@@ -77,6 +77,8 @@ void (*NotifyClientNetworkChanged)(void);
 #include <IOKit/IOKitLib.h>
 #include <IOKit/IOMessage.h>
 
+extern void LogErrorMessage(const char *format, ...);
+
 // ***************************************************************************
 // Structures
 
@@ -142,6 +144,7 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const DNSMessage *co
 static ssize_t myrecvfrom(const int s, void *const buffer, const size_t max,
 	struct sockaddr *const from, size_t *const fromlen, struct in_addr *dstaddr, char ifname[128])
 	{
+	static int numLogMessages = 0;
 	struct iovec databuffers = { (char *)buffer, max };
 	struct msghdr   msg;
 	ssize_t         n;
@@ -159,8 +162,22 @@ static ssize_t myrecvfrom(const int s, void *const buffer, const size_t max,
 	
 	// Receive the data
 	n = recvmsg(s, &msg, 0);
-	if (n<0 || msg.msg_controllen < sizeof(struct cmsghdr) || (msg.msg_flags & MSG_CTRUNC))
-		{ perror("recvmsg"); return(n); }
+	if (n<0)
+		{
+		if (numLogMessages++ < 100) LogErrorMessage("CFSocket.c: recvmsg(%d) returned error %d errno %d", s, n, errno);
+		return(-1);
+		}
+	if (msg.msg_controllen < sizeof(struct cmsghdr))
+		{
+		if (numLogMessages++ < 100) LogErrorMessage("CFSocket.c: recvmsg(%d) msg.msg_controllen %d < sizeof(struct cmsghdr) %d",
+			s, msg.msg_controllen, sizeof(struct cmsghdr));
+		return(-1);
+		}
+	if (msg.msg_flags & MSG_CTRUNC)
+		{
+		if (numLogMessages++ < 100) LogErrorMessage("CFSocket.c: recvmsg(%d) msg.msg_flags & MSG_CTRUNC", s);
+		return(-1);
+		}
 	
 	*fromlen = msg.msg_namelen;
 	
@@ -197,19 +214,30 @@ mDNSlocal void myCFSocketCallBack(CFSocketRef s, CFSocketCallBackType type, CFDa
 	size_t fromlen = sizeof(from);
 	char packetifname[128] = "";
 	int err;
+	int s1 = -1;
 	
 	(void)address;	// Parameter not used
 	(void)data;		// Parameter not used
 	
-	if (type != kCFSocketReadCallBack) debugf("myCFSocketCallBack: Why is type not kCFSocketReadCallBack?");
+	if (type != kCFSocketReadCallBack) LogErrorMessage("CFSocketCallBack: CallBackType %d is not kCFSocketReadCallBack", type);
 #if mDNS_AllowPort53
 	if (s == info->cfsocket53)
-		err = myrecvfrom(info->socket53, &packet, sizeof(packet), (struct sockaddr *)&from, &fromlen, &to, packetifname);
+		s1 = info->socket53;
 	else
 #endif
-	err = myrecvfrom(info->socket, &packet, sizeof(packet), (struct sockaddr *)&from, &fromlen, &to, packetifname);
+	if (s == info->cfsocket)
+		s1 = info->socket;
 
-	if (err < 0) { debugf("myCFSocketCallBack recvfrom error %d", err); return; }
+	err = myrecvfrom(s1, &packet, sizeof(packet), (struct sockaddr *)&from, &fromlen, &to, packetifname);
+
+	if (err < 0 || s1 < 0 || s1 != CFSocketGetNative(s))
+		{
+		LogErrorMessage("CFSocketCallBack: s1 %d native socket %d", s1, CFSocketGetNative(s));
+		LogErrorMessage("CFSocketCallBack: cfs %X, cfsocket53 %X, cfsocket %X", s, info->cfsocket53, info->cfsocket);
+		LogErrorMessage("CFSocketCallBack: skt53 %X, sktv4 %X", info->socket53, info->socket);
+		LogErrorMessage("CFSocketCallBack recvfrom(%d) error %d errno %d", s1, err, errno);
+		return;
+		}
 
 	senderaddr.NotAnInteger = from.sin_addr.s_addr;
 	senderport.NotAnInteger = from.sin_port;
@@ -278,12 +306,15 @@ mDNSlocal mStatus SetupSocket(struct sockaddr_in *ifa_addr, mDNSIPPort port, int
 	struct ip_mreq imr;
 	struct sockaddr_in listening_sockaddr;
 	CFRunLoopSourceRef rls;
-	
+
+	if (*s > 0) { LogErrorMessage("SetupSocket ERROR: socket %d is already set", *s); return(-1); }
+	if (*c) { LogErrorMessage("SetupSocket ERROR: CFSocketRef %X is already set", *c); return(-1); }
+
 	// Open the socket...
 	*s = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	*c = NULL;
 	if (*s < 0) { perror("socket"); return(*s); }
-	
+
 	// ... with a shared UDP port
 	err = setsockopt(*s, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
 	if (err < 0) { perror("setsockopt - SO_REUSEPORT"); return(err); }
@@ -578,8 +609,8 @@ mDNSlocal mStatus SetupInterface(mDNS *const m, NetworkInterfaceInfo2 *info, str
 	if (!err)
 		err = SetupSocket(ifa_addr, MulticastDNSPort, &info->socket, &info->cfsocket, &myCFSocketContext);
 
-	debugf("SetupInterface: %s Flags %04X %.4a Registered",
-		ifa->ifa_name, ifa->ifa_flags, &info->ifinfo.ip);
+	debugf("SetupInterface: %s Flags %04X %.4a Registered socket53 %d socket5353 %d",
+		ifa->ifa_name, ifa->ifa_flags, &info->ifinfo.ip, info->socket53, info->socket);
 
 	return(err);
 	}

@@ -50,6 +50,7 @@ typedef enum				// From RFC 1035
 	kDNSType_MX,			// 15 Mail Exchanger
 	kDNSType_TXT,			// 16 Arbitrary text string
 	
+	kDNSType_AAAA = 28,		// 28 IPv6 address
 	kDNSType_SRV = 33,		// 33 Service record
 
 	kDNSQType_ANY = 255		// Not a DNS type, but a DNS query type, meaning "all types"
@@ -170,7 +171,7 @@ typedef struct { mDNSu16 priority; mDNSu16 weight; mDNSIPPort port; domainname t
 
 typedef union
 	{
-	mDNSu8     data[512];	// Generic untyped data (temporarily set 512 for the benefit of iChat)
+	mDNSu8     data[768];	// Generic untyped data (temporarily set 768 for the benefit of Airport Extreme printing)
 	mDNSIPAddr ip;			// For 'A' record
 	domainname name;		// For PTR and CNAME records
 	UTF8str255 txt;			// For TXT record
@@ -382,6 +383,8 @@ struct mDNS_struct
 	ResourceRecord *CurrentRecord;	// Next ResourceRecord about to be examined
 	NetworkInterfaceInfo *HostInterfaces;
 	mDNSs32 SuppressSending;
+	mDNSs32 ProbeFailTime;
+	mDNSs32 NumFailedProbes;
 	mDNSs32 SuppressProbes;
 	mDNSBool SleepState;
 	mDNSBool NetChanged;

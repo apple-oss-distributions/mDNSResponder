@@ -45,6 +45,7 @@
 #include "DNSServiceDiscoveryReply.h"
 
 #include "mDNSClientAPI.h"				// Defines the interface to the client layer above
+#include "mDNSPlatformFunctions.h"		// For mDNSPlatformTimeNow() and mDNSPlatformOneSecond
 #include "mDNSPlatformEnvironment.h"	// Defines the specific types needed to run mDNS on this platform
 #include "mDNSsprintf.h"
 #include "mDNSvsprintf.h"				// Used to implement LogErrorMessage();
@@ -94,14 +95,22 @@ struct DNSServiceDomainEnumeration_struct
 	DNSQuestion def;	// Question asking for default domain
 	};
 
+typedef struct DNSServiceBrowserResult_struct DNSServiceBrowserResult;
+struct DNSServiceBrowserResult_struct
+	{
+	DNSServiceBrowserResult *next;
+	int resultType;
+	char name[256], type[256], dom[256];
+	};
+
 typedef struct DNSServiceBrowser_struct DNSServiceBrowser;
 struct DNSServiceBrowser_struct
 	{
 	DNSServiceBrowser *next;
 	mach_port_t ClientMachPort;
 	DNSQuestion q;
-	int resultType;		// Set to -1 if no outstanding reply
-	char name[256], type[256], dom[256];
+	DNSServiceBrowserResult *results;
+	mDNSs32 lastsuccess;
 	};
 
 typedef struct DNSServiceResolver_struct DNSServiceResolver;
@@ -246,6 +255,12 @@ mDNSlocal void AbortClient(mach_port_t ClientMachPort)
 		*b = (*b)->next;
 		debugf("Aborting DNSServiceBrowser %d", ClientMachPort);
 		mDNS_StopBrowse(&mDNSStorage, &x->q);
+		while (x->results)
+			{
+			DNSServiceBrowserResult *r = x->results;
+			x->results = x->results->next;
+			freeL("DNSServiceBrowserResult", r);
+			}
 		freeL("DNSServiceBrowser", x);
 		return;
 		}
@@ -388,19 +403,9 @@ mDNSexport kern_return_t provide_DNSServiceDomainEnumerationCreate_rpc(mach_port
 //*************************************************************************************************************
 // Browse for services
 
-mDNSlocal void DeliverInstance(DNSServiceBrowser *x, DNSServiceDiscoveryReplyFlags flags)
-	{
-	kern_return_t status;
-	debugf("DNSServiceBrowserReply_rpc sending reply for %s (%s)", x->name,
-		(flags & DNSServiceDiscoverReplyFlagsMoreComing) ? "more coming" : "last in batch");
-	status = DNSServiceBrowserReply_rpc(x->ClientMachPort, x->resultType, x->name, x->type, x->dom, flags, MDNS_MM_TIMEOUT);
-	x->resultType = -1;
-	if (status == MACH_SEND_TIMED_OUT)
-		AbortBlockedClient(x->ClientMachPort, "browse");
-	}
-
 mDNSlocal void DeliverInstanceTimerCallBack(CFRunLoopTimerRef timer, void *info)
 	{
+	mDNSBool tryagain = mDNSfalse;
 	DNSServiceBrowser *b = DNSServiceBrowserList;
 	(void)timer;	// Parameter not used
 
@@ -411,14 +416,38 @@ mDNSlocal void DeliverInstanceTimerCallBack(CFRunLoopTimerRef timer, void *info)
 		// and that will cause the DNSServiceBrowser object's memory to be freed before it returns
 		DNSServiceBrowser *x = b;
 		b = b->next;
-		if (x->resultType != -1)
-			DeliverInstance(x, 0);
+		if (x->results)			// Try to deliver the list of results
+			{
+			mDNSs32 now = mDNSPlatformTimeNow();
+			while (x->results)
+				{
+				DNSServiceBrowserResult *const r = x->results;
+				DNSServiceDiscoveryReplyFlags flags = (r->next) ? DNSServiceDiscoverReplyFlagsMoreComing : 0;
+				kern_return_t status = DNSServiceBrowserReply_rpc(x->ClientMachPort, r->resultType, r->name, r->type, r->dom, flags, 1);
+				// If we failed to send the mach message, try again in one second
+				if (status == MACH_SEND_TIMED_OUT)
+					{ tryagain = mDNStrue; break; }
+				else
+					{
+					x->lastsuccess = now;
+					x->results = x->results->next;
+					freeL("DNSServiceBrowserResult", r);
+					}
+				}
+			// If this client hasn't read a single message in the last 60 seconds, abort it
+			if (now - x->lastsuccess >= 60 * mDNSPlatformOneSecond)
+				AbortBlockedClient(x->ClientMachPort, "browse");
+			}
 		}
+	if (tryagain)
+		CFRunLoopTimerSetNextFireDate(DeliverInstanceTimer, CFAbsoluteTimeGetCurrent() + 1.0);
 	}
 
 mDNSlocal void FoundInstance(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer)
 	{
-	DNSServiceBrowser *x = (DNSServiceBrowser *)question->Context;
+	DNSServiceBrowser *browser = (DNSServiceBrowser *)question->Context;
+	DNSServiceBrowserResult **p = &browser->results;
+	DNSServiceBrowserResult *x = mallocL("DNSServiceBrowserResult", sizeof(*x));
 	domainlabel name;
 	domainname type, domain;
 	
@@ -434,7 +463,7 @@ mDNSlocal void FoundInstance(mDNS *const m, DNSQuestion *question, const Resourc
 		return;
 		}
 
-	if (x->resultType != -1) DeliverInstance(x, DNSServiceDiscoverReplyFlagsMoreComing);
+	if (!x) return;
 
 	debugf("FoundInstance: %##s", answer->rdata->u.name.c);
 	ConvertDomainLabelToCString_unescaped(&name, x->name);
@@ -443,6 +472,9 @@ mDNSlocal void FoundInstance(mDNS *const m, DNSQuestion *question, const Resourc
 	if (answer->rrremainingttl)
 		 x->resultType = DNSServiceBrowserReplyAddInstance;
 	else x->resultType = DNSServiceBrowserReplyRemoveInstance;
+	x->next = NULL;
+	while (*p) p = &(*p)->next;
+	*p = x;
 
 	// We schedule this timer 1/10 second in the future because CFRunLoop doesn't respect
 	// the relative priority between CFSocket and CFRunLoopTimer, and continues to call
@@ -458,7 +490,8 @@ mDNSexport kern_return_t provide_DNSServiceBrowserCreate_rpc(mach_port_t unuseds
 	DNSServiceBrowser *x = mallocL("DNSServiceBrowser", sizeof(*x));
 	if (!x) { debugf("provide_DNSServiceBrowserCreate_rpc: No memory!"); return(mStatus_NoMemoryErr); }
 	x->ClientMachPort = client;
-	x->resultType = -1;
+	x->results = NULL;
+	x->lastsuccess = 0;
 	x->next = DNSServiceBrowserList;
 	DNSServiceBrowserList = x;
 
@@ -638,7 +671,7 @@ mDNSlocal void RegCallback(mDNS *const m, ServiceRecordSet *const sr, mStatus re
 		}
 	}
 
-mDNSlocal void CheckForDuplicateRegistrations(DNSServiceRegistration *x, domainlabel *n, domainname *t, domainname *d)
+mDNSlocal void CheckForDuplicateRegistrations(DNSServiceRegistration *x, domainlabel *n, domainname *t, domainname *d, mDNSIPPort port)
 	{
 	char name[256];
 	int count = 0;
@@ -648,15 +681,15 @@ mDNSlocal void CheckForDuplicateRegistrations(DNSServiceRegistration *x, domainl
 	mDNS_sprintf(name, "%##s", &srvname);
 
 	for (rr = mDNSStorage.ResourceRecords; rr; rr=rr->next)
-		if (rr->rrtype == kDNSType_SRV && SameDomainName(&rr->name, &srvname))
+		if (rr->rrtype == kDNSType_SRV && rr->rdata->u.srv.port.NotAnInteger == port.NotAnInteger && SameDomainName(&rr->name, &srvname))
 			count++;
 
 	if (count)
 		{
-		debugf("Client %5d   registering Service Record Set \"%##s\"; WARNING! now have %d instances",
-			x->ClientMachPort, &srvname, count+1);
-		LogErrorMessage("%5d: WARNING! Bogus client application has now registered %d identical instances of service %##s",
-			x->ClientMachPort, count+1, &srvname);
+		debugf("Client %5d   registering Service Record Set \"%##s\"; WARNING! now have %d instances port %d",
+			x->ClientMachPort, &srvname, count+1, (int)port.b[0] << 8 | port.b[1]);
+		LogErrorMessage("%5d: WARNING! Bogus client application has now registered %d identical instances of service %##s port %d",
+			x->ClientMachPort, count+1, &srvname, (int)port.b[0] << 8 | port.b[1]);
 		}
 	}
 
@@ -715,7 +748,7 @@ mDNSexport kern_return_t provide_DNSServiceRegistrationCreate_rpc(mach_port_t un
 	debugf("Client %d: provide_DNSServiceRegistrationCreate_rpc", client);
 	debugf("Client %d: Register Service: %#s.%##s%##s %d %.30s",
 		client, &x->name, &t, &d, (int)port.b[0] << 8 | port.b[1], txtRecord);
-	CheckForDuplicateRegistrations(x, &x->name, &t, &d);
+	if (port.NotAnInteger) CheckForDuplicateRegistrations(x, &x->name, &t, &d, port);
 	err = mDNS_RegisterService(&mDNSStorage, &x->s, &x->name, &t, &d, mDNSNULL, port, txtinfo, data_len, RegCallback, x);
 
 	if (err) AbortClient(client);

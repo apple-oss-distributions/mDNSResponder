@@ -31,6 +31,8 @@
 #include "mDNSPlatformFunctions.h"		// Defines the interface required of the supporting layer below
 #include "mDNSsprintf.h"
 
+extern void LogErrorMessage(const char *format, ...);
+
 #if(defined(_MSC_VER))
 	// Disable warnings about Microsoft Visual Studio/C++ not understanding "pragma unused"
     #pragma warning( disable:4068 )
@@ -684,6 +686,7 @@ mDNSlocal mDNSu32 GetRDLength(const ResourceRecord *const rr, mDNSBool estimate)
 		case kDNSType_CNAME:// Same as PTR
 		case kDNSType_PTR:	return(CompressedDomainNameLength(&rr->rdata->u.name, name));
 		case kDNSType_TXT:  return(rr->rdata->RDLength); // TXT is not self-describing, so have to just trust rdlength
+		case kDNSType_AAAA:	return(16); break;
 		case kDNSType_SRV:	return(6 + CompressedDomainNameLength(&rr->rdata->u.srv.target, name));
 		default:			debugf("Warning! Don't know how to get length of resource type %d", rr->rrtype);
 							return(rr->rdata->RDLength);
@@ -696,7 +699,7 @@ mDNSlocal DNSQuestion *CacheRRActive(const mDNS *const m, ResourceRecord *rr)
 	{
 	DNSQuestion *q;
 	for (q = m->ActiveQuestions; q; q=q->next)		// Scan our list of questions
-		if (!q->DuplicateOf && ResourceRecordAnswersQuestion(rr, q))
+		if (q->ThisQInterval > 0 && !q->DuplicateOf && ResourceRecordAnswersQuestion(rr, q))
 			return(q);
 	return(mDNSNULL);
 	}
@@ -880,8 +883,11 @@ mDNSlocal void mDNS_Deregister_internal(mDNS *const m, ResourceRecord *const rr,
 			rr->Callback(m, rr, mStatus_MemFree);
 		else if (drt == mDNS_Dereg_conflict)
 			{
-			m->SuppressProbes = timenow + mDNSPlatformOneSecond;
-			if (m->SuppressProbes == 0) m->SuppressProbes = 1;
+			m->ProbeFailTime = timenow;
+			// If we've had ten probe failures, rate-limit to one every five seconds
+			// The result is ORed with 1 to make sure SuppressProbes is not accidentally set to zero
+			if (m->NumFailedProbes < 10) m->NumFailedProbes++;
+			else m->SuppressProbes = (timenow + mDNSPlatformOneSecond * 5) | 1;
 			if (rr->Callback) rr->Callback(m, rr, mStatus_NameConflict);
 			}
 		}
@@ -1334,7 +1340,8 @@ mDNSlocal const mDNSu8 *getResourceRecord(const DNSMessage *msg, const mDNSu8 *p
 									rr->rrtype, pktrdlength, rr->rdata->MaxRDLength);
 								return(mDNSNULL);
 								}
-							debugf("getResourceRecord: Warning! Reading resource type %d as opaque data", rr->rrtype);
+							if (rr->rrtype != kDNSType_AAAA)
+								debugf("getResourceRecord: Warning! Reading resource type %d as opaque data", rr->rrtype);
 							// Note: Just because we don't understand the record type, that doesn't
 							// mean we fail. The DNS protocol specifies rdlength, so we can
 							// safely skip over unknown records and ignore them.
@@ -1491,7 +1498,7 @@ mDNSlocal mDNSu8 *BuildResponse(mDNS *const m,
 
 	if (m->CurrentRecord) debugf("BuildResponse ERROR m->CurrentRecord already set");
 	m->CurrentRecord = m->ResourceRecords;
-	
+
 	// If we're sleeping, only send deregistrations
 	if (m->SleepState)
 		{
@@ -1568,7 +1575,7 @@ mDNSlocal mDNSu8 *BuildResponse(mDNS *const m,
 					if (response->h.numAnswers == 0) debugf("BuildResponse announcements failed");
 					if (newptr || response->h.numAnswers == 0)
 						{
-						if (minExistingAnnounceInterval > rr->NextSendInterval)
+						if (minExistingAnnounceInterval < rr->NextSendInterval)
 							minExistingAnnounceInterval = rr->NextSendInterval;
 						rr->SendPriority      = 0;
 						rr->Requester         = zeroIPAddr;
@@ -1701,7 +1708,7 @@ mDNSlocal void SendResponses(mDNS *const m, const mDNSs32 timenow)
 		}
 	}
 
-#define TimeToSendThisQuestion(Q,time) (!(Q)->DuplicateOf && time - (Q)->NextQTime >= 0)
+#define TimeToSendThisQuestion(Q,time) ((Q)->ThisQInterval > 0 && !(Q)->DuplicateOf && (time) - (Q)->NextQTime >= 0)
 
 mDNSlocal mDNSBool HaveQueries(const mDNS *const m, const mDNSs32 timenow)
 	{
@@ -2014,7 +2021,7 @@ mDNSlocal void TriggerImmediateQuestions(mDNS *const m, const ResourceRecord *co
 	mDNSs32 needquery = timenow + mDNSPlatformOneSecond;
 	DNSQuestion *q;
 	for (q = m->ActiveQuestions; q; q=q->next)		// Scan our list of questions
-		if (!q->DuplicateOf && q->NextQTime - needquery > 0 && ResourceRecordAnswersQuestion(rr, q))
+		if (q->ThisQInterval > 0 && !q->DuplicateOf && q->NextQTime - needquery > 0 && ResourceRecordAnswersQuestion(rr, q))
 			{
 			q->NextQTime     = needquery;
 			// As long as responses are still coming in, don't do the exponential backoff
@@ -2096,7 +2103,18 @@ mDNSlocal void AnswerNewQuestion(mDNS *const m, const mDNSs32 timenow)
 	m->CurrentQuestion = q;		// Indicate which question we're answering, so we'll know if it gets deleted
 	for (rr=m->rrcache; rr && m->CurrentQuestion == q; rr=rr->next)
 		if (ResourceRecordAnswersQuestion(rr, q))
-			AnswerQuestionWithResourceRecord(m, q, rr, timenow);
+			{
+			mDNSu32 SecsSinceRcvd = ((mDNSu32)(timenow - rr->TimeRcvd)) / mDNSPlatformOneSecond;
+			if (rr->rroriginalttl <= SecsSinceRcvd) rr->rrremainingttl = 0;
+			else rr->rrremainingttl = rr->rroriginalttl - SecsSinceRcvd;
+			
+			// We only give positive responses to new questions.
+			// Since this question is new, it has not received any answers yet, so there's no point
+			// telling it about records that are going away that it never heard about in the first place.
+			if (rr->rrremainingttl > 0)
+				AnswerQuestionWithResourceRecord(m, q, rr, timenow);
+			// MUST NOT touch q again after calling AnswerQuestionWithResourceRecord()
+			}
 	m->CurrentQuestion = mDNSNULL;
 	m->lock_rrcache = 0;
 	}
@@ -2111,9 +2129,9 @@ mDNSlocal void FlushCacheRecords(mDNS *const m, mDNSIPAddr InterfaceAddr, const 
 			{
 			// If the record's interface matches the one we're flushing,
 			// then pretend we just received a 'goodbye' packet for this record.
-			rr->TimeRcvd          = timenow;
-			rr->UnansweredQueries = 0;
-			rr->rroriginalttl     = 1;
+			rr->TimeRcvd          = timenow - mDNSPlatformOneSecond * 60;
+			rr->UnansweredQueries = 2;
+			rr->rroriginalttl     = 0;
 			count++;
 			}
 		}
@@ -2360,6 +2378,9 @@ mDNSexport void mDNSCoreTask(mDNS *const m)
 	if (m->SuppressProbes && timenow - m->SuppressProbes >= 0)
 		m->SuppressProbes = 0;
 
+	if (m->NumFailedProbes && timenow - m->ProbeFailTime >= mDNSPlatformOneSecond * 10)
+		m->NumFailedProbes = 0;
+
 	// 1. See if we can answer any of our new local questions from the cache
 	while (m->NewQuestions) AnswerNewQuestion(m, timenow);
 
@@ -2373,12 +2394,15 @@ mDNSexport void mDNSCoreTask(mDNS *const m)
 		}
 	else if (m->SuppressSending == 0 || timenow - m->SuppressSending >= 0)
 		{
+		int i;
 		// If the platform code is ready,
 		// and we're not suppressing packet generation right now
 		// send our responses, probes, and questions
 		m->SuppressSending = 0;
-		while (HaveResponses(m, timenow)) SendResponses(m, timenow);
-		while (HaveQueries  (m, timenow)) SendQueries  (m, timenow);
+		for (i=0; i<100 && HaveResponses(m, timenow); i++) SendResponses(m, timenow);
+		if (i >= 100) LogErrorMessage("mDNSCoreTask: HaveResponses returned true %d times", i);
+		for (i=0; i<100 && HaveQueries  (m, timenow); i++) SendQueries  (m, timenow);
+		if (i >= 100) LogErrorMessage("mDNSCoreTask: HaveQueries returned true %d times", i);
 		}
 
 	if (m->rrcache_size) TidyRRCache(m, timenow);
@@ -2415,7 +2439,7 @@ mDNSexport void mDNSCoreSleep(mDNS *const m, mDNSBool sleepstate)
 			rr->NextSendInterval  = DefaultSendIntervalForRecordType(rr->RecordType);
 			}
 		for (q = m->ActiveQuestions; q; q=q->next)		// Scan our list of questions
-			if (!q->DuplicateOf)
+			if (q->ThisQInterval > 0 && !q->DuplicateOf)
 				{
 				q->NextQTime     = timenow;
 				q->ThisQInterval = mDNSPlatformOneSecond;  // MUST NOT be zero for an active question
@@ -2623,10 +2647,10 @@ mDNSlocal void ResolveSimultaneousProbe(mDNS *const m, const DNSMessage *const q
 				if (!result) result = CompareRData(&pktrr, our);
 				switch (result)
 					{
-					case  1:	debugf("ResolveSimultaneousProbe: %##s (%s): We won",  our->name.c, DNSTypeName(our->rrtype));
+					case -1:	debugf("ResolveSimultaneousProbe: %##s (%s): We won",  our->name.c, DNSTypeName(our->rrtype));
 								break;
 					case  0:	break;
-					case -1:	debugf("ResolveSimultaneousProbe: %##s (%s): We lost", our->name.c, DNSTypeName(our->rrtype));
+					case  1:	debugf("ResolveSimultaneousProbe: %##s (%s): We lost", our->name.c, DNSTypeName(our->rrtype));
 								mDNS_Deregister_internal(m, our, timenow, mDNS_Dereg_conflict);
 								return;
 					}
@@ -2958,6 +2982,11 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 								rr->ProbeCount       = DefaultProbeCountForTypeUnique + 1;
 								rr->NextSendTime     = timenow;
 								rr->NextSendInterval = DefaultSendIntervalForRecordType(kDNSRecordTypeUnique);
+								m->ProbeFailTime = timenow;
+								// If we've had ten probe failures, rate-limit to one every five seconds
+								// The result is ORed with 1 to make sure SuppressProbes is not accidentally set to zero
+								if (m->NumFailedProbes < 10) m->NumFailedProbes++;
+								else m->SuppressProbes = (timenow + mDNSPlatformOneSecond * 5) | 1;
 								}
 							else
 								{
@@ -3080,10 +3109,16 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNS
 mDNSlocal DNSQuestion *FindDuplicateQuestion(const mDNS *const m, const DNSQuestion *const question)
 	{
 	DNSQuestion *q;
-	for (q = m->ActiveQuestions; q; q=q->next)		// Scan our list of questions
-		if (q->rrtype  == question->rrtype  &&
-			q->rrclass == question->rrclass &&
-			SameDomainName(&q->name, &question->name)) return(q);
+	// Note: A question can only be marked as a duplicate of one that occurs *earlier* in the list.
+	// This prevents circular references, where two questions are each marked as a duplicate of the other.
+	// Accordingly, we break out of the loop when we get to 'question', because there's no point searching
+	// further in the list.
+	for (q = m->ActiveQuestions; q && q != question; q=q->next)							// Scan our list of questions
+		if (q->InterfaceAddr.NotAnInteger == question->InterfaceAddr.NotAnInteger &&	// for another question with the same InterfaceID,
+			q->rrtype      == question->rrtype                                    &&	// type,
+			q->rrclass     == question->rrclass                                   &&	// class,
+			SameDomainName(&q->name, &question->name))									// and name
+			return(q);
 	return(mDNSNULL);
 	}
 
@@ -3117,6 +3152,17 @@ mDNSlocal mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const que
 			return(mStatus_AlreadyRegistered);
 			}
 
+		if (question->InterfaceAddr.NotAnInteger)
+			{
+			NetworkInterfaceInfo *p = m->HostInterfaces;
+			while (p && p->ip.NotAnInteger != question->InterfaceAddr.NotAnInteger) p=p->next;
+			if (!p)
+				{
+				LogErrorMessage("mDNS_StartQuery_internal: question->InterfaceAddr %.4a not found in interface list", &question->InterfaceAddr);
+				question->InterfaceAddr.NotAnInteger = 0;
+				}
+			}
+
 		question->next          = mDNSNULL;
 		question->NextQTime     = timenow;
 		question->ThisQInterval = mDNSPlatformOneSecond;  // MUST NOT be zero for an active question
@@ -3140,9 +3186,8 @@ mDNSlocal void mDNS_StopQuery_internal(mDNS *const m, DNSQuestion *const questio
 
 	UpdateQuestionDuplicates(m, question);
 
-	question->next = mDNSNULL;
-	question->ThisQInterval = 0;
-	question->NextQInterval = 0;
+	question->ThisQInterval = -1;
+	question->NextQInterval = -1;
 	
 	// If we just deleted the question that AnswerLocalQuestions() is about to look at,
 	// bump its pointer forward one question.
@@ -3158,6 +3203,8 @@ mDNSlocal void mDNS_StopQuery_internal(mDNS *const m, DNSQuestion *const questio
 		m->NewQuestions    = m->NewQuestions->next;
 		}
 	
+	// Take care not to trash question->next until *after* we've updated m->CurrentQuestion and m->NewQuestions
+	question->next = mDNSNULL;
 	}
 
 mDNSexport mStatus mDNS_StartQuery(mDNS *const m, DNSQuestion *const question)
@@ -3201,13 +3248,16 @@ mDNSlocal void FoundServiceInfoSRV(mDNS *const m, DNSQuestion *question, const R
 	if (!query->GotSRV)
 		{
 		query->GotSRV             = mDNStrue;
+		query->qADD.InterfaceAddr = answer->InterfaceAddr;
 		query->qADD.name          = answer->rdata->u.srv.target;
 		mDNS_StartQuery_internal(m, &query->qADD, mDNSPlatformTimeNow());
 		}
 	// If this is not our first answer, only re-issue the address query if the target host name has changed
-	else if (!SameDomainName(&query->qADD.name, &answer->rdata->u.srv.target))
+	else if (query->qADD.InterfaceAddr.NotAnInteger != answer->InterfaceAddr.NotAnInteger ||
+		!SameDomainName(&query->qADD.name, &answer->rdata->u.srv.target))
 		{
 		mDNS_StopQuery_internal(m, &query->qADD);
+		query->qADD.InterfaceAddr = answer->InterfaceAddr;
 		query->qADD.name          = answer->rdata->u.srv.target;
 		mDNS_StartQuery_internal(m, &query->qADD, mDNSPlatformTimeNow());
 		}
@@ -3317,9 +3367,9 @@ mDNSexport mStatus mDNS_StartResolveService(mDNS *const m,
 mDNSexport void    mDNS_StopResolveService (mDNS *const m, ServiceInfoQuery *query)
 	{
 	mDNS_Lock(m);
-	if (query->qSRV.ThisQInterval) mDNS_StopQuery_internal(m, &query->qSRV);
-	if (query->qTXT.ThisQInterval) mDNS_StopQuery_internal(m, &query->qTXT);
-	if (query->qADD.ThisQInterval) mDNS_StopQuery_internal(m, &query->qADD);
+	if (query->qSRV.ThisQInterval >= 0) mDNS_StopQuery_internal(m, &query->qSRV);
+	if (query->qTXT.ThisQInterval >= 0) mDNS_StopQuery_internal(m, &query->qTXT);
+	if (query->qADD.ThisQInterval >= 0) mDNS_StopQuery_internal(m, &query->qADD);
 	mDNS_Unlock(m);
 	}
 
@@ -3552,6 +3602,17 @@ mDNSexport mStatus mDNS_RegisterInterface(mDNS *const m, NetworkInterfaceInfo *s
 		// ... Add an HINFO record, etc.?
 		}
 
+	{ // Reactivate Interface Questions
+	DNSQuestion *q;
+	for (q = m->ActiveQuestions; q; q=q->next)		// Scan our list of questions
+		if (!q->InterfaceAddr.NotAnInteger || q->InterfaceAddr.NotAnInteger == set->ip.NotAnInteger)
+			{
+			q->NextQTime     = timenow;
+			q->ThisQInterval = mDNSPlatformOneSecond;  // MUST be > zero for an active question
+			q->NextQInterval = mDNSPlatformOneSecond;
+			}
+	}
+
 	set->next = mDNSNULL;
 	*p = set;
 	mDNS_Unlock(m);
@@ -3595,6 +3656,13 @@ mDNSexport void mDNS_DeregisterInterface(mDNS *const m, NetworkInterfaceInfo *se
 
 	// Flush any cache entries we received on this interface
 	FlushCacheRecords(m, set->ip, timenow);
+
+	{ // Deactivate Interface Questions
+	DNSQuestion *q;
+	for (q = m->ActiveQuestions; q; q=q->next)
+		if (q->InterfaceAddr.NotAnInteger == set->ip.NotAnInteger)
+			q->ThisQInterval = 0;
+	}
 
 	// If we were advertising on this interface, deregister now
 	// When doing the mDNS_Close processing, we first call mDNS_DeadvertiseInterface for each interface
@@ -3665,9 +3733,9 @@ mDNSexport mStatus mDNS_RegisterService(mDNS *const m, ServiceRecordSet *sr,
 	if (host && host->c[0]) sr->Host = *host;
 	else sr->Host.c[0] = 0;
 	
-	mDNS_SetupResourceRecord(&sr->RR_PTR, mDNSNULL, zeroIPAddr, kDNSType_PTR, 24*3600, kDNSRecordTypeShared, ServiceCallback, sr);
-	mDNS_SetupResourceRecord(&sr->RR_SRV, mDNSNULL, zeroIPAddr, kDNSType_SRV, 60,      kDNSRecordTypeUnique, ServiceCallback, sr);
- 	mDNS_SetupResourceRecord(&sr->RR_TXT, mDNSNULL, zeroIPAddr, kDNSType_TXT, 60,      kDNSRecordTypeUnique, ServiceCallback, sr);
+	mDNS_SetupResourceRecord(&sr->RR_PTR, mDNSNULL, zeroIPAddr, kDNSType_PTR, 2*3600, kDNSRecordTypeShared, ServiceCallback, sr);
+	mDNS_SetupResourceRecord(&sr->RR_SRV, mDNSNULL, zeroIPAddr, kDNSType_SRV, 60,     kDNSRecordTypeUnique, ServiceCallback, sr);
+ 	mDNS_SetupResourceRecord(&sr->RR_TXT, mDNSNULL, zeroIPAddr, kDNSType_TXT, 60,     kDNSRecordTypeUnique, ServiceCallback, sr);
 	
 	// If the client is registering an oversized TXT record,
 	// it is the client's responsibility to alloate a ServiceRecordSet structure that is large enough for it
@@ -3819,7 +3887,7 @@ mDNSexport void mDNS_DeregisterService(mDNS *const m, ServiceRecordSet *sr)
 mDNSexport mStatus mDNS_AdvertiseDomains(mDNS *const m, ResourceRecord *rr,
 	mDNSu8 DomainType, const mDNSIPAddr InterfaceAddr, char *domname)
 	{
-	mDNS_SetupResourceRecord(rr, mDNSNULL, InterfaceAddr, kDNSType_PTR, 24*3600, kDNSRecordTypeShared, mDNSNULL, mDNSNULL);
+	mDNS_SetupResourceRecord(rr, mDNSNULL, InterfaceAddr, kDNSType_PTR, 2*3600, kDNSRecordTypeShared, mDNSNULL, mDNSNULL);
 	ConvertCStringToDomainName(mDNS_DomainTypeNames[DomainType], &rr->name);
 	ConvertCStringToDomainName(domname, &rr->rdata->u.name);
 	return(mDNS_Register(m, rr));
@@ -3871,6 +3939,9 @@ mDNSexport mStatus mDNS_Init(mDNS *const m, mDNS_PlatformSupport *const p,
 	m->CurrentRecord      = mDNSNULL;
 	m->HostInterfaces     = mDNSNULL;
 	m->SuppressSending    = 0;
+	m->ProbeFailTime      = 0;
+	m->NumFailedProbes    = 0;
+	m->SuppressProbes     = 0;
 	m->SleepState         = mDNSfalse;
 	m->NetChanged         = mDNSfalse;
 
