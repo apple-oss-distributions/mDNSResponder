@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -25,6 +23,13 @@
     Change History (most recent first):
 
 $Log: mDNSClientAPI.h,v $
+Revision 1.114.2.5  2004/02/18 23:35:17  cheshire
+<rdar://problem/3488559>: Hard code domain enumeration functions to return ".local" only
+Also make mDNS_StopGetDomains() a no-op too, so that we don't get warning messages in syslog
+
+Revision 1.114.2.4  2004/01/28 23:29:20  cheshire
+Fix structure packing (only affects third-party Darwin developers)
+
 Revision 1.114.2.3  2003/12/05 00:03:34  cheshire
 <rdar://problem/3487869> Use buffer size MAX_ESCAPED_DOMAIN_NAME instead of 256
 
@@ -416,13 +421,33 @@ Merge in license terms from Quinn's copy, in preparation for Darwin release
 // ***************************************************************************
 // Function scope indicators
 
-// If you see "mDNSlocal" before a function name, it means the function is not callable outside this file
+// If you see "mDNSlocal" before a function name in a C file, it means the function is not callable outside this file
 #ifndef mDNSlocal
 #define mDNSlocal static
 #endif
-// If you see "mDNSexport" before a symbol, it means the symbol is exported for use by clients
+// If you see "mDNSexport" before a symbol in a C file, it means the symbol is exported for use by clients
+// For every "mDNSexport" in a C file, there needs to be a corresponding "extern" declaration in some header file
+// (When a C file #includes a header file, the "extern" declarations tell the compiler:
+// "This symbol exists -- but not necessarily in this C file.")
 #ifndef mDNSexport
 #define mDNSexport
+#endif
+
+// ***************************************************************************
+// Structure packing macro
+
+// If we're not using GNUC, it's not fatal.
+// Most compilers naturally pack the on-the-wire structures correctly anyway, so a plain "struct" is usually fine.
+// In the event that structures are not packed correctly, mDNS_Init() will detect this and report an error, so the
+// developer will know what's wrong, and can investigate what needs to be done on that compiler to provide proper packing.
+#ifndef packed_struct
+ #ifdef __GNUC__
+  #define packedstruct struct __attribute__((__packed__))
+  #define packedunion  union  __attribute__((__packed__))
+ #else
+  #define packedstruct struct
+  #define packedunion  union
+ #endif
 #endif
 
 // ***************************************************************************
@@ -482,8 +507,13 @@ typedef   signed char  mDNSs8;
 typedef unsigned char  mDNSu8;
 typedef   signed short mDNSs16;
 typedef unsigned short mDNSu16;
+#if _LP64
+typedef   signed int   mDNSs32;
+typedef unsigned int   mDNSu32;
+#else
 typedef   signed long  mDNSs32;
 typedef unsigned long  mDNSu32;
+#endif
 
 // To enforce useful type checking, we make mDNSInterfaceID be a pointer to a dummy struct
 // This way, mDNSInterfaceIDs can be assigned, and compared with each other, but not with other types
@@ -497,9 +527,9 @@ typedef struct { void *dummy; } *mDNSInterfaceID;
 // less than, add, multiply, increment, decrement, etc., are undefined for opaque identifiers,
 // and if you make the mistake of trying to do those using the NotAnInteger field, then you'll
 // find you get code that doesn't work consistently on big-endian and little-endian machines.
-typedef union { mDNSu8 b[2]; mDNSu16 NotAnInteger; } mDNSOpaque16;
-typedef union { mDNSu8 b[4]; mDNSu32 NotAnInteger; } mDNSOpaque32;
-typedef union { mDNSu8 b[16]; mDNSu16 w[8]; mDNSu32 l[4]; } mDNSOpaque128;
+typedef packedunion { mDNSu8 b[2]; mDNSu16 NotAnInteger; } mDNSOpaque16;
+typedef packedunion { mDNSu8 b[4]; mDNSu32 NotAnInteger; } mDNSOpaque32;
+typedef packedunion { mDNSu8 b[16]; mDNSu16 w[8]; mDNSu32 l[4]; } mDNSOpaque128;
 
 typedef mDNSOpaque16  mDNSIPPort;		// An IP port is a two-byte opaque identifier (not an integer)
 typedef mDNSOpaque32  mDNSv4Addr;		// An IP address is a four-byte opaque identifier (not an integer)
@@ -667,8 +697,8 @@ enum
 	kDNSRecordTypePacketUniqueMask = 0x20	// True for PacketAddUnique and PacketAnsUnique
 	};
 
-typedef struct { mDNSu16 priority; mDNSu16 weight; mDNSIPPort port; domainname target; } rdataSRV;
-typedef struct { mDNSu16 preference; domainname exchange; } rdataMX;
+typedef packedstruct { mDNSu16 priority; mDNSu16 weight; mDNSIPPort port; domainname target; } rdataSRV;
+typedef packedstruct { mDNSu16 preference; domainname exchange; } rdataMX;
 
 // StandardAuthRDSize is 264 (256+8), which is large enough to hold a maximum-sized SRV record
 // MaximumRDSize is 8K the absolute maximum we support (at least for now)
@@ -904,8 +934,8 @@ struct DNSQuestion_struct
 	// Internal state fields. These are used internally by mDNSCore; the client layer needn't be concerned with them.
 	DNSQuestion          *next;
 	mDNSu32               qnamehash;
-	mDNSs32               LastQTime;		// Last scheduled tranmission of this Q on *all* applicable interfaces
-	mDNSs32               ThisQInterval;	// LastQTime + ThisQInterval is the next scheduled tranmission of this Q
+	mDNSs32               LastQTime;		// Last scheduled transmission of this Q on *all* applicable interfaces
+	mDNSs32               ThisQInterval;	// LastQTime + ThisQInterval is the next scheduled transmission of this Q
 											// ThisQInterval > 0 for an active question;
 											// ThisQInterval = 0 for a suspended question that's still in the list
 											// ThisQInterval = -1 for a cancelled question that's been removed from the list
@@ -1087,6 +1117,7 @@ extern const mDNSAddr        AllDNSLinkGroup_v6;
 //    the appropriate steps to manually create the correct address records for those other machines.
 // In principle, a proxy-like registration service could manually create address records for its own machine too,
 // but this would be pointless extra effort when using mDNS_Init_AdvertiseLocalAddresses does that for you.
+//
 // When mDNS has finished setting up the client's callback is called
 // A client can also spin and poll the mDNSPlatformStatus field to see when it changes from mStatus_Waiting to mStatus_NoError
 //
@@ -1112,6 +1143,7 @@ extern mStatus mDNS_Init      (mDNS *const m, mDNS_PlatformSupport *const p,
 								CacheRecord *rrcachestorage, mDNSu32 rrcachesize,
 								mDNSBool AdvertiseLocalAddresses,
 								mDNSCallback *Callback, void *Context);
+// See notes above on use of NoCache/ZeroCacheSize
 #define mDNS_Init_NoCache                     mDNSNULL
 #define mDNS_Init_ZeroCacheSize               0
 // See notes above on use of Advertise/DontAdvertiseLocalAddresses
@@ -1201,7 +1233,10 @@ typedef enum
 	} mDNS_DomainType;
 
 extern mStatus mDNS_GetDomains(mDNS *const m, DNSQuestion *const question, mDNS_DomainType DomainType, const mDNSInterfaceID InterfaceID, mDNSQuestionCallback *Callback, void *Context);
-#define        mDNS_StopGetDomains mDNS_StopQuery
+// In the Panther mDNSResponder we don't do unicast queries yet, so there's no point trying to do domain enumeration
+// mDNS_GetDomains() and mDNS_StopGetDomains() are set to be no-ops so that clients don't try to do browse/register operations that will fail
+//#define        mDNS_StopGetDomains mDNS_StopQuery
+#define        mDNS_StopGetDomains(m,q) ((void)(m),(void)(q))
 extern mStatus mDNS_AdvertiseDomains(mDNS *const m, AuthRecord *rr, mDNS_DomainType DomainType, const mDNSInterfaceID InterfaceID, char *domname);
 #define        mDNS_StopAdvertiseDomains mDNS_Deregister
 
@@ -1300,7 +1335,7 @@ extern void IncrementLabelSuffix(domainlabel *name, mDNSBool RichText);
 // The definitions are placed here because sometimes clients do use these calls indirectly, via other supported client operations.
 // For example, AssignDomainName is a macro defined using mDNSPlatformMemCopy()
 
-typedef struct
+typedef packedstruct
 	{
 	mDNSOpaque16 id;
 	mDNSOpaque16 flags;
@@ -1315,7 +1350,7 @@ typedef struct
 // 40 (IPv6 header) + 8 (UDP header) + 12 (DNS message header) + 1440 (DNS message body) = 1500 total
 #define AbsoluteMaxDNSMessageData 8940
 #define NormalMaxDNSMessageData 1440
-typedef struct
+typedef packedstruct
 	{
 	DNSMessageHeader h;						// Note: Size 12 bytes
 	mDNSu8 data[AbsoluteMaxDNSMessageData];	// 40 (IPv6) + 8 (UDP) + 12 (DNS header) + 8940 (data) = 9000

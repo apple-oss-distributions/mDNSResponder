@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -46,6 +44,14 @@
     Change History (most recent first):
 
 $Log: mDNS.c,v $
+Revision 1.307.2.3  2004/01/28 23:08:45  cheshire
+<rdar://problem/3488559>: Hard code domain enumeration functions to return ".local" only
+
+Revision 1.307.2.2  2003/12/20 01:51:40  cheshire
+<rdar://problem/3515876>: Error putting additional records into packets
+Another fix from Rampi: responseptr needs to be updated inside the "for" loop,
+after every record, not once at the end.
+
 Revision 1.307.2.1  2003/12/03 11:20:27  cheshire
 <rdar://problem/3457718>: Stop and start of a service uses old ip address (with old port number)
 
@@ -3481,10 +3487,10 @@ mDNSlocal void SendResponses(mDNS *const m)
 							rr->resrec.rrclass |= kDNSClass_UniqueRRSet;	// Temporarily set the cache flush bit so PutResourceRecord will set it
 						}
 					newptr = PutResourceRecord(&response, newptr, &response.h.numAdditionals, &rr->resrec);
+					if (newptr) responseptr = newptr;
 					rr->resrec.rrclass &= ~kDNSClass_UniqueRRSet;			// Make sure to clear cache flush bit back to normal state
 					}
 				}
-		if (newptr) responseptr = newptr;
 	
 		if (response.h.numAnswers > 0)	// We *never* send a packet with only additionals in it
 			{
@@ -6076,7 +6082,11 @@ mDNSexport mStatus mDNS_GetDomains(mDNS *const m, DNSQuestion *const question, m
 	question->qclass           = kDNSClass_IN;
 	question->QuestionCallback = Callback;
 	question->QuestionContext  = Context;
-	return(mDNS_StartQuery(m, question));
+
+	// No sense doing this until we actually support unicast query/update
+	//return(mDNS_StartQuery(m, question));
+	(void)m; // Unused
+	return(mStatus_NoError);
 	}
 
 // ***************************************************************************

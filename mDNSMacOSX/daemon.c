@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -38,6 +36,9 @@
     Change History (most recent first):
 
 $Log: daemon.c,v $
+Revision 1.134.2.3  2003/12/12 01:21:30  cheshire
+<rdar://problem/3491108> mDNSResponder should not run as root
+
 Revision 1.134.2.2  2003/12/05 00:03:35  cheshire
 <rdar://problem/3487869> Use buffer size MAX_ESCAPED_DOMAIN_NAME instead of 256
 
@@ -204,6 +205,7 @@ Add $Log header
 #include <unistd.h>
 #include <paths.h>
 #include <fcntl.h>
+#include <pwd.h>
 
 #include "DNSServiceDiscoveryRequestServer.h"
 #include "DNSServiceDiscoveryReply.h"
@@ -1657,6 +1659,13 @@ mDNSexport int main(int argc, char **argv)
 	
 	LogMsg("%s starting", mDNSResponderVersionString);
 	status = mDNSDaemonInitialize();
+
+	// Now that we're finished with anything privileged, switch over to running as "nobody"
+	const struct passwd *pw = getpwnam( "nobody");
+	if ( pw != NULL)
+		setuid( pw->pw_uid);
+	else
+		status = mStatus_Incompatible;		// refuse to run as root
 
 	if (status == 0)
 		{
