@@ -3,6 +3,8 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -36,6 +38,9 @@
 	Change History (most recent first):
 
 $Log: mDNSPosix.c,v $
+Revision 1.25  2003/10/30 19:25:49  cheshire
+Fix signed/unsigned warning on certain compilers
+
 Revision 1.24  2003/08/18 23:12:23  cheshire
 <rdar://problem/3382647> mDNSResponder divide by zero in mDNSPlatformTimeNow()
 
@@ -412,7 +417,7 @@ mDNSlocal void GetUserSpecifiedFriendlyComputerName(domainlabel *const namelabel
 mDNSlocal void GetUserSpecifiedRFC1034ComputerName(domainlabel *const namelabel)
 	{
 	int len = 0;
-	gethostname(&namelabel->c[1], MAX_DOMAIN_LABEL);
+	gethostname((char *)(&namelabel->c[1]), MAX_DOMAIN_LABEL);
 	while (len < MAX_DOMAIN_LABEL && namelabel->c[len+1] && namelabel->c[len+1] != '.') len++;
 	namelabel->c[0] = len;
 	}

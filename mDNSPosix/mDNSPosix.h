@@ -3,6 +3,8 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -23,6 +25,9 @@
     Change History (most recent first):
 
 $Log: mDNSPosix.h,v $
+Revision 1.9  2003/10/30 19:25:19  cheshire
+Fix warning on certain compilers
+
 Revision 1.8  2003/08/12 19:56:26  cheshire
 Update to APSL 2.0
 
@@ -70,6 +75,7 @@ extern int gMDNSPlatformPosixVerboseLevel;
 struct mDNS_PlatformSupport_struct
 	{
     // No additional data required for Posix at this time
+	long dummy[1];	// Some compilers don't like empty structures
 	};
 
 extern mStatus mDNSPlatformPosixRefreshInterfaceList(mDNS *const m);

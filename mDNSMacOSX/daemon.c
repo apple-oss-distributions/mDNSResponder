@@ -3,6 +3,8 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -36,6 +38,12 @@
     Change History (most recent first):
 
 $Log: daemon.c,v $
+Revision 1.134.2.2  2003/12/05 00:03:35  cheshire
+<rdar://problem/3487869> Use buffer size MAX_ESCAPED_DOMAIN_NAME instead of 256
+
+Revision 1.134.2.1  2003/12/03 11:00:09  cheshire
+Update "mDNSResponderVersion" mechanism to allow dots so we can do mDNSResponder-58.1 for SUPan
+
 Revision 1.134  2003/08/21 20:01:37  cheshire
 <rdar://problem/3387941> Traffic reduction: Detect long-lived Resolve() calls, and report them in syslog
 
@@ -264,7 +272,7 @@ struct DNSServiceBrowserResult_struct
 	{
 	DNSServiceBrowserResult *next;
 	int resultType;
-	char name[256], type[256], dom[256];
+	domainname result;
 	};
 
 typedef struct DNSServiceBrowser_struct DNSServiceBrowser;
@@ -569,7 +577,7 @@ mDNSlocal void FoundDomain(mDNS *const m, DNSQuestion *question, const ResourceR
 	{
 	kern_return_t status;
 	#pragma unused(m)
-	char buffer[256];
+	char buffer[MAX_ESCAPED_DOMAIN_NAME];
 	DNSServiceDomainEnumerationReplyResultType rt;
 	DNSServiceDomainEnumeration *x = (DNSServiceDomainEnumeration *)question->QuestionContext;
 
@@ -667,9 +675,7 @@ mDNSlocal void FoundInstance(mDNS *const m, DNSQuestion *question, const Resourc
 	if (!x) { LogMsg("FoundInstance: Failed to allocate memory for result %##s", answer->rdata->u.name.c); return; }
 	
 	verbosedebugf("FoundInstance: %s %##s", AddRecord ? "Add" : "Rmv", answer->rdata->u.name.c);
-	ConvertDomainLabelToCString_unescaped(&name, x->name);
-	ConvertDomainNameToCString(&type, x->type);
-	ConvertDomainNameToCString(&domain, x->dom);
+	AssignDomainName(x->result, answer->rdata->u.name);
 	if (AddRecord)
 		 x->resultType = DNSServiceBrowserReplyAddInstance;
 	else x->resultType = DNSServiceBrowserReplyRemoveInstance;
@@ -1562,8 +1568,17 @@ mDNSlocal mDNSs32 mDNSDaemonIdle(void)
 			while (x->results)
 				{
 				DNSServiceBrowserResult *const r = x->results;
+				domainlabel name;
+				domainname type, domain;
+				DeconstructServiceName(&r->result, &name, &type, &domain);	// Don't need to check result; already validated in FoundInstance()
+				char cname[MAX_DOMAIN_LABEL+1];			// Unescaped name: up to 63 bytes plus C-string terminating NULL.
+				char ctype[MAX_ESCAPED_DOMAIN_NAME];
+				char cdom [MAX_ESCAPED_DOMAIN_NAME];
+				ConvertDomainLabelToCString_unescaped(&name, cname);
+				ConvertDomainNameToCString(&type, ctype);
+				ConvertDomainNameToCString(&domain, cdom);
 				DNSServiceDiscoveryReplyFlags flags = (r->next) ? DNSServiceDiscoverReplyFlagsMoreComing : 0;
-				kern_return_t status = DNSServiceBrowserReply_rpc(x->ClientMachPort, r->resultType, r->name, r->type, r->dom, flags, 1);
+				kern_return_t status = DNSServiceBrowserReply_rpc(x->ClientMachPort, r->resultType, cname, ctype, cdom, flags, 1);
 				// If we failed to send the mach message, try again in one second
 				if (status == MACH_SEND_TIMED_OUT)
 					{
@@ -1694,8 +1709,4 @@ mDNSexport int main(int argc, char **argv)
 	}
 
 // For convenience when using the "strings" command, this is the last thing in the file
-#if mDNSResponderVersion > 1
-mDNSexport const char mDNSResponderVersionString[] = "mDNSResponder-" STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
-#else
-mDNSexport const char mDNSResponderVersionString[] = "mDNSResponder (Engineering Build) (" __DATE__ " " __TIME__ ")";
-#endif
+mDNSexport const char mDNSResponderVersionString[] = STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";

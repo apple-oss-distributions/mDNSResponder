@@ -3,6 +3,8 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -44,6 +46,9 @@
     Change History (most recent first):
 
 $Log: mDNS.c,v $
+Revision 1.307.2.1  2003/12/03 11:20:27  cheshire
+<rdar://problem/3457718>: Stop and start of a service uses old ip address (with old port number)
+
 Revision 1.307  2003/09/09 20:13:30  cheshire
 <rdar://problem/3411105> Don't send a Goodbye record if we never announced it
 Ammend checkin 1.304: Off-by-one error: By this place in the function we've already decremented
@@ -2001,6 +2006,7 @@ mDNSexport void IncrementLabelSuffix(domainlabel *name, mDNSBool RichText)
 #endif
 
 #define RRIsAddressType(RR) ((RR)->resrec.rrtype == kDNSType_A || (RR)->resrec.rrtype == kDNSType_AAAA)
+#define RRTypeIsAddressType(T) ((T) == kDNSType_A || (T) == kDNSType_AAAA)
 
 #define ResourceRecordIsValidAnswer(RR) ( ((RR)->             resrec.RecordType & kDNSRecordTypeActiveMask)  && \
 		((RR)->Additional1 == mDNSNULL || ((RR)->Additional1->resrec.RecordType & kDNSRecordTypeActiveMask)) && \
@@ -3254,6 +3260,15 @@ mDNSlocal void DiscardDeregistrations(mDNS *const m)
 		}
 	}
 
+mDNSlocal mDNSBool HaveSentEntireRRSet(const mDNS *const m, const AuthRecord *const rr, mDNSInterfaceID InterfaceID)
+	{
+	// Try to find another member of this set that we're still planning to send on this interface
+	const AuthRecord *a;
+	for (a = m->ResourceRecords; a; a=a->next)
+		if (a->SendRNow == InterfaceID && a != rr && SameResourceRecordSignature(&a->resrec, &rr->resrec)) break;
+	return (a == mDNSNULL);		// If no more members of this set found, then we should set the cache flush bit
+	}
+
 // Note about acceleration of announcements to facilitate automatic coalescing of
 // multiple independent threads of announcements into a single synchronized thread:
 // The announcements in the packet may be at different stages of maturity;
@@ -3423,22 +3438,17 @@ mDNSlocal void SendResponses(mDNS *const m)
 						}
 					// Now try to see if we can fit the update in the same packet (not fatal if we can't)
 					SetNewRData(&rr->resrec, rr->NewRData, rr->newrdlength);
+					if ((rr->resrec.RecordType & kDNSRecordTypeUniqueMask) && HaveSentEntireRRSet(m, rr, intf->InterfaceID))
+						rr->resrec.rrclass |= kDNSClass_UniqueRRSet;		// Temporarily set the cache flush bit so PutResourceRecord will set it
 					newptr = PutResourceRecord(&response, responseptr, &response.h.numAnswers, &rr->resrec);
+					rr->resrec.rrclass &= ~kDNSClass_UniqueRRSet;			// Make sure to clear cache flush bit back to normal state
 					if (newptr) responseptr = newptr;
 					SetNewRData(&rr->resrec, OldRData, oldrdlength);
 					}
 				else
 					{
-					// If this record is supposed to be unique, see if we've sent its whole set
-					if (rr->resrec.RecordType & kDNSRecordTypeUniqueMask)
-						{
-						// Try to find another member of this set that we're still planning to send on this interface
-						const AuthRecord *a;
-						for (a = m->ResourceRecords; a; a=a->next)
-							if (a->SendRNow == intf->InterfaceID && a != rr && SameResourceRecordSignature(&a->resrec, &rr->resrec)) break;
-						if (a == mDNSNULL)							// If no more members of this set found
-							rr->resrec.rrclass |= kDNSClass_UniqueRRSet;	// Temporarily set the cache flush bit so PutResourceRecord will set it
-						}
+					if ((rr->resrec.RecordType & kDNSRecordTypeUniqueMask) && HaveSentEntireRRSet(m, rr, intf->InterfaceID))
+						rr->resrec.rrclass |= kDNSClass_UniqueRRSet;		// Temporarily set the cache flush bit so PutResourceRecord will set it
 					newptr = PutResourceRecordTTL(&response, responseptr, &response.h.numAnswers, &rr->resrec, m->SleepState ? 0 : rr->resrec.rroriginalttl);
 					rr->resrec.rrclass &= ~kDNSClass_UniqueRRSet;			// Make sure to clear cache flush bit back to normal state
 					if (!newptr && response.h.numAnswers) break;
@@ -4208,6 +4218,8 @@ mDNSlocal void CheckCacheExpiration(mDNS *const m, mDNSu32 slot)
 			rp = &rr->next;
 			}
 		}
+	if (m->rrcache_tail[slot] != rp) debugf("CheckCacheExpiration: Updating m->rrcache_tail[%d] from %p to %p", slot, m->rrcache_tail[slot], rp);
+	m->rrcache_tail[slot] = rp;
 	m->lock_rrcache = 0;
 	}
 
@@ -4253,6 +4265,9 @@ mDNSlocal void AnswerNewQuestion(mDNS *const m)
 			// MUST NOT dereference q again after calling AnswerQuestionWithResourceRecord()
 			if (m->CurrentQuestion != q) break;		// If callback deleted q, then we're finished here
 			}
+		else if (RRTypeIsAddressType(rr->resrec.rrtype) && RRTypeIsAddressType(q->qtype))
+			if (rr->resrec.namehash == q->qnamehash && SameDomainName(&rr->resrec.name, &q->qname))
+				ShouldQueryImmediately = mDNSfalse;
 
 	if (ShouldQueryImmediately && m->CurrentQuestion == q)
 		{
@@ -4371,23 +4386,24 @@ mDNSlocal CacheRecord *GetFreeCacheRR(mDNS *const m, mDNSu16 RDLength)
 		mDNSu32 oldtotalused = m->rrcache_totalused;
 		#endif
 		mDNSu32 slot;
-		CacheRecord **rr;
 		for (slot = 0; slot < CACHE_HASH_SLOTS; slot++)
 			{
-			rr = &(m->rrcache_hash[slot]);
-			while (*rr)
+			CacheRecord **rp = &(m->rrcache_hash[slot]);
+			while (*rp)
 				{
 				// Records that answer still-active questions are not candidates for deletion
-				if ((*rr)->CRActiveQuestion)
-					rr=&(*rr)->next;
+				if ((*rp)->CRActiveQuestion)
+					rp=&(*rp)->next;
 				else
 					{
-					CacheRecord *r = *rr;
-					*rr = (*rr)->next;			// Cut record from list
+					CacheRecord *rr = *rp;
+					*rp = (*rp)->next;			// Cut record from list
 					m->rrcache_used[slot]--;	// Decrement counts
-					ReleaseCacheRR(m, r);
+					ReleaseCacheRR(m, rr);
 					}
 				}
+			if (m->rrcache_tail[slot] != rp) debugf("GetFreeCacheRR: Updating m->rrcache_tail[%d] from %p to %p", slot, m->rrcache_tail[slot], rp);
+			m->rrcache_tail[slot] = rp;
 			}
 		#if MDNS_DEBUGMSGS
 		debugf("Clear unused records; m->rrcache_totalused was %lu; now %lu", oldtotalused, m->rrcache_totalused);
@@ -5537,8 +5553,9 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 					// If this is an oversized record with external storage allocated, copy rdata to external storage
 					if (pkt.r.resrec.rdlength > InlineCacheRDSize)
 						mDNSPlatformMemCopy(pkt.r.resrec.rdata, rr->resrec.rdata, sizeofRDataHeader + pkt.r.resrec.rdlength);
-					rr->next = m->rrcache_hash[slot];
-					m->rrcache_hash[slot] = rr;
+					rr->next = mDNSNULL;					// Clear 'next' pointer
+					*(m->rrcache_tail[slot]) = rr;			// Append this record to tail of cache slot list
+					m->rrcache_tail[slot] = &(rr->next);	// Advance tail pointer
 					m->rrcache_used[slot]++;
 					//debugf("Adding RR %##s to cache (%d)", pkt.r.name.c, m->rrcache_used);
 					CacheRecordAdd(m, rr);
@@ -6398,12 +6415,12 @@ mDNSexport mStatus mDNS_RegisterInterface(mDNS *const m, NetworkInterfaceInfo *s
 	// even if we believe that we previously had an active representative of this interface.
 	if ((m->KnownBugs & mDNS_KnownBug_PhantomInterfaces) || FirstOfType || set->InterfaceActive)
 		{
+		DNSQuestion *q;
+		AuthRecord *rr;
 		// Use a small amount of randomness:
 		// In the case of a network administrator turning on an Ethernet hub so that all the connected machines establish link at
 		// exactly the same time, we don't want them to all go and hit the network with identical queries at exactly the same moment.
 		if (!m->SuppressSending) m->SuppressSending = m->timenow + (mDNSs32)mDNSRandom((mDNSu32)InitialQuestionInterval);
-		DNSQuestion *q;
-		AuthRecord *rr;
 		for (q = m->Questions; q; q=q->next)							// Scan our list of questions
 			if (!q->InterfaceID || q->InterfaceID == set->InterfaceID)	// If non-specific Q, or Q on this specific interface,
 				{														// then reactivate this question
@@ -6855,7 +6872,7 @@ mDNSexport mStatus mDNS_Init(mDNS *const m, mDNS_PlatformSupport *const p,
 	CacheRecord *rrcachestorage, mDNSu32 rrcachesize,
 	mDNSBool AdvertiseLocalAddresses, mDNSCallback *Callback, void *Context)
 	{
-	mDNSu32 i;
+	mDNSu32 slot;
 	mDNSs32 timenow;
 	mStatus result = mDNSPlatformTimeInit(&timenow);
 	if (result != mStatus_NoError) return(result);
@@ -6905,10 +6922,11 @@ mDNSexport mStatus mDNS_Init(mDNS *const m, mDNS_PlatformSupport *const p,
 	m->rrcache_report          = 10;
 	m->rrcache_free            = mDNSNULL;
 
-	for (i = 0; i < CACHE_HASH_SLOTS; i++)
+	for (slot = 0; slot < CACHE_HASH_SLOTS; slot++)
 		{
-		m->rrcache_hash[i] = mDNSNULL;
-		m->rrcache_used[i] = 0;
+		m->rrcache_hash[slot] = mDNSNULL;
+		m->rrcache_tail[slot] = &m->rrcache_hash[slot];
+		m->rrcache_used[slot] = 0;
 		}
 
 	mDNS_GrowCache(m, rrcachestorage, rrcachesize);
@@ -6954,6 +6972,7 @@ mDNSexport void mDNS_Close(mDNS *const m)
 
 	rrcache_totalused = m->rrcache_totalused;
 	for (slot = 0; slot < CACHE_HASH_SLOTS; slot++)
+		{
 		while (m->rrcache_hash[slot])
 			{
 			CacheRecord *rr = m->rrcache_hash[slot];
@@ -6962,6 +6981,9 @@ mDNSexport void mDNS_Close(mDNS *const m)
 			m->rrcache_used[slot]--;
 			ReleaseCacheRR(m, rr);
 			}
+		// Reset tail pointer back to empty state (not that it really matters on exit, but we'll do it anyway, for the sake of completeness)
+		m->rrcache_tail[slot] = &m->rrcache_hash[slot];
+		}
 	debugf("mDNS_Close: RR Cache was using %ld records, %d active", rrcache_totalused, rrcache_active);
 	if (rrcache_active != m->rrcache_active)
 		LogMsg("*** ERROR *** rrcache_active %lu != m->rrcache_active %lu", rrcache_active, m->rrcache_active);

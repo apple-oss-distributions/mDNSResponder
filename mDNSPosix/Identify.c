@@ -3,6 +3,8 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -36,6 +38,13 @@
     Change History (most recent first):
 
 $Log: Identify.c,v $
+Revision 1.12  2003/11/14 21:27:09  cheshire
+<rdar://problem/3484766>: Security: Crashing bug in mDNSResponder
+Fix code that should use buffer size MAX_ESCAPED_DOMAIN_NAME (1005) instead of 256-byte buffers.
+
+Revision 1.11  2003/10/30 19:26:38  cheshire
+Fix warnings on certain compilers
+
 Revision 1.10  2003/09/02 20:38:57  cheshire
 #include <signal.h> for Linux
 
@@ -106,7 +115,7 @@ static CacheRecord gRRCache[RR_CACHE_SIZE];
 
 static volatile int StopNow;	// 0 means running, 1 means stop because we got an answer, 2 means stop because of Ctrl-C
 static volatile int NumAnswers, NumAddr, NumAAAA, NumHINFO;
-static char hostname[256], hardware[256], software[256];
+static char hostname[MAX_ESCAPED_DOMAIN_NAME], hardware[256], software[256];
 static mDNSOpaque16 lastid, id;
 
 //*************************************************************************************************************
@@ -171,10 +180,10 @@ static void InfoCallback(mDNS *const m, DNSQuestion *question, const ResourceRec
 	else if (answer->rrtype == kDNSType_HINFO)
 		{
 		mDNSu8 *p = answer->rdata->u.data;
-		strncpy(hardware, p+1, p[0]);
+		strncpy(hardware, (char*)(p+1), p[0]);
 		hardware[p[0]] = 0;
 		p += 1 + p[0];
-		strncpy(software, p+1, p[0]);
+		strncpy(software, (char*)(p+1), p[0]);
 		software[p[0]] = 0;
 		NumAnswers++;
 		NumHINFO++;
@@ -248,7 +257,11 @@ mDNSlocal void HandleSIG(int signal)
 mDNSexport int main(int argc, char **argv)
 	{
 	mStatus status;
-	
+	struct in_addr s4;
+	struct in6_addr s6;
+	char buffer[256];
+	DNSQuestion q;
+
 	if (argc < 2) goto usage;
 	
     // Initialise the mDNS core.
@@ -260,12 +273,6 @@ mDNSexport int main(int argc, char **argv)
 
 	signal(SIGINT, HandleSIG);	// SIGINT is what you get for a Ctrl-C
 	signal(SIGTERM, HandleSIG);
-
-	struct in_addr s4;
-	struct in6_addr s6;
-
-	char buffer[256];
-	DNSQuestion q;
 
 	if (inet_pton(AF_INET, argv[1], &s4) == 1)
 		{

@@ -3,6 +3,8 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -23,6 +25,13 @@
     Change History (most recent first):
 
 $Log: Client.c,v $
+Revision 1.11  2003/11/17 20:14:32  cheshire
+Typo: Wrote "domC" where it should have said "domainC"
+
+Revision 1.10  2003/11/14 21:27:09  cheshire
+<rdar://problem/3484766>: Security: Crashing bug in mDNSResponder
+Fix code that should use buffer size MAX_ESCAPED_DOMAIN_NAME (1005) instead of 256-byte buffers.
+
 Revision 1.9  2003/08/14 02:19:55  cheshire
 <rdar://problem/3375491> Split generic ResourceRecord type into two separate types: AuthRecord and CacheRecord
 
@@ -81,9 +90,9 @@ static void BrowseCallback(mDNS *const m, DNSQuestion *question, const ResourceR
     domainlabel name;
     domainname  type;
     domainname  domain;
-    char nameC[256];
-    char typeC[256];
-    char domainC[256];
+	char nameC  [MAX_DOMAIN_LABEL+1];			// Unescaped name: up to 63 bytes plus C-string terminating NULL.
+	char typeC  [MAX_ESCAPED_DOMAIN_NAME];
+	char domainC[MAX_ESCAPED_DOMAIN_NAME];
     const char *state;
 
 	(void)m;		// Unused

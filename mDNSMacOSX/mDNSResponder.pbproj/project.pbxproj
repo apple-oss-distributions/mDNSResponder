@@ -6,11 +6,13 @@
 	objectVersion = 38;
 	objects = {
 		000753D303367C1C0CCA2C71 = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			path = mDNSMacOSX.h;
 			refType = 4;
 		};
 		0017390704CC75C30CCA2C71 = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			path = SampleUDSClient.c;
 			refType = 2;
@@ -30,6 +32,7 @@
 			);
 			buildSettings = {
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OTHER_CFLAGS = "-no-cpp-precomp -DmDNSResponderVersion=$(MVERS)";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";
@@ -45,7 +48,6 @@
 			name = "UDS API Test Tool";
 			productName = "UDS API Test Tool";
 			productReference = 0044D34F04CC73600CCA2C71;
-			shouldUseHeadermap = 0;
 		};
 		0044D34904CC73600CCA2C71 = {
 			buildActionMask = 2147483647;
@@ -84,6 +86,7 @@
 			refType = 3;
 		};
 		004EFB9604CC78130CCA2C71 = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			path = dnssd_clientstub.c;
 			refType = 2;
@@ -104,6 +107,7 @@
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
 				HEADER_SEARCH_PATHS = "\"$(APPLE_INTERNAL_DEVELOPER_DIR)/Headers\"";
 				LIBRARY_SEARCH_PATHS = "";
+				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OPTIMIZATION_CFLAGS = "-O0";
 				OTHER_CFLAGS = "-no-cpp-precomp -D__MACOSX__ -DMDNS_DEBUGMSGS=1 -DmDNSResponderVersion=$(MVERS)";
 				OTHER_LDFLAGS = "";
@@ -120,7 +124,6 @@
 			name = "mDNSResponder debug";
 			productName = mDNSResponder;
 			productReference = 00AD62B8032D799A0CCA2C71;
-			shouldUseHeadermap = 1;
 		};
 		00AD62A4032D799A0CCA2C71 = {
 			buildActionMask = 2147483647;
@@ -148,9 +151,9 @@
 				00AD62AE032D799A0CCA2C71,
 				00AD62AF032D799A0CCA2C71,
 				00AD62B0032D799A0CCA2C71,
-				00AD62B1032D799A0CCA2C71,
 				F5E11B5E04A28126019798ED,
 				F525E72B04AA167A01F1CF4D,
+				00AD62B1032D799A0CCA2C71,
 			);
 			isa = PBXSourcesBuildPhase;
 			runOnlyForDeploymentPostprocessing = 0;
@@ -251,7 +254,6 @@
 			isa = PBXAggregateTarget;
 			name = "Build All";
 			productName = "Build All";
-			shouldUseHeadermap = 0;
 		};
 		00AD62BC032D7A160CCA2C71 = {
 			isa = PBXTargetDependency;
@@ -269,7 +271,7 @@
 			buildRules = (
 			);
 			buildSettings = {
-				MVERS = 1;
+				MVERS = "\"mDNSResponder (Engineering Build)\"";
 			};
 			isa = PBXBuildStyle;
 			name = Development;
@@ -321,6 +323,7 @@
 			buildStyles = (
 				00B2AB0C032D7B220CCA2C71,
 			);
+			hasScannedForEncodings = 1;
 			isa = PBXProject;
 			mainGroup = 08FB7794FE84155DC02AAC07;
 			projectDirPath = "";
@@ -385,6 +388,7 @@
 				HEADER_SEARCH_PATHS = "\"$(APPLE_INTERNAL_DEVELOPER_DIR)/Headers\"";
 				INSTALL_PATH = /usr/sbin;
 				LIBRARY_SEARCH_PATHS = "";
+				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OTHER_CFLAGS = "-no-cpp-precomp -D__MACOSX__ -DmDNSResponderVersion=$(MVERS)";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";
@@ -401,7 +405,6 @@
 			productInstallPath = "$(HOME)/bin";
 			productName = mDNSResponder;
 			productReference = 034768E2FF38A6DC11DB9C8B;
-			shouldUseHeadermap = 1;
 		};
 		08FB77A0FE84155DC02AAC07 = {
 			buildActionMask = 2147483647;
@@ -419,9 +422,9 @@
 				6575FC0E022EB18700000109,
 				6575FBEA022EAF5A00000109,
 				6575FBED022EAF7200000109,
-				6575FBEE022EAF7200000109,
 				F5E11B5C04A28126019798ED,
 				F525E72904AA167501F1CF4D,
+				6575FBEE022EAF7200000109,
 			);
 			isa = PBXSourcesBuildPhase;
 			runOnlyForDeploymentPostprocessing = 0;
@@ -497,18 +500,21 @@
 //653
 //654
 		654BE64F02B63B93000001D1 = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			name = mDNSClientAPI.h;
 			path = ../mDNSCore/mDNSClientAPI.h;
 			refType = 4;
 		};
 		654BE65002B63B93000001D1 = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			name = mDNSDebug.h;
 			path = ../mDNSCore/mDNSDebug.h;
 			refType = 4;
 		};
 		654BE65202B63B93000001D1 = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			name = mDNSPlatformFunctions.h;
 			path = ../mDNSCore/mDNSPlatformFunctions.h;
@@ -527,6 +533,7 @@
 			};
 		};
 		6575FBE9022EAF5A00000109 = {
+			fileEncoding = 4;
 			indentWidth = 4;
 			isa = PBXFileReference;
 			name = mDNS.c;
@@ -542,6 +549,7 @@
 			};
 		};
 		6575FBEB022EAF7200000109 = {
+			fileEncoding = 4;
 			indentWidth = 4;
 			isa = PBXFileReference;
 			path = CFSocket.c;
@@ -550,6 +558,7 @@
 			usesTabs = 1;
 		};
 		6575FBEC022EAF7200000109 = {
+			fileEncoding = 4;
 			indentWidth = 4;
 			isa = PBXFileReference;
 			path = daemon.c;
@@ -580,16 +589,19 @@
 			refType = 4;
 		};
 		6575FBFF022EAFBA00000109 = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			path = DNSServiceDiscoveryDefines.h;
 			refType = 4;
 		};
 		6575FC00022EAFBA00000109 = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			path = DNSServiceDiscoveryReply.defs;
 			refType = 4;
 		};
 		6575FC01022EAFBA00000109 = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			path = DNSServiceDiscoveryRequest.defs;
 			refType = 4;
@@ -659,6 +671,7 @@
 			buildSettings = {
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
 				INSTALL_PATH = /usr/bin;
+				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OTHER_CFLAGS = "-no-cpp-precomp -DmDNSResponderVersion=$(MVERS)";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";
@@ -675,7 +688,6 @@
 			productInstallPath = /usr/bin;
 			productName = "Sample mDNS Client";
 			productReference = 6575FC1D022EB76000000109;
-			shouldUseHeadermap = 0;
 		};
 		6575FC1D022EB76000000109 = {
 			isa = PBXExecutableFileReference;
@@ -693,6 +705,7 @@
 			refType = 4;
 		};
 		6575FC20022EB7AA00000109 = {
+			fileEncoding = 4;
 			indentWidth = 4;
 			isa = PBXFileReference;
 			path = SamplemDNSClient.c;
@@ -753,6 +766,7 @@
 			};
 		};
 		F525E72804AA167501F1CF4D = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			path = uds_daemon.c;
 			refType = 4;
@@ -770,11 +784,13 @@
 			};
 		};
 		F5E11B5A04A28126019798ED = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			path = dnssd_ipc.c;
 			refType = 4;
 		};
 		F5E11B5B04A28126019798ED = {
+			fileEncoding = 4;
 			isa = PBXFileReference;
 			path = dnssd_ipc.h;
 			refType = 4;
