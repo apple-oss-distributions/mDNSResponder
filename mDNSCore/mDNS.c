@@ -44,6 +44,23 @@
     Change History (most recent first):
 
 $Log: mDNS.c,v $
+Revision 1.307.2.13  2005/01/28 05:39:12  cheshire
+Remove LogMsg()
+
+Revision 1.307.2.12  2005/01/28 05:02:05  cheshire
+<rdar://problem/3770559> SUPan: Replace IP TTL 255 check with local-subnet check
+
+Revision 1.307.2.11  2005/01/28 04:03:23  cheshire
+<rdar://problem/3759302> SUPan: Current method of doing subtypes causes name collisions
+Summary: Pulled in ConstructServiceName, CountSubTypes and AllocateSubTypes from Tiger version.
+
+Revision 1.307.2.10  2004/06/18 17:28:18  cheshire
+<rdar://problem/3588761> Current method of doing subtypes causes name collisions
+
+Revision 1.307.2.9  2004/06/18 00:31:51  cheshire
+<rdar://problem/3617655> mDNSResponder escape handling inconsistent with BIND
+(Prerequisite for fixing <rdar://problem/3588761>)
+
 Revision 1.307.2.8  2004/04/03 05:18:19  bradley
 Added cast to fix signed/unsigned warning due to int promotion.
 
@@ -987,7 +1004,7 @@ Revision 1.61  2002/09/20 01:05:24  cheshire
 Don't kill the Extras list in mDNS_DeregisterService()
 
 Revision 1.60  2002/09/19 23:47:35  cheshire
-Added mDNS_RegisterNoSuchService() function for assertion of non-existance
+Added mDNS_RegisterNoSuchService() function for assertion of non-existence
 of a particular named service
 
 Revision 1.59  2002/09/19 21:25:34  cheshire
@@ -1481,7 +1498,7 @@ mDNSexport mDNSBool mDNSSameAddress(const mDNSAddr *ip1, const mDNSAddr *ip2)
 	return(mDNSfalse);
 	}
 
-mDNSlocal mDNSBool mDNSAddrIsDNSMulticast(const mDNSAddr *ip)
+mDNSexport mDNSBool mDNSAddrIsDNSMulticast(const mDNSAddr *ip)
 	{
 	switch(ip->type)
 		{
@@ -1647,15 +1664,14 @@ mDNSexport mDNSu8 *AppendDNSNameString(domainname *const name, const char *cstr)
 			mDNSu8 c = (mDNSu8)*cstr++;								// Read the character
 			if (c == '\\')											// If escape character, check next character
 				{
-				if (*cstr == '\\' || *cstr == '.')					// If a second escape, or a dot,
-					c = (mDNSu8)*cstr++;							// just use the second character
-				else if (mdnsIsDigit(cstr[0]) && mdnsIsDigit(cstr[1]) && mdnsIsDigit(cstr[2]))
-					{												// else, if three decimal digits,
-					int v0 = cstr[0] - '0';							// then interpret as three-digit decimal
-					int v1 = cstr[1] - '0';
-					int v2 = cstr[2] - '0';
+				c = (mDNSu8)*cstr++;								// Assume we'll just take the next character
+				if (mdnsIsDigit(cstr[-1]) && mdnsIsDigit(cstr[0]) && mdnsIsDigit(cstr[1]))
+					{												// If three decimal digits,
+					int v0 = cstr[-1] - '0';						// then interpret as three-digit decimal
+					int v1 = cstr[ 0] - '0';
+					int v2 = cstr[ 1] - '0';
 					int val = v0 * 100 + v1 * 10 + v2;
-					if (val <= 255) { c = (mDNSu8)val; cstr += 3; }	// If valid value, use it
+					if (val <= 255) { c = (mDNSu8)val; cstr += 2; }	// If valid three-digit decimal value, use it
 					}
 				}
 			*ptr++ = c;												// Write the character
@@ -1828,15 +1844,31 @@ mDNSexport mDNSu8 *ConstructServiceName(domainname *const fqdn,
 
 	// In the case where there is no name (and ONLY in that case),
 	// a single-label subtype is allowed as the first label of a three-part "type"
-	if (!name)
+	if (!name && type)
 		{
-		const mDNSu8 *s2 = type->c + 1 + type->c[0];
-		if (type->c[0]  > 0 && type->c[0]  < 0x40 &&
-			s2[0]       > 0 && s2[0]       < 0x40 &&
-			s2[1+s2[0]] > 0 && s2[1+s2[0]] < 0x40)
+		const mDNSu8 *s0 = type->c;
+		if (s0[0] && s0[0] < 0x40)		// If legal first label (at least one character, and no more than 63)
 			{
-			name = (domainlabel *)type;
-			type = (domainname  *)s2;
+			const mDNSu8 * s1 = s0 + 1 + s0[0];
+			if (s1[0] && s1[0] < 0x40)	// and legal second label (at least one character, and no more than 63)
+				{
+				const mDNSu8 *s2 = s1 + 1 + s1[0];
+				if (s2[0] && s2[0] < 0x40 && s2[1+s2[0]] == 0)	// and we have three and only three labels
+					{
+					static const mDNSu8 SubTypeLabel[5] = "\x04_sub";
+					src = s0;									// Copy the first label
+					len = *src;
+					for (i=0; i <= len;                      i++) *dst++ = *src++;
+					for (i=0; i < (int)sizeof(SubTypeLabel); i++) *dst++ = SubTypeLabel[i];
+					type = (domainname *)s1;
+					
+					// Special support for queries done by older versions of "Rendezvous Browser"
+					// For these queries, we retract the "._sub" we just added between the subtype and the main type
+					if (SameDomainName((domainname*)s0, (domainname*)"\x09_services\x07_dns-sd\x04_udp") ||
+						SameDomainName((domainname*)s0, (domainname*)"\x09_services\x05_mdns\x04_udp"))
+						dst -= sizeof(SubTypeLabel);
+					}
+				}
 			}
 		}
 
@@ -1849,26 +1881,29 @@ mDNSexport mDNSu8 *ConstructServiceName(domainname *const fqdn,
 		}
 	else
 		name = (domainlabel*)"";	// Set this up to be non-null, to avoid errors if we have to call LogMsg() below
-	
+
 	src = type->c;										// Put the service type into the domain name
 	len = *src;
-	if (len < 2 || len >= 0x40)  { errormsg="Invalid service application protocol name"; goto fail; }
-	if (src[1] != '_') { errormsg="Service application protocol name must begin with underscore"; goto fail; }
+	if (len < 2 || len >= 0x40 || (len > 15 && !SameDomainName(domain, (domainname*)"\x05" "local")))
+		{
+		errormsg="Application protocol name must be underscore plus 1-14 characters. See <http://www.dns-sd.org/ServiceTypes.html>";
+		goto fail;
+		}
+	if (src[1] != '_') { errormsg="Application protocol name must begin with underscore"; goto fail; }
 	for (i=2; i<=len; i++)
 		if (!mdnsIsLetter(src[i]) && !mdnsIsDigit(src[i]) && src[i] != '-' && src[i] != '_')
-			{ errormsg="Service application protocol name must contain only letters, digits, and hyphens"; goto fail; }
+			{ errormsg="Application protocol name must contain only letters, digits, and hyphens"; goto fail; }
 	for (i=0; i<=len; i++) *dst++ = *src++;
 
 	len = *src;
-	//if (len == 0 || len >= 0x40)  { errormsg="Invalid service transport protocol name"; goto fail; }
 	if (!(len == 4 && src[1] == '_' &&
 		(((src[2] | 0x20) == 'u' && (src[3] | 0x20) == 'd') || ((src[2] | 0x20) == 't' && (src[3] | 0x20) == 'c')) &&
 		(src[4] | 0x20) == 'p'))
-		{ errormsg="Service transport protocol name must be _udp or _tcp"; goto fail; }
+		{ errormsg="Transport protocol name must be _udp or _tcp"; goto fail; }
 	for (i=0; i<=len; i++) *dst++ = *src++;
-	
+
 	if (*src) { errormsg="Service type must have only two labels"; goto fail; }
-	
+
 	*dst = 0;
 	dst = AppendDomainName(fqdn, domain);
 	if (!dst) { errormsg="Service domain too long"; goto fail; }
@@ -5360,33 +5395,64 @@ exit:
 	return(responseptr);
 	}
 
+mDNSlocal mDNSBool AddressIsLocalSubnet(mDNS *const m, const mDNSInterfaceID InterfaceID, const mDNSAddr *addr)
+	{
+	NetworkInterfaceInfo *intf;
+
+	if (addr->type == mDNSAddrType_IPv4)
+		{
+		if (addr->ip.v4.b[0] == 169 && addr->ip.v4.b[1] == 254) return(mDNStrue);
+		for (intf = m->HostInterfaces; intf; intf = intf->next)
+			if (intf->ip.type == addr->type && intf->InterfaceID == InterfaceID)
+				if (((intf->ip.ip.v4.NotAnInteger ^ addr->ip.v4.NotAnInteger) & intf->mask.ip.v4.NotAnInteger) == 0)
+					return(mDNStrue);
+		}
+
+	if (addr->type == mDNSAddrType_IPv6)
+		{
+		if (addr->ip.v6.b[0] == 0xFE && addr->ip.v6.b[1] == 0x80) return(mDNStrue);
+		for (intf = m->HostInterfaces; intf; intf = intf->next)
+			if (intf->ip.type == addr->type && intf->InterfaceID == InterfaceID)
+				if ((((intf->ip.ip.v6.l[0] ^ addr->ip.v6.l[0]) & intf->mask.ip.v6.l[0]) == 0) &&
+					(((intf->ip.ip.v6.l[1] ^ addr->ip.v6.l[1]) & intf->mask.ip.v6.l[1]) == 0) &&
+					(((intf->ip.ip.v6.l[2] ^ addr->ip.v6.l[2]) & intf->mask.ip.v6.l[2]) == 0) &&
+					(((intf->ip.ip.v6.l[3] ^ addr->ip.v6.l[3]) & intf->mask.ip.v6.l[3]) == 0))
+						return(mDNStrue);
+		}
+
+	return(mDNSfalse);
+	}
+
 mDNSlocal void mDNSCoreReceiveQuery(mDNS *const m, const DNSMessage *const msg, const mDNSu8 *const end,
 	const mDNSAddr *srcaddr, const mDNSIPPort srcport, const mDNSAddr *dstaddr, mDNSIPPort dstport,
 	const mDNSInterfaceID InterfaceID)
 	{
-	DNSMessage    response;
-	const mDNSu8 *responseend    = mDNSNULL;
-	
-	verbosedebugf("Received Query from %#-15a:%d to %#-15a:%d on 0x%.8X with %2d Question%s %2d Answer%s %2d Authorit%s %2d Additional%s",
-		srcaddr, (mDNSu16)srcport.b[0]<<8 | srcport.b[1],
-		dstaddr, (mDNSu16)dstport.b[0]<<8 | dstport.b[1],
-		InterfaceID,
-		msg->h.numQuestions,   msg->h.numQuestions   == 1 ? ", " : "s,",
-		msg->h.numAnswers,     msg->h.numAnswers     == 1 ? ", " : "s,",
-		msg->h.numAuthorities, msg->h.numAuthorities == 1 ? "y,  " : "ies,",
-		msg->h.numAdditionals, msg->h.numAdditionals == 1 ? "" : "s");
-	
-	responseend = ProcessQuery(m, msg, end, srcaddr, InterfaceID,
-		(srcport.NotAnInteger != MulticastDNSPort.NotAnInteger), mDNSAddrIsDNSMulticast(dstaddr), &response);
-
-	if (responseend)	// If responseend is non-null, that means we built a unicast response packet
+	if (mDNSAddrIsDNSMulticast(dstaddr) || AddressIsLocalSubnet(m, InterfaceID, srcaddr))
 		{
-		debugf("Unicast Response: %d Question%s, %d Answer%s, %d Additional%s to %#-15a:%d on %p/%ld",
-			response.h.numQuestions,   response.h.numQuestions   == 1 ? "" : "s",
-			response.h.numAnswers,     response.h.numAnswers     == 1 ? "" : "s",
-			response.h.numAdditionals, response.h.numAdditionals == 1 ? "" : "s",
-			srcaddr, (mDNSu16)srcport.b[0]<<8 | srcport.b[1], InterfaceID, srcaddr->type);
-		mDNSSendDNSMessage(m, &response, responseend, InterfaceID, dstport, srcaddr, srcport);
+		DNSMessage    response;
+		const mDNSu8 *responseend    = mDNSNULL;
+		
+		verbosedebugf("Received Query from %#-15a:%d to %#-15a:%d on 0x%.8X with %2d Question%s %2d Answer%s %2d Authorit%s %2d Additional%s",
+			srcaddr, (mDNSu16)srcport.b[0]<<8 | srcport.b[1],
+			dstaddr, (mDNSu16)dstport.b[0]<<8 | dstport.b[1],
+			InterfaceID,
+			msg->h.numQuestions,   msg->h.numQuestions   == 1 ? ", " : "s,",
+			msg->h.numAnswers,     msg->h.numAnswers     == 1 ? ", " : "s,",
+			msg->h.numAuthorities, msg->h.numAuthorities == 1 ? "y,  " : "ies,",
+			msg->h.numAdditionals, msg->h.numAdditionals == 1 ? "" : "s");
+		
+		responseend = ProcessQuery(m, msg, end, srcaddr, InterfaceID,
+			(srcport.NotAnInteger != MulticastDNSPort.NotAnInteger), mDNSAddrIsDNSMulticast(dstaddr), &response);
+	
+		if (responseend)	// If responseend is non-null, that means we built a unicast response packet
+			{
+			debugf("Unicast Response: %d Question%s, %d Answer%s, %d Additional%s to %#-15a:%d on %p/%ld",
+				response.h.numQuestions,   response.h.numQuestions   == 1 ? "" : "s",
+				response.h.numAnswers,     response.h.numAnswers     == 1 ? "" : "s",
+				response.h.numAdditionals, response.h.numAdditionals == 1 ? "" : "s",
+				srcaddr, (mDNSu16)srcport.b[0]<<8 | srcport.b[1], InterfaceID, srcaddr->type);
+			mDNSSendDNSMessage(m, &response, responseend, InterfaceID, dstport, srcaddr, srcport);
+			}
 		}
 	}
 
@@ -5395,7 +5461,7 @@ mDNSlocal void mDNSCoreReceiveQuery(mDNS *const m, const DNSMessage *const msg, 
 // Any code walking either list must use the CurrentQuestion and/or CurrentRecord mechanism to protect against this.
 mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 	const DNSMessage *const response, const mDNSu8 *end, const mDNSAddr *srcaddr, const mDNSAddr *dstaddr,
-	const mDNSInterfaceID InterfaceID, mDNSu8 ttl)
+	const mDNSInterfaceID InterfaceID)
 	{
 	int i;
 	const mDNSu8 *ptr = LocateAnswers(response, end);	// We ignore questions (if any) in a DNS response packet
@@ -5409,28 +5475,25 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 
 	(void)srcaddr;	// Currently used only for display in debugging message
 
-	verbosedebugf("Received Response from %#-15a addressed to %#-15a on %p TTL %d with %2d Question%s %2d Answer%s %2d Authorit%s %2d Additional%s",
-		srcaddr, dstaddr, InterfaceID, ttl,
+	verbosedebugf("Received Response from %#-15a addressed to %#-15a on %p with %2d Question%s %2d Answer%s %2d Authorit%s %2d Additional%s",
+		srcaddr, dstaddr, InterfaceID,
 		response->h.numQuestions,   response->h.numQuestions   == 1 ? ", " : "s,",
 		response->h.numAnswers,     response->h.numAnswers     == 1 ? ", " : "s,",
 		response->h.numAuthorities, response->h.numAuthorities == 1 ? "y,  " : "ies,",
 		response->h.numAdditionals, response->h.numAdditionals == 1 ? "" : "s");
 
-	// TTL should be 255
-	// In the case of overlayed subnets that aren't using RFC 3442, some packets may incorrectly
-	// go to the router first and then come back with a TTL of 254, so we allow that too.
-	// Anything lower than 254 is a pretty good sign of an off-net spoofing attack.
-	// Also, if we get a unicast response when we weren't expecting one, then we assume it is someone trying to spoof us
-	if (ttl < 254 || (!mDNSAddrIsDNSMulticast(dstaddr) && (mDNSu32)(m->timenow - m->ExpectUnicastResponse) > (mDNSu32)mDNSPlatformOneSecond))
-		{
-		debugf("** Ignored apparent spoof mDNS Response from %#-15a to %#-15a TTL %d on %p with %2d Question%s %2d Answer%s %2d Authorit%s %2d Additional%s",
-		srcaddr, dstaddr, ttl, InterfaceID,
-		response->h.numQuestions,   response->h.numQuestions   == 1 ? ", " : "s,",
-		response->h.numAnswers,     response->h.numAnswers     == 1 ? ", " : "s,",
-		response->h.numAuthorities, response->h.numAuthorities == 1 ? "y,  " : "ies,",
-		response->h.numAdditionals, response->h.numAdditionals == 1 ? "" : "s");
-		return;
-		}
+ 	// If we get a unicast response when we weren't expecting one, then we assume it is someone trying to spoof us
+	if (!mDNSAddrIsDNSMulticast(dstaddr))
+		if (!AddressIsLocalSubnet(m, InterfaceID, srcaddr) || (mDNSu32)(m->timenow - m->ExpectUnicastResponse) > (mDNSu32)(mDNSPlatformOneSecond*2))
+			{
+			debugf("** Ignored apparent spoof mDNS Response from %#-15a to %#-15a on %p with %2d Question%s %2d Answer%s %2d Authorit%s %2d Additional%s",
+				srcaddr, dstaddr, InterfaceID,
+				response->h.numQuestions,   response->h.numQuestions   == 1 ? ", " : "s,",
+				response->h.numAnswers,     response->h.numAnswers     == 1 ? ", " : "s,",
+				response->h.numAuthorities, response->h.numAuthorities == 1 ? "y,  " : "ies,",
+				response->h.numAdditionals, response->h.numAdditionals == 1 ? "" : "s");
+			return;
+			}
 
 	for (i = 0; i < totalrecords && ptr && ptr < end; i++)
 		{
@@ -5633,11 +5696,13 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 
 mDNSexport void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNSu8 *const end,
 	const mDNSAddr *const srcaddr, const mDNSIPPort srcport, const mDNSAddr *const dstaddr, const mDNSIPPort dstport,
-	const mDNSInterfaceID InterfaceID, mDNSu8 ttl)
+	const mDNSInterfaceID InterfaceID, mDNSu8 unusedttl)
 	{
 	const mDNSu8 StdQ  = kDNSFlag0_QR_Query    | kDNSFlag0_OP_StdQuery;
 	const mDNSu8 StdR  = kDNSFlag0_QR_Response | kDNSFlag0_OP_StdQuery;
 	const mDNSu8 QR_OP = (mDNSu8)(msg->h.flags.b[0] & kDNSFlag0_QROP_Mask);
+	
+	(void)unusedttl;
 	
 	// Read the integer parts which are in IETF byte-order (MSB first, LSB second)
 	mDNSu8 *ptr = (mDNSu8 *)&msg->h.numQuestions;
@@ -5654,7 +5719,7 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNS
 	
 	mDNS_Lock(m);
 	if      (QR_OP == StdQ) mDNSCoreReceiveQuery   (m, msg, end, srcaddr, srcport, dstaddr, dstport, InterfaceID);
-	else if (QR_OP == StdR) mDNSCoreReceiveResponse(m, msg, end, srcaddr,          dstaddr,          InterfaceID, ttl);
+	else if (QR_OP == StdR) mDNSCoreReceiveResponse(m, msg, end, srcaddr,          dstaddr,          InterfaceID);
 	else debugf("Unknown DNS packet type %02X%02X (ignored)", msg->h.flags.b[0], msg->h.flags.b[1]);
 
 	// Packet reception often causes a change to the task list:
@@ -6611,7 +6676,7 @@ mDNSlocal void ServiceCallback(mDNS *const m, AuthRecord *const rr, mStatus resu
 	
 	if (result == mStatus_MemFree)
 		{
-		// If the PTR record or any of the subtype PTR record are still in the process of deregistering,
+		// If the PTR record or any of the subtype PTR records are still in the process of deregistering,
 		// don't pass on the NameConflict/MemFree message until every record is finished cleaning up.
 		mDNSu32 i;
 		if (sr->RR_PTR.resrec.RecordType != kDNSRecordTypeUnregistered) return;
@@ -6688,9 +6753,12 @@ mDNSexport mStatus mDNS_RegisterService(mDNS *const m, ServiceRecordSet *sr,
 	// already set the first label of the record name to the subtype being registered
 	for (i=0; i<NumSubTypes; i++)
 		{
-		domainlabel s = *(domainlabel*)&sr->SubTypes[i].resrec.name;
+		domainname st;
+		AssignDomainName(st, sr->SubTypes[i].resrec.name);
+		st.c[1+st.c[0]] = 0;			// Only want the first label, not the whole FQDN (particularly for mDNS_RenameAndReregisterService())
+		AppendDomainName(&st, type);
 		mDNS_SetupResourceRecord(&sr->SubTypes[i], mDNSNULL, InterfaceID, kDNSType_PTR, kDefaultTTLforShared, kDNSRecordTypeShared, ServiceCallback, sr);
-		if (ConstructServiceName(&sr->SubTypes[i].resrec.name, &s, type, domain) == mDNSNULL) return(mStatus_BadParamErr);
+		if (ConstructServiceName(&sr->SubTypes[i].resrec.name, mDNSNULL, &st, domain) == mDNSNULL) return(mStatus_BadParamErr);
 		AssignDomainName(sr->SubTypes[i].resrec.rdata->u.name, sr->RR_SRV.resrec.name);
 		sr->SubTypes[i].Additional1 = &sr->RR_SRV;
 		sr->SubTypes[i].Additional2 = &sr->RR_TXT;

@@ -1310,7 +1310,7 @@ DNSStatus
 //---------------------------------------------------------------------------------------------------------------------------
 /*!	@function	DNSNoSuchServiceRegistrationCreate
 
-	@abstract	Creates a registration object and publish the registration to assert non-existance of a particular service.
+	@abstract	Creates a registration object and publish the registration to assert non-existence of a particular service.
 
 	@param		inFlags
 					Flags to control the registration process.

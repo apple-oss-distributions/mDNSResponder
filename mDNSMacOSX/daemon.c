@@ -36,6 +36,13 @@
     Change History (most recent first):
 
 $Log: daemon.c,v $
+Revision 1.134.2.8  2005/01/28 04:03:24  cheshire
+<rdar://problem/3759302> SUPan: Current method of doing subtypes causes name collisions
+Summary: Pulled in ConstructServiceName, CountSubTypes and AllocateSubTypes from Tiger version.
+
+Revision 1.134.2.7  2004/06/18 17:28:19  cheshire
+<rdar://problem/3588761> Current method of doing subtypes causes name collisions
+
 Revision 1.134.2.6  2004/04/06 19:50:36  cheshire
 <rdar://problem/3605898> mDNSResponder will not launch if "nobody" user doesn't exist.
 After more discussion, we've decided to use userid -2 if "nobody" user doesn't exist.
@@ -223,6 +230,9 @@ Add $Log header
 
 #include "mDNSClientAPI.h"			// Defines the interface to the client layer above
 #include "mDNSMacOSX.h"				// Defines the specific types needed to run mDNS on this platform
+
+extern mDNSs32 CountSubTypes(char *regtype);
+extern AuthRecord *AllocateSubTypes(mDNSs32 NumSubTypes, char *p);
 
 #include <DNSServiceDiscovery/DNSServiceDiscovery.h>
 
@@ -712,7 +722,12 @@ mDNSexport kern_return_t provide_DNSServiceBrowserCreate_rpc(mach_port_t unuseds
 
 	// Check other parameters
 	domainname t, d;
-	if (!regtype[0] || !MakeDomainNameFromDNSNameString(&t, regtype))      { errormsg = "Illegal regtype"; goto badparam; }
+	t.c[0] = 0;
+	mDNSs32 NumSubTypes = CountSubTypes(regtype);
+	if (NumSubTypes < 0 || NumSubTypes > 1) { errormsg = "Bad Service SubType"; goto badparam; }
+	if (NumSubTypes == 1 && !AppendDNSNameString(&t, regtype + strlen(regtype) + 1))
+	                                        { errormsg = "Bad Service SubType"; goto badparam; }
+	if (!regtype[0] || !AppendDNSNameString(&t, regtype))                  { errormsg = "Illegal regtype"; goto badparam; }
 	if (!MakeDomainNameFromDNSNameString(&d, *domain ? domain : "local.")) { errormsg = "Illegal domain";  goto badparam; }
 
 	// Allocate memory, and handle failure
@@ -965,22 +980,8 @@ mDNSexport kern_return_t provide_DNSServiceRegistrationCreate_rpc(mach_port_t un
 	if (CheckForExistingClient(client)) { err = mStatus_Invalid; errormsg = "Client id already in use"; goto fail; }
 
 	// Check for sub-types after the service type
-	AuthRecord *SubTypes = mDNSNULL;
-	mDNSu32 i, NumSubTypes = 0;
-	char *comma = regtype;
-	while (*comma && *comma != ',') comma++;
-	if (*comma)					// If we found a comma...
-		{
-		*comma = 0;				// Overwrite the first comma with a nul
-		char *p = comma + 1;	// Start scanning from the next character
-		while (*p)
-			{
-			if ( !(*p && *p != ',')) { errormsg = "Bad Service SubType";  goto badparam; }
-			while (*p && *p != ',') p++;
-			if (*p) *p++ = 0;
-			NumSubTypes++;
-			}
-		}
+	mDNSs32 NumSubTypes = CountSubTypes(regtype);
+	if (NumSubTypes < 0) { errormsg = "Bad Service SubType"; goto badparam; }
 
 	// Check other parameters
 	domainlabel n;
@@ -1030,17 +1031,9 @@ mDNSexport kern_return_t provide_DNSServiceRegistrationCreate_rpc(mach_port_t un
 	DNSServiceRegistration *x = mallocL("DNSServiceRegistration", sizeof(*x) - sizeof(RDataBody) + size);
 	if (!x) { err = mStatus_NoMemoryErr; errormsg = "No memory"; goto fail; }
 
-	if (NumSubTypes)
-		{
-		SubTypes = mallocL("ServiceSubTypes", NumSubTypes * sizeof(AuthRecord));
-		if (!SubTypes) { freeL("DNSServiceRegistration", x); err = mStatus_NoMemoryErr; errormsg = "No memory"; goto fail; }
-		for (i = 0; i < NumSubTypes; i++)
-			{
-			comma++;				// Advance over the nul character
-			MakeDomainNameFromDNSNameString(&SubTypes[i].resrec.name, comma);
-			while (*comma) comma++;	// Advance comma to point to the next terminating nul
-			}
-		}
+	AuthRecord *SubTypes = AllocateSubTypes(NumSubTypes, regtype);
+	if (NumSubTypes && !SubTypes)
+		{ freeL("DNSServiceRegistration", x); err = mStatus_NoMemoryErr; errormsg = "No memory"; goto fail; }
 
 	// Set up object, and link into list
 	x->ClientMachPort = client;
@@ -1062,7 +1055,7 @@ mDNSexport kern_return_t provide_DNSServiceRegistrationCreate_rpc(mach_port_t un
 		mDNSNULL, port,			// Host and port
 		txtinfo, data_len,		// TXT data, length
 		SubTypes, NumSubTypes,	// Subtypes
-		mDNSInterface_Any,		// Interace ID
+		mDNSInterface_Any,		// Interface ID
 		RegCallback, x);		// Callback and context
 
 	if (err) { AbortClient(client, x); errormsg = "mDNS_RegisterService"; goto fail; }
@@ -1094,6 +1087,7 @@ mDNSlocal void mDNS_StatusCallback(mDNS *const m, mStatus result)
 				r->autorename = mDNStrue;
 				mDNS_DeregisterService(&mDNSStorage, &r->s);
 				}
+		udsserver_handle_configchange();
 		}
 	else if (result == mStatus_GrowCache)
 		{

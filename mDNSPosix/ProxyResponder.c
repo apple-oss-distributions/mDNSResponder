@@ -64,7 +64,7 @@ Revision 1.13  2003/04/18 22:46:12  cheshire
 Fix mistake in 1.8 -- INADDR_NONE is 0xFFFFFFFF, not 0
 
 Revision 1.12  2003/04/16 02:11:07  cheshire
-Fixed mDNS_RegisterNoSuchService non-existance function so that it works again
+Fixed mDNS_RegisterNoSuchService non-existence function so that it works again
 
 Revision 1.11  2003/03/31 22:49:35  cheshire
 Add "$Log" header

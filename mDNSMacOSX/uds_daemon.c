@@ -23,6 +23,16 @@
     Change History (most recent first):
 
 $Log: uds_daemon.c,v $
+Revision 1.22.2.4  2005/01/28 05:41:45  cheshire
+<rdar://problem/3924278> SUPan: Service advertisement in qmaster can yield zombie ads
+
+Revision 1.22.2.3  2005/01/28 04:03:24  cheshire
+<rdar://problem/3759302> SUPan: Current method of doing subtypes causes name collisions
+Summary: Pulled in ConstructServiceName, CountSubTypes and AllocateSubTypes from Tiger version.
+
+Revision 1.22.2.2  2004/06/18 17:28:19  cheshire
+<rdar://problem/3588761> Current method of doing subtypes causes name collisions
+
 Revision 1.22.2.1  2003/12/05 00:03:35  cheshire
 <rdar://problem/3487869> Use buffer size MAX_ESCAPED_DOMAIN_NAME instead of 256
 
@@ -120,7 +130,6 @@ typedef struct request_state
     CFRunLoopSourceRef rls;
     CFSocketRef sr;		
     int sd;	
-    int errfd;		
                                 
     // state of read (in case message is read over several recv() calls)                            
     transfer_state ts;
@@ -247,8 +256,8 @@ static void handle_regservice_request(request_state *request);
 static void regservice_termination_callback(void *context);
 static void process_service_registration(ServiceRecordSet *const srs);
 static void regservice_callback(mDNS *const m, ServiceRecordSet *const srs, mStatus result);
-static void handle_add_request(request_state *rstate);
-static void handle_update_request(request_state *rstate);
+static mStatus handle_add_request(request_state *rstate);
+static mStatus handle_update_request(request_state *rstate);
 static mStatus gen_rr_response(domainname *servicename, mDNSInterfaceID id, request_state *request, reply_state **rep);
 static void append_reply(request_state *req, reply_state *rep);
 static int build_domainname_from_strings(domainname *srv, char *name, char *regtype, char *domain);
@@ -258,12 +267,12 @@ static void handle_query_request(request_state *rstate);
 static mStatus do_question(request_state *rstate, domainname *name, uint32_t ifi, uint16_t rrtype, int16_t rrclass);
 static reply_state *format_enumeration_reply(request_state *rstate, char *domain,                                             	DNSServiceFlags flags, uint32_t ifi, DNSServiceErrorType err);
 static void handle_enum_request(request_state *rstate);
-static void handle_regrecord_request(request_state *rstate);
+static mStatus handle_regrecord_request(request_state *rstate);
 static void regrecord_callback(mDNS *const m, AuthRecord *const rr, mStatus result);
 static void connected_registration_termination(void *context);
 static void handle_reconfirm_request(request_state *rstate);
 static AuthRecord *read_rr_from_ipc_msg(char *msgbuf, int ttl);
-static void handle_removerecord_request(request_state *rstate);
+static mStatus handle_removerecord_request(request_state *rstate);
 static void reset_connected_rstate(request_state *rstate);
 static int deliver_error(request_state *rstate, mStatus err);
 static int deliver_async_error(request_state *rs, reply_op_t op, mStatus err);
@@ -441,7 +450,7 @@ void udsserver_handle_configchange(void)
     for (req = all_requests; req; req = req->next)
         {
         srv = req->service;
-        if (srv->autoname && !SameDomainLabel(srv->name.c, mDNSStorage.nicelabel.c))
+        if (srv && srv->autoname && !SameDomainLabel(srv->name.c, mDNSStorage.nicelabel.c))
             {
             srv->rename_on_memfree = 1;
             err = mDNS_DeregisterService(&mDNSStorage, srv->srs);
@@ -607,16 +616,19 @@ static void request_callback(CFSocketRef sr, CFSocketCallBackType t, CFDataRef d
     if (rstate->hdr.flags & IPC_FLAGS_NOREPLY) rstate->no_reply = 1;
 
     // check if primary socket is to be used for synchronous errors, else open new socket
-    if (rstate->hdr.flags & IPC_FLAGS_REUSE_SOCKET)
-        rstate->errfd = rstate->sd;
-    else
-       {
-        if ((rstate->errfd = socket(AF_LOCAL, SOCK_STREAM, 0)) < 0)
+    if ((rstate->hdr.flags & IPC_FLAGS_REUSE_SOCKET) == 0)
+		{
+		mStatus err = 0;
+		int nwritten;
+		int errfd = socket(AF_LOCAL, SOCK_STREAM, 0);
+        if (errfd < 0)
             {
             my_perror("ERROR: socket");	
-            exit(1);
+            abort_request(rstate);
+            unlink_request(rstate);
+            return;
             }
-        if (fcntl(rstate->errfd, F_SETFL, O_NONBLOCK) < 0)
+        if (fcntl(errfd, F_SETFL, O_NONBLOCK) < 0)
             {
             my_perror("ERROR: could not set control socket to non-blocking mode");
             abort_request(rstate);
@@ -627,32 +639,43 @@ static void request_callback(CFSocketRef sr, CFSocketCallBackType t, CFDataRef d
         bzero(&cliaddr, sizeof(cliaddr));
         cliaddr.sun_family = AF_LOCAL;
         strcpy(cliaddr.sun_path, ctrl_path);
-        if (connect(rstate->errfd, (struct sockaddr *)&cliaddr, sizeof(cliaddr)) < 0)
+        if (connect(errfd, (struct sockaddr *)&cliaddr, sizeof(cliaddr)) < 0)
             {
             my_perror("ERROR: connect");
             abort_request(rstate);
             unlink_request(rstate);
             }
-        }
 
-        
+		switch (rstate->hdr.op.request_op)
+			{
+			case reg_record_request:    err = handle_regrecord_request   (rstate); break;
+			case add_record_request:    err = handle_add_request         (rstate); break;
+			case update_record_request: err = handle_update_request      (rstate); break;
+			case remove_record_request: err = handle_removerecord_request(rstate); break;
+			default: LogMsg("%3d: ERROR: udsserver_recv_request - unsupported request type: %d", rstate->sd, rstate->hdr.op);
+			}
 
-
-    switch(rstate->hdr.op.request_op)
-    	{
-        case resolve_request: handle_resolve_request(rstate); break;
-        case query_request: handle_query_request(rstate);  break;
-        case browse_request: handle_browse_request(rstate); break;
-        case reg_service_request: handle_regservice_request(rstate);  break;
-        case enumeration_request: handle_enum_request(rstate); break;
-        case reg_record_request: handle_regrecord_request(rstate);  break;
-        case add_record_request: handle_add_request(rstate); break;
-        case update_record_request: handle_update_request(rstate); break;
-        case remove_record_request: handle_removerecord_request(rstate); break;
-        case reconfirm_record_request: handle_reconfirm_request(rstate); break;
-        default:
-            debugf("ERROR: udsserver_recv_request - unsupported request type: %d", rstate->hdr.op.request_op);
-    	}
+		nwritten = send(errfd, &err, sizeof(err), 0);
+		// On a freshly-created Unix Domain Socket, the kernel should *never* fail to buffer a four-byte write for us.
+		// If not, we don't attempt to handle this failure, but we do log it.
+		if (nwritten < (int)sizeof(err))
+			LogMsg("ERROR: failed to write error response back to caller: %d %d %s", nwritten, errno, strerror(errno));
+		close(errfd);
+		reset_connected_rstate(rstate);		// Reset ready to accept the next request on this pipe
+		}
+	else
+		{
+		switch (rstate->hdr.op.request_op)
+			{
+			case resolve_request:          handle_resolve_request   (rstate); break;
+			case query_request:            handle_query_request     (rstate); break;
+			case browse_request:           handle_browse_request    (rstate); break;
+			case reg_service_request:      handle_regservice_request(rstate); break;
+			case enumeration_request:      handle_enum_request      (rstate); break;
+			case reconfirm_record_request: handle_reconfirm_request (rstate); break;
+			default: LogMsg("%3d: ERROR: udsserver_recv_request - unsupported request type: %d", rstate->sd, rstate->hdr.op);
+			}
+		}
     }
 
 // mDNS operation functions.  Each operation has 3 associated functions - a request handler that parses
@@ -986,6 +1009,77 @@ static void question_termination_callback(void *context)
     freeL("question_termination_callback", q);
     }
 
+// If there's a comma followed by another character,
+// FindFirstSubType overwrites the comma with a nul and returns the pointer to the next character.
+// Otherwise, it returns a pointer to the final nul at the end of the string
+static char *FindFirstSubType(char *p)
+	{
+	while (*p)
+		{
+		if (p[0] == '\\' && p[1]) p += 2;
+		else if (p[0] == ',' && p[1]) { *p++ = 0; return(p); }
+		else p++;
+		}
+	return(p);
+	}
+
+// If there's a comma followed by another character,
+// FindNextSubType overwrites the comma with a nul and returns the pointer to the next character.
+// If it finds an illegal unescaped dot in the subtype name, it returns mDNSNULL
+// Otherwise, it returns a pointer to the final nul at the end of the string
+static char *FindNextSubType(char *p)
+	{
+	while (*p)
+		{
+		if (p[0] == '\\' && p[1])		// If escape character
+			p += 2;						// ignore following character
+		else if (p[0] == ',')			// If we found a comma
+			{
+			if (p[1]) *p++ = 0;
+			return(p);
+			}
+		else if (p[0] == '.')
+			return(mDNSNULL);
+		else p++;
+		}
+	return(p);
+	}
+
+// Returns -1 if illegal subtype found
+extern mDNSs32 CountSubTypes(char *regtype);
+mDNSexport mDNSs32 CountSubTypes(char *regtype)
+	{
+	mDNSs32 NumSubTypes = 0;
+	char *stp = FindFirstSubType(regtype);
+	while (stp && *stp)					// If we found a comma...
+		{
+		if (*stp == ',') return(-1);
+		NumSubTypes++;
+		stp = FindNextSubType(stp);
+		}
+	if (!stp) return(-1);
+	return(NumSubTypes);
+	}
+
+extern AuthRecord *AllocateSubTypes(mDNSs32 NumSubTypes, char *p);
+mDNSexport AuthRecord *AllocateSubTypes(mDNSs32 NumSubTypes, char *p)
+	{
+	AuthRecord *st = mDNSNULL;
+	if (NumSubTypes)
+		{
+		mDNSs32 i;
+		st = mallocL("ServiceSubTypes", NumSubTypes * sizeof(AuthRecord));
+		if (!st) return(mDNSNULL);
+		for (i = 0; i < NumSubTypes; i++)
+			{
+			while (*p) p++;
+			p++;
+			if (!MakeDomainNameFromDNSNameString(&st[i].resrec.name, p))
+				{ freeL("ServiceSubTypes", st); return(mDNSNULL); }
+			}
+		}
+	return(st);
+	}
 
 static void handle_browse_request(request_state *request)
     {
@@ -994,6 +1088,7 @@ static void handle_browse_request(request_state *request)
     char regtype[MAX_ESCAPED_DOMAIN_NAME], domain[MAX_ESCAPED_DOMAIN_NAME];
     DNSQuestion *q;
     domainname typedn, domdn;
+    mDNSs32 NumSubTypes;
     char *ptr;
     mStatus result;
 
@@ -1027,7 +1122,13 @@ static void handle_browse_request(request_state *request)
     if (interfaceIndex && !InterfaceID) goto bad_param;
     q->QuestionContext = request;
     q->QuestionCallback = browse_result_callback;
-    if (!MakeDomainNameFromDNSNameString(&typedn, regtype) ||
+    
+	typedn.c[0] = 0;
+	NumSubTypes = CountSubTypes(regtype);
+	if (NumSubTypes < 0 || NumSubTypes > 1) goto bad_param;
+	if (NumSubTypes == 1 && !AppendDNSNameString(&typedn, regtype + strlen(regtype) + 1)) goto bad_param;
+
+    if (!AppendDNSNameString(&typedn, regtype) ||
         !MakeDomainNameFromDNSNameString(&domdn, domain[0] ? domain : "local."))
         goto bad_param;
     request->termination_context = q;
@@ -1089,11 +1190,8 @@ static void handle_regservice_request(request_state *request)
     registered_service *r_srv;
     int srs_size;
     mStatus result;
+    mDNSs32 num_subtypes;
 
-    char *sub, *rtype_ptr;
-    int i, num_subtypes;
-    
-    
     if (request->ts != t_complete)
         {
         LogMsg("ERROR: handle_regservice_request - transfer state != t_complete");
@@ -1118,12 +1216,10 @@ static void handle_regservice_request(request_state *request)
     txtlen = get_short(&ptr);
     txtdata = get_rdata(&ptr, txtlen);
 
-    // count subtypes, replacing commas w/ whitespace
-    rtype_ptr = regtype;
-    num_subtypes = -1;
-    while((sub = strsep(&rtype_ptr, ",")))
-        if (*sub) num_subtypes++;
-        
+	// Check for sub-types after the service type
+	num_subtypes = CountSubTypes(regtype);
+	if (num_subtypes < 0) goto bad_param;
+	
     if (!name[0]) n = (&mDNSStorage)->nicelabel;
     else if (!MakeDomainLabelFromLiteralString(&n, name))  
         goto bad_param;
@@ -1138,24 +1234,10 @@ static void handle_regservice_request(request_state *request)
     srs_size = sizeof(ServiceRecordSet) + (sizeof(RDataBody) > txtlen ? 0 : txtlen - sizeof(RDataBody));
     r_srv->srs = mallocL("handle_regservice_request", srs_size);
     if (!r_srv->srs) goto malloc_error;
-    if (num_subtypes > 0)
-        {
-        r_srv->subtypes = mallocL("handle_regservice_request", num_subtypes * sizeof(AuthRecord));
-        if (!r_srv->subtypes) goto malloc_error;
-        sub = regtype + strlen(regtype) + 1;
-        for (i = 0; i < num_subtypes; i++)
-            {
-            if (!MakeDomainNameFromDNSNameString(&(r_srv->subtypes + i)->resrec.name, sub))
-                {
-                freeL("handle_regservice_request", r_srv->subtypes);
-                freeL("handle_regservice_request", r_srv);
-                r_srv = NULL;
-                goto bad_param;
-                }
-            sub += strlen(sub) + 1;
-            }
-        }
-    else r_srv->subtypes = NULL;
+
+	r_srv->subtypes = AllocateSubTypes(num_subtypes, regtype);
+	if (num_subtypes && !r_srv->subtypes)
+		{ freeL("handle_regservice_request", r_srv); r_srv = NULL; goto malloc_error; }
     r_srv->request = request;
     
     r_srv->autoname = (!name[0]);
@@ -1272,7 +1354,7 @@ static void regservice_callback(mDNS *const m, ServiceRecordSet *const srs, mSta
         }
     }
         
-static void handle_add_request(request_state *rstate)
+static mStatus handle_add_request(request_state *rstate)
     {
     registered_record_entry *re;
     ExtraResourceRecord *extra;
@@ -1287,7 +1369,7 @@ static void handle_add_request(request_state *rstate)
         {
         LogMsg("ERROR: handle_add_request - no service record set in request state");
         deliver_error(rstate, mStatus_UnknownErr);
-        return;
+        return(-1);
         }
         
     ptr = rstate->msgdata;
@@ -1313,14 +1395,12 @@ static void handle_add_request(request_state *rstate)
     extra->r.resrec.rdlength = rdlen;
     memcpy(&extra->r.rdatastorage.u.data, rdata, rdlen);
     result =  mDNS_AddRecordToService(&mDNSStorage, srs , extra, &extra->r.rdatastorage, ttl);
-    deliver_error(rstate, result);
-    reset_connected_rstate(rstate);
     if (result) 
         {
         freeL("handle_add_request", rstate->msgbuf);
         rstate->msgbuf = NULL;
         freeL("handle_add_request", extra);
-        return;
+        return(result);
         }
     re = mallocL("handle_add_request", sizeof(registered_record_entry));
     if (!re)
@@ -1332,9 +1412,10 @@ static void handle_add_request(request_state *rstate)
     re->rr = &extra->r;
     re->next = rstate->reg_recs;
     rstate->reg_recs = re;
+    return(result);
     }
     
-static void handle_update_request(request_state *rstate)
+static mStatus handle_update_request(request_state *rstate)
     {
     registered_record_entry *reptr;
     AuthRecord *rr;
@@ -1349,7 +1430,7 @@ static void handle_update_request(request_state *rstate)
         if (!rstate->service)
             {
             deliver_error(rstate, mStatus_BadParamErr);
-            return;
+            return(-1);
             }
         rr  = &rstate->service->srs->RR_TXT;
         }
@@ -1378,8 +1459,7 @@ static void handle_update_request(request_state *rstate)
     newrd->MaxRDLength = rdsize;
     memcpy(&newrd->u, rdata, rdlen);
     result = mDNS_Update(&mDNSStorage, rr, ttl, rdlen, newrd, update_callback);
-    deliver_error(rstate, result);
-    reset_connected_rstate(rstate);
+    return(result);
     }
     
 static void update_callback(mDNS *const m, AuthRecord *const rr, RData *oldrd)
@@ -1434,7 +1514,7 @@ static void regservice_termination_callback(void *context)
     }
 
 
-static void handle_regrecord_request(request_state *rstate)
+static mStatus handle_regrecord_request(request_state *rstate)
     {
     AuthRecord *rr;
     regrecord_callback_context *rcc;
@@ -1446,17 +1526,13 @@ static void handle_regrecord_request(request_state *rstate)
         LogMsg("ERROR: handle_regrecord_request - transfer state != t_complete");
         abort_request(rstate);
         unlink_request(rstate);
-        return;
+        return(-1);
         }
         
     rr = read_rr_from_ipc_msg(rstate->msgdata, 1);
-    if (!rr) 
-        {
-        deliver_error(rstate, mStatus_BadParamErr);
-        return;
-        }
+    if (!rr) return(mStatus_BadParamErr);
 
-    rcc = mallocL("hanlde_regrecord_request", sizeof(regrecord_callback_context));
+    rcc = mallocL("handle_regrecord_request", sizeof(regrecord_callback_context));
     if (!rcc) goto malloc_error;
     rcc->rstate = rstate;
     rcc->client_context = rstate->hdr.client_context;
@@ -1464,7 +1540,7 @@ static void handle_regrecord_request(request_state *rstate)
     rr->RecordCallback = regrecord_callback;
 
     // allocate registration entry, link into list
-    re = mallocL("hanlde_regrecord_request", sizeof(registered_record_entry));
+    re = mallocL("handle_regrecord_request", sizeof(registered_record_entry));
     if (!re) goto malloc_error;
     re->key = rstate->hdr.reg_index;
     re->rr = rr;
@@ -1478,13 +1554,11 @@ static void handle_regrecord_request(request_state *rstate)
     	}
     
     result = mDNS_Register(&mDNSStorage, rr);
-    deliver_error(rstate, result); 
-    reset_connected_rstate(rstate);
-    return;
+    return(result);
 
 malloc_error:
     my_perror("ERROR: malloc");
-    return;
+    return(-1);
     }
 
 static void regrecord_callback(mDNS *const m, AuthRecord *const rr, mStatus result)
@@ -1534,7 +1608,7 @@ static void connected_registration_termination(void *context)
     
 
 
-static void handle_removerecord_request(request_state *rstate)
+static mStatus handle_removerecord_request(request_state *rstate)
     {
     registered_record_entry *reptr, *prev = NULL;
     mStatus err = mStatus_UnknownErr;
@@ -1557,12 +1631,7 @@ static void handle_removerecord_request(request_state *rstate)
         prev = reptr;
         reptr = reptr->next;
     	}
-    reset_connected_rstate(rstate);
-    if (deliver_error(rstate, err) < 0)
-        {
-        abort_request(rstate);
-        unlink_request(rstate);
-        }
+    return(err);
     }
 
 
@@ -1598,7 +1667,7 @@ static void handle_enum_request(request_state *rstate)
     	}
 
     // allocate context structures
-    def = mallocL("hanlde_enum_request", sizeof(domain_enum_t));
+    def = mallocL("handle_enum_request", sizeof(domain_enum_t));
     all = mallocL("handle_enum_request", sizeof(domain_enum_t));
     term = mallocL("handle_enum_request", sizeof(enum_termination_t));
     if (!def || !all || !term)
@@ -2067,7 +2136,7 @@ static int deliver_error(request_state *rstate, mStatus err)
     int nwritten = -1;
     undelivered_error_t *undeliv;
     
-    nwritten = send(rstate->errfd, &err, sizeof(mStatus), 0);
+    nwritten = send(rstate->sd, &err, sizeof(mStatus), 0);
     if (nwritten < (int)sizeof(mStatus))
         {
         if (errno == EINTR || errno == EAGAIN)   
@@ -2086,15 +2155,13 @@ static int deliver_error(request_state *rstate, mStatus err)
             }
         undeliv->err = err;
         undeliv->nwritten = nwritten;
-        undeliv->sd = rstate->errfd;
+        undeliv->sd = rstate->sd;
         rstate->u_err = undeliv;
         return 0;
     }
-    if (rstate->errfd != rstate->sd) close(rstate->errfd);
     return 0;
     
 error:
-    if (rstate->errfd != rstate->sd) close(rstate->errfd);
     return -1;
     
     }
@@ -2166,8 +2233,6 @@ static void abort_request(request_state *rs)
     CFSocketInvalidate(rs->sr);
     CFRelease(rs->sr);
     rs->sd = -1;
-    if (rs->errfd >= 0) close(rs->errfd);
-    rs->errfd = -1;
 
     // free pending replies
     rep = rs->replies;

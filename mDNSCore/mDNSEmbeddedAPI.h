@@ -22,10 +22,7 @@
 
     Change History (most recent first):
 
-$Log: mDNSClientAPI.h,v $
-Revision 1.114.2.10  2005/01/28 05:02:05  cheshire
-<rdar://problem/3770559> SUPan: Replace IP TTL 255 check with local-subnet check
-
+$Log: mDNSEmbeddedAPI.h,v $
 Revision 1.114.2.9  2004/04/22 03:17:35  cheshire
 Fix use of "struct __attribute__((__packed__))" so it only applies on GCC >= 2.9
 
@@ -119,7 +116,7 @@ We want to avoid touching the rdata pages, so we don't page them in.
 
 Revision 1.100  2003/08/14 19:29:04  cheshire
 <rdar://problem/3378473> Include cache records in SIGINFO output
-Moved declarations of DNSTypeName() and GetRRDisplayString to mDNSClientAPI.h so daemon.c can use them
+Moved declarations of DNSTypeName() and GetRRDisplayString to mDNSEmbeddedAPI.h so daemon.c can use them
 
 Revision 1.99  2003/08/14 02:17:05  cheshire
 <rdar://problem/3375491> Split generic ResourceRecord type into two separate types: AuthRecord and CacheRecord
@@ -163,7 +160,7 @@ To eliminate compiler warnings, changed definition of mDNSBool from
 for the result of comparison operators (a<b) and logical operators (a||b)
 
 Revision 1.87  2003/07/22 23:57:20  cheshire
-Move platform-layer function prototypes from mDNSClientAPI.h to mDNSPlatformFunctions.h where they belong
+Move platform-layer function prototypes from mDNSEmbeddedAPI.h to mDNSPlatformFunctions.h where they belong
 
 Revision 1.86  2003/07/20 03:52:02  ksekar
 Bug #: <rdar://problem/3320722>: Feature: New Rendezvous APIs (#7875) (mDNSResponder component)
@@ -888,8 +885,6 @@ struct NetworkInterfaceInfo_struct
 	// Client API fields: The client must set up these fields *before* calling mDNS_RegisterInterface()
 	mDNSInterfaceID InterfaceID;
 	mDNSAddr        ip;
-	mDNSAddr        mask;
-	char            ifname[16];
 	mDNSBool        Advertise;			// Set Advertise to false if you are only searching on this interface
 	mDNSBool        TxAndRx;			// Set to false if not sending and receiving packets on this interface
 	};
@@ -1341,7 +1336,6 @@ extern char *DNSTypeName(mDNSu16 rrtype);
 extern char *GetRRDisplayString_rdb(mDNS *const m, const ResourceRecord *rr, RDataBody *rd);
 #define GetRRDisplayString(m, rr) GetRRDisplayString_rdb((m), &(rr)->resrec, &(rr)->resrec.rdata->u)
 extern mDNSBool mDNSSameAddress(const mDNSAddr *ip1, const mDNSAddr *ip2);
-extern mDNSBool mDNSAddrIsDNSMulticast(const mDNSAddr *ip);
 extern void IncrementLabelSuffix(domainlabel *name, mDNSBool RichText);
 
 // ***************************************************************************

@@ -22,10 +22,7 @@
 
     Change History (most recent first):
 
-$Log: CFSocket.c,v $
-Revision 1.115.2.5  2005/01/28 05:02:06  cheshire
-<rdar://problem/3770559> SUPan: Replace IP TTL 255 check with local-subnet check
-
+$Log: mDNSMacOSX.c,v $
 Revision 1.115.2.4  2004/04/23 00:34:06  cheshire
 <rdar://problem/3628978>: mDNSResponder messages on wake
 Take care to correctly update InterfaceIDs when a dormant interface comes back to life
@@ -654,7 +651,6 @@ mDNSlocal void myCFSocketCallBack(CFSocketRef cfs, CFSocketCallBackType CallBack
 	mDNSIPPort senderPort, destPort = MulticastDNSPort;
 	NetworkInterfaceInfoOSX *info = (NetworkInterfaceInfoOSX *)context;
 	mDNS *const m = info->m;
-	mDNSInterfaceID InterfaceID = info->ifinfo.InterfaceID;
 	DNSMessage packet;
 	struct sockaddr_storage from;
 	size_t fromlen = sizeof(from);
@@ -708,38 +704,25 @@ mDNSlocal void myCFSocketCallBack(CFSocketRef cfs, CFSocketCallBackType CallBack
 			return;
 			}
 
-		if (mDNSAddrIsDNSMulticast(&destAddr))
+		// Even though we indicated a specific interface in the IP_ADD_MEMBERSHIP call, a weirdness of the
+		// sockets API means that even though this socket has only officially joined the multicast group
+		// on one specific interface, the kernel will still deliver multicast packets to it no matter which
+		// interface they arrive on. According to the official Unix Powers That Be, this is Not A Bug.
+		// To work around this weirdness, we use the IP_RECVIF option to find the name of the interface
+		// on which the packet arrived, and ignore the packet if it really arrived on some other interface.
+		if (strcmp(info->ifa_name, packetifname))
 			{
-			// Even though we indicated a specific interface in the IP_ADD_MEMBERSHIP call, a weirdness of the
-			// sockets API means that even though this socket has only officially joined the multicast group
-			// on one specific interface, the kernel will still deliver multicast packets to it no matter which
-			// interface they arrive on. According to the official Unix Powers That Be, this is Not A Bug.
-			// To work around this weirdness, we use the IP_RECVIF option to find the name of the interface
-			// on which the packet arrived, and ignore the packet if it really arrived on some other interface.
-			if (strcmp(info->ifa_name, packetifname))
-				{
-				verbosedebugf("myCFSocketCallBack got a packet from %#a to %#a on interface %#a/%s (Ignored -- really arrived on interface %s)",
-					&senderAddr, &destAddr, &info->ifinfo.ip, info->ifa_name, packetifname);
-				return;
-				}
-			else
-				verbosedebugf("myCFSocketCallBack got a packet from %#a to %#a on interface %#a/%s",
-					&senderAddr, &destAddr, &info->ifinfo.ip, info->ifa_name);
+			verbosedebugf("myCFSocketCallBack got a packet from %#a to %#a on interface %#a/%s (Ignored -- really arrived on interface %s)",
+				&senderAddr, &destAddr, &info->ifinfo.ip, info->ifa_name, packetifname);
+			return;
 			}
 		else
-			{
-			verbosedebugf("myCFSocketCallBack got a unicast from %#a to %#a on interface %#a/%s packetifname %s)",
-				&senderAddr, &destAddr, &info->ifinfo.ip, info->ifa_name, packetifname);
-			// Note: For unicast packets, try to find the matching mDNSCore interface object 
-			// (though we may not be able to, for unicast packets received over something like a PPP link)
-			NetworkInterfaceInfo *intf = m->HostInterfaces;
-			while (intf && strcmp(intf->ifname, packetifname)) intf = intf->next;
-			if (intf) InterfaceID = intf->InterfaceID;
-			}
+			verbosedebugf("myCFSocketCallBack got a packet from %#a to %#a on interface %#a/%s",
+				&senderAddr, &destAddr, &info->ifinfo.ip, info->ifa_name);
 		
 		if (err < (int)sizeof(DNSMessageHeader)) { debugf("myCFSocketCallBack packet length (%d) too short", err); return; }
 		
-		mDNSCoreReceive(m, &packet, (unsigned char*)&packet + err, &senderAddr, senderPort, &destAddr, destPort, InterfaceID, ttl);
+		mDNSCoreReceive(m, &packet, (unsigned char*)&packet + err, &senderAddr, senderPort, &destAddr, destPort, info->ifinfo.InterfaceID, ttl);
 		}
 
 	if (err < 0 && (errno != EWOULDBLOCK || count == 0))
@@ -985,9 +968,6 @@ mDNSlocal mStatus AddInterfaceToList(mDNS *const m, struct ifaddrs *ifa)
 
 	i->ifinfo.InterfaceID = mDNSNULL;
 	i->ifinfo.ip          = ip;
-	SetupAddr(&i->ifinfo.mask, ifa->ifa_netmask);
-	strncpy(i->ifinfo.ifname, ifa->ifa_name, sizeof(i->ifinfo.ifname));
-	i->ifinfo.ifname[sizeof(i->ifinfo.ifname)-1] = 0;
 	i->ifinfo.Advertise   = m->AdvertiseLocalAddresses;
 	i->ifinfo.TxAndRx     = mDNSfalse;		// For now; will be set up later at the end of UpdateInterfaceList
 

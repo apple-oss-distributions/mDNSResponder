@@ -91,10 +91,6 @@
 			path = dnssd_clientstub.c;
 			refType = 2;
 		};
-		0066920A04CC7AA80CCA2C71 = {
-			isa = PBXTargetDependency;
-			target = 0044D34804CC73600CCA2C71;
-		};
 		00AD62A3032D799A0CCA2C71 = {
 			buildPhases = (
 				00AD62A4032D799A0CCA2C71,
@@ -105,11 +101,11 @@
 			buildSettings = {
 				FRAMEWORK_SEARCH_PATHS = "";
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				HEADER_SEARCH_PATHS = "\"$(APPLE_INTERNAL_DEVELOPER_DIR)/Headers\"";
+				HEADER_SEARCH_PATHS = "../mDNSShared \"$(APPLE_INTERNAL_DEVELOPER_DIR)/Headers\"";
 				LIBRARY_SEARCH_PATHS = "";
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OPTIMIZATION_CFLAGS = "-O0";
-				OTHER_CFLAGS = "-no-cpp-precomp -D__MACOSX__ -DMDNS_DEBUGMSGS=1 -DmDNSResponderVersion=$(MVERS)";
+				OTHER_CFLAGS = "-no-cpp-precomp -D__MACOSX__ -DMDNS_DEBUGMSGS=1 -DmDNSResponderVersion=$(MVERS) -DkDNSServiceFlagsRemove=0 -DkDNSServiceFlagsFinished=0";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = mDNSResponder.debug;
@@ -249,7 +245,8 @@
 				00AD62BC032D7A160CCA2C71,
 				00AD62BD032D7A1B0CCA2C71,
 				00AD62BE032D7A1D0CCA2C71,
-				0066920A04CC7AA80CCA2C71,
+				FF1B80C507AA1567000768F0,
+				FF1B80C607AA1569000768F0,
 			);
 			isa = PBXAggregateTarget;
 			name = "Build All";
@@ -333,10 +330,13 @@
 				00AD62A3032D799A0CCA2C71,
 				6575FC1C022EB76000000109,
 				0044D34804CC73600CCA2C71,
+				FF518DC907AA0BA60096AE13,
+				FFEF84D207AA10DF00171646,
 			);
 		};
 		08FB7794FE84155DC02AAC07 = {
 			children = (
+				FF518DCB07AA0C330096AE13,
 				08FB7795FE84155DC02AAC07,
 				6575FC1F022EB78C00000109,
 				6575FBFE022EAFA800000109,
@@ -370,6 +370,7 @@
 				09AB6884FE841BABC02AAC07,
 				65713D46025A293200000109,
 				00CA213D02786FC30CCA2C71,
+				FFEF84D607AA115900171646,
 			);
 			isa = PBXGroup;
 			name = "External Frameworks and Libraries";
@@ -385,17 +386,18 @@
 			buildSettings = {
 				FRAMEWORK_SEARCH_PATHS = "";
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				HEADER_SEARCH_PATHS = "\"$(APPLE_INTERNAL_DEVELOPER_DIR)/Headers\"";
+				HEADER_SEARCH_PATHS = "../mDNSShared \"$(APPLE_INTERNAL_DEVELOPER_DIR)/Headers\"";
 				INSTALL_PATH = /usr/sbin;
 				LIBRARY_SEARCH_PATHS = "";
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
-				OTHER_CFLAGS = "-no-cpp-precomp -D__MACOSX__ -DmDNSResponderVersion=$(MVERS)";
+				OTHER_CFLAGS = "-no-cpp-precomp -D__MACOSX__ -DmDNSResponderVersion=$(MVERS) -DkDNSServiceFlagsRemove=0 -DkDNSServiceFlagsFinished=0";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = mDNSResponder;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
 				STRIPFLAGS = "-S";
+				USE_GCC3_PFE_SUPPORT = NO;
 				WARNING_CFLAGS = "-W -Wall -Wmissing-prototypes -Wno-four-char-constants -Wno-unknown-pragmas";
 			};
 			dependencies = (
@@ -484,6 +486,8 @@
 				6575FC1D022EB76000000109,
 				00AD62B8032D799A0CCA2C71,
 				0044D34F04CC73600CCA2C71,
+				FF72324E07AA0CB30012EE6F,
+				FFEF84D307AA10DF00171646,
 			);
 			isa = PBXGroup;
 			name = Products;
@@ -672,7 +676,7 @@
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
 				INSTALL_PATH = /usr/bin;
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
-				OTHER_CFLAGS = "-no-cpp-precomp -DmDNSResponderVersion=$(MVERS)";
+				OTHER_CFLAGS = "-no-cpp-precomp -DmDNSResponderVersion=$(MVERS) -DkDNSServiceFlagsRemove=0";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = mDNS;
@@ -821,6 +825,398 @@
 			isa = PBXBuildFile;
 			settings = {
 			};
+		};
+//F50
+//F51
+//F52
+//F53
+//F54
+//FF0
+//FF1
+//FF2
+//FF3
+//FF4
+		FF1B80C507AA1567000768F0 = {
+			isa = PBXTargetDependency;
+			target = FF518DC907AA0BA60096AE13;
+		};
+		FF1B80C607AA1569000768F0 = {
+			isa = PBXTargetDependency;
+			target = FFEF84D207AA10DF00171646;
+		};
+		FF518DC607AA0BA60096AE13 = {
+			buildActionMask = 2147483647;
+			files = (
+				FF518DD907AA0C330096AE13,
+				FF518DDA07AA0C330096AE13,
+				FF518DDB07AA0C330096AE13,
+				FF518DDC07AA0C330096AE13,
+				FF518DDD07AA0C330096AE13,
+				FF518DDE07AA0C330096AE13,
+				FF518DDF07AA0C330096AE13,
+				FF518DE007AA0C330096AE13,
+				FF518DE207AA0C330096AE13,
+				FF518DE307AA0C330096AE13,
+				FF518DE407AA0C330096AE13,
+				FF518DE507AA0C330096AE13,
+			);
+			isa = PBXSourcesBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FF518DC707AA0BA60096AE13 = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			isa = PBXFrameworksBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FF518DC807AA0BA60096AE13 = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			isa = PBXRezBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FF518DC907AA0BA60096AE13 = {
+			buildPhases = (
+				FF518DC607AA0BA60096AE13,
+				FF518DC707AA0BA60096AE13,
+				FF518DC807AA0BA60096AE13,
+				FF72324F07AA0CC20012EE6F,
+				FF72325007AA0CCA0012EE6F,
+			);
+			buildSettings = {
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				INSTALL_PATH = System/Library/Java/Extensions;
+				JAVA_ARCHIVE_CLASSES = YES;
+				JAVA_ARCHIVE_COMPRESSION = YES;
+				JAVA_ARCHIVE_TYPE = JAR;
+				JAVA_COMPILER_DEBUGGING_SYMBOLS = NO;
+				JAVA_COMPILER_TARGET_VM_VERSION = 1.2;
+				JAVA_SOURCE_SUBDIR = .;
+				LIBRARY_STYLE = STATIC;
+				OTHER_CFLAGS = "";
+				OTHER_LDFLAGS = "";
+				OTHER_LIBTOOL_FLAGS = "";
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = dns_sd;
+				REZ_EXECUTABLE = YES;
+				SECTORDER_FLAGS = "";
+				WARNING_CFLAGS = "-Wmost -Wno-four-char-constants -Wno-unknown-pragmas";
+			};
+			dependencies = (
+			);
+			isa = PBXLibraryTarget;
+			name = dns_sd.jar;
+			productInstallPath = System/Library/Java/Extensions;
+			productName = dns_sd.jar;
+			productReference = FF72324E07AA0CB30012EE6F;
+		};
+		FF518DCB07AA0C330096AE13 = {
+			children = (
+				FF518DCC07AA0C330096AE13,
+				FF518DCD07AA0C330096AE13,
+				FF518DCE07AA0C330096AE13,
+				FF518DCF07AA0C330096AE13,
+				FF518DD007AA0C330096AE13,
+				FF518DD107AA0C330096AE13,
+				FF518DD207AA0C330096AE13,
+				FF518DD307AA0C330096AE13,
+				FF518DD407AA0C330096AE13,
+				FF518DD507AA0C330096AE13,
+				FF518DD607AA0C330096AE13,
+				FF518DD707AA0C330096AE13,
+				FF518DD807AA0C330096AE13,
+			);
+			isa = PBXGroup;
+			name = Java;
+			path = ../mDNSShared/Java;
+			refType = 2;
+		};
+		FF518DCC07AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = BaseListener.java;
+			path = ../mDNSShared/Java/BaseListener.java;
+			refType = 2;
+		};
+		FF518DCD07AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = BrowseListener.java;
+			path = ../mDNSShared/Java/BrowseListener.java;
+			refType = 2;
+		};
+		FF518DCE07AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = DNSRecord.java;
+			path = ../mDNSShared/Java/DNSRecord.java;
+			refType = 2;
+		};
+		FF518DCF07AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = DNSSD.java;
+			path = ../mDNSShared/Java/DNSSD.java;
+			refType = 2;
+		};
+		FF518DD007AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = DNSSDException.java;
+			path = ../mDNSShared/Java/DNSSDException.java;
+			refType = 2;
+		};
+		FF518DD107AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = DNSSDRegistration.java;
+			path = ../mDNSShared/Java/DNSSDRegistration.java;
+			refType = 2;
+		};
+		FF518DD207AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = DNSSDService.java;
+			path = ../mDNSShared/Java/DNSSDService.java;
+			refType = 2;
+		};
+		FF518DD307AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = DomainListener.java;
+			path = ../mDNSShared/Java/DomainListener.java;
+			refType = 2;
+		};
+		FF518DD407AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = JNISupport.c;
+			path = ../mDNSShared/Java/JNISupport.c;
+			refType = 2;
+		};
+		FF518DD507AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = QueryListener.java;
+			path = ../mDNSShared/Java/QueryListener.java;
+			refType = 2;
+		};
+		FF518DD607AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = RegisterListener.java;
+			path = ../mDNSShared/Java/RegisterListener.java;
+			refType = 2;
+		};
+		FF518DD707AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = ResolveListener.java;
+			path = ../mDNSShared/Java/ResolveListener.java;
+			refType = 2;
+		};
+		FF518DD807AA0C330096AE13 = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			name = TXTRecord.java;
+			path = ../mDNSShared/Java/TXTRecord.java;
+			refType = 2;
+		};
+		FF518DD907AA0C330096AE13 = {
+			fileRef = FF518DCC07AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF518DDA07AA0C330096AE13 = {
+			fileRef = FF518DCD07AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF518DDB07AA0C330096AE13 = {
+			fileRef = FF518DCE07AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF518DDC07AA0C330096AE13 = {
+			fileRef = FF518DCF07AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF518DDD07AA0C330096AE13 = {
+			fileRef = FF518DD007AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF518DDE07AA0C330096AE13 = {
+			fileRef = FF518DD107AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF518DDF07AA0C330096AE13 = {
+			fileRef = FF518DD207AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF518DE007AA0C330096AE13 = {
+			fileRef = FF518DD307AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF518DE207AA0C330096AE13 = {
+			fileRef = FF518DD507AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF518DE307AA0C330096AE13 = {
+			fileRef = FF518DD607AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF518DE407AA0C330096AE13 = {
+			fileRef = FF518DD707AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF518DE507AA0C330096AE13 = {
+			fileRef = FF518DD807AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF72324E07AA0CB30012EE6F = {
+			includeInIndex = 0;
+			isa = PBXZipArchiveReference;
+			path = dns_sd.jar;
+			refType = 3;
+		};
+		FF72324F07AA0CC20012EE6F = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			generatedFileNames = (
+			);
+			isa = PBXShellScriptBuildPhase;
+			neededFileNames = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "javah -force -classpath ${OBJROOT}/mDNSResponder.build/dns_sd.jar.build/JavaClasses/ -o ${OBJROOT}/mDNSResponder.build/dns_sd.jar.build/DNSSD.java.h com.apple.dnssd.AppleDNSSD com.apple.dnssd.AppleBrowser com.apple.dnssd.AppleResolver com.apple.dnssd.AppleRegistration com.apple.dnssd.AppleQuery com.apple.dnssd.AppleDomainEnum com.apple.dnssd.AppleService";
+		};
+		FF72325007AA0CCA0012EE6F = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			generatedFileNames = (
+			);
+			isa = PBXShellScriptBuildPhase;
+			neededFileNames = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "rm -f ${BUILD_DIR}/dns_sd";
+		};
+		FFEF84CE07AA10DF00171646 = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			isa = PBXHeadersBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FFEF84CF07AA10DF00171646 = {
+			buildActionMask = 2147483647;
+			files = (
+				FFEF84D407AA113100171646,
+			);
+			isa = PBXSourcesBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FFEF84D007AA10DF00171646 = {
+			buildActionMask = 2147483647;
+			files = (
+				FFEF84D707AA115900171646,
+			);
+			isa = PBXFrameworksBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FFEF84D107AA10DF00171646 = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			isa = PBXRezBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FFEF84D207AA10DF00171646 = {
+			buildPhases = (
+				FFEF84CE07AA10DF00171646,
+				FFEF84CF07AA10DF00171646,
+				FFEF84D007AA10DF00171646,
+				FFEF84D107AA10DF00171646,
+			);
+			buildSettings = {
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				HEADER_SEARCH_PATHS = "../mDNSShared \"$(SYSTEM_LIBRARY_DIR)/Frameworks/JavaVM.framework/Versions/A/Headers\" \"$(SYSTEM_LIBRARY_DIR)/Frameworks/JavaVM.framework/Versions/1.3.1/Headers\" \"$(OBJROOT)/mDNSResponder.build/dns_sd.jar.build\"";
+				INSTALL_PATH = /usr/lib/java;
+				LIBRARY_STYLE = DYNAMIC;
+				OTHER_CFLAGS = "";
+				OTHER_LDFLAGS = "";
+				OTHER_LIBTOOL_FLAGS = "";
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = libjdns_sd.jnilib;
+				REZ_EXECUTABLE = YES;
+				SECTORDER_FLAGS = "";
+				WARNING_CFLAGS = "-Wmost -Wno-four-char-constants -Wno-unknown-pragmas";
+			};
+			comments = "Platform-specific JNI library that bridges dns_sd.jar to <dns_sd.h>.";
+			dependencies = (
+				FFEF84D807AA116400171646,
+			);
+			isa = PBXLibraryTarget;
+			name = libjdns_sd.jnilib;
+			productInstallPath = /usr/lib/java;
+			productName = libjdns_sd.jnilib;
+			productReference = FFEF84D307AA10DF00171646;
+		};
+		FFEF84D307AA10DF00171646 = {
+			isa = PBXLibraryReference;
+			path = libjdns_sd.jnilib;
+			refType = 3;
+		};
+		FFEF84D407AA113100171646 = {
+			fileRef = FF518DD407AA0C330096AE13;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FFEF84D607AA115900171646 = {
+			isa = PBXFrameworkReference;
+			name = JavaVM.framework;
+			path = /System/Library/Frameworks/JavaVM.framework;
+			refType = 0;
+		};
+		FFEF84D707AA115900171646 = {
+			fileRef = FFEF84D607AA115900171646;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FFEF84D807AA116400171646 = {
+			isa = PBXTargetDependency;
+			target = FF518DC907AA0BA60096AE13;
 		};
 	};
 	rootObject = 08FB7793FE84155DC02AAC07;
