@@ -23,6 +23,12 @@
     Change History (most recent first):
     
 $Log: mDNSWin32.h,v $
+Revision 1.9.2.1  2004/04/03 05:26:08  bradley
+Integrated changes from TOT to remove legacy port 53 support.
+
+Revision 1.10  2003/10/24 23:23:02  bradley
+Removed legacy port 53 support as it is no longer needed.
+
 Revision 1.9  2003/08/20 06:21:25  bradley
 Updated to latest internal version of the Rendezvous for Windows platform plugin: Added support
 for Windows CE/PocketPC 2003; re-did interface-related code to emulate getifaddrs/freeifaddrs for
@@ -94,10 +100,8 @@ struct	mDNSInterfaceData
 {
 	mDNSInterfaceData *			next;
 	char						name[ 256 ];
-	SocketRef					multicastSocketRef;
-	HANDLE						multicastReadPendingEvent;
-	SocketRef					unicastSocketRef;
-	HANDLE						unicastReadPendingEvent;
+	SocketRef					sock;
+	HANDLE						readPendingEvent;
 	NetworkInterfaceInfo		hostSet;
 	mDNSBool					hostRegistered;
 	
@@ -105,8 +109,7 @@ struct	mDNSInterfaceData
 	int							sendUnicastCounter;
 	int							sendErrorCounter;
 	
-	int							recvMulticastCounter;
-	int							recvUnicastCounter;
+	int							recvCounter;
 	int							recvErrorCounter;
 };
 

@@ -16,7 +16,7 @@
 
 include /Developer/Makefiles/pb_makefiles/platform.make
 
-MVERS = "mDNSResponder-58.5"
+MVERS = "mDNSResponder-58.8"
 
 install:
 	cd "$(SRCROOT)/mDNSMacOSX"; pbxbuild install     OBJROOT=$(OBJROOT) SYMROOT=$(SYMROOT) DSTROOT=$(DSTROOT) MVERS=$(MVERS)

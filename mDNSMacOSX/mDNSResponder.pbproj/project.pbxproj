@@ -767,9 +767,12 @@
 		};
 		F525E72804AA167501F1CF4D = {
 			fileEncoding = 4;
+			indentWidth = 4;
 			isa = PBXFileReference;
 			path = uds_daemon.c;
 			refType = 4;
+			tabWidth = 4;
+			usesTabs = 0;
 		};
 		F525E72904AA167501F1CF4D = {
 			fileRef = F525E72804AA167501F1CF4D;

@@ -23,6 +23,9 @@
     Change History (most recent first):
 
 $Log: Responder.c,v $
+Revision 1.16.2.1  2004/04/07 23:51:09  cheshire
+Remove obsolete comments referring to doing mDNS on port 53
+
 Revision 1.16  2003/08/14 02:19:55  cheshire
 <rdar://problem/3375491> Split generic ResourceRecord type into two separate types: AuthRecord and CacheRecord
 
@@ -354,14 +357,13 @@ enum {
 static void PrintUsage()
 {
     fprintf(stderr, 
-            "Usage: %s [-v level ] [-r] [-n name] [-t type] [-d domain] [-x TXT] [-p port] [-f file] [-b] [-P pidfile]\n", 
+            "Usage: %s [-v level ] [-n name] [-t type] [-d domain] [-x TXT] [-p port] [-f file] [-b] [-P pidfile]\n", 
             gProgramName);
     fprintf(stderr, "          -v verbose mode, level is a number from 0 to 2\n");
     fprintf(stderr, "             0 = no debugging info (default)\n");
     fprintf(stderr, "             1 = standard debugging info\n");
     fprintf(stderr, "             2 = intense debugging info\n");
     fprintf(stderr, "             can be cycled kill -USR1\n");
-    fprintf(stderr, "          -r also bind to port 53 (port 5353 is always bound)\n");
     fprintf(stderr, "          -n uses 'name' as the host name (default is none)\n");
     fprintf(stderr, "          -t uses 'type' as the service type (default is '%s')\n", kDefaultServiceType);
     fprintf(stderr, "          -d uses 'domain' as the service domain (default is '%s')\n", kDefaultServiceDomain);
@@ -374,7 +376,6 @@ static void PrintUsage()
     fprintf(stderr, "             only meaningful if -b also specified\n");
 }
 
-static   mDNSBool  gAvoidPort53      = mDNStrue;
 static const char *gRichTextHostName = "";
 static const char *gServiceType      = kDefaultServiceType;
 static const char *gServiceDomain    = kDefaultServiceDomain;
@@ -414,9 +415,6 @@ static void ParseArguments(int argc, char **argv)
                                 gProgramName);
                         exit(1);
                     }
-                    break;
-                case 'r':
-                    gAvoidPort53 = mDNSfalse;
                     break;
                 case 'n':
                     gRichTextHostName = optarg;

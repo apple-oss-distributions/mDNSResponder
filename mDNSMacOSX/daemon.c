@@ -36,6 +36,17 @@
     Change History (most recent first):
 
 $Log: daemon.c,v $
+Revision 1.134.2.6  2004/04/06 19:50:36  cheshire
+<rdar://problem/3605898> mDNSResponder will not launch if "nobody" user doesn't exist.
+After more discussion, we've decided to use userid -2 if "nobody" user doesn't exist.
+
+Revision 1.134.2.5  2004/04/03 01:29:07  cheshire
+<rdar://problem/3605898> mDNSResponder will not launch if "nobody" user doesn't exist.
+If "nobody" user doesn't exist, log a message and continue as "root"
+
+Revision 1.134.2.4  2004/04/02 21:50:21  cheshire
+Fix errors in comments
+
 Revision 1.134.2.3  2003/12/12 01:21:30  cheshire
 <rdar://problem/3491108> mDNSResponder should not run as root
 
@@ -1628,7 +1639,7 @@ mDNSexport int main(int argc, char **argv)
 	signal(SIGTERM, HandleSIGTERM);
 	signal(SIGINFO, HandleSIGINFO);
 
-	// Register the server with mach_init for automatic restart only during debug mode
+	// Register the server with mach_init for automatic restart only during normal (non-debug) mode
     if (!debug_mode)
 		registerBootstrapService();
 
@@ -1641,7 +1652,7 @@ mDNSexport int main(int argc, char **argv)
 		int fd = open(_PATH_DEVNULL, O_RDWR, 0);
 		if (fd != -1)
 			{
-			// Avoid to unnecessarily duplicate a file descriptor to itself
+			// Avoid unnecessarily duplicating a file descriptor to itself
 			if (fd != STDIN_FILENO) (void)dup2(fd, STDIN_FILENO);
 			if (fd != STDOUT_FILENO) (void)dup2(fd, STDOUT_FILENO);
 			if (fd != STDERR_FILENO) (void)dup2(fd, STDERR_FILENO);
@@ -1665,7 +1676,7 @@ mDNSexport int main(int argc, char **argv)
 	if ( pw != NULL)
 		setuid( pw->pw_uid);
 	else
-		status = mStatus_Incompatible;		// refuse to run as root
+		setuid(-2);		// User "nobody" is -2; use that value if "nobody" does not appear in the password database
 
 	if (status == 0)
 		{

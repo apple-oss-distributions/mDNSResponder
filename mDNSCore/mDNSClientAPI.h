@@ -23,6 +23,19 @@
     Change History (most recent first):
 
 $Log: mDNSClientAPI.h,v $
+Revision 1.114.2.9  2004/04/22 03:17:35  cheshire
+Fix use of "struct __attribute__((__packed__))" so it only applies on GCC >= 2.9
+
+Revision 1.114.2.8  2004/03/30 06:55:37  cheshire
+Gave name to anonymous struct, to avoid errors on certain compilers.
+(Thanks to ramaprasad.kr@hp.com for reporting this.)
+
+Revision 1.114.2.7  2004/03/09 02:31:27  cheshire
+Remove erroneous underscore in 'packed_struct' (makes no difference now, but might in future)
+
+Revision 1.114.2.6  2004/03/02 02:55:25  cheshire
+<rdar://problem/3549576> Properly support "_services._dns-sd._udp" meta-queries
+
 Revision 1.114.2.5  2004/02/18 23:35:17  cheshire
 <rdar://problem/3488559>: Hard code domain enumeration functions to return ".local" only
 Also make mDNS_StopGetDomains() a no-op too, so that we don't get warning messages in syslog
@@ -440,8 +453,8 @@ Merge in license terms from Quinn's copy, in preparation for Darwin release
 // Most compilers naturally pack the on-the-wire structures correctly anyway, so a plain "struct" is usually fine.
 // In the event that structures are not packed correctly, mDNS_Init() will detect this and report an error, so the
 // developer will know what's wrong, and can investigate what needs to be done on that compiler to provide proper packing.
-#ifndef packed_struct
- #ifdef __GNUC__
+#ifndef packedstruct
+ #if ((__GNUC__ > 2) || ((__GNUC__ == 2) && (__GNUC_MINOR__ >= 9)))
   #define packedstruct struct __attribute__((__packed__))
   #define packedunion  union  __attribute__((__packed__))
  #else
@@ -518,7 +531,7 @@ typedef unsigned long  mDNSu32;
 // To enforce useful type checking, we make mDNSInterfaceID be a pointer to a dummy struct
 // This way, mDNSInterfaceIDs can be assigned, and compared with each other, but not with other types
 // Declaring the type to be the typical generic "void *" would lack this type checking
-typedef struct { void *dummy; } *mDNSInterfaceID;
+typedef struct mDNSInterfaceID_dummystruct { void *dummy; } *mDNSInterfaceID;
 
 // These types are for opaque two- and four-byte identifiers.
 // The "NotAnInteger" fields of the unions allow the value to be conveniently passed around in a
@@ -901,7 +914,7 @@ struct ServiceRecordSet_struct
 	AuthRecord          *SubTypes;
 	mDNSBool             Conflict;	// Set if this record set was forcibly deregistered because of a conflict
 	domainname           Host;		// Set if this service record does not use the standard target host name
-	AuthRecord           RR_ADV;	// e.g. _services._mdns._udp.local. PTR _printer._tcp.local.
+	AuthRecord           RR_ADV;	// e.g. _services._dns-sd._udp.local. PTR _printer._tcp.local.
 	AuthRecord           RR_PTR;	// e.g. _printer._tcp.local.        PTR Name._printer._tcp.local.
 	AuthRecord           RR_SRV;	// e.g. Name._printer._tcp.local.   SRV 0 0 port target
 	AuthRecord           RR_TXT;	// e.g. Name._printer._tcp.local.   TXT PrintQueueName
