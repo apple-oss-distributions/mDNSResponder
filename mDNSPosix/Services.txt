@@ -1,0 +1,14 @@
+Tweedlebug
+_afpovertcp._tcp.
+name=val1
+548
+
+Tweedlebug2
+_afpovertcp._tcp. local.
+name=val2name2=anotherattribute
+548
+
+Tweedlebug3
+_afpovertcp._tcp. apple.com.
+name=val3
+548

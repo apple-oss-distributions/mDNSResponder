@@ -1,0 +1,808 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 38;
+	objects = {
+		000753D303367C1C0CCA2C71 = {
+			isa = PBXFileReference;
+			path = mDNSMacOSX.h;
+			refType = 4;
+		};
+		0017390704CC75C30CCA2C71 = {
+			isa = PBXFileReference;
+			path = SampleUDSClient.c;
+			refType = 2;
+		};
+		0017390804CC75C30CCA2C71 = {
+			fileRef = 0017390704CC75C30CCA2C71;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		0044D34804CC73600CCA2C71 = {
+			buildPhases = (
+				0044D34904CC73600CCA2C71,
+				0044D34A04CC73600CCA2C71,
+				0044D34C04CC73600CCA2C71,
+				0044D34E04CC73600CCA2C71,
+			);
+			buildSettings = {
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				OTHER_CFLAGS = "-no-cpp-precomp -DmDNSResponderVersion=$(MVERS)";
+				OTHER_LDFLAGS = "";
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = uds_test;
+				REZ_EXECUTABLE = YES;
+				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
+				WARNING_CFLAGS = "-W -Wall -Wmissing-prototypes -Wno-four-char-constants -Wno-unknown-pragmas";
+			};
+			dependencies = (
+			);
+			isa = PBXToolTarget;
+			name = "UDS API Test Tool";
+			productName = "UDS API Test Tool";
+			productReference = 0044D34F04CC73600CCA2C71;
+			shouldUseHeadermap = 0;
+		};
+		0044D34904CC73600CCA2C71 = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			isa = PBXHeadersBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0044D34A04CC73600CCA2C71 = {
+			buildActionMask = 2147483647;
+			files = (
+				0017390804CC75C30CCA2C71,
+				00DD152B04CC79700CCA2C71,
+				00DD152C04CC79A50CCA2C71,
+			);
+			isa = PBXSourcesBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0044D34C04CC73600CCA2C71 = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			isa = PBXFrameworksBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0044D34E04CC73600CCA2C71 = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			isa = PBXRezBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0044D34F04CC73600CCA2C71 = {
+			isa = PBXExecutableFileReference;
+			path = uds_test;
+			refType = 3;
+		};
+		004EFB9604CC78130CCA2C71 = {
+			isa = PBXFileReference;
+			path = dnssd_clientstub.c;
+			refType = 2;
+		};
+		0066920A04CC7AA80CCA2C71 = {
+			isa = PBXTargetDependency;
+			target = 0044D34804CC73600CCA2C71;
+		};
+		00AD62A3032D799A0CCA2C71 = {
+			buildPhases = (
+				00AD62A4032D799A0CCA2C71,
+				00AD62AC032D799A0CCA2C71,
+				00AD62B3032D799A0CCA2C71,
+				00AD62B7032D799A0CCA2C71,
+			);
+			buildSettings = {
+				FRAMEWORK_SEARCH_PATHS = "";
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				HEADER_SEARCH_PATHS = "\"$(APPLE_INTERNAL_DEVELOPER_DIR)/Headers\"";
+				LIBRARY_SEARCH_PATHS = "";
+				OPTIMIZATION_CFLAGS = "-O0";
+				OTHER_CFLAGS = "-no-cpp-precomp -D__MACOSX__ -DMDNS_DEBUGMSGS=1 -DmDNSResponderVersion=$(MVERS)";
+				OTHER_LDFLAGS = "";
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = mDNSResponder.debug;
+				REZ_EXECUTABLE = YES;
+				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
+				WARNING_CFLAGS = "-W -Wall -Wmissing-prototypes -Wno-four-char-constants -Wno-unknown-pragmas";
+			};
+			dependencies = (
+			);
+			isa = PBXToolTarget;
+			name = "mDNSResponder debug";
+			productName = mDNSResponder;
+			productReference = 00AD62B8032D799A0CCA2C71;
+			shouldUseHeadermap = 1;
+		};
+		00AD62A4032D799A0CCA2C71 = {
+			buildActionMask = 2147483647;
+			files = (
+				00AD62A5032D799A0CCA2C71,
+				F5E11B5F04A28126019798ED,
+				F515E29604A37BB701CA296C,
+				F515E29704A37BB801CA296C,
+				F515E29804A37BBB01CA296C,
+				F515E29904A37BBB01CA296C,
+			);
+			isa = PBXHeadersBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		00AD62A5032D799A0CCA2C71 = {
+			fileRef = 6575FBFF022EAFBA00000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		00AD62AC032D799A0CCA2C71 = {
+			buildActionMask = 2147483647;
+			files = (
+				00AD62AD032D799A0CCA2C71,
+				00AD62AE032D799A0CCA2C71,
+				00AD62AF032D799A0CCA2C71,
+				00AD62B0032D799A0CCA2C71,
+				00AD62B1032D799A0CCA2C71,
+				F5E11B5E04A28126019798ED,
+				F525E72B04AA167A01F1CF4D,
+			);
+			isa = PBXSourcesBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		00AD62AD032D799A0CCA2C71 = {
+			fileRef = 6575FC00022EAFBA00000109;
+			isa = PBXBuildFile;
+			settings = {
+				ATTRIBUTES = (
+					Client,
+				);
+			};
+		};
+		00AD62AE032D799A0CCA2C71 = {
+			fileRef = 6575FC01022EAFBA00000109;
+			isa = PBXBuildFile;
+			settings = {
+				ATTRIBUTES = (
+					Server,
+					Client,
+				);
+			};
+		};
+		00AD62AF032D799A0CCA2C71 = {
+			fileRef = 6575FBE9022EAF5A00000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		00AD62B0032D799A0CCA2C71 = {
+			fileRef = 6575FBEB022EAF7200000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		00AD62B1032D799A0CCA2C71 = {
+			fileRef = 6575FBEC022EAF7200000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		00AD62B3032D799A0CCA2C71 = {
+			buildActionMask = 2147483647;
+			files = (
+				00AD62B4032D799A0CCA2C71,
+				00AD62B5032D799A0CCA2C71,
+				00AD62B6032D799A0CCA2C71,
+			);
+			isa = PBXFrameworksBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		00AD62B4032D799A0CCA2C71 = {
+			fileRef = 09AB6884FE841BABC02AAC07;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		00AD62B5032D799A0CCA2C71 = {
+			fileRef = 65713D46025A293200000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		00AD62B6032D799A0CCA2C71 = {
+			fileRef = 00CA213D02786FC30CCA2C71;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		00AD62B7032D799A0CCA2C71 = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			isa = PBXRezBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		00AD62B8032D799A0CCA2C71 = {
+			isa = PBXExecutableFileReference;
+			path = mDNSResponder.debug;
+			refType = 3;
+		};
+		00AD62BB032D7A0C0CCA2C71 = {
+			buildPhases = (
+			);
+			buildSettings = {
+				OTHER_CFLAGS = "";
+				OTHER_LDFLAGS = "";
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = "Build All";
+				SECTORDER_FLAGS = "";
+			};
+			dependencies = (
+				00AD62BC032D7A160CCA2C71,
+				00AD62BD032D7A1B0CCA2C71,
+				00AD62BE032D7A1D0CCA2C71,
+				0066920A04CC7AA80CCA2C71,
+			);
+			isa = PBXAggregateTarget;
+			name = "Build All";
+			productName = "Build All";
+			shouldUseHeadermap = 0;
+		};
+		00AD62BC032D7A160CCA2C71 = {
+			isa = PBXTargetDependency;
+			target = 08FB779FFE84155DC02AAC07;
+		};
+		00AD62BD032D7A1B0CCA2C71 = {
+			isa = PBXTargetDependency;
+			target = 00AD62A3032D799A0CCA2C71;
+		};
+		00AD62BE032D7A1D0CCA2C71 = {
+			isa = PBXTargetDependency;
+			target = 6575FC1C022EB76000000109;
+		};
+		00B2AB0C032D7B220CCA2C71 = {
+			buildRules = (
+			);
+			buildSettings = {
+				MVERS = 1;
+			};
+			isa = PBXBuildStyle;
+			name = Development;
+		};
+		00CA213D02786FC30CCA2C71 = {
+			isa = PBXFrameworkReference;
+			name = IOKit.framework;
+			path = /System/Library/Frameworks/IOKit.framework;
+			refType = 0;
+		};
+		00DD152B04CC79700CCA2C71 = {
+			fileRef = 004EFB9604CC78130CCA2C71;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		00DD152C04CC79A50CCA2C71 = {
+			fileRef = F5E11B5A04A28126019798ED;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+//000
+//001
+//002
+//003
+//004
+//030
+//031
+//032
+//033
+//034
+		034768E2FF38A6DC11DB9C8B = {
+			isa = PBXExecutableFileReference;
+			path = mDNSResponder;
+			refType = 3;
+		};
+//030
+//031
+//032
+//033
+//034
+//080
+//081
+//082
+//083
+//084
+		08FB7793FE84155DC02AAC07 = {
+			buildStyles = (
+				00B2AB0C032D7B220CCA2C71,
+			);
+			isa = PBXProject;
+			mainGroup = 08FB7794FE84155DC02AAC07;
+			projectDirPath = "";
+			targets = (
+				00AD62BB032D7A0C0CCA2C71,
+				08FB779FFE84155DC02AAC07,
+				00AD62A3032D799A0CCA2C71,
+				6575FC1C022EB76000000109,
+				0044D34804CC73600CCA2C71,
+			);
+		};
+		08FB7794FE84155DC02AAC07 = {
+			children = (
+				08FB7795FE84155DC02AAC07,
+				6575FC1F022EB78C00000109,
+				6575FBFE022EAFA800000109,
+				08FB779DFE84155DC02AAC07,
+				19C28FBDFE9D53C911CA2CBB,
+			);
+			isa = PBXGroup;
+			name = mDNSResponder;
+			refType = 4;
+		};
+		08FB7795FE84155DC02AAC07 = {
+			children = (
+				F525E72804AA167501F1CF4D,
+				F5E11B5A04A28126019798ED,
+				F5E11B5B04A28126019798ED,
+				6575FBEC022EAF7200000109,
+				6575FBE9022EAF5A00000109,
+				6575FBEB022EAF7200000109,
+				654BE64F02B63B93000001D1,
+				654BE65002B63B93000001D1,
+				654BE65202B63B93000001D1,
+				000753D303367C1C0CCA2C71,
+			);
+			isa = PBXGroup;
+			name = "mDNS Server Sources";
+			path = "";
+			refType = 4;
+		};
+		08FB779DFE84155DC02AAC07 = {
+			children = (
+				09AB6884FE841BABC02AAC07,
+				65713D46025A293200000109,
+				00CA213D02786FC30CCA2C71,
+			);
+			isa = PBXGroup;
+			name = "External Frameworks and Libraries";
+			refType = 4;
+		};
+		08FB779FFE84155DC02AAC07 = {
+			buildPhases = (
+				08FB77A0FE84155DC02AAC07,
+				08FB77A1FE84155DC02AAC07,
+				08FB77A3FE84155DC02AAC07,
+				08FB77A5FE84155DC02AAC07,
+			);
+			buildSettings = {
+				FRAMEWORK_SEARCH_PATHS = "";
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				HEADER_SEARCH_PATHS = "\"$(APPLE_INTERNAL_DEVELOPER_DIR)/Headers\"";
+				INSTALL_PATH = /usr/sbin;
+				LIBRARY_SEARCH_PATHS = "";
+				OTHER_CFLAGS = "-no-cpp-precomp -D__MACOSX__ -DmDNSResponderVersion=$(MVERS)";
+				OTHER_LDFLAGS = "";
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = mDNSResponder;
+				REZ_EXECUTABLE = YES;
+				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
+				WARNING_CFLAGS = "-W -Wall -Wmissing-prototypes -Wno-four-char-constants -Wno-unknown-pragmas";
+			};
+			dependencies = (
+			);
+			isa = PBXToolTarget;
+			name = mDNSResponder;
+			productInstallPath = "$(HOME)/bin";
+			productName = mDNSResponder;
+			productReference = 034768E2FF38A6DC11DB9C8B;
+			shouldUseHeadermap = 1;
+		};
+		08FB77A0FE84155DC02AAC07 = {
+			buildActionMask = 2147483647;
+			files = (
+				6575FC02022EAFBA00000109,
+				F5E11B5D04A28126019798ED,
+			);
+			isa = PBXHeadersBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		08FB77A1FE84155DC02AAC07 = {
+			buildActionMask = 2147483647;
+			files = (
+				6575FC0D022EB18700000109,
+				6575FC0E022EB18700000109,
+				6575FBEA022EAF5A00000109,
+				6575FBED022EAF7200000109,
+				6575FBEE022EAF7200000109,
+				F5E11B5C04A28126019798ED,
+				F525E72904AA167501F1CF4D,
+			);
+			isa = PBXSourcesBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		08FB77A3FE84155DC02AAC07 = {
+			buildActionMask = 2147483647;
+			files = (
+				09AB6885FE841BABC02AAC07,
+				65713D66025A293200000109,
+				6585DD640279A3B7000001D1,
+			);
+			isa = PBXFrameworksBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		08FB77A5FE84155DC02AAC07 = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			isa = PBXRezBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+//080
+//081
+//082
+//083
+//084
+//090
+//091
+//092
+//093
+//094
+		09AB6884FE841BABC02AAC07 = {
+			isa = PBXFrameworkReference;
+			name = CoreFoundation.framework;
+			path = /System/Library/Frameworks/CoreFoundation.framework;
+			refType = 0;
+		};
+		09AB6885FE841BABC02AAC07 = {
+			fileRef = 09AB6884FE841BABC02AAC07;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+//090
+//091
+//092
+//093
+//094
+//190
+//191
+//192
+//193
+//194
+		19C28FBDFE9D53C911CA2CBB = {
+			children = (
+				034768E2FF38A6DC11DB9C8B,
+				6575FC1D022EB76000000109,
+				00AD62B8032D799A0CCA2C71,
+				0044D34F04CC73600CCA2C71,
+			);
+			isa = PBXGroup;
+			name = Products;
+			refType = 4;
+		};
+//190
+//191
+//192
+//193
+//194
+//650
+//651
+//652
+//653
+//654
+		654BE64F02B63B93000001D1 = {
+			isa = PBXFileReference;
+			name = mDNSClientAPI.h;
+			path = ../mDNSCore/mDNSClientAPI.h;
+			refType = 4;
+		};
+		654BE65002B63B93000001D1 = {
+			isa = PBXFileReference;
+			name = mDNSDebug.h;
+			path = ../mDNSCore/mDNSDebug.h;
+			refType = 4;
+		};
+		654BE65202B63B93000001D1 = {
+			isa = PBXFileReference;
+			name = mDNSPlatformFunctions.h;
+			path = ../mDNSCore/mDNSPlatformFunctions.h;
+			refType = 4;
+		};
+		65713D46025A293200000109 = {
+			isa = PBXFrameworkReference;
+			name = SystemConfiguration.framework;
+			path = /System/Library/Frameworks/SystemConfiguration.framework;
+			refType = 0;
+		};
+		65713D66025A293200000109 = {
+			fileRef = 65713D46025A293200000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		6575FBE9022EAF5A00000109 = {
+			indentWidth = 4;
+			isa = PBXFileReference;
+			name = mDNS.c;
+			path = ../mDNSCore/mDNS.c;
+			refType = 4;
+			tabWidth = 4;
+			usesTabs = 1;
+		};
+		6575FBEA022EAF5A00000109 = {
+			fileRef = 6575FBE9022EAF5A00000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		6575FBEB022EAF7200000109 = {
+			indentWidth = 4;
+			isa = PBXFileReference;
+			path = CFSocket.c;
+			refType = 4;
+			tabWidth = 4;
+			usesTabs = 1;
+		};
+		6575FBEC022EAF7200000109 = {
+			indentWidth = 4;
+			isa = PBXFileReference;
+			path = daemon.c;
+			refType = 4;
+			tabWidth = 4;
+			usesTabs = 1;
+		};
+		6575FBED022EAF7200000109 = {
+			fileRef = 6575FBEB022EAF7200000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		6575FBEE022EAF7200000109 = {
+			fileRef = 6575FBEC022EAF7200000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		6575FBFE022EAFA800000109 = {
+			children = (
+				6575FBFF022EAFBA00000109,
+				6575FC00022EAFBA00000109,
+				6575FC01022EAFBA00000109,
+			);
+			isa = PBXGroup;
+			name = "DNS Service Discovery MIG files";
+			refType = 4;
+		};
+		6575FBFF022EAFBA00000109 = {
+			isa = PBXFileReference;
+			path = DNSServiceDiscoveryDefines.h;
+			refType = 4;
+		};
+		6575FC00022EAFBA00000109 = {
+			isa = PBXFileReference;
+			path = DNSServiceDiscoveryReply.defs;
+			refType = 4;
+		};
+		6575FC01022EAFBA00000109 = {
+			isa = PBXFileReference;
+			path = DNSServiceDiscoveryRequest.defs;
+			refType = 4;
+		};
+		6575FC02022EAFBA00000109 = {
+			fileRef = 6575FBFF022EAFBA00000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		6575FC0D022EB18700000109 = {
+			fileRef = 6575FC00022EAFBA00000109;
+			isa = PBXBuildFile;
+			settings = {
+				ATTRIBUTES = (
+					Client,
+				);
+			};
+		};
+		6575FC0E022EB18700000109 = {
+			fileRef = 6575FC01022EAFBA00000109;
+			isa = PBXBuildFile;
+			settings = {
+				ATTRIBUTES = (
+					Server,
+					Client,
+				);
+			};
+		};
+		6575FC18022EB76000000109 = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			isa = PBXHeadersBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6575FC19022EB76000000109 = {
+			buildActionMask = 2147483647;
+			files = (
+				6575FC21022EB7AA00000109,
+			);
+			isa = PBXSourcesBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6575FC1A022EB76000000109 = {
+			buildActionMask = 2147483647;
+			files = (
+				6575FC24022EBA5D00000109,
+			);
+			isa = PBXFrameworksBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6575FC1B022EB76000000109 = {
+			buildActionMask = 2147483647;
+			files = (
+			);
+			isa = PBXRezBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6575FC1C022EB76000000109 = {
+			buildPhases = (
+				6575FC18022EB76000000109,
+				6575FC19022EB76000000109,
+				6575FC1A022EB76000000109,
+				6575FC1B022EB76000000109,
+			);
+			buildSettings = {
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				INSTALL_PATH = /usr/bin;
+				OTHER_CFLAGS = "-no-cpp-precomp -DmDNSResponderVersion=$(MVERS)";
+				OTHER_LDFLAGS = "";
+				OTHER_REZFLAGS = "";
+				PRODUCT_NAME = mDNS;
+				REZ_EXECUTABLE = YES;
+				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
+				WARNING_CFLAGS = "-W -Wall -Wmissing-prototypes -Wno-four-char-constants -Wno-unknown-pragmas";
+			};
+			dependencies = (
+			);
+			isa = PBXToolTarget;
+			name = "mDNS Command-Line tool";
+			productInstallPath = /usr/bin;
+			productName = "Sample mDNS Client";
+			productReference = 6575FC1D022EB76000000109;
+			shouldUseHeadermap = 0;
+		};
+		6575FC1D022EB76000000109 = {
+			isa = PBXExecutableFileReference;
+			path = mDNS;
+			refType = 3;
+		};
+		6575FC1F022EB78C00000109 = {
+			children = (
+				6575FC20022EB7AA00000109,
+				0017390704CC75C30CCA2C71,
+				004EFB9604CC78130CCA2C71,
+			);
+			isa = PBXGroup;
+			name = SampleMulticastDNSClient;
+			refType = 4;
+		};
+		6575FC20022EB7AA00000109 = {
+			indentWidth = 4;
+			isa = PBXFileReference;
+			path = SamplemDNSClient.c;
+			refType = 4;
+			tabWidth = 4;
+			usesTabs = 0;
+		};
+		6575FC21022EB7AA00000109 = {
+			fileRef = 6575FC20022EB7AA00000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		6575FC24022EBA5D00000109 = {
+			fileRef = 09AB6884FE841BABC02AAC07;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		6585DD640279A3B7000001D1 = {
+			fileRef = 00CA213D02786FC30CCA2C71;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+//650
+//651
+//652
+//653
+//654
+//F50
+//F51
+//F52
+//F53
+//F54
+		F515E29604A37BB701CA296C = {
+			fileRef = 654BE64F02B63B93000001D1;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		F515E29704A37BB801CA296C = {
+			fileRef = 654BE65002B63B93000001D1;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		F515E29804A37BBB01CA296C = {
+			fileRef = 654BE65202B63B93000001D1;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		F515E29904A37BBB01CA296C = {
+			fileRef = 000753D303367C1C0CCA2C71;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		F525E72804AA167501F1CF4D = {
+			isa = PBXFileReference;
+			path = uds_daemon.c;
+			refType = 4;
+		};
+		F525E72904AA167501F1CF4D = {
+			fileRef = F525E72804AA167501F1CF4D;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		F525E72B04AA167A01F1CF4D = {
+			fileRef = F525E72804AA167501F1CF4D;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		F5E11B5A04A28126019798ED = {
+			isa = PBXFileReference;
+			path = dnssd_ipc.c;
+			refType = 4;
+		};
+		F5E11B5B04A28126019798ED = {
+			isa = PBXFileReference;
+			path = dnssd_ipc.h;
+			refType = 4;
+		};
+		F5E11B5C04A28126019798ED = {
+			fileRef = F5E11B5A04A28126019798ED;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		F5E11B5D04A28126019798ED = {
+			fileRef = F5E11B5B04A28126019798ED;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		F5E11B5E04A28126019798ED = {
+			fileRef = F5E11B5A04A28126019798ED;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		F5E11B5F04A28126019798ED = {
+			fileRef = F5E11B5B04A28126019798ED;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+	};
+	rootObject = 08FB7793FE84155DC02AAC07;
+}
