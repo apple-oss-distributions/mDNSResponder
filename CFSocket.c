@@ -38,6 +38,8 @@
 // to zero will cause CFSocket.c to not set the Advertise flag in its mDNS_RegisterInterface calls.
 int mDNS_AdvertiseLocalAddresses = 1;
 
+void (*NotifyClientNetworkChanged)(void);
+
 #include "mDNSClientAPI.h"           // Defines the interface provided to the client layer above
 #include "mDNSPlatformFunctions.h"   // Defines the interface to the supporting layer below
 #include "mDNSPlatformEnvironment.h" // Defines the specific types needed to run mDNS on this platform
@@ -664,8 +666,10 @@ mDNSlocal void NetworkChanged(SCDynamicStoreRef store, CFArrayRef changedKeys, v
 	debugf("***   Network Configuration Change   ***");
 	(void)store;		// Parameter not used
 	(void)changedKeys;	// Parameter not used
+	
 	ClearInterfaceList(m);
 	SetupInterfaceList(m);
+	if (NotifyClientNetworkChanged) NotifyClientNetworkChanged();
 	mDNSCoreSleep(m, false);
 	}
 
@@ -677,7 +681,7 @@ mDNSlocal mStatus WatchForNetworkChanges(mDNS *const m)
 	CFStringRef           key1     = SCDynamicStoreKeyCreateNetworkGlobalEntity(NULL, kSCDynamicStoreDomainState, kSCEntNetIPv4);
 	CFStringRef           key2     = SCDynamicStoreKeyCreateComputerName(NULL);
 	CFStringRef           key3     = SCDynamicStoreKeyCreateHostNames(NULL);
-	CFStringRef           pattern  = SCDynamicStoreKeyCreateNetworkServiceEntity(NULL, kSCDynamicStoreDomainState, kSCCompAnyRegex, kSCEntNetIPv4);
+	CFStringRef           pattern  = SCDynamicStoreKeyCreateNetworkInterfaceEntity(NULL, kSCDynamicStoreDomainState, kSCCompAnyRegex, kSCEntNetIPv4);
 	CFMutableArrayRef     keys     = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
 	CFMutableArrayRef     patterns = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
 
@@ -809,7 +813,6 @@ mDNSexport void mDNSPlatformClose(mDNS *const m)
 		}
 	}
 
-// To Do: Find out how to implement a proper modular time function in CF
 mDNSexport void mDNSPlatformScheduleTask(const mDNS *const m, SInt32 NextTaskTime)
 	{
 	if (m->p->CFTimer)

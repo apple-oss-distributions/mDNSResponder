@@ -477,7 +477,7 @@ extern mStatus mDNS_RegisterService  (mDNS *const m, ServiceRecordSet *sr,
                mDNSServiceCallback Callback, void *Context);
 extern mStatus mDNS_AddRecordToService(mDNS *const m, ServiceRecordSet *sr, ExtraResourceRecord *extra, RData *rdata, mDNSu32 ttl);
 extern mStatus mDNS_RemoveRecordFromService(mDNS *const m, ServiceRecordSet *sr, ExtraResourceRecord *extra);
-extern mStatus mDNS_RenameAndReregisterService(mDNS *const m, ServiceRecordSet *const sr);
+extern mStatus mDNS_RenameAndReregisterService(mDNS *const m, ServiceRecordSet *const sr, const domainlabel *newname);
 extern void    mDNS_DeregisterService(mDNS *const m, ServiceRecordSet *sr);
 
 extern mStatus mDNS_StartBrowse(mDNS *const m, DNSQuestion *const question,
@@ -511,6 +511,7 @@ extern mStatus mDNS_AdvertiseDomains(mDNS *const m, ResourceRecord *rr, mDNSu8 D
 // work with DNS's native length-prefixed strings. For convenience in C, the following utility functions
 // are provided for converting between C's null-terminated strings and DNS's length-prefixed strings.
 
+extern mDNSBool SameDomainLabel(const mDNSu8 *a, const mDNSu8 *b);
 extern mDNSBool SameDomainName(const domainname *const d1, const domainname *const d2);
 
 extern mDNSu32 DomainNameLength(const domainname *const name);
