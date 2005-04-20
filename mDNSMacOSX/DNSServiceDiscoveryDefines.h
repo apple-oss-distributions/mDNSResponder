@@ -23,6 +23,9 @@
     Change History (most recent first):
 
 $Log: DNSServiceDiscoveryDefines.h,v $
+Revision 1.6  2004/09/20 21:45:27  ksekar
+Mach IPC cleanup
+
 Revision 1.5  2003/08/12 19:56:25  cheshire
 Update to APSL 2.0
 
@@ -39,5 +42,6 @@ typedef char    DNSCString[1024];
 typedef char    sockaddr_t[128];
 
 typedef const char * record_data_t;
+typedef struct { char bytes[4]; } IPPort;
 
 #endif	/* __DNS_SERVICE_DISCOVERY_DEFINES_H */

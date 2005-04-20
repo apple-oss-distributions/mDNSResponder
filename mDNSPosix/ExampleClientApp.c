@@ -1,5 +1,6 @@
-/*
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+/* -*- Mode: C; tab-width: 4 -*-
+ *
+ * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -23,6 +24,18 @@
     Change History (most recent first):
 
 $Log: ExampleClientApp.c,v $
+Revision 1.12  2004/11/30 22:37:00  cheshire
+Update copyright dates and add "Mode: C; tab-width: 4" headers
+
+Revision 1.11  2004/09/17 01:08:53  cheshire
+Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
+  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
+  declared in that file are ONLY appropriate to single-address-space embedded applications.
+  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
+
+Revision 1.10  2004/09/16 01:58:22  cheshire
+Fix compiler warnings
+
 Revision 1.9  2003/08/12 19:56:26  cheshire
 Update to APSL 2.0
 
@@ -47,7 +60,7 @@ Add log header
 #include <netdb.h>			// For gethostbyname()
 #include <signal.h>			// For SIGINT, etc.
 
-#include "mDNSClientAPI.h"  // Defines the interface to the client layer above
+#include "mDNSEmbeddedAPI.h"  // Defines the interface to the client layer above
 #include "mDNSPosix.h"      // Defines the specific types needed to run mDNS on this platform
 
 //*******************************************************************************************
@@ -58,7 +71,7 @@ static volatile mDNSBool StopNow;
 mDNSlocal void HandleSIG(int signal)
 	{
 	(void)signal;	// Unused
-	debugf("");
+	debugf("%s","");
 	debugf("HandleSIG");
 	StopNow = mDNStrue;
 	}

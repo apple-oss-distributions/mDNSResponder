@@ -1,5 +1,6 @@
-/*
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+/* -*- Mode: C; tab-width: 4 -*-
+ *
+ * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -23,6 +24,49 @@
     Change History (most recent first):
 
 $Log: Responder.c,v $
+Revision 1.29  2005/03/04 21:35:33  cheshire
+<rdar://problem/4037201> Services.txt file not parsed properly when it contains more than one service
+
+Revision 1.28  2005/01/11 01:55:26  ksekar
+Fix compile errors in Posix debug build
+
+Revision 1.27  2004/12/01 04:28:43  cheshire
+<rdar://problem/3872803> Darwin patches for Solaris and Suse
+Use version of daemon() provided in mDNSUNP.c instead of local copy
+
+Revision 1.26  2004/11/30 22:37:01  cheshire
+Update copyright dates and add "Mode: C; tab-width: 4" headers
+
+Revision 1.25  2004/11/11 02:00:51  cheshire
+Minor fixes to getopt, error message
+
+Revision 1.24  2004/11/09 19:32:10  rpantos
+Suggestion from Ademar de Souza Reis Jr. to allow comments in services file
+
+Revision 1.23  2004/09/17 01:08:54  cheshire
+Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
+  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
+  declared in that file are ONLY appropriate to single-address-space embedded applications.
+  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
+
+Revision 1.22  2004/09/16 01:58:22  cheshire
+Fix compiler warnings
+
+Revision 1.21  2004/06/15 03:48:07  cheshire
+Update mDNSResponderPosix to take multiple name=val arguments in a sane way
+
+Revision 1.20  2004/05/18 23:51:26  cheshire
+Tidy up all checkin comments to use consistent "<rdar://problem/xxxxxxx>" format for bug numbers
+
+Revision 1.19  2004/03/12 08:03:14  cheshire
+Update comments
+
+Revision 1.18  2004/01/25 00:00:55  cheshire
+Change to use mDNSOpaque16fromIntVal() instead of shifting and masking
+
+Revision 1.17  2003/12/11 19:11:55  cheshire
+Fix compiler warning
+
 Revision 1.16  2003/08/14 02:19:55  cheshire
 <rdar://problem/3375491> Split generic ResourceRecord type into two separate types: AuthRecord and CacheRecord
 
@@ -57,7 +101,7 @@ Revision 1.6  2003/03/08 00:35:56  cheshire
 Switched to using new "mDNS_Execute" model (see "mDNSCore/Implementer Notes.txt")
 
 Revision 1.5  2003/02/20 06:48:36  cheshire
-Bug #: 3169535 Xserve RAID needs to do interface-specific registrations
+<rdar://problem/3169535> Xserve RAID needs to do interface-specific registrations
 Reviewed by: Josh Graessley, Bob Bradley
 
 Revision 1.4  2003/01/28 03:07:46  cheshire
@@ -75,7 +119,7 @@ First checkin
 
 */
 
-#include "mDNSClientAPI.h"// Defines the interface to the client layer above
+#include "mDNSEmbeddedAPI.h"// Defines the interface to the client layer above
 #include "mDNSPosix.h"    // Defines the specific types needed to run mDNS on this platform
 
 #include <assert.h>
@@ -170,41 +214,25 @@ static void HandleSigQuit(int sigraised)
 #pragma mark ***** Parameter Checking
 #endif
 
-static mDNSBool CheckThatRichTextHostNameIsUsable(const char *richTextHostName, mDNSBool printExplanation)
-    // Checks that richTextHostName is a reasonable host name 
+static mDNSBool CheckThatRichTextNameIsUsable(const char *richTextName, mDNSBool printExplanation)
+    // Checks that richTextName is reasonable 
     // label and, if it isn't and printExplanation is true, prints 
     // an explanation of why not.
 {
-    mDNSBool    result;
-    domainlabel richLabel;
-    domainlabel poorLabel;
-    
-    result = mDNStrue;
-    if (result && strlen(richTextHostName) > 63) {
+    mDNSBool result = mDNStrue;
+    if (result && strlen(richTextName) > 63) {
         if (printExplanation) {
             fprintf(stderr, 
-                    "%s: Host name is too long (must be 63 characters or less)\n", 
+                    "%s: Service name is too long (must be 63 characters or less)\n", 
                     gProgramName);
         }
         result = mDNSfalse;
     }
-    if (result && richTextHostName[0] == 0) {
+    if (result && richTextName[0] == 0) {
         if (printExplanation) {
-            fprintf(stderr, "%s: Host name can't be empty\n", gProgramName);
+            fprintf(stderr, "%s: Service name can't be empty\n", gProgramName);
         }
         result = mDNSfalse;
-    }
-    if (result) {
-        MakeDomainLabelFromLiteralString(&richLabel, richTextHostName);
-        ConvertUTF8PstringToRFC1034HostLabel(richLabel.c, &poorLabel);
-        if (poorLabel.c[0] == 0) {
-            if (printExplanation) {
-                fprintf(stderr, 
-                        "%s: Host name doesn't produce a usable RFC-1034 name\n", 
-                        gProgramName);
-            }
-            result = mDNSfalse;
-        }
     }
     return result;
 }
@@ -233,91 +261,6 @@ static mDNSBool CheckThatServiceTypeIsUsable(const char *serviceType, mDNSBool p
         }
         result = mDNSfalse;
     }
-    return result;
-}
-
-static mDNSBool CheckThatServiceTextIsUsable(const char *serviceText, mDNSBool printExplanation,
-                                             mDNSu8 *pStringList, mDNSu16 *pStringListLen)
-    // Checks that serviceText is a reasonable service text record 
-    // and, if it isn't and printExplanation is true, prints 
-    // an explanation of why not.  Also parse the text into 
-    // the packed PString buffer denoted by pStringList and 
-    // return the length of that buffer in *pStringListLen.
-    // Note that this routine assumes that the buffer is 
-    // sizeof(RDataBody) bytes long.
-{
-    mDNSBool result;
-    size_t   serviceTextLen;
-    
-    // Note that parsing a C string into a PString list always 
-    // expands the data by one character, so the following 
-    // compare is ">=", not ">".  Here's the logic:
-    //
-    // #1 For a string with not ^A's, the PString length is one 
-    //    greater than the C string length because we add a length 
-    //    byte.
-    // #2 For every regular (not ^A) character you add to the C 
-    //    string, you add a regular character to the PString list.
-    //    This does not affect the equivalence stated in #1.
-    // #3 For every ^A you add to the C string, you add a length 
-    //    byte to the PString list but you also eliminate the ^A, 
-    //    which again does not affect the equivalence stated in #1.
-    
-    result = mDNStrue;
-    serviceTextLen = strlen(serviceText);
-    if (result && strlen(serviceText) >= sizeof(RDataBody)) {
-        if (printExplanation) {
-            fprintf(stderr, 
-                    "%s: Service text record is too long (must be less than %d characters)\n", 
-                    gProgramName,
-                    (int) sizeof(RDataBody) );
-        }
-        result = mDNSfalse;
-    }
-    
-    // Now break the string up into PStrings delimited by ^A.
-    // We know the data will fit so we can ignore buffer overrun concerns. 
-    // However, we still have to treat runs long than 255 characters as
-    // an error.
-    
-    if (result) {
-        int         lastPStringOffset;
-        int         i;
-        int         thisPStringLen;
-        
-        // This algorithm is a little tricky.  We start by copying 
-        // the string directly into the output buffer, shifted up by 
-        // one byte.  We then fill in the first byte with a ^A. 
-        // We then walk backwards through the buffer and, for each 
-        // ^A that we find, we replace it with the difference between 
-        // its offset and the offset of the last ^A that we found
-        // (ie lastPStringOffset).
-        
-        memcpy(&pStringList[1], serviceText, serviceTextLen);
-        pStringList[0] = 1;
-        lastPStringOffset = serviceTextLen + 1;
-        for (i = serviceTextLen; i >= 0; i--) {
-            if ( pStringList[i] == 1 ) {
-                thisPStringLen = (lastPStringOffset - i - 1);
-                assert(thisPStringLen >= 0);
-                if (thisPStringLen > 255) {
-                    result = mDNSfalse;
-                    if (printExplanation) {
-                        fprintf(stderr, 
-                                "%s: Each component of the service text record must be 255 characters or less\n", 
-                                gProgramName);
-                    }
-                    break;
-                } else {
-                    pStringList[i]    = thisPStringLen;
-                    lastPStringOffset = i;
-                }
-            }
-        }
-        
-        *pStringListLen = serviceTextLen + 1;
-    }
-
     return result;
 }
 
@@ -354,7 +297,7 @@ enum {
 static void PrintUsage()
 {
     fprintf(stderr, 
-            "Usage: %s [-v level ] [-r] [-n name] [-t type] [-d domain] [-x TXT] [-p port] [-f file] [-b] [-P pidfile]\n", 
+            "Usage: %s [-v level ] [-r] [-n name] [-t type] [-d domain] [-p port] [-f file] [-b] [-P pidfile] [-x name=val ...]\n", 
             gProgramName);
     fprintf(stderr, "          -v verbose mode, level is a number from 0 to 2\n");
     fprintf(stderr, "             0 = no debugging info (default)\n");
@@ -362,20 +305,22 @@ static void PrintUsage()
     fprintf(stderr, "             2 = intense debugging info\n");
     fprintf(stderr, "             can be cycled kill -USR1\n");
     fprintf(stderr, "          -r also bind to port 53 (port 5353 is always bound)\n");
-    fprintf(stderr, "          -n uses 'name' as the host name (default is none)\n");
+    fprintf(stderr, "          -n uses 'name' as the service name (required)\n");
     fprintf(stderr, "          -t uses 'type' as the service type (default is '%s')\n", kDefaultServiceType);
     fprintf(stderr, "          -d uses 'domain' as the service domain (default is '%s')\n", kDefaultServiceDomain);
-    fprintf(stderr, "          -x uses 'TXT' as the service TXT record (default is empty)\n");
     fprintf(stderr, "          -p uses 'port' as the port number (default is '%d')\n",  kDefaultPortNumber);
     fprintf(stderr, "          -f reads a service list from 'file'\n");
     fprintf(stderr, "          -b forces daemon (background) mode\n");
     fprintf(stderr, "          -P uses 'pidfile' as the PID file\n");
     fprintf(stderr, "             (default is '%s')\n",  kDefaultPIDFile);
     fprintf(stderr, "             only meaningful if -b also specified\n");
+    fprintf(stderr, "          -x stores name=val in TXT record (default is empty).\n");
+    fprintf(stderr, "             MUST be the last command-line argument;\n");
+    fprintf(stderr, "             all subsequent arguments after -x are treated as name=val pairs.\n");
 }
 
 static   mDNSBool  gAvoidPort53      = mDNStrue;
-static const char *gRichTextHostName = "";
+static const char *gServiceName      = "";
 static const char *gServiceType      = kDefaultServiceType;
 static const char *gServiceDomain    = kDefaultServiceDomain;
 static mDNSu8      gServiceText[sizeof(RDataBody)];
@@ -403,7 +348,7 @@ static void ParseArguments(int argc, char **argv)
     // Parse command line options using getopt.
     
     do {
-        ch = getopt(argc, argv, "v:rn:t:d:x:p:f:dPb");
+        ch = getopt(argc, argv, "v:rn:t:d:p:f:dP:bx");
         if (ch != -1) {
             switch (ch) {
                 case 'v':
@@ -419,8 +364,8 @@ static void ParseArguments(int argc, char **argv)
                     gAvoidPort53 = mDNSfalse;
                     break;
                 case 'n':
-                    gRichTextHostName = optarg;
-                    if ( ! CheckThatRichTextHostNameIsUsable(gRichTextHostName, mDNStrue) ) {
+                    gServiceName = optarg;
+                    if ( ! CheckThatRichTextNameIsUsable(gServiceName, mDNStrue) ) {
                         exit(1);
                     }
                     break;
@@ -432,11 +377,6 @@ static void ParseArguments(int argc, char **argv)
                     break;
                 case 'd':
                     gServiceDomain = optarg;
-                    break;
-                case 'x':
-                    if ( ! CheckThatServiceTextIsUsable(optarg, mDNStrue, gServiceText, &gServiceTextLen) ) {
-                        exit(1);
-                    }
                     break;
                 case 'p':
                     gPortNumber = atol(optarg);
@@ -453,6 +393,16 @@ static void ParseArguments(int argc, char **argv)
                 case 'P':
                     gPIDFile = optarg;
                     break;
+                case 'x':
+                	while (optind < argc)
+                		{
+                		gServiceText[gServiceTextLen] = strlen(argv[optind]);
+                		memcpy(gServiceText+gServiceTextLen+1, argv[optind], gServiceText[gServiceTextLen]);
+                		gServiceTextLen += 1 + gServiceText[gServiceTextLen];
+                		optind++;
+                		}
+                	ch = -1;
+                	break;
                 case '?':
                 default:
                     PrintUsage();
@@ -472,9 +422,9 @@ static void ParseArguments(int argc, char **argv)
     
     // Check for inconsistency between the arguments.
     
-    if ( (gRichTextHostName[0] == 0) && (gServiceFile[0] == 0) ) {
+    if ( (gServiceName[0] == 0) && (gServiceFile[0] == 0) ) {
     	PrintUsage();
-        fprintf(stderr, "%s: You must specify a service to register (-n) or a service file (-f).\n", gProgramName);
+        fprintf(stderr, "%s: You must specify a service name to register (-n) or a service file (-f).\n", gProgramName);
         exit(1);
     }
 }
@@ -501,13 +451,13 @@ static void RegistrationCallback(mDNS *const m, ServiceRecordSet *const thisRegi
     switch (status) {
 
         case mStatus_NoError:      
-            debugf("Callback: %##s Name Registered",   thisRegistration->RR_SRV.resrec.name.c); 
+            debugf("Callback: %##s Name Registered",   thisRegistration->RR_SRV.resrec.name->c); 
             // Do nothing; our name was successfully registered.  We may 
             // get more call backs in the future.
             break;
 
         case mStatus_NameConflict: 
-            debugf("Callback: %##s Name Conflict",     thisRegistration->RR_SRV.resrec.name.c); 
+            debugf("Callback: %##s Name Conflict",     thisRegistration->RR_SRV.resrec.name->c); 
 
             // In the event of a conflict, this sample RegistrationCallback 
             // just calls mDNS_RenameAndReregisterService to automatically 
@@ -525,7 +475,7 @@ static void RegistrationCallback(mDNS *const m, ServiceRecordSet *const thisRegi
             break;
 
         case mStatus_MemFree:      
-            debugf("Callback: %##s Memory Free",       thisRegistration->RR_SRV.resrec.name.c); 
+            debugf("Callback: %##s Memory Free",       thisRegistration->RR_SRV.resrec.name->c); 
             
             // When debugging is enabled, make sure that thisRegistration 
             // is not on our gServiceList.
@@ -545,14 +495,14 @@ static void RegistrationCallback(mDNS *const m, ServiceRecordSet *const thisRegi
             break;
 
         default:                   
-            debugf("Callback: %##s Unknown Status %d", thisRegistration->RR_SRV.resrec.name.c, status); 
+            debugf("Callback: %##s Unknown Status %ld", thisRegistration->RR_SRV.resrec.name->c, status); 
             break;
     }
 }
 
 static int gServiceID = 0;
 
-static mStatus RegisterOneService(const char *  richTextHostName, 
+static mStatus RegisterOneService(const char *  richTextName, 
                                   const char *  serviceType, 
                                   const char *  serviceDomain, 
                                   const mDNSu8  text[],
@@ -561,7 +511,6 @@ static mStatus RegisterOneService(const char *  richTextHostName,
 {
     mStatus             status;
     PosixService *      thisServ;
-    mDNSOpaque16        port;
     domainlabel         name;
     domainname          type;
     domainname          domain;
@@ -572,17 +521,15 @@ static mStatus RegisterOneService(const char *  richTextHostName,
         status = mStatus_NoMemoryErr;
     }
     if (status == mStatus_NoError) {
-        MakeDomainLabelFromLiteralString(&name,  richTextHostName);
+        MakeDomainLabelFromLiteralString(&name,  richTextName);
         MakeDomainNameFromDNSNameString(&type, serviceType);
         MakeDomainNameFromDNSNameString(&domain, serviceDomain);
-        port.b[0] = (portNumber >> 8) & 0x0FF;
-        port.b[1] = (portNumber >> 0) & 0x0FF;;
         status = mDNS_RegisterService(&mDNSStorage, &thisServ->coreServ,
                 &name, &type, &domain,				// Name, type, domain
-                NULL, port, 						// Host and port
+                NULL, mDNSOpaque16fromIntVal(portNumber),
                 text, textLen,						// TXT data, length
                 NULL, 0,							// Subtypes
-                mDNSInterface_Any,					// Interace ID
+                mDNSInterface_Any,					// Interface ID
                 RegistrationCallback, thisServ);	// Callback and context
     }
     if (status == mStatus_NoError) {
@@ -597,7 +544,7 @@ static mStatus RegisterOneService(const char *  richTextHostName,
                     "%s: Registered service %d, name '%s', type '%s', port %ld\n", 
                     gProgramName, 
                     thisServ->serviceID, 
-                    richTextHostName,
+                    richTextName,
                     serviceType,
                     portNumber);
         }
@@ -610,95 +557,97 @@ static mStatus RegisterOneService(const char *  richTextHostName,
 }
 
 static mDNSBool ReadALine(char *buf, size_t bufSize, FILE *fp)
+// Read a line, skipping over any blank lines or lines starting with '#'
 {
-    mDNSBool good;
-    size_t len;
-    
-    good = (fgets(buf, bufSize, fp) != NULL);
-    if (good) {
-        len = strlen(buf);
-        good = (len > 0 && buf[len - 1] == '\n');
-    }
-    if (good) {
-        buf[len - 1] = 0;
-    }
+	mDNSBool good, skip;
+	do {
+		good = (fgets(buf, bufSize, fp) != NULL);
+		skip = (good && (buf[0] == '#'));
+	} while (good && skip);
+	if (good)
+	{
+		int		len = strlen( buf);
+		if ( buf[len - 1] == '\r' || buf[len - 1] == '\n')
+			buf[len - 1] = '\0';
+	}
     return good;
 }
 
 static mStatus RegisterServicesInFile(const char *filePath)
 {
-    mStatus     status;
-    FILE *      fp;
+    mStatus     status = mStatus_NoError;
+    FILE *      fp = fopen(filePath, "r");
     int         junk;
-    mDNSBool    good;
-    int         ch;
-    char name[256];
-    char type[256];
-    const char *dom = kDefaultServiceDomain;
-    char rawText[1024];
-    mDNSu8  text[sizeof(RDataBody)];
-    mDNSu16 textLen;
-    char port[256];
     
-    status = mStatus_NoError;
-    fp = fopen(filePath, "r");
     if (fp == NULL) {
         status = mStatus_UnknownErr;
     }
     if (status == mStatus_NoError) {
-        good = mDNStrue;
+        mDNSBool good = mDNStrue;
         do {
+			int         ch;
+			char name[256];
+			char type[256];
+			const char *dom = kDefaultServiceDomain;
+			char rawText[1024];
+			mDNSu8  text[sizeof(RDataBody)];
+			mDNSu16 textLen = 0;
+			char port[256];
+
             // Skip over any blank lines.
-            do {
-                ch = fgetc(fp);
-            } while ( ch == '\n' || ch == '\r' );
-            if (ch != EOF) {
-                good = (ungetc(ch, fp) == ch);
-            }
+            do ch = fgetc(fp); while ( ch == '\n' || ch == '\r' );
+            if (ch != EOF) good = (ungetc(ch, fp) == ch);
             
             // Read three lines, check them for validity, and register the service.
-            if ( good && ! feof(fp) ) {
-                good = ReadALine(name, sizeof(name), fp);               
-                if (good) {
-                    good = ReadALine(type, sizeof(type), fp);
-                }
-                if (good) {
-                	char *p = type;
-                	while (*p && *p != ' ') p++;
-                	if (*p) {
-                		*p = 0;
-                		dom = p+1;
-                	}
-                }
-                if (good) {
-                    good = ReadALine(rawText, sizeof(rawText), fp);
-                }
-                if (good) {
-                    good = ReadALine(port, sizeof(port), fp);
-                }
-                if (good) {
-                    good =     CheckThatRichTextHostNameIsUsable(name, mDNSfalse)
-                            && CheckThatServiceTypeIsUsable(type, mDNSfalse)
-                            && CheckThatServiceTextIsUsable(rawText, mDNSfalse, text, &textLen)
-                            && CheckThatPortNumberIsUsable(atol(port), mDNSfalse);
-                }
-                if (good) {
-                    status = RegisterOneService(name, type, dom, text, textLen, atol(port));
-                    if (status != mStatus_NoError) {
-                        fprintf(stderr, 
-                                "%s: Failed to register service, name = %s, type = %s, port = %s\n", 
-                                gProgramName,
-                                name,
-                                type,
-                                port);
-                        status = mStatus_NoError;       // keep reading
-                    }
-                }
-            }
+			good = ReadALine(name, sizeof(name), fp);               
+			if (good) {
+				good = ReadALine(type, sizeof(type), fp);
+			}
+			if (good) {
+				char *p = type;
+				while (*p && *p != ' ') p++;
+				if (*p) {
+					*p = 0;
+					dom = p+1;
+				}
+			}
+			if (good) {
+				good = ReadALine(port, sizeof(port), fp);
+			}
+			if (good) {
+				good =     CheckThatRichTextNameIsUsable(name, mDNSfalse)
+						&& CheckThatServiceTypeIsUsable(type, mDNSfalse)
+						&& CheckThatPortNumberIsUsable(atol(port), mDNSfalse);
+			}
+			if (good) {
+				while (1) {
+					int len;
+					if (!ReadALine(rawText, sizeof(rawText), fp)) break;
+					len = strlen(rawText);
+					if (len <= 255)
+						{
+						text[textLen] = len;
+						if (text[textLen] == 0) break;
+						memcpy(text + textLen + 1, rawText, text[textLen]);
+						textLen += 1 + text[textLen];
+						}
+					else
+						fprintf(stderr, "%s: TXT attribute too long for name = %s, type = %s, port = %s\n", 
+							gProgramName, name, type, port);
+				}
+			}
+			if (good) {
+				status = RegisterOneService(name, type, dom, text, textLen, atol(port));
+				if (status != mStatus_NoError) {
+					fprintf(stderr, "%s: Failed to register service, name = %s, type = %s, port = %s\n", 
+							gProgramName, name, type, port);
+					status = mStatus_NoError;       // keep reading
+				}
+			}
         } while (good && !feof(fp));
 
         if ( ! good ) {
-            fprintf(stderr, "%s: Error reading service file %s\n", gProgramName, gServiceFile);
+            fprintf(stderr, "%s: Error reading service file %s\n", gProgramName, filePath);
         }
     }
     
@@ -715,8 +664,8 @@ static mStatus RegisterOurServices(void)
     mStatus status;
     
     status = mStatus_NoError;
-    if (gRichTextHostName[0] != 0) {
-        status = RegisterOneService(gRichTextHostName, 
+    if (gServiceName[0] != 0) {
+        status = RegisterOneService(gServiceName, 
                                     gServiceType, 
                                     gServiceDomain, 
                                     gServiceText, gServiceTextLen, 
@@ -753,43 +702,6 @@ static void DeregisterOurServices(void)
 #if COMPILER_LIKES_PRAGMA_MARK
 #pragma mark **** Main
 #endif
-
-#ifdef NOT_HAVE_DAEMON
-
-    // The version of Solaris that I tested on didn't have the daemon 
-    // call.  This implementation was basically stolen from the 
-    // Mac OS X standard C library.
-    
-    static int daemon(int nochdir, int noclose)
-    {
-        int fd;
-    
-        switch (fork()) {
-        case -1:
-            return (-1);
-        case 0:
-            break;
-        default:
-            _exit(0);
-        }
-    
-        if (setsid() == -1)
-            return (-1);
-    
-        if (!nochdir)
-            (void)chdir("/");
-    
-        if (!noclose && (fd = _open("/dev/null", O_RDWR, 0)) != -1) {
-            (void)dup2(fd, STDIN_FILENO);
-            (void)dup2(fd, STDOUT_FILENO);
-            (void)dup2(fd, STDERR_FILENO);
-            if (fd > 2)
-                (void)_close(fd);
-        }
-        return (0);
-    }
-
-#endif /* NOT_HAVE_DAEMON */
 
 int main(int argc, char **argv)
 {

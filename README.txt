@@ -1,11 +1,11 @@
 What is mDNSResponder?
 ----------------------
 
-The mDNSResponder project is a component of Rendezvous,
+The mDNSResponder project is a component of Bonjour,
 Apple's ease-of-use IP networking initiative:
-<http://developer.apple.com/macosx/rendezvous/index.html>
+<http://developer.apple.com/bonjour/>
 
-Apple's Rendezvous software derives from the ongoing standardization
+Apple's Bonjour software derives from the ongoing standardization
 work of the IETF Zero Configuration Networking Working Group:
 <http://zeroconf.org/>
 
@@ -57,8 +57,8 @@ local significance (e.g. "yourcomputer.local.").
 About the mDNSResponder Code
 ----------------------------
 
-Because Apple benefits more from widespread adoption of Rendezvous than
-it would benefit from keeping Rendezvous proprietary, Apple is making
+Because Apple benefits more from widespread adoption of Bonjour than
+it would benefit from keeping Bonjour proprietary, Apple is making
 this code open so that other developers can use it too.
 
 Because Apple recognises that networks are hetrogenous environments
@@ -92,16 +92,15 @@ the functions it needs --
 The "mDNS Core" layer in turn calls through to the "Platform Support"
 layer to send and receive the multicast UDP packets to do the actual work.
 
-Apple currently provides a "Platform Support" layer for OS X 10.2
-("Jaguar"), and a "Platform Support" layer for other Posix platforms
-(OS X 10.1, Linux, etc.) Other support layers for platforms like Windows,
-VxWorks, etc. are also planned.
+Apple currently provides "Platform Support" layers for Mac OS 9, Mac OS X,
+Microsoft Windows, VxWorks, and for POSIX platforms like Linux, Solaris,
+FreeBSD, etc.
 
-Note: Developers writing applications for OS X 10.2 ("Jaguar") do not
-need to incorporate this code into their applications, since OS X 10.2
-provides a system service to handle this for them. If every application
-developer were to link-in the mDNSResponder code into their application,
-then we would end up with a situation like the picture below:
+Note: Developers writing applications for OS X do not need to incorporate
+this code into their applications, since OS X provides a system service to
+handle this for them. If every application developer were to link-in the
+mDNSResponder code into their application, then we would end up with a
+situation like the picture below:
 
   +------------------+    +------------------+    +------------------+
   |   Application 1  |    |   Application 2  |    |   Application 3  |
@@ -111,13 +110,12 @@ then we would end up with a situation like the picture below:
   | Platform Support |    | Platform Support |    | Platform Support |
   +------------------+    +------------------+    +------------------+
 
-This would not be very efficient. Each separate application would be
-sending their own separate multicast UDP packets and maintaining their
-own list of answers. Because of this, OS X 10.2 provides a common system
-service which client software should access through the
-"DNSServiceDiscovery.h" APIs.
+This would not be very efficient. Each separate application would be sending
+their own separate multicast UDP packets and maintaining their own list of
+answers. Because of this, OS X provides a common system service which client
+software should access through the "/usr/include/dns_sd.h" APIs.
 
-The situation on OS X 10.2 looks more like the picture below:
+The situation on OS X looks more like the picture below:
 
                                    -------------------
                                   /                   \
@@ -129,7 +127,7 @@ The situation on OS X 10.2 looks more like the picture below:
                  | Platform Support |
                  +------------------+
 
-Applications on OS X 10.2 make calls to the single mDNSResponder daemon
+Applications on OS X make calls to the single mDNSResponder daemon
 which implements the mDNS and DNS-SD protocols. 
 
 Vendors of products such as printers, which are closed environments not
@@ -142,4 +140,27 @@ that platform should, where possible, make use of that system service
 instead of embedding their own mDNSResponder.
 
 See ReadMe.txt in the mDNSPosix directory for specific details of
-building an mDNSResponder on a Posix Operating System.
+building an mDNSResponder on a POSIX Operating System.
+
+
+Compiling on Older C Compilers
+------------------------------
+
+We go to some lengths to make the code portable, but //-style comments
+are one of the modern conveniences we can't live without.
+
+If your C compiler doesn't understand these comments, you can transform
+them into classical K&R /* style */ comments with a quick GREP
+search-and-replace pattern.
+
+In BBEdit on the Mac:
+1. Open the "Find" dialog window and make sure "Use Grep" is selected
+2. Search For  : ([^:])//(.*)
+3. Replace With: \1/*\2 */
+4. Drag your mDNSResponder source code folder to the Multi-File search pane
+5. Click "Replace All"
+
+For the more command-line oriented, cd into your mDNSResponder source code
+directory and execute the following command (all one line):
+
+find mDNSResponder \( -name \*.c\* -or -name \*.h \) -exec sed -i .orig -e 's,^//\(.*\),/*\1 */,' -e '/\/\*/\!s,\([^:]\)//\(.*\),\1/*\2 */,' {} \;

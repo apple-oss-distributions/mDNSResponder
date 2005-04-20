@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding = "Windows-1252"?>
+<VisualStudioProject
+	ProjectType="Visual C++"
+	Version="7.00"
+	Name="ExplorerPluginLocRes"
+	ProjectGUID="{BB8AC1B5-6587-4163-BDC6-788B157705CA}"
+	SccProjectName=""
+	SccLocalPath="">
+	<Platforms>
+		<Platform
+			Name="Win32"/>
+	</Platforms>
+	<Configurations>
+		<Configuration
+			Name="Debug|Win32"
+			OutputDirectory=".\Debug\Resources\ExplorerPlugin.dll.Resources\en.lproj"
+			IntermediateDirectory=".\Debug"
+			ConfigurationType="2"
+			UseOfMFC="1"
+			ATLMinimizesCRunTimeLibraryUsage="FALSE"
+			CharacterSet="1">
+			<Tool
+				Name="VCCLCompilerTool"
+				Optimization="0"
+				AdditionalIncludeDirectories="..\..\mDNSWindows"
+				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;DEBUG=1;ENABLE_DOT_LOCAL_NAMES;WINVER=0x0400"
+				StringPooling="TRUE"
+				BasicRuntimeChecks="3"
+				RuntimeLibrary="1"
+				ForceConformanceInForLoopScope="TRUE"
+				UsePrecompiledHeader="0"
+				PrecompiledHeaderFile=""
+				AssemblerListingLocation=".\Debug/"
+				ObjectFile=".\Debug/"
+				ProgramDataBaseFileName=".\Debug/"
+				BrowseInformation="1"
+				WarningLevel="4"
+				WarnAsError="FALSE"
+				SuppressStartupBanner="TRUE"
+				Detect64BitPortabilityProblems="TRUE"
+				DebugInformationFormat="3"
+				CallingConvention="2"
+				CompileAs="0"/>
+			<Tool
+				Name="VCCustomBuildTool"/>
+			<Tool
+				Name="VCLinkerTool"
+				AdditionalOptions="/MACHINE:I386 /IGNORE:4089 "
+				AdditionalDependencies=""
+				OutputFile="$(OutDir)/ExplorerPluginLocalized.dll"
+				LinkIncremental="1"
+				SuppressStartupBanner="TRUE"
+				IgnoreDefaultLibraryNames=""
+				ModuleDefinitionFile=""
+				GenerateDebugInformation="TRUE"
+				ProgramDatabaseFile="$(OutDir)/$(ProjectName).pdb"
+				SubSystem="2"
+				ResourceOnlyDLL="TRUE"
+				ImportLibrary="$(OutDir)/$(ProjectName).lib"/>
+			<Tool
+				Name="VCMIDLTool"
+				PreprocessorDefinitions="_DEBUG"
+				MkTypLibCompatible="TRUE"
+				SuppressStartupBanner="TRUE"
+				TargetEnvironment="1"
+				TypeLibraryName="$(OutDir)/$(ProjectName).tlb"/>
+			<Tool
+				Name="VCPostBuildEventTool"/>
+			<Tool
+				Name="VCPreBuildEventTool"/>
+			<Tool
+				Name="VCPreLinkEventTool"
+				Description="Building Output Directories"
+				CommandLine="if not exist Debug\Resources mkdir Debug\Resources
+if not exist Debug\Resources\ExplorerPlugin.dll.Resources mkdir Debug\Resources\ExplorerPlugin.dll.Resources
+if not exist Debug\Resources\ExplorerPlugin.dll.Resources\en.lproj mkdir Debug\Resources\ExplorerPlugin.dll.Resources\en.lproj"/>
+			<Tool
+				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="_DEBUG"
+				Culture="1033"
+				AdditionalIncludeDirectories="../../mDNSWindows"/>
+			<Tool
+				Name="VCWebServiceProxyGeneratorTool"/>
+			<Tool
+				Name="VCWebDeploymentTool"/>
+		</Configuration>
+		<Configuration
+			Name="Release|Win32"
+			OutputDirectory=".\Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources\en.lproj"
+			IntermediateDirectory=".\Release"
+			ConfigurationType="2"
+			UseOfMFC="1"
+			ATLMinimizesCRunTimeLibraryUsage="FALSE"
+			CharacterSet="1">
+			<Tool
+				Name="VCCLCompilerTool"
+				Optimization="2"
+				GlobalOptimizations="TRUE"
+				InlineFunctionExpansion="2"
+				FavorSizeOrSpeed="2"
+				OmitFramePointers="TRUE"
+				AdditionalIncludeDirectories="..\..\mDNSWindows"
+				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;WINVER=0x0400"
+				StringPooling="TRUE"
+				RuntimeLibrary="0"
+				BufferSecurityCheck="FALSE"
+				EnableFunctionLevelLinking="FALSE"
+				ForceConformanceInForLoopScope="TRUE"
+				UsePrecompiledHeader="0"
+				PrecompiledHeaderFile=""
+				AssemblerListingLocation=".\Release/"
+				ObjectFile=".\Release/"
+				ProgramDataBaseFileName=".\Release/"
+				BrowseInformation="1"
+				WarningLevel="4"
+				WarnAsError="FALSE"
+				SuppressStartupBanner="TRUE"
+				Detect64BitPortabilityProblems="TRUE"
+				CompileAs="0"/>
+			<Tool
+				Name="VCCustomBuildTool"/>
+			<Tool
+				Name="VCLinkerTool"
+				AdditionalOptions="/MACHINE:I386 /IGNORE:4089 "
+				AdditionalDependencies=""
+				OutputFile="$(OutDir)/ExplorerPluginLocalized.dll"
+				LinkIncremental="1"
+				SuppressStartupBanner="TRUE"
+				IgnoreDefaultLibraryNames=""
+				ModuleDefinitionFile=""
+				ProgramDatabaseFile=""
+				SubSystem="2"
+				OptimizeReferences="0"
+				EnableCOMDATFolding="0"
+				ResourceOnlyDLL="TRUE"
+				ImportLibrary="$(IntDir)/$(ProjectName).lib"/>
+			<Tool
+				Name="VCMIDLTool"
+				PreprocessorDefinitions="NDEBUG"
+				MkTypLibCompatible="TRUE"
+				SuppressStartupBanner="TRUE"
+				TargetEnvironment="1"
+				TypeLibraryName="$(OutDir)/$(ProjectName).tlb"/>
+			<Tool
+				Name="VCPostBuildEventTool"/>
+			<Tool
+				Name="VCPreBuildEventTool"/>
+			<Tool
+				Name="VCPreLinkEventTool"
+				Description="Building Output Directories"
+				CommandLine="if not exist Release\Root mkdir Release\Root
+if not exist &quot;Release\Root\Program Files&quot; mkdir &quot;Release\Root\Program Files&quot;
+if not exist &quot;Release\Root\Program Files\Bonjour&quot; mkdir &quot;Release\Root\Program Files\Bonjour&quot;
+if not exist &quot;Release\Root\Program Files\Bonjour\Resources&quot; mkdir &quot;Release\Root\Program Files\Bonjour\Resources&quot;
+if not exist &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources&quot; mkdir &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources&quot;
+if not exist &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources\en.lproj&quot; mkdir &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources\en.lproj&quot;"/>
+			<Tool
+				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="NDEBUG"
+				Culture="1033"
+				AdditionalIncludeDirectories="../../mDNSWindows"/>
+			<Tool
+				Name="VCWebServiceProxyGeneratorTool"/>
+			<Tool
+				Name="VCWebDeploymentTool"/>
+		</Configuration>
+	</Configurations>
+	<Files>
+		<Filter
+			Name="Header Files"
+			Filter="h;hpp;hxx;hm;inl;inc">
+			<File
+				RelativePath="resource_loc_res.h">
+			</File>
+		</Filter>
+		<Filter
+			Name="Resource Files"
+			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;jpg;jpeg;jpe;manifest">
+			<File
+				RelativePath="ExplorerPluginLocRes.rc">
+			</File>
+		</Filter>
+	</Files>
+	<Globals>
+		<Global
+			Name="RESOURCE_FILE"
+			Value="ExplorerPluginLocRes.rc"/>
+	</Globals>
+</VisualStudioProject>

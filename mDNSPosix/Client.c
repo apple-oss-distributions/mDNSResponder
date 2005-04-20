@@ -1,5 +1,6 @@
-/*
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+/* -*- Mode: C; tab-width: 4 -*-
+ *
+ * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -23,6 +24,33 @@
     Change History (most recent first):
 
 $Log: Client.c,v $
+Revision 1.16  2005/02/04 01:00:53  cheshire
+Add '-d' command-line option to specify domain to browse
+
+Revision 1.15  2004/12/16 20:17:11  cheshire
+<rdar://problem/3324626> Cache memory management improvements
+
+Revision 1.14  2004/11/30 22:37:00  cheshire
+Update copyright dates and add "Mode: C; tab-width: 4" headers
+
+Revision 1.13  2004/10/19 21:33:20  cheshire
+<rdar://problem/3844991> Cannot resolve non-local registrations using the mach API
+Added flag 'kDNSServiceFlagsForceMulticast'. Passing through an interface id for a unicast name
+doesn't force multicast unless you set this flag to indicate explicitly that this is what you want
+
+Revision 1.12  2004/09/17 01:08:53  cheshire
+Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
+  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
+  declared in that file are ONLY appropriate to single-address-space embedded applications.
+  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
+
+Revision 1.11  2003/11/17 20:14:32  cheshire
+Typo: Wrote "domC" where it should have said "domainC"
+
+Revision 1.10  2003/11/14 21:27:09  cheshire
+<rdar://problem/3484766>: Security: Crashing bug in mDNSResponder
+Fix code that should use buffer size MAX_ESCAPED_DOMAIN_NAME (1005) instead of 256-byte buffers.
+
 Revision 1.9  2003/08/14 02:19:55  cheshire
 <rdar://problem/3375491> Split generic ResourceRecord type into two separate types: AuthRecord and CacheRecord
 
@@ -61,7 +89,7 @@ First checkin
 #include <unistd.h>
 #include <stdlib.h>
 
-#include "mDNSClientAPI.h"// Defines the interface to the mDNS core code
+#include "mDNSEmbeddedAPI.h"// Defines the interface to the mDNS core code
 #include "mDNSPosix.h"    // Defines the specific types needed to run mDNS on this platform
 #include "ExampleClientApp.h"
 
@@ -69,7 +97,7 @@ First checkin
 static mDNS mDNSStorage;       // mDNS core uses this to store its globals
 static mDNS_PlatformSupport PlatformStorage;  // Stores this platform's globals
 #define RR_CACHE_SIZE 500
-static CacheRecord gRRCache[RR_CACHE_SIZE];
+static CacheEntity gRRCache[RR_CACHE_SIZE];
 
 static const char *gProgramName = "mDNSResponderPosix";
 
@@ -81,9 +109,9 @@ static void BrowseCallback(mDNS *const m, DNSQuestion *question, const ResourceR
     domainlabel name;
     domainname  type;
     domainname  domain;
-    char nameC[256];
-    char typeC[256];
-    char domainC[256];
+	char nameC  [MAX_DOMAIN_LABEL+1];			// Unescaped name: up to 63 bytes plus C-string terminating NULL.
+	char typeC  [MAX_ESCAPED_DOMAIN_NAME];
+	char domainC[MAX_ESCAPED_DOMAIN_NAME];
     const char *state;
 
 	(void)m;		// Unused
@@ -133,21 +161,24 @@ static mDNSBool CheckThatServiceTypeIsUsable(const char *serviceType, mDNSBool p
     return result;
 }
 
-static const char kDefaultServiceType[] = "_afpovertcp._tcp.";
+static const char kDefaultServiceType[] = "_afpovertcp._tcp";
+static const char kDefaultDomain[]      = "local.";
 
 static void PrintUsage()
 {
     fprintf(stderr, 
-            "Usage: %s [-v level] [-t type]\n", 
+            "Usage: %s [-v level] [-t type] [-d domain]\n",
             gProgramName);
     fprintf(stderr, "          -v verbose mode, level is a number from 0 to 2\n");
     fprintf(stderr, "             0 = no debugging info (default)\n");
     fprintf(stderr, "             1 = standard debugging info\n");
     fprintf(stderr, "             2 = intense debugging info\n");
     fprintf(stderr, "          -t uses 'type' as the service type (default is '%s')\n", kDefaultServiceType);
+    fprintf(stderr, "          -d uses 'domain' as the domain to browse (default is '%s')\n", kDefaultDomain);
 }
 
 static const char *gServiceType      = kDefaultServiceType;
+static const char *gServiceDomain    = kDefaultDomain;
 
 static void ParseArguments(int argc, char **argv)
     // Parses our command line arguments into the global variables 
@@ -167,7 +198,7 @@ static void ParseArguments(int argc, char **argv)
     // Parse command line options using getopt.
     
     do {
-        ch = getopt(argc, argv, "v:t:");
+        ch = getopt(argc, argv, "v:t:d:");
         if (ch != -1) {
             switch (ch) {
                 case 'v':
@@ -184,6 +215,9 @@ static void ParseArguments(int argc, char **argv)
                     if ( ! CheckThatServiceTypeIsUsable(gServiceType, mDNStrue) ) {
                         exit(1);
                     }
+                    break;
+                case 'd':
+                    gServiceDomain = optarg;
                     break;
                 case '?':
                 default:
@@ -225,9 +259,9 @@ int main(int argc, char **argv)
         // Construct and start the query.
         
         MakeDomainNameFromDNSNameString(&type, gServiceType);
-        MakeDomainNameFromDNSNameString(&domain, "local.");
+        MakeDomainNameFromDNSNameString(&domain, gServiceDomain);
 
-        status = mDNS_StartBrowse(&mDNSStorage, &question, &type, &domain, mDNSInterface_Any, BrowseCallback, NULL);
+        status = mDNS_StartBrowse(&mDNSStorage, &question, &type, &domain, mDNSInterface_Any, mDNSfalse, BrowseCallback, NULL);
     
         // Run the platform main event loop until the user types ^C. 
         // The BrowseCallback routine is responsible for printing 

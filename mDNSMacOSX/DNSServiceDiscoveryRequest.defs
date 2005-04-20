@@ -34,6 +34,7 @@ import "DNSServiceDiscoveryDefines.h";
 type DNSCString = c_string[*:1024];
 type record_data = ^ array [] of MACH_MSG_TYPE_BYTE
 				ctype: record_data_t;
+type IPPort = struct[4] of char ctype:IPPort;				
 
 simpleroutine DNSServiceBrowserCreate_rpc(
 				server: mach_port_t;
@@ -53,7 +54,7 @@ simpleroutine DNSServiceRegistrationCreate_rpc(
                         in	name: DNSCString;
                         in	regtype: DNSCString;
                         in	domain: DNSCString;
-                        in	port: int;
+                        in	port: IPPort;
                         in	txtRecord: DNSCString);
 
                         

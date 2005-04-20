@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -23,6 +23,30 @@
     Change History (most recent first):
 
 $Log: DNSServiceDiscovery.c,v $
+Revision 1.8  2004/09/17 01:08:58  cheshire
+Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
+  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
+  declared in that file are ONLY appropriate to single-address-space embedded applications.
+  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
+
+Revision 1.7  2004/05/08 12:24:48  bradley
+Removed trailing character from zero value to fix compile error.
+
+Revision 1.6  2004/05/06 18:42:58  ksekar
+General dns_sd.h API cleanup, including the following radars:
+<rdar://problem/3592068>: Remove flags with zero value
+<rdar://problem/3479569>: Passing in NULL causes a crash.
+
+Revision 1.5  2004/01/30 02:56:34  bradley
+Updated to support full Unicode display. Added support for all services on www.dns-sd.org.
+
+Revision 1.4  2003/11/14 20:59:10  cheshire
+Clients can't use AssignDomainName macro because mDNSPlatformMemCopy is defined in mDNSPlatformFunctions.h.
+Best solution is just to combine mDNSEmbeddedAPI.h and mDNSPlatformFunctions.h into a single file.
+
+Revision 1.3  2003/10/04 04:47:08  bradley
+Changed DNSServiceRegistrationCreate to treat the port in network byte order for end-to-end consistency.
+
 Revision 1.2  2003/08/20 07:06:34  bradley
 Update to APSL 2.0. Updated change history to match other mDNSResponder files.
 
@@ -54,8 +78,7 @@ Platform-neutral DNSServices-based emulation layer for the Mac OS X DNSServiceDi
 	
 #endif
 
-#include	"mDNSClientAPI.h"
-#include	"mDNSPlatformFunctions.h"
+#include	"mDNSEmbeddedAPI.h"
 #include	"DNSServices.h"
 
 #include	"DNSServiceDiscovery.h"
@@ -179,6 +202,7 @@ dns_service_discovery_ref
 	dns_service_discovery_ref		obj;
 	void *							txt;
 	size_t							txtSize;
+	DNSOpaque16						port;
 	DNSRegistrationRef				registration;
 	
 	result 	= NULL;
@@ -203,7 +227,9 @@ dns_service_discovery_ref
 		require_noerr( err, exit );
 	}
 	
-	err = DNSRegistrationCreate( kDNSRegistrationFlagPreFormattedTextRecord, inName, inType, inDomain, inPort, txt, 
+	port.v8[ 0 ] = (DNSUInt8)( inPort >> 8 );
+	port.v8[ 1 ] = (DNSUInt8)( inPort & 0xFF );
+	err = DNSRegistrationCreate( kDNSRegistrationFlagPreFormattedTextRecord, inName, inType, inDomain, port.v16, txt, 
 								 (DNSCount) txtSize, NULL, NULL, DNSServiceRegistrationPrivateCallBack, obj, &registration );
 	require_noerr( err, exit ); 
 	obj->ref = registration;
@@ -426,7 +452,7 @@ DNS_LOCAL void
 			if( callback )
 			{
 				callback( DNSServiceDomainEnumerationReplyAddDomain, inEvent->data.addDomain.domain, 
-						  DNSServiceDiscoverReplyFlagsFinished, obj->context );
+						  0, obj->context );
 			}
 			break;
 		
@@ -436,7 +462,7 @@ DNS_LOCAL void
 			if( callback )
 			{
 				callback( DNSServiceDomainEnumerationReplyAddDomainDefault, inEvent->data.addDefaultDomain.domain, 
-						  DNSServiceDiscoverReplyFlagsFinished, obj->context );
+						  0, obj->context );
 			}
 			break;
 		
@@ -446,7 +472,7 @@ DNS_LOCAL void
 			if( callback )
 			{
 				callback( DNSServiceDomainEnumerationReplyRemoveDomain, inEvent->data.removeDomain.domain, 
-						  DNSServiceDiscoverReplyFlagsFinished, obj->context );
+						  0, obj->context );
 			}
 			break;
 		
@@ -547,7 +573,7 @@ DNS_LOCAL void
 						  inEvent->data.addService.name, 
 						  inEvent->data.addService.type, 
 						  inEvent->data.addService.domain, 
-						  DNSServiceDiscoverReplyFlagsFinished, 
+						  0, 
 						  obj->context );
 			}
 			break;
@@ -564,7 +590,7 @@ DNS_LOCAL void
 						  inEvent->data.removeService.name, 
 						  inEvent->data.removeService.type, 
 						  inEvent->data.removeService.domain, 
-						  DNSServiceDiscoverReplyFlagsFinished, 
+						  0, 
 						  obj->context );
 			}
 			break;
@@ -667,7 +693,7 @@ DNS_LOCAL void
 			if( callback )
 			{
 				callback( (struct sockaddr *) &interfaceAddr, (struct sockaddr *) &addr, inEvent->data.resolved.textRecord, 
-						  DNSServiceDiscoverReplyFlagsFinished, obj->context );
+						  0, obj->context );
 			}
 			break;
 				

@@ -23,6 +23,13 @@
     Change History (most recent first):
 
 $Log: mDNSMacOS9.h,v $
+Revision 1.10  2004/03/12 21:30:26  cheshire
+Build a System-Context Shared Library from mDNSCore, for the benefit of developers
+like Muse Research who want to be able to use mDNS/DNS-SD from GPL-licensed code.
+
+Revision 1.9  2004/02/09 23:25:35  cheshire
+Need to set TTL 255 to interoperate with peers that check TTL (oops!)
+
 Revision 1.8  2003/08/12 19:56:24  cheshire
 Update to APSL 2.0
 
@@ -31,28 +38,33 @@ Update to APSL 2.0
 // ***************************************************************************
 // Classic Mac (Open Transport) structures
 
+//#include <Files.h>	// OpenTransport.h requires this
 #include <OpenTransport.h>
 #include <OpenTptInternet.h>
 #include <OpenTptClient.h>
 
 typedef enum
 	{
-	mOT_Reset = 0,
-	mOT_Start,
-	mOT_ReusePort,
-	mOT_RcvDestAddr,
-	mOT_LLScope,
-	mOT_AdminScope,
-	mOT_Bind,
-	mOT_Ready
+	mOT_Closed = 0,		// We got kOTProviderIsClosed message
+	mOT_Reset,			// We got xOTStackWasLoaded message
+	mOT_Start,			// We've called OTAsyncOpenEndpoint
+	mOT_ReusePort,		// Have just done kReusePortOption
+	mOT_RcvDestAddr,	// Have just done kRcvDestAddrOption
+	mOT_SetUTTL,		// Have just done kSetUnicastTTLOption
+	mOT_SetMTTL,		// Have just done kSetMulticastTTLOption
+	mOT_LLScope,		// Have just done kAddLinkMulticastOption
+//	mOT_AdminScope,		// Have just done kAddAdminMulticastOption
+	mOT_Bind,			// We've just called OTBind
+	mOT_Ready			// Got T_BINDCOMPLETE; Interface is registered and active
 	} mOT_State;
 
 typedef struct { TOptionHeader h; mDNSv4Addr multicastGroupAddress; mDNSv4Addr InterfaceAddress; } TIPAddMulticastOption;
+typedef struct { TOptionHeader h; UInt8 val; } TSetByteOption;
 typedef struct { TOptionHeader h; UInt32 flag; } TSetBooleanOption;
 
 // TOptionBlock is a union of various types.
 // What they all have in common is that they all start with a TOptionHeader.
-typedef union  { TOptionHeader h; TIPAddMulticastOption m; TSetBooleanOption b; } TOptionBlock;
+typedef union  { TOptionHeader h; TIPAddMulticastOption m; TSetByteOption i; TSetBooleanOption b; } TOptionBlock;
 
 struct mDNS_PlatformSupport_struct
 	{

@@ -23,6 +23,37 @@
     Change History (most recent first):
 
 $Log: Mac\040OS\040Test\040Searcher.c,v $
+Revision 1.21  2004/12/16 20:49:34  cheshire
+<rdar://problem/3324626> Cache memory management improvements
+
+Revision 1.20  2004/10/19 21:33:18  cheshire
+<rdar://problem/3844991> Cannot resolve non-local registrations using the mach API
+Added flag 'kDNSServiceFlagsForceMulticast'. Passing through an interface id for a unicast name
+doesn't force multicast unless you set this flag to indicate explicitly that this is what you want
+
+Revision 1.19  2004/09/17 01:08:50  cheshire
+Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
+  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
+  declared in that file are ONLY appropriate to single-address-space embedded applications.
+  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
+
+Revision 1.18  2004/09/16 21:59:16  cheshire
+For consistency with zerov6Addr, rename zeroIPAddr to zerov4Addr
+
+Revision 1.17  2004/06/10 04:37:27  cheshire
+Add new parameter in mDNS_GetDomains()
+
+Revision 1.16  2004/03/12 21:30:25  cheshire
+Build a System-Context Shared Library from mDNSCore, for the benefit of developers
+like Muse Research who want to be able to use mDNS/DNS-SD from GPL-licensed code.
+
+Revision 1.15  2004/01/24 23:55:15  cheshire
+Change to use mDNSOpaque16fromIntVal/mDNSVal16 instead of shifting and masking
+
+Revision 1.14  2003/11/14 21:27:09  cheshire
+<rdar://problem/3484766>: Security: Crashing bug in mDNSResponder
+Fix code that should use buffer size MAX_ESCAPED_DOMAIN_NAME (1005) instead of 256-byte buffers.
+
 Revision 1.13  2003/08/14 02:19:54  cheshire
 <rdar://problem/3375491> Split generic ResourceRecord type into two separate types: AuthRecord and CacheRecord
 
@@ -35,7 +66,7 @@ Update to APSL 2.0
 #include <Events.h>						// For WaitNextEvent()
 #include <SIOUX.h>						// For SIOUXHandleOneEvent()
 
-#include "mDNSClientAPI.h"				// Defines the interface to the client layer above
+#include "mDNSEmbeddedAPI.h"			// Defines the interface to the client layer above
 #include "mDNSMacOS9.h"					// Defines the specific types needed to run mDNS on this platform
 
 typedef struct
@@ -50,7 +81,7 @@ typedef struct { ServiceInfo i; mDNSBool add; mDNSBool dom; OTLink link; } linke
 // These don't have to be globals, but their memory does need to remain valid for as
 // long as the search is going on. They are declared as globals here for simplicity.
 #define RR_CACHE_SIZE 1000
-static CacheRecord rrcachestorage[RR_CACHE_SIZE];
+static CacheEntity rrcachestorage[RR_CACHE_SIZE];
 static mDNS mDNSStorage;
 static mDNS_PlatformSupport PlatformSupportStorage;
 static SearcherServices services;
@@ -75,7 +106,7 @@ static void PrintServiceInfo(SearcherServices *services)
 
 		if (ls->dom)
 			{
-			char c_dom[256];
+			char c_dom[MAX_ESCAPED_DOMAIN_NAME];
 			ConvertDomainNameToCString(&s->name, c_dom);
 			if (ls->add) printf("%-55s available for browsing\n", c_dom);
 			else         printf("%-55s no longer available for browsing\n", c_dom);
@@ -84,9 +115,7 @@ static void PrintServiceInfo(SearcherServices *services)
 			{
 			domainlabel name;
 			domainname type, domain;
-			UInt16 port = (UInt16)((UInt16)s->port.b[0] << 8 | s->port.b[1]);
-			char c_name[64], c_type[256], c_dom[256], c_ip[20];
-			
+			char c_name[MAX_DOMAIN_LABEL+1], c_type[MAX_ESCAPED_DOMAIN_NAME], c_dom[MAX_ESCAPED_DOMAIN_NAME], c_ip[20];
 			DeconstructServiceName(&s->name, &name, &type, &domain);
 			ConvertDomainLabelToCString_unescaped(&name, c_name);
 			ConvertDomainNameToCString(&type, c_type);
@@ -94,7 +123,7 @@ static void PrintServiceInfo(SearcherServices *services)
 			sprintf(c_ip, "%d.%d.%d.%d", s->ip.ip.v4.b[0], s->ip.ip.v4.b[1], s->ip.ip.v4.b[2], s->ip.ip.v4.b[3]);
 
 			printf("%-55s %-16s %-14s ", c_name, c_type, c_dom);
-			if (ls->add) printf("%-15s %5d %#s\n", c_ip, port, s->TXTinfo);
+			if (ls->add) printf("%-15s %5d %#s\n", c_ip, mDNSVal16(s->port), s->TXTinfo);
 			else         printf("Removed\n");
 			}
 
@@ -130,7 +159,7 @@ static void FoundInstance(mDNS *const m, DNSQuestion *question, const ResourceRe
 	SearcherServices *services = (SearcherServices *)question->QuestionContext;
 	linkedServiceInfo *info;
 
-	debugf("FoundInstance %##s PTR %##s", answer->name.c, answer->rdata->u.name.c);
+	debugf("FoundInstance %##s PTR %##s", answer->name->c, answer->rdata->u.name.c);
 
 	if (answer->rrtype != kDNSType_PTR) return;
 	if (!services) { debugf("FoundInstance: services is NULL"); return; }
@@ -141,7 +170,7 @@ static void FoundInstance(mDNS *const m, DNSQuestion *question, const ResourceRe
 	info->i.name          = answer->rdata->u.name;
 	info->i.InterfaceID   = answer->InterfaceID;
 	info->i.ip.type		  = mDNSAddrType_IPv4;
-	info->i.ip.ip.v4  = zeroIPAddr;
+	info->i.ip.ip.v4      = zerov4Addr;
 	info->i.port          = zeroIPPort;
 	info->add             = AddRecord;
 	info->dom             = mDNSfalse;
@@ -163,7 +192,7 @@ static void FoundDomain(mDNS *const m, DNSQuestion *question, const ResourceReco
 	SearcherServices *services = (SearcherServices *)question->QuestionContext;
 	linkedServiceInfo *info;
 
-	debugf("FoundDomain %##s PTR %##s", answer->name.c, answer->rdata->u.name.c);
+	debugf("FoundDomain %##s PTR %##s", answer->name->c, answer->rdata->u.name.c);
 
 	if (answer->rrtype != kDNSType_PTR) return;
 	if (!services) { debugf("FoundDomain: services is NULL"); return; }
@@ -174,7 +203,7 @@ static void FoundDomain(mDNS *const m, DNSQuestion *question, const ResourceReco
 	info->i.name          = answer->rdata->u.name;
 	info->i.InterfaceID   = answer->InterfaceID;
 	info->i.ip.type		  = mDNSAddrType_IPv4;
-	info->i.ip.ip.v4  = zeroIPAddr;
+	info->i.ip.ip.v4      = zerov4Addr;
 	info->i.port          = zeroIPPort;
 	info->add             = AddRecord;
 	info->dom             = mDNStrue;
@@ -194,18 +223,16 @@ static Boolean YieldSomeTime(UInt32 milliseconds)
 
 int main()
 	{
-	extern void mDNSPlatformIdle(mDNS *const m);	// Only needed for debugging version
 	mStatus err;
 	Boolean DoneSetup = false;
+	void *tempmem;
 
 	SIOUXSettings.asktosaveonclose = false;
 	SIOUXSettings.userwindowtitle  = "\pMulticast DNS Searcher";
 	SIOUXSettings.rows             = 40;
 	SIOUXSettings.columns          = 132;
 
-	printf("Prototype Multicast DNS Searcher\n\n");
-	printf("WARNING! This is experimental software.\n\n");
-	printf("Multicast DNS is currently an experimental protocol.\n\n");
+	printf("Multicast DNS Searcher\n\n");
 	printf("This software reports errors using MacsBug breaks,\n");
 	printf("so if you don't have MacsBug installed your Mac may crash.\n\n");
 	printf("******************************************************************************\n");
@@ -217,15 +244,23 @@ int main()
 		mDNS_Init_DontAdvertiseLocalAddresses, mDNS_Init_NoInitCallback, mDNS_Init_NoInitCallbackContext);
 	if (err) return(err);
 
+	// Make sure OT has a large enough memory pool for us to draw from at OTNotifier (interrupt) time
+	tempmem = OTAllocMem(0x10000);
+	if (tempmem) OTFreeMem(tempmem);
+	else printf("**** Warning: OTAllocMem couldn't pre-allocate 64K for us.\n");
+
 	services.serviceinfolist.fHead = NULL;
 	services.headerPrinted         = false;
 	services.lostRecords           = false;
 
 	while (!YieldSomeTime(35))
 		{
-		// For debugging, use "#define __ONLYSYSTEMTASK__ 1" and call mDNSPlatformIdle() periodically.
-		// For shipping code, don't define __ONLYSYSTEMTASK__, and you don't need to call mDNSPlatformIdle()
+#if MDNS_ONLYSYSTEMTASK
+		// For debugging, use "#define MDNS_ONLYSYSTEMTASK 1" and call mDNSPlatformIdle() periodically.
+		// For shipping code, don't define MDNS_ONLYSYSTEMTASK, and you don't need to call mDNSPlatformIdle()
+		extern void mDNSPlatformIdle(mDNS *const m);
 		mDNSPlatformIdle(&mDNSStorage);	// Only needed for debugging version
+#endif
 		if (mDNSStorage.mDNSPlatformStatus == mStatus_NoError && !DoneSetup)
 			{
 			domainname srvtype, srvdom;
@@ -233,9 +268,9 @@ int main()
 			printf("\nSending mDNS service lookup queries and waiting for responses...\n\n");
 			MakeDomainNameFromDNSNameString(&srvtype, "_http._tcp.");
 			MakeDomainNameFromDNSNameString(&srvdom, "local.");
-			err = mDNS_StartBrowse(&mDNSStorage, &browsequestion, &srvtype, &srvdom, mDNSInterface_Any, FoundInstance, &services);
+			err = mDNS_StartBrowse(&mDNSStorage, &browsequestion, &srvtype, &srvdom, mDNSInterface_Any, mDNSfalse, FoundInstance, &services);
 			if (err) break;
-			err = mDNS_GetDomains(&mDNSStorage, &domainquestion, mDNS_DomainTypeBrowse, mDNSInterface_Any, FoundDomain, &services);
+			err = mDNS_GetDomains(&mDNSStorage, &domainquestion, mDNS_DomainTypeBrowse, NULL, mDNSInterface_Any, FoundDomain, &services);
 			if (err) break;
 			}
 

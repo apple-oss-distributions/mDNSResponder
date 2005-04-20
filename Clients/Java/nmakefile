@@ -1,0 +1,106 @@
+# Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
+#
+# @APPLE_LICENSE_HEADER_START@
+# 
+# This file contains Original Code and/or Modifications of Original Code
+# as defined in and that are subject to the Apple Public Source License
+# Version 2.0 (the 'License'). You may not use this file except in
+# compliance with the License. Please obtain a copy of the License at
+# http://www.opensource.apple.com/apsl/ and read it before using this
+# file.
+# 
+# The Original Code and all software distributed under the License are
+# distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+# EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+# INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+# Please see the License for the specific language governing rights and
+# limitations under the License.
+# 
+# @APPLE_LICENSE_HEADER_END@
+#
+#
+# This Makefile builds .jar files for the DNS-SD Java sample apps.
+# You must have the Java support installed.
+#
+# nmake with no arguments builds all production targets.
+# 'nmake DEBUG=1' to build debugging targets.
+# 'nmake clean' or 'nmake clean DEBUG=1' to delete prod/debug objects & targets
+#
+# To run nmake, you may need to set up your PATH correctly, using a script 
+# such as: "\Program Files\Microsoft Visual Studio .NET\Common7\tools\vsvars32.bat"
+# 
+# The default location of the JDK is \javasdk. You can override this on the
+# command line (e.g. 'nmake JDK=\j2dk1.4.2_03').
+
+############################################################################
+
+JDK = \javasdk
+
+CP = copy
+RM = del /Q
+RMDIR = rmdir /S /Q
+JAVAC = $(JDK)\bin\javac
+JAVAH = $(JDK)\bin\javah
+JAR = $(JDK)\bin\jar
+
+# Set up diverging paths for debug vs. prod builds
+DEBUG=0
+!if $(DEBUG) == 1
+JFLAGS = -g
+OBJDIR = objects\debug
+BUILDDIR = build\debug
+!else
+JFLAGS = 
+OBJDIR = objects\prod
+BUILDDIR = build\prod
+!endif
+
+SCOBJ = $(OBJDIR)\SimpleChat
+BAOBJ = $(OBJDIR)\BrowserApp
+
+#############################################################################
+
+all: setup Java
+
+# 'setup' sets up the build directory structure the way we want
+setup:
+	@if not exist objects		mkdir objects
+	@if not exist build			mkdir build
+	@if not exist $(OBJDIR)		mkdir $(OBJDIR)
+	@if not exist $(SCOBJ)		mkdir $(SCOBJ)
+	@if not exist $(BAOBJ)		mkdir $(BAOBJ)
+	@if not exist $(BUILDDIR)	mkdir $(BUILDDIR)
+
+# clean removes targets and objects
+clean:
+	@if exist $(OBJDIR)		$(RMDIR) $(OBJDIR)
+	@if exist $(BUILDDIR)	$(RMDIR) $(BUILDDIR)
+
+#############################################################################
+
+Java: setup $(BUILDDIR)\SimpleChat.jar $(BUILDDIR)\BrowserApp.jar
+	@echo "Build complete"
+
+SIMPLECHATOBJ =	$(SCOBJ)\SwingBrowseListener.class \
+				$(SCOBJ)\SwingQueryListener.class \
+				$(SCOBJ)\SimpleChat.class 
+SIMPLECHATMAN = SimpleChat.manifest
+
+$(BUILDDIR)\SimpleChat.jar: $(SIMPLECHATOBJ) $(SIMPLECHATMAN)
+	$(JAR) -cfm $@ $(SIMPLECHATMAN) -C $(SCOBJ) .
+
+BROWSERAPPOBJ =	$(BAOBJ)\SwingResolveListener.class \
+				$(BAOBJ)\BrowserApp.class 
+BROWSERAPPMAN = BrowserApp.manifest
+
+$(BUILDDIR)\BrowserApp.jar: $(BROWSERAPPOBJ) $(BROWSERAPPMAN)
+	$(JAR) -cfm $@ $(BROWSERAPPMAN) -C $(BAOBJ) .
+
+JAVASRC	= .
+.SUFFIXES : .java
+{$(JAVASRC)}.java{$(BAOBJ)}.class:	
+	$(JAVAC) -d $(BAOBJ) -classpath $(BAOBJ);$(DNS_SD) $<
+{$(JAVASRC)}.java{$(SCOBJ)}.class:	
+	$(JAVAC) -d $(SCOBJ) -classpath $(SCOBJ);$(DNS_SD) $<
+

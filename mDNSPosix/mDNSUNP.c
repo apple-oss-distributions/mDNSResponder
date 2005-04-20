@@ -1,5 +1,6 @@
-/*
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+/* -*- Mode: C; tab-width: 4 -*-
+ *
+ * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -23,6 +24,40 @@
     Change History (most recent first):
 
 $Log: mDNSUNP.c,v $
+Revision 1.23  2004/12/01 04:25:05  cheshire
+<rdar://problem/3872803> Darwin patches for Solaris and Suse
+Provide daemon() for platforms that don't have it
+
+Revision 1.22  2004/11/30 22:37:01  cheshire
+Update copyright dates and add "Mode: C; tab-width: 4" headers
+
+Revision 1.21  2004/11/08 22:13:59  rpantos
+Create sockf6 lazily when v6 interface found.
+
+Revision 1.20  2004/10/16 00:17:01  cheshire
+<rdar://problem/3770558> Replace IP TTL 255 check with local subnet source address check
+
+Revision 1.19  2004/07/20 01:47:36  rpantos
+NOT_HAVE_SA_LEN applies to v6, too. And use more-portable s6_addr.
+
+Revision 1.18  2004/07/08 21:30:21  rpantos
+
+Revision 1.17  2004/06/25 00:26:27  rpantos
+Changes to fix the Posix build on Solaris.
+
+Revision 1.16  2004/03/20 05:37:09  cheshire
+Fix contributed by Terry Lambert & Alfred Perlstein:
+Don't use uint8_t -- it requires stdint.h, which doesn't exist on FreeBSD 4.x
+
+Revision 1.15  2004/02/14 01:09:45  rpantos
+Just use HAVE_IPV6 rather than defined(HAVE_IPV6).
+
+Revision 1.14  2003/12/11 18:53:40  cheshire
+Fix compiler warning reported by Paul Guyot
+
+Revision 1.13  2003/12/08 20:47:02  rpantos
+Add support for mDNSResponder on Linux.
+
 Revision 1.12  2003/09/02 20:47:13  cheshire
 Fix signed/unsigned warning
 
@@ -94,22 +129,29 @@ First checkin
     #include <net/if_dl.h>
 #endif
 
+#if defined(AF_INET6) && HAVE_IPV6
+#include <netinet6/in6_var.h>
+#endif
 
 struct ifi_info *get_ifi_info(int family, int doaliases)
 {
     int                 junk;
     struct ifi_info     *ifi, *ifihead, **ifipnext;
-    int                 sockfd, len, lastlen, flags, myflags;
+    int                 sockfd, sockf6, len, lastlen, flags, myflags;
+#ifdef NOT_HAVE_IF_NAMETOINDEX
+    int                 index = 200;
+#endif
     char                *ptr, *buf, lastname[IFNAMSIZ], *cptr;
     struct ifconf       ifc;
     struct ifreq        *ifr, ifrcopy;
     struct sockaddr_in  *sinptr;
     
-#if defined(AF_INET6) && defined(HAVE_IPV6)
+#if defined(AF_INET6) && HAVE_IPV6
     struct sockaddr_in6 *sinptr6;
 #endif
 
     sockfd = -1;
+    sockf6 = -1;
     buf = NULL;
     ifihead = NULL;
     
@@ -121,7 +163,7 @@ struct ifi_info *get_ifi_info(int family, int doaliases)
     lastlen = 0;
     len = 100 * sizeof(struct ifreq);   /* initial buffer size guess */
     for ( ; ; ) {
-        buf = malloc(len);
+        buf = (char*)malloc(len);
         if (buf == NULL) {
             goto gotError;
         }
@@ -175,7 +217,7 @@ struct ifi_info *get_ifi_info(int family, int doaliases)
         if ((flags & IFF_UP) == 0)
             continue;   /* ignore if interface not up */
 
-        ifi = calloc(1, sizeof(struct ifi_info));
+        ifi = (struct ifi_info*)calloc(1, sizeof(struct ifi_info));
         if (ifi == NULL) {
             goto gotError;
         }
@@ -184,7 +226,15 @@ struct ifi_info *get_ifi_info(int family, int doaliases)
 
         ifi->ifi_flags = flags;     /* IFF_xxx values */
         ifi->ifi_myflags = myflags; /* IFI_xxx values */
+#ifndef NOT_HAVE_IF_NAMETOINDEX
         ifi->ifi_index = if_nametoindex(ifr->ifr_name);
+#else
+        ifrcopy = *ifr;
+		if ( 0 >= ioctl(sockfd, SIOCGIFINDEX, &ifrcopy))
+            ifi->ifi_index = ifrcopy.ifr_index;
+        else
+            ifi->ifi_index = index++;	/* SIOCGIFINDEX is broken on Solaris 2.5ish, so fake it */
+#endif
         memcpy(ifi->ifi_name, ifr->ifr_name, IFI_NAME);
         ifi->ifi_name[IFI_NAME-1] = '\0';
 /* end get_ifi_info2 */
@@ -193,11 +243,19 @@ struct ifi_info *get_ifi_info(int family, int doaliases)
         case AF_INET:
             sinptr = (struct sockaddr_in *) &ifr->ifr_addr;
             if (ifi->ifi_addr == NULL) {
-                ifi->ifi_addr = calloc(1, sizeof(struct sockaddr_in));
+                ifi->ifi_addr = (struct sockaddr*)calloc(1, sizeof(struct sockaddr_in));
                 if (ifi->ifi_addr == NULL) {
                     goto gotError;
                 }
                 memcpy(ifi->ifi_addr, sinptr, sizeof(struct sockaddr_in));
+
+#ifdef  SIOCGIFNETMASK
+				if (ioctl(sockfd, SIOCGIFNETMASK, &ifrcopy) < 0) goto gotError;
+				ifi->ifi_netmask = (struct sockaddr*)calloc(1, sizeof(struct sockaddr_in));
+				if (ifi->ifi_netmask == NULL) goto gotError;
+				sinptr = (struct sockaddr_in *) &ifrcopy.ifr_addr;
+				memcpy(ifi->ifi_netmask, sinptr, sizeof(struct sockaddr_in));
+#endif
 
 #ifdef  SIOCGIFBRDADDR
                 if (flags & IFF_BROADCAST) {
@@ -205,7 +263,7 @@ struct ifi_info *get_ifi_info(int family, int doaliases)
                         goto gotError;
                     }
                     sinptr = (struct sockaddr_in *) &ifrcopy.ifr_broadaddr;
-                    ifi->ifi_brdaddr = calloc(1, sizeof(struct sockaddr_in));
+                    ifi->ifi_brdaddr = (struct sockaddr*)calloc(1, sizeof(struct sockaddr_in));
                     if (ifi->ifi_brdaddr == NULL) {
                         goto gotError;
                     }
@@ -219,7 +277,7 @@ struct ifi_info *get_ifi_info(int family, int doaliases)
                         goto gotError;
                     }
                     sinptr = (struct sockaddr_in *) &ifrcopy.ifr_dstaddr;
-                    ifi->ifi_dstaddr = calloc(1, sizeof(struct sockaddr_in));
+                    ifi->ifi_dstaddr = (struct sockaddr*)calloc(1, sizeof(struct sockaddr_in));
                     if (ifi->ifi_dstaddr == NULL) {
                         goto gotError;
                     }
@@ -229,7 +287,7 @@ struct ifi_info *get_ifi_info(int family, int doaliases)
             }
             break;
 
-#if defined(AF_INET6) && defined(HAVE_IPV6)
+#if defined(AF_INET6) && HAVE_IPV6
         case AF_INET6:
             sinptr6 = (struct sockaddr_in6 *) &ifr->ifr_addr;
             if (ifi->ifi_addr == NULL) {
@@ -241,8 +299,24 @@ struct ifi_info *get_ifi_info(int family, int doaliases)
                 /* Some platforms (*BSD) inject the prefix in IPv6LL addresses */
                 /* We need to strip that out */
                 if (IN6_IS_ADDR_LINKLOCAL(&sinptr6->sin6_addr))
-                	sinptr6->sin6_addr.__u6_addr.__u6_addr16[1] = 0;
+                	sinptr6->sin6_addr.s6_addr[2] = sinptr6->sin6_addr.s6_addr[3] = 0;
                 memcpy(ifi->ifi_addr, sinptr6, sizeof(struct sockaddr_in6));
+
+#ifdef  SIOCGIFNETMASK_IN6
+				{
+				struct in6_ifreq ifr6;
+				if (sockf6 == -1)
+					sockf6 = socket(AF_INET6, SOCK_DGRAM, 0);
+				bzero(&ifr6, sizeof(ifr6));
+				memcpy(&ifr6.ifr_name,           &ifr->ifr_name, sizeof(ifr6.ifr_name          ));
+				memcpy(&ifr6.ifr_ifru.ifru_addr, &ifr->ifr_addr, sizeof(ifr6.ifr_ifru.ifru_addr));
+				if (ioctl(sockf6, SIOCGIFNETMASK_IN6, &ifr6) < 0) goto gotError;
+				ifi->ifi_netmask = (struct sockaddr*)calloc(1, sizeof(struct sockaddr_in6));
+				if (ifi->ifi_netmask == NULL) goto gotError;
+				sinptr6 = (struct sockaddr_in6 *) &ifr6.ifr_ifru.ifru_addr;
+				memcpy(ifi->ifi_netmask, sinptr6, sizeof(struct sockaddr_in6));
+				}
+#endif
             }
             break;
 #endif
@@ -265,6 +339,10 @@ done:
     }
     if (sockfd != -1) {
         junk = close(sockfd);
+        assert(junk == 0);
+    }
+    if (sockf6 != -1) {
+        junk = close(sockf6);
         assert(junk == 0);
     }
     return(ifihead);    /* pointer to first structure in linked list */
@@ -292,7 +370,7 @@ free_ifi_info(struct ifi_info *ifihead)
 
 ssize_t 
 recvfrom_flags(int fd, void *ptr, size_t nbytes, int *flagsp,
-               struct sockaddr *sa, socklen_t *salenptr, struct my_in_pktinfo *pktp)
+               struct sockaddr *sa, socklen_t *salenptr, struct my_in_pktinfo *pktp, u_char *ttl)
 {
     struct msghdr   msg;
     struct iovec    iov[1];
@@ -305,6 +383,8 @@ recvfrom_flags(int fd, void *ptr, size_t nbytes, int *flagsp,
       char              control[1024];
     } control_un;
 
+	*ttl = 255;			// If kernel fails to provide TTL data then assume the TTL was 255 as it should be
+
     msg.msg_control = control_un.control;
     msg.msg_controllen = sizeof(control_un.control);
     msg.msg_flags = 0;
@@ -312,9 +392,9 @@ recvfrom_flags(int fd, void *ptr, size_t nbytes, int *flagsp,
     memset(&msg, 0, sizeof(msg));   /* make certain msg_accrightslen = 0 */
 #endif /* CMSG_FIRSTHDR */
 
-    msg.msg_name = (void *) sa;
+    msg.msg_name = (char *) sa;
     msg.msg_namelen = *salenptr;
-    iov[0].iov_base = ptr;
+    iov[0].iov_base = (char *)ptr;
     iov[0].iov_len = nbytes;
     msg.msg_iov = iov;
     msg.msg_iovlen = 1;
@@ -390,25 +470,40 @@ struct in_pktinfo
         if (cmptr->cmsg_level == IPPROTO_IP &&
             cmptr->cmsg_type == IP_RECVIF) {
             struct sockaddr_dl  *sdl = (struct sockaddr_dl *) CMSG_DATA(cmptr);
-            int nameLen = (sdl->sdl_nlen < IFI_NAME - 1) ? sdl->sdl_nlen : (IFI_NAME - 1);
-            pktp->ipi_ifindex = sdl->sdl_index;
 #ifndef HAVE_BROKEN_RECVIF_NAME
+            int nameLen = (sdl->sdl_nlen < IFI_NAME - 1) ? sdl->sdl_nlen : (IFI_NAME - 1);
             strncpy(pktp->ipi_ifname, sdl->sdl_data, nameLen);
 #endif
+            pktp->ipi_ifindex = sdl->sdl_index;
             assert(pktp->ipi_ifname[IFI_NAME - 1] == 0);
             // null terminated because of memset above
             continue;
         }
 #endif
 
-#if defined(IPV6_PKTINFO) && defined(HAVE_IPV6)
+#ifdef  IP_RECVTTL
+        if (cmptr->cmsg_level == IPPROTO_IP &&
+            cmptr->cmsg_type == IP_RECVTTL) {
+			*ttl = *(u_char*)CMSG_DATA(cmptr);
+            continue;
+        }
+        else if (cmptr->cmsg_level == IPPROTO_IP &&
+            cmptr->cmsg_type == IP_TTL) {		// some implementations seem to send IP_TTL instead of IP_RECVTTL
+			*ttl = *(int*)CMSG_DATA(cmptr);
+            continue;
+        }
+#endif
+
+#if defined(IPV6_PKTINFO) && HAVE_IPV6
         if (cmptr->cmsg_level == IPPROTO_IPV6 && 
             cmptr->cmsg_type == IPV6_PKTINFO) {
             struct sockaddr_in6 *sin6 = (struct sockaddr_in6*)&pktp->ipi_addr;
 			struct in6_pktinfo *ip6_info = (struct in6_pktinfo*)CMSG_DATA(cmptr);
 			
             sin6->sin6_family   = AF_INET6;
+#ifndef NOT_HAVE_SA_LEN
             sin6->sin6_len      = sizeof(*sin6);
+#endif
             sin6->sin6_addr     = ip6_info->ipi6_addr;
             sin6->sin6_flowinfo = 0;
             sin6->sin6_scope_id = 0;
@@ -417,8 +512,64 @@ struct in_pktinfo
             continue;
         }
 #endif
+
+#if defined(IPV6_HOPLIMIT) && HAVE_IPV6
+        if (cmptr->cmsg_level == IPPROTO_IPV6 && 
+            cmptr->cmsg_type == IPV6_HOPLIMIT) {
+			*ttl = *(int*)CMSG_DATA(cmptr);
+            continue;
+        }
+#endif
         assert(0);  // unknown ancillary data
     }
     return(n);
 #endif /* CMSG_FIRSTHDR */
 }
+
+// **********************************************************************************************
+
+// daemonize the process. Adapted from "Unix Network Programming" vol 1 by Stevens, section 12.4.
+// Returns 0 on success, -1 on failure.
+
+#ifdef NOT_HAVE_DAEMON
+#include <fcntl.h>
+#include <sys/stat.h>
+int daemon(int nochdir, int noclose)
+    {
+	switch (fork())
+		{
+		case -1: return (-1);	// Fork failed
+		case 0:  break;			// Child -- continue
+		default: _exit(0);		// Parent -- exit
+		}
+
+	if (setsid() == -1) return(-1);
+
+	signal(SIGHUP, SIG_IGN);
+
+	switch (fork())				// Fork again, primarily for reasons of Unix trivia
+		{
+		case -1: return (-1);	// Fork failed
+		case 0:  break;			// Child -- continue
+		default: _exit(0);		// Parent -- exit
+		}
+
+	if (!nochdir) (void)chdir("/");
+	umask(0);
+
+	if (!noclose)
+		{
+		int fd = open("/dev/null", O_RDWR, 0);
+		if (fd != -1)
+			{
+			// Avoid unnecessarily duplicating a file descriptor to itself
+			if (fd != STDIN_FILENO) (void)dup2(fd, STDIN_FILENO);
+			if (fd != STDOUT_FILENO) (void)dup2(fd, STDOUT_FILENO);
+			if (fd != STDERR_FILENO) (void)dup2(fd, STDERR_FILENO);
+			if (fd != STDIN_FILENO && fd != STDOUT_FILENO && fd != STDERR_FILENO) 
+				(void)close (fd);
+			}
+		}
+	return (0);
+    }
+#endif /* NOT_HAVE_DAEMON */

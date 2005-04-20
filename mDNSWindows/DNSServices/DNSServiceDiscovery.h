@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -23,6 +23,14 @@
     Change History (most recent first):
 
 $Log: DNSServiceDiscovery.h,v $
+Revision 1.4  2004/05/06 18:42:58  ksekar
+General dns_sd.h API cleanup, including the following radars:
+<rdar://problem/3592068>: Remove flags with zero value
+<rdar://problem/3479569>: Passing in NULL causes a crash.
+
+Revision 1.3  2004/01/30 02:56:34  bradley
+Updated to support full Unicode display. Added support for all services on www.dns-sd.org.
+
 Revision 1.2  2003/08/20 07:06:34  bradley
 Update to APSL 2.0. Updated change history to match other mDNSResponder files.
 
@@ -177,7 +185,6 @@ typedef enum
 
 typedef enum
 {
-    DNSServiceDiscoverReplyFlagsFinished,
     DNSServiceDiscoverReplyFlagsMoreComing,
 } DNSServiceDiscoveryReplyFlags;
 

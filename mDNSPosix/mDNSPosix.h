@@ -1,5 +1,6 @@
-/*
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+/* -*- Mode: C; tab-width: 4 -*-
+ *
+ * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -23,6 +24,33 @@
     Change History (most recent first):
 
 $Log: mDNSPosix.h,v $
+Revision 1.17  2005/02/04 00:39:59  cheshire
+Move ParseDNSServers() from PosixDaemon.c to mDNSPosix.c so all Posix client layers can use it
+
+Revision 1.16  2004/11/30 22:37:01  cheshire
+Update copyright dates and add "Mode: C; tab-width: 4" headers
+
+Revision 1.15  2004/02/06 01:19:51  cheshire
+Conditionally exclude IPv6 code unless HAVE_IPV6 is set
+
+Revision 1.14  2004/01/28 21:12:15  cheshire
+Reconcile mDNSIPv6Support & HAVE_IPV6 into a single flag (HAVE_IPV6)
+
+Revision 1.13  2004/01/24 05:12:03  cheshire
+<rdar://problem/3534352>: Need separate socket for issuing unicast queries
+
+Revision 1.12  2004/01/23 21:37:08  cheshire
+For consistency, rename multicastSocket to multicastSocket4, and multicastSocketv6 to multicastSocket6
+
+Revision 1.11  2003/12/11 03:03:51  rpantos
+Clean up mDNSPosix so that it builds on OS X again.
+
+Revision 1.10  2003/12/08 20:47:02  rpantos
+Add support for mDNSResponder on Linux.
+
+Revision 1.9  2003/10/30 19:25:19  cheshire
+Fix warning on certain compilers
+
 Revision 1.8  2003/08/12 19:56:26  cheshire
 Update to APSL 2.0
 
@@ -54,24 +82,46 @@ First checkin
 #ifndef __mDNSPlatformPosix_h
 #define __mDNSPlatformPosix_h
 
+#include <signal.h>
 #include <sys/time.h>
-
-#if HAVE_IPV6
-#define mDNSIPv6Support 1
-#endif
 
 #ifdef  __cplusplus
     extern "C" {
 #endif
+
+// PosixNetworkInterface is a record extension of the core NetworkInterfaceInfo
+// type that supports extra fields needed by the Posix platform.
+//
+// IMPORTANT: coreIntf must be the first field in the structure because
+// we cast between pointers to the two different types regularly.
+
+typedef struct PosixNetworkInterface PosixNetworkInterface;
+
+struct PosixNetworkInterface
+	{
+	NetworkInterfaceInfo    coreIntf;
+	const char *            intfName;
+	PosixNetworkInterface * aliasIntf;
+	int                     index;
+	int                     multicastSocket4;
+#if HAVE_IPV6
+	int                     multicastSocket6;
+#endif
+	};
 
 // This is a global because debugf_() needs to be able to check its value
 extern int gMDNSPlatformPosixVerboseLevel;
 
 struct mDNS_PlatformSupport_struct
 	{
-    // No additional data required for Posix at this time
+	int unicastSocket4;
+#if HAVE_IPV6
+	int unicastSocket6;
+#endif
 	};
 
+#define uDNS_SERVERS_FILE "/etc/resolv.conf"
+extern int ParseDNSServers(mDNS *m, const char *filePath);
 extern mStatus mDNSPlatformPosixRefreshInterfaceList(mDNS *const m);
     // See comment in implementation.
 
@@ -81,8 +131,16 @@ extern mStatus mDNSPlatformPosixRefreshInterfaceList(mDNS *const m);
 // Set timeout->tv_sec to 0x3FFFFFFF if you want to have effectively no timeout
 // After calling mDNSPosixGetFDSet(), call select(nfds, &readfds, NULL, NULL, &timeout); as usual
 // After select() returns, call mDNSPosixProcessFDSet() to let mDNSCore do its work
-extern void mDNSPosixGetFDSet(mDNS *const m, int *nfds, fd_set *readfds, struct timeval *timeout);
+extern void mDNSPosixGetFDSet(mDNS *m, int *nfds, fd_set *readfds, struct timeval *timeout);
 extern void mDNSPosixProcessFDSet(mDNS *const m, fd_set *readfds);
+
+typedef	void (*mDNSPosixEventCallback)( void *context);
+
+extern mStatus mDNSPosixAddFDToEventLoop( int fd, mDNSPosixEventCallback callback, void *context);
+extern mStatus mDNSPosixRemoveFDFromEventLoop( int fd);
+extern mStatus mDNSPosixListenForSignalInEventLoop( int signum);
+extern mStatus mDNSPosixIgnoreSignalInEventLoop( int signum);
+extern mStatus mDNSPosixRunEventLoopOnce( mDNS *m, const struct timeval *pTimeout, sigset_t *pSignalsReceived, mDNSBool *pDataDispatched);
 
 #ifdef  __cplusplus
     }
