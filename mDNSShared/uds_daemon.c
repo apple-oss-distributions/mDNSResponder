@@ -24,6 +24,17 @@
     Change History (most recent first):
 
 $Log: uds_daemon.c,v $
+Revision 1.183  2005/06/13 22:39:11  cheshire
+<rdar://problem/4144870> Missing return statement in handle_enum_request() error handling
+
+Revision 1.182  2005/03/21 00:39:31  shersche
+<rdar://problem/4021486> Fix build warnings on Win32 platform
+
+Revision 1.181  2005/03/20 20:21:32  shersche
+<rdar://problem/4056827> mDNSResponder crashes when incorrect interface index is passed to DNSServiceRegister()
+Text record length and data parameters must be initialized to 0 and NULL to ensure that the service request
+object is cleaned up correctly when encountering an interface index error.
+
 Revision 1.180  2005/03/10 00:13:12  cheshire
 <rdar://problem/4043098> DNSServiceBrowse no longer returning error codes for invalid types
 In handle_browse_request(), mStatus err was being set correctly if an error occurred,
@@ -645,7 +656,7 @@ typedef struct service_instance
     domainname domain;
     mDNSBool default_local;			// is this the "local." from an empty-string registration?
     struct request_state *request;
-    int sd;
+    dnssd_sock_t sd;
     AuthRecord *subtypes;
     ServiceRecordSet srs; // note - must be last field in struct
     } service_instance;
@@ -834,7 +845,7 @@ static void handle_query_request(request_state *rstate);
 static reply_state *format_enumeration_reply(request_state *rstate, const char *domain, DNSServiceFlags flags, uint32_t ifi, DNSServiceErrorType err);
 static void handle_enum_request(request_state *rstate);
 static mStatus handle_regrecord_request(request_state *rstate);
-static void regrecord_callback(mDNS *const m, AuthRecord *const rr, mStatus result);
+static void regrecord_callback(mDNS *const m, AuthRecord * rr, mStatus result);
 static void connected_registration_termination(void *context);
 static void handle_reconfirm_request(request_state *rstate);
 static AuthRecord *read_rr_from_ipc_msg(char *msgbuf, int ttl, int validate_flags);
@@ -1164,13 +1175,13 @@ void udsserver_handle_configchange(void)
 static void connect_callback(void *info)
     {
     dnssd_sock_t sd;
-	unsigned int len;
+	dnssd_socklen_t len;
 	unsigned long optval;
     dnssd_sockaddr_t cliaddr;
     request_state *rstate;
     (void)info; // Unused
 
-	len = (int) sizeof(cliaddr);
+	len = (dnssd_socklen_t) sizeof(cliaddr);
     
 	sd = accept(listenfd, (struct sockaddr*) &cliaddr, &len);
 
@@ -1279,7 +1290,7 @@ static void request_callback(void *info)
 		{
 		mStatus err = 0;
 		int nwritten;
-		int errfd = socket(AF_DNSSD, SOCK_STREAM, 0);
+		dnssd_sock_t errfd = socket(AF_DNSSD, SOCK_STREAM, 0);
 		if (errfd == dnssd_InvalidSocket)
 			{
 			my_perror("ERROR: socket");
@@ -1336,7 +1347,7 @@ static void request_callback(void *info)
 			}
 
 		err = dnssd_htonl(err);
-		nwritten = send(errfd, &err, sizeof(err), 0);
+		nwritten = send(errfd, (dnssd_sockbuf_t) &err, sizeof(err), 0);
 		// On a freshly-created Unix Domain Socket, the kernel should *never* fail to buffer a four-byte write for us.
 		// If not, we don't attempt to handle this failure, but we do log it.
 		if (nwritten < (int)sizeof(err))
@@ -2206,6 +2217,8 @@ static void handle_regservice_request(request_state *request)
 
 	service->instances = NULL;
 	service->request = request;
+	service->txtlen  = 0;
+	service->txtdata = NULL;
 	request->service_registration = service;
     request->termination_context = request->service_registration;
     request->terminate = regservice_termination_callback;
@@ -2880,6 +2893,7 @@ static void handle_enum_request(request_state *rstate)
 		deliver_error(rstate, mStatus_BadParamErr);
 		abort_request(rstate);
 		unlink_request(rstate);
+		return;
     	}
 
     // allocate context structures
@@ -3053,7 +3067,7 @@ static AuthRecord *read_rr_from_ipc_msg(char *msgbuf, int GetTTL, int validate_f
     bzero(rr, sizeof(AuthRecord));  // ok if oversized rdata not zero'd
     
     mDNS_SetupResourceRecord(rr, mDNSNULL, mDNSPlatformInterfaceIDfromInterfaceIndex(gmDNS, interfaceIndex),
-		type, 0, (flags & kDNSServiceFlagsShared) ? kDNSRecordTypeShared : kDNSRecordTypeUnique, mDNSNULL, mDNSNULL);
+		type, 0, (mDNSu8) ((flags & kDNSServiceFlagsShared) ? kDNSRecordTypeShared : kDNSRecordTypeUnique), mDNSNULL, mDNSNULL);
     
     if (!MakeDomainNameFromDNSNameString(rr->resrec.name, name))
     	{
@@ -3342,7 +3356,7 @@ static int deliver_error(request_state *rstate, mStatus err)
 	undelivered_error_t *undeliv;
 	
 	err = dnssd_htonl(err);
-	nwritten = send(rstate->sd, &err, sizeof(mStatus), 0);
+	nwritten = send(rstate->sd, (dnssd_sockbuf_t) &err, sizeof(mStatus), 0);
 	if (nwritten < (int)sizeof(mStatus))
 		{
 		if (dnssd_errno() == dnssd_EINTR || dnssd_errno() == dnssd_EWOULDBLOCK)

@@ -24,6 +24,16 @@
     Change History (most recent first):
 
 $Log: mDNSMacOSX.c,v $
+Revision 1.308.2.2  2005/08/05 01:12:24  ksekar
+<rdar://problem/4137930> SUTiger: Hostname registration should register IPv6 AAAA record with DNS Update
+<rdar://problem/4147774> SUTiger: Be defensive against invalid UTF-8 in dynamic host names
+<rdar://problem/3923098> SUTiger: Things are showing up with a bogus interface index
+<rdar://problem/4080074> SUTiger: PPP connection disables same-host Bonjour ".local" lookups
+
+
+Revision 1.308.2.1  2005/07/22 21:42:59  ksekar
+Fix GCC 4.0/Intel compiler warnings
+
 Revision 1.308  2005/03/09 00:48:44  cheshire
 <rdar://problem/4015157> QU packets getting sent too early on wake from sleep
 Move "m->p->NetworkChanged = 0;" line from caller to callee
@@ -1360,27 +1370,19 @@ mDNSlocal ssize_t myrecvfrom(const int s, void *const buffer, const size_t max,
 // On entry, context points to our CFSocketSet
 // If ss->info is NULL, we received this packet on our anonymous unicast socket
 // If ss->info is non-NULL, we received this packet on port 5353 on the indicated interface
-mDNSlocal void myCFSocketCallBack(CFSocketRef cfs, CFSocketCallBackType CallBackType, CFDataRef address, const void *data, void *context)
+mDNSlocal void myCFSocketCallBack(const CFSocketRef cfs, const CFSocketCallBackType CallBackType, const CFDataRef address, const void *const data, void *const context)
 	{
-	mDNSAddr senderAddr, destAddr;
-	mDNSIPPort senderPort, destPort = MulticastDNSPort;
-	const CFSocketSet *ss = (const CFSocketSet *)context;
+	const CFSocketSet *const ss = (const CFSocketSet *)context;
 	mDNS *const m = ss->m;
-	mDNSInterfaceID InterfaceID = ss->info ? ss->info->ifinfo.InterfaceID : mDNSNULL;
-	struct sockaddr_storage from;
-	size_t fromlen = sizeof(from);
-	char packetifname[IF_NAMESIZE] = "";
-	int err, s1 = -1, skt = CFSocketGetNative(cfs);
-	int count = 0;
+	const int skt = CFSocketGetNative(cfs);
+	const int s1  = (cfs == ss->cfsv4) ? ss->sktv4 : (cfs == ss->cfsv6) ? ss->sktv6 : -1;
+	int err, count = 0;
 	
 	(void)address; // Parameter not used
 	(void)data;    // Parameter not used
 	
 	if (CallBackType != kCFSocketReadCallBack)
 		LogMsg("myCFSocketCallBack: Why is CallBackType %d not kCFSocketReadCallBack?", CallBackType);
-
-	if      (cfs == ss->cfsv4) s1 = ss->sktv4;
-	else if (cfs == ss->cfsv6) s1 = ss->sktv6;
 
 	if (s1 < 0 || s1 != skt)
 		{
@@ -1389,9 +1391,19 @@ mDNSlocal void myCFSocketCallBack(CFSocketRef cfs, CFSocketCallBackType CallBack
 		LogMsg("myCFSocketCallBack: cfsv6 %p, sktv6 %d", ss->cfsv6, ss->sktv6);
 		}
 
-	mDNSu8 ttl;
-	while ((err = myrecvfrom(s1, &m->imsg, sizeof(m->imsg), (struct sockaddr *)&from, &fromlen, &destAddr, packetifname, &ttl)) >= 0)
+	while (1)
 		{
+		// NOTE: When handling multiple packets in a batch, MUST reset InterfaceID before handling each packet
+		mDNSInterfaceID InterfaceID = ss->info ? ss->info->ifinfo.InterfaceID : mDNSNULL;
+		mDNSAddr senderAddr, destAddr;
+		mDNSIPPort senderPort, destPort = MulticastDNSPort;
+		struct sockaddr_storage from;
+		size_t fromlen = sizeof(from);
+		char packetifname[IF_NAMESIZE] = "";
+		mDNSu8 ttl;
+		err = myrecvfrom(s1, &m->imsg, sizeof(m->imsg), (struct sockaddr *)&from, &fromlen, &destAddr, packetifname, &ttl);
+		if (err < 0) break;
+		
 		count++;
 		if (from.ss_family == AF_INET)
 			{
@@ -1426,20 +1438,22 @@ mDNSlocal void myCFSocketCallBack(CFSocketRef cfs, CFSocketCallBackType CallBack
 				verbosedebugf("myCFSocketCallBack got multicast packet from %#a to %#a on unicast socket (Ignored)", &senderAddr, &destAddr);
 				return;
 				}
-			else if (!strcmp(ss->info->ifa_name, packetifname))
-				verbosedebugf("myCFSocketCallBack got multicast packet from %#a to %#a on interface %#a/%s",
-					&senderAddr, &destAddr, &ss->info->ifinfo.ip, ss->info->ifa_name);
-			else
+			else if (strcmp(ss->info->ifa_name, packetifname))
 				{
 				verbosedebugf("myCFSocketCallBack got multicast packet from %#a to %#a on interface %#a/%s (Ignored -- really arrived on interface %s)",
 					&senderAddr, &destAddr, &ss->info->ifinfo.ip, ss->info->ifa_name, packetifname);
 				return;
 				}
+			else
+				verbosedebugf("myCFSocketCallBack got multicast packet from %#a to %#a on interface %#a/%s",
+					&senderAddr, &destAddr, &ss->info->ifinfo.ip, ss->info->ifa_name);
 			}
 		else
 			{
-			// Note: For unicast packets, try to find the matching mDNSCore interface object 
-			// (though we may not be able to, for unicast packets received over something like a PPP link)
+			// Note: Unicast packets are delivered to *one* of our listening sockets,
+			// not necessarily the one bound to the physical interface where the packet arrived.
+			// To sort this out we search our interface list and update InterfaceID to reference
+			// the mDNSCore interface object for the interface where the packet was actually received.
 			NetworkInterfaceInfo *intf = m->HostInterfaces;
 			while (intf && strcmp(intf->ifname, packetifname)) intf = intf->next;
 			if (intf) InterfaceID = intf->InterfaceID;
@@ -1459,7 +1473,7 @@ mDNSlocal void myCFSocketCallBack(CFSocketRef cfs, CFSocketCallBackType CallBack
 		int so_error = -1;
 		int so_nread = -1;
 		int fionread = -1;
-		int solen = sizeof(int);
+		socklen_t solen = sizeof(int);
 		fd_set readfds;
 		FD_ZERO(&readfds);
 		FD_SET(s1, &readfds);
@@ -1766,25 +1780,45 @@ mDNSlocal void SetDDNSNameStatus(domainname *const dname, mStatus status)
 			if (!(*(p+1)) && *p == '.') *p = 0; // if last character, strip trailing dot
 			p++;
 			}
-		
-		const void *StatusKey = CFSTR("Status");		
-		const void *StatusVal = CFNumberCreate(NULL, kCFNumberSInt32Type, &status); // CFNumberRef
-		const void *StatusDict = CFDictionaryCreate(NULL, &StatusKey, &StatusVal, 1, NULL, NULL);
 
-		const void *HostKey = CFStringCreateWithCString(NULL, uname, kCFStringEncodingUTF8);
-		const void *HostDict = CFDictionaryCreate(NULL, &HostKey, &StatusDict, 1, NULL, NULL);
-				
-		const void *StateKey = CFSTR("HostNames"); // CFStringRef
-		CFDictionaryRef StateDict = CFDictionaryCreate(NULL, &StateKey, &HostDict, 1, NULL, NULL);
-		SCDynamicStoreSetValue(store, CFSTR("State:/Network/DynamicDNS"), StateDict);
+		// We need to make a CFDictionary called "State:/Network/DynamicDNS" containing (at present) a single entity.
+		// That single entity is a CFDictionary with name "HostNames".
+		// The "HostNames" CFDictionary contains a set of name/value pairs, where the each name is the FQDN
+		// in question, and the corresponding value is a CFDictionary giving the state for that FQDN.
+		// (At present we only support a single FQDN, so this dictionary holds just a single name/value pair.)
+		// The CFDictionary for each FQDN holds (at present) a single name/value pair,
+		// where the name is "Status" and the value is a CFNumber giving an errror code (with zero meaning success).
 
-		CFRelease(StateDict);
-		CFRelease(StateKey);
-		CFRelease(HostDict);
-		CFRelease(HostKey);
-		CFRelease(StatusDict);
-		CFRelease(StatusVal);
-		CFRelease(StatusKey);
+		const CFStringRef StateKeys [1] = { CFSTR("HostNames") };
+		const CFStringRef HostKeys  [1] = { CFStringCreateWithCString(NULL, uname, kCFStringEncodingUTF8) };
+		const CFStringRef StatusKeys[1] = { CFSTR("Status") };
+		if (!HostKeys[0]) LogMsg("SetDDNSNameStatus: CFStringCreateWithCString(%s) failed", uname);
+		else
+			{
+			const CFNumberRef StatusVals[1] = { CFNumberCreate(NULL, kCFNumberSInt32Type, &status) };
+			if (!StatusVals[0]) LogMsg("SetDDNSNameStatus: CFNumberCreate(%ld) failed", status);
+			else
+				{
+				const CFDictionaryRef HostVals[1] = { CFDictionaryCreate(NULL, (void*)StatusKeys, (void*)StatusVals, 1, NULL, NULL) };
+				if (HostVals[0])
+					{
+					const CFDictionaryRef StateVals[1] = { CFDictionaryCreate(NULL, (void*)HostKeys, (void*)HostVals, 1, NULL, NULL) };
+					if (StateVals[0])
+						{
+						CFDictionaryRef StateDict = CFDictionaryCreate(NULL, (void*)StateKeys, (void*)StateVals, 1, NULL, NULL);
+						if (StateDict)
+							{
+							SCDynamicStoreSetValue(store, CFSTR("State:/Network/DynamicDNS"), StateDict);
+							CFRelease(StateDict);
+							}
+						CFRelease(StateVals[0]);
+						}
+					CFRelease(HostVals[0]);
+					}
+				CFRelease(StatusVals[0]);
+				}
+			CFRelease(HostKeys[0]);
+			}
 		CFRelease(store);
 		}
 	}
@@ -2141,9 +2175,12 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 							else                                     v6Loopback = ifa;
 						else
 							{
-							AddInterfaceToList(m, ifa, utc);
-							if (ifa->ifa_addr->sa_family == AF_INET) foundav4 = mDNStrue;
-							else                                     foundav6 = mDNStrue;
+							NetworkInterfaceInfoOSX *i = AddInterfaceToList(m, ifa, utc);
+							if (i && i->Multicast)
+								{
+								if (ifa->ifa_addr->sa_family == AF_INET) foundav4 = mDNStrue;
+								else                                     foundav6 = mDNStrue;
+								}
 							}
 						}
 					}
@@ -2588,7 +2625,7 @@ mDNSlocal void FoundDomain(mDNS *const m, DNSQuestion *question, const ResourceR
 			{
 			if (SameDomainName(&ptr->ar.resrec.rdata->u.name, &answer->rdata->u.name))
 				{
-				debugf("Deregistering PTR %s -> %s", ptr->ar.resrec.name->c, ptr->ar.resrec.rdata->u.name.c);
+				debugf("Deregistering PTR %##s -> %##s", ptr->ar.resrec.name->c, ptr->ar.resrec.rdata->u.name.c);
                 dereg = &ptr->ar;
 				if (prev) prev->next = ptr->next;
 				else slElem->AuthRecs = ptr->next;
@@ -2755,7 +2792,7 @@ mDNSlocal mStatus RegisterSearchDomains(mDNS *const m, CFDictionaryRef dict)
 				{
 				AuthRecord *dereg = &arList->ar;
 				arList = arList->next;
-				debugf("Deregistering PTR %s -> %s", dereg->resrec.name->c, dereg->resrec.rdata->u.name.c);
+				debugf("Deregistering PTR %##s -> %##s", dereg->resrec.name->c, dereg->resrec.rdata->u.name.c);
 				err = mDNS_Deregister(m, dereg);
 				if (err) LogMsg("ERROR: RegisterSearchDomains mDNS_Deregister returned %d", err);
 				}
@@ -2994,7 +3031,7 @@ mDNSlocal void DynDNSConfigChanged(mDNS *const m)
 	CFRelease(store);
 	if (!dict)				// lost v4
 		{
-		mDNS_SetPrimaryInterfaceInfo(m, NULL, NULL);
+		mDNS_SetPrimaryInterfaceInfo(m, NULL, NULL, NULL);
 		if (DynDNSHostname.c[0]) SetDDNSNameStatus(&DynDNSHostname, 1);	// Set status to 1 to indicate temporary failure
 		return;
 		} 
@@ -3024,42 +3061,64 @@ mDNSlocal void DynDNSConfigChanged(mDNS *const m)
 
 	// handle primary interface changes
 	// if we gained or lost DNS servers (e.g. logged into VPN) "toggle" primary address so it gets re-registered even if it is unchanged
-	if (nAdditions || nDeletions) mDNS_SetPrimaryInterfaceInfo(m, NULL, NULL);
+	if (nAdditions || nDeletions) mDNS_SetPrimaryInterfaceInfo(m, NULL, NULL, NULL);
 	CFStringRef primary = CFDictionaryGetValue(dict, kSCDynamicStorePropNetPrimaryInterface);
 	if (primary)
 		{
+		mDNSAddr v4 = zeroAddr, v6 = zeroAddr;
+		mDNSBool HavePrimaryGlobalv6 = mDNSfalse;  // does  the primary interface have a global v6 address?
 		struct ifaddrs *ifa = myGetIfAddrs(1);
-
+		
 		if (!CFStringGetCString(primary, buf, 256, kCFStringEncodingUTF8))
 			{ LogMsg("Could not convert router to CString"); goto error; }		
 
 		// find primary interface in list
-		while (ifa)
+		while (ifa && (!v4.ip.v4.NotAnInteger || !HavePrimaryGlobalv6))
 			{
-			if (ifa->ifa_addr->sa_family == AF_INET && !strcmp(buf, ifa->ifa_name))
-				{
-				mDNSAddr ip;
-				SetupAddr(&ip, ifa->ifa_addr);
-				if (ip.ip.v4.b[0] == 169 && ip.ip.v4.b[1] == 254)
-					{ mDNS_SetPrimaryInterfaceInfo(m, NULL, NULL); break; }  // primary IP is link-local				
-				if (ip.ip.v4.NotAnInteger != u->PrimaryIP.ip.v4.NotAnInteger ||
-					r.ip.v4.NotAnInteger != u->Router.ip.v4.NotAnInteger)
+			mDNSAddr tmp6 = zeroAddr;
+			if (!strcmp(buf, ifa->ifa_name))
+				{				
+				if      (ifa->ifa_addr->sa_family == AF_INET) SetupAddr(&v4, ifa->ifa_addr);					
+				else if (ifa->ifa_addr->sa_family == AF_INET6) 				
 					{
-					if (LegacyNATInitialized) { LegacyNATDestroy(); LegacyNATInitialized = mDNSfalse; }
-					if (r.ip.v4.NotAnInteger && IsPrivateV4Addr(&ip))
-						{
-						mStatus err = LegacyNATInit();
-						if (err)  LogMsg("ERROR: LegacyNATInit");
-						else LegacyNATInitialized = mDNStrue;
-						}					
-					mDNS_SetPrimaryInterfaceInfo(m, &ip, r.ip.v4.NotAnInteger ? &r : NULL);
-					break;
+					SetupAddr(&tmp6, ifa->ifa_addr);
+					if (tmp6.ip.v6.b[0] >> 5 == 1)   // global prefix: 001
+						{ HavePrimaryGlobalv6 = mDNStrue; v6 = tmp6; }
+					}
+				}
+			else
+				{
+				// We'll take a V6 address from the non-primary interface if the primary interface doesn't have a global V6 address
+				if (!HavePrimaryGlobalv6 && ifa->ifa_addr->sa_family == AF_INET6 && !v6.ip.v6.b[0])
+					{
+					SetupAddr(&tmp6, ifa->ifa_addr);
+					if (tmp6.ip.v6.b[0] >> 5 == 1) v6 = tmp6;
 					}
 				}
 			ifa = ifa->ifa_next;
 			}
+
+		// Note that while we advertise v6, we still require v4 (possibly NAT'd, but not link-local) because we must use
+		// V4 to communicate w/ our DNS server
+					
+		if (v4.ip.v4.b[0] == 169 && v4.ip.v4.b[1] == 254) mDNS_SetPrimaryInterfaceInfo(m, NULL, NULL, NULL);  // primary IP is link-local
+		else
+			{
+			if (v4.ip.v4.NotAnInteger != u->AdvertisedV4.ip.v4.NotAnInteger ||
+				memcmp(v6.ip.v6.b, u->AdvertisedV6.ip.v6.b, 16)             ||
+				r.ip.v4.NotAnInteger != u->Router.ip.v4.NotAnInteger)
+				{
+				if (LegacyNATInitialized) { LegacyNATDestroy(); LegacyNATInitialized = mDNSfalse; }
+				if (r.ip.v4.NotAnInteger && IsPrivateV4Addr(&v4))
+					{
+					mStatus err = LegacyNATInit();
+					if (err)  LogMsg("ERROR: LegacyNATInit");
+					else LegacyNATInitialized = mDNStrue;
+					}					
+				mDNS_SetPrimaryInterfaceInfo(m, &v4, v6.ip.v6.b[0] ? &v6 : NULL, r.ip.v4.NotAnInteger ? &r : NULL);
+				}
+			}
 		}
-	
 	error:
 	CFRelease(dict);
 	}
@@ -3304,7 +3363,7 @@ mDNSlocal void FoundLegacyBrowseDomain(mDNS *const m, DNSQuestion *question, con
 			prev = ptr;
 			ptr = ptr->next;
 			}
-		LogMsg("FoundLegacyBrowseDomain: Got remove event for domain %s not in list", answer->rdata->u.name.c);
+		LogMsg("FoundLegacyBrowseDomain: Got remove event for domain %##s not in list", answer->rdata->u.name.c);
 		}
 	}
 
@@ -3450,8 +3509,8 @@ mDNSlocal mStatus mDNSPlatformInit_setup(mDNS *const m)
 
 	struct sockaddr_in s4;
 	struct sockaddr_in6 s6;
-	int n4 = sizeof(s4);
-	int n6 = sizeof(s6);
+	socklen_t n4 = sizeof(s4);
+	socklen_t n6 = sizeof(s6);
 	if (getsockname(m->p->unicastsockets.sktv4, (struct sockaddr *)&s4, &n4) < 0) LogMsg("getsockname v4 error %d (%s)", errno, strerror(errno));
 	else m->UnicastPort4.NotAnInteger = s4.sin_port;
 	if (getsockname(m->p->unicastsockets.sktv6, (struct sockaddr *)&s6, &n6) < 0) LogMsg("getsockname v6 error %d (%s)", errno, strerror(errno));

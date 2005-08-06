@@ -24,6 +24,9 @@
     Change History (most recent first):
 
 $Log: LegacyNATTraversal.c,v $
+Revision 1.12  2005/07/22 21:36:16  ksekar
+Fix GCC 4.0/Intel compiler warnings
+
 Revision 1.11  2004/12/03 03:34:20  ksekar
 <rdar://problem/3882674> LegacyNATTraversal.c leaks threads
 
@@ -1312,20 +1315,20 @@ static void *TCPProc(void *in)
 			(g_dwLocalIP >> 0) & 0xFF,
 			g_wEventPort);
 
-		n = sprintf(buf,
+		n = sprintf((char *)buf,
 			szEventMsgSubscribeFMT,
 			g_szEventURL,
 			callback, g_szRouterHostPortEvent, 1800);
 
 		memset(response, 0, 2000);
 		n = SendTCPMsg_saddr_parse(
-			buf, n,
+			(char *)buf, n,
 			response, 2000,
 			&g_saddrRouterEvent);
 		if (n > 0)
 		{
 			response[n] = '\0';
-			resp = NewHTTPResponse_sz(buf, n, TRUE);
+			resp = NewHTTPResponse_sz((char *)buf, n, TRUE);
 			if (NULL != resp)
 			{
 ////TracePrint(ELL_TRACE, "UPnP Subscribe returns %s/%d\n", resp->pszStatus, n);
@@ -1352,7 +1355,7 @@ static void *TCPProc(void *in)
 	{
 //		ssize_t				n;
 		struct sockaddr_in	recvaddr;
-		int					recvaddrlen;
+		socklen_t		    recvaddrlen;
 		fd_set				readfds;
 		struct timeval		timeout;
 		int					sEvent;
@@ -1473,7 +1476,7 @@ static void *UDPProc(void *in)
 	for (;;) {
 		ssize_t				n;
 		struct sockaddr_in	recvaddr;
-		int					recvaddrlen;
+		socklen_t					recvaddrlen;
 		fd_set				readfds;
 		//struct timeval		timeout;
 		//int					i;
@@ -1513,8 +1516,8 @@ static void *UDPProc(void *in)
 			return NULL;
 		}
 		buf[n] = '\0';
-		if (strncmp(buf, "HTTP/1.1", 8) == 0) {
-			PHTTPResponse pResponse = NewHTTPResponse_sz(buf, n, TRUE);
+		if (strncmp((char *)buf, "HTTP/1.1", 8) == 0) {
+			PHTTPResponse pResponse = NewHTTPResponse_sz((char *)buf, n, TRUE);
 			PrintHTTPResponse(pResponse);
 			if (DiscoverRouter(pResponse) == 0)
 			{
@@ -1529,11 +1532,11 @@ static void *UDPProc(void *in)
 			}
 			DeleteHTTPResponse(pResponse);
 		}
-		else if (strncmp(buf, "NOTIFY * HTTP/1.1", 7) == 0) {
+		else if (strncmp((char *)buf, "NOTIFY * HTTP/1.1", 7) == 0) {
 			// temporarily use this to fudge - will have the exact same
 			// parsing, only status/reason set to "*" and "HTTP/1.1".
 			// TODO: add support for HTTP requests
-			PHTTPResponse pResponse = NewHTTPResponse_sz(buf, n, TRUE);
+			PHTTPResponse pResponse = NewHTTPResponse_sz((char *)buf, n, TRUE);
 			if (DiscoverRouter(pResponse) == 0)
 			{
 				time_t	now = time(NULL);
@@ -2810,7 +2813,7 @@ static int GetMappingUnused(unsigned short eport, int protocol)
 	char			szPort[10];
 	Property		propArgs[3];
 	PHTTPResponse	resp;
-	unsigned long	ip;
+	unsigned long	ip = 0;
 
 	sprintf( szPort, "%u", eport);
 

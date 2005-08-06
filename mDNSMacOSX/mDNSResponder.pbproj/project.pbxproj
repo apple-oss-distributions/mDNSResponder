@@ -22,13 +22,12 @@
 			buildSettings = {
 				FRAMEWORK_SEARCH_PATHS = "";
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				GCC_VERSION = 3.3;
 				HEADER_SEARCH_PATHS = "../mDNSShared \"$(APPLE_INTERNAL_DEVELOPER_DIR)/Headers\" \"$(OBJROOT)\"";
 				LIBRARY_SEARCH_PATHS = "";
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OPTIMIZATION_CFLAGS = "-O0";
 				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=$(MVERS) -D_LEGACY_NAT_TRAVERSAL_ -DMDNS_DEBUGMSGS=1";
-				OTHER_LDFLAGS = "-weak-ldnsinfo";
+				OTHER_LDFLAGS = "-ldnsinfo";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = mDNSResponder.debug;
 				REZ_EXECUTABLE = YES;
@@ -330,13 +329,12 @@
 			buildSettings = {
 				FRAMEWORK_SEARCH_PATHS = "";
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				GCC_VERSION = 3.3;
 				HEADER_SEARCH_PATHS = "../mDNSShared \"$(APPLE_INTERNAL_DEVELOPER_DIR)/Headers\" \"$(OBJROOT)\"";
 				INSTALL_PATH = /usr/sbin;
 				LIBRARY_SEARCH_PATHS = "";
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=$(MVERS) -D_LEGACY_NAT_TRAVERSAL_";
-				OTHER_LDFLAGS = "-weak-ldnsinfo";
+				OTHER_LDFLAGS = "-ldnsinfo";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = mDNSResponder;
 				REZ_EXECUTABLE = YES;
@@ -623,7 +621,6 @@
 			);
 			buildSettings = {
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				GCC_VERSION = 3.3;
 				INSTALL_PATH = /usr/bin;
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=$(MVERS)";
@@ -952,7 +949,6 @@
 			buildSettings = {
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
-				GCC_VERSION = 3.3;
 				INSTALL_PATH = "$(SYSTEM_LIBRARY_DIR)/Java/Extensions";
 				JAVA_ARCHIVE_CLASSES = YES;
 				JAVA_ARCHIVE_COMPRESSION = YES;
@@ -1107,7 +1103,6 @@
 				DEBUGGING_SYMBOLS = NO;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
-				GCC_VERSION = 3.3;
 				HEADER_SEARCH_PATHS = "../mDNSShared \"$(SYSTEM_LIBRARY_DIR)/Frameworks/JavaVM.framework/Versions/A/Headers\" \"$(SYSTEM_LIBRARY_DIR)/Frameworks/JavaVM.framework/Versions/1.3.1/Headers\" \"$(OBJROOT)/mDNSResponder.build/dns_sd.jar.build\"";
 				INSTALL_PATH = /usr/lib/java;
 				LIBRARY_STYLE = DYNAMIC;
@@ -1319,7 +1314,6 @@
 			);
 			buildSettings = {
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				GCC_VERSION = 3.3;
 				INSTALL_PATH = /usr/bin;
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=$(MVERS) -I../mDNSShared";
@@ -1420,7 +1414,6 @@
 			buildSettings = {
 				FRAMEWORK_SEARCH_PATHS = "";
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				GCC_VERSION = 3.3;
 				HEADER_SEARCH_PATHS = "\"$(APPLE_INTERNAL_DEVELOPER_DIR)/Headers\"";
 				INSTALL_PATH = /usr/sbin;
 				LIBRARY_SEARCH_PATHS = "";
@@ -1674,7 +1667,6 @@
 			);
 			buildSettings = {
 				EXPORTED_SYMBOLS_FILE = "";
-				GCC_VERSION = 3.3;
 				INSTALL_PATH = "$(SYSTEM_LIBRARY_DIR)/PreferencePanes";
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OTHER_CFLAGS = "";

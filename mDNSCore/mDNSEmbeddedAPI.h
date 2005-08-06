@@ -60,6 +60,15 @@
     Change History (most recent first):
 
 $Log: mDNSEmbeddedAPI.h,v $
+Revision 1.284  2005/07/29 18:04:22  ksekar
+<rdar://problem/4137930> Hostname registration should register IPv6 AAAA record with DNS Update
+
+Revision 1.283  2005/05/13 20:45:09  ksekar
+<rdar://problem/4074400> Rapid wide-area txt record updates don't work
+
+Revision 1.282  2005/03/16 00:42:32  ksekar
+<rdar://problem/4012279> Long-lived queries not working on Windows
+
 Revision 1.281  2005/02/25 17:47:44  ksekar
 <rdar://problem/4021868> SendServiceRegistration fails on wake from sleep
 
@@ -1367,6 +1376,11 @@ typedef packedstruct
 	mDNSu32 lease;
 	} LLQOptData;
 
+#define LLQ_OPTLEN ((3 * sizeof(mDNSu16)) + 8 + sizeof(mDNSu32))
+// Windows adds pad bytes to sizeof(LLQOptData).  Use this macro when setting length fields or validating option rdata from
+// off the wire.  Use sizeof(LLQOptData) when dealing with structures (e.g. memcpy).  Never memcpy between on-the-wire
+// representation and a structure
+	
 // NOTE: rdataOpt format may be repeated an arbitrary number of times in a single resource record
 typedef packedstruct
 	{
@@ -1501,10 +1515,11 @@ typedef struct
     mDNSBool     SRVChanged;              // temporarily deregistered service because its SRV target or port changed
 
     // uDNS_UpdateRecord support fields
-	mDNSBool     UpdateQueued; // Update the rdata once the current pending operation completes
-	RData       *UpdateRData;  // Pointer to new RData while a record update is in flight
-	mDNSu16      UpdateRDLen;  // length of above field
-	mDNSRecordUpdateCallback *UpdateRDCallback; // client callback to free old rdata
+    RData *OrigRData;      mDNSu16 OrigRDLen;     // previously registered, being deleted
+    RData *InFlightRData;  mDNSu16 InFlightRDLen; // currently being registered
+    RData *QueuedRData;    mDNSu16 QueuedRDLen;   // if the client call Update while an update is in flight, we must finish the
+                                                  // pending operation (re-transmitting if necessary) THEN register the queued update
+	mDNSRecordUpdateCallback *UpdateRDCallback;   // client callback to free old rdata
 	} uDNS_RegInfo;
 
 struct AuthRecord_struct
@@ -1622,7 +1637,9 @@ typedef struct
 typedef struct uDNS_HostnameInfo
 	{
 	struct uDNS_HostnameInfo *next;
-	AuthRecord *ar;                           // registered address record
+    domainname fqdn;
+    AuthRecord *arv4;                         // registered IPv4 address record
+	AuthRecord *arv6;                         // registered IPv6 address record
 	mDNSRecordCallback *StatusCallback;       // callback to deliver success or error code to client layer
 	const void *StatusContext;                // Client Context
 	} uDNS_HostnameInfo;
@@ -1773,8 +1790,8 @@ typedef struct
 #define kLLQOp_Refresh   2
 #define kLLQOp_Event     3
 
-#define LLQ_OPT_SIZE (2 * sizeof(mDNSu16)) + sizeof(LLQOptData)
-#define LEASE_OPT_SIZE (2 * sizeof(mDNSu16)) + sizeof(mDNSs32)
+#define LLQ_OPT_RDLEN ((2 * sizeof(mDNSu16)) + LLQ_OPTLEN)
+#define LEASE_OPT_RDLEN (2 * sizeof(mDNSu16)) + sizeof(mDNSs32)
 
 // LLQ Errror Codes
 enum
@@ -2005,8 +2022,9 @@ typedef struct
 	mDNSu16          NextMessageID;
     DNSServer        *Servers;           // list of DNS servers
 	mDNSAddr         Router;
-	mDNSAddr         PrimaryIP;          // Address of primary interface
-	mDNSAddr         MappedPrimaryIP;    // Cache of public address if PrimaryIP is behind a NAT
+	mDNSAddr         AdvertisedV4;       // IPv4 address pointed to by hostname
+	mDNSAddr         MappedV4;           // Cache of public address if PrimaryIP is behind a NAT
+	mDNSAddr         AdvertisedV6;       // IPv6 address pointed to by hostname
     NATTraversalInfo *LLQNatInfo;        // Nat port mapping to receive LLQ events
 	domainname       ServiceRegDomain;   // (going away w/ multi-user support)
 	struct uDNS_AuthInfo *AuthInfoList;  // list of domains requiring authentication for updates.
@@ -2506,10 +2524,10 @@ extern mStatus mDNS_SetSecretForZone(mDNS *m, const domainname *zone, const doma
 
 // Hostname/Unicast Interface Configuration
 
-// All hostnames advertised point to a single IP address, set via SetPrimaryInterfaceInfo.  Invoking this routine
+// All hostnames advertised point to one IPv4 address and/or one IPv6 address, set via SetPrimaryInterfaceInfo.  Invoking this routine
 // updates all existing hostnames to point to the new address.
 	
-// A hostname is added via AddDynDNSHostName, which points to the primary interface's IP address.
+// A hostname is added via AddDynDNSHostName, which points to the primary interface's v4 and/or v6 addresss
 
 // The status callback is invoked to convey success or failure codes - the callback should not modify the AuthRecord or free memory.
 // Added hostnames may be removed (deregistered) via mDNS_RemoveDynDNSHostName.
@@ -2527,7 +2545,7 @@ extern mStatus mDNS_SetSecretForZone(mDNS *m, const domainname *zone, const doma
 	
 extern void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCallback *StatusCallback, const void *StatusContext);
 extern void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn);
-extern void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *addr, const mDNSAddr *router);
+extern void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const mDNSAddr *v6addr, const mDNSAddr *router);
 extern void mDNS_UpdateLLQs(mDNS *m);
 extern void mDNS_AddDNSServer(mDNS *const m, const mDNSAddr *dnsAddr, const domainname *domain);
 extern void mDNS_DeleteDNSServers(mDNS *const m);

@@ -36,6 +36,9 @@
     Change History (most recent first):
 
 $Log: daemon.c,v $
+Revision 1.255.2.1  2005/07/22 21:45:04  ksekar
+Fix GCC 4.0/Intel compiler warnings
+
 Revision 1.255  2005/03/09 00:48:43  cheshire
 <rdar://problem/4015157> QU packets getting sent too early on wake from sleep
 Move "m->p->NetworkChanged = 0;" line from caller to callee
@@ -1885,8 +1888,8 @@ mDNSexport kern_return_t provide_DNSServiceRegistrationAddRecord_rpc(mach_port_t
 	uint32_t id;
 	mStatus err = mStatus_NoError;
 	const char *errormsg = "Unknown";
-	if (client == (mach_port_t)-1) { err = mStatus_Invalid;         errormsg = "Client id -1 invalid"; goto fail; }
 	DNSServiceRegistration *x = DNSServiceRegistrationList;
+	if (client == (mach_port_t)-1) { err = mStatus_Invalid;         errormsg = "Client id -1 invalid"; goto fail; }
 	ServiceInstance *si;
 	size_t size;
 	(void)unusedserver;		// Unused
