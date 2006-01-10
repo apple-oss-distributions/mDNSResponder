@@ -45,6 +45,18 @@
     Change History (most recent first):
 
 $Log: mDNS.c,v $
+Revision 1.526  2005/10/20 00:10:33  cheshire
+<rdar://problem/4290265> Add check to avoid crashing NAT gateways that have buggy DNS relay code
+
+Revision 1.525  2005/09/24 00:47:17  cheshire
+Fix comment typos
+
+Revision 1.524  2005/09/16 21:06:49  cheshire
+Use mDNS_TimeNow_NoLock macro, instead of writing "mDNSPlatformRawTime() + m->timenow_adjust" all over the place
+
+Revision 1.523  2005/03/21 00:33:51  shersche
+<rdar://problem/4021486> Fix build warnings on Win32 platform
+
 Revision 1.522  2005/03/04 21:48:12  cheshire
 <rdar://problem/4037283> Fractional time rounded down instead of up on platforms with coarse clock granularity
 
@@ -1737,6 +1749,7 @@ mDNSexport const mDNSAddr   AllDNSLinkGroup_v6 = { mDNSAddrType_IPv6, { { { 0xFF
 
 mDNSexport const mDNSOpaque16 zeroID = { { 0, 0 } };
 mDNSexport const mDNSOpaque16 QueryFlags    = { { kDNSFlag0_QR_Query    | kDNSFlag0_OP_StdQuery,                0 } };
+mDNSexport const mDNSOpaque16 uQueryFlags   = { { kDNSFlag0_QR_Query    | kDNSFlag0_OP_StdQuery | kDNSFlag0_RD, 0 } };
 mDNSexport const mDNSOpaque16 ResponseFlags = { { kDNSFlag0_QR_Response | kDNSFlag0_OP_StdQuery | kDNSFlag0_AA, 0 } };
 mDNSexport const mDNSOpaque16 UpdateReqFlags= { { kDNSFlag0_QR_Query    | kDNSFlag0_OP_Update,                  0 } };
 mDNSexport const mDNSOpaque16 UpdateRespFlags={ { kDNSFlag0_QR_Response | kDNSFlag0_OP_Update,                  0 } };
@@ -1785,7 +1798,7 @@ mDNSexport mDNSu32 mDNS_vsnprintf(char *sbuffer, mDNSu32 buflen, const char *fmt
 	mDNSu32 nwritten = 0;
 	int c;
 	if (buflen == 0) return(0);
-	buflen--;		// Pre-reserve one space in the buffer for the terminating nul
+	buflen--;		// Pre-reserve one space in the buffer for the terminating null
 	if (buflen == 0) goto exit;
 
 	for (c = *fmt; c != 0; c = *++fmt)
@@ -3136,7 +3149,7 @@ mDNSlocal void SendResponses(mDNS *const m)
 					newptr = PutResourceRecordTTL(&m->omsg, responseptr, &m->omsg.h.numAnswers, &rr->resrec, m->SleepState ? 0 : rr->resrec.rroriginalttl);
 					rr->resrec.rrclass &= ~kDNSClass_UniqueRRSet;			// Make sure to clear cache flush bit back to normal state
 					if (!newptr && m->omsg.h.numAnswers) break;
-					rr->RequireGoodbye = !m->SleepState;
+					rr->RequireGoodbye = (mDNSu8) (!m->SleepState);
 					if (rr->LastAPTime == m->timenow) numAnnounce++; else numAnswer++;
 					responseptr = newptr;
 					}
@@ -4350,7 +4363,7 @@ mDNSexport mDNSs32 mDNS_TimeNow(const mDNS *const m)
 		}
 	
 	if (m->timenow) time = m->timenow;
-	else            time = mDNSPlatformRawTime() + m->timenow_adjust;
+	else            time = mDNS_TimeNow_NoLock(m);
 	mDNSPlatformUnlock(m);
 	return(time);
 	}
@@ -5669,7 +5682,7 @@ mDNSlocal mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const que
 
 		if (!ValidateDomainName(&question->qname))
 			{
-			LogMsg("Attempt to start query with invalid qname %##s %s", question->qname.c, DNSTypeName(question->qtype));
+			LogMsg("Attempt to start query with invalid qname %##s (%s)", question->qname.c, DNSTypeName(question->qtype));
 			return(mStatus_Invalid);
 			}
 
@@ -5700,10 +5713,10 @@ mDNSlocal mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const que
 		question->LastQTxTime      = m->timenow;
 
 		if (!question->DuplicateOf)
-			verbosedebugf("mDNS_StartQuery_internal: Question %##s %s %p %d (%p) started",
+			verbosedebugf("mDNS_StartQuery_internal: Question %##s (%s) %p %d (%p) started",
 				question->qname.c, DNSTypeName(question->qtype), question->InterfaceID, question->LastQTime + question->ThisQInterval - m->timenow, question);
 		else
-			verbosedebugf("mDNS_StartQuery_internal: Question %##s %s %p %d (%p) duplicate of (%p)",
+			verbosedebugf("mDNS_StartQuery_internal: Question %##s (%s) %p %d (%p) duplicate of (%p)",
 				question->qname.c, DNSTypeName(question->qtype), question->InterfaceID, question->LastQTime + question->ThisQInterval - m->timenow, question, question->DuplicateOf);
 
 		*q = question;
@@ -6743,7 +6756,7 @@ mDNSexport mStatus mDNS_RegisterService(mDNS *const m, ServiceRecordSet *sr,
 
 #ifndef UNICAST_DISABLED	
 	// If the client has specified an explicit InterfaceID,
-	// then we do a multicast registration  on that interface, even for unicast domains.
+	// then we do a multicast registration on that interface, even for unicast domains.
 	if (!(InterfaceID == mDNSInterface_LocalOnly || IsLocalDomain(sr->RR_SRV.resrec.name)))
 		{
 		mStatus status;
@@ -7013,7 +7026,7 @@ mDNSexport mStatus mDNS_Init(mDNS *const m, mDNS_PlatformSupport *const p,
 	mDNSBool AdvertiseLocalAddresses, mDNSCallback *Callback, void *Context)
 	{
 	mDNSu32 slot;
-	mDNSs32 timenow, timenow_adjust;
+	mDNSs32 timenow;
 	mStatus result;
 	
 	if (!rrcachestorage) rrcachesize = 0;
@@ -7040,12 +7053,11 @@ mDNSexport mStatus mDNS_Init(mDNS *const m, mDNS_PlatformSupport *const p,
 	// Task Scheduling variables
 	result = mDNSPlatformTimeInit();
 	if (result != mStatus_NoError) return(result);
-	timenow_adjust = (mDNSs32)mDNSRandom(0xFFFFFFFF);
-	timenow = mDNSPlatformRawTime() + timenow_adjust;
+	m->timenow_adjust = (mDNSs32)mDNSRandom(0xFFFFFFFF);
+	timenow = mDNS_TimeNow_NoLock(m);
 
 	m->timenow                 = 0;		// MUST only be set within mDNS_Lock/mDNS_Unlock section
 	m->timenow_last            = timenow;
-	m->timenow_adjust          = timenow_adjust;
 	m->NextScheduledEvent      = timenow;
 	m->SuppressSending         = timenow;
 	m->NextCacheCheck          = timenow + 0x78000000;
@@ -7092,6 +7104,7 @@ mDNSexport mStatus mDNS_Init(mDNS *const m, mDNS_PlatformSupport *const p,
 
 #ifndef UNICAST_DISABLED	
 	uDNS_Init(m);
+	m->SuppressStdPort53Queries = 0;
 #endif
 	result = mDNSPlatformInit(m);
 

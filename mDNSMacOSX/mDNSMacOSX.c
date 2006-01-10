@@ -3,14 +3,14 @@
  * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- *
+ * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- *
+ * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -18,21 +18,42 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
+ * 
  * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
 
 $Log: mDNSMacOSX.c,v $
-Revision 1.308.2.2  2005/08/05 01:12:24  ksekar
-<rdar://problem/4137930> SUTiger: Hostname registration should register IPv6 AAAA record with DNS Update
-<rdar://problem/4147774> SUTiger: Be defensive against invalid UTF-8 in dynamic host names
-<rdar://problem/3923098> SUTiger: Things are showing up with a bogus interface index
-<rdar://problem/4080074> SUTiger: PPP connection disables same-host Bonjour ".local" lookups
+Revision 1.318  2005/10/20 00:10:34  cheshire
+<rdar://problem/4290265> Add check to avoid crashing NAT gateways that have buggy DNS relay code
 
+Revision 1.317  2005/09/24 01:10:26  cheshire
+Fix comment typos
 
-Revision 1.308.2.1  2005/07/22 21:42:59  ksekar
+Revision 1.316  2005/07/29 18:04:22  ksekar
+<rdar://problem/4137930> Hostname registration should register IPv6 AAAA record with DNS Update
+
+Revision 1.315  2005/07/22 21:50:55  ksekar
 Fix GCC 4.0/Intel compiler warnings
+
+Revision 1.314  2005/07/11 02:12:09  cheshire
+<rdar://problem/4147774> Be defensive against invalid UTF-8 in dynamic host names
+Fix copy-and-paste error: "CFRelease(StatusVals[0]);" should be "CFRelease(StateVals[0]);"
+
+Revision 1.313  2005/07/04 23:52:25  cheshire
+<rdar://problem/3923098> Things are showing up with a bogus interface index
+
+Revision 1.312  2005/07/04 22:24:36  cheshire
+Export NotifyOfElusiveBug() so other files can call it
+
+Revision 1.311  2005/06/15 13:20:43  cheshire
+<rdar://problem/4147774> Be defensive against invalid UTF-8 in dynamic host names
+
+Revision 1.310  2005/04/07 00:49:58  cheshire
+<rdar://problem/4080074> PPP connection disables Bonjour ".local" lookups
+
+Revision 1.309  2005/03/23 05:53:29  cheshire
+Fix %s where it should have been %##s in debugf & LogMsg calls
 
 Revision 1.308  2005/03/09 00:48:44  cheshire
 <rdar://problem/4015157> QU packets getting sent too early on wake from sleep
@@ -1095,10 +1116,8 @@ mDNSlocal void RemoveDefRegDomain(domainname *d)
 	debugf("Requested removal of default registration domain %##s not in contained in list", d->c); 
 	}
 
-mDNSlocal void NotifyOfElusiveBug(const char *title, mDNSu32 radarid, const char *msg)
+mDNSexport void NotifyOfElusiveBug(const char *title, mDNSu32 radarid, const char *msg)
 	{
-	extern mDNS mDNSStorage;
-	NetworkInterfaceInfoOSX *i;
 	static int notifyCount = 0;
 	if (notifyCount) return;
 	
@@ -1106,11 +1125,18 @@ mDNSlocal void NotifyOfElusiveBug(const char *title, mDNSu32 radarid, const char
 	// To avoid this, we don't try to display alerts in the first three minutes after boot.
 	if ((mDNSu32)(mDNSPlatformRawTime()) < (mDNSu32)(mDNSPlatformOneSecond * 180)) return;
 	
-	// Determine if we're at Apple (17.*.*.*)
-	for (i = mDNSStorage.p->InterfaceList; i; i = i->next)
-		if (i->ifinfo.ip.type == mDNSAddrType_IPv4 && i->ifinfo.ip.ip.v4.b[0] == 17)
-			break;
-	if (!i) return;	// If not at Apple, don't show the alert
+	// Unless ForceAlerts is defined, we only show these bug report alerts on machines that have a 17.x.x.x address
+	#if !ForceAlerts
+		{
+		// Determine if we're at Apple (17.*.*.*)
+		extern mDNS mDNSStorage;
+		NetworkInterfaceInfoOSX *i;
+		for (i = mDNSStorage.p->InterfaceList; i; i = i->next)
+			if (i->ifinfo.ip.type == mDNSAddrType_IPv4 && i->ifinfo.ip.ip.v4.b[0] == 17)
+				break;
+		if (!i) return;	// If not at Apple, don't show the alert
+		}
+	#endif
 
 	// Send a notification to the user to contact coreos-networking
 	notifyCount++;
@@ -2465,7 +2491,7 @@ mDNSlocal mStatus RegisterSplitDNS(mDNS *m, int *nAdditions, int *nDeletions)
 		dns_config_t *config = v;  // use void * to allow compilation on 10.3 systems
 		mDNS_Lock(m);
 		p = m->uDNS_info.Servers;
-		while (p) { p->flag = -1; p = p->next; }  // mark all for deletion
+		while (p) { p->del = mDNStrue; p = p->next; }  // mark all for deletion
 		
 		LogOperation("RegisterSplitDNS: Registering %d resolvers", config->n_resolver);
 		for (i = 0; i < config->n_resolver; i++)		
@@ -2498,22 +2524,25 @@ mDNSlocal mStatus RegisterSplitDNS(mDNS *m, int *nAdditions, int *nDeletions)
 				{
 				if (r->nameserver[n]->sa_family == AF_INET && !AddrRequiresPPPConnection(r->nameserver[n]))
 					{
+					// %%% This should use mDNS_AddDNSServer() instead of duplicating functionality here
 					mDNSAddr saddr;
 					if (SetupAddr(&saddr, r->nameserver[n])) { LogMsg("RegisterSplitDNS: bad IP address"); continue; }
+					// mDNSAddr saddr = { mDNSAddrType_IPv4, { { { 192, 168, 1, 1 } } } }; // for testing
 					debugf("Adding dns server from slot %d %d.%d.%d.%d for domain %##s", i, saddr.ip.v4.b[0], saddr.ip.v4.b[1], saddr.ip.v4.b[2], saddr.ip.v4.b[3], d.c);
 					p = m->uDNS_info.Servers;					
 					while (p)
 						{
-						if (mDNSSameAddress(&p->addr, &saddr) && SameDomainName(&p->domain, &d)) { p->flag = 0; break; }
+						if (mDNSSameAddress(&p->addr, &saddr) && SameDomainName(&p->domain, &d)) { p->del = mDNSfalse; break; }
 						else p = p->next;
 						}
 					if (!p)
 						{
 						p = mallocL("DNSServer", sizeof(*p));
 						if (!p) { LogMsg("Error: malloc");  mDNS_Unlock(m); return mStatus_UnknownErr; }
-						p->addr = saddr;
+						p->addr      = saddr;
+						p->del       = mDNSfalse;
+						p->teststate = DNSServer_Untested;
 						AssignDomainName(&p->domain, &d);
-						p->flag = 0;
 						p->next = m->uDNS_info.Servers;
 						m->uDNS_info.Servers = p;
 						(*nAdditions)++;
@@ -2527,7 +2556,7 @@ mDNSlocal mStatus RegisterSplitDNS(mDNS *m, int *nAdditions, int *nDeletions)
 		DNSServer **s = &m->uDNS_info.Servers;
 		while (*s)
 			{
-			if ((*s)->flag < 0)
+			if ((*s)->del)
 				{
 				p = *s;
 				*s = (*s)->next;
@@ -3066,7 +3095,7 @@ mDNSlocal void DynDNSConfigChanged(mDNS *const m)
 	if (primary)
 		{
 		mDNSAddr v4 = zeroAddr, v6 = zeroAddr;
-		mDNSBool HavePrimaryGlobalv6 = mDNSfalse;  // does  the primary interface have a global v6 address?
+		mDNSBool HavePrimaryGlobalv6 = mDNSfalse;  // does the primary interface have a global v6 address?
 		struct ifaddrs *ifa = myGetIfAddrs(1);
 		
 		if (!CFStringGetCString(primary, buf, 256, kCFStringEncodingUTF8))
