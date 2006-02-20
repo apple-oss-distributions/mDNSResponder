@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: PrinterSetupWizardApp.cpp,v $
+Revision 1.8  2005/04/13 17:43:39  shersche
+<rdar://problem/4081448> Change "PrinterWizard.dll" to "PrinterWizardResources.dll"
+
 Revision 1.7  2005/02/15 07:50:09  shersche
 <rdar://problem/4007151> Update name
 
@@ -123,7 +126,7 @@ BOOL CPrinterSetupWizardApp::InitInstance()
 
 	// Load Resources
 
-	res = PathForResource( NULL, L"PrinterWizard.dll", resource, MAX_PATH );
+	res = PathForResource( NULL, L"PrinterWizardResources.dll", resource, MAX_PATH );
 	err = translate_errno( res != 0, kUnknownErr, kUnknownErr );
 	require_noerr( err, exit );
 

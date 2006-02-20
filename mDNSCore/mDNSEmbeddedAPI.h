@@ -60,6 +60,24 @@
     Change History (most recent first):
 
 $Log: mDNSEmbeddedAPI.h,v $
+Revision 1.287  2005/10/20 00:10:33  cheshire
+<rdar://problem/4290265> Add check to avoid crashing NAT gateways that have buggy DNS relay code
+
+Revision 1.286  2005/09/24 01:09:40  cheshire
+Fix comment typos
+
+Revision 1.285  2005/09/16 20:57:47  cheshire
+Add macro mDNS_TimeNow_NoLock(m) to get properly adjusted time without also acquiring lock
+
+Revision 1.284  2005/07/29 18:04:22  ksekar
+<rdar://problem/4137930> Hostname registration should register IPv6 AAAA record with DNS Update
+
+Revision 1.283  2005/05/13 20:45:09  ksekar
+<rdar://problem/4074400> Rapid wide-area txt record updates don't work
+
+Revision 1.282  2005/03/16 00:42:32  ksekar
+<rdar://problem/4012279> Long-lived queries not working on Windows
+
 Revision 1.281  2005/02/25 17:47:44  ksekar
 <rdar://problem/4021868> SendServiceRegistration fails on wake from sleep
 
@@ -1220,7 +1238,7 @@ typedef struct { mDNSu8 c[256]; } UTF8str255;		// Null-terminated C string
 // For records containing a hostname (in the name on the left, or in the rdata on the right),
 // like A, AAAA, reverse-mapping PTR, and SRV, we use a two-minute TTL by default, because we don't want
 // them to hang around for too long in the cache if the host in question crashes or otherwise goes away.
-// Wide-area service discovery records have a very short TTL to aviod poluting intermediate caches with
+// Wide-area service discovery records have a very short TTL to avoid poluting intermediate caches with
 // dynamic records.  When discovered via Long Lived Queries (with change notifications), resource record
 // TTLs can be safely ignored.
 	
@@ -1367,6 +1385,11 @@ typedef packedstruct
 	mDNSu32 lease;
 	} LLQOptData;
 
+#define LLQ_OPTLEN ((3 * sizeof(mDNSu16)) + 8 + sizeof(mDNSu32))
+// Windows adds pad bytes to sizeof(LLQOptData).  Use this macro when setting length fields or validating option rdata from
+// off the wire.  Use sizeof(LLQOptData) when dealing with structures (e.g. memcpy).  Never memcpy between on-the-wire
+// representation and a structure
+	
 // NOTE: rdataOpt format may be repeated an arbitrary number of times in a single resource record
 typedef packedstruct
 	{
@@ -1501,10 +1524,11 @@ typedef struct
     mDNSBool     SRVChanged;              // temporarily deregistered service because its SRV target or port changed
 
     // uDNS_UpdateRecord support fields
-	mDNSBool     UpdateQueued; // Update the rdata once the current pending operation completes
-	RData       *UpdateRData;  // Pointer to new RData while a record update is in flight
-	mDNSu16      UpdateRDLen;  // length of above field
-	mDNSRecordUpdateCallback *UpdateRDCallback; // client callback to free old rdata
+    RData *OrigRData;      mDNSu16 OrigRDLen;     // previously registered, being deleted
+    RData *InFlightRData;  mDNSu16 InFlightRDLen; // currently being registered
+    RData *QueuedRData;    mDNSu16 QueuedRDLen;   // if the client call Update while an update is in flight, we must finish the
+                                                  // pending operation (re-transmitting if necessary) THEN register the queued update
+	mDNSRecordUpdateCallback *UpdateRDCallback;   // client callback to free old rdata
 	} uDNS_RegInfo;
 
 struct AuthRecord_struct
@@ -1622,17 +1646,27 @@ typedef struct
 typedef struct uDNS_HostnameInfo
 	{
 	struct uDNS_HostnameInfo *next;
-	AuthRecord *ar;                           // registered address record
+    domainname fqdn;
+    AuthRecord *arv4;                         // registered IPv4 address record
+	AuthRecord *arv6;                         // registered IPv6 address record
 	mDNSRecordCallback *StatusCallback;       // callback to deliver success or error code to client layer
 	const void *StatusContext;                // Client Context
 	} uDNS_HostnameInfo;
 
+enum
+   	{
+   	DNSServer_Untested = 0,
+   	DNSServer_Failed   = 1,
+   	DNSServer_Passed   = 2
+   	};
+
 typedef struct DNSServer
 	{
     struct DNSServer *next;
-    mDNSAddr addr;
-    domainname domain;       // name->server matching for "split dns"
-    int flag;                // temporary marker for list intersection
+    mDNSAddr   addr;
+    mDNSBool   del;			// Set when we're planning to delete this from the list
+    mDNSu32    teststate;	// Have we sent bug-detection query to this server?
+    domainname domain;		// name->server matching for "split dns"
 	} DNSServer;
 
 typedef struct NetworkInterfaceInfo_struct NetworkInterfaceInfo;
@@ -1773,8 +1807,8 @@ typedef struct
 #define kLLQOp_Refresh   2
 #define kLLQOp_Event     3
 
-#define LLQ_OPT_SIZE (2 * sizeof(mDNSu16)) + sizeof(LLQOptData)
-#define LEASE_OPT_SIZE (2 * sizeof(mDNSu16)) + sizeof(mDNSs32)
+#define LLQ_OPT_RDLEN ((2 * sizeof(mDNSu16)) + LLQ_OPTLEN)
+#define LEASE_OPT_RDLEN (2 * sizeof(mDNSu16)) + sizeof(mDNSs32)
 
 // LLQ Errror Codes
 enum
@@ -2005,13 +2039,14 @@ typedef struct
 	mDNSu16          NextMessageID;
     DNSServer        *Servers;           // list of DNS servers
 	mDNSAddr         Router;
-	mDNSAddr         PrimaryIP;          // Address of primary interface
-	mDNSAddr         MappedPrimaryIP;    // Cache of public address if PrimaryIP is behind a NAT
+	mDNSAddr         AdvertisedV4;       // IPv4 address pointed to by hostname
+	mDNSAddr         MappedV4;           // Cache of public address if PrimaryIP is behind a NAT
+	mDNSAddr         AdvertisedV6;       // IPv6 address pointed to by hostname
     NATTraversalInfo *LLQNatInfo;        // Nat port mapping to receive LLQ events
 	domainname       ServiceRegDomain;   // (going away w/ multi-user support)
 	struct uDNS_AuthInfo *AuthInfoList;  // list of domains requiring authentication for updates.
 	uDNS_HostnameInfo *Hostnames;        // List of registered hostnames + hostname metadata
-    DNSQuestion      ReverseMap;         // Reverse-map query to find  static hostname for service target
+    DNSQuestion      ReverseMap;         // Reverse-map query to find static hostname for service target
     mDNSBool         ReverseMapActive;   // Is above query active?
     domainname       StaticHostname;     // Current answer to reverse-map query (above)
     mDNSBool         DelaySRVUpdate;     // Delay SRV target/port update to avoid "flap"
@@ -2045,9 +2080,9 @@ struct mDNS_struct
 	char MsgBuffer[80];					// Temp storage used while building error log messages
 
 	// Task Scheduling variables
+	mDNSs32  timenow_adjust;			// Correction applied if we ever discover time went backwards
 	mDNSs32  timenow;					// The time that this particular activation of the mDNS code started
 	mDNSs32  timenow_last;				// The time the last time we ran
-	mDNSs32  timenow_adjust;			// Correction applied if we ever discover time went backwards
 	mDNSs32  NextScheduledEvent;		// Derived from values below
 	mDNSs32  SuppressSending;			// Don't send *any* packets during this time
 	mDNSs32  NextCacheCheck;			// Next time to refresh cache record before it expires
@@ -2091,6 +2126,7 @@ struct mDNS_struct
 
 	// unicast-specific data
 	uDNS_GlobalInfo uDNS_info;
+	mDNSs32 SuppressStdPort53Queries;	// Wait before allowing the next standard unicast query to the user's configured DNS server
 
 	// Fixed storage, to avoid creating large objects on the stack
 	DNSMessage imsg;		// Incoming message received from wire
@@ -2129,6 +2165,7 @@ extern const mDNSAddr        AllDNSLinkGroup_v6;
 
 extern const mDNSOpaque16 zeroID;
 extern const mDNSOpaque16 QueryFlags;
+extern const mDNSOpaque16 uQueryFlags;
 extern const mDNSOpaque16 ResponseFlags;
 extern const mDNSOpaque16 UpdateReqFlags;
 extern const mDNSOpaque16 UpdateRespFlags;
@@ -2289,7 +2326,7 @@ extern mDNSs32  mDNSPlatformOneSecond;
 // mDNS_AddRecordToService adds an additional record to a Service Record Set.  This record may be deregistered
 // via mDNS_RemoveRecordFromService, or by deregistering the service.  mDNS_RemoveRecordFromService is passed a
 // callback to free the memory associated with the extra RR when it is safe to do so.  The ExtraResourceRecord
-// object  can be found in the record's context pointer.
+// object can be found in the record's context pointer.
 	
 // mDNS_GetBrowseDomains is a special case of the mDNS_StartQuery call, where the resulting answers
 // are a list of PTR records indicating (in the rdata) domains that are recommended for browsing.
@@ -2424,6 +2461,11 @@ extern mDNSBool DeconstructServiceName(const domainname *const fqdn, domainlabel
 #pragma mark - Other utility functions and macros
 #endif
 
+// mDNS_vsnprintf/snprintf return the number of characters written, excluding the final terminating null.
+// The output is always null-terminated: for example, if the output turns out to be exactly buflen long,
+// then the output will be truncated by one character to allow space for the terminating null.
+// Unlike standard C vsnprintf/snprintf, they return the number of characters *actually* written,
+// not the number of characters that *would* have been printed were buflen unlimited.
 extern mDNSu32 mDNS_vsnprintf(char *sbuffer, mDNSu32 buflen, const char *fmt, va_list arg);
 extern mDNSu32 mDNS_snprintf(char *sbuffer, mDNSu32 buflen, const char *fmt, ...) IS_A_PRINTF_STYLE_FUNCTION(3,4);
 extern mDNSu32 NumCacheRecordsForInterfaceID(const mDNS *const m, mDNSInterfaceID id);
@@ -2506,10 +2548,10 @@ extern mStatus mDNS_SetSecretForZone(mDNS *m, const domainname *zone, const doma
 
 // Hostname/Unicast Interface Configuration
 
-// All hostnames advertised point to a single IP address, set via SetPrimaryInterfaceInfo.  Invoking this routine
+// All hostnames advertised point to one IPv4 address and/or one IPv6 address, set via SetPrimaryInterfaceInfo.  Invoking this routine
 // updates all existing hostnames to point to the new address.
 	
-// A hostname is added via AddDynDNSHostName, which points to the primary interface's IP address.
+// A hostname is added via AddDynDNSHostName, which points to the primary interface's v4 and/or v6 addresss
 
 // The status callback is invoked to convey success or failure codes - the callback should not modify the AuthRecord or free memory.
 // Added hostnames may be removed (deregistered) via mDNS_RemoveDynDNSHostName.
@@ -2527,7 +2569,7 @@ extern mStatus mDNS_SetSecretForZone(mDNS *m, const domainname *zone, const doma
 	
 extern void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCallback *StatusCallback, const void *StatusContext);
 extern void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn);
-extern void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *addr, const mDNSAddr *router);
+extern void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const mDNSAddr *v6addr, const mDNSAddr *router);
 extern void mDNS_UpdateLLQs(mDNS *m);
 extern void mDNS_AddDNSServer(mDNS *const m, const mDNSAddr *dnsAddr, const domainname *domain);
 extern void mDNS_DeleteDNSServers(mDNS *const m);
@@ -2574,6 +2616,9 @@ extern mDNSu8 *DNSDigest_SignMessage(DNSMessage *msg, mDNSu8 **end, mDNSu16 *num
 // Generally speaking:
 // Code that's protected by the main mDNS lock should just use the m->timenow value
 // Code outside the main mDNS lock should use mDNS_TimeNow(m) to get properly adjusted time
+// In certain cases there may be reasons why it's necessary to get the time without taking the lock first
+// (e.g. inside the routines that are doing the locking and unlocking, where a call to get the lock would result in a
+// recursive loop); in these cases use mDNS_TimeNow_NoLock(m) to get mDNSPlatformRawTime with the proper correction factor added.
 //
 // mDNSPlatformUTC returns the time, in seconds, since Jan 1st 1970 UTC and is required for generating TSIG records
 
@@ -2596,6 +2641,7 @@ extern mDNSu32  mDNSPlatformRandomSeed  (void);
 extern mStatus  mDNSPlatformTimeInit    (void);
 extern mDNSs32  mDNSPlatformRawTime     (void);
 extern mDNSs32  mDNSPlatformUTC         (void);
+#define mDNS_TimeNow_NoLock(m) (mDNSPlatformRawTime() + m->timenow_adjust)
 
 // Platform support modules should provide the following functions to map between opaque interface IDs
 // and interface indexes in order to support the DNS-SD API. If your target platform does not support

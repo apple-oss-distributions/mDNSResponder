@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding = "windows-1251"?>
+<?xml version="1.0" encoding="windows-1251"?>
 <VisualStudioProject
 	ProjectType="Visual C++"
-	Version="7.00"
+	Version="7.10"
 	Name="PrinterSetupWizard"
 	ProjectGUID="{B1D2CDA2-CC8F-45D5-A694-2EE45B0308CF}"
 	Keyword="MFCProj">
@@ -20,7 +20,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories=".;../../mDNSWindows;../../mDNSShared;C:\WINDDK\2600.1106\inc;C:\WINDDK\2600.1106\inc\wxp"
+				AdditionalIncludeDirectories=".;../../mDNSWindows;../../mDNSShared"
 				PreprocessorDefinitions="WIN32;_WINDOWS;_DEBUGS;DEBUG=1;WINVER=0x0501;UNICODE;_UNICODE"
 				StringPooling="TRUE"
 				MinimalRebuild="TRUE"
@@ -64,11 +64,17 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
-			OutputDirectory=".\Release\Root\Program Files\Bonjour"
+			OutputDirectory=".\Release"
 			IntermediateDirectory=".\Release"
 			ConfigurationType="1"
 			UseOfMFC="1"
@@ -78,7 +84,7 @@
 				Optimization="2"
 				InlineFunctionExpansion="1"
 				OmitFramePointers="TRUE"
-				AdditionalIncludeDirectories=".;../../mDNSWindows;../../mDNSShared;C:\WINDDK\2600.1106\inc;C:\WINDDK\2600.1106\inc\wxp"
+				AdditionalIncludeDirectories=".;../../mDNSWindows;../../mDNSShared"
 				PreprocessorDefinitions="WIN32;_WINDOWS;NDEBUG;WINVER=0x0501;UNICODE;_UNICODE"
 				StringPooling="TRUE"
 				MinimalRebuild="FALSE"
@@ -122,9 +128,17 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 	</Configurations>
+	<References>
+	</References>
 	<Files>
 		<Filter
 			Name="Source Files"
@@ -148,13 +162,13 @@
 				RelativePath="SecondPage.cpp">
 			</File>
 			<File
+				RelativePath="stdafx.cpp">
+			</File>
+			<File
 				RelativePath=".\StdioFileEx.cpp">
 			</File>
 			<File
 				RelativePath="ThirdPage.cpp">
-			</File>
-			<File
-				RelativePath="stdafx.cpp">
 			</File>
 		</Filter>
 		<Filter
@@ -176,7 +190,16 @@
 				RelativePath="PrinterSetupWizardSheet.h">
 			</File>
 			<File
+				RelativePath="resource.h">
+			</File>
+			<File
+				RelativePath="resource_exe.h">
+			</File>
+			<File
 				RelativePath="SecondPage.h">
+			</File>
+			<File
+				RelativePath="stdafx.h">
 			</File>
 			<File
 				RelativePath=".\StdioFileEx.h">
@@ -187,19 +210,16 @@
 			<File
 				RelativePath=".\UtilTypes.h">
 			</File>
-			<File
-				RelativePath="resource.h">
-			</File>
-			<File
-				RelativePath="resource_exe.h">
-			</File>
-			<File
-				RelativePath="stdafx.h">
-			</File>
 		</Filter>
 		<Filter
 			Name="Resource Files"
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;jpg;jpeg;jpe;manifest">
+			<File
+				RelativePath="res\about.bmp">
+			</File>
+			<File
+				RelativePath="res\banner_icon.bmp">
+			</File>
 			<File
 				RelativePath="res\Info.ico">
 			</File>
@@ -214,12 +234,6 @@
 			</File>
 			<File
 				RelativePath="PrinterSetupWizard.rc">
-			</File>
-			<File
-				RelativePath="res\about.bmp">
-			</File>
-			<File
-				RelativePath="res\banner_icon.bmp">
 			</File>
 			<File
 				RelativePath="res\watermark.bmp">
@@ -238,12 +252,6 @@
 				RelativePath="..\..\mDNSWindows\DebugServices.h">
 			</File>
 			<File
-				RelativePath="..\..\mDNSWindows\WinServices.cpp">
-			</File>
-			<File
-				RelativePath="..\..\mDNSWindows\WinServices.h">
-			</File>
-			<File
 				RelativePath="..\..\mDNSShared\dns_sd.h">
 			</File>
 			<File
@@ -260,6 +268,12 @@
 			</File>
 			<File
 				RelativePath="..\..\mDNSWindows\loclibrary.h">
+			</File>
+			<File
+				RelativePath="..\..\mDNSWindows\WinServices.cpp">
+			</File>
+			<File
+				RelativePath="..\..\mDNSWindows\WinServices.h">
 			</File>
 		</Filter>
 		<File

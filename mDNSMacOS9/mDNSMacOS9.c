@@ -23,6 +23,9 @@
     Change History (most recent first):
 
 $Log: mDNSMacOS9.c,v $
+Revision 1.44  2005/09/16 21:06:50  cheshire
+Use mDNS_TimeNow_NoLock macro, instead of writing "mDNSPlatformRawTime() + m->timenow_adjust" all over the place
+
 Revision 1.43  2004/12/17 23:37:49  cheshire
 <rdar://problem/3485365> Guard against repeating wireless dissociation/re-association
 (and other repetitive configuration changes)
@@ -705,7 +708,7 @@ mDNSlocal void ScheduleNextTimerCallback(const mDNS *const m)
 	{
 	if (m->mDNSPlatformStatus == mStatus_NoError)
 		{
-		SInt32 interval = m->NextScheduledEvent - (mDNSPlatformRawTime() + m->timenow_adjust);
+		SInt32 interval = m->NextScheduledEvent - mDNS_TimeNow_NoLock(m);
 		if      (interval < 1)                 interval = 1;
 		else if (interval > 0x70000000 / 1000) interval = 0x70000000 / mDNSPlatformOneSecond;
 		else                                   interval = (interval * 1000 + mDNSPlatformOneSecond-1)/ mDNSPlatformOneSecond;

@@ -23,6 +23,15 @@
     Change History (most recent first):
 
 $Log: DNSCommon.c,v $
+Revision 1.90  2005/03/21 00:33:51  shersche
+<rdar://problem/4021486> Fix build warnings on Win32 platform
+
+Revision 1.89  2005/03/17 18:59:38  ksekar
+<rdar://problem/4012279> Properly parse multiple LLQ Options per packet on Windows
+
+Revision 1.88  2005/03/16 00:42:32  ksekar
+<rdar://problem/4012279> Long-lived queries not working on Windows
+
 Revision 1.87  2005/02/25 04:21:00  cheshire
 <rdar://problem/4015377> mDNS -F returns the same domain multiple times with different casing
 
@@ -1028,7 +1037,7 @@ mDNSexport void AppendLabelSuffix(domainlabel *name, mDNSu32 val, mDNSBool RichT
 
 	while (val >= divisor * 10) { divisor *= 10; chars++; }
 
-	name->c[0] = TruncateUTF8ToLength(name->c+1, name->c[0], MAX_DOMAIN_LABEL - chars);
+	name->c[0] = (mDNSu8) TruncateUTF8ToLength(name->c+1, name->c[0], MAX_DOMAIN_LABEL - chars);
 
 	if (RichText) { name->c[++name->c[0]] = ' '; name->c[++name->c[0]] = '('; }
 	else          { name->c[++name->c[0]] = '-'; }
@@ -1342,14 +1351,14 @@ mDNSlocal mDNSu8 *putOptRData(mDNSu8 *ptr, const mDNSu8 *limit, ResourceRecord *
 		nput += 2 * sizeof(mDNSu16);
 		if (opt->opt == kDNSOpt_LLQ)
 			{
-			if (ptr + sizeof(LLQOptData) > limit) goto space_err;
+			if (ptr + LLQ_OPTLEN > limit) goto space_err;
 			ptr = putVal16(ptr, opt->OptData.llq.vers);
 			ptr = putVal16(ptr, opt->OptData.llq.llqOp);
 			ptr = putVal16(ptr, opt->OptData.llq.err);
 			mDNSPlatformMemCopy(opt->OptData.llq.id, ptr, 8);  // 8-byte id
 			ptr += 8;
 			ptr = putVal32(ptr, opt->OptData.llq.lease);
-			nput += sizeof(LLQOptData);
+			nput += LLQ_OPTLEN;
 			}
 		else if (opt->opt == kDNSOpt_Lease)
 			{
@@ -1377,11 +1386,10 @@ mDNSlocal mDNSu16 getVal16(const mDNSu8 **ptr)
 mDNSlocal const mDNSu8 *getOptRdata(const mDNSu8 *ptr, const mDNSu8 *limit, ResourceRecord *rr, mDNSu16 pktRDLen)
 	{
 	int nread = 0;
-	rdataOpt *opt;
-	
-	while (nread < pktRDLen)
+	rdataOpt *opt = (rdataOpt *)rr->rdata->u.data;
+
+	while (nread < pktRDLen && (mDNSu8 *)opt < rr->rdata->u.data + MaximumRDSize - sizeof(rdataOpt))
 		{
-		opt = (rdataOpt *)(rr->rdata->u.data + nread);
 		// space for opt + optlen
 		if (nread + (2 * sizeof(mDNSu16)) > rr->rdata->MaxRDLength) goto space_err;
 		opt->opt = getVal16(&ptr);
@@ -1389,7 +1397,7 @@ mDNSlocal const mDNSu8 *getOptRdata(const mDNSu8 *ptr, const mDNSu8 *limit, Reso
 		nread += 2 * sizeof(mDNSu16);
 		if (opt->opt == kDNSOpt_LLQ)
 			{
-			if ((unsigned)(limit - ptr) < sizeof(LLQOptData)) goto space_err;
+			if ((unsigned)(limit - ptr) < LLQ_OPTLEN) goto space_err;
 			opt->OptData.llq.vers = getVal16(&ptr);
 			opt->OptData.llq.llqOp = getVal16(&ptr);
 			opt->OptData.llq.err = getVal16(&ptr);
@@ -1399,7 +1407,7 @@ mDNSlocal const mDNSu8 *getOptRdata(const mDNSu8 *ptr, const mDNSu8 *limit, Reso
 			if (opt->OptData.llq.lease > 0x70000000UL / mDNSPlatformOneSecond)
 				opt->OptData.llq.lease = 0x70000000UL / mDNSPlatformOneSecond;
 			ptr += sizeof(mDNSOpaque32);
-			nread += sizeof(LLQOptData);
+			nread += LLQ_OPTLEN;
 			}
 		else if (opt->opt == kDNSOpt_Lease)
 			{
@@ -1412,6 +1420,7 @@ mDNSlocal const mDNSu8 *getOptRdata(const mDNSu8 *ptr, const mDNSu8 *limit, Reso
 			nread += sizeof(mDNSs32);
 			}
 		else { LogMsg("ERROR: getOptRdata - unknown opt %d", opt->opt); return mDNSNULL; }
+		opt++;  // increment pointer into rdatabody
 		}
 	
 	rr->rdlength = pktRDLen;
@@ -1629,8 +1638,8 @@ mDNSexport mDNSu8 *putUpdateLease(DNSMessage *msg, mDNSu8 *end, mDNSu32 lease)
 	
 	opt->RecordType = kDNSRecordTypeKnownUnique;  // to avoid warnings in other layers
 	opt->rrtype = kDNSType_OPT;
-	opt->rdlength = LEASE_OPT_SIZE;
-	opt->rdestimate = LEASE_OPT_SIZE;
+	opt->rdlength = LEASE_OPT_RDLEN;
+	opt->rdestimate = LEASE_OPT_RDLEN;
 
 	optRD = &rr.resrec.rdata->u.opt;
 	optRD->opt = kDNSOpt_Lease;

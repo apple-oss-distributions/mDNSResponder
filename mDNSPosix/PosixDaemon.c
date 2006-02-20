@@ -28,6 +28,12 @@
 	Change History (most recent first):
 
 $Log: PosixDaemon.c,v $
+Revision 1.29  2005/08/04 03:37:45  mkrochma
+Temporary workaround to fix posix after mDNS_SetPrimaryInterfaceInfo changed
+
+Revision 1.28  2005/07/19 11:21:09  cheshire
+<rdar://problem/4170449> Unix Domain Socket leak in mdnsd
+
 Revision 1.27  2005/02/04 00:39:59  cheshire
 Move ParseDNSServers() from PosixDaemon.c to mDNSPosix.c so all Posix client layers can use it
 
@@ -143,14 +149,14 @@ extern const char mDNSResponderVersionString[];
 static void Reconfigure(mDNS *m)
 	{
 	mDNSAddr DynDNSIP;
-	mDNS_SetPrimaryInterfaceInfo(m, NULL, NULL);
+	mDNS_SetPrimaryInterfaceInfo(m, NULL, NULL, NULL);
 	mDNS_DeleteDNSServers(m);
 	if (ParseDNSServers(m, uDNS_SERVERS_FILE) < 0)
 		LogMsg("Unable to parse DNS server list. Unicast DNS-SD unavailable");
 	ReadDDNSSettingsFromConfFile(m, CONFIG_FILE, &DynDNSHostname, &DynDNSZone, NULL);
 	FindDefaultRouteIP(&DynDNSIP);
 	if (DynDNSHostname.c[0]) mDNS_AddDynDNSHostName(m, &DynDNSHostname, NULL, NULL);
-	if (DynDNSIP.type)       mDNS_SetPrimaryInterfaceInfo(m, &DynDNSIP, NULL);
+	if (DynDNSIP.type)       mDNS_SetPrimaryInterfaceInfo(m, &DynDNSIP, NULL, NULL);
 	}
 
 // Do appropriate things at startup with command line arguments. Calls exit() if unhappy.
@@ -288,8 +294,9 @@ mStatus udsSupportAddFDToEventLoop(int fd, udsEventCallback callback, void *cont
 
 mStatus udsSupportRemoveFDFromEventLoop(int fd)		// Note: This also CLOSES the file descriptor
 	{
-	return mDNSPosixRemoveFDFromEventLoop(fd);
+	mStatus err = mDNSPosixRemoveFDFromEventLoop(fd);
 	close(fd);
+	return err;
 	}
 
 mDNSexport void RecordUpdatedNiceLabel(mDNS *const m, mDNSs32 delay)

@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: Firewall.cpp,v $
+Revision 1.3  2005/09/29 06:33:54  herscher
+<rdar://problem/4278931> Fix compilation error when using latest Microsoft Platform SDK.
+
 Revision 1.2  2004/09/15 09:39:53  shersche
 Retry the method INetFwPolicy::get_CurrentProfile on error
 
@@ -32,7 +35,16 @@ Wrapper for Windows Firewall API code
 
 */
 
-#define _WIN32_DCOM 
+// <rdar://problem/4278931> Doesn't compile correctly with latest Platform SDK
+
+#if !defined(_WIN32_DCOM)
+#	define _WIN32_DCOM 
+#endif
+
+
+#if !defined(_WSPIAPI_COUNTOF)
+#	define _WSPIAPI_COUNTOF(_Array) (sizeof(_Array) / sizeof(_Array[0]))
+#endif
 
 #include "Firewall.h"
 #include <windows.h>

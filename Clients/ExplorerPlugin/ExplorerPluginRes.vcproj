@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding = "Windows-1252"?>
+<?xml version="1.0" encoding="Windows-1252"?>
 <VisualStudioProject
 	ProjectType="Visual C++"
-	Version="7.00"
+	Version="7.10"
 	Name="ExplorerPluginRes"
 	ProjectGUID="{BB8AC1B5-6587-4163-BDC6-788B157705CA}"
 	SccProjectName=""
@@ -13,7 +13,7 @@
 	<Configurations>
 		<Configuration
 			Name="Debug|Win32"
-			OutputDirectory=".\Debug\Resources\ExplorerPlugin.dll.Resources"
+			OutputDirectory=".\Debug\ExplorerPlugin.Resources"
 			IntermediateDirectory=".\Debug"
 			ConfigurationType="2"
 			UseOfMFC="1"
@@ -70,8 +70,7 @@
 			<Tool
 				Name="VCPreLinkEventTool"
 				Description="Building Output Directories"
-				CommandLine="if not exist Debug\Resources mkdir Debug\Resources
-if not exist Debug\Resources\ExplorerPlugin.dll.Resources mkdir Debug\Resources\ExplorerPlugin.dll.Resources"/>
+				CommandLine="if not exist Debug\ExplorerPlugin.Resources mkdir Debug\ExplorerPlugin.Resources"/>
 			<Tool
 				Name="VCResourceCompilerTool"
 				PreprocessorDefinitions="_DEBUG"
@@ -80,11 +79,17 @@ if not exist Debug\Resources\ExplorerPlugin.dll.Resources mkdir Debug\Resources\
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
-			OutputDirectory=".\Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources"
+			OutputDirectory=".\Release\ExplorerPlugin.Resources"
 			IntermediateDirectory=".\Release"
 			ConfigurationType="2"
 			UseOfMFC="1"
@@ -145,11 +150,9 @@ if not exist Debug\Resources\ExplorerPlugin.dll.Resources mkdir Debug\Resources\
 			<Tool
 				Name="VCPreLinkEventTool"
 				Description="Building Output Directories"
-				CommandLine="if not exist Release\Root mkdir Release\Root
-if not exist &quot;Release\Root\Program Files&quot; mkdir &quot;Release\Root\Program Files&quot;
-if not exist &quot;Release\Root\Program Files\Bonjour&quot; mkdir &quot;Release\Root\Program Files\Bonjour&quot;
-if not exist &quot;Release\Root\Program Files\Bonjour\Resources&quot; mkdir &quot;Release\Root\Program Files\Bonjour\Resources&quot;
-if not exist &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources&quot; mkdir &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources&quot;"/>
+				CommandLine="if not exist Release mkdir Release
+if not exist &quot;Release\ExplorerPlugin.Resources&quot; mkdir &quot;Release\ExplorerPlugin.Resources&quot;
+"/>
 			<Tool
 				Name="VCResourceCompilerTool"
 				PreprocessorDefinitions="NDEBUG"
@@ -158,9 +161,17 @@ if not exist &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.d
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 	</Configurations>
+	<References>
+	</References>
 	<Files>
 		<Filter
 			Name="Header Files"
@@ -173,16 +184,10 @@ if not exist &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.d
 			Name="Resource Files"
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;jpg;jpeg;jpe;manifest">
 			<File
-				RelativePath="ExplorerPluginRes.rc">
-			</File>
-			<File
-				RelativePath="Web.ico">
+				RelativePath="res\about.bmp">
 			</File>
 			<File
 				RelativePath=".\about.bmp">
-			</File>
-			<File
-				RelativePath="res\about.bmp">
 			</File>
 			<File
 				RelativePath="res\button-2k.ico">
@@ -194,13 +199,19 @@ if not exist &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.d
 				RelativePath=".\res\cold.ico">
 			</File>
 			<File
+				RelativePath="ExplorerPluginRes.rc">
+			</File>
+			<File
 				RelativePath=".\hot.ico">
+			</File>
+			<File
+				RelativePath="res\logo.bmp">
 			</File>
 			<File
 				RelativePath=".\logo.bmp">
 			</File>
 			<File
-				RelativePath="res\logo.bmp">
+				RelativePath="Web.ico">
 			</File>
 		</Filter>
 	</Files>

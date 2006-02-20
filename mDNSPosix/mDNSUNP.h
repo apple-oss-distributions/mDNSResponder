@@ -24,6 +24,9 @@
     Change History (most recent first):
 
 $Log: mDNSUNP.h,v $
+Revision 1.18  2005/04/08 21:37:57  ksekar
+<rdar://problem/3792767> get_ifi_info doesn't return IPv6 interfaces on Linux
+
 Revision 1.17  2004/12/17 19:32:43  cheshire
 Add missing semicolon
 
@@ -90,6 +93,10 @@ First checkin
 #include <net/if.h>
 #include <netinet/in.h>
 
+#ifdef HAVE_LINUX
+#include <linux/socket.h>
+#endif
+
 #ifdef  __cplusplus
     extern "C" {
 #endif
@@ -99,8 +106,12 @@ First checkin
 #endif
 
 #if !defined(_SS_MAXSIZE)
-    #define sockaddr_storage sockaddr
-#endif
+#if HAVE_IPV6
+#define sockaddr_storage sockaddr_in6
+#else
+#define sockaddr_storage sockaddr
+#endif // HAVE_IPV6	
+#endif // !defined(_SS_MAXSIZE)
 
 #ifndef NOT_HAVE_SA_LEN
 #define GET_SA_LEN(X) (sizeof(struct sockaddr) > ((struct sockaddr*)&(X))->sa_len ? \
@@ -146,6 +157,17 @@ struct ifi_info {
   struct ifi_info  *ifi_next;   /* next of these structures */
 };
 
+#if defined(AF_INET6) && HAVE_IPV6 && HAVE_LINUX
+#define PROC_IFINET6_PATH "/proc/net/if_inet6"
+extern struct ifi_info  *get_ifi_info_linuxv6(int family, int doaliases);
+#endif
+	
+#if defined(AF_INET6) && HAVE_IPV6
+#define INET6_ADDRSTRLEN 46 /*Maximum length of IPv6 address */
+#endif
+	
+
+	
 #define IFI_ALIAS   1           /* ifi_addr is an alias */
 
 /* From the text (Stevens, section 16.6): */

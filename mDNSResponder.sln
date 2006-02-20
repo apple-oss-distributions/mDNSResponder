@@ -1,43 +1,78 @@
-Microsoft Visual Studio Solution File, Format Version 7.00
+Microsoft Visual Studio Solution File, Format Version 8.00
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DLL", "mDNSWindows\DLL\dnssd.vcproj", "{AB581101-18F0-46F6-B56A-83A6B1EA657E}"
+	ProjectSection(ProjectDependencies) = postProject
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mDNSResponder", "mDNSWindows\SystemService\Service.vcproj", "{C1D98254-BA27-4427-A3BE-A68CA2CC5F69}"
+	ProjectSection(ProjectDependencies) = postProject
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NSPTool", "mDNSWindows\NSPTool\NSPTool.vcproj", "{208B3A9F-1CA0-4D1D-9D6C-C61616F94705}"
+	ProjectSection(ProjectDependencies) = postProject
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mdnsNSP", "mDNSWindows\mdnsNSP\mdnsNSP.vcproj", "{F4F15529-F0EB-402F-8662-73C5797EE557}"
+	ProjectSection(ProjectDependencies) = postProject
+		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExplorerPlugin", "Clients\ExplorerPlugin\ExplorerPlugin.vcproj", "{BB8AC1B5-6587-4163-BDC6-788B157705CA}"
+	ProjectSection(ProjectDependencies) = postProject
+		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PrinterSetupWizard", "Clients\PrinterSetupWizard\PrinterSetupWizard.vcproj", "{B1D2CDA2-CC8F-45D5-A694-2EE45B0308CF}"
+	ProjectSection(ProjectDependencies) = postProject
+		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DLL.NET", "mDNSWindows\DLL.NET\dnssd_NET.vcproj", "{9C6701E2-82B7-44B7-9B5E-3897D9153F79}"
+	ProjectSection(ProjectDependencies) = postProject
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ControlPanel", "mDNSWindows\ControlPanel\ControlPanel.vcproj", "{F5D703B6-5612-4381-8BE2-2B7AEBAE58FC}"
+	ProjectSection(ProjectDependencies) = postProject
+		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PrinterSetupWizardLocRes", "Clients\PrinterSetupWizard\PrinterSetupWizardLocRes.vcproj", "{B1D2CDA2-CC8F-45D5-A694-2EE45B0308CF}"
+	ProjectSection(ProjectDependencies) = postProject
+		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PrinterSetupWizardRes", "Clients\PrinterSetupWizard\PrinterSetupWizardRes.vcproj", "{B1D2CDA2-CC8F-45D5-A694-2EE45B0308CF}"
+	ProjectSection(ProjectDependencies) = postProject
+		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExplorerPluginLocRes", "Clients\ExplorerPlugin\ExplorerPluginLocRes.vcproj", "{BB8AC1B5-6587-4163-BDC6-788B157705CA}"
+	ProjectSection(ProjectDependencies) = postProject
+		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExplorerPluginRes", "Clients\ExplorerPlugin\ExplorerPluginRes.vcproj", "{BB8AC1B5-6587-4163-BDC6-788B157705CA}"
+	ProjectSection(ProjectDependencies) = postProject
+		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dns-sd", "Clients\DNS-SD.VisualStudio\dns-sd.vcproj", "{AA230639-E115-4A44-AA5A-44A61235BA50}"
+	ProjectSection(ProjectDependencies) = postProject
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Java", "mDNSWindows\Java\Java.vcproj", "{9CE2568A-3170-41C6-9F20-A0188A9EC114}"
+	ProjectSection(ProjectDependencies) = postProject
+		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "JavaSamples", "Clients\Java\JavaSamples.vcproj", "{A987A0C1-344F-475C-869C-F082EB11EEBA}"
+	ProjectSection(ProjectDependencies) = postProject
+		{9CE2568A-3170-41C6-9F20-A0188A9EC114} = {9CE2568A-3170-41C6-9F20-A0188A9EC114}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfiguration) = preSolution
-		ConfigName.0 = Debug
-		ConfigName.1 = Release
-	EndGlobalSection
-	GlobalSection(ProjectDependencies) = postSolution
-		{F4F15529-F0EB-402F-8662-73C5797EE557}.0 = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-		{BB8AC1B5-6587-4163-BDC6-788B157705CA}.0 = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-		{B1D2CDA2-CC8F-45D5-A694-2EE45B0308CF}.0 = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-		{B1D2CDA2-CC8F-45D5-A694-2EE45B0308CF}.0 = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-		{B1D2CDA2-CC8F-45D5-A694-2EE45B0308CF}.0 = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-		{BB8AC1B5-6587-4163-BDC6-788B157705CA}.0 = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-		{BB8AC1B5-6587-4163-BDC6-788B157705CA}.0 = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
+		Debug = Debug
+		Release = Release
 	EndGlobalSection
 	GlobalSection(ProjectConfiguration) = postSolution
 		{AB581101-18F0-46F6-B56A-83A6B1EA657E}.Debug.ActiveCfg = Debug|Win32
@@ -92,6 +127,14 @@ Global
 		{AA230639-E115-4A44-AA5A-44A61235BA50}.Debug.Build.0 = Debug|Win32
 		{AA230639-E115-4A44-AA5A-44A61235BA50}.Release.ActiveCfg = Release|Win32
 		{AA230639-E115-4A44-AA5A-44A61235BA50}.Release.Build.0 = Release|Win32
+		{9CE2568A-3170-41C6-9F20-A0188A9EC114}.Debug.ActiveCfg = Debug|Win32
+		{9CE2568A-3170-41C6-9F20-A0188A9EC114}.Debug.Build.0 = Debug|Win32
+		{9CE2568A-3170-41C6-9F20-A0188A9EC114}.Release.ActiveCfg = Release|Win32
+		{9CE2568A-3170-41C6-9F20-A0188A9EC114}.Release.Build.0 = Release|Win32
+		{A987A0C1-344F-475C-869C-F082EB11EEBA}.Debug.ActiveCfg = Debug|Win32
+		{A987A0C1-344F-475C-869C-F082EB11EEBA}.Debug.Build.0 = Debug|Win32
+		{A987A0C1-344F-475C-869C-F082EB11EEBA}.Release.ActiveCfg = Release|Win32
+		{A987A0C1-344F-475C-869C-F082EB11EEBA}.Release.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 	EndGlobalSection

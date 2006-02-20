@@ -44,6 +44,10 @@
 
     Change History (most recent first):
 $Log: ddnswriteconfig.m,v $
+Revision 1.4  2005/06/04 04:47:47  cheshire
+<rdar://problem/4138070> ddnswriteconfig (Bonjour PreferencePane) vulnerability
+Remove self-installing capability of ddnswriteconfig
+
 Revision 1.3  2005/02/16 00:17:35  cheshire
 Don't create empty arrays -- CFArrayGetValueAtIndex(array,0) returns an essentially random (non-null)
 result for empty arrays, which can lead to code crashing if it's not sufficiently defensive.
@@ -79,54 +83,6 @@ Add Preference Pane to facilitate testing of DDNS & wide-area features
 
 
 static AuthorizationRef	gAuthRef = 0;
-
-int
-CopySUIDTool(const char *srcPath, const char *dstPath)
-// Copy a tool from srcPath to dstPath and set its 'x' and SUID bits. Return 0 on success.
-{
-	int		srcFD, dstFD, err = 0;
-	off_t	len, written;
-	void	*pSrc;
-	
-	srcFD = open( srcPath, O_RDONLY, (mode_t) 0);
-	require_action( srcFD > 0, OpenSrcFailed, err=errno;);
-
-	len = lseek( srcFD, 0, SEEK_END);
-	require_action( len > 0, GetSrcLenFailed, err=errno;);
-	pSrc = mmap( NULL, len, PROT_READ, MAP_FILE, srcFD, 0);
-	require_action( pSrc != (void*)-1, MMapFailed, err=errno;);
-
-	dstFD = open( dstPath, O_RDWR | O_CREAT | O_TRUNC, (mode_t) 0);
-	require_action( dstFD > 0, OpenDstFailed, err=errno;);
-
-	written = write( dstFD, pSrc, len);
-	require_action( written == len, WriteFailed, err=errno;);
-
-	err = fchmod( dstFD, S_IRUSR | S_IXUSR | S_ISUID | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
-
-WriteFailed:
-	close( dstFD);
-OpenDstFailed:
-	munmap( pSrc, len);
-MMapFailed:
-GetSrcLenFailed:
-	close( srcFD);
-OpenSrcFailed:
-	return err;
-}
-
-
-int	
-InstallRootTool( const char *srcPath)
-{
-	if (geteuid() != 0)
-		return -1;		// failure; not running as root
-
-	(void) mkdir(kToolHome kToolDir, S_IRUSR | S_IXUSR | S_IWUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
-
-	return CopySUIDTool( srcPath, kToolPath);
-}
-
 
 OSStatus
 WriteArrayToDynDNS(CFStringRef arrayKey, CFArrayRef domainArray)
@@ -435,7 +391,6 @@ int	main( int argc, char **argv)
 /* argv[0] is the exec path; argv[1] is a fd for input data; argv[2]... are operation codes.
    The tool supports the following operations:
 	V		-- exit with status PRIV_OP_TOOL_VERS
-	I		-- install self as suid-root tool into system (must be run as root)
 	A		-- read AuthInfo from input pipe
 	Wd		-- write registration domain to dynamic store
 	Wb		-- write browse domain to dynamic store
@@ -444,19 +399,10 @@ int	main( int argc, char **argv)
 */
 {
 	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-	int	commFD = -1, iArg, savedUID, result = 0;
+	int	commFD = -1, iArg, result = 0;
 
-	if ( argc == 3 && 0 == strcmp( argv[2], "I")) {
-		return InstallRootTool( argv[0]);
-	}
-
-	savedUID = geteuid();
-#if 1
 	if ( 0 != seteuid( 0))
 		return -1;
-#else
-	sleep( 10);
-#endif
 
 	if ( argc == 3 && 0 == strcmp( argv[2], "V"))
 		return PRIV_OP_TOOL_VERS;

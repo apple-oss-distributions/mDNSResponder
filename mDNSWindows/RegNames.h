@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: RegNames.h,v $
+Revision 1.2  2005/10/05 18:05:28  herscher
+<rdar://problem/4192011> Save Wide-Area preferences in a different spot in the registry so they don't get removed when doing an update install.
+
 Revision 1.1  2005/03/03 02:31:37  shersche
 Consolidates all registry key names and can safely be included in any component that needs it
 
@@ -35,6 +38,7 @@ Consolidates all registry key names and can safely be included in any component 
 
 #if defined(UNICODE)
 
+#	define kServiceParametersNode				L"SOFTWARE\\Apple Computer, Inc.\\Bonjour"
 #	define kServiceName							L"Bonjour Service"
 #	define kServiceDynDNSBrowseDomains			L"BrowseDomains"
 #	define kServiceDynDNSHostNames				L"HostNames"
@@ -48,6 +52,7 @@ Consolidates all registry key names and can safely be included in any component 
 
 # else
 
+#	define kServiceParametersNode				"SOFTWARE\\Apple Computer, Inc.\\Bonjour"
 #	define kServiceName							"Bonjour Service"
 #	define kServiceDynDNSBrowseDomains			"BrowseDomains"
 #	define kServiceDynDNSHostNames				"HostNames"

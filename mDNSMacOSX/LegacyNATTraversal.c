@@ -24,6 +24,19 @@
     Change History (most recent first):
 
 $Log: LegacyNATTraversal.c,v $
+Revision 1.14.2.1  2005/12/12 17:38:40  cheshire
+Put buffer overflow bug 4151514 back in by order of Program CCC:
+"Program CCC Denied.  This change does not meet the criteria for Chardonnay."
+
+Revision 1.14  2005/12/08 03:00:33  cheshire
+<rdar://problem/4349971> Byte order bugs in Legacy NAT traversal code
+
+Revision 1.13  2005/09/07 18:23:05  ksekar
+<rdar://problem/4151514> Off-by-one overflow in LegacyNATTraversal
+
+Revision 1.12  2005/07/22 21:36:16  ksekar
+Fix GCC 4.0/Intel compiler warnings
+
 Revision 1.11  2004/12/03 03:34:20  ksekar
 <rdar://problem/3882674> LegacyNATTraversal.c leaks threads
 
@@ -103,6 +116,8 @@ Revision 1.1  2004/08/18 17:35:41  ksekar
 // TODO: remove later and do variable length
 #define MAX_SOAPMSGSIZE		65536
 
+// This code accidentally closes fd 0 all over the place
+// To stop that messing up the mDNSResponder core, we trap it and prevent it
 static int safe_close(int fd)
 	{
 	if (fd < 3) { /* LogMsg("safe_close: ERROR sd %d < 3", fd); */ return(-1); }
@@ -110,6 +125,10 @@ static int safe_close(int fd)
 	}
 
 #define close safe_close
+
+// This code uses fprintf(stderr, ...) and similar to log error messages
+// We redirect all of them to syslog using our LogMsg mechanism
+#define fprintf(file, ...) LogMsg(__VA_ARGS__)
 
 ////////////////////////////////////////////////////////////////////////
 // NetAddr Functions
@@ -433,7 +452,7 @@ typedef struct tagIPINFO
 {
         int                             iFlags;
         char                    szIfName[IFNAMELEN];    /* Interface name                       */
-        unsigned char   abIP[IPLEN];                    /* IP in host byte order        */
+        unsigned char   abIP[IPLEN];
         unsigned short  wPort;
 } IPINFO, *PIPINFO, **PPIPINFO;
 
@@ -441,10 +460,13 @@ typedef struct hostent	HOSTENT, *PHOSTENT;
 
 static unsigned long GetNATIPNetmask(unsigned long dwIP)
 {
-	if ((dwIP & 0xFF000000) == 0x0A000000)  return 0xFF000000;
-	if ((dwIP & 0xFFF00000) == 0xAC100000)  return 0xFFF00000;
-	if ((dwIP & 0xFFFF0000) == 0xC0a80000)  return 0xFFFF0000;
-
+	static const union { uint8_t b[4]; uint32_t l; } mask_10 = { { 255, 0,   0, 0 } };	// Mask for 10/8
+	static const union { uint8_t b[4]; uint32_t l; } mask172 = { { 255, 240, 0, 0 } };	// Mask for 172.16/12
+	static const union { uint8_t b[4]; uint32_t l; } mask192 = { { 255, 255, 0, 0 } };	// Mask for 192.168/16
+	uint8_t *p = (uint8_t *)&dwIP;
+	if (p[0] ==  10                       ) return mask_10.l;
+	if (p[0] == 172 && (p[1] & 0xF0) == 16) return mask172.l;
+	if (p[0] == 192 && p[1] == 168        ) return mask192.l;
 	return 0;	/* No NAT IP */
 }
 
@@ -528,8 +550,7 @@ static int GetIPInfo(PPIPINFO ppIPInfo)
 		{
 		case AF_INET:
 			memcpy(pIPInfo[iNum].szIfName, ifr->ifr_name, IFNAMELEN);
-			dwIP =
-				ntohl(((struct sockaddr_in *)&ifr->ifr_addr)->sin_addr.s_addr);
+			dwIP = ((struct sockaddr_in *)&ifr->ifr_addr)->sin_addr.s_addr;
 			memcpy(pIPInfo[iNum].abIP, &dwIP, sizeof(unsigned long));
 			if (ifrcopy.ifr_flags & IFF_POINTOPOINT)
 				pIPInfo[iNum].iFlags |= ISPPP;
@@ -602,7 +623,7 @@ static int SSDPListen()
 	saddr.sin_family = AF_INET;
 	//saddr.sin_addr.s_addr = inet_addr(SSDP_IP);
 	//saddr.sin_port = htons(SSDP_PORT);
-	saddr.sin_addr.s_addr = htonl(g_dwLocalIP);
+	saddr.sin_addr.s_addr = g_dwLocalIP;
 	saddr.sin_port = 0;
 
 	// and set the multicast add_member structure
@@ -647,7 +668,7 @@ static int EventListen()
 		bzero(&saddr, sizeof(saddr));
 		saddr.sin_len = sizeof(saddr);
 		saddr.sin_family = AF_INET;
-		saddr.sin_addr.s_addr = htonl(g_dwLocalIP);
+		saddr.sin_addr.s_addr = g_dwLocalIP;
 		saddr.sin_port = htons(g_wEventPort);
 
 		// return if okay
@@ -718,7 +739,7 @@ static void DumpHex(char *buf, int len)
 			nexti = i + 16;
 			endj = (nexti > len) ? len : nexti;
 			for (j = i; j < endj; j++)
-				fprintf(g_log, "%02x ", buf[j] & 0xff);
+				fprintf(g_log, "%02x %c ", buf[j] & 0xff, buf[j]);
 			if (j == len) {
 				if ((j % 16) != 0) {
 					char pad[3 * 16 + 1];  // don't need the last 3 bytes anyway
@@ -757,7 +778,7 @@ static char *FindHTTPHeaderNewLine(char *pbuf, int iBufSize, int *pfEOH)
 		result = memchr(pbuf, '\r', iBufSize);
 		if (result == NULL) {
 			if (g_fLogging & NALOG_INFO0) {
-				fprintf(g_log, "FindHTTPHeaderNewLine: er @(%d)\n", i);
+				fprintf(g_log, "FindHTTPHeaderNewLine: er @(%d/%d)\n", i, iBufSize);
 				fflush(g_log);
 			}
 			return NULL;
@@ -895,7 +916,15 @@ static PHTTPResponse NewHTTPResponse_sz(
 		pszEOL = FindHTTPHeaderNewLine(pszEOL,
 			iBufferSize - (pszEOL - pBuf),  // remainder size
 			&fEOH);
-		if (pszEOL == NULL) goto cleanup;  // syntax error
+		if (pszEOL == NULL) {
+			if (g_fLogging & NALOG_INFO0) {
+				fprintf(g_log, "NewHTTPResponse_sz: er reading header field %d @ %lu / %lu\n",
+					iNumHeaders, pHeader->pszName - pBuf, iBufferSize);
+				DumpHex(pszHTTPResponse, iBufferSize);
+				fflush(g_log);
+			}
+			goto cleanup;  // syntax error
+		}
 
 		*pszEOL = '\0';  // terminate this string
 		pszEOL += 2;  // point to beginning of next line
@@ -1305,27 +1334,24 @@ static void *TCPProc(void *in)
 		char response[2000];
 		PHTTPResponse resp;
 		int n;
-		sprintf(callback, "%lu.%lu.%lu.%lu:%u", 
-			(g_dwLocalIP >> 24) & 0xFF,
-			(g_dwLocalIP >> 16) & 0xFF,
-			(g_dwLocalIP >> 8) & 0xFF,
-			(g_dwLocalIP >> 0) & 0xFF,
-			g_wEventPort);
+		sprintf(callback, "%u.%u.%u.%u:%u",
+			((uint8_t*)&g_dwLocalIP)[0], ((uint8_t*)&g_dwLocalIP)[1],
+			((uint8_t*)&g_dwLocalIP)[2], ((uint8_t*)&g_dwLocalIP)[3], g_wEventPort);
 
-		n = sprintf(buf,
+		n = sprintf((char *)buf,
 			szEventMsgSubscribeFMT,
 			g_szEventURL,
 			callback, g_szRouterHostPortEvent, 1800);
 
 		memset(response, 0, 2000);
 		n = SendTCPMsg_saddr_parse(
-			buf, n,
+			(char *)buf, n,
 			response, 2000,
 			&g_saddrRouterEvent);
 		if (n > 0)
 		{
 			response[n] = '\0';
-			resp = NewHTTPResponse_sz(buf, n, TRUE);
+			resp = NewHTTPResponse_sz((char *)response, n+1, TRUE);
 			if (NULL != resp)
 			{
 ////TracePrint(ELL_TRACE, "UPnP Subscribe returns %s/%d\n", resp->pszStatus, n);
@@ -1352,7 +1378,7 @@ static void *TCPProc(void *in)
 	{
 //		ssize_t				n;
 		struct sockaddr_in	recvaddr;
-		int					recvaddrlen;
+		socklen_t		    recvaddrlen;
 		fd_set				readfds;
 		struct timeval		timeout;
 		int					sEvent;
@@ -1473,7 +1499,7 @@ static void *UDPProc(void *in)
 	for (;;) {
 		ssize_t				n;
 		struct sockaddr_in	recvaddr;
-		int					recvaddrlen;
+		socklen_t					recvaddrlen;
 		fd_set				readfds;
 		//struct timeval		timeout;
 		//int					i;
@@ -1501,7 +1527,7 @@ static void *UDPProc(void *in)
 
 		if (!FD_ISSET(g_sUDP, &readfds)) continue;
 		recvaddrlen = sizeof(recvaddr);
-		n = recvfrom(g_sUDP, buf, sizeof(buf), 0,
+		n = recvfrom(g_sUDP, buf, sizeof(buf), 0, // ### !!! Buffer overflow !!! Should be sizeof(buf)-1 to allow for "buf[n] = '\0';" below !!!
 			(struct sockaddr *)&recvaddr, &recvaddrlen);
 		if (n < 0) {
 			if (g_fLogging & NALOG_ERROR)
@@ -1513,8 +1539,8 @@ static void *UDPProc(void *in)
 			return NULL;
 		}
 		buf[n] = '\0';
-		if (strncmp(buf, "HTTP/1.1", 8) == 0) {
-			PHTTPResponse pResponse = NewHTTPResponse_sz(buf, n, TRUE);
+		if (strncmp((char *)buf, "HTTP/1.1", 8) == 0) {
+			PHTTPResponse pResponse = NewHTTPResponse_sz((char *)buf, n+1, TRUE);
 			PrintHTTPResponse(pResponse);
 			if (DiscoverRouter(pResponse) == 0)
 			{
@@ -1529,11 +1555,11 @@ static void *UDPProc(void *in)
 			}
 			DeleteHTTPResponse(pResponse);
 		}
-		else if (strncmp(buf, "NOTIFY * HTTP/1.1", 7) == 0) {
+		else if (strncmp((char *)buf, "NOTIFY * HTTP/1.1", 7) == 0) {
 			// temporarily use this to fudge - will have the exact same
 			// parsing, only status/reason set to "*" and "HTTP/1.1".
 			// TODO: add support for HTTP requests
-			PHTTPResponse pResponse = NewHTTPResponse_sz(buf, n, TRUE);
+			PHTTPResponse pResponse = NewHTTPResponse_sz((char *)buf, n+1, TRUE);
 			if (DiscoverRouter(pResponse) == 0)
 			{
 				time_t	now = time(NULL);
@@ -1855,13 +1881,14 @@ GetTimeElapsed(&tv_start, &tv_end, &tv_elapsed);
 
 		FD_ZERO(&readfds);
 		FD_SET(s, &readfds);
-		//timeout.tv_sec = g_iFunctionTimeout / U_TOGRAN;
-		//timeout.tv_usec = (g_iFunctionTimeout % U_TOGRAN) * 1000000 / U_TOGRAN;
-		// just do flat 2 sec now, since connection already established
-		timeout.tv_sec = 1;
+
+		// In testing, the Linksys Wireless-G Broadband Router "WRT54GS" takes
+		// up to four seconds to respond, and even then only a partial response,
+		// with the remainder coming in a second TCP segment half a second later.
+		// Accordingly, we wait up to five seconds for the initial data, and then after that
+		// wait one second after subsequent TCP segments, in care more data is still coming.
+		timeout.tv_sec  = iBufLen ? 1 : 5;
 		timeout.tv_usec = 0;
-
-
 		iRet = select(s+1, &readfds, NULL, NULL, &timeout);
 		if (iRet <= 0)
 		{
@@ -1926,7 +1953,7 @@ GetTimeElapsed(&tv_start, &tv_end, &tv_elapsed);
 //fprintf(stderr, "2 -- \n");
 
 	if (g_fLogging & NALOG_INFO1)
-		fprintf(g_log, "done recv @%lu\n", time(NULL));
+		fprintf(g_log, "SendTCPMsg_saddr_2part done recv %d @ %lu\n", iBufLen, time(NULL));
 
 	if (result == NULL) {    // if caller just want to send/display msgs
 		if (g_fLogging & NALOG_DUMP)
@@ -2015,7 +2042,7 @@ static int SendTCPMsg_saddr_parse(
 	}
 
 	if (g_fLogging & NALOG_INFO1)
-		fprintf(g_log, "SendTCPMsg/parse: Before Sending TCP Msg: %d == %lu?\n",
+		fprintf(g_log, "SendTCPMsg_saddr_parse: Before Sending TCP Msg: %d == %lu?\n",
 			iLen, strlen(msg));
 	if (g_fLogging & NALOG_DUMP)
 		fprintf(g_log,"Sending TCP msg:\n[%s]\n", msg);
@@ -2067,12 +2094,14 @@ static int SendTCPMsg_saddr_parse(
 
 		FD_ZERO(&readfds);
 		FD_SET(s, &readfds);
-		//timeout.tv_sec = g_iFunctionTimeout / U_TOGRAN;
-		//timeout.tv_usec = (g_iFunctionTimeout % U_TOGRAN) * 1000000 / U_TOGRAN;
-		// just do flat 2 sec now, since connection already established
-		timeout.tv_sec = 1;
-		timeout.tv_usec = 0;
 
+		// In testing, the Linksys Wireless-G Broadband Router "WRT54GS" takes
+		// up to four seconds to respond, and even then only a partial response,
+		// with the remainder coming in a second TCP segment half a second later.
+		// Accordingly, we wait up to five seconds for the initial data, and then after that
+		// wait one second after subsequent TCP segments, in care more data is still coming.
+		timeout.tv_sec  = iBufLen ? 1 : 5;
+		timeout.tv_usec = 0;
 		iRet = select(s+1, &readfds, NULL, NULL, &timeout);
 		if (iRet <= 0) {
 //fprintf(stderr, "**********: select failed (%d/%d)\n", iRet, errno);
@@ -2099,6 +2128,8 @@ static int SendTCPMsg_saddr_parse(
 		if (resultSize <= iBufLen) {
 			char	t[1000];
 			i = recv(s, &t, 1000, 0);
+			if (g_fLogging & NALOG_INFO1)
+				fprintf(g_log, "SendTCPMsg_saddr_parse discarding %d bytes\n", i);
 			if (i== 0) break;
 			// Note that there's no dump here - prevents DoS attack from
 			// flooding the logs/diskspace
@@ -2106,6 +2137,8 @@ static int SendTCPMsg_saddr_parse(
 		}
 
 		i = recv(s, result + iBufLen, resultSize - iBufLen, 0);
+		if (g_fLogging & NALOG_INFO1)
+			fprintf(g_log, "SendTCPMsg_saddr_parse read %d bytes (%d/%d)\n", i, iBufLen, resultSize);
 		if (0 == i) {
 
 			break;
@@ -2128,7 +2161,7 @@ static int SendTCPMsg_saddr_parse(
 //fprintf(stderr, "p -- \n");
 
 	if (g_fLogging & NALOG_INFO1)
-		fprintf(g_log, "done recv @%lu\n", time(NULL));
+		fprintf(g_log, "SendTCPMsg_saddr_parse done recv %d @ %lu\n", iBufLen, time(NULL));
 
 	if (result == NULL) {    // if caller just want to send/display msgs
 		if (g_fLogging & NALOG_DUMP)
@@ -2240,6 +2273,8 @@ static PHTTPResponse SendSOAPMsgControlAction(
 			&g_saddrRouterSOAP);
 	}
 
+	if (g_fLogging & NALOG_INFO1)
+		fprintf(g_log, "SendSOAPMsgControlAction iResultLen %d\n", iResultLen);
 	if (iResultLen > 0) {
 		if (iResultLen > MAX_SOAPMSGSIZE) {
 			if (g_fLogging & NALOG_ALERT)
@@ -2470,10 +2505,8 @@ static void ParseURL(
 	szBuf,
 	pszHostPort?pszHostPort:"",
 	pszPath?pszPath:"",
-	(psaddr->sin_addr.s_addr >> 24) & 0xff,
-	(psaddr->sin_addr.s_addr >> 16) & 0xff,
-	(psaddr->sin_addr.s_addr >> 8) & 0xff,
-	(psaddr->sin_addr.s_addr >> 0) & 0xff,
+	((uint8_t*)&psaddr->sin_addr.s_addr)[0], ((uint8_t*)&psaddr->sin_addr.s_addr)[1],
+	((uint8_t*)&psaddr->sin_addr.s_addr)[2], ((uint8_t*)&psaddr->sin_addr.s_addr)[3],
 	psaddr->sin_port);
 #endif
 }
@@ -2603,17 +2636,13 @@ static void GetIPByName(char *hostname, unsigned long *ip_ret)
 		if (pHEnt == NULL) {
 			if (g_fLogging & NALOG_ALERT)
 				fprintf(g_log, "Can't translate [%s] to IP...\n", hostname);
-			g_dwLocalIP = htonl(INADDR_ANY);
+			g_dwLocalIP = INADDR_ANY;
 			return;
 		}
-		ip = ntohl(*(unsigned long *)(pHEnt->h_addr));
+		ip = *(unsigned long *)(pHEnt->h_addr);
 		if (g_fLogging & NALOG_INFO1)
-			fprintf(g_log, "hostname [%s] to ip: %ld.%ld.%ld.%ld\n",
-				hostname,
-				(ip >> 24) & 0xff,
-				(ip >> 16) & 0xff,
-				(ip >> 8) & 0xff,
-				(ip >> 0) & 0xff);
+			fprintf(g_log, "hostname [%s] to ip: %u.%u.%u.%u\n", hostname,
+				((uint8_t*)&ip)[0], ((uint8_t*)&ip)[1], ((uint8_t*)&ip)[2], ((uint8_t*)&ip)[3]);
 	}
 	*ip_ret = ip;
 }
@@ -2681,9 +2710,8 @@ mStatus LNT_UnmapPort(mDNSIPPort PubPort, mDNSBool tcp)
 	//unsigned		long dwIP;
 	Property		propArgs[3];
 	PHTTPResponse	resp;
-    unsigned short port = PubPort.NotAnInteger;
     int protocol = tcp ? IPPROTO_TCP : IPPROTO_UDP;
-	sprintf(szEPort, "%u", port);
+	sprintf(szEPort, "%u", mDNSVal16(PubPort));
 
 	bzero(propArgs, sizeof(propArgs));
 	propArgs[0].pszName = "NewRemoteHost";
@@ -2731,26 +2759,19 @@ extern mStatus LNT_MapPort(mDNSIPPort priv, mDNSIPPort pub, mDNSBool tcp)
 	char			descr[40];
 	Property		propArgs[8];
 	PHTTPResponse	resp;
-    unsigned short iport = priv.NotAnInteger;
-    unsigned short eport = pub.NotAnInteger;
     int protocol = tcp ? IPPROTO_TCP : IPPROTO_UDP;
 
-
-	if (NA_E_EXISTS == GetMappingUnused(eport, protocol))
+	if (NA_E_EXISTS == GetMappingUnused(mDNSVal16(pub), protocol))
 		return mStatus_AlreadyRegistered;
 
 	//DeletePortMapping(eport, protocol);
 
-	sprintf(szEPort, "%u", eport);
-
-	sprintf(szIPort, "%u", iport);
+	sprintf(szEPort, "%u", mDNSVal16(pub));
+	sprintf(szIPort, "%u", mDNSVal16(priv));
 
 	dwIP = g_dwLocalIP;
 	sprintf(szLocalIP, "%u.%u.%u.%u",
-		(unsigned int)((dwIP >> 24) & 0xff),
-		(unsigned int)((dwIP >> 16) & 0xff),
-		(unsigned int)((dwIP >> 8) & 0xff),
-		(unsigned int)((dwIP >> 0) & 0xff));
+		((uint8_t*)&dwIP)[0], ((uint8_t*)&dwIP)[1], ((uint8_t*)&dwIP)[2], ((uint8_t*)&dwIP)[3]);
 
 	bzero(propArgs, sizeof(propArgs));
 	propArgs[0].pszName = "NewRemoteHost";
@@ -2780,7 +2801,7 @@ extern mStatus LNT_MapPort(mDNSIPPort priv, mDNSIPPort pub, mDNSBool tcp)
 	propArgs[5].pszValue = "1";
 	propArgs[5].pszType = "boolean";
 	propArgs[6].pszName = "NewPortMappingDescription";
-	sprintf(descr, "iC%u", eport);
+	sprintf(descr, "iC%u", mDNSVal16(pub));
 	//propArgs[6].pszValue = "V";
 	propArgs[6].pszValue = descr;
 	propArgs[6].pszType = "string";
@@ -2788,8 +2809,14 @@ extern mStatus LNT_MapPort(mDNSIPPort priv, mDNSIPPort pub, mDNSBool tcp)
 	propArgs[7].pszValue = "0";
 	propArgs[7].pszType = "ui4";
 
+	if (g_fLogging & NALOG_INFO1)
+		fprintf(g_log, "Sending AddPortMapping priv %u pub %u\n", mDNSVal16(priv), mDNSVal16(pub));
+
 	resp = SendSOAPMsgControlAction(
 		"AddPortMapping", 8, propArgs, FALSE);
+
+	if (g_fLogging & NALOG_INFO1)
+		fprintf(g_log, "AddPortMapping resp %p\n", resp);
 
 	if (resp == NULL) {
 		return mStatus_NATTraversal;
@@ -2810,7 +2837,7 @@ static int GetMappingUnused(unsigned short eport, int protocol)
 	char			szPort[10];
 	Property		propArgs[3];
 	PHTTPResponse	resp;
-	unsigned long	ip;
+	unsigned long	ip = 0;
 
 	sprintf( szPort, "%u", eport);
 
@@ -2911,11 +2938,13 @@ int LegacyNATInit(void)
 	pthread_attr_t	attr;
 	int				iRet;
 	//struct timeval	tv;
+	LogOperation("LegacyNATInit");
 
 	static int		fFirstInitLocks = TRUE;
 	FILE *log = NULL;	
 	
 	g_fLogging = 0;
+	//g_fLogging = ~0;		// Turns ALL logging on
 	g_log = stderr;
 
 	SetLocalIP();

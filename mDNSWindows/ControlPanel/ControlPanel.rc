@@ -60,7 +60,6 @@ BEGIN
     END
 END
 
-
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -120,13 +119,13 @@ CAPTION "Hostname"
 FONT 8, "MS Sans Serif", 0, 0, 0x0
 BEGIN
     LTEXT           "Enter a hostname for this computer. Other computers on the Internet will be able to reach your computer using this hostname.",
-                    IDC_STATIC,7,19,248,28
-    LTEXT           "Hostname:",IDC_STATIC,15,55,35,8
-    EDITTEXT        IDC_EDIT1,52,53,187,14,ES_AUTOHSCROLL
-    PUSHBUTTON      "Password...",IDC_BUTTON1,52,72,67,14
-    ICON            IDI_FAILURE,IDC_FAILURE,240,50,21,20,SS_CENTERIMAGE | 
+                    IDC_STATIC,10,19,245,28
+    LTEXT           "Hostname:",IDC_STATIC,13,55,35,8
+    EDITTEXT        IDC_EDIT1,55,53,184,14,ES_AUTOHSCROLL
+    PUSHBUTTON      "Password...",IDC_BUTTON1,55,72,65,14
+    ICON            IDI_FAILURE,IDC_FAILURE,240,50,20,20,SS_CENTERIMAGE | 
                     SS_REALSIZEIMAGE
-    ICON            IDI_SUCCESS,IDC_SUCCESS,240,50,21,20,SS_CENTERIMAGE | 
+    ICON            IDI_SUCCESS,IDC_SUCCESS,240,50,20,20,SS_CENTERIMAGE | 
                     SS_REALSIZEIMAGE | NOT WS_VISIBLE
 END
 
@@ -136,12 +135,12 @@ CAPTION "Registration"
 FONT 8, "MS Sans Serif", 0, 0, 0x0
 BEGIN
     CONTROL         "Domain:",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | 
-                    WS_TABSTOP,13,54,42,10
-    COMBOBOX        IDC_COMBO2,59,53,189,46,CBS_DROPDOWN | CBS_SORT | 
+                    WS_TABSTOP,13,54,41,10
+    COMBOBOX        IDC_COMBO2,55,53,193,46,CBS_DROPDOWN | CBS_SORT | 
                     WS_DISABLED | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Password...",IDC_BUTTON1,59,72,65,14
+    PUSHBUTTON      "Password...",IDC_BUTTON1,55,72,65,14
     LTEXT           "Check the box and enter a registration domain to enable Bonjour advertising beyond the local subnet. ",
-                    IDC_STATIC,14,20,233,23
+                    IDC_STATIC,10,19,233,23
 END
 
 IDR_SECRET DIALOGEX 0, 0, 251, 90
@@ -153,9 +152,9 @@ BEGIN
     DEFPUSHBUTTON   "OK",IDOK,139,69,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,194,69,50,14
     LTEXT           "Name:",IDC_STATIC,9,28,22,8
-    EDITTEXT        IDC_SECRET_NAME,36,26,208,14,ES_AUTOHSCROLL
-    LTEXT           "Secret:",IDC_STATIC,9,44,24,8
-    EDITTEXT        IDC_SECRET,36,42,208,14,ES_PASSWORD | ES_AUTOHSCROLL
+    EDITTEXT        IDC_KEY,49,26,195,14,ES_AUTOHSCROLL
+    LTEXT           "Password:",IDC_STATIC,9,44,32,8
+    EDITTEXT        IDC_SECRET,49,42,195,14,ES_PASSWORD | ES_AUTOHSCROLL
     LTEXT           "Enter a Password if your DNS server requires authentication.",
                     IDC_STATIC,7,7,237,15
 END
@@ -182,7 +181,7 @@ FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,117,74,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,173,74,50,14
-    COMBOBOX        IDC_COMBO1,35,42,188,30,CBS_DROPDOWN | CBS_SORT | 
+    COMBOBOX        IDC_COMBO1,35,42,188,100,CBS_DROPDOWN | CBS_SORT | 
                     WS_VSCROLL | WS_TABSTOP
     LTEXT           "Domain:",IDC_STATIC,7,43,27,8
     LTEXT           "The following domain will be added to your list of Bonjour browse domains.",

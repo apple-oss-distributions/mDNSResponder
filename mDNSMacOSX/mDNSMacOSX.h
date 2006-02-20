@@ -23,6 +23,9 @@
     Change History (most recent first):
 
 $Log: mDNSMacOSX.h,v $
+Revision 1.51  2005/07/04 22:24:36  cheshire
+Export NotifyOfElusiveBug() so other files can call it
+
 Revision 1.50  2005/02/19 00:04:18  cheshire
 Add comments
 
@@ -255,6 +258,7 @@ struct mDNS_PlatformSupport_struct
     CFRunLoopSourceRef       PowerRLS;
     };
 
+extern void NotifyOfElusiveBug(const char *title, mDNSu32 radarid, const char *msg);
 extern void mDNSMacOSXNetworkChanged(mDNS *const m);
 extern int mDNSMacOSXSystemBuildNumber(char *HINFO_SWstring);
 

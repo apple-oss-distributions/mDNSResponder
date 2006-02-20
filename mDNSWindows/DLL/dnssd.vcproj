@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding = "Windows-1252"?>
+<?xml version="1.0" encoding="Windows-1252"?>
 <VisualStudioProject
 	ProjectType="Visual C++"
-	Version="7.00"
+	Version="7.10"
 	Name="DLL"
 	ProjectGUID="{AB581101-18F0-46F6-B56A-83A6B1EA657E}"
 	Keyword="Win32Proj">
@@ -33,7 +33,8 @@
 				Detect64BitPortabilityProblems="TRUE"
 				DebugInformationFormat="4"
 				CallingConvention="2"
-				CompileAs="0"/>
+				CompileAs="0"
+				DisableSpecificWarnings="4127;4204"/>
 			<Tool
 				Name="VCCustomBuildTool"/>
 			<Tool
@@ -45,6 +46,7 @@
 				GenerateDebugInformation="TRUE"
 				ProgramDatabaseFile="$(OutDir)/dnssd.pdb"
 				SubSystem="2"
+				BaseAddress="0x16000000"
 				ImportLibrary="$(IntDir)\dnssd.lib"
 				TargetMachine="1"/>
 			<Tool
@@ -61,11 +63,17 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
-			OutputDirectory=".\Release\Root\Program Files\Bonjour"
+			OutputDirectory=".\Release"
 			IntermediateDirectory=".\Release"
 			ConfigurationType="2"
 			CharacterSet="2">
@@ -79,7 +87,8 @@
 				Detect64BitPortabilityProblems="TRUE"
 				DebugInformationFormat="3"
 				CallingConvention="2"
-				CompileAs="0"/>
+				CompileAs="0"
+				DisableSpecificWarnings="4127;4204"/>
 			<Tool
 				Name="VCCustomBuildTool"/>
 			<Tool
@@ -93,6 +102,7 @@
 				SubSystem="2"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
+				BaseAddress="0x16000000"
 				ImportLibrary=".\Release\dnssd.lib"
 				TargetMachine="1"/>
 			<Tool
@@ -109,9 +119,17 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 	</Configurations>
+	<References>
+	</References>
 	<Files>
 		<Filter
 			Name="Source Files"
@@ -119,9 +137,6 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}">
 			<File
 				RelativePath="..\DebugServices.c">
-			</File>
-			<File
-				RelativePath="..\..\mDNSShared\GenLinkedList.c">
 			</File>
 			<File
 				RelativePath=".\dllmain.c">
@@ -138,6 +153,9 @@
 			<File
 				RelativePath="..\..\mDNSShared\dnssd_ipc.c">
 			</File>
+			<File
+				RelativePath="..\..\mDNSShared\GenLinkedList.c">
+			</File>
 		</Filter>
 		<Filter
 			Name="Header Files"
@@ -150,9 +168,6 @@
 				RelativePath="..\DebugServices.h">
 			</File>
 			<File
-				RelativePath="..\..\mDNSShared\GenLinkedList.h">
-			</File>
-			<File
 				RelativePath="..\..\mDNSShared\dns_sd.h">
 			</File>
 			<File
@@ -160,6 +175,9 @@
 			</File>
 			<File
 				RelativePath="..\..\mDNSShared\dnssd_sock.h">
+			</File>
+			<File
+				RelativePath="..\..\mDNSShared\GenLinkedList.h">
 			</File>
 			<File
 				RelativePath=".\resource.h">

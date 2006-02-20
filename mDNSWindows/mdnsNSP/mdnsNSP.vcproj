@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding = "Windows-1252"?>
+<?xml version="1.0" encoding="Windows-1252"?>
 <VisualStudioProject
 	ProjectType="Visual C++"
-	Version="7.00"
+	Version="7.10"
 	Name="mdnsNSP"
 	ProjectGUID="{F4F15529-F0EB-402F-8662-73C5797EE557}"
 	Keyword="Win32Proj">
@@ -37,13 +37,15 @@
 				Name="VCCustomBuildTool"/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="../DLL/Debug/dnssd.lib ws2_32.lib iphlpapi.lib"
+				AdditionalDependencies="../DLL/Debug/dnssd.lib ws2_32.lib iphlpapi.lib shlwapi.lib"
 				OutputFile="$(OutDir)/mdnsNSP.dll"
 				LinkIncremental="2"
 				ModuleDefinitionFile="mdnsNSP.def"
+				DelayLoadDLLs="dnssd.dll"
 				GenerateDebugInformation="TRUE"
 				ProgramDatabaseFile="$(OutDir)/mdnsNSP.pdb"
 				SubSystem="2"
+				BaseAddress="0x16080000"
 				ImportLibrary="$(OutDir)/mdnsNSP.lib"
 				TargetMachine="1"/>
 			<Tool
@@ -60,11 +62,17 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
-			OutputDirectory=".\Release\Root\Program Files\Bonjour"
+			OutputDirectory=".\Release"
 			IntermediateDirectory=".\Release"
 			ConfigurationType="2"
 			CharacterSet="2">
@@ -87,15 +95,17 @@
 				Name="VCCustomBuildTool"/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="../DLL/Release/dnssd.lib ws2_32.lib iphlpapi.lib"
+				AdditionalDependencies="../DLL/Release/dnssd.lib ws2_32.lib iphlpapi.lib shlwapi.lib"
 				OutputFile="$(OutDir)/mdnsNSP.dll"
 				LinkIncremental="1"
 				ModuleDefinitionFile="mdnsNSP.def"
+				DelayLoadDLLs="dnssd.dll"
 				GenerateDebugInformation="TRUE"
 				ProgramDatabaseFile="$(IntDir)/$(ProjectName).pdb"
 				SubSystem="2"
 				OptimizeReferences="0"
 				EnableCOMDATFolding="0"
+				BaseAddress="0x16080000"
 				ImportLibrary="$(IntDir)/mdnsNSP.lib"
 				TargetMachine="1"/>
 			<Tool
@@ -112,9 +122,17 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 	</Configurations>
+	<References>
+	</References>
 	<Files>
 		<Filter
 			Name="Source Files"

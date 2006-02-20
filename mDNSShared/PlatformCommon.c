@@ -24,6 +24,10 @@
     Change History (most recent first):
 
 $Log: PlatformCommon.c,v $
+Revision 1.6  2005/04/08 21:30:16  ksekar
+<rdar://problem/4007457> Compiling problems with mDNSResponder-98 on Solaris/Sparc v9
+Patch submitted by Bernd Kuhls
+
 Revision 1.5  2005/02/01 19:33:30  ksekar
 <rdar://problem/3985239> Keychain format too restrictive
 
@@ -44,7 +48,7 @@ Move ReadDDNSSettingsFromConfFile() from mDNSMacOSX.c to PlatformCommon.c
 #include <stdio.h>				// Needed for fopen() etc.
 #include <unistd.h>				// Needed for close()
 #include <string.h>				// Needed for strlen() etc.
-#include <sys/errno.h>			// Needed for errno etc.
+#include <errno.h>			// Needed for errno etc.
 #include <sys/socket.h>			// Needed for socket() etc.
 #include <netinet/in.h>			// Needed for sockaddr_in
 

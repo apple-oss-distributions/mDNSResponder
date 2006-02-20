@@ -23,6 +23,69 @@
     Change History (most recent first):
 
 $Log: WinVersRes.h,v $
+Revision 1.51  2005/11/28 19:49:56  herscher
+Bump to 1.0.2.9
+
+Revision 1.50  2005/10/28 18:48:04  herscher
+Bump to version 1.0.2.8
+
+Revision 1.49  2005/10/25 05:24:27  herscher
+Bump to 1.0.2.7
+
+Revision 1.48  2005/10/18 06:17:05  herscher
+Bump to 1.0.2.6
+
+Revision 1.47  2005/10/05 22:16:57  herscher
+Bump version number to 1.0.2.5
+
+Revision 1.46  2005/09/29 06:43:07  herscher
+Bump to version 1.0.2.4
+
+Revision 1.45  2005/09/22 07:11:35  herscher
+Bump version to 1.0.2.3
+
+Revision 1.44  2005/09/13 01:07:40  herscher
+Bump to 1.0.2.2
+
+Revision 1.43  2005/09/12 06:13:32  herscher
+Bump version 1.0.2.1
+
+Revision 1.42  2005/07/22 19:41:44  ksekar
+Update version
+
+Revision 1.41  2005/07/15 15:22:20  shersche
+Bump to 1.0.1.1
+
+Revision 1.40  2005/07/11 20:42:03  shersche
+Bump version to 1.0.0.68
+
+Revision 1.39  2005/07/07 19:12:47  shersche
+Bump to 1.0.0.67
+
+Revision 1.38  2005/04/25 21:59:42  shersche
+Bump to 1.0.0.66
+
+Revision 1.37  2005/04/22 07:39:48  shersche
+Bump to 1.0.0.65
+
+Revision 1.36  2005/04/19 07:25:56  shersche
+Bump version to 1.0.0.64
+
+Revision 1.35  2005/04/13 17:48:58  shersche
+Bump to 1.0.0.63
+
+Revision 1.34  2005/04/06 01:00:55  shersche
+Bump to 1.0.0.62
+
+Revision 1.33  2005/03/30 07:37:41  shersche
+Bump to 1.0.0.61
+
+Revision 1.32  2005/03/23 00:39:46  shersche
+Bump to version 1.0.0.60
+
+Revision 1.31  2005/03/16 03:52:06  shersche
+Bump to 1.0.0.59
+
 Revision 1.30  2005/03/07 19:18:18  shersche
 <rdar://problem/4039831> Update Windows build to 1.0.0.58
 
@@ -121,10 +184,10 @@ First checked in.
 #define MASTER_PROD_NAME	"Bonjour"
 
 // Define the product version for mDNSResponder on Windows
-#define MASTER_PROD_VERS		1,0,0,58
-#define MASTER_PROD_VERS_STR	"1,0,0,58"
-#define MASTER_PROD_VERS_STR2	"1.0.0.58"
-#define MASTER_PROD_VERS_STR3 "Explorer Plugin 1.0.0.58"
+#define MASTER_PROD_VERS		1,0,2,9
+#define MASTER_PROD_VERS_STR	"1,0,2,9"
+#define MASTER_PROD_VERS_STR2	"1.0.2.9"
+#define MASTER_PROD_VERS_STR3 "Explorer Plugin 1.0.2.9"
 
 // Define the legal copyright
 #define MASTER_LEGAL_COPYRIGHT "Copyright (C) 2003-2005 Apple Computer, Inc."

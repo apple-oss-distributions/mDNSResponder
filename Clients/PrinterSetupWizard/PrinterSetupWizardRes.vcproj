@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding = "windows-1251"?>
+<?xml version="1.0" encoding="windows-1251"?>
 <VisualStudioProject
 	ProjectType="Visual C++"
-	Version="7.00"
+	Version="7.10"
 	Name="PrinterSetupWizardRes"
 	ProjectGUID="{B1D2CDA2-CC8F-45D5-A694-2EE45B0308CF}"
 	Keyword="MFCProj">
@@ -12,7 +12,7 @@
 	<Configurations>
 		<Configuration
 			Name="Debug|Win32"
-			OutputDirectory=".\Debug\Resources\PrinterWizard.exe.Resources"
+			OutputDirectory=".\Debug\PrinterWizard.Resources"
 			IntermediateDirectory=".\Debug"
 			ConfigurationType="2"
 			UseOfMFC="1"
@@ -38,7 +38,7 @@
 				Name="VCCustomBuildTool"/>
 			<Tool
 				Name="VCLinkerTool"
-				OutputFile="$(OutDir)/PrinterWizard.dll"
+				OutputFile="$(OutDir)/PrinterWizardResources.dll"
 				LinkIncremental="2"
 				GenerateDebugInformation="TRUE"
 				SubSystem="2"
@@ -57,8 +57,7 @@
 			<Tool
 				Name="VCPreLinkEventTool"
 				Description="Building Output Directories"
-				CommandLine="if not exist Debug\Resources mkdir Debug\Resources
-if not exist Debug\Resources\PrinterWizard.exe.Resources mkdir Debug\Resources\PrinterWizard.exe.Resources"/>
+				CommandLine="if not exist Debug\PrinterWizard.Resources mkdir Debug\PrinterWizard.Resources"/>
 			<Tool
 				Name="VCResourceCompilerTool"
 				PreprocessorDefinitions="_DEBUG"
@@ -67,11 +66,17 @@ if not exist Debug\Resources\PrinterWizard.exe.Resources mkdir Debug\Resources\P
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
-			OutputDirectory=".\Release\Root\Program Files\Bonjour\Resources\PrinterWizard.exe.Resources"
+			OutputDirectory=".\Release\PrinterWizard.Resources"
 			IntermediateDirectory=".\Release"
 			ConfigurationType="2"
 			UseOfMFC="1"
@@ -97,7 +102,7 @@ if not exist Debug\Resources\PrinterWizard.exe.Resources mkdir Debug\Resources\P
 				Name="VCCustomBuildTool"/>
 			<Tool
 				Name="VCLinkerTool"
-				OutputFile="$(OutDir)/PrinterWizard.dll"
+				OutputFile="$(OutDir)/PrinterWizardResources.dll"
 				LinkIncremental="1"
 				GenerateDebugInformation="FALSE"
 				SubSystem="2"
@@ -118,11 +123,9 @@ if not exist Debug\Resources\PrinterWizard.exe.Resources mkdir Debug\Resources\P
 			<Tool
 				Name="VCPreLinkEventTool"
 				Description="Building Output Directories"
-				CommandLine="if not exist Release\Root mkdir Release\Root
-if not exist &quot;Release\Root\Program Files&quot; mkdir &quot;Release\Root\Program Files&quot;
-if not exist &quot;Release\Root\Program Files\Bonjour&quot; mkdir &quot;Release\Root\Program Files\Bonjour&quot;
-if not exist &quot;Release\Root\Program Files\Bonjour\Resources&quot; mkdir &quot;Release\Root\Program Files\Bonjour\Resources&quot;
-if not exist &quot;Release\Root\Program Files\Bonjour\Resources\PrinterWizard.exe.Resources&quot; mkdir &quot;Release\Root\Program Files\Bonjour\Resources\PrinterWizard.exe.Resources&quot;"/>
+				CommandLine="if not exist Release mkdir Release
+if not exist &quot;Release\PrinterWizard.Resources&quot; mkdir &quot;Release\PrinterWizard.Resources&quot;
+"/>
 			<Tool
 				Name="VCResourceCompilerTool"
 				PreprocessorDefinitions="NDEBUG"
@@ -131,9 +134,17 @@ if not exist &quot;Release\Root\Program Files\Bonjour\Resources\PrinterWizard.ex
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 	</Configurations>
+	<References>
+	</References>
 	<Files>
 		<Filter
 			Name="Header Files"
@@ -145,6 +156,12 @@ if not exist &quot;Release\Root\Program Files\Bonjour\Resources\PrinterWizard.ex
 		<Filter
 			Name="Resource Files"
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;jpg;jpeg;jpe;manifest">
+			<File
+				RelativePath=".\res\about.bmp">
+			</File>
+			<File
+				RelativePath="res\banner_icon.bmp">
+			</File>
 			<File
 				RelativePath=".\res\Info.ico">
 			</File>
@@ -171,12 +188,6 @@ if not exist &quot;Release\Root\Program Files\Bonjour\Resources\PrinterWizard.ex
 			</File>
 			<File
 				RelativePath="res\PrinterSetupWizardRes.rc2">
-			</File>
-			<File
-				RelativePath=".\res\about.bmp">
-			</File>
-			<File
-				RelativePath="res\banner_icon.bmp">
 			</File>
 			<File
 				RelativePath="res\watermark.bmp">

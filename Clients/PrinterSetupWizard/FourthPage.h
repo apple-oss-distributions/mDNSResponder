@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: FourthPage.h,v $
+Revision 1.3  2005/07/07 17:53:20  shersche
+Fix problems associated with the CUPS printer workaround fix.
+
 Revision 1.2  2005/01/06 08:17:08  shersche
 Display the selected protocol ("Raw", "LPR", "IPP") rather than the port name
 
@@ -50,6 +53,7 @@ public:
 	enum { IDD = IDD_FOURTH_PAGE };
 
 	virtual BOOL OnSetActive();
+	virtual BOOL OnKillActive();
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support

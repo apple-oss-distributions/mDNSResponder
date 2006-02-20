@@ -42,6 +42,10 @@
 
     Change History (most recent first):
 $Log: PrivilegedOperations.h,v $
+Revision 1.4  2005/06/04 04:50:00  cheshire
+<rdar://problem/4138070> ddnswriteconfig (Bonjour PreferencePane) vulnerability
+Use installtool instead of requiring ddnswriteconfig to self-install
+
 Revision 1.3  2005/02/16 00:17:35  cheshire
 Don't create empty arrays -- CFArrayGetValueAtIndex(array,0) returns an essentially random (non-null)
 result for empty arrays, which can lead to code crashing if it's not sufficiently defensive.
@@ -57,12 +61,11 @@ Add Preference Pane to facilitate testing of DDNS & wide-area features
 #include <CoreServices/CoreServices.h>
 #include <CoreFoundation/CoreFoundation.h>
 
-#define	PRIV_OP_TOOL_VERS	2
+#define	PRIV_OP_TOOL_VERS	3
 
-#define	kToolHome	"/Library/Application Support/"
-#define	kToolDir	"Bonjour"
-#define	kToolName	"ddnswriteconfig"
-#define	kToolPath	kToolHome kToolDir "/" kToolName
+#define	kToolName      "ddnswriteconfig"
+#define	kToolPath      "/Library/Application Support/Bonjour/" kToolName
+#define	kToolInstaller "installtool"
 
 #define	SC_DYNDNS_SETUP_KEY			CFSTR("Setup:/Network/DynamicDNS")
 #define	SC_DYNDNS_STATE_KEY			CFSTR("State:/Network/DynamicDNS")

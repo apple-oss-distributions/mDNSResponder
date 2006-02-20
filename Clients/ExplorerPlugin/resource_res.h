@@ -11,7 +11,6 @@
 #define IDI_BUTTON_2K                   115
 #define IDI_BUTTON_XP                   118
 #define IDB_ABOUT                       119
-#define IDB_GLOBE                       149
 #define IDC_COMPONENT                   1001
 #define IDC_LEGAL                       1002
 #define IDC_LOGIN_USERNAME_TEXT         1182

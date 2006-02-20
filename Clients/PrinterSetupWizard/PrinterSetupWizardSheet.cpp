@@ -23,6 +23,21 @@
     Change History (most recent first):
     
 $Log: PrinterSetupWizardSheet.cpp,v $
+Revision 1.34  2005/10/05 17:32:51  herscher
+<rdar://problem/4141221> Use a case insensitive compare operation to check whether a printer with the same name has already been installed.
+
+Revision 1.33  2005/07/11 20:17:15  shersche
+<rdar://4124524> UI fixes associated with CUPS printer workaround fix.
+
+Revision 1.32  2005/07/07 17:53:20  shersche
+Fix problems associated with the CUPS printer workaround fix.
+
+Revision 1.31  2005/06/30 18:02:54  shersche
+<rdar://problem/4124524> Workaround for Mac OS X Printer Sharing bug
+
+Revision 1.30  2005/04/13 17:46:22  shersche
+<rdar://problem/4082122> Generic PCL not selected when printers advertise multiple text records
+
 Revision 1.29  2005/02/14 20:48:37  shersche
 <rdar://problem/4003710> Default pdl key to "application/postscript"
 
@@ -163,7 +178,8 @@ CPrinterSetupWizardSheet::CPrinterSetupWizardSheet(UINT nIDCaption, CWnd* pParen
 	m_driverThreadFinished( false ),
 	m_pdlBrowser( NULL ),
 	m_ippBrowser( NULL ),
-	m_lprBrowser( NULL )
+	m_lprBrowser( NULL ),
+	m_lastPage( NULL )
 {
 	m_arrow		=	LoadCursor(0, IDC_ARROW);
 	m_wait		=	LoadCursor(0, IDC_APPSTARTING);
@@ -245,7 +261,7 @@ CPrinterSetupWizardSheet::LoadPrinterNames()
 		{
 			PRINTER_INFO_4 * lppi4 = (PRINTER_INFO_4*) (buffer + index * sizeof(PRINTER_INFO_4));
 
-			m_printerNames[lppi4->pPrinterName] = lppi4->pPrinterName;
+			m_printerNames.push_back( lppi4->pPrinterName );
 		}
 	}
 
@@ -289,6 +305,7 @@ CPrinterSetupWizardSheet::InstallPrinter(Printer * printer)
 	//
 	// if the driver isn't installed, then install it
 	//
+
 	if ( !printer->driverInstalled )
 	{
 		DWORD		dwResult;
@@ -398,7 +415,7 @@ CPrinterSetupWizardSheet::InstallPrinterPDLAndLPR(Printer * printer, Service * s
 	ok = OpenPrinter(L",XcvMonitor Standard TCP/IP Port", &hXcv, &printerDefaults);
 	err = translate_errno( ok, errno_compat(), kUnknownErr );
 	require_noerr( err, exit );
-	
+
 	//
 	// BUGBUG: MSDN said this is not required, but my experience shows it is required
 	//
@@ -429,7 +446,7 @@ CPrinterSetupWizardSheet::InstallPrinterPDLAndLPR(Printer * printer, Service * s
 	wcscpy(portData.sztQueue, q->name);
 	wcscpy(portData.sztIPAddress, service->hostname); 
 	wcscpy(portData.sztHostAddress, service->hostname);
-		
+
 	ok = XcvData(hXcv, L"AddPort", (PBYTE) &portData, sizeof(PORT_DATA_1), pOutputData, cbInputData,  &cbOutputNeeded, &dwStatus);
 	err = translate_errno( ok, errno_compat(), kUnknownErr );
 	require_noerr( err, exit );
@@ -445,7 +462,7 @@ CPrinterSetupWizardSheet::InstallPrinterPDLAndLPR(Printer * printer, Service * s
 	pInfo.pPortName				=	printer->portName.GetBuffer();
 	pInfo.pDriverName			=	printer->modelName.GetBuffer();
 	pInfo.pComment				=	printer->displayModelName.GetBuffer();
-	pInfo.pLocation				=	service->location.GetBuffer();
+	pInfo.pLocation				=	q->location.GetBuffer();
 	pInfo.pDevMode				=	NULL;
 	pInfo.pDevMode				=	NULL;
 	pInfo.pSepFile				=	L"";
@@ -489,9 +506,12 @@ CPrinterSetupWizardSheet::InstallPrinterIPP(Printer * printer, Service * service
 {
 	DEBUG_UNUSED( service );
 
+	Queue		*	q		 = service->SelectedQueue();
 	HANDLE			hPrinter = NULL;
 	PRINTER_INFO_2	pInfo;
 	OSStatus		err;
+
+	check( q );
 	
 	//
 	// add the printer
@@ -502,7 +522,7 @@ CPrinterSetupWizardSheet::InstallPrinterIPP(Printer * printer, Service * service
 	pInfo.pPortName			= printer->portName.GetBuffer();
 	pInfo.pDriverName		= printer->modelName.GetBuffer();
 	pInfo.pPrintProcessor	= L"winprint";
-	pInfo.pLocation			= service->location.GetBuffer();
+	pInfo.pLocation			= q->location.GetBuffer();
 	pInfo.pComment			= printer->displayModelName.GetBuffer();
 	pInfo.Attributes		= PRINTER_ATTRIBUTE_NETWORK | PRINTER_ATTRIBUTE_LOCAL;
 	
@@ -886,8 +906,6 @@ CPrinterSetupWizardSheet::OnResolve(
 	CPrinterSetupWizardSheet	*	self;
 	Service						*	service;
 	Queue						*	q;
-	uint32_t						qpriority = kDefaultPriority;
-	CString							qname;
 	int								idx;
 	OSStatus						err;
 
@@ -925,13 +943,6 @@ CPrinterSetupWizardSheet::OnResolve(
 	//
 	service->portNumber = ntohs(inPort);
 
-	//
-	// parse the text record.
-	//
-
-	err = self->ParseTextRecord( service, inTXTSize, inTXT, qname, qpriority );
-	require_noerr( err, exit );
-
 	if ( service->qtotal == 1 )
 	{	
 		//
@@ -948,10 +959,13 @@ CPrinterSetupWizardSheet::OnResolve(
 
 		require_action( q, exit, err = E_OUTOFMEMORY );
 
+		//
+		// parse the text record.
+		//
 
-		q->name		= qname;
-		q->priority = qpriority;
-		
+		err = self->ParseTextRecord( service, q, inTXTSize, inTXT );
+		require_noerr( err, exit );
+
 		service->queues.push_back( q );
 
 		//
@@ -1033,7 +1047,7 @@ CPrinterSetupWizardSheet::OnQuery(
 
 		require_action( q, exit, err = E_OUTOFMEMORY );
 
-		err = service->printer->window->ParseTextRecord( service, inRDLen, inTXT, q->name, q->priority );
+		err = service->printer->window->ParseTextRecord( service, q, inRDLen, inTXT );
 		require_noerr( err, exit );
 
 		//
@@ -1121,9 +1135,18 @@ CPrinterSetupWizardSheet::OnAddPrinter(
 
 	for (;;)
 	{
-		CPrinterSetupWizardSheet::PrinterNameMap::iterator it;
+		CPrinterSetupWizardSheet::PrinterNames::iterator it;
 
-		it = m_printerNames.find(printer->actualName);
+		// <rdar://problem/4141221> Don't use find to do comparisons because we need to
+		// do a case insensitive string comparison
+
+		for ( it = m_printerNames.begin(); it != m_printerNames.end(); it++ )
+		{
+			if ( (*it).CompareNoCase( printer->actualName ) == 0 )
+			{
+				break;
+			}
+		}
 
 		if (it != m_printerNames.end())
 		{
@@ -1267,7 +1290,7 @@ CPrinterSetupWizardSheet::OnResolveService( Service * service )
 {
 	// Make sure that the active page is page 2
 
-	check( GetActivePage() == &m_pgSecond );
+	require_quiet( GetActivePage() == &m_pgSecond, exit );
 
 	if ( !--service->printer->resolving )
 	{
@@ -1289,6 +1312,10 @@ CPrinterSetupWizardSheet::OnResolveService( Service * service )
 
 		m_pgSecond.OnResolveService( service );
 	}		
+
+exit:
+
+	return;
 }
 
 
@@ -1512,8 +1539,11 @@ exit:
 
 
 OSStatus
-CPrinterSetupWizardSheet::ParseTextRecord( Service * service, uint16_t inTXTSize, const char * inTXT, CString & qname, uint32_t & qpriority )
+CPrinterSetupWizardSheet::ParseTextRecord( Service * service, Queue * q, uint16_t inTXTSize, const char * inTXT )
 {
+	check( service );
+	check( q );
+
 	// <rdar://problem/3946587> Use TXTRecord APIs declared in dns_sd.h
 	
 	bool			qtotalDefined	= false;
@@ -1524,11 +1554,11 @@ CPrinterSetupWizardSheet::ParseTextRecord( Service * service, uint16_t inTXTSize
 
 	// <rdar://problem/3987680> Default to queue "lp"
 
-	qname = L"lp";
+	q->name = L"lp";
 
 	// <rdar://problem/4003710> Default pdl key to be "application/postscript"
 
-	service->pdl = L"application/postscript";
+	q->pdl = L"application/postscript";
 
 	if ( ( val = TXTRecordGetValuePtr( inTXTSize, inTXT, "rp", &len ) ) != NULL )
 	{
@@ -1537,7 +1567,7 @@ CPrinterSetupWizardSheet::ParseTextRecord( Service * service, uint16_t inTXTSize
 		memcpy( buf, val, len );
 		buf[len] = '\0';
 
-		err = UTF8StringToStringObject( buf, qname );
+		err = UTF8StringToStringObject( buf, q->name );
 		require_noerr( err, exit );
 	}
 	
@@ -1548,7 +1578,7 @@ CPrinterSetupWizardSheet::ParseTextRecord( Service * service, uint16_t inTXTSize
 		memcpy( buf, val, len );
 		buf[len] = '\0';
 
-		err = UTF8StringToStringObject( buf, service->pdl );
+		err = UTF8StringToStringObject( buf, q->pdl );
 		require_noerr( err, exit );
 	}
 	
@@ -1560,7 +1590,7 @@ CPrinterSetupWizardSheet::ParseTextRecord( Service * service, uint16_t inTXTSize
 		memcpy( buf, val, len );
 		buf[len] = '\0';
 
-		err = UTF8StringToStringObject( buf, service->usb_MFG );
+		err = UTF8StringToStringObject( buf, q->usb_MFG );
 		require_noerr( err, exit );
 	}
 	
@@ -1572,7 +1602,7 @@ CPrinterSetupWizardSheet::ParseTextRecord( Service * service, uint16_t inTXTSize
 		memcpy( buf, val, len );
 		buf[len] = '\0';
 
-		err = UTF8StringToStringObject( buf, service->usb_MDL );
+		err = UTF8StringToStringObject( buf, q->usb_MDL );
 		require_noerr( err, exit );
 	}
 
@@ -1583,7 +1613,7 @@ CPrinterSetupWizardSheet::ParseTextRecord( Service * service, uint16_t inTXTSize
 		memcpy( buf, val, len );
 		buf[len] = '\0';
 
-		err = UTF8StringToStringObject( buf, service->description );
+		err = UTF8StringToStringObject( buf, q->description );
 		require_noerr( err, exit );
 	}
 		
@@ -1594,7 +1624,7 @@ CPrinterSetupWizardSheet::ParseTextRecord( Service * service, uint16_t inTXTSize
 		memcpy( buf, val, len );
 		buf[len] = '\0';
 
-		err = UTF8StringToStringObject( buf, service->product );
+		err = UTF8StringToStringObject( buf, q->product );
 		require_noerr( err, exit );
 	}
 
@@ -1605,7 +1635,7 @@ CPrinterSetupWizardSheet::ParseTextRecord( Service * service, uint16_t inTXTSize
 		memcpy( buf, val, len );
 		buf[len] = '\0';
 
-		err = UTF8StringToStringObject( buf, service->location );
+		err = UTF8StringToStringObject( buf, q->location );
 		require_noerr( err, exit );
 	}
 
@@ -1627,20 +1657,27 @@ CPrinterSetupWizardSheet::ParseTextRecord( Service * service, uint16_t inTXTSize
 		memcpy( buf, val, len );
 		buf[len] = '\0';
 
-		qpriority = atoi( buf );
+		q->priority = atoi( buf );
+	}
+
+	// <rdar://problem/4124524> Was this printer discovered via OS X Printer Sharing?
+
+	if ( TXTRecordContainsKey( inTXTSize, inTXT, "printer-state" ) || TXTRecordContainsKey( inTXTSize, inTXT, "printer-type" ) )
+	{
+		service->printer->isSharedFromOSX = true;
 	}
 
 exit:
 
 	// The following code is to fix a problem with older HP 
 	// printers that don't include "qtotal" in their text
-	// record.  We'll check to see if the qname is "TEXT"
+	// record.  We'll check to see if the q->name is "TEXT"
 	// and if so, we're going to modify it to be "lp" so
 	// that we don't use the wrong queue
 
-	if ( !err && !qtotalDefined && ( qname == L"TEXT" ) )
+	if ( !err && !qtotalDefined && ( q->name == L"TEXT" ) )
 	{
-		qname = "lp";
+		q->name = "lp";
 	}
 
 	return err;

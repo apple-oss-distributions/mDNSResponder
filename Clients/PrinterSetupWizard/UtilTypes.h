@@ -23,6 +23,15 @@
     Change History (most recent first):
     
 $Log: UtilTypes.h,v $
+Revision 1.14  2005/06/30 18:02:54  shersche
+<rdar://problem/4124524> Workaround for Mac OS X Printer Sharing bug
+
+Revision 1.13  2005/04/13 17:46:22  shersche
+<rdar://problem/4082122> Generic PCL not selected when printers advertise multiple text records
+
+Revision 1.12  2005/03/16 03:12:28  shersche
+<rdar://problem/4050504> Generic PCL driver isn't selected correctly on Win2K
+
 Revision 1.11  2005/03/05 02:27:46  shersche
 <rdar://problem/4030388> Generic drivers don't do color
 
@@ -135,6 +144,11 @@ namespace PrinterSetupWizard
 		CString			portName;
 		bool			deflt;
 
+		// This let's us know that this printer was discovered via OSX Printer Sharing.
+		// We use this knowledge to workaround a problem with OS X Printer sharing.
+
+		bool			isSharedFromOSX;
+		
 		//
 		// state
 		//
@@ -148,6 +162,9 @@ namespace PrinterSetupWizard
 		Service();
 
 		~Service();
+
+		Queue*
+		SelectedQueue();
 
 		void
 		EmptyQueues();
@@ -163,12 +180,6 @@ namespace PrinterSetupWizard
 		DNSServiceRef	serviceRef;
 		CString			hostname;
 		unsigned short	portNumber;
-		CString			pdl;
-		CString			usb_MFG;
-		CString			usb_MDL;
-		CString			description;
-		CString			location;
-		CString			product;
 		CString			protocol;
 		unsigned short	qtotal;
 
@@ -194,6 +205,12 @@ namespace PrinterSetupWizard
 
 		CString		name;
 		uint32_t	priority;
+		CString		pdl;
+		CString		usb_MFG;
+		CString		usb_MDL;
+		CString		description;
+		CString		location;
+		CString		product;
 	};
 
 
@@ -219,6 +236,8 @@ namespace PrinterSetupWizard
 
 	inline
 	Printer::Printer()
+	:
+		isSharedFromOSX( false )
 	{
 	}
 
@@ -269,6 +288,12 @@ namespace PrinterSetupWizard
 		EmptyQueues();
 	}
 
+	inline Queue*
+	Service::SelectedQueue()
+	{
+		return queues.front();
+	}
+
 	inline void
 	Service::EmptyQueues()
 	{
@@ -301,7 +326,7 @@ namespace PrinterSetupWizard
 		{
 			Model * model = *it;
 
-			if ( model->name = name )
+			if ( model->name == name )
 			{
 				return model;
 			}

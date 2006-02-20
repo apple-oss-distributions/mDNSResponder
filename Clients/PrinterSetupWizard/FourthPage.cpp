@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: FourthPage.cpp,v $
+Revision 1.7  2005/07/07 17:53:20  shersche
+Fix problems associated with the CUPS printer workaround fix.
+
 Revision 1.6  2005/02/08 21:45:06  shersche
 <rdar://problem/3947490> Default to Generic PostScript or PCL if unable to match driver
 
@@ -149,4 +152,20 @@ CFourthPage::OnSetActive()
 exit:
 
 	return CPropertyPage::OnSetActive();
+}
+
+
+BOOL
+CFourthPage::OnKillActive()
+{
+	CPrinterSetupWizardSheet * psheet;
+
+	psheet = reinterpret_cast<CPrinterSetupWizardSheet*>(GetParent());
+	require_quiet( psheet, exit );   
+   
+	psheet->SetLastPage(this);
+
+exit:
+
+	return CPropertyPage::OnKillActive();
 }

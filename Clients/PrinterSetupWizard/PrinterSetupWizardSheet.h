@@ -23,6 +23,15 @@
     Change History (most recent first):
     
 $Log: PrinterSetupWizardSheet.h,v $
+Revision 1.11  2005/10/05 17:32:51  herscher
+<rdar://problem/4141221> Use a case insensitive compare operation to check whether a printer with the same name has already been installed.
+
+Revision 1.10  2005/07/07 17:53:19  shersche
+Fix problems associated with the CUPS printer workaround fix.
+
+Revision 1.9  2005/04/13 17:46:22  shersche
+<rdar://problem/4082122> Generic PCL not selected when printers advertise multiple text records
+
 Revision 1.8  2005/02/08 18:53:33  shersche
 Remove qtotalDefined parameter from ParseTextRecord()
 
@@ -85,6 +94,12 @@ public:
 
 	CPrinterSetupWizardSheet(UINT nIDCaption, CWnd* pParentWnd = NULL, UINT iSelectPage = 0);
 	virtual ~CPrinterSetupWizardSheet();
+
+	CPropertyPage*
+	GetLastPage();
+
+	void
+	SetLastPage(CPropertyPage * page );
 
 	void
 	SetSelectedPrinter(Printer * printer);
@@ -241,7 +256,7 @@ private:
 	StopResolve( Service * service );
 
 	OSStatus
-	ParseTextRecord( Service * service, uint16_t inTXTSize, const char * inTXT, CString & qname, uint32_t & qpriority );
+	ParseTextRecord( Service * service, Queue * q, uint16_t inTXTSize, const char * inTXT );
 
 	OSStatus
 	LoadPrinterNames();
@@ -261,10 +276,10 @@ private:
 	static unsigned WINAPI
 	InstallDriverThread( LPVOID inParam );
 
-	typedef std::map<CString,CString>	PrinterNameMap;
+	typedef std::list<CString>			PrinterNames;
 	typedef std::list<DNSServiceRef>	ServiceRefList;
 	static CPrinterSetupWizardSheet	*	m_self;
-	PrinterNameMap						m_printerNames;
+	PrinterNames						m_printerNames;
 	Printer							*	m_selectedPrinter;
 	bool								m_driverThreadFinished;
 	DWORD								m_driverThreadExitCode;
@@ -273,6 +288,8 @@ private:
 	DNSServiceRef						m_lprBrowser;
 	DNSServiceRef						m_ippBrowser;
 	DNSServiceRef						m_resolver;
+
+	CPropertyPage					*	m_lastPage;
 };
 
 
@@ -287,6 +304,20 @@ inline HCURSOR
 CPrinterSetupWizardSheet::GetCursor()
 {
 	return m_active;
+}
+
+
+inline CPropertyPage*
+CPrinterSetupWizardSheet::GetLastPage()
+{
+	return m_lastPage;
+}
+
+
+inline void
+CPrinterSetupWizardSheet::SetLastPage(CPropertyPage * lastPage)
+{
+	m_lastPage = lastPage;
 }
 
 

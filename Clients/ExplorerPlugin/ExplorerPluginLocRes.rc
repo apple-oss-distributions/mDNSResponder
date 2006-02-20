@@ -177,7 +177,7 @@ END
 STRINGTABLE 
 BEGIN
     IDS_ABOUT               "About Bonjour"
-    IDS_ABOUT_URL           "http://www.apple.com/macosx/features/rendezvous"
+    IDS_ABOUT_URL           "http://www.apple.com/macosx/features/bonjour"
     IDS_NAME                "Bonjour"
     IDS_WEB_SITES           "Web Sites"
     IDS_PRINTERS            "Printers"

@@ -79,11 +79,11 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 IDD_ABOUTBOX DIALOGEX 0, 0, 235, 55
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | 
     WS_SYSMENU
-CAPTION "About Printer Setup Wizard"
+CAPTION "About Printer Wizard"
 FONT 8, "MS Shell Dlg", 0, 0, 0x1
 BEGIN
     ICON            128,IDC_STATIC,11,17,20,20
-    LTEXT           "Printer Setup Wizard Version 1.0",IDC_STATIC,40,10,119,
+    LTEXT           "Printer Wizard Version 1.0",IDC_STATIC,40,10,119,
                     8,SS_NOPREFIX
     LTEXT           "Copyright (C) 2002",IDC_STATIC,40,25,119,8
     DEFPUSHBUTTON   "OK",IDOK,178,7,50,16,WS_GROUP
@@ -93,7 +93,7 @@ IDD_PRINTERSETUPWIZARD_DIALOG DIALOGEX 0, 0, 320, 200
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_VISIBLE | 
     WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_APPWINDOW
-CAPTION "Printer Setup Wizard"
+CAPTION "Bonjour Printer Wizard"
 FONT 8, "MS Shell Dlg", 0, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,263,7,50,16
@@ -123,12 +123,11 @@ STYLE DS_SETFONT | DS_FIXEDSYS | WS_CHILD | WS_DISABLED | WS_CAPTION
 CAPTION "Bonjour Printer Wizard"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
-    LTEXT           "Welcome to the Bonjour Printer Setup Wizard",
+    LTEXT           "Welcome to the Bonjour Printer Wizard",
                     IDC_GREETING,114,7,171,46
-    LTEXT           "Click next to continue.",IDC_STATIC,115,188,143,8
+    LTEXT           "To continue, click Next.",IDC_STATIC,115,188,143,8
     LTEXT           "This wizard helps you connect to a shared printer using Bonjour.  Make sure your printer is turned on and connected to your network.",
-                    IDC_STATIC,146,60,139,62
-    ICON            "",IDC_INFO,118,60,20,20,SS_REALSIZEIMAGE
+                    IDC_STATIC,114,60,171,62
 END
 
 IDD_THIRD_PAGE DIALOGEX 0, 0, 290, 154
@@ -143,9 +142,9 @@ BEGIN
     CONTROL         "",IDC_PRINTER_MANUFACTURER,"SysListView32",LVS_REPORT | 
                     LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_SORTASCENDING | 
                     LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,2,58,105,76
-    ICON            1017,1,0,0,20,27
+    ICON            1017,1,3,5,20,27
     LTEXT           "",IDC_PRINTER_NAME,40,5,173,8
-    LTEXT           "The Bonjour Printer Wizard has auto-selected the following printer settings.  Click 'Next' to continue installing this printer.",
+    LTEXT           "The Bonjour Printer Wizard has auto-selected the following printer settings.  To continue installing this printer, click Next.",
                     IDC_PRINTER_SELECTION_TEXT,40,18,243,33
     CONTROL         "Use this printer as the default printer",
                     IDC_DEFAULT_PRINTER,"Button",BS_AUTOCHECKBOX | 
@@ -160,20 +159,20 @@ FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     LTEXT           "Completing the Bonjour Printer Wizard",IDC_GOODBYE,
                     116,7,171,27
-    LTEXT           "You have successfully completed the Bonjour Printer Wizard.  The printer has the following settings:",
-                    IDC_STATIC,116,42,158,31
+    LTEXT           "You are ready to complete the Bonjour Printer Wizard.  The printer has the following settings:",
+                    IDC_STATIC,116,42,171,31
     LTEXT           "Name:",IDC_STATIC,116,78,22,8
     LTEXT           "Manufacturer:",IDC_STATIC,116,91,47,8
     LTEXT           "Model:",IDC_STATIC,116,104,22,8
     LTEXT           "Protocol:",IDC_STATIC,116,117,38,8
     LTEXT           "Default:",IDC_STATIC,116,130,27,8
-    LTEXT           "",IDC_PRINTER_NAME,172,78,113,8
+    LTEXT           "",IDC_PRINTER_NAME,172,78,113,8,SS_ENDELLIPSIS
     LTEXT           "",IDC_PRINTER_MANUFACTURER,172,91,113,8
     LTEXT           "",IDC_PRINTER_MODEL,172,104,113,8
     LTEXT           "",IDC_PRINTER_PROTOCOL,172,117,113,8
     LTEXT           "",IDC_PRINTER_DEFAULT,172,130,113,8
-    LTEXT           "To close this wizard, click Finish.",IDC_STATIC,116,187,
-                    103,8
+    LTEXT           "To complete the installation, click Finish.",IDC_STATIC,116,187,
+                    171,8
 END
 
 IDD_DIALOG1 DIALOGEX 0, 0, 265, 130
@@ -236,15 +235,15 @@ END
 
 STRINGTABLE 
 BEGIN
-    IDS_ABOUTBOX            "&About Printer Setup Wizard..."
-    IDS_GOODBYE             "Completing the Bonjour Printer Setup Wizard."
-    IDS_GREETING            "Welcome to the Bonjour Printer Setup Wizard"
+    IDS_ABOUTBOX            "&About Bonjour Printer Wizard..."
+    IDS_GOODBYE             "Completing the Bonjour Printer Wizard."
+    IDS_GREETING            "Welcome to the Bonjour Printer Wizard"
     IDS_BROWSE_TITLE        "Browse for Bonjour Printers"
     IDS_BROWSE_SUBTITLE     "Select the printer you want to use from the list below."
     IDS_CAPTION             "Bonjour Printer Wizard"
-    IDS_GOODBYE_GOOD1       "You have successfully completed the Bonjour Printer Wizard.  The printer has the following settings:"
+    IDS_GOODBYE_GOOD1       "You are ready to complete the Bonjour Printer Wizard.  The printer has the following settings:"
     IDS_SEARCHING           "Searching for printers..."
-    IDS_GOODBYTE_GOOD2      "To close this wizard, click Finish."
+    IDS_GOODBYTE_GOOD2      "To complete the installation, click Finish."
     IDS_INSTALL_TITLE       "Install Bonjour Printer"
     IDS_INSTALL_SUBTITLE    "The manufacturer and model determine which printer software to use."
 END

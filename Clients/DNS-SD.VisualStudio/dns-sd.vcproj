@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding = "Windows-1252"?>
+<?xml version="1.0" encoding="Windows-1252"?>
 <VisualStudioProject
 	ProjectType="Visual C++"
-	Version="7.00"
+	Version="7.10"
 	Name="dns-sd"
 	ProjectGUID="{AA230639-E115-4A44-AA5A-44A61235BA50}"
 	Keyword="Win32Proj">
@@ -20,7 +20,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="../../mDNSShared"
-				PreprocessorDefinitions="WIN32;_WIN32;_DEBUG;_CONSOLE;NOT_HAVE_GETOPT;NOT_HAVE_SETLINEBUF"
+				PreprocessorDefinitions="WIN32;_WIN32;_DEBUG;_CONSOLE;NOT_HAVE_GETOPT;NOT_HAVE_SETLINEBUF;WIN32_LEAN_AND_MEAN"
 				MinimalRebuild="TRUE"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="5"
@@ -53,11 +53,17 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
-			OutputDirectory=".\Release\Root\Program Files\Bonjour"
+			OutputDirectory=".\Release"
 			IntermediateDirectory=".\Release"
 			ConfigurationType="1"
 			CharacterSet="2">
@@ -67,7 +73,7 @@
 				InlineFunctionExpansion="1"
 				OmitFramePointers="TRUE"
 				AdditionalIncludeDirectories="../../mDNSShared"
-				PreprocessorDefinitions="WIN32;_WIN32;NDEBUG;_CONSOLE;NOT_HAVE_GETOPT;NOT_HAVE_SETLINEBUF"
+				PreprocessorDefinitions="WIN32;_WIN32;NDEBUG;_CONSOLE;NOT_HAVE_GETOPT;NOT_HAVE_SETLINEBUF;WIN32_LEAN_AND_MEAN"
 				StringPooling="TRUE"
 				RuntimeLibrary="4"
 				EnableFunctionLevelLinking="TRUE"
@@ -101,9 +107,17 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 	</Configurations>
+	<References>
+	</References>
 	<Files>
 		<Filter
 			Name="Source Files"

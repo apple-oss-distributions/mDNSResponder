@@ -23,6 +23,21 @@
     Change History (most recent first):
     
 $Log: SecondPage.cpp,v $
+Revision 1.18  2005/07/20 17:44:54  shersche
+<rdar://problem/4124524> UI fixes for CUPS workaround
+
+Revision 1.17  2005/07/11 20:17:15  shersche
+<rdar://4124524> UI fixes associated with CUPS printer workaround fix.
+
+Revision 1.16  2005/07/07 17:53:20  shersche
+Fix problems associated with the CUPS printer workaround fix.
+
+Revision 1.15  2005/04/13 17:46:22  shersche
+<rdar://problem/4082122> Generic PCL not selected when printers advertise multiple text records
+
+Revision 1.14  2005/03/20 20:08:37  shersche
+<rdar://problem/4055670> Second screen should not select a printer by default
+
 Revision 1.13  2005/02/15 07:50:10  shersche
 <rdar://problem/4007151> Update name
 
@@ -115,6 +130,12 @@ CSecondPage::InitBrowseList()
 	psheet = reinterpret_cast<CPrinterSetupWizardSheet*>(GetParent());
 	require_quiet( psheet, exit );
 
+	// Initialize so that nothing is selected when we add to the list
+
+	psheet->SetSelectedPrinter( NULL );
+	m_gotChoice = false;
+	m_browseList.Select( NULL, TVGN_FIRSTVISIBLE );
+
 	//
 	// load the no printers message until something shows up in the browse list
 	//
@@ -131,6 +152,8 @@ CSecondPage::InitBrowseList()
 	// disable the printer information box
 	//
 	SetPrinterInformationState( FALSE );
+	m_descriptionField.SetWindowText( L"" );
+	m_locationField.SetWindowText( L"" );
 
 exit:
 
@@ -182,44 +205,63 @@ CSecondPage::OnSetActive()
 	Printer						*	printer;
 	Printers::iterator				it;
 	OSStatus						err = kNoErr;
+	BOOL							b;
+
+	b = CPropertyPage::OnSetActive();
 
 	psheet = reinterpret_cast<CPrinterSetupWizardSheet*>(GetParent());
 	require_action( psheet, exit, err = kUnknownErr );
+
+	// Stash the selected printer if any
+
+	printer = psheet->GetSelectedPrinter();
 
 	// initialize the browse list...this will remove everything currently
 	// in it, and add the no printers item
 
 	InitBrowseList();
 
-	// And populate the list with any printers that we currently know about
+	// Populate the list with any printers that we currently know about
 
 	for ( it = psheet->m_printers.begin(); it != psheet->m_printers.end(); it++ )
 	{
 		OnAddPrinter( *it, false );
 	}
 
-	printer = psheet->GetSelectedPrinter();
+	// And if we hit 'Back' from page 3, then re-select printer
 
-	if ( printer != NULL )
+	if ( ( psheet->GetLastPage() == psheet->GetPage( 2 ) ) && printer )
 	{
+		psheet->SetSelectedPrinter( printer );
 		m_browseList.Select( printer->item, TVGN_FIRSTVISIBLE );
 	}
 
 exit:
 
-	return CPropertyPage::OnSetActive();
+	return b;
 }
 
 
 BOOL
 CSecondPage::OnKillActive()
 {
+	CPrinterSetupWizardSheet * psheet;
+
+	psheet = reinterpret_cast<CPrinterSetupWizardSheet*>(GetParent());
+	require_quiet( psheet, exit );   
+   
+	psheet->SetLastPage(this);
+
+exit:
+
 	return CPropertyPage::OnKillActive();
 }
 
 
 BEGIN_MESSAGE_MAP(CSecondPage, CPropertyPage)
 	ON_NOTIFY(TVN_SELCHANGED, IDC_BROWSE_LIST, OnTvnSelchangedBrowseList)
+	ON_NOTIFY(NM_CLICK, IDC_BROWSE_LIST, OnNmClickBrowseList)
+	ON_NOTIFY(TVN_KEYDOWN, IDC_BROWSE_LIST, OnTvnKeyDownBrowseList)
 	ON_WM_SETCURSOR()
 END_MESSAGE_MAP()
 
@@ -245,11 +287,6 @@ CSecondPage::OnAddPrinter(
 	m_browseList.SetItemData( printer->item, (DWORD_PTR) printer );
 
 	m_browseList.SortChildren(TVI_ROOT);
-		
-	if ( printer->name == m_selectedName )
-	{
-		m_browseList.SelectItem( printer->item );
-	}
 
 	//
 	// if the searching item is still in the list
@@ -333,8 +370,13 @@ CSecondPage::OnResolveService( Service * service )
 {
 	CPrinterSetupWizardSheet * psheet = reinterpret_cast<CPrinterSetupWizardSheet*>(GetParent());
 	require_quiet( psheet, exit );
-	
+
 	check( service );
+
+	Queue *	q = service->SelectedQueue();
+
+	check( q );
+	
 
 	//
 	// and set it to selected
@@ -347,8 +389,8 @@ CSecondPage::OnResolveService( Service * service )
 	//
 	SetPrinterInformationState( TRUE );
 
-	m_descriptionField.SetWindowText( service->description );
-	m_locationField.SetWindowText( service->location );
+	m_descriptionField.SetWindowText( q->description );
+	m_locationField.SetWindowText( q->location );
 
 	//
 	// reset the cursor
@@ -366,15 +408,43 @@ void CSecondPage::OnTvnSelchangedBrowseList(NMHDR *pNMHDR, LRESULT *pResult)
 {
 	LPNMTREEVIEW					pNMTreeView = reinterpret_cast<LPNMTREEVIEW>(pNMHDR);
 	CPrinterSetupWizardSheet	*	psheet;
+	Printer						*	printer;
 	int								err = 0;
+
+	psheet = reinterpret_cast<CPrinterSetupWizardSheet*>(GetParent());
+	require_action( psheet, exit, err = kUnknownErr );
+
+	// The strange code here is to workaround a bug in the CTreeCtrl, whereupon the item
+	// we selected isn't passed through correctly to this callback routine.
+
+	if ( !m_gotChoice )
+	{
+		printer = psheet->GetSelectedPrinter();
+
+		// If we really haven't selected a printer, then re-select NULL and exit
+
+		if ( !printer )
+		{
+			m_browseList.SelectItem( NULL );
+
+			goto exit;
+		}
+
+		// If we already have selected a printer, fake like we've clicked on it, but only
+		// if the CTreeCtrl hasn't already selected it
+		
+		else if ( printer->item != m_browseList.GetSelectedItem() )
+		{
+			m_gotChoice = true;
+
+			m_browseList.SelectItem( printer->item );
+
+			goto exit;
+		}
+	}
 
 	HTREEITEM item = m_browseList.GetSelectedItem();
 	require_quiet( item, exit );
-
-	psheet = reinterpret_cast<CPrinterSetupWizardSheet*>(GetParent());
-	require_action( psheet, exit, err = kUnknownErr );	
-
-	Printer * printer;
 
 	printer = reinterpret_cast<Printer*>(m_browseList.GetItemData( item ) );
 	require_quiet( printer, exit );
@@ -405,6 +475,26 @@ exit:
 
 		MessageBox(text, caption, MB_OK|MB_ICONEXCLAMATION);
 	}
+
+	*pResult = 0;
+}
+
+
+void CSecondPage::OnNmClickBrowseList(NMHDR *pNMHDR, LRESULT *pResult)
+{
+	DEBUG_UNUSED( pNMHDR );
+
+	m_gotChoice = true;
+
+	*pResult = 0;
+}
+
+
+void CSecondPage::OnTvnKeyDownBrowseList( NMHDR * pNMHDR, LRESULT * pResult)
+{
+	DEBUG_UNUSED( pNMHDR );
+
+	m_gotChoice = true;
 
 	*pResult = 0;
 }

@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: stdafx.h,v $
+Revision 1.2  2005/10/19 19:50:35  herscher
+Workaround a bug in the latest Microsoft Platform SDK when compiling C++ files that include (directly or indirectly) <WspiApi.h>
+
 Revision 1.1  2004/06/18 04:36:58  rpantos
 First checked in
 
@@ -58,6 +61,10 @@ First checked in
 
 // turns off MFC's hiding of some common and often safely ignored warning messages
 #define _AFX_ALL_WARNINGS
+
+#if !defined(_WSPIAPI_COUNTOF)
+#	define _WSPIAPI_COUNTOF(_Array) (sizeof(_Array) / sizeof(_Array[0]))
+#endif
 
 #include <afxwin.h>         // MFC core and standard components
 #include <afxext.h>         // MFC extensions

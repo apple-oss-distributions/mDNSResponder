@@ -23,6 +23,9 @@
     Change History (most recent first):
 
 $Log: SecondPage.h,v $
+Revision 1.4  2005/04/05 03:52:14  shersche
+<rdar://problem/4066485> Registering with shared secret key doesn't work. Additionally, mDNSResponder wasn't dynamically re-reading it's DynDNS setup after setting a shared secret key.
+
 Revision 1.3  2005/03/03 19:55:21  shersche
 <rdar://problem/4034481> ControlPanel source code isn't saving CVS log info
 
@@ -113,6 +116,7 @@ private:
 	CButton			m_advertiseServicesButton;
 	CButton			m_sharedSecretButton;
 	BOOL			m_modified;
+	HKEY			m_setupKey;
 
 public:
 	afx_msg void OnCbnSelChange();

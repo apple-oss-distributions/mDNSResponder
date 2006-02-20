@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: ExplorerPlugin.cpp,v $
+Revision 1.8  2005/06/30 18:01:54  shersche
+<rdar://problem/4130635> Cause IE to rebuild cache so we don't have to reboot following an install.
+
 Revision 1.7  2005/02/23 02:00:45  shersche
 <rdar://problem/4014479> Delete all the registry entries when component is unregistered
 
@@ -124,6 +127,14 @@ GetLocalizedResources()
 {
 	return g_localizedResources;
 }
+
+// This is the class GUID for an undocumented hook into IE that will allow us to register
+// and have IE notice our new ExplorerBar without rebooting.
+// {8C7461EF-2B13-11d2-BE35-3078302C2030}
+
+DEFINE_GUID(CLSID_CompCatCacheDaemon, 
+0x8C7461EF, 0x2b13, 0x11d2, 0xbe, 0x35, 0x30, 0x78, 0x30, 0x2c, 0x20, 0x30);
+
 
 #if 0
 #pragma mark == Globals ==
@@ -248,9 +259,10 @@ exit:
 
 STDAPI	DllRegisterServer( void )
 {
-	HRESULT		err;
-	BOOL		ok;
-	CString		s;
+	IRunnableTask * pTask = NULL;
+	HRESULT			err;
+	BOOL			ok;
+	CString			s;
 	
 	dlog( kDebugLevelTrace, "DllRegisterServer\n" );
 	
@@ -262,7 +274,16 @@ STDAPI	DllRegisterServer( void )
 	
 	err = RegisterCOMCategory( CLSID_ExplorerBar, CATID_InfoBand, TRUE );
 	require_noerr( err, exit );
-	
+
+	// <rdar://problem/4130635> Clear IE cache so it will rebuild the cache when it runs next.  This
+	// will allow us to install and not reboot
+
+	err = CoCreateInstance(CLSID_CompCatCacheDaemon, NULL, CLSCTX_INPROC, IID_IRunnableTask, (void**) &pTask);
+	require_noerr( err, exit );
+
+	pTask->Run();
+	pTask->Release();
+
 exit:
 	return( err );
 }

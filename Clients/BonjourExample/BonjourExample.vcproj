@@ -1,9 +1,9 @@
-<?xml version="1.0" encoding = "Windows-1252"?>
+<?xml version="1.0" encoding="Windows-1252"?>
 <VisualStudioProject
 	ProjectType="Visual C++"
-	Version="7.00"
-	Name="mDNSResponderTest"
-	ProjectGUID="{F66EFE7E-50A6-44D4-87C7-742B303BA852}"
+	Version="7.10"
+	Name="BonjourExample"
+	ProjectGUID="{0A842379-799E-414C-BF1F-BF11A8D3A8A8}"
 	Keyword="Win32Proj">
 	<Platforms>
 		<Platform
@@ -15,35 +15,35 @@
 			OutputDirectory="Debug"
 			IntermediateDirectory="Debug"
 			ConfigurationType="1"
-			CharacterSet="2">
+			CharacterSet="1">
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\..\mDNSCore;..\..\..\mDNSWindows"
-				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE;DEBUG=1"
+				AdditionalIncludeDirectories="../../mDNSShared"
+				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE"
 				StringPooling="TRUE"
 				MinimalRebuild="TRUE"
 				ExceptionHandling="FALSE"
 				BasicRuntimeChecks="3"
-				SmallerTypeCheck="FALSE"
-				RuntimeLibrary="1"
+				SmallerTypeCheck="TRUE"
+				RuntimeLibrary="5"
 				BufferSecurityCheck="TRUE"
 				ForceConformanceInForLoopScope="TRUE"
-				UsePrecompiledHeader="2"
+				UsePrecompiledHeader="3"
 				BrowseInformation="1"
 				WarningLevel="4"
 				WarnAsError="TRUE"
 				Detect64BitPortabilityProblems="TRUE"
-				DebugInformationFormat="3"/>
+				DebugInformationFormat="4"/>
 			<Tool
 				Name="VCCustomBuildTool"/>
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalDependencies="ws2_32.lib"
-				OutputFile="$(ProjectName)Debug.exe"
-				LinkIncremental="1"
-				SuppressStartupBanner="TRUE"
+				OutputFile="$(OutDir)/BonjourExample.exe"
+				LinkIncremental="2"
 				GenerateDebugInformation="TRUE"
+				ProgramDatabaseFile="$(OutDir)/BonjourExample.pdb"
 				SubSystem="1"
 				TargetMachine="1"/>
 			<Tool
@@ -59,44 +59,43 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
 			OutputDirectory="Release"
 			IntermediateDirectory="Release"
 			ConfigurationType="1"
-			CharacterSet="2"
-			WholeProgramOptimization="FALSE">
+			CharacterSet="1">
 			<Tool
 				Name="VCCLCompilerTool"
-				Optimization="2"
-				InlineFunctionExpansion="2"
-				FavorSizeOrSpeed="2"
+				GlobalOptimizations="TRUE"
 				OmitFramePointers="TRUE"
-				AdditionalIncludeDirectories="..\..\..\mDNSCore;..\..\..\mDNSWindows"
+				AdditionalIncludeDirectories="../../mDNSShared"
 				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE"
 				StringPooling="TRUE"
-				ExceptionHandling="FALSE"
-				RuntimeLibrary="0"
+				RuntimeLibrary="4"
 				BufferSecurityCheck="FALSE"
-				EnableFunctionLevelLinking="FALSE"
-				DisableLanguageExtensions="FALSE"
 				ForceConformanceInForLoopScope="TRUE"
-				UsePrecompiledHeader="2"
+				UsePrecompiledHeader="3"
 				WarningLevel="4"
 				WarnAsError="TRUE"
 				Detect64BitPortabilityProblems="TRUE"
 				DebugInformationFormat="3"
-				CompileAs="1"/>
+				CompileAs="2"/>
 			<Tool
 				Name="VCCustomBuildTool"/>
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalDependencies="ws2_32.lib"
-				OutputFile="$(ProjectName).exe"
+				OutputFile="$(OutDir)/BonjourExample.exe"
 				LinkIncremental="1"
-				SuppressStartupBanner="TRUE"
 				GenerateDebugInformation="TRUE"
 				SubSystem="1"
 				OptimizeReferences="2"
@@ -115,75 +114,41 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 	</Configurations>
+	<References>
+	</References>
 	<Files>
 		<File
-			RelativePath="..\..\CommonServices.h">
+			RelativePath=".\BonjourExample.cpp">
 		</File>
 		<File
-			RelativePath="..\..\..\mDNSCore\DNSCommon.c">
+			RelativePath="..\..\mDNSWindows\Dll\release\dnssd.lib">
 		</File>
 		<File
-			RelativePath="..\..\..\mDNSCore\DNSCommon.h">
+			RelativePath=".\stdafx.cpp">
+			<FileConfiguration
+				Name="Debug|Win32">
+				<Tool
+					Name="VCCLCompilerTool"
+					UsePrecompiledHeader="1"/>
+			</FileConfiguration>
+			<FileConfiguration
+				Name="Release|Win32">
+				<Tool
+					Name="VCCLCompilerTool"
+					UsePrecompiledHeader="1"/>
+			</FileConfiguration>
 		</File>
 		<File
-			RelativePath="..\..\..\mDNSCore\DNSDigest.c">
-		</File>
-		<File
-			RelativePath="..\..\DNSSD.c">
-		</File>
-		<File
-			RelativePath="..\..\DNSSD.h">
-		</File>
-		<File
-			RelativePath="..\..\DNSSDDirect.c">
-		</File>
-		<File
-			RelativePath="..\..\DNSSDDirect.h">
-		</File>
-		<File
-			RelativePath="..\..\DebugServices.c">
-		</File>
-		<File
-			RelativePath="..\..\DebugServices.h">
-		</File>
-		<File
-			RelativePath="..\..\RMxClient.c">
-		</File>
-		<File
-			RelativePath="..\..\RMxClient.h">
-		</File>
-		<File
-			RelativePath="..\..\RMxCommon.c">
-		</File>
-		<File
-			RelativePath="..\..\RMxCommon.h">
-		</File>
-		<File
-			RelativePath="Tool.c">
-		</File>
-		<File
-			RelativePath="..\..\..\mDNSCore\mDNS.c">
-		</File>
-		<File
-			RelativePath="..\..\..\mDNSCore\mDNSClientAPI.h">
-		</File>
-		<File
-			RelativePath="..\..\..\mDNSCore\mDNSDebug.h">
-		</File>
-		<File
-			RelativePath="..\..\mDNSWin32.c">
-		</File>
-		<File
-			RelativePath="..\..\mDNSWin32.h">
-		</File>
-		<File
-			RelativePath="..\..\..\mDNSCore\uDNS.c">
-		</File>
-		<File
-			RelativePath="..\..\..\mDNSCore\uDNS.h">
+			RelativePath=".\stdafx.h">
 		</File>
 	</Files>
 	<Globals>

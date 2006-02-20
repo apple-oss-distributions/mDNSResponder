@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding = "Windows-1252"?>
+<?xml version="1.0" encoding="Windows-1252"?>
 <VisualStudioProject
 	ProjectType="Visual C++"
-	Version="7.00"
+	Version="7.10"
 	Name="ExplorerPluginLocRes"
 	ProjectGUID="{BB8AC1B5-6587-4163-BDC6-788B157705CA}"
 	SccProjectName=""
@@ -13,7 +13,7 @@
 	<Configurations>
 		<Configuration
 			Name="Debug|Win32"
-			OutputDirectory=".\Debug\Resources\ExplorerPlugin.dll.Resources\en.lproj"
+			OutputDirectory=".\Debug\ExplorerPlugin.Resources\en.lproj"
 			IntermediateDirectory=".\Debug"
 			ConfigurationType="2"
 			UseOfMFC="1"
@@ -71,9 +71,9 @@
 			<Tool
 				Name="VCPreLinkEventTool"
 				Description="Building Output Directories"
-				CommandLine="if not exist Debug\Resources mkdir Debug\Resources
-if not exist Debug\Resources\ExplorerPlugin.dll.Resources mkdir Debug\Resources\ExplorerPlugin.dll.Resources
-if not exist Debug\Resources\ExplorerPlugin.dll.Resources\en.lproj mkdir Debug\Resources\ExplorerPlugin.dll.Resources\en.lproj"/>
+				CommandLine="if not exist Debug\ExplorerPlugin.Resources mkdir Debug\ExplorerPlugin.Resources
+if not exist Debug\ExplorerPlugin.Resources\en.lproj mkdir Debug\ExplorerPlugin.Resources\en.lproj
+"/>
 			<Tool
 				Name="VCResourceCompilerTool"
 				PreprocessorDefinitions="_DEBUG"
@@ -82,11 +82,17 @@ if not exist Debug\Resources\ExplorerPlugin.dll.Resources\en.lproj mkdir Debug\R
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
-			OutputDirectory=".\Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources\en.lproj"
+			OutputDirectory=".\Release\ExplorerPlugin.Resources\en.lproj"
 			IntermediateDirectory=".\Release"
 			ConfigurationType="2"
 			UseOfMFC="1"
@@ -148,12 +154,10 @@ if not exist Debug\Resources\ExplorerPlugin.dll.Resources\en.lproj mkdir Debug\R
 			<Tool
 				Name="VCPreLinkEventTool"
 				Description="Building Output Directories"
-				CommandLine="if not exist Release\Root mkdir Release\Root
-if not exist &quot;Release\Root\Program Files&quot; mkdir &quot;Release\Root\Program Files&quot;
-if not exist &quot;Release\Root\Program Files\Bonjour&quot; mkdir &quot;Release\Root\Program Files\Bonjour&quot;
-if not exist &quot;Release\Root\Program Files\Bonjour\Resources&quot; mkdir &quot;Release\Root\Program Files\Bonjour\Resources&quot;
-if not exist &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources&quot; mkdir &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources&quot;
-if not exist &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources\en.lproj&quot; mkdir &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.dll.Resources\en.lproj&quot;"/>
+				CommandLine="if not exist Release mkdir Release
+if not exist &quot;Release\ExplorerPlugin.Resources&quot; mkdir &quot;Release\ExplorerPlugin.Resources&quot;
+if not exist &quot;Release\ExplorerPlugin.Resources\en.lproj&quot; mkdir &quot;Release\ExplorerPlugin.Resources\en.lproj&quot;
+"/>
 			<Tool
 				Name="VCResourceCompilerTool"
 				PreprocessorDefinitions="NDEBUG"
@@ -162,9 +166,17 @@ if not exist &quot;Release\Root\Program Files\Bonjour\Resources\ExplorerPlugin.d
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 	</Configurations>
+	<References>
+	</References>
 	<Files>
 		<Filter
 			Name="Header Files"

@@ -104,7 +104,6 @@ END
 
 IDB_LOGO                BITMAP                  "res\\logo.bmp"
 IDB_ABOUT               BITMAP                  "res\\about.bmp"
-IDB_GLOBE					BITMAP						"res\\globe.bmp"
 
 /////////////////////////////////////////////////////////////////////////////
 //

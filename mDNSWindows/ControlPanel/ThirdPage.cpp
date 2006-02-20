@@ -23,6 +23,9 @@
     Change History (most recent first):
 
 $Log: ThirdPage.cpp,v $
+Revision 1.4  2005/10/05 20:46:50  herscher
+<rdar://problem/4192011> Move Wide-Area preferences to another part of the registry so they don't removed during an update-install.
+
 Revision 1.3  2005/03/07 18:27:42  shersche
 <rdar://problem/4037940> Fix problem when ControlPanel commits changes to the browse domain list
 
@@ -148,7 +151,7 @@ CThirdPage::OnSetActive()
 
 	// Now populate the browse domain box
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\" kServiceName L"\\Parameters\\DynDNS\\Setup\\" kServiceDynDNSBrowseDomains, &key );
+	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSBrowseDomains, &key );
 	require_noerr( err, exit );
 
 	// Get information about this node
@@ -233,7 +236,7 @@ CThirdPage::Commit()
 	int			i;
 	DWORD		err;
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\" kServiceName L"\\Parameters\\DynDNS\\Setup\\" kServiceDynDNSBrowseDomains, &key );
+	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSBrowseDomains, &key );
 	require_noerr( err, exit );
 
 	// First, remove all the entries that are there

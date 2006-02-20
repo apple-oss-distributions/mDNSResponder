@@ -23,6 +23,12 @@
     Change History (most recent first):
 
 $Log: FirstPage.cpp,v $
+Revision 1.5  2005/10/05 20:46:50  herscher
+<rdar://problem/4192011> Move Wide-Area preferences to another part of the registry so they don't removed during an update-install.
+
+Revision 1.4  2005/04/05 03:52:14  shersche
+<rdar://problem/4066485> Registering with shared secret key doesn't work. Additionally, mDNSResponder wasn't dynamically re-reading it's DynDNS setup after setting a shared secret key.
+
 Revision 1.3  2005/03/07 18:27:42  shersche
 <rdar://problem/4037940> Fix problem when ControlPanel commits changes to the browse domain list
 
@@ -51,17 +57,18 @@ CFirstPage::CFirstPage()
 :
 	CPropertyPage(CFirstPage::IDD),
 	m_ignoreHostnameChange( false ),
-	m_statusKey( NULL )
+	m_statusKey( NULL ),
+	m_setupKey( NULL )
 {
 	//{{AFX_DATA_INIT(CFirstPage)
 	//}}AFX_DATA_INIT
 
 	OSStatus err;
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\" kServiceName L"\\Parameters\\DynDNS\\State\\Hostnames", &m_statusKey );
+	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\State\\Hostnames", &m_statusKey );
 	check_noerr( err );
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\" kServiceName L"\\Parameters\\DynDNS\\Setup\\Hostnames", &m_setupKey );
+	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\Hostnames", &m_setupKey );
 	check_noerr( err );
 }
 
@@ -128,12 +135,33 @@ void CFirstPage::OnBnClickedSharedSecret()
 
 	CSharedSecret dlg;
 
-	dlg.m_secretName = name;
+	dlg.m_key = name;
 
 	if ( dlg.DoModal() == IDOK )
 	{
-		dlg.Commit();
+		DWORD		wakeup = 0;
+		DWORD		dwSize = sizeof( DWORD );
+		OSStatus	err;
+
+		dlg.Commit( name );
+
+		// We have now updated the secret, however the system service
+		// doesn't know about it yet.  So we're going to update the
+		// registry with a dummy value which will cause the system
+		// service to re-initialize it's DynDNS setup
+		//
+
+		RegQueryValueEx( m_setupKey, L"Wakeup", NULL, NULL, (LPBYTE) &wakeup, &dwSize );      
+
+		wakeup++;
+		
+		err = RegSetValueEx( m_setupKey, L"Wakeup", 0, REG_DWORD, (LPBYTE) &wakeup, sizeof( DWORD ) );
+		require_noerr( err, exit );
 	}
+
+exit:
+
+	return;
 }
 
 

@@ -23,6 +23,9 @@
     Change History (most recent first):
 
 $Log: DNSCommon.h,v $
+Revision 1.32  2005/03/21 00:33:51  shersche
+<rdar://problem/4021486> Fix build warnings on Win32 platform
+
 Revision 1.31  2005/02/18 00:43:11  cheshire
 <rdar://problem/4010245> mDNSResponder should auto-truncate service names that are too long
 
@@ -314,7 +317,7 @@ extern const mDNSu8 *getDomainName(const DNSMessage *const msg, const mDNSu8 *pt
 extern const mDNSu8 *skipResourceRecord(const DNSMessage *msg, const mDNSu8 *ptr, const mDNSu8 *end);
 
 extern const mDNSu8 *GetLargeResourceRecord(mDNS *const m, const DNSMessage * const msg, const mDNSu8 *ptr, 
-    const mDNSu8 * const end, const mDNSInterfaceID InterfaceID, mDNSu8 RecordType, LargeCacheRecord *largecr);
+    const mDNSu8 * end, const mDNSInterfaceID InterfaceID, mDNSu8 RecordType, LargeCacheRecord *largecr);
 
 extern const mDNSu8 *skipQuestion(const DNSMessage *msg, const mDNSu8 *ptr, const mDNSu8 *end);
 

@@ -20,6 +20,9 @@
 # @APPLE_LICENSE_HEADER_END@
 #
 # $Log: makefile,v $
+# Revision 1.7  2005/10/19 17:19:56  herscher
+# Change JDK to use JAVA_HOME environment variable
+#
 # Revision 1.6  2005/02/10 22:35:36  cheshire
 # <rdar://problem/3727944> Update name
 #
@@ -64,7 +67,7 @@
 COREDIR = ..\..\mDNSCore
 SHAREDDIR = ..\..\mDNSShared
 
-JDK = \javasdk
+JDK = $(JAVA_HOME)
 
 CC = cl
 RC = rc

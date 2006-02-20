@@ -72,7 +72,7 @@ static int _getISOCode(LANGID wLangID, char *isoLangCode, int codeLen) {
 		int startIndex = i * MODULO_ISOCODES;
 		
 		langCode = (ISOCODES[startIndex] << 8);
-		langCode += ( (unsigned short) (ISOCODES[startIndex + 1]) );
+		langCode = langCode + ( (unsigned short) (ISOCODES[startIndex + 1]) );
 
 		if (langCode == wLangID) {
 			char *langStr = (char *)&(ISOCODES[startIndex+2]);
@@ -118,6 +118,7 @@ int PathForResourceA ( HMODULE module, const char *name, char *locFile, int locF
 	if ( !strcmp( appPathNameA, "" ) )
 	{
 		char   folder[MAX_PATH];
+		char * ext;
 		char * app;
 
 		GetModuleFileNameA( module, folder, MAX_PATH );
@@ -126,10 +127,16 @@ int PathForResourceA ( HMODULE module, const char *name, char *locFile, int locF
 		
 		app = strrchr( folder, '\\' );
 		require_action( app, exit, ret = 0 );
-
 		*app++ = '\0';
 
-		snprintf( appPathNameA, MAX_PATH, "%s\\Resources\\%s", folder, app );
+		// Strip the extension
+
+		if ( ( ( ext = strstr( app, ".exe" ) ) != NULL ) || ( ( ext = strstr( app, ".dll" ) ) != NULL ) )
+		{
+			*ext = '\0';
+		}
+
+		snprintf( appPathNameA, MAX_PATH, "%s\\%s", folder, app );
 	}
 
 	ret = PathForResourceWithPathA (appPathNameA, name, locFile, locFileLen);
@@ -149,6 +156,7 @@ int PathForResourceW ( HMODULE module, const wchar_t *name, wchar_t *locFile, in
 	{
 		wchar_t   folder[MAX_PATH];
 		wchar_t * app;
+		wchar_t * ext;
 
 		GetModuleFileNameW( module, folder, MAX_PATH);
 
@@ -156,10 +164,16 @@ int PathForResourceW ( HMODULE module, const wchar_t *name, wchar_t *locFile, in
 		
 		app = wcsrchr( folder, '\\' );
 		require_action( app, exit, ret = 0 );
-
 		*app++ = '\0';
 
-		swprintf( appPathNameW, MAX_PATH, L"%ls\\Resources\\%ls", folder, app );
+		// Strip the extension
+
+		if ( ( ( ext = wcsstr( app, L".exe" ) ) != NULL ) || ( ( ext = wcsstr( app, L".dll" ) ) != NULL ) )
+		{
+			*ext = '\0';
+		}
+
+		swprintf( appPathNameW, MAX_PATH, L"%ls\\%ls", folder, app );
 	}
 
 	ret = PathForResourceWithPathW (appPathNameW, name, locFile, locFileLen);

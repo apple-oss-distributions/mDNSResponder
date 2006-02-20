@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: mDNSWin32.h,v $
+Revision 1.23  2005/10/05 20:55:14  herscher
+<rdar://problem/4096464> Don't call SetLLRoute on loopback interface
+
 Revision 1.22  2005/03/04 22:44:53  shersche
 <rdar://problem/4022802> mDNSResponder did not notice changes to DNS server config
 
@@ -199,6 +202,7 @@ struct	mDNS_PlatformSupport_struct
 	HKEY						tcpipKey;
 	HKEY						ddnsKey;
 	mStatus						initStatus;
+	mDNSBool					registeredLoopback4;
 	SocketRef					interfaceListChangedSocket;
 	int							interfaceCount;
 	mDNSInterfaceData *			interfaceList;

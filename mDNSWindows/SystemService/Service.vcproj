@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding = "Windows-1252"?>
+<?xml version="1.0" encoding="Windows-1252"?>
 <VisualStudioProject
 	ProjectType="Visual C++"
-	Version="7.00"
+	Version="7.10"
 	Name="mDNSResponder"
 	ProjectGUID="{C1D98254-BA27-4427-A3BE-A68CA2CC5F69}"
 	Keyword="Win32Proj">
@@ -19,8 +19,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories=".;../;../../mDNSCore;../../mDNSShared;&quot;C:\Program Files\Microsoft Platform SDK for Windows XP SP2\Include&quot;"
-				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE;DEBUG=1;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=&quot;&quot;&quot;&quot;;UNICODE;_UNICODE"
+				AdditionalIncludeDirectories=".;../;../../mDNSCore;../../mDNSShared"
+				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE;_WIN32_WINNT=0x0500;DEBUG=1;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=&quot;&quot;&quot;&quot;;UNICODE;_UNICODE"
 				StringPooling="TRUE"
 				MinimalRebuild="TRUE"
 				ExceptionHandling="FALSE"
@@ -59,18 +59,24 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
-			OutputDirectory=".\Release\Root\Program Files\Bonjour"
+			OutputDirectory=".\Release"
 			IntermediateDirectory=".\Release"
 			ConfigurationType="1"
 			CharacterSet="2">
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories=".;../;../../mDNSCore;../../mDNSShared;&quot;C:\Program Files\Microsoft Platform SDK for Windows XP SP2\Include&quot;"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=&quot;&quot;&quot;&quot;;UNICODE;_UNICODE"
+				AdditionalIncludeDirectories=".;../;../../mDNSCore;../../mDNSShared"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_WIN32_WINNT=0x0500;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=&quot;&quot;&quot;&quot;;UNICODE;_UNICODE"
 				RuntimeLibrary="0"
 				UsePrecompiledHeader="0"
 				WarningLevel="4"
@@ -103,14 +109,28 @@
 			<Tool
 				Name="VCWebServiceProxyGeneratorTool"/>
 			<Tool
+				Name="VCXMLDataGeneratorTool"/>
+			<Tool
 				Name="VCWebDeploymentTool"/>
+			<Tool
+				Name="VCManagedWrapperGeneratorTool"/>
+			<Tool
+				Name="VCAuxiliaryManagedWrapperGeneratorTool"/>
 		</Configuration>
 	</Configurations>
+	<References>
+	</References>
 	<Files>
 		<Filter
 			Name="Source Files"
 			Filter="cpp;c;cxx;def;odl;idl;hpj;bat;asm;asmx"
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}">
+			<File
+				RelativePath="..\dDNS.c">
+			</File>
+			<File
+				RelativePath="..\DebugServices.c">
+			</File>
 			<File
 				RelativePath="..\..\mDNSCore\DNSCommon.c">
 			</File>
@@ -118,22 +138,13 @@
 				RelativePath="..\..\mDNSCore\DNSDigest.c">
 			</File>
 			<File
-				RelativePath="..\DebugServices.c">
+				RelativePath="..\..\mDNSShared\dnssd_ipc.c">
 			</File>
 			<File
 				RelativePath="Firewall.cpp">
 			</File>
 			<File
 				RelativePath="..\..\mDNSShared\GenLinkedList.c">
-			</File>
-			<File
-				RelativePath=".\Service.c">
-			</File>
-			<File
-				RelativePath="..\dDNS.c">
-			</File>
-			<File
-				RelativePath="..\..\mDNSShared\dnssd_ipc.c">
 			</File>
 			<File
 				RelativePath="..\..\mDNSCore\mDNS.c">
@@ -143,6 +154,12 @@
 			</File>
 			<File
 				RelativePath="..\mDNSWin32.c">
+			</File>
+			<File
+				RelativePath="..\VPCDetect.cpp">
+			</File>
+			<File
+				RelativePath=".\Service.c">
 			</File>
 			<File
 				RelativePath="..\..\mDNSCore\uDNS.c">
@@ -159,22 +176,19 @@
 				RelativePath="..\CommonServices.h">
 			</File>
 			<File
-				RelativePath="..\..\mDNSCore\DNSCommon.h">
+				RelativePath="..\dDNS.h">
 			</File>
 			<File
 				RelativePath="..\DebugServices.h">
 			</File>
 			<File
-				RelativePath="..\..\mDNSShared\GenLinkedList.h">
-			</File>
-			<File
-				RelativePath=".\Resource.h">
-			</File>
-			<File
-				RelativePath="..\dDNS.h">
+				RelativePath="..\..\mDNSCore\DNSCommon.h">
 			</File>
 			<File
 				RelativePath="..\..\mDNSShared\dnssd_ipc.h">
+			</File>
+			<File
+				RelativePath="..\..\mDNSShared\GenLinkedList.h">
 			</File>
 			<File
 				RelativePath="..\..\mDNSCore\mDNSDebug.h">
@@ -184,6 +198,12 @@
 			</File>
 			<File
 				RelativePath="..\mDNSWin32.h">
+			</File>
+			<File
+				RelativePath="..\VPCDetect.h">
+			</File>
+			<File
+				RelativePath=".\Resource.h">
 			</File>
 			<File
 				RelativePath="..\..\mDNSCore\uDNS.h">

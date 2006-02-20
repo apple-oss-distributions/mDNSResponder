@@ -27,6 +27,9 @@
    Change History (most recent first):
 
 $Log: dnssd_clientlib.c,v $
+Revision 1.10  2005/04/06 02:06:56  shersche
+Add DNSSD_API macro to TXTRecord API calls
+
 Revision 1.9  2004/10/06 02:22:19  cheshire
 Changed MacRoman copyright symbol (should have been UTF-8 in any case :-) to ASCII-compatible "(c)"
 
@@ -196,7 +199,7 @@ struct dnssd_clientlib_CompileTimeAssertionCheck
 	char assert0[(sizeof(TXTRecordRefRealType) <= 16) ? 1 : -1];
 	};
 
-void TXTRecordCreate
+void DNSSD_API TXTRecordCreate
 	(
 	TXTRecordRef     *txtRecord,
 	uint16_t         bufferLen,
@@ -209,12 +212,12 @@ void TXTRecordCreate
 	txtRec->malloced = 0;
 	}
 
-void TXTRecordDeallocate(TXTRecordRef *txtRecord)
+void DNSSD_API TXTRecordDeallocate(TXTRecordRef *txtRecord)
 	{
 	if (txtRec->malloced) free(txtRec->buffer);
 	}
 
-DNSServiceErrorType TXTRecordSetValue
+DNSServiceErrorType DNSSD_API TXTRecordSetValue
 	(
 	TXTRecordRef     *txtRecord,
 	const char       *key,
@@ -259,7 +262,7 @@ DNSServiceErrorType TXTRecordSetValue
 	return(kDNSServiceErr_NoError);
 	}
 
-DNSServiceErrorType TXTRecordRemoveValue
+DNSServiceErrorType DNSSD_API TXTRecordRemoveValue
 	(
 	TXTRecordRef     *txtRecord,
 	const char       *key
@@ -276,8 +279,8 @@ DNSServiceErrorType TXTRecordRemoveValue
 	return(kDNSServiceErr_NoError);
 	}
 
-uint16_t       TXTRecordGetLength  (const TXTRecordRef *txtRecord) { return(txtRec->datalen); }
-const void *   TXTRecordGetBytesPtr(const TXTRecordRef *txtRecord) { return(txtRec->buffer); }
+uint16_t DNSSD_API TXTRecordGetLength  (const TXTRecordRef *txtRecord) { return(txtRec->datalen); }
+const void * DNSSD_API TXTRecordGetBytesPtr(const TXTRecordRef *txtRecord) { return(txtRec->buffer); }
 
 /*********************************************************************************************
  *
@@ -285,7 +288,7 @@ const void *   TXTRecordGetBytesPtr(const TXTRecordRef *txtRecord) { return(txtR
  *
  *********************************************************************************************/
 
-int TXTRecordContainsKey
+int DNSSD_API TXTRecordContainsKey
 	(
 	uint16_t         txtLen,
 	const void       *txtRecord,
@@ -296,7 +299,7 @@ int TXTRecordContainsKey
 	return (InternalTXTRecordSearch(txtLen, txtRecord, key, &keylen) ? 1 : 0);
 	}
 
-const void * TXTRecordGetValuePtr
+const void * DNSSD_API TXTRecordGetValuePtr
 	(
 	uint16_t         txtLen,
 	const void       *txtRecord,
@@ -311,7 +314,7 @@ const void * TXTRecordGetValuePtr
 	return (item + 1 + keylen + 1);
 	}
 
-uint16_t TXTRecordGetCount
+uint16_t DNSSD_API TXTRecordGetCount
 	(
 	uint16_t         txtLen,
 	const void       *txtRecord
@@ -324,7 +327,7 @@ uint16_t TXTRecordGetCount
 	return((p>e) ? (uint16_t)0 : count);
 	}
 
-DNSServiceErrorType TXTRecordGetItemAtIndex
+DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
 	(
 	uint16_t         txtLen,
 	const void       *txtRecord,

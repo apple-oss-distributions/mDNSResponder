@@ -44,6 +44,9 @@
     Change History (most recent first):
 
 $Log: ConfigurationAuthority.c,v $
+Revision 1.2  2005/08/07 22:48:05  mkrochma
+<rdar://problem/4204003> Bonjour Pref Pane returns -927 when "system.preferences" is not shared
+
 Revision 1.1  2005/02/05 02:28:22  cheshire
 Add Preference Pane to facilitate testing of DDNS & wide-area features
 
@@ -144,8 +147,6 @@ OSStatus InitConfigAuthority(void)
 	}
 	require_noerr( err, AuthSetFailed);
 
-	(void) AttemptAcquireAuthority( false);
-
 AuthSetFailed:
 GetStrFailed:
 NewAuthFailed:
@@ -177,11 +178,7 @@ OSStatus ReleaseAuthority(void)
 
 Boolean	CurrentlyAuthorized(void)
 {
-	OSStatus err;
-
-	err = AuthorizationCopyRights(gAuthRef, &gAuthSet, (AuthorizationEnvironment*) NULL,
-									(AuthorizationFlags) 0, (AuthorizationRights**) NULL);
-
+	OSStatus err = AttemptAcquireAuthority(true);
 	return err == noErr;
 }
 

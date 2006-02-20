@@ -23,6 +23,15 @@
     Change History (most recent first):
 
 $Log: SecondPage.cpp,v $
+Revision 1.6  2005/10/05 20:46:50  herscher
+<rdar://problem/4192011> Move Wide-Area preferences to another part of the registry so they don't removed during an update-install.
+
+Revision 1.5  2005/04/05 04:15:46  shersche
+RegQueryString was returning uninitialized strings if the registry key couldn't be found, so always initialize strings before checking the registry key.
+
+Revision 1.4  2005/04/05 03:52:14  shersche
+<rdar://problem/4066485> Registering with shared secret key doesn't work. Additionally, mDNSResponder wasn't dynamically re-reading it's DynDNS setup after setting a shared secret key.
+
 Revision 1.3  2005/03/03 19:55:22  shersche
 <rdar://problem/4034481> ControlPanel source code isn't saving CVS log info
 
@@ -46,10 +55,16 @@ IMPLEMENT_DYNCREATE(CSecondPage, CPropertyPage)
 
 CSecondPage::CSecondPage()
 :
-	CPropertyPage(CSecondPage::IDD)
+	CPropertyPage(CSecondPage::IDD),
+	m_setupKey( NULL )
 {
 	//{{AFX_DATA_INIT(CSecondPage)
 	//}}AFX_DATA_INIT
+
+	OSStatus err;
+
+	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSRegistrationDomains, &m_setupKey );
+	check_noerr( err );
 }
 
 
@@ -59,6 +74,11 @@ CSecondPage::CSecondPage()
 
 CSecondPage::~CSecondPage()
 {
+	if ( m_setupKey )
+	{
+		RegCloseKey( m_setupKey );
+		m_setupKey = NULL;
+	}
 }
 
 
@@ -109,7 +129,6 @@ BOOL
 CSecondPage::OnSetActive()
 {
 	CConfigPropertySheet	*	psheet;
-	HKEY						key = NULL;
 	DWORD						dwSize;
 	DWORD						enabled;
 	DWORD						err;
@@ -126,19 +145,14 @@ CSecondPage::OnSetActive()
 
 	// Now populate the registration domain box
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\" kServiceName L"\\Parameters\\DynDNS\\Setup\\" kServiceDynDNSRegistrationDomains, &key );
-	require_noerr( err, exit );
-
-	err = Populate( m_regDomainsBox, key, psheet->m_regDomains );
+	err = Populate( m_regDomainsBox, m_setupKey, psheet->m_regDomains );
 	check_noerr( err );
 
 	dwSize = sizeof( DWORD );
-	err = RegQueryValueEx( key, L"Enabled", NULL, NULL, (LPBYTE) &enabled, &dwSize );
+	err = RegQueryValueEx( m_setupKey, L"Enabled", NULL, NULL, (LPBYTE) &enabled, &dwSize );
 	m_advertiseServicesButton.SetCheck( ( !err && enabled ) ? BST_CHECKED : BST_UNCHECKED );
 	m_regDomainsBox.EnableWindow( ( !err && enabled ) );
 	m_sharedSecretButton.EnableWindow( (!err && enabled ) );
-
-	RegCloseKey( key );
 
 exit:
 
@@ -168,20 +182,12 @@ CSecondPage::OnOK()
 void
 CSecondPage::Commit()
 {
-	HKEY		key = NULL;
-	DWORD		err;
+	DWORD err;
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\" kServiceName L"\\Parameters\\DynDNS\\Setup\\" kServiceDynDNSRegistrationDomains, &key );
-	require_noerr( err, exit );
-
-	err = Commit( m_regDomainsBox, key, m_advertiseServicesButton.GetCheck() == BST_CHECKED );
-	check_noerr( err );
-	
-exit:
-
-	if ( key )
+	if ( m_setupKey != NULL )
 	{
-		RegCloseKey( key );
+		err = Commit( m_regDomainsBox, m_setupKey, m_advertiseServicesButton.GetCheck() == BST_CHECKED );
+		check_noerr( err );
 	}
 }
 
@@ -244,15 +250,39 @@ CSecondPage::Commit( CComboBox & box, HKEY key, DWORD enabled )
 
 void CSecondPage::OnBnClickedSharedSecret()
 {
-	CString string;
+	CString name;
 
-	m_regDomainsBox.GetWindowText( string );
+	m_regDomainsBox.GetWindowText( name );
 
 	CSharedSecret dlg;
 
-	dlg.m_secretName = string;
+	dlg.m_key = name;
 
-	dlg.DoModal();
+	if ( dlg.DoModal() == IDOK )
+	{
+		DWORD		wakeup = 0;
+		DWORD		dwSize = sizeof( DWORD );
+		OSStatus	err;
+
+		dlg.Commit( name );
+
+		// We have now updated the secret, however the system service
+		// doesn't know about it yet.  So we're going to update the
+		// registry with a dummy value which will cause the system
+		// service to re-initialize it's DynDNS setup
+		//
+
+		RegQueryValueEx( m_setupKey, L"Wakeup", NULL, NULL, (LPBYTE) &wakeup, &dwSize );      
+
+		wakeup++;
+		
+		err = RegSetValueEx( m_setupKey, L"Wakeup", 0, REG_DWORD, (LPBYTE) &wakeup, sizeof( DWORD ) );
+		require_noerr( err, exit );
+	}
+
+exit:
+
+	return;
 }
 
 
@@ -470,6 +500,7 @@ CSecondPage::RegQueryString( HKEY key, CString valueName, CString & value )
 
 		string = (TCHAR*) malloc( stringLen );
 		require_action( string, exit, err = kUnknownErr );
+		*string = '\0';
 
 		err = RegQueryValueEx( key, valueName, 0, NULL, (LPBYTE) string, &stringLen );
 

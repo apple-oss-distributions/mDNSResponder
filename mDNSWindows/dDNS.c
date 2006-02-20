@@ -22,10 +22,22 @@
 
     Change History (most recent first):
 
+$Log: dDNS.c,v $
+Revision 1.8  2005/09/12 07:13:33  herscher
+<rdar://problem/4248878> Workaround for router crash.  Lazily call RegisterSearchDomains rather than call it always at startup.
+
+Revision 1.7  2005/08/10 01:43:23  herscher
+Pass NULL in for the IPv6 paramter to mDNS_SetPrimaryInterfaceInfo to get this code to compile on Windows.
+
+Revision 1.6  2005/03/23 05:54:48  cheshire
+<rdar://problem/4021486> Fix build warnings
+Fix %s where it should be %##s in debugf & LogMsg calls
+
 */
 
 #include "dDNS.h"
 #include "DNSCommon.h"
+#include "uds_daemon.h"
 #include <winsock2.h>
 #include <iphlpapi.h>
 #include <ws2tcpip.h>
@@ -52,7 +64,11 @@ static ARListElem *SCPrefBrowseDomains = mDNSNULL; // manually generated local-o
 static domainname			dDNSRegDomain;             // Default wide-area zone for service registration
 static DNameListElem	*	dDNSBrowseDomains;         // Default wide-area zone for legacy ("empty string") browses
 static domainname			dDNSHostname;
+static mDNSBool				dDNSRegisterSearchDomains = mDNSfalse;
 
+mDNSlocal mStatus RegisterNameServers( mDNS *const m );
+mDNSlocal mStatus RegisterSearchDomains( mDNS *const m );
+	
 
 mStatus dDNS_SetupAddr(mDNSAddr *ip, const struct sockaddr *const sa)
 	{
@@ -81,7 +97,19 @@ mStatus dDNS_SetupAddr(mDNSAddr *ip, const struct sockaddr *const sa)
 
 	LogMsg("SetupAddr invalid sa_family %d", sa->sa_family);
 	return(mStatus_Invalid);
+	} 
+
+
+mStatus dDNS_RegisterSearchDomains( mDNS * const m )
+	{
+	mStatus err = mStatus_NoError;
+
+	dDNSRegisterSearchDomains = mDNStrue;
+	RegisterSearchDomains( m );
+
+	return err;
 	}
+
 
 mDNSlocal void MarkSearchListElem(domainname *domain)
 	{
@@ -166,7 +194,7 @@ mDNSlocal void FoundDomain(mDNS *const m, DNSQuestion *question, const ResourceR
 			{
 			if (SameDomainName(&ptr->ar.resrec.rdata->u.name, &answer->rdata->u.name))
 				{
-				debugf("Deregistering PTR %s -> %s", ptr->ar.resrec.name->c, ptr->ar.resrec.rdata->u.name.c);
+				debugf("Deregistering PTR %##s -> %##s", ptr->ar.resrec.name->c, ptr->ar.resrec.rdata->u.name.c);
                 dereg = &ptr->ar;
 				if (prev) prev->next = ptr->next;
 				else slElem->AuthRecs = ptr->next;
@@ -271,7 +299,7 @@ mDNSlocal void FoundDefBrowseDomain(mDNS *const m, DNSQuestion *question, const 
 			prev = ptr;
 			ptr = ptr->next;
 			}
-		LogMsg("FoundDefBrowseDomain: Got remove event for domain %s not in list", answer->rdata->u.name.c);
+		LogMsg("FoundDefBrowseDomain: Got remove event for domain %##s not in list", answer->rdata->u.name.c);
 		}
 	}
 
@@ -359,7 +387,7 @@ mDNSlocal mStatus RegisterSearchDomains( mDNS *const m )
 				{
 				AuthRecord *dereg = &arList->ar;
 				arList = arList->next;
-				debugf("Deregistering PTR %s -> %s", dereg->resrec.name->c, dereg->resrec.rdata->u.name.c);
+				debugf("Deregistering PTR %##s -> %##s", dereg->resrec.name->c, dereg->resrec.rdata->u.name.c);
 				err = mDNS_Deregister(m, dereg);
 				if (err) LogMsg("ERROR: RegisterSearchDomains mDNS_Deregister returned %d", err);
 				}
@@ -471,7 +499,7 @@ mDNSlocal void SetSCPrefsBrowseDomains(mDNS *m, DNameListElem * browseDomains, m
 		{
 			if ( !browseDomain->name.c[0] )
 				{
-				LogMsg("SetSCPrefsBrowseDomains bad DDNS browse domain: %s", browseDomain->name.c[0] ? browseDomain->name.c : "(unknown)");
+				LogMsg("SetSCPrefsBrowseDomains bad DDNS browse domain: %##s", browseDomain->name.c[0] ? (char*) browseDomain->name.c : "(unknown)");
 				}
 			else
 				{
@@ -554,9 +582,13 @@ mStatus dDNS_Setup( mDNS *const m )
 	// YO CFRelease(key);
 
 	// handle any changes to search domains and DNS server addresses
+
 	if ( dDNSPlatformRegisterSplitDNS(m) != mStatus_NoError)
 		if (dict) RegisterNameServers( m );  // fall back to non-split DNS aware configuration on failure
-	RegisterSearchDomains( m );  // note that we register name servers *before* search domains
+
+	if ( dDNSRegisterSearchDomains == mDNStrue )
+		dDNS_RegisterSearchDomains( m );  // note that we register name servers *before* search domains
+
 	// if (dict) CFRelease(dict);
 
 	// get IPv4 settings
@@ -588,7 +620,10 @@ mStatus dDNS_Setup( mDNS *const m )
 	
 	if ( dDNSPlatformGetPrimaryInterface( m, &ip, &r ) == mStatus_NoError )
 		{
-		mDNS_SetPrimaryInterfaceInfo(m, &ip, r.ip.v4.NotAnInteger ? &r : mDNSNULL);
+		// For now, we're going to pass NULL for the IPv6 parameter so that the Windows code compiles. What needs
+		// to happen is that the implementation of dDNSPlatformGetPrimaryInterface() needs to call the
+		// IPv6 aware "GetAdaptersAddresses" rather than GetAdaptersInfo().
+		mDNS_SetPrimaryInterfaceInfo(m, &ip, NULL, r.ip.v4.NotAnInteger ? &r : mDNSNULL);
 		}
 
 	return mStatus_NoError;
@@ -608,14 +643,28 @@ mStatus dDNS_Setup( mDNS *const m )
 mStatus dDNS_InitDNSConfig(mDNS *const m)
 	{
 	mStatus err;
+	static AuthRecord LocalRegPTR;
 
 	// start query for domains to be used in default (empty string domain) browses
 	err = mDNS_GetDomains(m, &LegacyBrowseDomainQ, mDNS_DomainTypeBrowseLegacy, NULL, mDNSInterface_LocalOnly, FoundDefBrowseDomain, NULL);
 
 	// provide .local automatically
 	SetSCPrefsBrowseDomain(m, &localdomain, mDNStrue);
+
+	// <rdar://problem/4055653> dns-sd -E does not return "local."
+	// register registration domain "local"
+	mDNS_SetupResourceRecord(&LocalRegPTR, mDNSNULL, mDNSInterface_LocalOnly, kDNSType_PTR, 7200, kDNSRecordTypeShared, NULL, NULL);
+	MakeDomainNameFromDNSNameString(LocalRegPTR.resrec.name, mDNS_DomainTypeNames[mDNS_DomainTypeRegistration]);
+	AppendDNSNameString            (LocalRegPTR.resrec.name, "local");
+	AssignDomainName(&LocalRegPTR.resrec.rdata->u.name, &localdomain);
+	err = mDNS_Register(m, &LocalRegPTR);
+	if (err)
+		{
+		LogMsg("ERROR: dDNS_InitDNSConfig - mDNS_Register returned error %d", err);
+		}
+
     return mStatus_NoError;
-}
+	}
 
 void
 dDNS_FreeIPAddrList(IPAddrListElem * list)

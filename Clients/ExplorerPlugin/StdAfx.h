@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: StdAfx.h,v $
+Revision 1.3  2005/10/19 19:50:34  herscher
+Workaround a bug in the latest Microsoft Platform SDK when compiling C++ files that include (directly or indirectly) <WspiApi.h>
+
 Revision 1.2  2004/07/13 21:24:21  rpantos
 Fix for <rdar://problem/3701120>.
 
@@ -41,6 +44,10 @@ Explorer Plugin to browse for DNS-SD advertised Web and FTP servers from within 
 
 #ifndef VC_EXTRALEAN
 #define VC_EXTRALEAN		// Exclude rarely-used stuff from Windows headers
+#endif
+
+#if !defined(_WSPIAPI_COUNTOF)
+#	define _WSPIAPI_COUNTOF(_Array) (sizeof(_Array) / sizeof(_Array[0]))
 #endif
 
 #include <afxwin.h>         // MFC core and standard components

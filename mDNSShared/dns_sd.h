@@ -48,12 +48,14 @@
 #include <windows.h>
 #define _UNUSED
 #define bzero(a, b) memset(a, 0, b)
+#ifndef _MSL_STDINT_H
 typedef UINT8       uint8_t;
 typedef INT8        int8_t;
 typedef UINT16      uint16_t;
 typedef INT16       int16_t;
 typedef UINT32      uint32_t;
 typedef INT32       int32_t;
+#endif
 #else
 #include <stdint.h>
 #endif
@@ -1298,7 +1300,7 @@ int DNSSD_API DNSServiceConstructFullName
  * Note: Represents a DNS-SD TXT record.
  */
 
-typedef struct _TXTRecordRef_t { char privatedata[16]; } TXTRecordRef;
+typedef union _TXTRecordRef_t { char PrivateData[16]; char *ForceNaturalAlignment; } TXTRecordRef;
 
 
 /* TXTRecordCreate()
@@ -1660,6 +1662,17 @@ DNSServiceErrorType DNSSD_API DNSServiceSetDefaultDomainForUser
     );	
 	
 #endif //__APPLE_API_PRIVATE
+
+// Some C compiler cleverness. We can make the compiler check certain things for us,
+// and report errors at compile-time if anything is wrong. The usual way to do this would
+// be to use a run-time "if" statement or the conventional run-time "assert" mechanism, but
+// then you don't find out what's wrong until you run the software. This way, if the assertion
+// condition is false, the array size is negative, and the complier complains immediately.
+
+struct DNS_SD_CompileTimeAssertionChecks
+	{
+	char assert0[(sizeof(union _TXTRecordRef_t) == 16) ? 1 : -1];
+	};
 
 #ifdef  __cplusplus
     }

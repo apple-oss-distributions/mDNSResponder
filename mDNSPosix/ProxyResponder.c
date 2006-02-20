@@ -24,6 +24,9 @@
     Change History (most recent first):
 
 $Log: ProxyResponder.c,v $
+Revision 1.36  2005/08/04 03:12:47  mkrochma
+<rdar://problem/4199236> Register reverse PTR record using multicast
+
 Revision 1.35  2004/12/16 20:17:11  cheshire
 <rdar://problem/3324626> Cache memory management improvements
 
@@ -171,6 +174,7 @@ mDNSlocal mStatus mDNS_RegisterProxyHost(mDNS *m, ProxyHost *p)
 
 	mDNS_snprintf(buffer, sizeof(buffer), "%d.%d.%d.%d.in-addr.arpa.", p->ip.b[3], p->ip.b[2], p->ip.b[1], p->ip.b[0]);
 	MakeDomainNameFromDNSNameString(p->RR_PTR.resrec.name, buffer);
+	p->RR_PTR.ForceMCast = mDNStrue; // This PTR points to our dot-local name, so don't ever try to write it into a uDNS server
 
 	p->RR_A.  resrec.rdata->u.ipv4 = p->ip;
 	AssignDomainName(&p->RR_PTR.resrec.rdata->u.name, p->RR_A.resrec.name);

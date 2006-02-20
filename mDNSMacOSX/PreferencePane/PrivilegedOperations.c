@@ -42,6 +42,10 @@
 
     Change History (most recent first):
 $Log: PrivilegedOperations.c,v $
+Revision 1.3  2005/06/04 04:50:00  cheshire
+<rdar://problem/4138070> ddnswriteconfig (Bonjour PreferencePane) vulnerability
+Use installtool instead of requiring ddnswriteconfig to self-install
+
 Revision 1.2  2005/02/10 22:35:20  cheshire
 <rdar://problem/3727944> Update name
 
@@ -88,7 +92,8 @@ OSStatus EnsureToolInstalled(void)
 	int				status;
 	OSStatus		err = noErr;
 	const char		*args[] = { kToolPath, "0", "V", NULL };
-	char			toolPath[PATH_MAX] = {};
+	char			toolSourcePath[PATH_MAX] = {};
+	char			toolInstallerPath[PATH_MAX] = {};
 
 	if (gToolApproved) 
 		return noErr;
@@ -106,15 +111,17 @@ OSStatus EnsureToolInstalled(void)
 	bundleURL = CFBundleCopyBundleURL(CFBundleGetBundleWithIdentifier(CFSTR("com.apple.preference.bonjour")) );
 	if (bundleURL != NULL)
 	{
-		CFURLGetFileSystemRepresentation(bundleURL, false, (UInt8*) toolPath, sizeof toolPath);
-		strcat(toolPath, "/Contents/Resources/" kToolName);
+		CFURLGetFileSystemRepresentation(bundleURL, false, (UInt8*) toolSourcePath, sizeof toolSourcePath);
+		if (strlcat(toolSourcePath,    "/Contents/Resources/" kToolName,      sizeof toolSourcePath   ) >= sizeof toolSourcePath   ) return(-1);
+		CFURLGetFileSystemRepresentation(bundleURL, false, (UInt8*) toolInstallerPath, sizeof toolInstallerPath);
+		if (strlcat(toolInstallerPath, "/Contents/Resources/" kToolInstaller, sizeof toolInstallerPath) >= sizeof toolInstallerPath) return(-1);
 	}
 	else
 		return coreFoundationUnknownErr;
 	
 	// Obtain authorization and run in-bundle copy as root to install it
 	{
-		AuthorizationItem		aewpRight = { kAuthorizationRightExecute, strlen(toolPath), toolPath, 0 };
+		AuthorizationItem		aewpRight = { kAuthorizationRightExecute, strlen(toolInstallerPath), toolInstallerPath, 0 };
 		AuthorizationItemSet	rights = { 1, &aewpRight };
 		AuthorizationRef		authRef;
 		
@@ -123,8 +130,8 @@ OSStatus EnsureToolInstalled(void)
 					kAuthorizationFlagPreAuthorize, &authRef);
 		if (err == noErr)
 		{
-			args[2] = "I";
-			err = AuthorizationExecuteWithPrivileges(authRef, toolPath, 0, (char * const *)&args[1], (FILE**) NULL);
+			char *installerargs[] = { toolSourcePath, NULL };
+			err = AuthorizationExecuteWithPrivileges(authRef, toolInstallerPath, 0, installerargs, (FILE**) NULL);
 			if (err == noErr)
 				gToolApproved = true;
 			(void) AuthorizationFree(authRef, kAuthorizationFlagDestroyRights);

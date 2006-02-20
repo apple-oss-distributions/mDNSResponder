@@ -23,6 +23,12 @@
     Change History (most recent first):
 
 $Log: SharedSecret.cpp,v $
+Revision 1.4  2005/10/18 06:13:41  herscher
+<rdar://problem/4192119> Prepend "$" to key name to ensure that secure updates work if the domain name and key name are the same
+
+Revision 1.3  2005/04/06 02:04:49  shersche
+<rdar://problem/4066485> Registering with shared secret doesn't work
+
 Revision 1.2  2005/03/03 19:55:22  shersche
 <rdar://problem/4034481> ControlPanel source code isn't saving CVS log info
 
@@ -61,8 +67,8 @@ IMPLEMENT_DYNAMIC(CSharedSecret, CDialog)
 
 CSharedSecret::CSharedSecret(CWnd* pParent /*=NULL*/)
 	: CDialog(CSharedSecret::IDD, pParent)
+	, m_key(_T(""))
 	, m_secret(_T(""))
-	, m_secretName(_T(""))
 {
 }
 
@@ -83,8 +89,8 @@ CSharedSecret::~CSharedSecret()
 void CSharedSecret::DoDataExchange(CDataExchange* pDX)
 {
 	CDialog::DoDataExchange(pDX);
-	DDX_Text(pDX, IDC_SECRET, m_secret);
-	DDX_Text(pDX, IDC_SECRET_NAME, m_secretName);
+	DDX_Text(pDX, IDC_KEY, m_key );
+	DDX_Text(pDX, IDC_SECRET, m_secret );
 }
 
 
@@ -98,27 +104,41 @@ END_MESSAGE_MAP()
 //---------------------------------------------------------------------------------------------------------------------------
 
 void
-CSharedSecret::Commit()
+CSharedSecret::Commit( CString zone )
 {
 	LSA_OBJECT_ATTRIBUTES	attrs;
 	LSA_HANDLE				handle = NULL;
 	NTSTATUS				res;
+	LSA_UNICODE_STRING		lucZoneName;
 	LSA_UNICODE_STRING		lucKeyName;
-	LSA_UNICODE_STRING		lucPrivateData;
+	LSA_UNICODE_STRING		lucSecretName;
 	BOOL					ok;
 	OSStatus				err;
 
 	// If there isn't a trailing dot, add one because the mDNSResponder
 	// presents names with the trailing dot.
 
-	if ( m_secretName.ReverseFind( '.' ) != m_secretName.GetLength() )
+	if ( zone.ReverseFind( '.' ) != zone.GetLength() )
 	{
-		m_secretName += '.';
+		zone += '.';
 	}
+
+	if ( m_key.ReverseFind( '.' ) != m_key.GetLength() )
+	{
+		m_key += '.';
+	}
+
+	// <rdar://problem/ >
+	//
+	// Prepend "$" to the key name, so that there will
+	// be no conflict between the zone name and the key
+	// name
+
+	m_key.Insert( 0, L"$" );
 
 	// attrs are reserved, so initialize to zeroes.
 
-	ZeroMemory(&attrs, sizeof( attrs ) );
+	ZeroMemory( &attrs, sizeof( attrs ) );
 
 	// Get a handle to the Policy object on the local system
 
@@ -128,17 +148,25 @@ CSharedSecret::Commit()
 
 	// Intializing PLSA_UNICODE_STRING structures
 
-	ok = InitLsaString( &lucKeyName, m_secretName );
+	ok = InitLsaString( &lucZoneName, zone );
+	err = translate_errno( ok, errno_compat(), kUnknownErr );
+	require_noerr( err, exit );
+ 
+	ok = InitLsaString( &lucKeyName, m_key );
 	err = translate_errno( ok, errno_compat(), kUnknownErr );
 	require_noerr( err, exit );
 
-	ok = InitLsaString( &lucPrivateData, m_secret );
+	ok = InitLsaString( &lucSecretName, m_secret );
 	err = translate_errno( ok, errno_compat(), kUnknownErr );
 	require_noerr( err, exit );
 
 	// Store the private data.
 
-	res = LsaStorePrivateData( handle, &lucKeyName, &lucPrivateData );
+	res = LsaStorePrivateData( handle, &lucZoneName, &lucKeyName );
+	err = translate_errno( res == 0, LsaNtStatusToWinError( res ), kUnknownErr );
+	require_noerr( err, exit );
+
+	res = LsaStorePrivateData( handle, &lucKeyName, &lucSecretName );
 	err = translate_errno( res == 0, LsaNtStatusToWinError( res ), kUnknownErr );
 	require_noerr( err, exit );
 

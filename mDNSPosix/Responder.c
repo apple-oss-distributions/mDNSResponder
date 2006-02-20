@@ -24,6 +24,9 @@
     Change History (most recent first):
 
 $Log: Responder.c,v $
+Revision 1.30  2005/10/26 22:21:16  cheshire
+<rdar://problem/4149841> Potential buffer overflow in mDNSResponderPosix
+
 Revision 1.29  2005/03/04 21:35:33  cheshire
 <rdar://problem/4037201> Services.txt file not parsed properly when it contains more than one service
 
@@ -591,7 +594,7 @@ static mStatus RegisterServicesInFile(const char *filePath)
 			const char *dom = kDefaultServiceDomain;
 			char rawText[1024];
 			mDNSu8  text[sizeof(RDataBody)];
-			mDNSu16 textLen = 0;
+			unsigned int textLen = 0;
 			char port[256];
 
             // Skip over any blank lines.
@@ -626,10 +629,11 @@ static mStatus RegisterServicesInFile(const char *filePath)
 					len = strlen(rawText);
 					if (len <= 255)
 						{
+						unsigned int newlen = textLen + 1 + len;
+						if (len == 0 || newlen >= sizeof(text)) break;
 						text[textLen] = len;
-						if (text[textLen] == 0) break;
-						memcpy(text + textLen + 1, rawText, text[textLen]);
-						textLen += 1 + text[textLen];
+						memcpy(text + textLen + 1, rawText, len);
+						textLen = newlen;
 						}
 					else
 						fprintf(stderr, "%s: TXT attribute too long for name = %s, type = %s, port = %s\n", 

@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: ThirdPage.h,v $
+Revision 1.5  2005/07/07 17:53:20  shersche
+Fix problems associated with the CUPS printer workaround fix.
+
 Revision 1.4  2005/02/08 21:45:06  shersche
 <rdar://problem/3947490> Default to Generic PostScript or PCL if unable to match driver
 
@@ -67,6 +70,7 @@ public:
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
 	virtual BOOL OnSetActive();
+	virtual BOOL OnKillActive();
 
 	DECLARE_MESSAGE_MAP()
 
@@ -107,7 +111,7 @@ private:
 	//
 	// Tries to match printer based on manufacturer and model
 	//
-	OSStatus MatchPrinter(Manufacturers & manufacturers, Printer * printer, Service * service);
+	OSStatus MatchPrinter(Manufacturers & manufacturers, Printer * printer, Service * service, bool useCUPSWorkaround);
 
 	//
 	// OnInitPage
@@ -125,12 +129,13 @@ private:
 
 	Manufacturer	*	MatchManufacturer( Manufacturers & manufacturer, const CString & name );
 	Model			*	MatchModel( Manufacturer * manufacturer, const CString & name );
-	BOOL				MatchGeneric( Printer * printer, Service * service, Manufacturer ** manufacturer, Model ** model );
-	void				SelectMatch(Printer * printer, Service * service, Manufacturers & manufacturers, Manufacturer * manufacturer, Model * model);
+	BOOL				MatchGeneric( Manufacturers & manufacturers, Printer * printer, Service * service, Manufacturer ** manufacturer, Model ** model );
+	void				SelectMatch(Printer * printer, Service * service, Manufacturer * manufacturer, Model * model);
+	void				SelectMatch(Manufacturers & manufacturers, Printer * printer, Service * service, Manufacturer * manufacturer, Model * model);
 	void				CopyPrinterSettings(Printer * printer, Service * service, Manufacturer * manufacturer, Model * model);
 
 	Manufacturers		m_manufacturers;
-	
+
 	CListCtrl			m_manufacturerListCtrl;
 	Manufacturer	*	m_manufacturerSelected;
 	

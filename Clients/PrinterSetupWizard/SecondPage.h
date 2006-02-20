@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: SecondPage.h,v $
+Revision 1.8  2005/03/20 20:08:37  shersche
+<rdar://problem/4055670> Second screen should not select a printer by default
+
 Revision 1.7  2005/01/31 23:54:30  shersche
 <rdar://problem/3947508> Start browsing when printer wizard starts. Move browsing logic from CSecondPage object to CPrinterSetupWizardSheet object.
 
@@ -95,6 +98,8 @@ public:
 	bool			m_waiting;
 
 	afx_msg void	OnTvnSelchangedBrowseList(NMHDR *pNMHDR, LRESULT *pResult);
+	afx_msg void	OnNmClickBrowseList(NMHDR * pNMHDR, LRESULT * pResult);
+	afx_msg void	OnTvnKeyDownBrowseList(NMHDR * pNMHDR, LRESULT * pResult );
 
 	OSStatus
 	OnAddPrinter(
@@ -126,4 +131,6 @@ private:
 	CStatic m_descriptionField;
 	CStatic m_locationLabel;
 	CStatic m_locationField;
+
+	bool	m_gotChoice;
 };

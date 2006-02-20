@@ -23,6 +23,9 @@
     Change History (most recent first):
     
 $Log: FirstPage.h,v $
+Revision 1.2  2005/07/07 17:53:20  shersche
+Fix problems associated with the CUPS printer workaround fix.
+
 Revision 1.1  2004/06/18 04:36:57  rpantos
 First checked in
 
@@ -49,6 +52,7 @@ public:
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
 	virtual BOOL OnSetActive();
+	virtual BOOL OnKillActive();
 	
 
 	DECLARE_MESSAGE_MAP()

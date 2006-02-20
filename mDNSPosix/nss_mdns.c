@@ -868,6 +868,7 @@ mdns_lookup_name (
 	DNSServiceErrorType errcode;
 	DNSServiceRef sdref;
 	ns_type_t rrtype;
+	nss_status status;
 	
 	if (MDNS_VERBOSE)
 		syslog (LOG_DEBUG,
@@ -919,7 +920,9 @@ mdns_lookup_name (
 		return set_err_mdns_failed (result);
 	}
 
-	return handle_events (sdref, result, fullname);
+	status = handle_events (sdref, result, fullname);
+	DNSServiceRefDeallocate (sdref);
+	return status;
 }
 
 
@@ -952,6 +955,7 @@ mdns_lookup_addr (
 {
 	DNSServiceErrorType errcode;
 	DNSServiceRef sdref;
+	nss_status status;
 	
 	if (MDNS_VERBOSE)
 		syslog (LOG_DEBUG,
@@ -991,7 +995,9 @@ mdns_lookup_addr (
 		return set_err_mdns_failed (result);
 	}
 
-	return handle_events (sdref, result, addr_str);
+	status = handle_events (sdref, result, addr_str);
+	DNSServiceRefDeallocate (sdref);
+	return status;
 }
 
 

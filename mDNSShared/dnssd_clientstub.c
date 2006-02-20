@@ -28,6 +28,16 @@
     Change History (most recent first):
 
 $Log: dnssd_clientstub.c,v $
+Revision 1.48  2005/06/30 18:01:00  shersche
+<rdar://problem/4096913> Clients shouldn't wait ten seconds to connect to mDNSResponder
+
+Revision 1.47  2005/03/31 02:19:56  cheshire
+<rdar://problem/4021486> Fix build warnings
+Reviewed by: Scott Herscher
+
+Revision 1.46  2005/03/21 00:39:31  shersche
+<rdar://problem/4021486> Fix build warnings on Win32 platform
+
 Revision 1.45  2005/02/01 01:25:06  shersche
 Define sleep() to be Sleep() for Windows compatibility
 
@@ -171,6 +181,8 @@ Update to APSL 2.0
 #include <windows.h>
 #define sockaddr_mdns sockaddr_in
 #define AF_MDNS AF_INET
+extern BOOL
+IsSystemServiceDisabled();
 #else
 #include <sys/time.h>
 #include <sys/socket.h>
@@ -194,6 +206,11 @@ Update to APSL 2.0
 static int g_initWinsock = 0;
 #endif
 
+
+// <rdar://problem/4096913> Specifies how many times we'll try and connect to the
+// server.
+
+#define DNSSD_CLIENT_MAXTRIES	4
 
 #define CTL_PATH_PREFIX "/tmp/dnssd_clippath."
 // error socket (if needed) is named "dnssd_clipath.[pid].xxx:n" where xxx are the
@@ -266,7 +283,9 @@ static ipc_msg_hdr *create_hdr(uint32_t op, size_t *len, char **data_start, int 
     char *msg = NULL;
     ipc_msg_hdr *hdr;
     int datalen;
+#if !defined(USE_TCP_LOOPBACK)
     char ctrl_path[256];
+#endif
 
     if (!reuse_socket)
         {
@@ -325,6 +344,15 @@ static DNSServiceRef connect_to_server(void)
 
 		if (err != 0) return NULL;
 		}
+
+	// <rdar://problem/4096913> If the system service is disabled, we only want to try 
+	// to connect once
+
+	if ( IsSystemServiceDisabled() )
+		{
+		NumTries = DNSSD_CLIENT_MAXTRIES;
+		}
+
 #endif
 
 	sdr = malloc(sizeof(_DNSServiceRef_t));
@@ -346,9 +374,9 @@ static DNSServiceRef connect_to_server(void)
 		// If we failed, then it may be because the daemon is still launching.
 		// This can happen for processes that launch early in the boot process, while the
 		// daemon is still coming up. Rather than fail here, we'll wait a bit and try again.
-		// If, after ten seconds, we still can't connect to the daemon,
+		// If, after four seconds, we still can't connect to the daemon,
 		// then we give up and return a failure code.
-		if (++NumTries < 10)
+		if (++NumTries < DNSSD_CLIENT_MAXTRIES)
 			sleep(1);		// Sleep a bit, then try again
 		else
 			{
@@ -369,7 +397,7 @@ static DNSServiceErrorType deliver_request(void *msg, DNSServiceRef sdr, int reu
     char *data = (char *)msg + sizeof(ipc_msg_hdr);
     dnssd_sock_t listenfd = dnssd_InvalidSocket, errsd = dnssd_InvalidSocket;
 	int ret;
-	unsigned int len = sizeof(caddr);
+	dnssd_socklen_t len = (dnssd_socklen_t) sizeof(caddr);
     DNSServiceErrorType err = kDNSServiceErr_Unknown;
 
     if (!hdr || sdr->sockfd < 0) return kDNSServiceErr_Unknown;

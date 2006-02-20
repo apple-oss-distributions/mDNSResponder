@@ -23,6 +23,8 @@
 #define IDC_FAILURE                     1008
 #define IDC_SUCCESS                     1009
 #define IDC_SECRET_NAME                 1010
+#define IDC_NAME                        1010
+#define IDC_KEY                         1010
 #define IDC_LIST1                       1011
 #define IDC_BROWSE_LIST                 1011
 #define IDC_BUTTON2                     1012
