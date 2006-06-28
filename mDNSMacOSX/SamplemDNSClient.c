@@ -36,6 +36,9 @@
     Change History (most recent first):
 
 $Log: SamplemDNSClient.c,v $
+Revision 1.47  2006/01/10 02:29:22  cheshire
+<rdar://problem/4403861> Cosmetic IPv6 address display problem in mDNS test tool
+
 Revision 1.46  2004/11/02 01:32:34  cheshire
 <rdar://problem/3861705> Update code so it still compiles when DNSServiceDiscovery.h is deprecated
 
@@ -217,12 +220,14 @@ static void resolve_reply(struct sockaddr *interface, struct sockaddr *address, 
         else if (address->sa_family == AF_INET6)
             {
             struct sockaddr_in6 *ip6 = (struct sockaddr_in6 *)address;
-            u_int16_t *w = ip6->sin6_addr.__u6_addr.__u6_addr16;
+            u_int8_t *b = ip6->sin6_addr.__u6_addr.__u6_addr8;
             union { uint16_t s; u_char b[2]; } port = { ip6->sin6_port };
             uint16_t PortAsNumber = ((uint16_t)port.b[0]) << 8 | port.b[1];
             char ipstring[40];
             char ifname[IF_NAMESIZE + 1] = "";
-            sprintf(ipstring, "%04X:%04X:%04X:%04X:%04X:%04X:%04X:%04X", w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+            sprintf(ipstring, "%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X",
+				b[0x0], b[0x1], b[0x2], b[0x3], b[0x4], b[0x5], b[0x6], b[0x7],
+				b[0x8], b[0x9], b[0xA], b[0xB], b[0xC], b[0xD], b[0xE], b[0xF]);
             if (ip6->sin6_scope_id) { ifname[0] = '%';  if_indextoname(ip6->sin6_scope_id, &ifname[1]); }
             printf("%s%s:%u", ipstring, ifname, PortAsNumber);
             }

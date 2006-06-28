@@ -23,6 +23,9 @@
     Change History (most recent first):
 
 $Log: JNISupport.c,v $
+Revision 1.13  2005/10/26 01:52:24  cheshire
+<rdar://problem/4316286> Race condition in Java code (doesn't work at all on Linux)
+
 Revision 1.12  2005/07/13 19:20:32  cheshire
 <rdar://problem/4175511> Race condition in Java API
 Additional cleanup suggested by Roger -- NewContext() doesn't need ownerClass parameter any more
@@ -262,15 +265,13 @@ JNIEXPORT void JNICALL Java_com_apple_dnssd_AppleService_HaltOperation( JNIEnv *
 }
 
 
-JNIEXPORT jint JNICALL Java_com_apple_dnssd_AppleService_BlockForData( JNIEnv *pEnv, jobject pThis, jint msTimeout)
-/* Block for timeout ms (or forever if -1). Returns 1 if data present, 0 if timed out, -1 if not browsing. */
+JNIEXPORT jint JNICALL Java_com_apple_dnssd_AppleService_BlockForData( JNIEnv *pEnv, jobject pThis)
+/* Block until data arrives, or one second passes. Returns 1 if data present, 0 otherwise. */
 {
-#if AUTO_CALLBACKS
-	return -1;				// BlockForData() not supported with AUTO_CALLBACKS 
-#else // AUTO_CALLBACKS
+// BlockForData() not supported with AUTO_CALLBACKS 
+#if !AUTO_CALLBACKS
 	jclass			cls = (*pEnv)->GetObjectClass( pEnv, pThis);
 	jfieldID		contextField = (*pEnv)->GetFieldID( pEnv, cls, "fNativeContext", "I");
-	jint			rc = -1;
 
 	if ( contextField != 0)
 	{
@@ -279,18 +280,32 @@ JNIEXPORT jint JNICALL Java_com_apple_dnssd_AppleService_BlockForData( JNIEnv *p
 		{
 			fd_set			readFDs;
 			int				sd = DNSServiceRefSockFD( pContext->ServiceRef);
-			struct timeval	timeout = { msTimeout / 1000, 10 * (msTimeout % 1000) };
-			struct timeval	*pTimeout = msTimeout == -1 ? NULL : &timeout;
-			
+			struct timeval	timeout = { 1, 0 };
 			FD_ZERO( &readFDs);
 			FD_SET( sd, &readFDs);
 
-			rc = select( sd + 1, &readFDs, (fd_set*) NULL, (fd_set*) NULL, pTimeout);
+			// Q: Why do we poll here?
+			// A: Because there's no other thread-safe way to do it.
+			// Mac OS X terminates a select() call if you close one of the sockets it's listening on, but Linux does not,
+			// and arguably Linux is correct (See <http://www.ussg.iu.edu/hypermail/linux/kernel/0405.1/0418.html>)
+			// The problem is that the Mac OS X behaviour assumes that it's okay for one thread to close a socket while
+			// some other thread is monitoring that socket in select(), but the difficulty is that there's no general way
+			// to make that thread-safe, because there's no atomic way to enter select() and release a lock simultaneously.
+			// If we try to do this without holding any lock, then right as we jump to the select() routine,
+			// some other thread could stop our operation (thereby closing the socket),
+			// and then that thread (or even some third, unrelated thread)
+			// could do some other DNS-SD operation (or some other operation that opens a new file descriptor)
+			// and then we'd blindly resume our fall into the select() call, now blocking on a file descriptor
+			// that may coincidentally have the same numerical value, but is semantically unrelated
+			// to the true file descriptor we thought we were blocking on.
+			// We can't stop this race condition from happening, but at least if we wake up once a second we can detect
+			// when fNativeContext has gone to zero, and thereby discover that we were blocking on the wrong fd.
+
+			if (select( sd + 1, &readFDs, (fd_set*) NULL, (fd_set*) NULL, &timeout) == 1) return(1);
 		}
 	}
-
-	return rc;
-#endif // AUTO_CALLBACKS
+#endif // !AUTO_CALLBACKS
+	return(0);
 }
 
 

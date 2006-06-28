@@ -954,7 +954,8 @@
 				JAVA_ARCHIVE_COMPRESSION = YES;
 				JAVA_ARCHIVE_TYPE = JAR;
 				JAVA_COMPILER_DEBUGGING_SYMBOLS = NO;
-				JAVA_COMPILER_TARGET_VM_VERSION = 1.2;
+				JAVA_COMPILER_SOURCE_VERSION = 1.4;
+				JAVA_COMPILER_TARGET_VM_VERSION = 1.4;
 				JAVA_SOURCE_SUBDIR = .;
 				LIBRARY_STYLE = STATIC;
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
@@ -966,6 +967,7 @@
 				PURE_JAVA = YES;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
 				WARNING_CFLAGS = "-Wmost -Wno-four-char-constants -Wno-unknown-pragmas";
 			};
 			comments = "Multiplatform .jar file that implements Java interface to DNS-SD";
@@ -988,7 +990,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -d ${OBJROOT}/mDNSResponder.build/${CONFIGURATION} ]; then BUILD_DIR=${OBJROOT}/mDNSResponder.build/${CONFIGURATION}; else BUILD_DIR=${OBJROOT}/mDNSResponder.build; fi\njavah -force -classpath ${BUILD_DIR}/dns_sd.jar.build/JavaClasses/ -o ${BUILD_DIR}/dns_sd.jar.build/DNSSD.java.h com.apple.dnssd.AppleDNSSD com.apple.dnssd.AppleBrowser com.apple.dnssd.AppleResolver com.apple.dnssd.AppleRegistration com.apple.dnssd.AppleQuery com.apple.dnssd.AppleDomainEnum com.apple.dnssd.AppleService";
+			shellScript = "if [ -d ${OBJROOT}/mDNSResponder.build/${CONFIGURATION} ]; then BUILD_DIR=${OBJROOT}/mDNSResponder.build/${CONFIGURATION}; else BUILD_DIR=${OBJROOT}/mDNSResponder.build; fi\njavah -force -J-Xbootclasspath/p:${BUILD_DIR}/dns_sd.jar.build/JavaClasses -o ${BUILD_DIR}/dns_sd.jar.build/DNSSD.java.h com.apple.dnssd.AppleDNSSD com.apple.dnssd.AppleBrowser com.apple.dnssd.AppleResolver com.apple.dnssd.AppleRegistration com.apple.dnssd.AppleQuery com.apple.dnssd.AppleDomainEnum com.apple.dnssd.AppleService";
 		};
 		DB2CC4560662DE4500335AB3 = {
 			fileRef = DB2CC4430662DD1100335AB3;
@@ -1113,6 +1115,7 @@
 				PRODUCT_NAME = libjdns_sd.jnilib;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
 				WARNING_CFLAGS = "-Wmost -Wno-four-char-constants -Wno-unknown-pragmas";
 			};
 			comments = "Platform-specific JNI library that bridges dns_sd.jar to <dns_sd.h>.";
@@ -1676,6 +1679,7 @@
 				PREBINDING = NO;
 				PRODUCT_NAME = Bonjour;
 				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
 				WARNING_CFLAGS = "-Wmost -Wno-four-char-constants -Wno-unknown-pragmas";
 				WRAPPER_EXTENSION = prefPane;
 			};
@@ -2219,6 +2223,7 @@
 				PRODUCT_NAME = ddnswriteconfig;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
 				WARNING_CFLAGS = "-Wmost -Wno-four-char-constants -Wno-unknown-pragmas";
 			};
 			dependencies = (

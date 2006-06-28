@@ -546,7 +546,7 @@ Revision 1.25  2003/10/22 23:37:49  ksekar
 <rdar://problem/3459141>: crash/hang in abort_client
 
 Revision 1.24  2003/10/21 20:59:40  ksekar
-<rdar://problem/3335216>: handle blocked clients moreefficiently
+<rdar://problem/3335216>: handle blocked clients more efficiently
 
 Revision 1.23  2003/09/23 02:12:43  cheshire
 Also include port number in list of services registered via new UDS API

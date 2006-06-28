@@ -27,7 +27,7 @@ Revision 1.27  2005/10/05 21:41:45  herscher
 <rdar://problem/4190104> Use "application/octet-stream" to determine if CUPS shared queue supports raw
 
 Revision 1.26  2005/07/11 20:17:15  shersche
-<rdar://4124524> UI fixes associated with CUPS printer workaround fix.
+<rdar://problem/4124524> UI fixes associated with CUPS printer workaround fix.
 
 Revision 1.25  2005/07/07 17:53:20  shersche
 Fix problems associated with the CUPS printer workaround fix.

@@ -27,7 +27,7 @@ Revision 1.34  2005/10/05 17:32:51  herscher
 <rdar://problem/4141221> Use a case insensitive compare operation to check whether a printer with the same name has already been installed.
 
 Revision 1.33  2005/07/11 20:17:15  shersche
-<rdar://4124524> UI fixes associated with CUPS printer workaround fix.
+<rdar://problem/4124524> UI fixes associated with CUPS printer workaround fix.
 
 Revision 1.32  2005/07/07 17:53:20  shersche
 Fix problems associated with the CUPS printer workaround fix.

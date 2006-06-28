@@ -23,6 +23,9 @@
     Change History (most recent first):
 
 $Log: DNSSDException.java,v $
+Revision 1.3  2005/07/10 22:19:01  cheshire
+Add missing error codes to list of public static final ints
+
 Revision 1.2  2004/04/30 21:48:27  rpantos
 Change line endings for CVS.
 
@@ -50,11 +53,23 @@ abstract public class	DNSSDException extends Exception
     public static final int		BAD_FLAGS           = -65543;
     public static final int		UNSUPPORTED         = -65544;
     public static final int		NOT_INITIALIZED     = -65545;
+    public static final int		NO_CACHE            = -65546;
     public static final int		ALREADY_REGISTERED  = -65547;
     public static final int		NAME_CONFLICT       = -65548;
     public static final int		INVALID             = -65549;
+    public static final int		FIREWALL            = -65550;
     public static final int		INCOMPATIBLE        = -65551;
     public static final int		BAD_INTERFACE_INDEX = -65552;
+    public static final int		REFUSED             = -65553;
+    public static final int		NOSUCHRECORD        = -65554;
+    public static final int		NOAUTH              = -65555;
+    public static final int		NOSUCHKEY           = -65556;
+    public static final int		NATTRAVERSAL        = -65557;
+    public static final int		DOUBLENAT           = -65558;
+    public static final int		BADTIME             = -65559;
+    public static final int		BADSIG              = -65560;
+    public static final int		BADKEY              = -65561;
+    public static final int		TRANSIENT           = -65562;
 
 	/** Returns the sub-code that identifies the particular error. */
 	abstract public int			getErrorCode();

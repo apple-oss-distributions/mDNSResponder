@@ -30,7 +30,7 @@ Revision 1.37  2005/10/05 18:05:28  herscher
 <rdar://problem/4192011> Save Wide-Area preferences in a different spot in the registry so they don't get removed when doing an update install.
 
 Revision 1.36  2005/09/11 22:12:42  herscher
-<rdar://4247793> Remove dependency on WMI.  Ensure that the Windows firewall is turned on before trying to configure it.
+<rdar://problem/4247793> Remove dependency on WMI.  Ensure that the Windows firewall is turned on before trying to configure it.
 
 Revision 1.35  2005/06/30 18:29:49  shersche
 <rdar://problem/4090059> Don't overwrite the localized service description text

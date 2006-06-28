@@ -23,6 +23,9 @@
     Change History (most recent first):
 
 $Log: DNSSD.java,v $
+Revision 1.9  2005/10/26 01:52:24  cheshire
+<rdar://problem/4316286> Race condition in Java code (doesn't work at all on Linux)
+
 Revision 1.8  2005/07/11 01:55:21  cheshire
 <rdar://problem/4175511> Race condition in Java API
 
@@ -652,8 +655,8 @@ class	AppleService implements DNSSDService, Runnable
 
 	public void				stop() { this.HaltOperation(); }
 
-	/* Block for timeout ms (or forever if -1). Returns 1 if data present, 0 if timed out, -1 if not browsing. */
-	protected native int	BlockForData( int msTimeout);
+	/* Block until data arrives, or one second passes. Returns 1 if data present, 0 otherwise. */
+	protected native int	BlockForData();
 
 	/* Call ProcessResults when data appears on socket descriptor. */
 	protected native int	ProcessResults();
@@ -672,7 +675,9 @@ class	AppleService implements DNSSDService, Runnable
 	{
 		while ( true )
 		{
-			// We have to be very careful here. Suppose our DNS-SD operation is stopped from some other thread,
+			// Note: We want to allow our DNS-SD operation to be stopped from other threads, so we have to
+			// block waiting for data *outside* the synchronized section. Because we're doing this unsynchronized
+			// we have to write some careful code. Suppose our DNS-SD operation is stopped from some other thread,
 			// and then immediately afterwards that thread (or some third, unrelated thread) starts a new DNS-SD
 			// operation. The Unix kernel always allocates the lowest available file descriptor to a new socket,
 			// so the same file descriptor is highly likely to be reused for the new operation, and if our old
@@ -691,11 +696,11 @@ class	AppleService implements DNSSDService, Runnable
 			// locking DOESN'T prevent the callback routine from stopping its own operation, but DOES prevent
 			// any other thread from stopping it until after the callback has completed and returned to us here.
 
-			int result = BlockForData(-1);
-			if (result != 1) break;	// If socket has been closed, time to terminate this thread
+			int result = BlockForData();
 			synchronized (this)
 			{
 				if (fNativeContext == 0) break;	// Some other thread stopped our DNSSD operation; time to terminate this thread
+				if (result == 0) continue;		// If BlockForData() said there was no data, go back and block again
 				result = ProcessResults();
 				if (fNativeContext == 0) break;	// Event listener stopped its own DNSSD operation; terminate this thread
 				if (result != 0) { fListener.operationFailed(this, result); break; }	// If error, notify listener
