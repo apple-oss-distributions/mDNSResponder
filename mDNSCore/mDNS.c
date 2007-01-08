@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2006 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -45,6 +45,45 @@
     Change History (most recent first):
 
 $Log: mDNS.c,v $
+Revision 1.535.2.3  2006/11/10 19:36:42  cheshire
+Further refinement: Only harmonize TTL if the value we're adjusting it to is at least 2 seconds
+
+Revision 1.535.2.2  2006/10/31 02:11:26  cheshire
+Compile error: Need to put back AllDNSLinkGroupv4 definition
+
+Revision 1.535.2.1  2006/10/31 01:28:06  cheshire
+<rdar://problem/4456945> After service restarts on different port, for a few seconds DNS-SD may return stale port number
+
+Revision 1.535  2006/03/02 20:41:17  cheshire
+<rdar://problem/4111464> After record update, old record sometimes remains in cache
+Minor code tidying and comments to reduce the risk of similar programming errors in future
+
+Revision 1.534  2006/03/02 03:25:46  cheshire
+<rdar://problem/4111464> After record update, old record sometimes remains in cache
+Code to harmonize RRSet TTLs was inadvertently rescuing expiring records
+
+Revision 1.533  2006/02/26 00:54:41  cheshire
+Fixes to avoid code generation warning/error on FreeBSD 7
+
+Revision 1.532  2005/12/02 20:24:36  cheshire
+<rdar://problem/4363209> Adjust cutoff time for KA list by one second
+
+Revision 1.531  2005/12/02 19:05:42  cheshire
+Tidy up constants
+
+Revision 1.530  2005/11/07 01:49:48  cheshire
+For consistency, use NonZeroTime() function instead of ?: expression
+
+Revision 1.529  2005/10/25 23:42:24  cheshire
+<rdar://problem/4316057> Error in ResolveSimultaneousProbe() when type or class don't match
+Changed switch statement to an "if"
+
+Revision 1.528  2005/10/25 23:34:22  cheshire
+<rdar://problem/4316048> RequireGoodbye state not set/respected sometimes when machine going to sleep
+
+Revision 1.527  2005/10/25 22:43:59  cheshire
+Add clarifying comments
+
 Revision 1.526  2005/10/20 00:10:33  cheshire
 <rdar://problem/4290265> Add check to avoid crashing NAT gateways that have buggy DNS relay code
 
@@ -503,7 +542,7 @@ Revision 1.388  2004/07/30 17:40:06  ksekar
 <rdar://problem/3739115>: TXT Record updates not available for wide-area services
 
 Revision 1.387  2004/07/26 22:49:30  ksekar
-<rdar://problem/3651409>: Feature #9516: Need support for NATPMP in client
+<rdar://problem/3651409>: Feature #9516: Need support for NAT-PMP in client
 
 Revision 1.386  2004/07/13 21:24:24  rpantos
 Fix for <rdar://problem/3701120>.
@@ -1737,22 +1776,30 @@ mDNSexport const mDNSInterfaceID mDNSInterface_LocalOnly  = (mDNSInterfaceID)1;
 
 mDNSlocal  const mDNSInterfaceID mDNSInterfaceMark        = (mDNSInterfaceID)~0;
 
-#define UnicastDNSPortAsNumber 53
+#define UnicastDNSPortAsNumber   53
+#define NATPMPPortAsNumber       5351
+#define DNSEXTPortAsNumber       5352		// Port used for end-to-end DNS operations like LLQ, Updates with Leases, etc.
 #define MulticastDNSPortAsNumber 5353
+#define LoopbackIPCPortAsNumber  5354
+
 mDNSexport const mDNSIPPort UnicastDNSPort     = { { UnicastDNSPortAsNumber   >> 8, UnicastDNSPortAsNumber   & 0xFF } };
+mDNSexport const mDNSIPPort NATPMPPort         = { { NATPMPPortAsNumber       >> 8, NATPMPPortAsNumber       & 0xFF } };
+mDNSexport const mDNSIPPort DNSEXTPort         = { { DNSEXTPortAsNumber       >> 8, DNSEXTPortAsNumber       & 0xFF } };
 mDNSexport const mDNSIPPort MulticastDNSPort   = { { MulticastDNSPortAsNumber >> 8, MulticastDNSPortAsNumber & 0xFF } };
+mDNSexport const mDNSIPPort LoopbackIPCPort    = { { LoopbackIPCPortAsNumber  >> 8, LoopbackIPCPortAsNumber  & 0xFF } };
+
 mDNSexport const mDNSv4Addr AllDNSAdminGroup   = { { 239, 255, 255, 251 } };
 mDNSexport const mDNSv4Addr AllDNSLinkGroupv4  = { { 224,   0,   0, 251 } };
 mDNSexport const mDNSv6Addr AllDNSLinkGroupv6  = { { 0xFF,0x02,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0xFB } };
 mDNSexport const mDNSAddr   AllDNSLinkGroup_v4 = { mDNSAddrType_IPv4, { { { 224,   0,   0, 251 } } } };
 mDNSexport const mDNSAddr   AllDNSLinkGroup_v6 = { mDNSAddrType_IPv6, { { { 0xFF,0x02,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0xFB } } } };
 
-mDNSexport const mDNSOpaque16 zeroID = { { 0, 0 } };
-mDNSexport const mDNSOpaque16 QueryFlags    = { { kDNSFlag0_QR_Query    | kDNSFlag0_OP_StdQuery,                0 } };
-mDNSexport const mDNSOpaque16 uQueryFlags   = { { kDNSFlag0_QR_Query    | kDNSFlag0_OP_StdQuery | kDNSFlag0_RD, 0 } };
-mDNSexport const mDNSOpaque16 ResponseFlags = { { kDNSFlag0_QR_Response | kDNSFlag0_OP_StdQuery | kDNSFlag0_AA, 0 } };
-mDNSexport const mDNSOpaque16 UpdateReqFlags= { { kDNSFlag0_QR_Query    | kDNSFlag0_OP_Update,                  0 } };
-mDNSexport const mDNSOpaque16 UpdateRespFlags={ { kDNSFlag0_QR_Response | kDNSFlag0_OP_Update,                  0 } };
+mDNSexport const mDNSOpaque16 zeroID          = { { 0, 0 } };
+mDNSexport const mDNSOpaque16 QueryFlags      = { { kDNSFlag0_QR_Query    | kDNSFlag0_OP_StdQuery,                0 } };
+mDNSexport const mDNSOpaque16 uQueryFlags     = { { kDNSFlag0_QR_Query    | kDNSFlag0_OP_StdQuery | kDNSFlag0_RD, 0 } };
+mDNSexport const mDNSOpaque16 ResponseFlags   = { { kDNSFlag0_QR_Response | kDNSFlag0_OP_StdQuery | kDNSFlag0_AA, 0 } };
+mDNSexport const mDNSOpaque16 UpdateReqFlags  = { { kDNSFlag0_QR_Query    | kDNSFlag0_OP_Update,                  0 } };
+mDNSexport const mDNSOpaque16 UpdateRespFlags = { { kDNSFlag0_QR_Response | kDNSFlag0_OP_Update,                  0 } };
 
 // Any records bigger than this are considered 'large' records
 #define SmallRecordLimit 1024
@@ -3121,7 +3168,7 @@ mDNSlocal void SendResponses(mDNS *const m)
 					numDereg++;
 					responseptr = newptr;
 					}
-				else if (rr->NewRData)							// If we have new data for this record
+				else if (rr->NewRData && !m->SleepState)					// If we have new data for this record
 					{
 					RData *OldRData     = rr->resrec.rdata;
 					mDNSu16 oldrdlength = rr->resrec.rdlength;
@@ -3132,6 +3179,7 @@ mDNSlocal void SendResponses(mDNS *const m)
 						if (!newptr && m->omsg.h.numAnswers) break;
 						numDereg++;
 						responseptr = newptr;
+						rr->RequireGoodbye = mDNSfalse;
 						}
 					// Now try to see if we can fit the update in the same packet (not fatal if we can't)
 					SetNewRData(&rr->resrec, rr->NewRData, rr->newrdlength);
@@ -3139,7 +3187,7 @@ mDNSlocal void SendResponses(mDNS *const m)
 						rr->resrec.rrclass |= kDNSClass_UniqueRRSet;		// Temporarily set the cache flush bit so PutResourceRecord will set it
 					newptr = PutResourceRecord(&m->omsg, responseptr, &m->omsg.h.numAnswers, &rr->resrec);
 					rr->resrec.rrclass &= ~kDNSClass_UniqueRRSet;			// Make sure to clear cache flush bit back to normal state
-					if (newptr) responseptr = newptr;
+					if (newptr) { responseptr = newptr; rr->RequireGoodbye = mDNStrue; }
 					SetNewRData(&rr->resrec, OldRData, oldrdlength);
 					}
 				else
@@ -3281,10 +3329,11 @@ mDNSlocal void SendResponses(mDNS *const m)
 
 // Note: MUST call SetNextCacheCheckTime any time we change:
 // rr->TimeRcvd
-// rr->DelayDelivery
 // rr->resrec.rroriginalttl
 // rr->UnansweredQueries
 // rr->CRActiveQuestion
+// Also, any time we set rr->DelayDelivery we should call SetNextCacheCheckTime to ensure m->NextCacheCheck is set if necessary
+// Clearing rr->DelayDelivery does not require a call to SetNextCacheCheckTime
 mDNSlocal void SetNextCacheCheckTime(mDNS *const m, CacheRecord *const rr)
 	{
 	rr->NextRequiredQuery = RRExpireTime(rr);
@@ -3367,7 +3416,8 @@ mDNSlocal mDNSBool BuildQuestion(mDNS *const m, DNSMessage *query, mDNSu8 **quer
 				rr->NextInKAList == mDNSNULL && ka != &rr->NextInKAList &&	// which is not already in the known answer list
 				rr->resrec.rdlength <= SmallRecordLimit &&					// which is small enough to sensibly fit in the packet
 				ResourceRecordAnswersQuestion(&rr->resrec, q) &&			// which answers our question
-				rr->TimeRcvd + TicksTTL(rr)/2 - m->timenow >= 0)			// and it is less than half-way to expiry
+				rr->TimeRcvd + TicksTTL(rr)/2 - m->timenow >				// and its half-way-to-expiry time is at least 1 second away
+												mDNSPlatformOneSecond)		// (also ensures we never include goodbye records with TTL=1)
 				{
 				*ka = rr;	// Link this record into our known answer chain
 				ka = &rr->NextInKAList;
@@ -3867,7 +3917,7 @@ mDNSlocal void AnswerQuestionWithResourceRecord(mDNS *const m, DNSQuestion *q, C
 
 mDNSlocal void CacheRecordDeferredAdd(mDNS *const m, CacheRecord *rr)
 	{
-	rr->DelayDelivery = 0;
+	rr->DelayDelivery = 0;		// Note, only need to call SetNextCacheCheckTime() when DelayDelivery is set, not when it's cleared
 	if (m->CurrentQuestion) LogMsg("CacheRecordDeferredAdd ERROR m->CurrentQuestion already set");
 	m->CurrentQuestion = m->Questions;
 	while (m->CurrentQuestion && m->CurrentQuestion != m->NewQuestions)
@@ -3892,7 +3942,7 @@ mDNSlocal mDNSs32 CheckForSoonToExpireRecords(mDNS *const m, const domainname *c
 			if (threshhold - RRExpireTime(rr) >= 0)		// If we have records about to expire within a second
 				if (delay - RRExpireTime(rr) < 0)		// then delay until after they've been deleted
 					delay = RRExpireTime(rr);
-	if (delay - start > 0) return(delay ? delay : 1);	// Make sure we return non-zero if we want to delay
+	if (delay - start > 0) return(NonZeroTime(delay));
 	else return(0);
 	}
 
@@ -3950,6 +4000,7 @@ mDNSlocal void CacheRecordAdd(mDNS *const m, CacheRecord *rr)
 			}
 		}
 	m->CurrentQuestion = mDNSNULL;
+	SetNextCacheCheckTime(m, rr);
 	}
 
 // NoCacheAnswer is only called from mDNSCoreReceiveResponse, *never* directly as a result of a client API call.
@@ -3965,7 +4016,7 @@ mDNSlocal void CacheRecordAdd(mDNS *const m, CacheRecord *rr)
 mDNSlocal void NoCacheAnswer(mDNS *const m, CacheRecord *rr)
 	{
 	LogMsg("No cache space: Delivering non-cached result for %##s", m->rec.r.resrec.name->c);
-	if (m->CurrentQuestion) LogMsg("CacheRecordAdd ERROR m->CurrentQuestion already set");
+	if (m->CurrentQuestion) LogMsg("NoCacheAnswer ERROR m->CurrentQuestion already set");
 	m->CurrentQuestion = m->Questions;
 	while (m->CurrentQuestion)
 		{
@@ -3996,7 +4047,7 @@ mDNSlocal void CacheRecordRmv(mDNS *const m, CacheRecord *rr)
 		m->CurrentQuestion = q->next;
 		if (ResourceRecordAnswersQuestion(&rr->resrec, q))
 			{
-			verbosedebugf("CacheRecordRmv %p %##s (%s)", rr, rr->resrec.name->c, DNSTypeName(rr->resrec.rrtype));
+			verbosedebugf("CacheRecordRmv %p %s", rr, CRDisplayString(m, rr));
 			if (q->CurrentAnswers == 0)
 				LogMsg("CacheRecordRmv ERROR: How can CurrentAnswers already be zero for %p %##s (%s)?", q, q->qname.c, DNSTypeName(q->qtype));
 			else
@@ -4651,7 +4702,7 @@ mDNSlocal int CompareRData(AuthRecord *our, CacheRecord *pkt)
 	if (*pktptr > *ourptr) return(-1);								// Our data is numerically lower; We lost
 	if (*pktptr < *ourptr) return(+1);								// Packet data is numerically lower; We won
 	
-	debugf("CompareRData: How did we get here?");
+	LogMsg("CompareRData ERROR: Invalid state");
 	return(-1);
 	}
 
@@ -4754,14 +4805,13 @@ mDNSlocal void ResolveSimultaneousProbe(mDNS *const m, const DNSMessage *const q
 				int result          = (int)our->resrec.rrclass - (int)m->rec.r.resrec.rrclass;
 				if (!result) result = (int)our->resrec.rrtype  - (int)m->rec.r.resrec.rrtype;
 				if (!result) result = CompareRData(our, &m->rec.r);
-				switch (result)
+				if (result > 0)
+					debugf("ResolveSimultaneousProbe: %##s (%s): We won",  our->resrec.name->c, DNSTypeName(our->resrec.rrtype));
+				else if (result < 0)
 					{
-					case  1:	debugf("ResolveSimultaneousProbe: %##s (%s): We won",  our->resrec.name->c, DNSTypeName(our->resrec.rrtype));
-								break;
-					case  0:	break;
-					case -1:	debugf("ResolveSimultaneousProbe: %##s (%s): We lost", our->resrec.name->c, DNSTypeName(our->resrec.rrtype));
-								mDNS_Deregister_internal(m, our, mDNS_Dereg_conflict);
-								goto exit;
+					debugf("ResolveSimultaneousProbe: %##s (%s): We lost", our->resrec.name->c, DNSTypeName(our->resrec.rrtype));
+					mDNS_Deregister_internal(m, our, mDNS_Dereg_conflict);
+					goto exit;
 					}
 				}
 			}
@@ -5251,8 +5301,14 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 	const mDNSInterfaceID InterfaceID)
 	{
 	int i;
-	const mDNSu8 *ptr = LocateAnswers(response, end);	// We ignore questions (if any) in a DNS response packet
-	CacheRecord *CacheFlushRecords = (CacheRecord*)1;	// "(CacheRecord*)1" is special (non-zero) end-of-list marker
+
+	// We ignore questions (if any) in a DNS response packet
+	const mDNSu8 *ptr = LocateAnswers(response, end);
+
+	// "(CacheRecord*)1" is a special (non-zero) end-of-list marker
+	// We use this non-zero marker so that records in our CacheFlushRecords list will always have NextInCFList
+	// set non-zero, and that tells GetCacheEntity() that they're not, at this moment, eligible for recycling.
+	CacheRecord *CacheFlushRecords = (CacheRecord*)1;
 	CacheRecord **cfp = &CacheFlushRecords;
 
 	// All records in a DNS response packet are treated as equally valid statements of truth. If we want
@@ -5461,9 +5517,7 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 						rr->DelayDelivery = m->timenow + mDNSPlatformOneSecond;	// to delay delivery of this 'add' event
 					else
 						rr->DelayDelivery = CheckForSoonToExpireRecords(m, rr->resrec.name, rr->resrec.namehash, slot);
-					CacheRecordAdd(m, rr);
-					// MUST do this AFTER CacheRecordAdd(), because that's what sets CRActiveQuestion for us
-					SetNextCacheCheckTime(m, rr);
+					CacheRecordAdd(m, rr);  // CacheRecordAdd calls SetNextCacheCheckTime(m, rr); for us
 					}
 				}
 			}
@@ -5484,33 +5538,38 @@ exit:
 		r1->NextInCFList = mDNSNULL;
 		for (r2 = cg ? cg->members : mDNSNULL; r2; r2=r2->next)
 			if (SameResourceRecordSignature(&r1->resrec, &r2->resrec))
-				{
-				// If record is recent, just ensure the whole RRSet has the same TTL (as required by DNS semantics)
-				// else, if record is old, mark it to be flushed
-				if (m->timenow - r2->TimeRcvd < mDNSPlatformOneSecond)
-					r2->resrec.rroriginalttl = r1->resrec.rroriginalttl;
-				else
+				if (RRExpireTime(r2) - m->timenow > mDNSPlatformOneSecond)
 					{
-					verbosedebugf("Cache flush %p X %p %##s (%s)", r1, r2, r2->resrec.name->c, DNSTypeName(r2->resrec.rrtype));
-					// We set stale records to expire in one second.
-					// This gives the owner a chance to rescue it if necessary.
-					// This is important in the case of multi-homing and bridged networks:
-					//   Suppose host X is on Ethernet. X then connects to an AirPort base station, which happens to be
-					//   bridged onto the same Ethernet. When X announces its AirPort IP address with the cache-flush bit
-					//   set, the AirPort packet will be bridged onto the Ethernet, and all other hosts on the Ethernet
-					//   will promptly delete their cached copies of the (still valid) Ethernet IP address record.
-					//   By delaying the deletion by one second, we give X a change to notice that this bridging has
-					//   happened, and re-announce its Ethernet IP address to rescue it from deletion from all our caches.
-					// We set UnansweredQueries to MaxUnansweredQueries to avoid expensive and unnecessary
-					// final expiration queries for this record.
-					r2->resrec.rroriginalttl = 1;
-					r2->TimeRcvd          = m->timenow;
-					r2->UnansweredQueries = MaxUnansweredQueries;
+					// If record is recent, just ensure the whole RRSet has the same TTL (as required by DNS semantics)
+					// else, if record is old, mark it to be flushed
+					if (m->timenow - r2->TimeRcvd < mDNSPlatformOneSecond)
+						{
+						if (r2->resrec.rroriginalttl != r1->resrec.rroriginalttl && r1->resrec.rroriginalttl > 1)
+							r2->resrec.rroriginalttl = r1->resrec.rroriginalttl;
+						}
+					else				// else, if record is old, mark it to be flushed
+						{
+						verbosedebugf("Cache flush %p X %p %s", r1, r2, CRDisplayString(m, r2));
+						// We set stale records to expire in one second.
+						// This gives the owner a chance to rescue it if necessary.
+						// This is important in the case of multi-homing and bridged networks:
+						//   Suppose host X is on Ethernet. X then connects to an AirPort base station, which happens to be
+						//   bridged onto the same Ethernet. When X announces its AirPort IP address with the cache-flush bit
+						//   set, the AirPort packet will be bridged onto the Ethernet, and all other hosts on the Ethernet
+						//   will promptly delete their cached copies of the (still valid) Ethernet IP address record.
+						//   By delaying the deletion by one second, we give X a change to notice that this bridging has
+						//   happened, and re-announce its Ethernet IP address to rescue it from deletion from all our caches.
+						// We set UnansweredQueries to MaxUnansweredQueries to avoid expensive and unnecessary
+						// final expiration queries for this record.
+						r2->resrec.rroriginalttl = 1;
+						r2->UnansweredQueries = MaxUnansweredQueries;
+						}
+					r2->TimeRcvd = m->timenow;
 					SetNextCacheCheckTime(m, r2);
 					}
-				}
 		if (r1->DelayDelivery)	// If we were planning to delay delivery of this record, see if we still need to
 			{
+			// Note, only need to call SetNextCacheCheckTime() when DelayDelivery is set, not when it's cleared
 			r1->DelayDelivery = CheckForSoonToExpireRecords(m, r1->resrec.name, r1->resrec.namehash, slot);
 			if (!r1->DelayDelivery) CacheRecordDeferredAdd(m, r1);
 			}
@@ -5529,9 +5588,7 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, void *const pkt, const mDNSu8 *co
 	const mDNSu8 UpdateR = kDNSFlag0_QR_Response | kDNSFlag0_OP_Update;
 
 #ifndef UNICAST_DISABLED	
-	mDNSIPPort NATPort = mDNSOpaque16fromIntVal(NATMAP_PORT);
-
-	if (srcport.NotAnInteger == NATPort.NotAnInteger)
+	if (srcport.NotAnInteger == NATPMPPort.NotAnInteger)
 		{
 		mDNS_Lock(m);
 		uDNS_ReceiveNATMap(m, pkt, (mDNSu16)(end - (mDNSu8 *)pkt));

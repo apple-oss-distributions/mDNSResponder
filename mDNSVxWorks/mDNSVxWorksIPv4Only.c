@@ -65,7 +65,7 @@ Convert ServiceRegDomain to domainname instead of C string
 Replace mDNS_GenerateFQDN/mDNS_GenerateGlobalFQDN with mDNS_SetFQDNs
 
 Revision 1.17  2004/07/29 19:26:03  ksekar
-Plaform-level changes for NATPMP support
+Plaform-level changes for NAT-PMP support
 
 Revision 1.16  2004/04/22 05:11:28  bradley
 Added mDNSPlatformUTC for TSIG signed dynamic updates.

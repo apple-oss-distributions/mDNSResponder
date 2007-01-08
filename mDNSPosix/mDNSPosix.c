@@ -121,7 +121,7 @@ Revision 1.50  2004/08/11 01:20:20  cheshire
 Declare private local functions using "mDNSlocal"
 
 Revision 1.49  2004/07/26 22:49:31  ksekar
-<rdar://problem/3651409>: Feature #9516: Need support for NATPMP in client
+<rdar://problem/3651409>: Feature #9516: Need support for NAT-PMP in client
 
 Revision 1.48  2004/07/20 01:47:36  rpantos
 NOT_HAVE_SA_LEN applies to v6, too. And use more-portable s6_addr.

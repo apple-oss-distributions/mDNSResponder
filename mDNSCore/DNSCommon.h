@@ -23,6 +23,10 @@
     Change History (most recent first):
 
 $Log: DNSCommon.h,v $
+Revision 1.33  2006/03/10 21:51:41  cheshire
+<rdar://problem/4111464> After record update, old record sometimes remains in cache
+Split out SameRDataBody() into a separate routine so it can be called from other code
+
 Revision 1.32  2005/03/21 00:33:51  shersche
 <rdar://problem/4021486> Fix build warnings on Win32 platform
 
@@ -235,6 +239,7 @@ extern void mDNS_HostNameCallback(mDNS *const m, AuthRecord *const rr, mStatus r
 
 extern mDNSu32 RDataHashValue(mDNSu16 const rdlength, const RDataBody *const rdb);
 
+extern mDNSBool SameRDataBody(const ResourceRecord *const r1, const RDataBody *const r2);
 extern mDNSBool SameRData(const ResourceRecord *const r1, const ResourceRecord *const r2);
 
 extern mDNSBool ResourceRecordAnswersQuestion(const ResourceRecord *const rr, const DNSQuestion *const q);

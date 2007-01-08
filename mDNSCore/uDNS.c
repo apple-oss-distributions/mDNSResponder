@@ -211,7 +211,7 @@ Revision 1.168  2004/12/23 23:22:47  ksekar
 <rdar://problem/3933606> Unicast known answers "name" pointers point to garbage stack memory
 
 Revision 1.167  2004/12/22 22:25:47  ksekar
-<rdar://problem/3734265> NATPMP: handle location changes
+<rdar://problem/3734265> NAT-PMP: handle location changes
 
 Revision 1.166  2004/12/22 00:04:12  ksekar
 <rdar://problem/3930324> mDNSResponder crashing in ReceivePortMapReply
@@ -558,16 +558,16 @@ Revision 1.61  2004/07/30 17:40:06  ksekar
 <rdar://problem/3739115>: TXT Record updates not available for wide-area services
 
 Revision 1.60  2004/07/29 19:40:05  ksekar
-NATPMP Support - minor fixes and cleanup
+NAT-PMP Support - minor fixes and cleanup
 
 Revision 1.59  2004/07/29 19:27:15  ksekar
-NATPMP Support - minor fixes and cleanup
+NAT-PMP Support - minor fixes and cleanup
 
 Revision 1.58  2004/07/27 07:35:38  shersche
 fix syntax error, variables declared in the middle of a block
 
 Revision 1.57  2004/07/26 22:49:30  ksekar
-<rdar://problem/3651409>: Feature #9516: Need support for NATPMP in client
+<rdar://problem/3651409>: Feature #9516: Need support for NAT-PMP in client
 
 Revision 1.56  2004/07/26 19:14:44  ksekar
 <rdar://problem/3737814>: 8A210: mDNSResponder crashed in startLLQHandshakeCallback

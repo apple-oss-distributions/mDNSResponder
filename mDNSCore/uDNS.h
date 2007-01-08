@@ -83,13 +83,13 @@ Revision 1.15  2004/07/30 17:40:06  ksekar
 <rdar://problem/3739115>: TXT Record updates not available for wide-area services
 
 Revision 1.14  2004/07/29 19:27:15  ksekar
-NATPMP Support - minor fixes and cleanup
+NAT-PMP Support - minor fixes and cleanup
 
 Revision 1.13  2004/07/29 02:03:35  ksekar
 Delete unused #define and structure field
 
 Revision 1.12  2004/07/26 22:49:30  ksekar
-<rdar://problem/3651409>: Feature #9516: Need support for NATPMP in client
+<rdar://problem/3651409>: Feature #9516: Need support for NAT-PMP in client
 
 Revision 1.11  2004/06/17 01:13:11  ksekar
 <rdar://problem/3696616>: polling interval too short

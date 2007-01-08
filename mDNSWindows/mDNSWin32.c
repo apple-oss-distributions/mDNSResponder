@@ -222,7 +222,7 @@ Revision 1.46  2004/08/05 05:43:01  shersche
 Bug #: 3751566
 
 Revision 1.45  2004/07/26 22:49:31  ksekar
-<rdar://problem/3651409>: Feature #9516: Need support for NATPMP in client
+<rdar://problem/3651409>: Feature #9516: Need support for NAT-PMP in client
 
 Revision 1.44  2004/07/26 05:42:50  shersche
 use "Computer Description" for nicename if available, track dynamic changes to "Computer Description"

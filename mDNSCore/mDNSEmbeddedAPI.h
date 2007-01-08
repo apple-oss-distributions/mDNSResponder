@@ -119,7 +119,7 @@ Revision 1.269  2005/01/11 22:50:52  ksekar
 Fixed constant naming (was using kLLQ_DefLease for update leases)
 
 Revision 1.268  2004/12/22 22:25:47  ksekar
-<rdar://problem/3734265> NATPMP: handle location changes
+<rdar://problem/3734265> NAT-PMP: handle location changes
 
 Revision 1.267  2004/12/22 00:13:49  ksekar
 <rdar://problem/3873993> Change version, port, and polling interval for LLQ
@@ -403,13 +403,13 @@ Revision 1.182  2004/07/30 17:40:06  ksekar
 <rdar://problem/3739115>: TXT Record updates not available for wide-area services
 
 Revision 1.181  2004/07/29 19:27:15  ksekar
-NATPMP Support - minor fixes and cleanup
+NAT-PMP Support - minor fixes and cleanup
 
 Revision 1.180  2004/07/29 02:03:35  ksekar
 Delete unused #define and structure field
 
 Revision 1.179  2004/07/26 22:49:30  ksekar
-<rdar://problem/3651409>: Feature #9516: Need support for NATPMP in client
+<rdar://problem/3651409>: Feature #9516: Need support for NAT-PMP in client
 
 Revision 1.178  2004/07/13 21:24:24  rpantos
 Fix for <rdar://problem/3701120>.
