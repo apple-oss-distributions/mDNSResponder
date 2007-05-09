@@ -24,6 +24,9 @@
     Change History (most recent first):
 
 $Log: LegacyNATTraversal.c,v $
+Revision 1.14.2.2  2007/05/09 02:05:49  cheshire
+<rdar://problem/5188970> Change sprintf and strcpy to their safer snprintf and strlcpy equivalents
+
 Revision 1.14.2.1  2005/12/12 17:38:40  cheshire
 Put buffer overflow bug 4151514 back in by order of Program CCC:
 "Program CCC Denied.  This change does not meet the criteria for Chardonnay."
@@ -1097,7 +1100,7 @@ static int DiscoverRouter(PHTTPResponse pResponse)
 			// see if port is specified
 			q = strchr(p, ':');
 			if (q == NULL) {
-				sprintf(g_szRouterHostPortDesc, "%s", p);
+				snprintf(g_szRouterHostPortDesc, sizeof(g_szRouterHostPortDesc), "%s", p);
 
 				g_saddrRouterDesc.sin_addr.s_addr = inet_addr(p);
 				g_saddrRouterDesc.sin_port = htons(80);
@@ -1106,7 +1109,7 @@ static int DiscoverRouter(PHTTPResponse pResponse)
 				// don't include the ":80" - HTTP is by default port 80
 				if (atoi(q+1) == 80) *q = '\0';
 
-				strcpy(g_szRouterHostPortDesc, p);
+				strlcpy(g_szRouterHostPortDesc, p, sizeof(g_szRouterHostPortDesc));
 
 				// terminate the host part and point to it
 				*q = '\0';
@@ -1334,11 +1337,11 @@ static void *TCPProc(void *in)
 		char response[2000];
 		PHTTPResponse resp;
 		int n;
-		sprintf(callback, "%u.%u.%u.%u:%u",
+		snprintf(callback, sizeof(callback), "%u.%u.%u.%u:%u",
 			((uint8_t*)&g_dwLocalIP)[0], ((uint8_t*)&g_dwLocalIP)[1],
 			((uint8_t*)&g_dwLocalIP)[2], ((uint8_t*)&g_dwLocalIP)[3], g_wEventPort);
 
-		n = sprintf((char *)buf,
+		n = snprintf((char *)buf, sizeof(buf),
 			szEventMsgSubscribeFMT,
 			g_szEventURL,
 			callback, g_szRouterHostPortEvent, 1800);
@@ -1527,7 +1530,7 @@ static void *UDPProc(void *in)
 
 		if (!FD_ISSET(g_sUDP, &readfds)) continue;
 		recvaddrlen = sizeof(recvaddr);
-		n = recvfrom(g_sUDP, buf, sizeof(buf), 0, // ### !!! Buffer overflow !!! Should be sizeof(buf)-1 to allow for "buf[n] = '\0';" below !!!
+		n = recvfrom(g_sUDP, buf, sizeof(buf)-1, 0,
 			(struct sockaddr *)&recvaddr, &recvaddrlen);
 		if (n < 0) {
 			if (g_fLogging & NALOG_ERROR)
@@ -2230,12 +2233,12 @@ static PHTTPResponse SendSOAPMsgControlAction(
 		for (i=0; i<argc; i++) {
 			n = 0;
 			if (args[i].pszType == NULL) {
-				n = sprintf(outBufferArgs + iArgsLen,
+				n = snprintf(outBufferArgs + iArgsLen, MAX_SOAPMSGSIZE - iArgsLen,
 					szSOAPMsgControlAArgumentFMT,
 					args[i].pszName, args[i].pszValue);
 			}
 			else {
-				n = sprintf(outBufferArgs + iArgsLen,
+				n = snprintf(outBufferArgs + iArgsLen, MAX_SOAPMSGSIZE - iArgsLen,
 					szSOAPMsgControlAArgumentFMT_t,
 					args[i].pszName, args[i].pszValue, args[i].pszType);
 			}
@@ -2243,10 +2246,10 @@ static PHTTPResponse SendSOAPMsgControlAction(
 		}
 	outBufferArgs[iArgsLen] = '\0';
 
-	iBodyLen = sprintf(outBufferBody, szSOAPMsgControlABodyFMT,
+	iBodyLen = snprintf(outBufferBody, MAX_SOAPMSGSIZE, szSOAPMsgControlABodyFMT,
 		action, outBufferArgs);
 
-	iHeaderLen = sprintf(outBuffer, szSOAPMsgControlAHeaderFMT,
+	iHeaderLen = snprintf(outBuffer, MAX_SOAPMSGSIZE, szSOAPMsgControlAHeaderFMT,
 		g_szControlURL, g_szRouterHostPortSOAP, action, iBodyLen);
 
 	if (f2Part) {
@@ -2259,7 +2262,7 @@ static PHTTPResponse SendSOAPMsgControlAction(
 			&g_saddrRouterSOAP);
 	}
 	else {
-		strcpy(outBuffer + iHeaderLen, outBufferBody);
+		strlcpy(outBuffer + iHeaderLen, outBufferBody, MAX_SOAPMSGSIZE - iHeaderLen);
 		iLen = iHeaderLen + iBodyLen;
 
 		DumpHex(outBuffer, iLen+1);
@@ -2361,7 +2364,7 @@ static int FindDescInfo(
 	pbuf = p;
 
 	// now skip after end of this tag, then skip until manufacturer tag
-	iSearchLen = sprintf(szSearch, "<%s>", szName);
+	iSearchLen = snprintf(szSearch, sizeof(szSearch), "<%s>", szName);
 	p = strstr_n(pbuf, szSearch, iLen);
 	if (p == NULL) return -1;
 	p += iSearchLen;
@@ -2454,15 +2457,17 @@ static int FindRouterInfo(char *inBuffer, int iLen)
 }
 
 static void ParseURL(
-	const char *szBuf, char *pszHostPort,
-	struct sockaddr_in *psaddr, char *pszPath)
+	const char *szBuf,
+	char *pszHostPort, int pszHostPort_size,
+	struct sockaddr_in *psaddr,
+	char *pszPath, int pszPath_size)
 {
 	char			buf[1024];
 	char			*p;
 	char			*q;
 	unsigned short	port;
 
-	strcpy(buf, szBuf);
+	strlcpy(buf, szBuf, sizeof(buf));
 
 	p = buf;
 	if (0 == strncmp(p, "http://", 7))
@@ -2476,7 +2481,7 @@ static void ParseURL(
 			pszPath[1] = '\0';
 		}
 		else  {
-			strcpy(pszPath, q);
+			strlcpy(pszPath, q, pszPath_size);
 			*q = '\0';
 		}
 	}
@@ -2491,7 +2496,7 @@ static void ParseURL(
 		if (80 == port) *q = '\0';
 	}
 
-	if (pszHostPort) strcpy(pszHostPort, p);
+	if (pszHostPort) strlcpy(pszHostPort, p, pszHostPort_size);
 
 	if (NULL != q) *q = '\0';
 
@@ -2538,13 +2543,15 @@ static void GetDeviceDescription(void)
 		goto cleanup;
 	}
 
-	iBufLen = sprintf(outBuffer, szSSDPMsgDescribeDeviceFMT, g_szNATDevDescURL,
+	iBufLen = snprintf(outBuffer, MAX_SOAPMSGSIZE, szSSDPMsgDescribeDeviceFMT, g_szNATDevDescURL,
 		g_szRouterHostPortDesc);
 
 	if (g_fLogging & NALOG_INFO1)
 		fprintf(g_log, "Describe Device: [%s]\n", outBuffer);
 	iLen = SendTCPMsg_saddr_parse(outBuffer, iBufLen, inBuffer, MAX_SOAPMSGSIZE,
 		&g_saddrRouterDesc);
+
+	if (iLen < 1) goto cleanup;
 
 	g_fControlURLSet = FALSE;
 
@@ -2563,28 +2570,29 @@ static void GetDeviceDescription(void)
 			// not there?  try default numbers from device description
 			memcpy(&g_saddrRouterBase, &g_saddrRouterDesc,
 				sizeof(g_saddrRouterBase));
-			strcpy(g_szRouterHostPortBase, g_szRouterHostPortDesc);
+			strlcpy(g_szRouterHostPortBase, g_szRouterHostPortDesc, sizeof(g_szRouterHostPortBase));
 		}
 		else {
 			ParseURL(szURLBase,
-				g_szRouterHostPortBase, &g_saddrRouterBase, NULL);
+				g_szRouterHostPortBase, sizeof(g_szRouterHostPortBase),
+				&g_saddrRouterBase, NULL, 0);
 
 			if ((strlen(g_szRouterHostPortBase) == 0) ||
 				(g_saddrRouterBase.sin_addr.s_addr == INADDR_NONE)) {
 				memcpy(&g_saddrRouterBase, &g_saddrRouterDesc,
 					sizeof(g_saddrRouterBase));
-				strcpy(g_szRouterHostPortBase, g_szRouterHostPortDesc);
+				strlcpy(g_szRouterHostPortBase, g_szRouterHostPortDesc, sizeof(g_szRouterHostPortBase));
 			}
 		}
 	}
 
 	ParseURL(szControlURL,
-		g_szRouterHostPortSOAP, &g_saddrRouterSOAP, g_szControlURL);
+		g_szRouterHostPortSOAP, sizeof(g_szRouterHostPortSOAP), &g_saddrRouterSOAP, g_szControlURL, sizeof(g_szControlURL));
 	if ((strlen(g_szRouterHostPortSOAP) == 0) ||
 		(g_saddrRouterSOAP.sin_addr.s_addr == INADDR_NONE)) {
 		memcpy(&g_saddrRouterSOAP, &g_saddrRouterBase,
 			sizeof(g_saddrRouterSOAP));
-		strcpy(g_szRouterHostPortSOAP, g_szRouterHostPortBase);
+		strlcpy(g_szRouterHostPortSOAP, g_szRouterHostPortBase, sizeof(g_szRouterHostPortSOAP));
 	}
 
 
@@ -2606,22 +2614,22 @@ static void GetDeviceDescription(void)
 	}
 	else {
 		ParseURL(szEventURL,
-			g_szRouterHostPortEvent, &g_saddrRouterEvent, g_szEventURL);
+			g_szRouterHostPortEvent, sizeof(g_szRouterHostPortEvent), &g_saddrRouterEvent, g_szEventURL, sizeof(g_szEventURL));
 		if ((strlen(g_szRouterHostPortEvent) == 0) ||
 			(g_saddrRouterEvent.sin_addr.s_addr == INADDR_NONE)) {
 			memcpy(&g_saddrRouterEvent, &g_saddrRouterBase,
 				sizeof(g_saddrRouterEvent));
-			strcpy(g_szRouterHostPortEvent, g_szRouterHostPortBase);
+			strlcpy(g_szRouterHostPortEvent, g_szRouterHostPortBase, sizeof(g_szRouterHostPortEvent));
 		}
 
 		EventInit();
 	}
 
+	pthread_mutex_unlock(&g_xUPnP);
+
 cleanup:
 	if (outBuffer != NULL) free(outBuffer);
 	if (inBuffer != NULL) free(inBuffer);
-
-	pthread_mutex_unlock(&g_xUPnP);
 }
 
 
@@ -2711,7 +2719,7 @@ mStatus LNT_UnmapPort(mDNSIPPort PubPort, mDNSBool tcp)
 	Property		propArgs[3];
 	PHTTPResponse	resp;
     int protocol = tcp ? IPPROTO_TCP : IPPROTO_UDP;
-	sprintf(szEPort, "%u", mDNSVal16(PubPort));
+	snprintf(szEPort, sizeof(szEPort), "%u", mDNSVal16(PubPort));
 
 	bzero(propArgs, sizeof(propArgs));
 	propArgs[0].pszName = "NewRemoteHost";
@@ -2766,11 +2774,11 @@ extern mStatus LNT_MapPort(mDNSIPPort priv, mDNSIPPort pub, mDNSBool tcp)
 
 	//DeletePortMapping(eport, protocol);
 
-	sprintf(szEPort, "%u", mDNSVal16(pub));
-	sprintf(szIPort, "%u", mDNSVal16(priv));
+	snprintf(szEPort, sizeof(szEPort), "%u", mDNSVal16(pub));
+	snprintf(szIPort, sizeof(szIPort), "%u", mDNSVal16(priv));
 
 	dwIP = g_dwLocalIP;
-	sprintf(szLocalIP, "%u.%u.%u.%u",
+	snprintf(szLocalIP, sizeof(szLocalIP), "%u.%u.%u.%u",
 		((uint8_t*)&dwIP)[0], ((uint8_t*)&dwIP)[1], ((uint8_t*)&dwIP)[2], ((uint8_t*)&dwIP)[3]);
 
 	bzero(propArgs, sizeof(propArgs));
@@ -2801,7 +2809,7 @@ extern mStatus LNT_MapPort(mDNSIPPort priv, mDNSIPPort pub, mDNSBool tcp)
 	propArgs[5].pszValue = "1";
 	propArgs[5].pszType = "boolean";
 	propArgs[6].pszName = "NewPortMappingDescription";
-	sprintf(descr, "iC%u", mDNSVal16(pub));
+	snprintf(descr, sizeof(descr), "iC%u", mDNSVal16(pub));
 	//propArgs[6].pszValue = "V";
 	propArgs[6].pszValue = descr;
 	propArgs[6].pszType = "string";
@@ -2839,7 +2847,7 @@ static int GetMappingUnused(unsigned short eport, int protocol)
 	PHTTPResponse	resp;
 	unsigned long	ip = 0;
 
-	sprintf( szPort, "%u", eport);
+	snprintf(szPort, sizeof(szPort), "%u", eport);
 
 	bzero(&propArgs, sizeof(propArgs));
 	propArgs[0].pszName = "NewRemoteHost";
@@ -2883,7 +2891,7 @@ static int GetMappingUnused(unsigned short eport, int protocol)
 	return NA_E_SUCCESS;
 }
 
-mStatus LNT_GetPublicIP(mDNSOpaque32 *IpPtr)
+mStatus LNT_GetPublicIP(mDNSv4Addr *IpPtr)
 {
 	char			buf[1024];
 	PHTTPResponse	resp;
