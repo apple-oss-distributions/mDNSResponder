@@ -24,6 +24,9 @@
     Change History (most recent first):
 
 $Log: mDNSMacOSX.c,v $
+Revision 1.318.2.3  2007/07/18 20:35:42  cheshire
+Bracket LegacyNATInit/LegacyNATDestroy calls with "#ifdef _LEGACY_NAT_TRAVERSAL_"
+
 Revision 1.318.2.2  2006/12/14 21:38:51  cheshire
 Fix problem exposed by previous changes: kSecAccountItemAttr is not necessarily nul-terminated
 
@@ -2997,7 +3000,9 @@ mDNSlocal void SetSCPrefsBrowseDomainsFromCFArray(mDNS *m, CFArrayRef browseDoma
 
 mDNSlocal void DynDNSConfigChanged(mDNS *const m)
 	{
+#ifdef _LEGACY_NAT_TRAVERSAL_
 	static mDNSBool LegacyNATInitialized = mDNSfalse;
+#endif _LEGACY_NAT_TRAVERSAL_
 	uDNS_GlobalInfo *u = &m->uDNS_info;
 	CFDictionaryRef dict;
 	CFStringRef     key;
@@ -3150,6 +3155,7 @@ mDNSlocal void DynDNSConfigChanged(mDNS *const m)
 				memcmp(v6.ip.v6.b, u->AdvertisedV6.ip.v6.b, 16)             ||
 				r.ip.v4.NotAnInteger != u->Router.ip.v4.NotAnInteger)
 				{
+#ifdef _LEGACY_NAT_TRAVERSAL_
 				if (LegacyNATInitialized) { LegacyNATDestroy(); LegacyNATInitialized = mDNSfalse; }
 				if (r.ip.v4.NotAnInteger && IsPrivateV4Addr(&v4))
 					{
@@ -3157,6 +3163,7 @@ mDNSlocal void DynDNSConfigChanged(mDNS *const m)
 					if (err)  LogMsg("ERROR: LegacyNATInit");
 					else LegacyNATInitialized = mDNStrue;
 					}					
+#endif _LEGACY_NAT_TRAVERSAL_
 				mDNS_SetPrimaryInterfaceInfo(m, &v4, v6.ip.v6.b[0] ? &v6 : NULL, r.ip.v4.NotAnInteger ? &r : NULL);
 				}
 			}

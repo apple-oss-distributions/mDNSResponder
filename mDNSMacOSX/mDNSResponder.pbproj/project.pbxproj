@@ -26,7 +26,7 @@
 				LIBRARY_SEARCH_PATHS = "\"${OBJROOT}/mDNSResponder.build\"";
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OPTIMIZATION_CFLAGS = "-O0";
-				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=${MVERS} -D_LEGACY_NAT_TRAVERSAL_ -DMDNS_DEBUGMSGS=1";
+				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=${MVERS} -DMDNS_DEBUGMSGS=1";
 				OTHER_LDFLAGS = "-ldnsinfo";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = mDNSResponder.debug;
@@ -75,7 +75,6 @@
 				F5E11B5E04A28126019798ED,
 				FFCB6D75075D595E00B8AF62,
 				00AD62B0032D799A0CCA2C71,
-				7FC8F9D606D14E66007E879D,
 				00AD62B1032D799A0CCA2C71,
 			);
 			isa = PBXSourcesBuildPhase;
@@ -272,7 +271,6 @@
 		};
 		08FB7795FE84155DC02AAC07 = {
 			children = (
-				7FC8F9D406D14E66007E879D,
 				7F461DB5062DBF2900672BF3,
 				F525E72804AA167501F1CF4D,
 				F5E11B5A04A28126019798ED,
@@ -333,7 +331,7 @@
 				INSTALL_PATH = /usr/sbin;
 				LIBRARY_SEARCH_PATHS = "\"${OBJROOT}/mDNSResponder.build\"";
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
-				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=${MVERS} -D_LEGACY_NAT_TRAVERSAL_";
+				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=${MVERS}";
 				OTHER_LDFLAGS = "-ldnsinfo";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = mDNSResponder;
@@ -374,7 +372,6 @@
 				F5E11B5C04A28126019798ED,
 				FFCB6D74075D539900B8AF62,
 				6575FBED022EAF7200000109,
-				7FC8F9D506D14E66007E879D,
 				6575FBEE022EAF7200000109,
 			);
 			isa = PBXSourcesBuildPhase;
@@ -762,24 +759,6 @@
 		};
 		7F869687066EE02400D2A2DC = {
 			fileRef = 7F869685066EE02400D2A2DC;
-			isa = PBXBuildFile;
-			settings = {
-			};
-		};
-		7FC8F9D406D14E66007E879D = {
-			fileEncoding = 4;
-			isa = PBXFileReference;
-			path = LegacyNATTraversal.c;
-			refType = 2;
-		};
-		7FC8F9D506D14E66007E879D = {
-			fileRef = 7FC8F9D406D14E66007E879D;
-			isa = PBXBuildFile;
-			settings = {
-			};
-		};
-		7FC8F9D606D14E66007E879D = {
-			fileRef = 7FC8F9D406D14E66007E879D;
 			isa = PBXBuildFile;
 			settings = {
 			};
