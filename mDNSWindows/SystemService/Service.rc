@@ -43,7 +43,7 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "Apple Computer, Inc."
+            VALUE "CompanyName", MASTER_COMPANY_NAME
             VALUE "FileDescription", "Bonjour Service"
             VALUE "FileVersion", MASTER_PROD_VERS_STR
             VALUE "InternalName", "mDNSResponder.exe"

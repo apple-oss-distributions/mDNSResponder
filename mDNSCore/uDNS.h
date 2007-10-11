@@ -1,132 +1,177 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
 
 $Log: uDNS.h,v $
-Revision 1.32  2005/07/29 19:46:10  ksekar
-<rdar://problem/4191860> reduce polling period on failed LLQs to 15 minutes
+Revision 1.79  2007/09/20 01:13:19  cheshire
+Export CacheGroupForName so it's callable from other files
 
-Revision 1.31  2005/03/31 02:19:56  cheshire
-<rdar://problem/4021486> Fix build warnings
-Reviewed by: Scott Herscher
+Revision 1.78  2007/09/14 21:26:09  cheshire
+<rdar://problem/5482627> BTMM: Need to manually avoid port conflicts when using UPnP gateways
 
-Revision 1.30  2005/03/04 03:00:03  ksekar
-<rdar://problem/4026546> Retransmissions happen too early, causing registrations to conflict with themselves
+Revision 1.77  2007/09/12 23:03:08  cheshire
+<rdar://problem/5476978> DNSServiceNATPortMappingCreate callback not giving correct interface index
 
-Revision 1.29  2005/01/11 22:50:53  ksekar
-Fixed constant naming (was using kLLQ_DefLease for update leases)
+Revision 1.76  2007/09/12 19:22:19  cheshire
+Variable renaming in preparation for upcoming fixes e.g. priv/pub renamed to intport/extport
+Made NAT Traversal packet handlers take typed data instead of anonymous "mDNSu8 *" byte pointers
 
-Revision 1.28  2004/12/22 00:13:49  ksekar
-<rdar://problem/3873993> Change version, port, and polling interval for LLQ
+Revision 1.75  2007/08/28 23:53:21  cheshire
+Rename serviceRegistrationCallback -> ServiceRegistrationZoneDataComplete
 
-Revision 1.27  2004/11/23 04:06:50  cheshire
-Get rid of floating point constant -- in a small embedded device, bringing in all
-the floating point libraries just to halve an integer value is a bit too heavyweight.
+Revision 1.74  2007/08/24 00:15:20  cheshire
+Renamed GetAuthInfoForName() to GetAuthInfoForName_internal() to make it clear that it may only be called with the lock held
 
-Revision 1.26  2004/11/22 17:49:15  ksekar
-Changed INIT_REFRESH from fraction to decimal
+Revision 1.73  2007/08/01 03:09:22  cheshire
+<rdar://problem/5344587> BTMM: Create NAT port mapping for autotunnel port
 
-Revision 1.25  2004/11/22 17:16:20  ksekar
-<rdar://problem/3854298> Unicast services don't disappear when you disable all networking
+Revision 1.72  2007/08/01 00:04:13  cheshire
+<rdar://problem/5261696> Crash in tcpKQSocketCallback
+Half-open TCP connections were not being cancelled properly
 
-Revision 1.24  2004/11/19 04:24:08  ksekar
-<rdar://problem/3682609> Security: Enforce a "window" on one-shot wide-area queries
+Revision 1.71  2007/07/30 23:31:26  cheshire
+Code for respecting TTL received in uDNS responses should exclude LLQ-type responses
 
-Revision 1.23  2004/11/18 18:04:21  ksekar
-Add INIT_REFRESH constant
+Revision 1.70  2007/07/27 20:52:29  cheshire
+Made uDNS_recvLLQResponse() return tri-state result: LLQ_Not, LLQ_First, or LLQ_Events
 
-Revision 1.22  2004/11/15 20:09:24  ksekar
-<rdar://problem/3719050> Wide Area support for Add/Remove record
+Revision 1.69  2007/07/27 19:30:40  cheshire
+Changed mDNSQuestionCallback parameter from mDNSBool to QC_result,
+to properly reflect tri-state nature of the possible responses
 
-Revision 1.21  2004/11/11 20:14:55  ksekar
-<rdar://problem/3719574> Wide-Area registrations not deregistered on sleep
+Revision 1.68  2007/07/27 18:38:56  cheshire
+Rename "uDNS_CheckQuery" to more informative "uDNS_CheckCurrentQuestion"
 
-Revision 1.20  2004/10/16 00:16:59  cheshire
-<rdar://problem/3770558> Replace IP TTL 255 check with local subnet source address check
+Revision 1.67  2007/07/20 23:11:12  cheshire
+Fix code layout
 
-Revision 1.19  2004/09/17 01:08:49  cheshire
-Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
-  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
-  declared in that file are ONLY appropriate to single-address-space embedded applications.
-  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
+Revision 1.66  2007/07/16 23:54:48  cheshire
+<rdar://problem/5338850> Crash when removing or changing DNS keys
 
-Revision 1.18  2004/09/03 19:23:05  ksekar
-<rdar://problem/3788460>: Need retransmission mechanism for wide-area service registrations
+Revision 1.65  2007/07/16 20:14:22  vazquez
+<rdar://problem/3867231> LegacyNATTraversal: Need complete rewrite
 
-Revision 1.17  2004/09/01 03:59:29  ksekar
-<rdar://problem/3783453>: Conditionally compile out uDNS code on Windows
+Revision 1.64  2007/07/11 02:53:36  cheshire
+<rdar://problem/5303807> Register IPv6-only hostname and don't create port mappings for AutoTunnel services
+Add ServiceRecordSet parameter in GetServiceTarget
 
-Revision 1.16  2004/08/25 00:37:27  ksekar
-<rdar://problem/3774635>: Cleanup DynDNS hostname registration code
+Revision 1.63  2007/06/29 00:09:24  vazquez
+<rdar://problem/5301908> Clean up NAT state machine (necessary for 6 other fixes)
 
-Revision 1.15  2004/07/30 17:40:06  ksekar
-<rdar://problem/3739115>: TXT Record updates not available for wide-area services
+Revision 1.62  2007/05/14 23:53:00  cheshire
+Export mDNS_StartQuery_internal and mDNS_StopQuery_internal so they can be called from uDNS.c
 
-Revision 1.14  2004/07/29 19:27:15  ksekar
-NATPMP Support - minor fixes and cleanup
+Revision 1.61  2007/05/07 20:43:45  cheshire
+<rdar://problem/4241419> Reduce the number of queries and announcements
 
-Revision 1.13  2004/07/29 02:03:35  ksekar
-Delete unused #define and structure field
+Revision 1.60  2007/05/04 21:46:10  cheshire
+Get rid of uDNS_Close (synonym for uDNS_Sleep)
 
-Revision 1.12  2004/07/26 22:49:30  ksekar
-<rdar://problem/3651409>: Feature #9516: Need support for NATPMP in client
+Revision 1.59  2007/05/03 22:40:38  cheshire
+<rdar://problem/4669229> mDNSResponder ignores bogus null target in SRV record
 
-Revision 1.11  2004/06/17 01:13:11  ksekar
-<rdar://problem/3696616>: polling interval too short
+Revision 1.58  2007/05/02 22:21:33  cheshire
+<rdar://problem/5167331> RegisterRecord and RegisterService need to cancel StartGetZoneData
 
-Revision 1.10  2004/06/11 05:45:03  ksekar
-<rdar://problem/3682397>: Change SRV names for LLQ/Update port lookups
+Revision 1.57  2007/04/27 19:28:02  cheshire
+Any code that calls StartGetZoneData needs to keep a handle to the structure, so
+it can cancel it if necessary. (First noticed as a crash in Apple Remote Desktop
+-- it would start a query and then quickly cancel it, and then when
+StartGetZoneData completed, it had a dangling pointer and crashed.)
 
-Revision 1.9  2004/06/01 23:46:50  ksekar
-<rdar://problem/3675149>: DynDNS: dynamically look up LLQ/Update ports
+Revision 1.56  2007/04/25 02:14:38  cheshire
+<rdar://problem/4246187> uDNS: Identical client queries should reference a single shared core query
+Additional fixes to make LLQs work properly
 
-Revision 1.8  2004/05/28 23:42:37  ksekar
-<rdar://problem/3258021>: Feature: DNS server->client notification on record changes (#7805)
+Revision 1.55  2007/04/22 06:02:03  cheshire
+<rdar://problem/4615977> Query should immediately return failure when no server
 
-Revision 1.7  2004/05/18 23:51:25  cheshire
-Tidy up all checkin comments to use consistent "<rdar://problem/xxxxxxx>" format for bug numbers
+Revision 1.54  2007/04/04 21:48:53  cheshire
+<rdar://problem/4720694> Combine unicast authoritative answer list with multicast list
 
-Revision 1.6  2004/03/13 01:57:33  ksekar
-<rdar://problem/3192546>: DynDNS: Dynamic update of service records
+Revision 1.53  2007/03/28 15:56:37  cheshire
+<rdar://problem/5085774> Add listing of NAT port mapping and GetAddrInfo requests in SIGINFO output
 
-Revision 1.5  2004/02/21 08:56:58  bradley
-Wrap prototypes with extern "C" for C++ builds.
+Revision 1.52  2007/02/28 01:44:26  cheshire
+<rdar://problem/5027863> Byte order bugs in uDNS.c, uds_daemon.c, dnssd_clientstub.c
 
-Revision 1.4  2004/02/06 23:04:19  ksekar
-Basic Dynamic Update support via mDNS_Register (dissabled via
-UNICAST_REGISTRATION #define)
+Revision 1.51  2007/01/27 03:34:27  cheshire
+Made GetZoneData use standard queries (and cached results);
+eliminated GetZoneData_Callback() packet response handler
 
-Revision 1.3  2004/01/24 03:38:27  cheshire
-Fix minor syntactic error: Headers should use "extern" declarations, not "mDNSexport"
+Revision 1.50  2007/01/19 21:17:32  cheshire
+StartLLQPolling needs to call SetNextQueryTime() to cause query to be done in a timely fashion
 
-Revision 1.2  2004/01/23 23:23:15  ksekar
-Added TCP support for truncated unicast messages.
+Revision 1.49  2007/01/17 21:35:31  cheshire
+For clarity, rename zoneData_t field "isPrivate" to "zonePrivate"
 
-Revision 1.1  2003/12/13 03:05:27  ksekar
-<rdar://problem/3192548>: DynDNS: Unicast query of service records
+Revision 1.48  2007/01/10 22:51:57  cheshire
+<rdar://problem/4917539> Add support for one-shot private queries as well as long-lived private queries
 
+Revision 1.47  2007/01/05 08:30:43  cheshire
+Trim excessive "$Log" checkin history from before 2006
+(checkin history still available via "cvs log ..." of course)
+
+Revision 1.46  2007/01/04 01:41:47  cheshire
+Use _dns-update-tls/_dns-query-tls/_dns-llq-tls instead of creating a new "_tls" subdomain
+
+Revision 1.45  2006/12/22 20:59:49  cheshire
+<rdar://problem/4742742> Read *all* DNS keys from keychain,
+ not just key for the system-wide default registration domain
+
+Revision 1.44  2006/12/20 04:07:35  cheshire
+Remove uDNS_info substructure from AuthRecord_struct
+
+Revision 1.43  2006/12/16 01:58:32  cheshire
+<rdar://problem/4720673> uDNS: Need to start caching unicast records
+
+Revision 1.42  2006/11/30 23:07:56  herscher
+<rdar://problem/4765644> uDNS: Sync up with Lighthouse changes for Private DNS
+
+Revision 1.41  2006/11/18 05:01:30  cheshire
+Preliminary support for unifying the uDNS and mDNS code,
+including caching of uDNS answers
+
+Revision 1.40  2006/11/10 07:44:04  herscher
+<rdar://problem/4825493> Fix Daemon locking failures while toggling BTMM
+
+Revision 1.39  2006/10/20 05:35:05  herscher
+<rdar://problem/4720713> uDNS: Merge unicast active question list with multicast list.
+
+Revision 1.38  2006/09/26 01:54:02  herscher
+<rdar://problem/4245016> NAT Port Mapping API (for both NAT-PMP and UPnP Gateway Protocol)
+
+Revision 1.37  2006/09/15 21:20:15  cheshire
+Remove uDNS_info substructure from mDNS_struct
+
+Revision 1.36  2006/08/14 23:24:23  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
+Revision 1.35  2006/07/30 05:45:36  cheshire
+<rdar://problem/4304215> Eliminate MIN_UCAST_PERIODIC_EXEC
+
+Revision 1.34  2006/07/15 02:01:29  cheshire
+<rdar://problem/4472014> Add Private DNS client functionality to mDNSResponder
+Fix broken "empty string" browsing
+
+Revision 1.33  2006/07/05 22:53:28  cheshire
+<rdar://problem/4472014> Add Private DNS client functionality to mDNSResponder
  
- */
+*/
 
 #ifndef __UDNS_H_
 #define __UDNS_H_
@@ -139,27 +184,29 @@ Revision 1.1  2003/12/13 03:05:27  ksekar
 #endif
 
 #define RESTART_GOODBYE_DELAY    (6 * mDNSPlatformOneSecond) // delay after restarting LLQ before nuking previous known answers (avoids flutter if we restart before we have networking up)
-#define MIN_UCAST_PERIODIC_EXEC  (5 * mDNSPlatformOneSecond) 	
 #define INIT_UCAST_POLL_INTERVAL (3 * mDNSPlatformOneSecond) // this interval is used after send failures on network transitions
 	                                                         // which typically heal quickly, so we start agressively and exponentially back off
 #define MAX_UCAST_POLL_INTERVAL (60 * 60 * mDNSPlatformOneSecond)
+//#define MAX_UCAST_POLL_INTERVAL (1 * 60 * mDNSPlatformOneSecond)
 #define LLQ_POLL_INTERVAL       (15 * 60 * mDNSPlatformOneSecond) // Polling interval for zones w/ an advertised LLQ port (ie not static zones) if LLQ fails due to NAT, etc.
 #define RESPONSE_WINDOW (60 * mDNSPlatformOneSecond)         // require server responses within one minute of request
-#define UPDATE_PORT_NAME "_dns-update._udp."
-#define LLQ_PORT_NAME "_dns-llq._udp"
+
 #define DEFAULT_UPDATE_LEASE 7200
-	
+
+#define QuestionIntervalStep 3
+#define QuestionIntervalStep2 (QuestionIntervalStep*QuestionIntervalStep)
+#define QuestionIntervalStep3 (QuestionIntervalStep*QuestionIntervalStep*QuestionIntervalStep)
+#define InitialQuestionInterval ((mDNSPlatformOneSecond + QuestionIntervalStep-1) / QuestionIntervalStep)
+
 // Entry points into unicast-specific routines
 
-extern mStatus uDNS_StartQuery(mDNS *const m, DNSQuestion *const question);
-extern mDNSBool uDNS_IsActiveQuery(DNSQuestion *const question, uDNS_GlobalInfo *u);  // returns true if OK to call StopQuery
-extern mStatus uDNS_StopQuery(mDNS *const m, DNSQuestion *const question);
-	
-extern void uDNS_Init(mDNS *const m);
+extern void startLLQHandshakeCallback(mDNS *const m, mStatus err, const ZoneData *zoneInfo);
+
+extern void    uDNS_StopLongLivedQuery(mDNS *const m, DNSQuestion *const question);
+
 extern void uDNS_Sleep(mDNS *const m);
 extern void uDNS_Wake(mDNS *const m);
-#define uDNS_Close uDNS_Sleep
-	
+
 // uDNS_UpdateRecord
 // following fields must be set, and the update validated, upon entry.
 // rr->NewRData
@@ -168,24 +215,56 @@ extern void uDNS_Wake(mDNS *const m);
 
 extern mStatus uDNS_AddRecordToService(mDNS *const m, ServiceRecordSet *sr, ExtraResourceRecord *extra);
 extern mStatus uDNS_UpdateRecord(mDNS *m, AuthRecord *rr);
-	
-extern mStatus uDNS_RegisterRecord(mDNS *const m, AuthRecord *const rr);
+
+extern void SetNextQueryTime(mDNS *const m, const DNSQuestion *const q);
+extern CacheGroup *CacheGroupForName(const mDNS *const m, const mDNSu32 slot, const mDNSu32 namehash, const domainname *const name);
+extern mStatus mDNS_Register_internal(mDNS *const m, AuthRecord *const rr);
+// mDNS_Dereg_normal is used for most calls to mDNS_Deregister_internal
+// mDNS_Dereg_conflict is used to indicate that this record is being forcibly deregistered because of a conflict
+// mDNS_Dereg_repeat is used when cleaning up, for records that may have already been forcibly deregistered
+typedef enum { mDNS_Dereg_normal, mDNS_Dereg_conflict, mDNS_Dereg_repeat } mDNS_Dereg_type;
+extern mStatus mDNS_Deregister_internal(mDNS *const m, AuthRecord *const rr, mDNS_Dereg_type drt);
+extern mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const question);
+extern mStatus mDNS_StopQuery_internal(mDNS *const m, DNSQuestion *const question);
+extern mStatus mDNS_StartNATOperation_internal(mDNS *const m, NATTraversalInfo *traversal);
+
+extern void RecordRegistrationCallback(mDNS *const m, mStatus err, const ZoneData *zoneData);
+extern void GetZoneData_QuestionCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord);
 extern mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr);
 
-extern mStatus uDNS_RegisterService(mDNS *const m, ServiceRecordSet *srs);
+extern void ServiceRegistrationZoneDataComplete(mDNS *const m, mStatus err, const ZoneData *result);
+extern const domainname *GetServiceTarget(mDNS *m, ServiceRecordSet *srs);
 extern mStatus uDNS_DeregisterService(mDNS *const m, ServiceRecordSet *srs);
+
+extern void uDNS_CheckCurrentQuestion(mDNS *const m);
 
 // integer fields of msg header must be in HOST byte order before calling this routine
 extern void uDNS_ReceiveMsg(mDNS *const m, DNSMessage *const msg, const mDNSu8 *const end,
-	const mDNSAddr *const srcaddr, const mDNSIPPort srcport, const mDNSAddr *const dstaddr, 
-	const mDNSIPPort dstport, const mDNSInterfaceID InterfaceID);
+	const mDNSAddr *const srcaddr, const mDNSIPPort srcport);
 
-extern void uDNS_ReceiveNATMap(mDNS *m, mDNSu8 *pkt, mDNSu16 len);
-	
 // returns time of next scheduled event
 extern void uDNS_Execute(mDNS *const m);
 
-	
+extern mStatus         uDNS_SetupDNSConfig(mDNS *const m);
+extern mStatus         uDNS_RegisterSearchDomains(mDNS *const m);
+
+typedef enum
+	{
+	uDNS_LLQ_Not = 0,	// Normal uDNS answer: Flush any stale records from cache, and respect record TTL
+	uDNS_LLQ_Poll,		// LLQ Poll: Flush any stale records from cache, but assume TTL is 2 x poll interval
+	uDNS_LLQ_Setup,		// LLQ Initial answer packet: Flush any stale records from cache; assume TTL is 2 x LLQ refresh interval
+	uDNS_LLQ_Events		// LLQ event packet: don't flush cache; assume TTL is 2 x LLQ refresh interval
+	} uDNS_LLQType;
+
+extern uDNS_LLQType    uDNS_recvLLQResponse(mDNS *const m, const DNSMessage *const msg, const mDNSu8 *const end, const mDNSAddr *const srcaddr, const mDNSIPPort srcport);
+extern DomainAuthInfo *GetAuthInfoForName_internal(mDNS *m, const domainname *const name);
+extern void DisposeTCPConn(struct tcpInfo_t *tcp);
+
+// NAT traversal
+extern void	uDNS_ReceiveNATPMPPacket(mDNS *m, const mDNSInterfaceID InterfaceID, mDNSu8 *pkt, mDNSu16 len);	// Called for each received NAT-PMP packet
+extern void	natTraversalHandleAddressReply(mDNS *const m, mDNSu16 err, mDNSv4Addr ExtAddr);
+extern void	natTraversalHandlePortMapReply(mDNS *const m, NATTraversalInfo *n, const mDNSInterfaceID InterfaceID, mDNSu16 err, mDNSIPPort extport, mDNSu32 lease);
+
 #ifdef	__cplusplus
 	}
 #endif

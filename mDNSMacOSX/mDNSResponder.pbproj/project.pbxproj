@@ -22,11 +22,11 @@
 			buildSettings = {
 				FRAMEWORK_SEARCH_PATHS = "";
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				HEADER_SEARCH_PATHS = "../mDNSShared \"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers\" \"${OBJROOT}/mDNSResponder.build\"";
-				LIBRARY_SEARCH_PATHS = "\"${OBJROOT}/mDNSResponder.build\"";
+				HEADER_SEARCH_PATHS = "../mDNSShared \"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers\" \"${CONFIGURATION_TEMP_DIR}\"";
+				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OPTIMIZATION_CFLAGS = "-O0";
-				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=${MVERS} -D_LEGACY_NAT_TRAVERSAL_ -DMDNS_DEBUGMSGS=1";
+				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -DmDNSResponderVersion=${MVERS} -DAPPLE_OSX_mDNSResponder=1 -D_LEGACY_NAT_TRAVERSAL_ -DMDNS_DEBUGMSGS=1";
 				OTHER_LDFLAGS = "-ldnsinfo";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = mDNSResponder.debug;
@@ -199,6 +199,8 @@
 			buildRules = (
 			);
 			buildSettings = {
+				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
+				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
 				MVERS = "\"mDNSResponder (Engineering Build)\"";
 			};
 			isa = PBXBuildStyle;
@@ -293,8 +295,8 @@
 				7F18A9F60587CEF6001880B3,
 				7F18A9F70587CEF6001880B3,
 				FF25794606C9A8BF00376F7B,
-				FF25794C06C9A9D500376F7B,
-				FF25794F06C9AA8B00376F7B,
+				FF13FFEA0A5DA44A00897C81,
+				FF13FFEC0A5DA45500897C81,
 			);
 			isa = PBXGroup;
 			name = "mDNS Server Sources";
@@ -329,11 +331,11 @@
 			buildSettings = {
 				FRAMEWORK_SEARCH_PATHS = "";
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				HEADER_SEARCH_PATHS = "../mDNSShared \"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers\" \"${OBJROOT}/mDNSResponder.build\"";
+				HEADER_SEARCH_PATHS = "../mDNSShared \"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers\" \"${CONFIGURATION_TEMP_DIR}\"";
 				INSTALL_PATH = /usr/sbin;
-				LIBRARY_SEARCH_PATHS = "\"${OBJROOT}/mDNSResponder.build\"";
+				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
-				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=${MVERS} -D_LEGACY_NAT_TRAVERSAL_";
+				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -DmDNSResponderVersion=${MVERS} -DAPPLE_OSX_mDNSResponder=1 -D_LEGACY_NAT_TRAVERSAL_ -D__MigTypeCheck=1";
 				OTHER_LDFLAGS = "-ldnsinfo";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = mDNSResponder;
@@ -623,7 +625,7 @@
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
 				INSTALL_PATH = /usr/bin;
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
-				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=${MVERS}";
+				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = mDNS;
@@ -809,6 +811,8 @@
 				DB2CC44D0662DD1100335AB3,
 				DB2CC44E0662DD1100335AB3,
 				DB2CC44F0662DD1100335AB3,
+				FF2C5FB00A48B8680066DA11,
+				FF2C5FB20A48B86E0066DA11,
 			);
 			isa = PBXGroup;
 			name = "Java Support";
@@ -920,6 +924,8 @@
 				DB2CC45F0662DE4C00335AB3,
 				DB2CC4600662DE4C00335AB3,
 				DB2CC4610662DE4D00335AB3,
+				FF2C5FB10A48B8680066DA11,
+				FF2C5FB30A48B86E0066DA11,
 			);
 			isa = PBXSourcesBuildPhase;
 			runOnlyForDeploymentPostprocessing = 0;
@@ -954,7 +960,8 @@
 				JAVA_ARCHIVE_COMPRESSION = YES;
 				JAVA_ARCHIVE_TYPE = JAR;
 				JAVA_COMPILER_DEBUGGING_SYMBOLS = NO;
-				JAVA_COMPILER_TARGET_VM_VERSION = 1.2;
+				JAVA_COMPILER_SOURCE_VERSION = 1.4;
+				JAVA_COMPILER_TARGET_VM_VERSION = 1.4;
 				JAVA_SOURCE_SUBDIR = .;
 				LIBRARY_STYLE = STATIC;
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
@@ -966,6 +973,7 @@
 				PURE_JAVA = YES;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
 				WARNING_CFLAGS = "-Wmost -Wno-four-char-constants -Wno-unknown-pragmas";
 			};
 			comments = "Multiplatform .jar file that implements Java interface to DNS-SD";
@@ -988,7 +996,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -d ${OBJROOT}/mDNSResponder.build/${CONFIGURATION} ]; then BUILD_DIR=${OBJROOT}/mDNSResponder.build/${CONFIGURATION}; else BUILD_DIR=${OBJROOT}/mDNSResponder.build; fi\njavah -force -classpath ${BUILD_DIR}/dns_sd.jar.build/JavaClasses/ -o ${BUILD_DIR}/dns_sd.jar.build/DNSSD.java.h com.apple.dnssd.AppleDNSSD com.apple.dnssd.AppleBrowser com.apple.dnssd.AppleResolver com.apple.dnssd.AppleRegistration com.apple.dnssd.AppleQuery com.apple.dnssd.AppleDomainEnum com.apple.dnssd.AppleService";
+			shellScript = "javah -force -J-Xbootclasspath/p:${CONFIGURATION_TEMP_DIR}/dns_sd.jar.build/JavaClasses -o ${CONFIGURATION_TEMP_DIR}/dns_sd.jar.build/DNSSD.java.h com.apple.dnssd.AppleDNSSD com.apple.dnssd.AppleBrowser com.apple.dnssd.AppleResolver com.apple.dnssd.AppleRegistration com.apple.dnssd.AppleQuery com.apple.dnssd.AppleDomainEnum com.apple.dnssd.AppleService";
 		};
 		DB2CC4560662DE4500335AB3 = {
 			fileRef = DB2CC4430662DD1100335AB3;
@@ -1100,10 +1108,9 @@
 				DB2CC4650662DF5C00335AB3,
 			);
 			buildSettings = {
-				DEBUGGING_SYMBOLS = NO;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
-				HEADER_SEARCH_PATHS = "../mDNSShared \"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/A/Headers\" \"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/1.3.1/Headers\" \"${OBJROOT}/mDNSResponder.build/dns_sd.jar.build\" \"${OBJROOT}/mDNSResponder.build/${CONFIGURATION}/dns_sd.jar.build\"";
+				HEADER_SEARCH_PATHS = "../mDNSShared \"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/A/Headers\" \"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/1.3.1/Headers\" \"${CONFIGURATION_TEMP_DIR}/dns_sd.jar.build\"";
 				INSTALL_PATH = /usr/lib/java;
 				LIBRARY_STYLE = DYNAMIC;
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
@@ -1113,6 +1120,7 @@
 				PRODUCT_NAME = libjdns_sd.jnilib;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
 				WARNING_CFLAGS = "-Wmost -Wno-four-char-constants -Wno-unknown-pragmas";
 			};
 			comments = "Platform-specific JNI library that bridges dns_sd.jar to <dns_sd.h>.";
@@ -1300,6 +1308,48 @@
 			path = ../mDNSShared/mDNS.1;
 			refType = 2;
 		};
+		FF13FFE90A5DA40200897C81 = {
+			fileRef = 6575FBEB022EAF7200000109;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF13FFEA0A5DA44A00897C81 = {
+			fileEncoding = 4;
+			isa = PBXFileReference;
+			name = dnsextd_lexer.l;
+			path = ../mDNSShared/dnsextd_lexer.l;
+			refType = 2;
+		};
+		FF13FFEB0A5DA44A00897C81 = {
+			fileRef = FF13FFEA0A5DA44A00897C81;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF13FFEC0A5DA45500897C81 = {
+			fileEncoding = 4;
+			isa = PBXFileReference;
+			name = dnsextd_parser.y;
+			path = ../mDNSShared/dnsextd_parser.y;
+			refType = 2;
+		};
+		FF13FFED0A5DA45500897C81 = {
+			fileRef = FF13FFEC0A5DA45500897C81;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF13FFEE0A5DA52700897C81 = {
+			isa = PBXTargetDependency;
+			target = 08FB779FFE84155DC02AAC07;
+		};
+		FF13FFEF0A5DA6FD00897C81 = {
+			fileRef = FFCB6D73075D539900B8AF62;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
 		FF16238F07023BD2001AB7D7 = {
 			isa = PBXTargetDependency;
 			target = FF1C919207021C84001048AB;
@@ -1316,7 +1366,7 @@
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
 				INSTALL_PATH = /usr/bin;
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
-				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=${MVERS} -I../mDNSShared";
+				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -I../mDNSShared";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = "dns-sd";
@@ -1414,20 +1464,24 @@
 			buildSettings = {
 				FRAMEWORK_SEARCH_PATHS = "";
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				HEADER_SEARCH_PATHS = "\"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers\"";
+				HEADER_SEARCH_PATHS = "\"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers\" \"${CONFIGURATION_TEMP_DIR}\"";
 				INSTALL_PATH = /usr/sbin;
-				LIBRARY_SEARCH_PATHS = "";
+				LEX = /usr/bin/flex;
+				LEXFLAGS = "-i";
+				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
-				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic -D__MACOSX__ -DmDNSResponderVersion=${MVERS}";
-				OTHER_LDFLAGS = "";
+				OTHER_CFLAGS = "-no-cpp-precomp -mdynamic-no-pic";
+				OTHER_LDFLAGS = "-ldnsinfo";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = dnsextd;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
 				STRIPFLAGS = "-S";
 				WARNING_CFLAGS = "-W -Wall -Wmissing-prototypes -Wno-four-char-constants -Wno-unknown-pragmas";
+				YACC = "/usr/bin/bison -y";
 			};
 			dependencies = (
+				FF13FFEE0A5DA52700897C81,
 			);
 			isa = PBXToolTarget;
 			name = dnsextd;
@@ -1439,7 +1493,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				FF25792B06C9A70800376F7B,
-				FF25792C06C9A70800376F7B,
 			);
 			isa = PBXHeadersBuildPhase;
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1450,23 +1503,18 @@
 			settings = {
 			};
 		};
-		FF25792C06C9A70800376F7B = {
-			fileRef = F5E11B5B04A28126019798ED;
-			isa = PBXBuildFile;
-			settings = {
-			};
-		};
 		FF25792D06C9A70800376F7B = {
 			buildActionMask = 2147483647;
 			files = (
 				FF25793606C9A70800376F7B,
 				FF25793806C9A70800376F7B,
 				FF25794706C9A8BF00376F7B,
-				FF25794906C9A97400376F7B,
 				FF25794A06C9A98700376F7B,
-				FF25794D06C9A9D500376F7B,
 				FF25794E06C9AA3000376F7B,
-				FF25795006C9AA8B00376F7B,
+				FF13FFE90A5DA40200897C81,
+				FF13FFEB0A5DA44A00897C81,
+				FF13FFED0A5DA45500897C81,
+				FF13FFEF0A5DA6FD00897C81,
 			);
 			isa = PBXSourcesBuildPhase;
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1544,17 +1592,11 @@
 			fileEncoding = 4;
 			isa = PBXFileReference;
 			name = dnsextd.c;
-			path = ../mDNSPosix/dnsextd.c;
+			path = ../mDNSShared/dnsextd.c;
 			refType = 2;
 		};
 		FF25794706C9A8BF00376F7B = {
 			fileRef = FF25794606C9A8BF00376F7B;
-			isa = PBXBuildFile;
-			settings = {
-			};
-		};
-		FF25794906C9A97400376F7B = {
-			fileRef = 7F18A9F70587CEF6001880B3;
 			isa = PBXBuildFile;
 			settings = {
 			};
@@ -1565,34 +1607,8 @@
 			settings = {
 			};
 		};
-		FF25794C06C9A9D500376F7B = {
-			fileEncoding = 4;
-			isa = PBXFileReference;
-			name = mDNSPosix.c;
-			path = ../mDNSPosix/mDNSPosix.c;
-			refType = 2;
-		};
-		FF25794D06C9A9D500376F7B = {
-			fileRef = FF25794C06C9A9D500376F7B;
-			isa = PBXBuildFile;
-			settings = {
-			};
-		};
 		FF25794E06C9AA3000376F7B = {
 			fileRef = DBAAFE2C057E8F660085CAD0;
-			isa = PBXBuildFile;
-			settings = {
-			};
-		};
-		FF25794F06C9AA8B00376F7B = {
-			fileEncoding = 4;
-			isa = PBXFileReference;
-			name = mDNSUNP.c;
-			path = ../mDNSPosix/mDNSUNP.c;
-			refType = 2;
-		};
-		FF25795006C9AA8B00376F7B = {
-			fileRef = FF25794F06C9AA8B00376F7B;
 			isa = PBXBuildFile;
 			settings = {
 			};
@@ -1676,6 +1692,7 @@
 				PREBINDING = NO;
 				PRODUCT_NAME = Bonjour;
 				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
 				WARNING_CFLAGS = "-Wmost -Wno-four-char-constants -Wno-unknown-pragmas";
 				WRAPPER_EXTENSION = prefPane;
 			};
@@ -1981,6 +1998,32 @@
 			isa = PBXTargetDependency;
 			target = FF2609E107B440DD00CE10E5;
 		};
+		FF2C5FB00A48B8680066DA11 = {
+			fileEncoding = 4;
+			isa = PBXFileReference;
+			name = DNSSDRecordRegistrar.java;
+			path = ../mDNSShared/Java/DNSSDRecordRegistrar.java;
+			refType = 2;
+		};
+		FF2C5FB10A48B8680066DA11 = {
+			fileRef = FF2C5FB00A48B8680066DA11;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
+		FF2C5FB20A48B86E0066DA11 = {
+			fileEncoding = 4;
+			isa = PBXFileReference;
+			name = RegisterRecordListener.java;
+			path = ../mDNSShared/Java/RegisterRecordListener.java;
+			refType = 2;
+		};
+		FF2C5FB30A48B86E0066DA11 = {
+			fileRef = FF2C5FB20A48B86E0066DA11;
+			isa = PBXBuildFile;
+			settings = {
+			};
+		};
 		FF354EB108516C63007C00E1 = {
 			fileEncoding = 4;
 			isa = PBXExecutableFileReference;
@@ -2005,7 +2048,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -e /usr/local/include/dnsinfo.h ]\nthen\nrm -f \"${OBJROOT}/mDNSResponder.build/dnsinfo.h\"\nrm -f \"${OBJROOT}/mDNSResponder.build/libdnsinfo.a\"\nelse\necho \"#define MDNS_NO_DNSINFO 1\" > ${OBJROOT}/mDNSResponder.build/dnsinfo.h\ntouch ${OBJROOT}/mDNSResponder.build/empty.c\ncc ${OBJROOT}/mDNSResponder.build/empty.c -c -o \"${OBJROOT}/mDNSResponder.build/libdnsinfo.a\"\nrm -f ${OBJROOT}/mDNSResponder.build/empty.c\nfi";
+			shellScript = "if [ -e /usr/local/include/dnsinfo.h ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/dnsinfo.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nelse\necho \"#define MDNS_NO_DNSINFO 1\" > ${CONFIGURATION_TEMP_DIR}/dnsinfo.h\ntouch ${CONFIGURATION_TEMP_DIR}/empty.c\ncc ${CONFIGURATION_TEMP_DIR}/empty.c -c -o \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nrm -f ${CONFIGURATION_TEMP_DIR}/empty.c\nfi";
 		};
 		FF485D5105632E0000130380 = {
 			fileEncoding = 4;
@@ -2087,7 +2130,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "rm -f ${BUILD_DIR}/${CONFIGURATION}/dns_sd";
+			shellScript = "rm -f ${CONFIGURATION_BUILD_DIR}/dns_sd";
 		};
 		FFD41DDF06641BBB00F0C438 = {
 			isa = PBXTargetDependency;
@@ -2154,7 +2197,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -e /usr/local/include/dnsinfo.h ]\nthen\nrm -f \"${OBJROOT}/mDNSResponder.build/dnsinfo.h\"\nrm -f \"${OBJROOT}/mDNSResponder.build/libdnsinfo.a\"\nelse\necho \"#define MDNS_NO_DNSINFO 1\" > ${OBJROOT}/mDNSResponder.build/dnsinfo.h\ntouch ${OBJROOT}/mDNSResponder.build/empty.c\ncc ${OBJROOT}/mDNSResponder.build/empty.c -c -o \"${OBJROOT}/mDNSResponder.build/libdnsinfo.a\"\nrm -f ${OBJROOT}/mDNSResponder.build/empty.c\nfi";
+			shellScript = "if [ -e /usr/local/include/dnsinfo.h ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/dnsinfo.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nelse\necho \"#define MDNS_NO_DNSINFO 1\" > ${CONFIGURATION_TEMP_DIR}/dnsinfo.h\ntouch ${CONFIGURATION_TEMP_DIR}/empty.c\ncc ${CONFIGURATION_TEMP_DIR}/empty.c -c -o \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nrm -f ${CONFIGURATION_TEMP_DIR}/empty.c\nfi";
 		};
 		FFFB0DA407B43BED00B88D48 = {
 			children = (
@@ -2212,6 +2255,7 @@
 				FFFB0DA807B43C9100B88D48,
 			);
 			buildSettings = {
+				INSTALL_PATH = "/Library/Application Support/Bonjour";
 				MACOSX_DEPLOYMENT_TARGET = 10.2;
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "";
@@ -2219,13 +2263,14 @@
 				PRODUCT_NAME = ddnswriteconfig;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
+				STRIPFLAGS = "-S";
 				WARNING_CFLAGS = "-Wmost -Wno-four-char-constants -Wno-unknown-pragmas";
 			};
 			dependencies = (
 			);
 			isa = PBXToolTarget;
 			name = ddnswriteconfig;
-			productInstallPath = /usr/local/bin;
+			productInstallPath = "/Library/Application Support/Bonjour";
 			productName = ddnswriteconfig;
 			productReference = FFFB0DAA07B43C9100B88D48;
 		};

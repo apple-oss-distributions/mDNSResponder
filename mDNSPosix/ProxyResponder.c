@@ -2,28 +2,46 @@
  *
  * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
 
 $Log: ProxyResponder.c,v $
+Revision 1.44  2007/04/22 20:16:25  cheshire
+Fix compiler errors (const parameter declarations)
+
+Revision 1.43  2007/04/16 20:49:39  cheshire
+Fix compile errors for mDNSPosix build
+
+Revision 1.42  2007/03/06 22:45:53  cheshire
+
+<rdar://problem/4138615> argv buffer overflow issues
+
+Revision 1.41  2007/02/28 01:51:22  cheshire
+Added comment about reverse-order IP address
+
+Revision 1.40  2007/01/05 04:32:13  cheshire
+Change "(domainname *)" cast to "(const domainname *)"
+
+Revision 1.39  2006/08/14 23:24:46  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
+Revision 1.38  2006/06/12 18:22:42  cheshire
+<rdar://problem/4580067> mDNSResponder building warnings under Red Hat 64-bit (LP64) Linux
+
+Revision 1.37  2006/02/23 23:38:43  cheshire
+<rdar://problem/4427969> On FreeBSD 4 "arpa/inet.h" requires "netinet/in.h" be included first
+
 Revision 1.36  2005/08/04 03:12:47  mkrochma
 <rdar://problem/4199236> Register reverse PTR record using multicast
 
@@ -118,8 +136,8 @@ Add "$Log" header
 #include <unistd.h>				// For select()
 #include <signal.h>				// For SIGINT, SIGTERM
 #include <errno.h>				// For errno, EINTR
-#include <arpa/inet.h>			// For inet_addr()
 #include <netinet/in.h>			// For INADDR_NONE
+#include <arpa/inet.h>			// For inet_addr()
 #include <netdb.h>				// For gethostbyname()
 
 #include "mDNSEmbeddedAPI.h"	// Defines the interface to the client layer above
@@ -135,6 +153,7 @@ Add "$Log" header
 // Globals
 static mDNS mDNSStorage;       // mDNS core uses this to store its globals
 static mDNS_PlatformSupport PlatformStorage;  // Stores this platform's globals
+mDNSexport const char ProgramName[] = "mDNSProxyResponderPosix";
 
 //*************************************************************************************************************
 // Proxy Host Registration
@@ -168,12 +187,13 @@ mDNSlocal mStatus mDNS_RegisterProxyHost(mDNS *m, ProxyHost *p)
 	mDNS_SetupResourceRecord(&p->RR_A,   mDNSNULL, mDNSInterface_Any, kDNSType_A,   60, kDNSRecordTypeUnique,      HostNameCallback, p);
 	mDNS_SetupResourceRecord(&p->RR_PTR, mDNSNULL, mDNSInterface_Any, kDNSType_PTR, 60, kDNSRecordTypeKnownUnique, HostNameCallback, p);
 
-	p->RR_A.resrec.name->c[0] = 0;
-	AppendDomainLabel(p->RR_A.resrec.name, &p->hostlabel);
-	AppendLiteralLabelString(p->RR_A.resrec.name, "local");
+	p->RR_A.namestorage.c[0] = 0;
+	AppendDomainLabel(&p->RR_A.namestorage, &p->hostlabel);
+	AppendLiteralLabelString(&p->RR_A.namestorage, "local");
 
+	// Note: This is reverse order compared to a normal dotted-decimal IP address, so we can't use our customary "%.4a" format code
 	mDNS_snprintf(buffer, sizeof(buffer), "%d.%d.%d.%d.in-addr.arpa.", p->ip.b[3], p->ip.b[2], p->ip.b[1], p->ip.b[0]);
-	MakeDomainNameFromDNSNameString(p->RR_PTR.resrec.name, buffer);
+	MakeDomainNameFromDNSNameString(&p->RR_PTR.namestorage, buffer);
 	p->RR_PTR.ForceMCast = mDNStrue; // This PTR points to our dot-local name, so don't ever try to write it into a uDNS server
 
 	p->RR_A.  resrec.rdata->u.ipv4 = p->ip;
@@ -238,6 +258,7 @@ mDNSlocal void RegisterService(mDNS *m, ServiceRecordSet *recordset,
 	while (argc)
 		{
 		int len = strlen(argv[0]);
+		if (len > 255 || bptr + 1 + len >= txtbuffer + sizeof(txtbuffer)) break;
 		printf("STR: %s\n", argv[0]);
 		bptr[0] = len;
 		strcpy((char*)(bptr+1), argv[0]);
@@ -268,7 +289,7 @@ mDNSlocal void RegisterService(mDNS *m, ServiceRecordSet *recordset,
 
 mDNSlocal void NoSuchServiceCallback(mDNS *const m, AuthRecord *const rr, mStatus result)
 	{
-	domainname *proxyhostname = (domainname *)rr->RecordContext;
+	const domainname *proxyhostname = (const domainname *)rr->RecordContext;
 	switch (result)
 		{
 		case mStatus_NoError:      debugf("Callback: %##s Name Registered",    rr->resrec.name->c); break;
@@ -326,7 +347,7 @@ mDNSexport int main(int argc, char **argv)
 		mDNS_Init_NoCache, mDNS_Init_ZeroCacheSize,
 		mDNS_Init_DontAdvertiseLocalAddresses,
 		mDNS_Init_NoInitCallback, mDNS_Init_NoInitCallbackContext);
-	if (status) { fprintf(stderr, "Daemon start: mDNS_Init failed %ld\n", status); return(status); }
+	if (status) { fprintf(stderr, "Daemon start: mDNS_Init failed %d\n", (int)status); return(status); }
 
 	mDNSPosixListenForSignalInEventLoop(SIGINT);
 	mDNSPosixListenForSignalInEventLoop(SIGTERM);

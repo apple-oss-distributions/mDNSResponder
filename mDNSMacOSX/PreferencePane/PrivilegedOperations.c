@@ -41,7 +41,20 @@
     ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
     Change History (most recent first):
+
 $Log: PrivilegedOperations.c,v $
+Revision 1.7  2007/02/09 00:39:06  cheshire
+Fix compile warnings
+
+Revision 1.6  2006/08/14 23:15:47  cheshire
+Tidy up Change History comment
+
+Revision 1.5  2006/06/10 02:07:11  mkrochma
+Whoa.  Make sure code compiles before checking it in.
+
+Revision 1.4  2006/05/27 02:32:38  mkrochma
+Wait for installer script to exit before returning result
+
 Revision 1.3  2005/06/04 04:50:00  cheshire
 <rdar://problem/4138070> ddnswriteconfig (Bonjour PreferencePane) vulnerability
 Use installtool instead of requiring ddnswriteconfig to self-install
@@ -68,7 +81,7 @@ Add Preference Pane to facilitate testing of DDNS & wide-area features
 
 Boolean	gToolApproved = false;
 
-pid_t	execTool(const char *args[])
+static pid_t	execTool(const char *args[])
 // fork/exec and return new pid
 {
 	pid_t	child;
@@ -132,8 +145,18 @@ OSStatus EnsureToolInstalled(void)
 		{
 			char *installerargs[] = { toolSourcePath, NULL };
 			err = AuthorizationExecuteWithPrivileges(authRef, toolInstallerPath, 0, installerargs, (FILE**) NULL);
-			if (err == noErr)
-				gToolApproved = true;
+			if (err == noErr) {
+				int status;
+				int pid = wait(&status);
+				if (pid > 0 && WIFEXITED(status)) {
+					err = WEXITSTATUS(status);
+					if (err == noErr) {
+						gToolApproved = true;
+					}
+				} else {
+					err = -1;
+				}
+			}
 			(void) AuthorizationFree(authRef, kAuthorizationFlagDestroyRights);
 		}
 	}

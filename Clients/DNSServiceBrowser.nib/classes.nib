@@ -16,6 +16,7 @@
             OUTLETS = {
                 domainField = id; 
                 hostField = id; 
+                interfaceField = id; 
                 ip6AddressField = id; 
                 ipAddressField = id; 
                 nameColumn = id; 

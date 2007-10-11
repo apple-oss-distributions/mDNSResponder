@@ -2,24 +2,17 @@
  *
  * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
  *
  * Formatting notes:
  * This code follows the "Whitesmiths style" C indentation rules. Plenty of discussion
@@ -37,243 +30,56 @@
     Change History (most recent first):
 
 $Log: NetMonitor.c,v $
-Revision 1.74  2005/12/02 20:08:39  cheshire
-Update "No HINFO" message
+Revision 1.89  2007/05/17 19:12:42  cheshire
+Tidy up code layout
 
-Revision 1.73  2005/12/02 19:19:53  cheshire
-<rdar://problem/4331590> Include interface index and name in mDNSNetMonitor output
+Revision 1.88  2007/04/22 20:16:25  cheshire
+Fix compiler errors (const parameter declarations)
 
-Revision 1.72  2005/11/07 01:47:45  cheshire
-<rdar://problem/4331590> Include interface index in mDNSNetMonitor output
+Revision 1.87  2007/04/16 20:49:39  cheshire
+Fix compile errors for mDNSPosix build
 
-Revision 1.71  2004/12/16 20:17:11  cheshire
-<rdar://problem/3324626> Cache memory management improvements
+Revision 1.86  2007/03/22 18:31:48  cheshire
+Put dst parameter first in mDNSPlatformStrCopy/mDNSPlatformMemCopy, like conventional Posix strcpy/memcpy
 
-Revision 1.70  2004/12/04 02:13:20  cheshire
-Pass proper record type in GetLargeResourceRecord() calls
+Revision 1.85  2007/02/28 01:51:22  cheshire
+Added comment about reverse-order IP address
 
-Revision 1.69  2004/11/30 22:37:01  cheshire
-Update copyright dates and add "Mode: C; tab-width: 4" headers
+Revision 1.84  2007/01/05 08:30:52  cheshire
+Trim excessive "$Log" checkin history from before 2006
+(checkin history still available via "cvs log ..." of course)
 
-Revision 1.68  2004/10/23 01:16:01  cheshire
-<rdar://problem/3851677> uDNS operations not always reliable on multi-homed hosts
+Revision 1.83  2006/11/18 05:01:32  cheshire
+Preliminary support for unifying the uDNS and mDNS code,
+including caching of uDNS answers
 
-Revision 1.67  2004/10/16 00:17:00  cheshire
-<rdar://problem/3770558> Replace IP TTL 255 check with local subnet source address check
+Revision 1.82  2006/08/14 23:24:46  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
-Revision 1.66  2004/09/17 00:31:52  cheshire
-For consistency with ipv6, renamed rdata field 'ip' to 'ipv4'
+Revision 1.81  2006/07/06 00:01:44  cheshire
+<rdar://problem/4472014> Add Private DNS client functionality to mDNSResponder
+Update mDNSSendDNSMessage() to use uDNS_TCPSocket type instead of "int"
 
-Revision 1.65  2004/09/16 01:58:22  cheshire
-Fix compiler warnings
+Revision 1.80  2006/06/12 18:22:42  cheshire
+<rdar://problem/4580067> mDNSResponder building warnings under Red Hat 64-bit (LP64) Linux
 
-Revision 1.64  2004/06/15 02:39:47  cheshire
-When displaying error message, only show command name, not entire path
+Revision 1.79  2006/04/26 20:48:33  cheshire
+Make final count of unique source addresses show IPv4 and IPv6 counts separately
 
-Revision 1.63  2004/05/18 23:51:26  cheshire
-Tidy up all checkin comments to use consistent "<rdar://problem/xxxxxxx>" format for bug numbers
+Revision 1.78  2006/04/25 00:42:24  cheshire
+Add ability to specify a single interface index to capture on,
+e.g. typically "-i 4" for Ethernet and "-i 5" for AirPort
 
-Revision 1.62  2004/03/16 18:24:25  cheshire
-If packet destination was not multicast, then display it
+Revision 1.77  2006/03/02 21:50:45  cheshire
+Removed strange backslash at the end of a line
 
-Revision 1.61  2004/02/20 09:36:46  cheshire
-Also show TTL in packet header, if it's not 255
+Revision 1.76  2006/02/23 23:38:43  cheshire
+<rdar://problem/4427969> On FreeBSD 4 "arpa/inet.h" requires "netinet/in.h" be included first
 
-Revision 1.60  2004/02/07 02:11:35  cheshire
-Make mDNSNetMonitor smarter about sending targeted unicast HINFO queries
+Revision 1.75  2006/01/05 22:33:58  cheshire
+Use IFNAMSIZ (more portable) instead of IF_NAMESIZE
 
-Revision 1.59  2004/02/03 21:42:55  cheshire
-Add constants kReportTopServices and kReportTopHosts
-
-Revision 1.58  2004/01/27 20:15:23  cheshire
-<rdar://problem/3541288>: Time to prune obsolete code for listening on port 53
-
-Revision 1.57  2004/01/24 23:59:42  cheshire
-Change to use mDNSVal16() instead of shifting and ORing
-
-Revision 1.56  2004/01/24 05:25:34  cheshire
-mDNSNetMonitor now uses the new ability to send unicast queries so that
-it causes less perturbation of the network traffic it's monitoring.
-
-Revision 1.55  2003/12/23 00:21:31  cheshire
-Send HINFO queries to determine the mDNSResponder version of each host
-
-Revision 1.54  2003/12/17 01:06:39  cheshire
-Also show host name along with HINFO data
-
-Revision 1.53  2003/12/17 00:51:22  cheshire
-Changed mDNSNetMonitor and mDNSIdentify to link the object files
-instead of #including the "DNSCommon.c" "uDNS.c" and source files
-
-Revision 1.52  2003/12/17 00:21:51  cheshire
-If we received one, display host's HINFO record in final summary
-
-Revision 1.51  2003/12/13 03:05:28  ksekar
-<rdar://problem/3192548>: DynDNS: Unicast query of service records
-
-Revision 1.50  2003/12/08 20:47:02  rpantos
-Add support for mDNSResponder on Linux.
-
-Revision 1.49  2003/10/30 19:38:56  cheshire
-Fix warning on certain compilers
-
-Revision 1.48  2003/10/30 19:30:00  cheshire
-Fix warnings on certain compilers
-
-Revision 1.47  2003/09/05 18:49:57  cheshire
-Add total packet size to display
-
-Revision 1.46  2003/09/05 02:33:48  cheshire
-Set output to be line buffered, so you can redirect to a file and "tail -f" the file in another window
-
-Revision 1.45  2003/09/04 00:16:20  cheshire
-Only show count of unique source addresses seen on network if we're not filtering
-
-Revision 1.44  2003/09/02 22:13:28  cheshire
-Show total host count in final summary table
-
-Revision 1.43  2003/09/02 21:42:52  cheshire
-Improved alignment of final summary table with v6 addresses
-
-Revision 1.42  2003/09/02 20:59:24  cheshire
-Use bcopy() instead of non-portable "__u6_addr.__u6_addr32" fields.
-
-Revision 1.41  2003/08/29 22:05:44  cheshire
-Also count subsequent KA packets for the purposes of statistics counting
-
-Revision 1.40  2003/08/29 16:43:24  cheshire
-Also display breakdown of Probe/Goodbye/BrowseQ etc. for each host
-
-Revision 1.39  2003/08/28 02:07:48  vlubet
-Added "per hosts" statistics
-
-Revision 1.38  2003/08/20 22:41:42  cheshire
-Also display total multicast packet count
-
-Revision 1.37  2003/08/20 22:32:08  cheshire
-Error in DisplayQuery: Authorities come *after* Answers, not before
-
-Revision 1.36  2003/08/18 23:20:10  cheshire
-RDLength moved from the RData to the ResourceRecord object.
-
-Revision 1.35  2003/08/15 20:17:28  cheshire
-"LargeResourceRecord" changed to "LargeCacheRecord"
-
-Revision 1.34  2003/08/14 02:19:55  cheshire
-<rdar://problem/3375491> Split generic ResourceRecord type into two separate types: AuthRecord and CacheRecord
-
-Revision 1.33  2003/08/12 19:56:26  cheshire
-Update to APSL 2.0
-
-Revision 1.32  2003/08/06 18:57:01  cheshire
-Update comments
-
-Revision 1.31  2003/08/06 02:05:12  cheshire
-Add ability to give a list of hosts to monitor
-
-Revision 1.30  2003/08/05 23:56:26  cheshire
-Update code to compile with the new mDNSCoreReceive() function that requires a TTL
-(Right now mDNSPosix.c just reports 255 -- we should fix this)
-
-Revision 1.29  2003/08/05 00:43:12  cheshire
-Report errors encountered while processing authority section
-
-Revision 1.28  2003/07/29 22:51:08  cheshire
-Added hexdump for packets we can't decode, so we can find out *why* we couldn't decode them
-
-Revision 1.27  2003/07/29 22:48:04  cheshire
-Completed support for decoding packets containing oversized resource records
-
-Revision 1.26  2003/07/19 03:25:23  cheshire
-Change to make use of new GetLargeResourceRecord() call, for handling larger records
-
-Revision 1.25  2003/07/18 00:13:23  cheshire
-Remove erroneous trailing '\' from TXT record display
-
-Revision 1.24  2003/07/17 17:10:51  cheshire
-<rdar://problem/3315761> Implement "unicast response" request, using top bit of qclass
-Further work: distinguish between PM and PU
-
-Revision 1.23  2003/07/16 22:20:23  cheshire
-<rdar://problem/3315761> Implement "unicast response" request, using top bit of qclass
-Made mDNSNetMonitor distinguish between QM and QU in its logging output
-
-Revision 1.22  2003/07/02 21:19:58  cheshire
-<rdar://problem/3313413> Update copyright notices, etc., in source code comments
-
-Revision 1.21  2003/06/18 05:48:41  cheshire
-Fix warnings
-
-Revision 1.20  2003/06/06 22:18:22  cheshire
-Add extra space in Q output to line it up with RR output
-
-Revision 1.19  2003/06/06 21:05:04  cheshire
-Display state of cache-flush bit on additional records
-
-Revision 1.18  2003/06/06 20:01:30  cheshire
-For clarity, rename question fields name/rrtype/rrclass as qname/qtype/qclass
-(Global search-and-replace; no functional change to code execution.)
-
-Revision 1.17  2003/06/06 14:26:50  cheshire
-Explicitly #include <time.h> for the benefit of certain Linux distributions
-
-Revision 1.16  2003/05/29 21:56:36  cheshire
-More improvements:
-Distinguish modern multicast queries from legacy multicast queries
-In addition to record counts, display packet counts of queries, legacy queries, and responses
-Include TTL in RR display
-
-Revision 1.15  2003/05/29 20:03:57  cheshire
-Various improvements:
-Display start and end time, average rates in packets-per-minute,
-show legacy queries as -LQ-, improve display of TXT and unknown records
-
-Revision 1.14  2003/05/26 04:45:42  cheshire
-Limit line length when printing super-long TXT records
-
-Revision 1.13  2003/05/26 03:21:29  cheshire
-Tidy up address structure naming:
-mDNSIPAddr         => mDNSv4Addr (for consistency with mDNSv6Addr)
-mDNSAddr.addr.ipv4 => mDNSAddr.ip.v4
-mDNSAddr.addr.ipv6 => mDNSAddr.ip.v6
-
-Revision 1.12  2003/05/26 03:01:28  cheshire
-<rdar://problem/3268904> sprintf/vsprintf-style functions are unsafe; use snprintf/vsnprintf instead
-
-Revision 1.11  2003/05/26 00:48:13  cheshire
-If mDNS packet contains a non-zero message ID, then display it.
-
-Revision 1.10  2003/05/22 01:10:32  cheshire
-Indicate when the TC bit is set on a query packet
-
-Revision 1.9  2003/05/21 03:56:00  cheshire
-Improve display of Probe queries
-
-Revision 1.8  2003/05/09 21:41:56  cheshire
-Track deletion/goodbye packets as separate category
-
-Revision 1.7  2003/05/07 00:16:01  cheshire
-More detailed decoding of Resource Records
-
-Revision 1.6  2003/05/05 21:16:16  cheshire
-<rdar://problem/3241281> Change timenow from a local variable to a structure member
-
-Revision 1.5  2003/04/19 01:16:22  cheshire
-Add filter option, to monitor only packets from a single specified source address
-
-Revision 1.4  2003/04/18 00:45:21  cheshire
-Distinguish announcements (AN) from deletions (DE)
-
-Revision 1.3  2003/04/15 18:26:01  cheshire
-Added timestamps and help information
-
-Revision 1.2  2003/04/04 20:42:02  cheshire
-Fix broken statistics counting
-
-Revision 1.1  2003/04/04 01:37:14  cheshire
-Added NetMonitor.c
-
- */
+*/
 
 //*************************************************************************************************************
 // Incorporate mDNS.c functionality
@@ -294,9 +100,9 @@ Added NetMonitor.c
 #include <signal.h>			// For SIGINT, SIGTERM
 #include <netdb.h>			// For gethostbyname()
 #include <sys/socket.h>		// For AF_INET, AF_INET6, etc.
-#include <arpa/inet.h>		// For inet_addr()
 #include <net/if.h>			// For IF_NAMESIZE
 #include <netinet/in.h>		// For INADDR_NONE
+#include <arpa/inet.h>		// For inet_addr()
 
 #include "mDNSPosix.h"      // Defines the specific types needed to run mDNS on this platform
 #include "ExampleClientApp.h"
@@ -358,9 +164,10 @@ struct FilterList_struct
 
 static mDNS mDNSStorage;						// mDNS core uses this to store its globals
 static mDNS_PlatformSupport PlatformStorage;	// Stores this platform's globals
+mDNSexport const char ProgramName[] = "mDNSNetMonitor";
 
 struct timeval tv_start, tv_end, tv_interval;
-
+static int FilterInterface = 0;
 static FilterList *Filters;
 #define ExactlyOneFilter (Filters && !Filters->next)
 
@@ -428,7 +235,7 @@ typedef struct
 static HostList IPv4HostList = { 0, 0, 0 };
 static HostList IPv6HostList = { 0, 0, 0 };
 
-mDNSlocal HostEntry *FindHost(const mDNSAddr *addr, HostList* list)
+mDNSlocal HostEntry *FindHost(const mDNSAddr *addr, HostList *list)
 	{
 	long	i;
 	
@@ -442,7 +249,7 @@ mDNSlocal HostEntry *FindHost(const mDNSAddr *addr, HostList* list)
 	return NULL;
 	}
 	
-mDNSlocal HostEntry *AddHost(const mDNSAddr *addr, HostList* list)
+mDNSlocal HostEntry *AddHost(const mDNSAddr *addr, HostList *list)
 	{
 	int i;
 	HostEntry *entry;
@@ -472,6 +279,7 @@ mDNSlocal HostEntry *AddHost(const mDNSAddr *addr, HostList* list)
 		{
 		mDNSv4Addr ip = entry->addr.ip.v4;
 		char buffer[32];
+		// Note: This is reverse order compared to a normal dotted-decimal IP address, so we can't use our customary "%.4a" format code
 		mDNS_snprintf(buffer, sizeof(buffer), "%d.%d.%d.%d.in-addr.arpa.", ip.b[3], ip.b[2], ip.b[1], ip.b[0]);
 		MakeDomainNameFromDNSNameString(&entry->revname, buffer);
 		}
@@ -521,8 +329,8 @@ mDNSlocal void RecordHostInfo(HostEntry *entry, const ResourceRecord *const pktr
 		if (sw + 1 + sw[0] <= rdend)
 			{
 			AssignDomainName(&entry->hostname, pktrr->name);
-			mDNSPlatformMemCopy(hw, entry->HIHardware.c, 1 + (mDNSu32)hw[0]);
-			mDNSPlatformMemCopy(sw, entry->HISoftware.c, 1 + (mDNSu32)sw[0]);
+			mDNSPlatformMemCopy(entry->HIHardware.c, hw, 1 + (mDNSu32)hw[0]);
+			mDNSPlatformMemCopy(entry->HISoftware.c, sw, 1 + (mDNSu32)sw[0]);
 			}
 		}
 	}
@@ -551,10 +359,9 @@ mDNSlocal void SendUnicastQuery(mDNS *const m, HostEntry *entry, domainname *nam
 		{
 		//mprintf("%#a Q\n", target);
 		InterfaceID = mDNSInterface_Any;	// Send query from our unicast reply socket
-		m->ExpectUnicastResponse = m->timenow;
 		}
 
-	mDNSSendDNSMessage(&mDNSStorage, &query, qptr, InterfaceID, target, MulticastDNSPort, -1, mDNSNULL);
+	mDNSSendDNSMessage(&mDNSStorage, &query, qptr, InterfaceID, target, MulticastDNSPort, mDNSNULL, mDNSNULL);
 	}
 
 mDNSlocal void AnalyseHost(mDNS *const m, HostEntry *entry, const mDNSInterfaceID InterfaceID)
@@ -605,7 +412,7 @@ mDNSlocal void ShowSortedHostList(HostList *list, int max)
 		if (e->pkts[HostPkt_B]) mprintf("Bad: %8lu", e->pkts[HostPkt_B]);
 		mprintf("\n");
 		if (!e->HISoftware.c[0] && e->NumQueries > 2)
-			mDNSPlatformMemCopy("\x27*** Unknown (Jaguar, Windows, etc.) ***", &e->HISoftware, 0x28);
+			mDNSPlatformMemCopy(&e->HISoftware, "\x27*** Unknown (Jaguar, Windows, etc.) ***", 0x28);
 		if (e->hostname.c[0] || e->HIHardware.c[0] || e->HISoftware.c[0])
 			mprintf("%##-45s %#-14s %#s\n", e->hostname.c, e->HIHardware.c, e->HISoftware.c);
 		}
@@ -637,7 +444,7 @@ mDNSexport mDNSBool ExtractServiceType(const domainname *const fqdn, domainname 
 	return(mDNStrue);
 	}
 
-mDNSlocal void recordstat(HostEntry *entry, domainname *fqdn, int op, mDNSu16 rrtype)
+mDNSlocal void recordstat(HostEntry *entry, const domainname *fqdn, int op, mDNSu16 rrtype)
 	{
 	ActivityStat **s = &stats;
 	domainname srvtype;
@@ -691,7 +498,7 @@ mDNSlocal void printstats(int max)
 		}
 	}
 
-mDNSlocal const mDNSu8 *FindUpdate(mDNS *const m, const DNSMessage *const query, const mDNSu8 *ptr, const mDNSu8 *const end,\
+mDNSlocal const mDNSu8 *FindUpdate(mDNS *const m, const DNSMessage *const query, const mDNSu8 *ptr, const mDNSu8 *const end,
 	DNSQuestion *q, LargeCacheRecord *pkt)
 	{
 	int i;
@@ -713,7 +520,7 @@ mDNSlocal void DisplayPacketHeader(mDNS *const m, const DNSMessage *const msg, c
 	struct timeval tv;
 	struct tm tm;
 	const mDNSu32 index = mDNSPlatformInterfaceIndexfromInterfaceID(m, InterfaceID);
-	char if_name[IF_NAMESIZE];
+	char if_name[IFNAMSIZ];		// Older Linux distributions don't define IF_NAMESIZE
 	if_indextoname(index, if_name);
 	gettimeofday(&tv, NULL);
 	localtime_r((time_t*)&tv.tv_sec, &tm);
@@ -984,6 +791,7 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNS
 	const mDNSu8 StdR = kDNSFlag0_QR_Response | kDNSFlag0_OP_StdQuery;
 	const mDNSu8 QR_OP = (mDNSu8)(msg->h.flags.b[0] & kDNSFlag0_QROP_Mask);
 	mDNSu8 *ptr = (mDNSu8 *)&msg->h.numQuestions;
+	int goodinterface = (FilterInterface == 0);
 
 	(void)dstaddr;	// Unused
 	(void)dstport;	// Unused
@@ -996,7 +804,8 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNS
 
 	// For now we're only interested in monitoring IPv4 traffic.
 	// All IPv6 packets should just be duplicates of the v4 packets.
-	if (AddressMatchesFilterList(srcaddr))
+	if (!goodinterface) goodinterface = (FilterInterface == (int)mDNSPlatformInterfaceIndexfromInterfaceID(m, InterfaceID));
+	if (goodinterface && AddressMatchesFilterList(srcaddr))
 		{
 		mDNS_Lock(m);
 		if (!mDNSAddrIsDNSMulticast(dstaddr))
@@ -1072,7 +881,14 @@ mDNSlocal mStatus mDNSNetMonitor(void)
 	localtime_r((time_t*)&tv_end.tv_sec, &tm);
 	mprintf("End          %3d:%02d:%02d.%06d\n", tm.tm_hour, tm.tm_min, tm.tm_sec, tv_end.tv_usec);
 	mprintf("Captured for %3d:%02d:%02d.%06d\n", h, m, s, tv_interval.tv_usec);
-	if (!Filters) mprintf("Unique source addresses seen on network: %ld\n", IPv4HostList.num + IPv6HostList.num);
+	if (!Filters)
+		{
+		mprintf("Unique source addresses seen on network:");
+		if (IPv4HostList.num) mprintf(" %ld (IPv4)", IPv4HostList.num);
+		if (IPv6HostList.num) mprintf(" %ld (IPv6)", IPv6HostList.num);
+		if (!IPv4HostList.num && !IPv6HostList.num) mprintf(" None");
+		mprintf("\n");
+		}
 	mprintf("\n");
 	mprintf("Modern Query        Packets:      %7d   (avg%5d/min)\n", NumPktQ,        NumPktQ        * mul / div);
 	mprintf("Legacy Query        Packets:      %7d   (avg%5d/min)\n", NumPktL,        NumPktL        * mul / div);
@@ -1108,34 +924,43 @@ mDNSexport int main(int argc, char **argv)
 
 	for (i=1; i<argc; i++)
 		{
-		struct in_addr s4;
-		struct in6_addr s6;
-		FilterList *f;
-		mDNSAddr a;
-		a.type = mDNSAddrType_IPv4;
-
-		if (inet_pton(AF_INET, argv[i], &s4) == 1)
-			a.ip.v4.NotAnInteger = s4.s_addr;
-		else if (inet_pton(AF_INET6, argv[i], &s6) == 1)
+		if (i+1 < argc && !strcmp(argv[i], "-i") && atoi(argv[i+1]))
 			{
-			a.type = mDNSAddrType_IPv6;
-			bcopy(&s6, &a.ip.v6, sizeof(a.ip.v6));
+			FilterInterface = atoi(argv[i+1]);
+			i += 2;
+			printf("Monitoring interface %d\n", FilterInterface);
 			}
 		else
 			{
-			struct hostent *h = gethostbyname(argv[i]);
-			if (h) a.ip.v4.NotAnInteger = *(long*)h->h_addr;
-			else goto usage;
+			struct in_addr s4;
+			struct in6_addr s6;
+			FilterList *f;
+			mDNSAddr a;
+			a.type = mDNSAddrType_IPv4;
+	
+			if (inet_pton(AF_INET, argv[i], &s4) == 1)
+				a.ip.v4.NotAnInteger = s4.s_addr;
+			else if (inet_pton(AF_INET6, argv[i], &s6) == 1)
+				{
+				a.type = mDNSAddrType_IPv6;
+				bcopy(&s6, &a.ip.v6, sizeof(a.ip.v6));
+				}
+			else
+				{
+				struct hostent *h = gethostbyname(argv[i]);
+				if (h) a.ip.v4.NotAnInteger = *(long*)h->h_addr;
+				else goto usage;
+				}
+			
+			f = malloc(sizeof(*f));
+			f->FilterAddr = a;
+			f->next = Filters;
+			Filters = f;
 			}
-		
-		f = malloc(sizeof(*f));
-		f->FilterAddr = a;
-		f->next = Filters;
-		Filters = f;
 		}
 
 	status = mDNSNetMonitor();
-	if (status) { fprintf(stderr, "%s: mDNSNetMonitor failed %ld\n", progname, status); return(status); }
+	if (status) { fprintf(stderr, "%s: mDNSNetMonitor failed %d\n", progname, (int)status); return(status); }
 	return(0);
 
 usage:

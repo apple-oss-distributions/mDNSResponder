@@ -1,28 +1,56 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
 
 $Log: mDNSDebug.h,v $
+Revision 1.36  2007/10/01 19:06:19  cheshire
+Defined symbolic constant MDNS_LOG_INITIAL_LEVEL to set the logging level we start out at
+
+Revision 1.35  2007/07/27 20:19:56  cheshire
+For now, comment out unused log levels MDNS_LOG_ERROR, MDNS_LOG_WARN, MDNS_LOG_INFO, MDNS_LOG_DEBUG
+
+Revision 1.34  2007/07/24 17:23:33  cheshire
+<rdar://problem/5357133> Add list validation checks for debugging
+
+Revision 1.33  2007/06/15 21:54:50  cheshire
+<rdar://problem/4883206> Add packet logging to help debugging private browsing over TLS
+
+Revision 1.32  2007/05/25 16:03:03  cheshire
+Remove unused LogMalloc
+
+Revision 1.31  2007/04/06 19:50:05  cheshire
+Add ProgramName declaration
+
+Revision 1.30  2007/03/24 01:22:44  cheshire
+Add validator for uDNS data structures
+
+Revision 1.29  2006/08/14 23:24:23  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
+Revision 1.28  2006/07/07 01:09:09  cheshire
+<rdar://problem/4472013> Add Private DNS server functionality to dnsextd
+Only use mallocL/freeL debugging routines when building mDNSResponder, not dnsextd
+
+Revision 1.27  2006/06/29 07:42:14  cheshire
+<rdar://problem/3922989> Performance: Remove unnecessary SameDomainName() checks
+
+Revision 1.26  2005/07/04 22:40:26  cheshire
+Additional debugging code to help catch memory corruption
+
 Revision 1.25  2004/12/14 21:34:16  cheshire
 Add "#define ANSWER_REMOTE_HOSTNAME_QUERIES 0" and comment
 
@@ -139,10 +167,26 @@ extern void verbosedebugf_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1
 #endif
 
 // LogMsg is used even in shipping code, to write truly serious error messages to syslog (or equivalent)
-extern int	mDNS_DebugMode;	// If non-zero, LogMsg() writes to stderr instead of syslog
+typedef enum
+	{
+	MDNS_LOG_NONE,
+//	MDNS_LOG_ERROR,
+//	MDNS_LOG_WARN,
+//	MDNS_LOG_INFO,
+//	MDNS_LOG_DEBUG,
+	MDNS_LOG_VERBOSE_DEBUG
+	} LogLevel_t;
+
+#define MDNS_LOG_INITIAL_LEVEL MDNS_LOG_NONE
+
+extern LogLevel_t mDNS_LogLevel;
+extern int        mDNS_DebugMode;	// If non-zero, LogMsg() writes to stderr instead of syslog
+extern const char ProgramName[];	// Program Name for use with LogMsgIdent
+
 extern void LogMsg(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
 extern void LogMsgIdent(const char *ident, const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(2,3);
 extern void LogMsgNoIdent(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
+extern void SigLogLevel(void);
 
 // Set this symbol to 1 to answer remote queries for our Address, reverse mapping PTR, and HINFO records
 #define ANSWER_REMOTE_HOSTNAME_QUERIES 0
@@ -151,24 +195,15 @@ extern void LogMsgNoIdent(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,
 // Set this symbol to 2 to write a log message for every malloc() and free()
 #define MACOSX_MDNS_MALLOC_DEBUGGING 0
 
-#if MACOSX_MDNS_MALLOC_DEBUGGING >= 1
+#if APPLE_OSX_mDNSResponder && MACOSX_MDNS_MALLOC_DEBUGGING >= 1
 extern void *mallocL(char *msg, unsigned int size);
 extern void freeL(char *msg, void *x);
+extern void LogMemCorruption(const char *format, ...);
+extern void uds_validatelists(void);
+extern void udns_validatelists(void *const v);
 #else
 #define mallocL(X,Y) malloc(Y)
 #define freeL(X,Y) free(Y)
-#endif
-
-#if MACOSX_MDNS_MALLOC_DEBUGGING >= 2
-#define LogMalloc LogMsg
-#else
-	#if (defined( __GNUC__ ))
-		#define	LogMalloc(ARGS...) ((void)0)
-	#elif (defined( __MWERKS__ ))
-		#define	LogMalloc( ... )
-	#else
-		#define LogMalloc 1 ? ((void)0) : (void)
-	#endif
 #endif
 
 #define LogAllOperations 0
@@ -178,6 +213,10 @@ extern void freeL(char *msg, void *x);
 #else
 #define	LogOperation debugf
 #endif
+
+#define ForceAlerts 0
+
+#define VerifySameNameAssumptions 0
 
 #ifdef	__cplusplus
 	}

@@ -1,4 +1,5 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2004, Apple Computer, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without 
@@ -27,6 +28,27 @@
    Change History (most recent first):
 
 $Log: dnssd_clientlib.c,v $
+Revision 1.17  2007/10/02 19:36:04  cheshire
+<rdar://problem/5516444> TXTRecordGetValuePtr should be case-insenstive
+
+Revision 1.16  2007/09/18 19:09:02  cheshire
+<rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
+
+Revision 1.15  2007/07/28 00:00:43  cheshire
+Renamed CompileTimeAssertionCheck structure for consistency with others
+
+Revision 1.14  2007/03/20 17:07:16  cheshire
+Rename "struct uDNS_TCPSocket_struct" to "TCPSocket", "struct uDNS_UDPSocket_struct" to "UDPSocket"
+
+Revision 1.13  2007/02/27 00:25:03  cheshire
+<rdar://problem/5010640> DNSServiceConstructFullName() doesn't handle empty string for instance name
+
+Revision 1.12  2007/02/07 19:32:00  cheshire
+<rdar://problem/4980353> All mDNSResponder components should contain version strings in SCCS-compatible format
+
+Revision 1.11  2006/08/14 23:05:53  cheshire
+Added "tab-width" emacs header line
+
 Revision 1.10  2005/04/06 02:06:56  shersche
 Add DNSSD_API macro to TXTRecord API calls
 
@@ -116,7 +138,7 @@ static uint8_t *InternalTXTRecordSearch
 		{
 		uint8_t *x = p;
 		p += 1 + p[0];
-		if (p <= e && *keylen <= x[0] && !strncmp(key, (char*)x+1, *keylen))
+		if (p <= e && *keylen <= x[0] && !strncasecmp(key, (char*)x+1, *keylen))
 			if (*keylen == x[0] || x[1+*keylen] == '=') return(x);
 		}
 	return(NULL);
@@ -143,9 +165,9 @@ int DNSSD_API DNSServiceConstructFullName
 	const char *r = regtype;
 	const char *d = domain;
 
-	if (service)
+	if (service && *service)
 		{
-		while(*s)
+		while (*s)
 			{
 			c = (unsigned char)*s++;
 			if (c == '.' || (c == '\\')) *fn++ = '\\'; // escape dot and backslash literals
@@ -165,12 +187,12 @@ int DNSSD_API DNSServiceConstructFullName
 	len = (unsigned long) strlen(regtype);
 	if (DomainEndsInDot(regtype)) len--;
 	if (len < 6) return -1; // regtype must be at least "x._udp" or "x._tcp"
-	if (strncmp((regtype + len - 4), "_tcp", 4) && strncmp((regtype + len - 4), "_udp", 4)) return -1;
-	while(*r) *fn++ = *r++;
+	if (strncasecmp((regtype + len - 4), "_tcp", 4) && strncasecmp((regtype + len - 4), "_udp", 4)) return -1;
+	while (*r) *fn++ = *r++;
 	if (!DomainEndsInDot(regtype)) *fn++ = '.';
 
 	if (!domain || !domain[0]) return -1;
-	while(*d) *fn++ = *d++;
+	while (*d) *fn++ = *d++;
 	if (!DomainEndsInDot(domain)) *fn++ = '.';
 	*fn = '\0';
 	return 0;
@@ -194,7 +216,7 @@ typedef struct _TXTRecordRefRealType
 
 // The opaque storage defined in the public dns_sd.h header is 16 bytes;
 // make sure we don't exceed that.
-struct dnssd_clientlib_CompileTimeAssertionCheck
+struct CompileTimeAssertionCheck_dnssd_clientlib
 	{
 	char assert0[(sizeof(TXTRecordRefRealType) <= 16) ? 1 : -1];
 	};
@@ -365,3 +387,21 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
 		}
 	return(kDNSServiceErr_Invalid);
 	}
+
+/*********************************************************************************************
+ *
+ *   SCCS-compatible version string
+ *
+ *********************************************************************************************/
+
+// For convenience when using the "strings" command, this is the last thing in the file
+
+// Note: The C preprocessor stringify operator ('#') makes a string from its argument, without macro expansion
+// e.g. If "version" is #define'd to be "4", then STRINGIFY_AWE(version) will return the string "version", not "4"
+// To expand "version" to its value before making the string, use STRINGIFY(version) instead
+#define STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s) #s
+#define STRINGIFY(s) STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s)
+
+// NOT static -- otherwise the compiler may optimize it out
+// The "@(#) " pattern is a special prefix the "what" command looks for
+const char VersionString_SCCS_libdnssd[] = "@(#) libdns_sd " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";

@@ -2,28 +2,34 @@
  *
  * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
 
 $Log: Client.c,v $
+Revision 1.20  2007/07/27 19:30:41  cheshire
+Changed mDNSQuestionCallback parameter from mDNSBool to QC_result,
+to properly reflect tri-state nature of the possible responses
+
+Revision 1.19  2007/04/16 20:49:39  cheshire
+Fix compile errors for mDNSPosix build
+
+Revision 1.18  2006/08/14 23:24:46  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
+Revision 1.17  2006/06/12 18:22:42  cheshire
+<rdar://problem/4580067> mDNSResponder building warnings under Red Hat 64-bit (LP64) Linux
+
 Revision 1.16  2005/02/04 01:00:53  cheshire
 Add '-d' command-line option to specify domain to browse
 
@@ -99,9 +105,11 @@ static mDNS_PlatformSupport PlatformStorage;  // Stores this platform's globals
 #define RR_CACHE_SIZE 500
 static CacheEntity gRRCache[RR_CACHE_SIZE];
 
-static const char *gProgramName = "mDNSResponderPosix";
+mDNSexport const char ProgramName[] = "mDNSClientPosix";
 
-static void BrowseCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, mDNSBool AddRecord)
+static const char *gProgramName = ProgramName;
+
+static void BrowseCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
     // A callback from the core mDNS code that indicates that we've received a 
     // response to our query.  Note that this code runs on the main thread 
     // (in fact, there is only one thread!), so we can safely printf the results.
@@ -281,7 +289,7 @@ int main(int argc, char **argv)
         result = 2;
     }
     if ( (result != 0) || (gMDNSPlatformPosixVerboseLevel > 0) ) {
-        fprintf(stderr, "%s: Finished with status %ld, result %d\n", gProgramName, status, result);
+        fprintf(stderr, "%s: Finished with status %d, result %d\n", gProgramName, (int)status, result);
     }
 
     return 0;

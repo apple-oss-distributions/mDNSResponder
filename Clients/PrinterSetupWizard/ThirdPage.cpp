@@ -1,33 +1,58 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 1997-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
     
 $Log: ThirdPage.cpp,v $
+Revision 1.37  2007/06/08 06:30:26  herscher
+<rdar://problem/5257700> Fix uninitialized pointers when detecting generic PCL and PS drivers
+
+Revision 1.36  2007/06/06 20:39:10  cheshire
+<rdar://problem/5254377> Printer Setup Wizard started crashing in Bonjour104A8, after update to Visual Studio 2005
+
+Revision 1.35  2007/06/06 20:08:01  cheshire
+<rdar://problem/4528853> mDNS: When auto-highlighting items in lists, scroll list so highlighted item is in the middle
+AutoScroll model list as well as manufacturer list
+
+Revision 1.34  2007/06/06 19:53:48  cheshire
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
+Revision 1.33  2007/04/20 22:58:10  herscher
+<rdar://problem/4826126> mDNS: Printer Wizard doesn't offer generic HP printers or generic PS support on Vista RC2
+
+Revision 1.32  2007/04/13 23:42:20  herscher
+<rdar://problem/4580061> mDNS: Printers added using Bonjour should be set as the default printer.
+
+Revision 1.31  2007/04/13 21:38:46  herscher
+<rdar://problem/4528853> mDNS: When auto-highlighting items in lists, scroll list so highlighted item is in the middle
+
+Revision 1.30  2007/04/13 20:23:40  herscher
+Fixed mistake in previous checkin that reverted license text for this file
+
+Revision 1.29  2007/04/13 18:10:24  herscher
+<rdar://problem/4496652> mDNS: Don't allow user to choose non-working driver
+
+Revision 1.28  2006/08/14 23:24:09  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
 Revision 1.27  2005/10/05 21:41:45  herscher
 <rdar://problem/4190104> Use "application/octet-stream" to determine if CUPS shared queue supports raw
 
 Revision 1.26  2005/07/11 20:17:15  shersche
-<rdar://4124524> UI fixes associated with CUPS printer workaround fix.
+<rdar://problem/4124524> UI fixes associated with CUPS printer workaround fix.
 
 Revision 1.25  2005/07/07 17:53:20  shersche
 Fix problems associated with the CUPS printer workaround fix.
@@ -115,8 +140,6 @@ Submitted by: herscher
 
 Revision 1.1  2004/06/18 04:36:58  rpantos
 First checked in
-
-
 */
 
 #include "stdafx.h"
@@ -131,12 +154,16 @@ First checked in
 // local variable is initialize but not referenced
 #pragma warning(disable:4189)
 
-
 //
 // This is the printer description file that is shipped
-// with Windows
+// with Windows XP and below
 //
 #define kNTPrintFile		L"inf\\ntprint.inf"
+
+//
+// Windows Vista ships with a set of prn*.inf files
+//
+#define kVistaPrintFiles	L"inf\\prn*.inf"
 
 //
 // These are pre-defined names for Generic manufacturer and model
@@ -152,7 +179,6 @@ First checked in
 #define kGenericPCLColorDriver		L"HP Color LaserJet 4550 PCL"
 #define kGenericPCLDriver			L"HP LaserJet 4050 Series PCL"
 
-
 //
 // states for parsing ntprint.inf
 //
@@ -164,18 +190,24 @@ enum PrinterParsingState
 	ParsingStrings
 };
 
-
 // CThirdPage dialog
 
 IMPLEMENT_DYNAMIC(CThirdPage, CPropertyPage)
 CThirdPage::CThirdPage()
 	: CPropertyPage(CThirdPage::IDD),
+		m_manufacturerSelected( NULL ),
+		m_modelSelected( NULL ),
+		m_genericPostscript( NULL ),
+		m_genericPCL( NULL ),
 		m_initialized(false),
 		m_printerImage( NULL )
 {
 	static const int	bufferSize	= 32768;
 	TCHAR				windowsDirectory[bufferSize];
 	CString				header;
+	WIN32_FIND_DATA		findFileData;
+	HANDLE				findHandle;
+	CString				prnFiles;
 	CString				ntPrint;
 	OSStatus			err;
 	BOOL				ok;
@@ -193,9 +225,38 @@ CThirdPage::CThirdPage()
 	err = translate_errno( ok, errno_compat(), kUnknownErr );
 	require_noerr( err, exit );
  
-	ntPrint.Format(L"%s\\%s", windowsDirectory, kNTPrintFile);
-	err = LoadPrintDriverDefsFromFile( m_manufacturers, ntPrint, false );
-	require_noerr(err, exit);
+	//
+	// <rdar://problem/4826126>
+	//
+	// If there are no *prn.inf files, we'll assume that the information
+	// is in ntprint.inf
+	//
+	prnFiles.Format( L"%s\\%s", windowsDirectory, kVistaPrintFiles );
+	findHandle = FindFirstFile( prnFiles, &findFileData );
+ 
+	if ( findHandle != INVALID_HANDLE_VALUE )
+	{
+		CString absolute;
+
+		absolute.Format( L"%s\\inf\\%s", windowsDirectory, findFileData.cFileName );
+		err = LoadPrintDriverDefsFromFile( m_manufacturers, absolute, false );
+		require_noerr( err, exit );
+
+		while ( FindNextFile( findHandle, &findFileData ) )
+		{
+			absolute.Format( L"%s\\inf\\%s", windowsDirectory, findFileData.cFileName );
+			err = LoadPrintDriverDefsFromFile( m_manufacturers, absolute, false );
+			require_noerr( err, exit );
+		}
+
+		FindClose( findHandle );
+	}
+	else
+	{
+		ntPrint.Format(L"%s\\%s", windowsDirectory, kNTPrintFile);
+		err = LoadPrintDriverDefsFromFile( m_manufacturers, ntPrint, false );
+		require_noerr(err, exit);
+	}
 
 	//
 	// load printer drivers that have been installed on this machine
@@ -213,7 +274,6 @@ exit:
 
 	return;
 }
-
 
 CThirdPage::~CThirdPage()
 {
@@ -241,13 +301,12 @@ CThirdPage::~CThirdPage()
 	}
 }
 
-
 // ----------------------------------------------------
 // SelectMatch
 //
 // SelectMatch will do all the UI work associated with
 // selected a manufacturer and model of printer.  It also
-// makes sure the printer object is update with the 
+// makes sure the printer object is update with the
 // latest settings
 //
 // ----------------------------------------------------
@@ -272,7 +331,10 @@ CThirdPage::SelectMatch(Printer * printer, Service * service, Manufacturer * man
 	if (nIndex != -1)
 	{
 		m_manufacturerListCtrl.SetItemState(nIndex, LVIS_SELECTED, LVIS_SELECTED);
-		m_manufacturerListCtrl.EnsureVisible(nIndex, FALSE);
+		//
+		//<rdar://problem/4528853> mDNS: When auto-highlighting items in lists, scroll list so highlighted item is in the middle
+		//
+		AutoScroll(m_manufacturerListCtrl, nIndex);
 	}
 
 	//
@@ -286,14 +348,13 @@ CThirdPage::SelectMatch(Printer * printer, Service * service, Manufacturer * man
 	if (nIndex != -1)
 	{
 		m_modelListCtrl.SetItemState(nIndex, LVIS_SELECTED, LVIS_SELECTED);
-		m_modelListCtrl.EnsureVisible(nIndex, FALSE);
+		AutoScroll( m_modelListCtrl, nIndex );
 
 		m_modelListCtrl.SetFocus();
 	}
 
 	CopyPrinterSettings( printer, service, manufacturer, model );
 }
-
 
 void
 CThirdPage::SelectMatch(Manufacturers & manufacturers, Printer * printer, Service * service, Manufacturer * manufacturer, Model * model)
@@ -302,7 +363,6 @@ CThirdPage::SelectMatch(Manufacturers & manufacturers, Printer * printer, Servic
 
 	SelectMatch( printer, service, manufacturer, model );
 }
-
 
 // --------------------------------------------------------
 // CopyPrinterSettings
@@ -359,6 +419,61 @@ CThirdPage::CopyPrinterSettings( Printer * printer, Service * service, Manufactu
 	}
 }
 
+// --------------------------------------------------------
+// DefaultPrinterExists
+//
+// Checks to see if a default printer has been configured
+// on this machine
+// --------------------------------------------------------
+BOOL
+CThirdPage::DefaultPrinterExists()
+{
+	CPrintDialog dlg(FALSE);
+	
+	dlg.m_pd.Flags |= PD_RETURNDEFAULT;
+
+	return dlg.GetDefaults();
+}
+
+// --------------------------------------------------------
+// AutoScroll
+//
+// Ensure selected item is in middle of list
+// --------------------------------------------------------
+void
+CThirdPage::AutoScroll( CListCtrl & list, int nIndex )
+{
+	//
+	//<rdar://problem/4528853> mDNS: When auto-highlighting items in lists, scroll list so highlighted item is in the middle
+	//
+
+	int		top;
+	int		count;
+
+	list.EnsureVisible( nIndex, FALSE );
+	
+	top		= list.GetTopIndex();
+	count	= list.GetCountPerPage();
+
+	if ( ( nIndex == top ) || ( ( nIndex + 1 ) == ( top + count ) ) )
+	{
+		CRect	rect;
+		int		rows;
+		
+		rows = ( count / 2 );
+
+		if ( nIndex == top )
+		{
+			list.GetItemRect(0, rect, LVIR_BOUNDS);
+			list.Scroll( CPoint( 0, rows * rect.Height() * -1 ) );
+		}
+		else
+		{
+			list.GetItemRect(0, rect, LVIR_BOUNDS);
+			list.Scroll( CPoint( 0, rows * rect.Height() ) );
+		}
+	}
+}
 
 // ------------------------------------------------------
 // LoadPrintDriverDefsFromFile
@@ -381,7 +496,7 @@ CThirdPage::CopyPrinterSettings( Printer * printer, Service * service, Manufactu
 // easy format.  Tags are strings that are enclosed in brackets.
 // We are only interested in [MANUFACTURERS] and models.
 //
-// The only potentially opaque thing about this function is the 
+// The only potentially opaque thing about this function is the
 // checkForDuplicateModels flag.  The problem here is that ntprint.inf
 // doesn't contain duplicate models, and it has hundreds of models
 // listed.  You wouldn't check for duplicates there.  But oftentimes,
@@ -514,14 +629,27 @@ CThirdPage::LoadPrintDriverDefsFromFile(Manufacturers & manufacturers, const CSt
 			}
 			else
 			{
+				CString name;
+				int		curPos;
+
+				//
 				// remove the leading and trailing delimiters
 				//
 				s.Remove('[');
 				s.Remove(']');
 
+				//
+				// <rdar://problem/4826126>
+				//
+				// Ignore decorations in model declarations
+				//
+				curPos	= 0;
+				name	= s.Tokenize( L".", curPos );
+
+				//
 				// check to see if this is a printer entry
 				//
-				iter = manufacturers.find(s);
+				iter = manufacturers.find( name );
 
 				if (iter != manufacturers.end())
 				{
@@ -545,7 +673,7 @@ CThirdPage::LoadPrintDriverDefsFromFile(Manufacturers & manufacturers, const CSt
 				// if we're parsing manufacturers, then we will parse
 				// an entry of the form key=val, where key is a delimited
 				// string specifying a manufacturer name, and val is
-				// a tag that is used later in the file.  the key is 
+				// a tag that is used later in the file.  the key is
 				// delimited by either '"' (quotes) or '%' (percent sign).
 				//
 				// the tag is used further down the file when models are
@@ -609,6 +737,22 @@ CThirdPage::LoadPrintDriverDefsFromFile(Manufacturers & manufacturers, const CSt
 					curPos	=	0;
 					val		=	val.Tokenize(L",", curPos);
 
+					for ( ;; )
+					{
+						CString decoration;
+
+						decoration = val.Tokenize( L",", curPos );
+
+						if ( decoration.GetLength() > 0 )
+						{
+							manufacturer->decorations.push_back( decoration );
+						}
+						else
+						{
+							break;
+						}
+					}
+
 					manufacturer->name = NormalizeManufacturerName( key );
 					manufacturer->tag  = val;
 
@@ -658,6 +802,15 @@ CThirdPage::LoadPrintDriverDefsFromFile(Manufacturers & manufacturers, const CSt
 						}
 					}
 
+					//
+					// Stock Vista printer inf files embed guids in the model
+					// declarations for Epson printers. Let's ignore those.
+					//
+					if ( name.Find( L"{", 0 ) != -1 )
+					{
+						continue;
+					}
+
 					try
 					{
 						model = new Model;
@@ -693,7 +846,6 @@ exit:
 
 	return (err);
 }
-
 
 // -------------------------------------------------------
 // LoadPrintDriverDefs
@@ -747,7 +899,7 @@ CThirdPage::LoadPrintDriverDefs( Manufacturers & manufacturers )
 	
 			//
 			// skip over anything that doesn't have a manufacturer field.  This
-			// fixes a bug that I noticed that occurred after I installed 
+			// fixes a bug that I noticed that occurred after I installed
 			// ProComm.  This program add a print driver with no manufacturer
 			// that screwed up this wizard.
 			//
@@ -829,7 +981,6 @@ exit:
 	return err;
 }
 
-
 // -------------------------------------------------------
 // LoadGenericPrintDriverDefs
 //
@@ -853,10 +1004,10 @@ CThirdPage::LoadGenericPrintDriverDefs( Manufacturers & manufacturers )
 	// First try and find our generic driver names
 
 	iter = m_manufacturers.find(L"HP");
-	require_action( iter != manufacturers.end(), exit, err = kUnknownErr );
+	require_action( iter != m_manufacturers.end(), exit, err = kUnknownErr );
 	manufacturer = iter->second;
 
-	// Look for Postscript 
+	// Look for Postscript
 
 	model = manufacturer->find( kGenericPSColorDriver );
 
@@ -868,7 +1019,6 @@ CThirdPage::LoadGenericPrintDriverDefs( Manufacturers & manufacturers )
 	if ( model )
 	{
 		psDriverName = model->name;
-	
 	}
 
 	// Look for PCL
@@ -882,7 +1032,7 @@ CThirdPage::LoadGenericPrintDriverDefs( Manufacturers & manufacturers )
 
 	if ( model )
 	{
-		pclDriverName = model->name;	
+		pclDriverName = model->name;
 	}
 
 	// If we found either a generic PS driver, or a generic PCL driver,
@@ -964,7 +1114,7 @@ exit:
 // ------------------------------------------------------
 // ConvertToManufacturerName
 //
-// This function is responsible for tweaking the 
+// This function is responsible for tweaking the
 // name so that subsequent string operations won't fail because
 // of capitalizations/different names for the same manufacturer
 // (i.e.  Hewlett-Packard/HP/Hewlett Packard)
@@ -1001,7 +1151,6 @@ CThirdPage::ConvertToManufacturerName( const CString & name )
 	return lower;
 }
 
-
 // ------------------------------------------------------
 // ConvertToModelName
 //
@@ -1021,7 +1170,6 @@ CThirdPage::ConvertToModelName( const CString & name )
 
 	return lower;
 }
-
 
 // ------------------------------------------------------
 // NormalizeManufacturerName
@@ -1046,7 +1194,6 @@ CThirdPage::NormalizeManufacturerName( const CString & name )
 
 	return normalized;
 }
-
 
 // -------------------------------------------------------
 // MatchPrinter
@@ -1120,7 +1267,7 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 				hasGenericDriver = true;
 			}
 
-			// <rdar://problem/4190104> Use "application/octet-stream" to determine if CUPS 
+			// <rdar://problem/4190104> Use "application/octet-stream" to determine if CUPS
 			// shared queue supports raw
 
 			if ( q->pdl.Find( L"application/octet-stream" ) != -1 )
@@ -1130,7 +1277,14 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 
 			if ( useCUPSWorkaround && printer->isSharedFromOSX && hasGenericDriver )
 			{
-				SelectMatch(manufacturers, printer, service, genericManufacturer, genericModel );
+				//
+				// <rdar://problem/4496652> mDNS: Don't allow user to choose non-working driver
+				//
+				Manufacturers genericManufacturers;
+
+				LoadGenericPrintDriverDefs( genericManufacturers );
+
+				SelectMatch( genericManufacturers, printer, service, genericManufacturer, genericModel );
 			}
 			else
 			{
@@ -1150,17 +1304,25 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 		text.LoadString(IDS_PRINTER_MATCH_GOOD);
 	}
 	else if ( MatchGeneric( manufacturers, printer, service, &genericManufacturer, &genericModel ) )
-	{	
+	{
 		if ( printer->isSharedFromOSX )
 		{
+			//
+			// <rdar://problem/4496652> mDNS: Don't allow user to choose non-working driver
+			//
+			Manufacturers genericManufacturers;
+
+			LoadGenericPrintDriverDefs( genericManufacturers );
+
+			SelectMatch( genericManufacturers, printer, service, genericManufacturer, genericModel );
+			
 			text.LoadString(IDS_PRINTER_MATCH_GOOD);
 		}
 		else
 		{
+			SelectMatch( manufacturers, printer, service, genericManufacturer, genericModel );
 			text.LoadString(IDS_PRINTER_MATCH_MAYBE);
 		}
-
-		SelectMatch( manufacturers, printer, service, genericManufacturer, genericModel );
 	}
 	else
 	{
@@ -1190,7 +1352,11 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 			if (nIndex != -1)
 			{
 				m_manufacturerListCtrl.SetItemState(nIndex, LVIS_SELECTED, LVIS_SELECTED);
-				m_manufacturerListCtrl.EnsureVisible(nIndex, FALSE);
+
+				//
+				//<rdar://problem/4528853> mDNS: When auto-highlighting items in lists, scroll list so highlighted item is in the middle
+				//
+				AutoScroll(m_manufacturerListCtrl, nIndex);
 			}
 		}
 	}
@@ -1199,7 +1365,6 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 
 	return err;
 }
-
 
 // ------------------------------------------------------
 // MatchManufacturer
@@ -1236,7 +1401,6 @@ CThirdPage::MatchManufacturer( Manufacturers & manufacturers, const CString & na
 
 	return NULL;
 }
-
 
 // -------------------------------------------------------
 // MatchModel
@@ -1288,7 +1452,6 @@ CThirdPage::MatchModel(Manufacturer * manufacturer, const CString & name)
 	return NULL;
 }
 
-
 // -------------------------------------------------------
 // MatchGeneric
 //
@@ -1318,12 +1481,12 @@ CThirdPage::MatchGeneric( Manufacturers & manufacturers, Printer * printer, Serv
 	pdl = q->pdl;
 	pdl.MakeLower();
 
-	if ( pdl.Find( kPDLPCLKey ) != -1 )
+	if ( m_genericPCL && ( pdl.Find( kPDLPCLKey ) != -1 ) )
 	{
 		*model	= m_genericPCL;
 		ok		= TRUE;
 	}
-	else if ( pdl.Find( kPDLPostscriptKey ) != -1 )
+	else if ( m_genericPostscript && ( pdl.Find( kPDLPostscriptKey ) != -1 ) )
 	{
 		*model	= m_genericPostscript;
 		ok		= TRUE;
@@ -1333,7 +1496,6 @@ exit:
 
 	return ok;
 }
-
 
 // -----------------------------------------------------------
 // OnInitPage
@@ -1349,12 +1511,9 @@ OSStatus CThirdPage::OnInitPage()
 	OSStatus	err = kNoErr;
 
 	// Load printer icon
-
-
-
 	check( m_printerImage == NULL );
 	
-	m_printerImage = (CStatic*) GetDlgItem( IDR_MANIFEST );
+	m_printerImage = (CStatic*) GetDlgItem( 1 );	// 1 == IDR_MANIFEST
 	check( m_printerImage );
 
 	if ( m_printerImage != NULL )
@@ -1372,7 +1531,7 @@ OSStatus CThirdPage::OnInitPage()
 	//
 
 	//
-	// we have to make sure that we only do this once.  Typically, 
+	// we have to make sure that we only do this once.  Typically,
 	// we would do this in something like OnInitDialog, but we don't
 	// have this in Wizards, because the window is a PropertySheet.
 	// We're considered fully initialized when we receive the first
@@ -1389,7 +1548,6 @@ OSStatus CThirdPage::OnInitPage()
 	return (err);
 }
 
-
 void CThirdPage::DoDataExchange(CDataExchange* pDX)
 {
 	CPropertyPage::DoDataExchange(pDX);
@@ -1400,7 +1558,6 @@ void CThirdPage::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_PRINTER_SELECTION_TEXT, m_printerSelectionText);
 
 }
-
 
 // ----------------------------------------------------------
 // OnSetActive
@@ -1437,6 +1594,20 @@ CThirdPage::OnSetActive()
 	}
 
 	//
+	// <rdar://problem/4580061> mDNS: Printers added using Bonjour should be set as the default printer.
+	//
+	if ( DefaultPrinterExists() )
+	{
+		m_defaultPrinterCtrl.SetCheck( BST_UNCHECKED );
+		printer->deflt = false;
+	}
+	else
+	{
+		m_defaultPrinterCtrl.SetCheck( BST_CHECKED );
+		printer->deflt = true;
+	}
+
+	//
 	// update the UI with the printer name
 	//
 	m_printerName.SetWindowText(printer->displayName);
@@ -1465,14 +1636,13 @@ exit:
 	return CPropertyPage::OnSetActive();
 }
 
-
 BOOL
 CThirdPage::OnKillActive()
 {
 	CPrinterSetupWizardSheet * psheet;
 
 	psheet = reinterpret_cast<CPrinterSetupWizardSheet*>(GetParent());
-	require_quiet( psheet, exit );   
+	require_quiet( psheet, exit );
    
 	psheet->SetLastPage(this);
 
@@ -1480,7 +1650,6 @@ exit:
 
 	return CPropertyPage::OnKillActive();
 }
-
 
 // -------------------------------------------------------
 // PopulateUI
@@ -1510,14 +1679,12 @@ CThirdPage::PopulateUI(Manufacturers & manufacturers)
 	return 0;
 }
 
-
 BEGIN_MESSAGE_MAP(CThirdPage, CPropertyPage)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_PRINTER_MANUFACTURER, OnLvnItemchangedManufacturer)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_PRINTER_MODEL, OnLvnItemchangedPrinterModel)
 	ON_BN_CLICKED(IDC_DEFAULT_PRINTER, OnBnClickedDefaultPrinter)
 	ON_BN_CLICKED(IDC_HAVE_DISK, OnBnClickedHaveDisk)
 END_MESSAGE_MAP()
-
 
 // CThirdPage message handlers
 void CThirdPage::OnLvnItemchangedManufacturer(NMHDR *pNMHDR, LRESULT *pResult)
@@ -1594,7 +1761,6 @@ exit:
 
 	*pResult = 0;
 }
-
 
 void CThirdPage::OnBnClickedDefaultPrinter()
 {

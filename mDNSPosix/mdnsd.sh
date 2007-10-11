@@ -1,28 +1,32 @@
 #!/bin/sh
+# Emacs settings: -*- tab-width: 4 -*-
+#
+# Copyright (c) 2002-2006 Apple Computer, Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#     http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # Linux /etc/init.d script to start/stop the mdnsd daemon.
-# Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
-#
-# @APPLE_LICENSE_HEADER_START@
-# 
-# This file contains Original Code and/or Modifications of Original Code
-# as defined in and that are subject to the Apple Public Source License
-# Version 2.0 (the 'License'). You may not use this file except in
-# compliance with the License. Please obtain a copy of the License at
-# http://www.opensource.apple.com/apsl/ and read it before using this
-# file.
-# 
-# The Original Code and all software distributed under the License are
-# distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-# EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
-# INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
-# Please see the License for the specific language governing rights and
-# limitations under the License.
-# 
-# @APPLE_LICENSE_HEADER_END@
 #
 # $Log: mdnsd.sh,v $
+# Revision 1.9  2006/09/05 20:00:14  cheshire
+# Moved Emacs settings to second line of file
+#
+# Revision 1.8  2006/08/29 16:42:01  mkrochma
+# Fix POSIX startup script
+#
+# Revision 1.7  2006/08/14 23:24:47  cheshire
+# Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+#
 # Revision 1.6  2004/12/07 20:30:45  cheshire
 # Fix start-stop-daemon for Suse Linux (don't use -s TERM)
 #

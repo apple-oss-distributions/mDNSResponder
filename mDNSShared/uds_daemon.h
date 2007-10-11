@@ -1,24 +1,18 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
  	File:		uds_daemon.h
 
@@ -29,6 +23,37 @@
     Change History (most recent first):
 
 $Log: uds_daemon.h,v $
+Revision 1.24  2007/09/19 20:25:17  cheshire
+Deleted outdated comment
+
+Revision 1.23  2007/07/24 17:23:02  cheshire
+Rename DefRegList as AutoRegistrationDomains
+
+Revision 1.22  2007/07/11 02:58:04  cheshire
+<rdar://problem/5303807> Register IPv6-only hostname and don't create port mappings for AutoTunnel services
+
+Revision 1.21  2007/04/21 21:47:47  cheshire
+<rdar://problem/4376383> Daemon: Add watchdog timer
+
+Revision 1.20  2007/02/14 01:58:19  cheshire
+<rdar://problem/4995831> Don't delete Unix Domain Socket on exit if we didn't create it on startup
+
+Revision 1.19  2007/02/07 19:32:00  cheshire
+<rdar://problem/4980353> All mDNSResponder components should contain version strings in SCCS-compatible format
+
+Revision 1.18  2007/02/06 19:06:49  cheshire
+<rdar://problem/3956518> Need to go native with launchd
+
+Revision 1.17  2007/01/05 05:46:07  cheshire
+Add mDNS *const m parameter to udsserver_handle_configchange()
+
+Revision 1.16  2007/01/04 23:11:15  cheshire
+<rdar://problem/4720673> uDNS: Need to start caching unicast records
+When an automatic browsing domain is removed, generate appropriate "remove" events for legacy queries
+
+Revision 1.15  2006/08/14 23:24:57  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
 Revision 1.14  2005/01/27 17:48:39  cheshire
 Added comment about CFSocketInvalidate closing the underlying socket
 
@@ -80,40 +105,40 @@ Changes necessary to support mDNSResponder on Linux.
 #include "mDNSEmbeddedAPI.h"
 #include "dnssd_ipc.h"
 
-
 /* Client interface: */
 
 #define SRS_PORT(S) mDNSVal16((S)->RR_SRV.resrec.rdata->u.srv.port)
 
-extern int udsserver_init(void);
-
-// takes the next scheduled event time, does idle work, and returns the updated nextevent time
+extern int udsserver_init(dnssd_sock_t skt);
 extern mDNSs32 udsserver_idle(mDNSs32 nextevent);
-
 extern void udsserver_info(mDNS *const m);	// print out info about current state
-
-extern void udsserver_handle_configchange(void);
-
-extern int udsserver_exit(void);	// should be called prior to app exit
-
-extern void udsserver_default_reg_domain_changed(const domainname *d, mDNSBool add);
-extern void udsserver_default_browse_domain_changed(const domainname *d, mDNSBool add);
+extern void udsserver_handle_configchange(mDNS *const m);
+extern int udsserver_exit(dnssd_sock_t skt);	// should be called prior to app exit
 
 /* Routines that uds_daemon expects to link against: */
 
-typedef	void (*udsEventCallback)(void *context);
-
+typedef	void (*udsEventCallback)(int fd, short filter, void *context);
 extern mStatus udsSupportAddFDToEventLoop(dnssd_sock_t fd, udsEventCallback callback, void *context);
 extern mStatus udsSupportRemoveFDFromEventLoop(dnssd_sock_t fd); // Note: This also CLOSES the file descriptor as well
 
-// RecordUpdatedNiceLabel() can be a no-op on platforms that don't care about updating the machine's
-// global default service name (was OS X calls the "Computer Name") in response to name conflicts.
 extern void RecordUpdatedNiceLabel(mDNS *const m, mDNSs32 delay);
 
 // Globals and functions defined in uds_daemon.c and also shared with the old "daemon.c" on OS X
+
 extern mDNS mDNSStorage;
+extern DNameListElem *AutoRegistrationDomains;
+extern DNameListElem *AutoBrowseDomains;
+
 extern mDNSs32 ChopSubTypes(char *regtype);
 extern AuthRecord *AllocateSubTypes(mDNSs32 NumSubTypes, char *p);
 extern int CountExistingRegistrations(domainname *srv, mDNSIPPort port);
 extern void FreeExtraRR(mDNS *const m, AuthRecord *const rr, mStatus result);
 extern int CountPeerRegistrations(mDNS *const m, ServiceRecordSet *const srs);
+
+#if APPLE_OSX_mDNSResponder
+extern void machserver_automatic_browse_domain_changed(const domainname *d, mDNSBool add);
+extern void machserver_automatic_registration_domain_changed(const domainname *d, mDNSBool add);
+#endif
+
+extern const char mDNSResponderVersionString_SCCS[];
+#define mDNSResponderVersionString (mDNSResponderVersionString_SCCS+5)

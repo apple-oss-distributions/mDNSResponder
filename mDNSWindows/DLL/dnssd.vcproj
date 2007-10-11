@@ -136,7 +136,7 @@
 			Filter="cpp;c;cxx;def;odl;idl;hpj;bat;asm;asmx"
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}">
 			<File
-				RelativePath="..\DebugServices.c">
+				RelativePath="..\..\mDNSShared\DebugServices.c">
 			</File>
 			<File
 				RelativePath=".\dllmain.c">
@@ -162,10 +162,10 @@
 			Filter="h;hpp;hxx;hm;inl;inc;xsd"
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}">
 			<File
-				RelativePath="..\CommonServices.h">
+				RelativePath="..\..\mDNSShared\CommonServices.h">
 			</File>
 			<File
-				RelativePath="..\DebugServices.h">
+				RelativePath="..\..\mDNSShared\DebugServices.h">
 			</File>
 			<File
 				RelativePath="..\..\mDNSShared\dns_sd.h">

@@ -155,7 +155,7 @@ format_reverse_addr_in (
 
 /*
 	Format an address structure as a string appropriate for DNS reverse (PTR)
-	lookup for AF_INET6.  Output is in .ip6.int domain.
+	lookup for AF_INET6.  Output is in .ip6.arpa domain.
 	
 	Parameters
 		prefixlen
@@ -490,22 +490,6 @@ const int MDNS_VERBOSE = 0;
 	// As per RFC1034 and RFC1035
 #define k_aliases_max 15
 #define k_addrs_max 15
-
-const int k_mdnsd_intfs_local = 0;
-	// Tell mdnsd to perform lookups only using link-local interfaces.
-	/*
-		Currently, this feature is buggy.  0 will actually cause mdnsd to
-		do what it thinks is best.  Unfortunately, this is to lookup 'local'
-		addresses locally and remote addresses via the DNS.  Thus, lookups
-		for non-"local" addresses via mdns will not work correctly.
-		
-		Apple is currently modifying mdnsd to allow a special interface id
-		(expected value -2) to mean "always lookup locally".  This constant
-		should be changed once the change is made.
-		
-		AW - 16 June 2004
-	 */
-
 
 typedef struct buf_header
 {
@@ -879,13 +863,13 @@ mdns_lookup_name (
 	switch (af)
 	{
 	  case AF_INET:
-		rrtype = T_A;
+		rrtype = kDNSServiceType_A;
 		result->hostent->h_length = 4;
 			// Length of an A record
 		break;
 	
 	  case AF_INET6:
-		rrtype = T_AAAA;
+		rrtype = kDNSServiceType_AAAA;
 		result->hostent->h_length = 16;
 			// Length of an AAAA record
 		break;
@@ -902,11 +886,11 @@ mdns_lookup_name (
 	errcode =
 		DNSServiceQueryRecord (
 			&sdref,
-			0,		// reserved flags field
-			k_mdnsd_intfs_local,	// all local interfaces
+			kDNSServiceFlagsForceMulticast,		// force multicast query
+			kDNSServiceInterfaceIndexAny,	// all interfaces
 			fullname,	// full name to query for
 			rrtype,		// resource record type
-			C_IN,	// internet class records
+			kDNSServiceClass_IN,	// internet class records
 			mdns_lookup_callback,	// callback
 			result		// Context - result buffer
 		);
@@ -977,11 +961,11 @@ mdns_lookup_addr (
 	errcode =
 		DNSServiceQueryRecord (
 			&sdref,
-			0,		// reserved flags field
-			k_mdnsd_intfs_local,	// all local interfaces
+			kDNSServiceFlagsForceMulticast,		// force multicast query
+			kDNSServiceInterfaceIndexAny,	// all interfaces
 			addr_str,	// address string to query for
-			T_PTR,	// pointer RRs
-			C_IN,	// internet class records
+			kDNSServiceType_PTR,	// pointer RRs
+			kDNSServiceClass_IN,	// internet class records
 			mdns_lookup_callback,	// callback
 			result		// Context - result buffer
 		);
@@ -1121,7 +1105,7 @@ mdns_lookup_callback
 		}
 		
 		// If a PTR
-		if (rrtype == T_PTR)
+		if (rrtype == kDNSServiceType_PTR)
 		{
 			if (callback_body_ptr (fullname, result, rdlen, rdata) < 0)
 				return;
@@ -1711,8 +1695,14 @@ const char * k_default_domains [] =
 	{
 		"local",
 		"254.169.in-addr.arpa",
-		"0.8.e.f.ip6.int",
-		"0.8.e.f.ip6.arpa",
+		"8.e.f.ip6.int",
+		"8.e.f.ip6.arpa",
+		"9.e.f.ip6.int",
+		"9.e.f.ip6.arpa",
+		"a.e.f.ip6.int",
+		"a.e.f.ip6.arpa",
+		"b.e.f.ip6.int",
+		"b.e.f.ip6.arpa",
 		NULL
 			// Always null terminated
 	};
@@ -1920,9 +1910,12 @@ load_config (config_t * conf)
 		if (errcode)
 		{
 			// Critical error, give up
+			fclose(cf);
 			return errcode;
 		}
 	}
+	
+	fclose (cf);
 	
 	return 0;
 }
@@ -2281,10 +2274,10 @@ rr_to_af (ns_type_t rrtype)
 {
 	switch (rrtype)
 	{
-	  case T_A:
+	  case kDNSServiceType_A:
 		return AF_INET;
 	
-	  case T_AAAA:
+	  case kDNSServiceType_AAAA:
 		return AF_INET6;
 	
 	  default:
@@ -2299,10 +2292,10 @@ af_to_rr (int af)
 	switch (af)
 	{
 	  case AF_INET:
-		return T_A;
+		return kDNSServiceType_A;
 	
 	  case AF_INET6:
-		return T_AAAA;
+		return kDNSServiceType_AAAA;
 	
 	  default:
 		//return ns_t_invalid;
@@ -2423,9 +2416,9 @@ format_reverse_addr_in6 (
 		// divide prefixlen into nibbles, rounding up
 
 	// Special handling for first
-	if (i / 2)
+	if (i % 2)
 	{
-		curr += sprintf (curr, "%d.", (in_addr_a [i] >> 4) & 0x0F);
+		curr += sprintf (curr, "%d.", (in_addr_a [i/2] >> 4) & 0x0F);
 	}
 	i >>= 1;
 		// Convert i to bytes (divide by 2)
@@ -2572,15 +2565,7 @@ dns_rdata_to_name (const char * rdata, int rdlen, char * name, int name_len)
 		// Index into 'name'
 	const char * rdata_curr = rdata;
 	
-	// drop any leading whitespace rubbish
-	while (isspace (*rdata_curr))
-	{
-		rdata_curr ++;
-		if (rdata_curr > rdata + rdlen)
-		{
-			return DNS_RDATA_TO_NAME_BAD_FORMAT;
-		}
-	}
+	if (rdlen == 0) return DNS_RDATA_TO_NAME_BAD_FORMAT;
 	
 	/*
 		In RDATA, a DNS name is stored as a series of labels.

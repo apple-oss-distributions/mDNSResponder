@@ -2,28 +2,38 @@
  *
  * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
- *
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- *
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- *
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
 
 $Log: PlatformCommon.c,v $
+Revision 1.11  2007/07/31 23:08:34  mcguire
+<rdar://problem/5329542> BTMM: Make AutoTunnel mode work with multihoming
+
+Revision 1.10  2007/07/11 02:59:58  cheshire
+<rdar://problem/5303807> Register IPv6-only hostname and don't create port mappings for AutoTunnel services
+Add AutoTunnel parameter to mDNS_SetSecretForDomain
+
+Revision 1.9  2007/01/09 22:37:44  cheshire
+Remove unused ClearDomainSecrets() function
+
+Revision 1.8  2006/12/22 20:59:51  cheshire
+<rdar://problem/4742742> Read *all* DNS keys from keychain,
+ not just key for the system-wide default registration domain
+
+Revision 1.7  2006/08/14 23:24:56  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
 Revision 1.6  2005/04/08 21:30:16  ksekar
 <rdar://problem/4007457> Compiling problems with mDNSResponder-98 on Solaris/Sparc v9
 Patch submitted by Bernd Kuhls
@@ -53,28 +63,31 @@ Move ReadDDNSSettingsFromConfFile() from mDNSMacOSX.c to PlatformCommon.c
 #include <netinet/in.h>			// Needed for sockaddr_in
 
 #include "mDNSEmbeddedAPI.h"	// Defines the interface provided to the client layer above
+#include "DNSCommon.h"
 #include "PlatformCommon.h"
 
 #ifdef NOT_HAVE_SOCKLEN_T
     typedef unsigned int socklen_t;
 #endif
 
-// Bind a UDP socket to a global destination to find the default route's interface address
-mDNSexport void FindDefaultRouteIP(mDNSAddr *a)
+// Bind a UDP socket to find the source address to a destination
+mDNSexport void FindSourceAddrForIP(mDNSAddr *const dst, mDNSAddr *src)
 	{
 	struct sockaddr_in addr;
 	socklen_t len = sizeof(addr);
 	int sock = socket(AF_INET,SOCK_DGRAM,0);
-	a->type = mDNSAddrType_None;
+	src->type = mDNSAddrType_None;
 	if (sock == -1) return;
+	if (dst->type != mDNSAddrType_IPv4) return; // Only support v4 for now
 	addr.sin_family = AF_INET;
-	addr.sin_port = 1;	// Not important, any port and public address will do
-	addr.sin_addr.s_addr = 0x11111111;
+	addr.sin_port = 1;	// Not important, any port will do
+	if (dst == NULL) addr.sin_addr.s_addr = 0x11111111;
+	else addr.sin_addr.s_addr = dst->ip.v4.NotAnInteger;
 	if ((connect(sock,(const struct sockaddr*)&addr,sizeof(addr))) == -1) { close(sock); return; }
 	if ((getsockname(sock,(struct sockaddr*)&addr, &len)) == -1) { close(sock); return; }
 	close(sock);
-	a->type = mDNSAddrType_IPv4;
-	a->ip.v4.NotAnInteger = addr.sin_addr.s_addr;
+	src->type = mDNSAddrType_IPv4;
+	src->ip.v4.NotAnInteger = addr.sin_addr.s_addr;
 	}
 
 // dst must be at least MAX_ESCAPED_DOMAIN_NAME bytes, and option must be less than 32 bytes in length
@@ -127,9 +140,10 @@ mDNSexport void ReadDDNSSettingsFromConfFile(mDNS *const m, const char *const fi
 
 	if (domain && domain->c[0] && secret[0])
 		{
+		DomainAuthInfo *info = (DomainAuthInfo*)mDNSPlatformMemAllocate(sizeof(*info));
 		// for now we assume keyname = service reg domain and we use same key for service and hostname registration
-		err = mDNS_SetSecretForZone(m, domain, domain, secret);
-		if (err) LogMsg("ERROR: mDNS_SetSecretForZone returned %d for domain %##s", err, domain->c);
+		err = mDNS_SetSecretForDomain(m, info, domain, domain, secret, mDNSfalse);
+		if (err) LogMsg("ERROR: mDNS_SetSecretForDomain returned %d for domain %##s", err, domain->c);
 		}
 
 	return;

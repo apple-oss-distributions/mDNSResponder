@@ -1,28 +1,29 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
 
 $Log: Mac\040OS\040Test\040Searcher.c,v $
+Revision 1.23  2007/07/27 19:30:40  cheshire
+Changed mDNSQuestionCallback parameter from mDNSBool to QC_result,
+to properly reflect tri-state nature of the possible responses
+
+Revision 1.22  2006/08/14 23:24:29  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
 Revision 1.21  2004/12/16 20:49:34  cheshire
 <rdar://problem/3324626> Cache memory management improvements
 
@@ -153,7 +154,7 @@ static void FoundInstanceInfo(mDNS *const m, ServiceInfoQuery *query)
 // When a new named instance of a service is found, FoundInstance() is called.
 // In this sample code we turn around and immediately issue a query to resolve that service name to
 // find its address, port, and txtinfo, but a normal browing application would just display the name.
-static void FoundInstance(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, mDNSBool AddRecord)
+static void FoundInstance(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 	{
 	#pragma unused (question)
 	SearcherServices *services = (SearcherServices *)question->QuestionContext;
@@ -185,7 +186,7 @@ static void FoundInstance(mDNS *const m, DNSQuestion *question, const ResourceRe
 		}
 	}
 
-static void FoundDomain(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, mDNSBool AddRecord)
+static void FoundDomain(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 	{
 	#pragma unused (m)
 	#pragma unused (question)

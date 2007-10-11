@@ -1,28 +1,85 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
 
 $Log: mDNSLibraryResources.r,v $
+Revision 1.54  2007/06/27 21:59:08  cheshire
+mDNSResponder-130
+
+Revision 1.53  2007/05/29 23:47:57  cheshire
+mDNSResponder-129
+
+Revision 1.52  2007/05/25 23:45:39  jvidrine
+Update version numbers to reflect the submission number. (Thanks, Marc!)
+
+Revision 1.51  2007/05/25 22:10:19  cheshire
+mDNSResponder-127
+
+Revision 1.50  2007/05/23 00:57:23  cheshire
+mDNSResponder-126
+
+Revision 1.49  2007/05/15 00:47:50  cheshire
+mDNSResponder-125
+
+Revision 1.48  2007/05/14 20:49:54  cheshire
+mDNSResponder-124
+
+Revision 1.47  2007/05/10 21:43:12  cheshire
+mDNSResponder-123
+
+Revision 1.46  2007/04/27 19:33:07  cheshire
+mDNSResponder-122
+
+Revision 1.45  2007/04/08 03:04:00  cheshire
+mDNSResponder-121
+
+Revision 1.44  2007/03/30 23:30:04  cheshire
+mDNSResponder-120
+
+Revision 1.43  2007/02/28 22:09:24  cheshire
+mDNSResponder-119
+
+Revision 1.42  2007/01/09 01:58:20  cheshire
+mDNSResponder-116
+
+Revision 1.41  2006/11/08 04:29:02  cheshire
+mDNSResponder-115
+
+Revision 1.40  2006/10/27 01:46:40  cheshire
+mDNSResponder-114
+
+Revision 1.39  2006/09/30 01:38:53  cheshire
+mDNSResponder-113
+
+Revision 1.38  2006/09/21 23:38:13  cheshire
+mDNSResponder-112
+
+Revision 1.37  2006/08/14 23:24:29  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
+Revision 1.36  2006/07/14 00:52:00  cheshire
+mDNSResponder-111
+
+Revision 1.35  2006/06/20 23:05:10  cheshire
+mDNSResponder-110
+
+Revision 1.34  2006/02/09 22:24:53  cheshire
+mDNSResponder-109
+
 Revision 1.33  2005/12/12 17:48:36  cheshire
 mDNSResponder-108
 
@@ -140,15 +197,15 @@ like Muse Research who want to be able to use mDNS/DNS-SD from GPL-licensed code
 
 resource 'vers' (1, purgeable)
 	{
-	0x01, 0x00, alpha, 108, verUS,
-	"1.0a108",
-	"Multicast DNS & DNS Service Discovery 1.0a108"
+	0x01, 0x00, alpha, 130, verUS,
+	"1.0a130",
+	"Multicast DNS & DNS Service Discovery 1.0a130"
 	};
 
 resource 'vers' (2, purgeable)
 	{
-   0x01, 0x00, alpha, 108, verUS,
-   "1.0a108",
+   0x01, 0x00, alpha, 130, verUS,
+   "1.0a130",
    "developer.apple.com/darwin/projects/bonjour/"
 	};
 

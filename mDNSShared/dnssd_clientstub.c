@@ -2,1203 +2,1631 @@
  *
  * Copyright (c) 2003-2004, Apple Computer, Inc. All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without 
+ * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- * 1.  Redistributions of source code must retain the above copyright notice, 
- *     this list of conditions and the following disclaimer. 
- * 2.  Redistributions in binary form must reproduce the above copyright notice, 
- *     this list of conditions and the following disclaimer in the documentation 
- *     and/or other materials provided with the distribution. 
- * 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of its 
- *     contributors may be used to endorse or promote products derived from this 
- *     software without specific prior written permission. 
+ * 1.  Redistributions of source code must retain the above copyright notice,
+ *     this list of conditions and the following disclaimer.
+ * 2.  Redistributions in binary form must reproduce the above copyright notice,
+ *     this list of conditions and the following disclaimer in the documentation
+ *     and/or other materials provided with the distribution.
+ * 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of its
+ *     contributors may be used to endorse or promote products derived from this
+ *     software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY 
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED 
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
- * DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY 
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES 
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; 
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND 
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS 
+ * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-    Change History (most recent first):
+	Change History (most recent first):
 
 $Log: dnssd_clientstub.c,v $
-Revision 1.48  2005/06/30 18:01:00  shersche
-<rdar://problem/4096913> Clients shouldn't wait ten seconds to connect to mDNSResponder
+Revision 1.93  2007/10/10 00:48:54  cheshire
+<rdar://problem/5526379> Daemon spins in an infinite loop when it doesn't get the control message it's expecting
 
-Revision 1.47  2005/03/31 02:19:56  cheshire
-<rdar://problem/4021486> Fix build warnings
-Reviewed by: Scott Herscher
+Revision 1.92  2007/10/06 03:44:44  cheshire
+Testing code for <rdar://problem/5526374> kqueue does not get a kevent to wake it up when a control message arrives on a socket
 
-Revision 1.46  2005/03/21 00:39:31  shersche
-<rdar://problem/4021486> Fix build warnings on Win32 platform
+Revision 1.91  2007/10/04 20:53:59  cheshire
+Improved debugging message when sendmsg fails
 
-Revision 1.45  2005/02/01 01:25:06  shersche
-Define sleep() to be Sleep() for Windows compatibility
+Revision 1.90  2007/09/30 00:09:27  cheshire
+<rdar://problem/5492315> Pass socket fd via SCM_RIGHTS sendmsg instead of using named UDS in the filesystem
 
-Revision 1.44  2005/01/27 22:57:56  cheshire
-Fix compile errors on gcc4
+Revision 1.89  2007/09/19 23:53:12  cheshire
+Fixed spelling mistake in comment
 
-Revision 1.43  2005/01/27 00:02:29  cheshire
-<rdar://problem/3947461> Handle case where client runs before daemon has finished launching
+Revision 1.88  2007/09/07 23:18:27  cheshire
+<rdar://problem/5467542> Change "client_context" to be an incrementing 64-bit counter
 
-Revision 1.42  2005/01/11 02:01:02  shersche
-Use dnssd_close() rather than close() for Windows compatibility
+Revision 1.87  2007/09/07 22:50:09  cheshire
+Added comment explaining moreptr field in DNSServiceOp structure
 
-Revision 1.41  2004/12/23 17:34:26  ksekar
-<rdar://problem/3931319> Calls leak sockets if mDNSResponder is not running
+Revision 1.86  2007/09/07 20:21:22  cheshire
+<rdar://problem/5462371> Make DNSSD library more resilient
+Add more comments explaining the moreptr/morebytes logic; don't allow DNSServiceRefSockFD or
+DNSServiceProcessResult for subordinate DNSServiceRefs created using kDNSServiceFlagsShareConnection
 
-Revision 1.40  2004/11/23 03:39:47  cheshire
-Let interface name/index mapping capability live directly in JNISupport.c,
-instead of having to call through to the daemon via IPC to get this information.
+Revision 1.85  2007/09/06 21:43:23  cheshire
+<rdar://problem/5462371> Make DNSSD library more resilient
+Allow DNSServiceRefDeallocate from within DNSServiceProcessResult callback
 
-Revision 1.39  2004/11/12 03:22:00  rpantos
-rdar://problem/3809541 Add DNSSDMapIfIndexToName, DNSSDMapNameToIfIndex.
+Revision 1.84  2007/09/06 18:31:47  cheshire
+<rdar://problem/5462371> Make DNSSD library more resilient against client programming errors
 
-Revision 1.38  2004/11/02 02:51:23  cheshire
-<rdar://problem/3526342> Remove overly-restrictive flag checks
+Revision 1.83  2007/08/28 20:45:45  cheshire
+Typo: ctrl_path needs to be 64 bytes, not 44 bytes
 
-Revision 1.37  2004/10/14 01:43:35  cheshire
-Fix opaque port passing problem
+Revision 1.82  2007/08/28 19:53:52  cheshire
+<rdar://problem/5437423> Bonjour failures when /tmp is not writable (e.g. when booted from installer disc)
 
-Revision 1.36  2004/10/06 02:22:19  cheshire
-Changed MacRoman copyright symbol (should have been UTF-8 in any case :-) to ASCII-compatible "(c)"
+Revision 1.81  2007/07/27 00:03:20  cheshire
+Fixed compiler warnings that showed up now we're building optimized ("-Os")
 
-Revision 1.35  2004/10/01 22:15:55  rpantos
-rdar://problem/3824265: Replace APSL in client lib with BSD license.
+Revision 1.80  2007/07/23 22:12:53  cheshire
+<rdar://problem/5352299> Make mDNSResponder more defensive against malicious local clients
 
-Revision 1.34  2004/09/17 22:36:13  cheshire
-Add comment explaining that deliver_request frees the message it sends
+Revision 1.79  2007/07/23 19:58:24  cheshire
+<rdar://problem/5351640> Library: Leak in DNSServiceRefDeallocate
 
-Revision 1.33  2004/09/17 01:17:31  ksekar
-Remove double-free of msg header, freed automatically by deliver_request()
+Revision 1.78  2007/07/12 20:42:27  cheshire
+<rdar://problem/5280735> If daemon is killed, return kDNSServiceErr_ServiceNotRunning
+to clients instead of kDNSServiceErr_Unknown
 
-Revision 1.32  2004/09/17 01:08:55  cheshire
-Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
-  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
-  declared in that file are ONLY appropriate to single-address-space embedded applications.
-  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
+Revision 1.77  2007/07/02 23:07:13  cheshire
+<rdar://problem/5308280> Reduce DNS-SD client syslog error messages
 
-Revision 1.31  2004/09/16 23:37:19  cheshire
-Free hdr before returning
+Revision 1.76  2007/06/22 20:12:18  cheshire
+<rdar://problem/5277024> Leak in DNSServiceRefDeallocate
 
-Revision 1.30  2004/09/16 23:14:24  cheshire
-Changes for Windows compatibility
+Revision 1.75  2007/05/23 18:59:22  cheshire
+Remove unnecessary IPC_FLAGS_REUSE_SOCKET
 
-Revision 1.29  2004/09/16 21:46:38  ksekar
-<rdar://problem/3665304> Need SPI for LoginWindow to associate a UID with a Wide Area domain
+Revision 1.74  2007/05/22 18:28:38  cheshire
+Fixed compile errors in posix build
 
-Revision 1.28  2004/08/11 17:10:04  cheshire
-Fix signed/unsigned warnings
+Revision 1.73  2007/05/22 01:20:47  cheshire
+To determine current operation, need to check hdr->op, not sdr->op
 
-Revision 1.27  2004/08/11 00:54:16  cheshire
-Change "hdr->op.request_op" to just "hdr->op"
+Revision 1.72  2007/05/22 01:07:42  cheshire
+<rdar://problem/3563675> API: Need a way to get version/feature information
 
-Revision 1.26  2004/07/26 06:07:27  shersche
-fix bugs when using an error socket to communicate with the daemon
+Revision 1.71  2007/05/18 23:55:22  cheshire
+<rdar://problem/4454655> Allow multiple register/browse/resolve operations to share single Unix Domain Socket
 
-Revision 1.25  2004/07/26 05:54:02  shersche
-DNSServiceProcessResult() returns NoError if socket read returns EWOULDBLOCK
+Revision 1.70  2007/05/17 20:58:22  cheshire
+<rdar://problem/4647145> DNSServiceQueryRecord should return useful information with NXDOMAIN
 
-Revision 1.24  2004/07/20 06:46:21  shersche
-<rdar://problem/3730123> fix endless loop in my_read() if recv returns 0
-Bug #: 3730123
+Revision 1.69  2007/05/16 16:58:27  cheshire
+<rdar://problem/4471320> Improve reliability of kDNSServiceFlagsMoreComing flag on multiprocessor machines
+As long as select indicates that data is waiting, loop within DNSServiceProcessResult delivering additional results
 
-Revision 1.23  2004/06/29 00:48:38  cheshire
-Don't use "MSG_WAITALL"; it returns "Invalid argument" on some Linux versions;
-use an explicit while() loop instead.
+Revision 1.68  2007/05/16 01:06:52  cheshire
+<rdar://problem/4471320> Improve reliability of kDNSServiceFlagsMoreComing flag on multiprocessor machines
 
-Revision 1.22  2004/06/26 03:16:34  shersche
-clean up warning messages on Win32 platform
+Revision 1.67  2007/05/15 21:57:16  cheshire
+<rdar://problem/4608220> Use dnssd_SocketValid(x) macro instead of just
+assuming that all negative values (or zero!) are invalid socket numbers
 
-Submitted by: herscher
+Revision 1.66  2007/03/27 22:23:04  cheshire
+Add "dnssd_clientstub" prefix onto syslog messages
 
-Revision 1.21  2004/06/18 04:53:56  rpantos
-Use platform layer for socket types. Introduce USE_TCP_LOOPBACK. Remove dependency on mDNSEmbeddedAPI.h.
+Revision 1.65  2007/03/21 22:25:23  cheshire
+<rdar://problem/4172796> Remove client retry logic now that mDNSResponder uses launchd for its Unix Domain Socket
 
-Revision 1.20  2004/06/12 00:50:22  cheshire
-Changes for Windows compatibility
+Revision 1.64  2007/03/21 19:01:56  cheshire
+<rdar://problem/5078494> IPC code not 64-bit-savvy: assumes long=32bits, and short=16bits
 
-Revision 1.19  2004/05/25 18:29:33  cheshire
-Move DNSServiceConstructFullName() from dnssd_clientstub.c to dnssd_clientlib.c,
-so that it's also accessible to dnssd_clientshim.c (single address space) clients.
+Revision 1.63  2007/03/12 21:48:21  cheshire
+<rdar://problem/5000162> Scary unlink errors in system.log
+Code was using memory after it had been freed
 
-Revision 1.18  2004/05/18 23:51:27  cheshire
-Tidy up all checkin comments to use consistent "<rdar://problem/xxxxxxx>" format for bug numbers
+Revision 1.62  2007/02/28 01:44:30  cheshire
+<rdar://problem/5027863> Byte order bugs in uDNS.c, uds_daemon.c, dnssd_clientstub.c
 
-Revision 1.17  2004/05/06 18:42:58  ksekar
-General dns_sd.h API cleanup, including the following radars:
-<rdar://problem/3592068>: Remove flags with zero value
-<rdar://problem/3479569>: Passing in NULL causes a crash.
+Revision 1.61  2007/02/09 03:09:42  cheshire
+<rdar://problem/3869251> Cleanup: Stop returning kDNSServiceErr_Unknown so often
+<rdar://problem/4177924> API: Should return kDNSServiceErr_ServiceNotRunning
 
-Revision 1.16  2004/03/12 22:00:37  cheshire
-Added: #include <sys/socket.h>
+Revision 1.60  2007/02/08 20:33:44  cheshire
+<rdar://problem/4985095> Leak on error path in DNSServiceProcessResult
 
-Revision 1.15  2004/01/20 18:36:29  ksekar
-Propagated Libinfo fix for <rdar://problem/3483971>: SU:
-DNSServiceUpdateRecord() doesn't allow you to update the TXT record
-into TOT mDNSResponder.
+Revision 1.59  2007/01/05 08:30:55  cheshire
+Trim excessive "$Log" checkin history from before 2006
+(checkin history still available via "cvs log ..." of course)
 
-Revision 1.14  2004/01/19 22:39:17  cheshire
-Don't use "MSG_WAITALL"; it makes send() return "Invalid argument" on Linux;
-use an explicit while() loop instead. (In any case, this should only make a difference
-with non-blocking sockets, which we don't use on the client side right now.)
+Revision 1.58  2006/10/27 00:38:22  cheshire
+Strip accidental trailing whitespace from lines
 
-Revision 1.13  2004/01/19 21:46:52  cheshire
-Fix compiler warning
+Revision 1.57  2006/09/30 01:06:54  cheshire
+Protocol field should be uint32_t
 
-Revision 1.12  2003/12/23 20:46:47  ksekar
-<rdar://problem/3497428>: sync dnssd files between libinfo & mDNSResponder
+Revision 1.56  2006/09/27 00:44:16  herscher
+<rdar://problem/4249761> API: Need DNSServiceGetAddrInfo()
 
-Revision 1.11  2003/12/08 21:11:42  rpantos
-Changes necessary to support mDNSResponder on Linux.
+Revision 1.55  2006/09/26 01:52:01  herscher
+<rdar://problem/4245016> NAT Port Mapping API (for both NAT-PMP and UPnP Gateway Protocol)
 
-Revision 1.10  2003/10/13 23:50:53  ksekar
-Updated dns_sd clientstub files to bring copies in synch with
-top-of-tree Libinfo:  A memory leak in dnssd_clientstub.c is fixed,
-and comments in dns_sd.h are improved.
+Revision 1.54  2006/09/21 21:34:09  cheshire
+<rdar://problem/4100000> Allow empty string name when using kDNSServiceFlagsNoAutoRename
 
-Revision 1.9  2003/08/15 21:30:39  cheshire
-Bring up to date with LibInfo version
+Revision 1.53  2006/09/07 04:43:12  herscher
+Fix compile error on Win32 platform by moving inclusion of syslog.h
 
-Revision 1.8  2003/08/13 23:54:52  ksekar
-Bringing dnssd_clientstub.c up to date with Libinfo, per radar 3376640
+Revision 1.52  2006/08/15 23:04:21  mkrochma
+<rdar://problem/4090354> Client should be able to specify service name w/o callback
 
-Revision 1.7  2003/08/12 19:56:25  cheshire
-Update to APSL 2.0
+Revision 1.51  2006/07/24 23:45:55  cheshire
+<rdar://problem/4605276> DNSServiceReconfirmRecord() should return error code
 
- */
+Revision 1.50  2006/06/28 08:22:27  cheshire
+<rdar://problem/4605264> dnssd_clientstub.c needs to report unlink failures in syslog
+
+Revision 1.49  2006/06/28 07:58:59  cheshire
+Minor textual tidying
+
+*/
 
 #include <errno.h>
 #include <stdlib.h>
-#if defined(_WIN32)
-#include <winsock2.h>
-#include <windows.h>
-#define sockaddr_mdns sockaddr_in
-#define AF_MDNS AF_INET
-extern BOOL
-IsSystemServiceDisabled();
-#else
-#include <sys/time.h>
-#include <sys/socket.h>
-#define sockaddr_mdns sockaddr_un
-#define AF_MDNS AF_LOCAL
-#endif
 
 #include "dnssd_ipc.h"
 
 #if defined(_WIN32)
-// disable warning: "'type cast' : from data pointer 'void *' to
-// function pointer"
-#pragma warning(disable:4055)
 
-// disable warning: "nonstandard extension, function/data pointer
-// conversion in expression"
-#pragma warning(disable:4152)
+	#include <winsock2.h>
+	#include <ws2tcpip.h>
+	#include <windows.h>
+	
+	#define sockaddr_mdns sockaddr_in
+	#define AF_MDNS AF_INET
+	
+	// Disable warning: "'type cast' : from data pointer 'void *' to function pointer"
+	#pragma warning(disable:4055)
+	
+	// Disable warning: "nonstandard extension, function/data pointer conversion in expression"
+	#pragma warning(disable:4152)
+	
+	extern BOOL IsSystemServiceDisabled();
+	
+	#define sleep(X) Sleep((X) * 1000)
+	
+	static int g_initWinsock = 0;
 
-#define sleep(X) Sleep((X) * 1000)
+#else
 
-static int g_initWinsock = 0;
+	#include <sys/time.h>
+	#include <sys/socket.h>
+	#include <syslog.h>
+	
+	#define sockaddr_mdns sockaddr_un
+	#define AF_MDNS AF_LOCAL
+
 #endif
 
+// <rdar://problem/4096913> Specifies how many times we'll try and connect to the server.
 
-// <rdar://problem/4096913> Specifies how many times we'll try and connect to the
-// server.
+#define DNSSD_CLIENT_MAXTRIES 4
 
-#define DNSSD_CLIENT_MAXTRIES	4
+// Uncomment the line below to use the old error return mechanism of creating a temporary named socket (e.g. in /var/tmp)
+//#define USE_NAMED_ERROR_RETURN_SOCKET 1
 
-#define CTL_PATH_PREFIX "/tmp/dnssd_clippath."
-// error socket (if needed) is named "dnssd_clipath.[pid].xxx:n" where xxx are the
-// last 3 digits of the time (in seconds) and n is the 6-digit microsecond time
+#ifndef CTL_PATH_PREFIX
+#define CTL_PATH_PREFIX "/var/tmp/dnssd_result_socket."
+#endif
 
-// general utility functions
-typedef struct _DNSServiceRef_t
-    {
-    dnssd_sock_t sockfd;  // connected socket between client and daemon
-    uint32_t op;          // request_op_t or reply_op_t
-    process_reply_callback process_reply;
-    void *app_callback;
-    void *app_context;
-    uint32_t max_index;  //largest assigned record index - 0 if no additl. recs registered
-    } _DNSServiceRef_t;
+typedef struct
+	{
+	ipc_msg_hdr         ipc_hdr;
+	DNSServiceFlags     cb_flags;
+	uint32_t            cb_interface;
+	DNSServiceErrorType cb_err;
+	} CallbackHeader;
 
-typedef struct _DNSRecordRef_t
-    {
-    void *app_context;
-    DNSServiceRegisterRecordReply app_callback;
-    DNSRecordRef recref;
-    uint32_t record_index;  // index is unique to the ServiceDiscoveryRef
-    DNSServiceRef sdr;
-    } _DNSRecordRef_t;
+typedef struct _DNSServiceRef_t DNSServiceOp;
+typedef struct _DNSRecordRef_t DNSRecord;
 
-// exported functions
+// client stub callback to process message from server and deliver results to client application
+typedef void (*ProcessReplyFn)(DNSServiceOp *sdr, CallbackHeader *cbh, char *msg, char *end);
 
-// write len bytes.  return 0 on success, -1 on error
-static int my_write(dnssd_sock_t sd, char *buf, int len)
-    {
-    // Don't use "MSG_WAITALL"; it returns "Invalid argument" on some Linux versions; use an explicit while() loop instead.
-    //if (send(sd, buf, len, MSG_WAITALL) != len)   return -1;
-    while (len)
-    	{
-    	ssize_t num_written = send(sd, buf, len, 0);
-    	if (num_written < 0 || num_written > len) return -1;
-    	buf += num_written;
-    	len -= num_written;
-    	}
-    return 0;
-    }
+#define ValidatorBits 0x12345678
+#define DNSServiceRefValid(X) (dnssd_SocketValid((X)->sockfd) && (((X)->sockfd ^ (X)->validator) == ValidatorBits))
 
-// read len bytes.  return 0 on success, -1 on error
-static int my_read(dnssd_sock_t sd, char *buf, int len)
-    {
-    // Don't use "MSG_WAITALL"; it returns "Invalid argument" on some Linux versions; use an explicit while() loop instead.
-    //if (recv(sd, buf, len, MSG_WAITALL) != len)  return -1;
-    while (len)
-    	{
-    	ssize_t num_read = recv(sd, buf, len, 0);
-    	if ((num_read == 0) || (num_read < 0) || (num_read > len)) return -1;
-    	buf += num_read;
-    	len -= num_read;
-    	}
-    return 0;
-    }
+// When using kDNSServiceFlagsShareConnection, there is one primary _DNSServiceOp_t, and zero or more subordinates
+// For the primary, the 'next' field points to the first subordinate, and its 'next' field points to the next, and so on.
+// For the primary, the 'primary' field is NULL; for subordinates the 'primary' field points back to the associated primary
+struct _DNSServiceRef_t
+	{
+	DNSServiceOp    *next;				// For shared connection
+	DNSServiceOp    *primary;			// For shared connection
+	dnssd_sock_t     sockfd;			// Connected socket between client and daemon
+	dnssd_sock_t     validator;			// Used to detect memory corruption, double disposals, etc.
+	client_context_t uid;				// For shared connection requests, each subordinate DNSServiceRef has its own ID,
+										// unique within the scope of the same shared parent DNSServiceRef
+	uint32_t         op;				// request_op_t or reply_op_t
+	uint32_t         max_index;			// Largest assigned record index - 0 if no additional records registered
+	uint32_t         logcounter;		// Counter used to control number of syslog messages we write
+	int             *moreptr;			// Set while DNSServiceProcessResult working on this particular DNSServiceRef
+	ProcessReplyFn   ProcessReply;		// Function pointer to the code to handle received messages
+	void            *AppCallback;		// Client callback function and context
+	void            *AppContext;
+	};
+
+struct _DNSRecordRef_t
+	{
+	void *AppContext;
+	DNSServiceRegisterRecordReply AppCallback;
+	DNSRecordRef recref;
+	uint32_t record_index;  // index is unique to the ServiceDiscoveryRef
+	DNSServiceOp *sdr;
+	};
+
+// Write len bytes. Return 0 on success, -1 on error
+static int write_all(dnssd_sock_t sd, char *buf, int len)
+	{
+	// Don't use "MSG_WAITALL"; it returns "Invalid argument" on some Linux versions; use an explicit while() loop instead.
+	//if (send(sd, buf, len, MSG_WAITALL) != len)   return -1;
+	while (len)
+		{
+		ssize_t num_written = send(sd, buf, len, 0);
+		if (num_written < 0 || num_written > len)
+			{
+			// Should never happen. If it does, it indicates some OS bug,
+			// or that the mDNSResponder daemon crashed (which should never happen).
+			syslog(LOG_WARNING, "dnssd_clientstub write_all(%d) failed %d/%d %d %s", sd, num_written, len,
+				(num_written < 0) ? errno           : 0,
+				(num_written < 0) ? strerror(errno) : "");
+			return -1;
+			}
+		buf += num_written;
+		len -= num_written;
+		}
+	return 0;
+	}
+
+// Read len bytes. Return 0 on success, -1 on error
+static int read_all(dnssd_sock_t sd, char *buf, int len)
+	{
+	// Don't use "MSG_WAITALL"; it returns "Invalid argument" on some Linux versions; use an explicit while() loop instead.
+	//if (recv(sd, buf, len, MSG_WAITALL) != len) return -1;
+
+	while (len)
+		{
+		ssize_t num_read = recv(sd, buf, len, 0);
+		if ((num_read == 0) || (num_read < 0) || (num_read > len))
+			{
+			// Should never happen. If it does, it indicates some OS bug,
+			// or that the mDNSResponder daemon crashed (which should never happen).
+			syslog(LOG_WARNING, "dnssd_clientstub read_all(%d) failed %d/%d %d %s", sd, num_read, len,
+				(num_read < 0) ? errno           : 0,
+				(num_read < 0) ? strerror(errno) : "");
+			return -1;
+			}
+		buf += num_read;
+		len -= num_read;
+		}
+	return 0;
+	}
+
+// Returns 1 if more bytes remain to be read on socket descriptor sd, 0 otherwise
+static int more_bytes(dnssd_sock_t sd)
+	{
+	struct timeval tv = { 0, 0 };
+	fd_set readfds;
+	FD_ZERO(&readfds);
+	FD_SET(sd, &readfds);
+	return(select(sd+1, &readfds, (fd_set*)NULL, (fd_set*)NULL, &tv) > 0);
+	}
 
 /* create_hdr
  *
- * allocate and initialize an ipc message header.  value of len should initially be the
- * length of the data, and is set to the value of the data plus the header.  data_start
- * is set to point to the beginning of the data section.  reuse_socket should be non-zero
- * for calls that can receive an immediate error return value on their primary socket.
+ * allocate and initialize an ipc message header. Value of len should initially be the
+ * length of the data, and is set to the value of the data plus the header. data_start
+ * is set to point to the beginning of the data section. SeparateReturnSocket should be
+ * non-zero for calls that can't receive an immediate error return value on their primary
+ * socket, and therefore require a separate return path for the error code result.
  * if zero, the path to a control socket is appended at the beginning of the message buffer.
  * data_start is set past this string.
  */
-
-static ipc_msg_hdr *create_hdr(uint32_t op, size_t *len, char **data_start, int reuse_socket)
-    {
-    char *msg = NULL;
-    ipc_msg_hdr *hdr;
-    int datalen;
+static ipc_msg_hdr *create_hdr(uint32_t op, size_t *len, char **data_start, int SeparateReturnSocket, DNSServiceOp *ref)
+	{
+	char *msg = NULL;
+	ipc_msg_hdr *hdr;
+	int datalen;
 #if !defined(USE_TCP_LOOPBACK)
-    char ctrl_path[256];
+	char ctrl_path[64] = "";	// "/var/tmp/dnssd_result_socket.xxxxxxxxxx-xxx-xxxxxx"
 #endif
 
-    if (!reuse_socket)
-        {
+	if (SeparateReturnSocket)
+		{
 #if defined(USE_TCP_LOOPBACK)
-		*len += 2;	// Allocate space for two-byte port number
-#else
+		*len += 2;  // Allocate space for two-byte port number
+#elif defined(USE_NAMED_ERROR_RETURN_SOCKET)
 		struct timeval time;
-		if (gettimeofday(&time, NULL) < 0) return NULL;
+		if (gettimeofday(&time, NULL) < 0)
+			{ syslog(LOG_WARNING, "dnssd_clientstub create_hdr: gettimeofday failed %d %s", errno, strerror(errno)); return NULL; }
 		sprintf(ctrl_path, "%s%d-%.3lx-%.6lu", CTL_PATH_PREFIX, (int)getpid(),
 			(unsigned long)(time.tv_sec & 0xFFF), (unsigned long)(time.tv_usec));
-        *len += strlen(ctrl_path) + 1;
-#endif
-        }
-
-    datalen = (int) *len;
-    *len += sizeof(ipc_msg_hdr);
-
-    // write message to buffer
-    msg = malloc(*len);
-    if (!msg) return NULL;
-
-    bzero(msg, *len);
-    hdr = (void *)msg;
-    hdr->datalen = datalen;
-    hdr->version = VERSION;
-    hdr->op = op;
-    if (reuse_socket) hdr->flags |= IPC_FLAGS_REUSE_SOCKET;
-    *data_start = msg + sizeof(ipc_msg_hdr);
-#if defined(USE_TCP_LOOPBACK)
-	// Put dummy data in for the port, since we don't know what
-	// it is yet.  The data will get filled in before we
-	// send the message. This happens in deliver_request().
-	if (!reuse_socket)	put_short(0, data_start);
+		*len += strlen(ctrl_path) + 1;
 #else
-    if (!reuse_socket)  put_string(ctrl_path, data_start);
+		*len += 1;		// Allocate space for single zero byte (empty C string)
 #endif
-    return hdr;
-    }
+		}
 
-    // return a connected service ref (deallocate with DNSServiceRefDeallocate)
-static DNSServiceRef connect_to_server(void)
-    {
-	dnssd_sockaddr_t saddr;
-	DNSServiceRef sdr;
+	datalen = (int) *len;
+	*len += sizeof(ipc_msg_hdr);
+
+	// Write message to buffer
+	msg = malloc(*len);
+	if (!msg) { syslog(LOG_WARNING, "dnssd_clientstub create_hdr: malloc failed"); return NULL; }
+
+	bzero(msg, *len);
+	hdr = (ipc_msg_hdr *)msg;
+	hdr->version                = VERSION;
+	hdr->datalen                = datalen;
+	hdr->ipc_flags              = 0;
+	hdr->op                     = op;
+	hdr->client_context         = ref->uid;
+	hdr->reg_index              = 0;
+	*data_start = msg + sizeof(ipc_msg_hdr);
+#if defined(USE_TCP_LOOPBACK)
+	// Put dummy data in for the port, since we don't know what it is yet.
+	// The data will get filled in before we send the message. This happens in deliver_request().
+	if (SeparateReturnSocket) put_uint16(0, data_start);
+#else
+	if (SeparateReturnSocket) put_string(ctrl_path, data_start);
+#endif
+	return hdr;
+	}
+
+static void FreeDNSServiceOp(DNSServiceOp *x)
+	{
+	// We don't use our DNSServiceRefValid macro here because if we're cleaning up after a socket() call failed 
+	// then sockfd could legitimately contain a failing value (e.g. dnssd_InvalidSocket)
+	if ((x->sockfd ^ x->validator) != ValidatorBits)
+		syslog(LOG_WARNING, "dnssd_clientstub attempt to dispose invalid DNSServiceRef %p %08X %08X", x, x->sockfd, x->validator);
+	else
+		{
+		x->next         = NULL;
+		x->primary      = NULL;
+		x->sockfd       = dnssd_InvalidSocket;
+		x->validator    = 0xDDDDDDDD;
+		x->op           = request_op_none;
+		x->max_index    = 0;
+		x->logcounter   = 0;
+		x->moreptr      = NULL;
+		x->ProcessReply = NULL;
+		x->AppCallback  = NULL;
+		x->AppContext   = NULL;
+		free(x);
+		}
+	}
+
+// Return a connected service ref (deallocate with DNSServiceRefDeallocate)
+static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags flags, uint32_t op, ProcessReplyFn ProcessReply, void *AppCallback, void *AppContext)
+	{
+	#if APPLE_OSX_mDNSResponder
+	int NumTries = DNSSD_CLIENT_MAXTRIES;
+	#else
 	int NumTries = 0;
+	#endif
 
-#if defined(_WIN32)
+	dnssd_sockaddr_t saddr;
+	DNSServiceOp *sdr;
+
+	if (!ref) { syslog(LOG_WARNING, "dnssd_clientstub DNSService operation with NULL DNSServiceRef"); return kDNSServiceErr_BadParam; }
+
+	if (flags & kDNSServiceFlagsShareConnection)
+		{
+		if (!*ref)
+			{
+			syslog(LOG_WARNING, "dnssd_clientstub kDNSServiceFlagsShareConnection used with NULL DNSServiceRef");
+			return kDNSServiceErr_BadParam;
+			}
+		if (!DNSServiceRefValid(*ref))
+			{
+			syslog(LOG_WARNING, "dnssd_clientstub kDNSServiceFlagsShareConnection used with invalid DNSServiceRef %p %08X %08X",
+				(*ref), (*ref)->sockfd, (*ref)->validator);
+			*ref = NULL;
+			return kDNSServiceErr_BadReference;
+			}
+		}
+
+	#if defined(_WIN32)
 	if (!g_initWinsock)
 		{
 		WSADATA wsaData;
-		DNSServiceErrorType err;
-		
 		g_initWinsock = 1;
-
-		err = WSAStartup( MAKEWORD( 2, 2 ), &wsaData );
-
-		if (err != 0) return NULL;
+		if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0) { *ref = NULL; return kDNSServiceErr_ServiceNotRunning; }
 		}
+	// <rdar://problem/4096913> If the system service is disabled, we only want to try to connect once
+	if (IsSystemServiceDisabled()) NumTries = DNSSD_CLIENT_MAXTRIES;
+	#endif
 
-	// <rdar://problem/4096913> If the system service is disabled, we only want to try 
-	// to connect once
+	sdr = malloc(sizeof(DNSServiceOp));
+	if (!sdr) { syslog(LOG_WARNING, "dnssd_clientstub ConnectToServer: malloc failed"); *ref = NULL; return kDNSServiceErr_NoMemory; }
+	sdr->next          = NULL;
+	sdr->primary       = NULL;
+	sdr->sockfd        = dnssd_InvalidSocket;
+	sdr->validator     = sdr->sockfd ^ ValidatorBits;
+	sdr->op            = op;
+	sdr->max_index     = 0;
+	sdr->logcounter    = 0;
+	sdr->moreptr       = NULL;
+	sdr->uid.u32[0]    = 0;
+	sdr->uid.u32[1]    = 0;
+	sdr->ProcessReply  = ProcessReply;
+	sdr->AppCallback   = AppCallback;
+	sdr->AppContext    = AppContext;
 
-	if ( IsSystemServiceDisabled() )
+	if (flags & kDNSServiceFlagsShareConnection)
 		{
-		NumTries = DNSSD_CLIENT_MAXTRIES;
+		DNSServiceOp **p = &(*ref)->next;		// Append ourselves to end of primary's list
+		while (*p) p = &(*p)->next;
+		*p = sdr;
+		sdr->primary    = *ref;					// Set our primary pointer
+		sdr->sockfd     = (*ref)->sockfd;		// Inherit primary's socket
+		sdr->validator  = (*ref)->validator;
+		sdr->uid        = (*ref)->uid;
+		if (++(*ref)->uid.u32[0] == 0) ++(*ref)->uid.u32[1];	// In parent DNSServiceOp increment UID counter
+		//printf("ConnectToServer sharing socket %d\n", sdr->sockfd);
 		}
-
-#endif
-
-	sdr = malloc(sizeof(_DNSServiceRef_t));
-	if (!sdr) return(NULL);
-	sdr->sockfd = socket(AF_DNSSD, SOCK_STREAM, 0);
-	if (sdr->sockfd == dnssd_InvalidSocket) { free(sdr); return NULL; }
-#if defined(USE_TCP_LOOPBACK)
-	saddr.sin_family		=	AF_INET;
-	saddr.sin_addr.s_addr	=	inet_addr(MDNS_TCP_SERVERADDR);
-	saddr.sin_port			=	htons(MDNS_TCP_SERVERPORT);
-#else
-	saddr.sun_family = AF_LOCAL;
-	strcpy(saddr.sun_path, MDNS_UDS_SERVERPATH);
-#endif
-	while (1)
+	else
 		{
-		int err = connect(sdr->sockfd, (struct sockaddr *) &saddr, sizeof(saddr));
-		if (!err) break;		// If we succeeded, return sdr
-		// If we failed, then it may be because the daemon is still launching.
-		// This can happen for processes that launch early in the boot process, while the
-		// daemon is still coming up. Rather than fail here, we'll wait a bit and try again.
-		// If, after four seconds, we still can't connect to the daemon,
-		// then we give up and return a failure code.
-		if (++NumTries < DNSSD_CLIENT_MAXTRIES)
-			sleep(1);		// Sleep a bit, then try again
-		else
+		*ref = NULL;
+		sdr->sockfd    = socket(AF_DNSSD, SOCK_STREAM, 0);
+		sdr->validator = sdr->sockfd ^ ValidatorBits;
+		if (!dnssd_SocketValid(sdr->sockfd))
 			{
-			dnssd_close(sdr->sockfd);
-			sdr->sockfd = dnssd_InvalidSocket;
-			free(sdr);
-			return NULL;
+			syslog(LOG_WARNING, "dnssd_clientstub ConnectToServer: socket failed %d %s", errno, strerror(errno));
+			FreeDNSServiceOp(sdr);
+			return kDNSServiceErr_NoMemory;
 			}
+		#if defined(USE_TCP_LOOPBACK)
+		saddr.sin_family      = AF_INET;
+		saddr.sin_addr.s_addr = inet_addr(MDNS_TCP_SERVERADDR);
+		saddr.sin_port        = htons(MDNS_TCP_SERVERPORT);
+		#else
+		saddr.sun_family      = AF_LOCAL;
+		strcpy(saddr.sun_path, MDNS_UDS_SERVERPATH);
+		#endif
+	
+		while (1)
+			{
+			int err = connect(sdr->sockfd, (struct sockaddr *) &saddr, sizeof(saddr));
+			if (!err) break; // If we succeeded, return sdr
+			// If we failed, then it may be because the daemon is still launching.
+			// This can happen for processes that launch early in the boot process, while the
+			// daemon is still coming up. Rather than fail here, we'll wait a bit and try again.
+			// If, after four seconds, we still can't connect to the daemon,
+			// then we give up and return a failure code.
+			if (++NumTries < DNSSD_CLIENT_MAXTRIES) sleep(1); // Sleep a bit, then try again
+			else { dnssd_close(sdr->sockfd); FreeDNSServiceOp(sdr); return kDNSServiceErr_ServiceNotRunning; }
+			}
+		//printf("ConnectToServer opened socket %d\n", sdr->sockfd);
 		}
-    return sdr;
+
+	*ref = sdr;
+	return kDNSServiceErr_NoError;
 	}
 
-static DNSServiceErrorType deliver_request(void *msg, DNSServiceRef sdr, int reuse_sd)
-    {
-    ipc_msg_hdr *hdr = msg;
-    uint32_t datalen = hdr->datalen;
-    dnssd_sockaddr_t caddr, daddr;  // (client and daemon address structs)
-    char *data = (char *)msg + sizeof(ipc_msg_hdr);
-    dnssd_sock_t listenfd = dnssd_InvalidSocket, errsd = dnssd_InvalidSocket;
-	int ret;
-	dnssd_socklen_t len = (dnssd_socklen_t) sizeof(caddr);
-    DNSServiceErrorType err = kDNSServiceErr_Unknown;
+static DNSServiceErrorType deliver_request(ipc_msg_hdr *hdr, DNSServiceOp *sdr)
+	{
+	uint32_t datalen = hdr->datalen;	// We take a copy here because we're going to convert hdr->datalen to network byte order
+	#if defined(USE_TCP_LOOPBACK) || defined(USE_NAMED_ERROR_RETURN_SOCKET)
+	char *const data = (char *)hdr + sizeof(ipc_msg_hdr);
+	#endif
+	dnssd_sock_t listenfd = dnssd_InvalidSocket, errsd = dnssd_InvalidSocket;
+	DNSServiceErrorType err;
+	int MakeSeparateReturnSocket = 0;
 
-    if (!hdr || sdr->sockfd < 0) return kDNSServiceErr_Unknown;
+	// Note: need to check hdr->op, not sdr->op.
+	// hdr->op contains the code for the specific operation we're currently doing, whereas sdr->op
+	// contains the original parent DNSServiceOp (e.g. for an add_record_request, hdr->op will be
+	// add_record_request but the parent sdr->op will be connection_request or reg_service_request)
+	if (sdr->primary ||
+		hdr->op == reg_record_request || hdr->op == add_record_request || hdr->op == update_record_request || hdr->op == remove_record_request)
+		MakeSeparateReturnSocket = 1;
 
-	if (!reuse_sd)
+	if (!DNSServiceRefValid(sdr))
 		{
-        // setup temporary error socket
-        if ((listenfd = socket(AF_DNSSD, SOCK_STREAM, 0)) < 0)
-            goto cleanup;
-        bzero(&caddr, sizeof(caddr));
+		syslog(LOG_WARNING, "dnssd_clientstub deliver_request: invalid DNSServiceRef %p %08X %08X", sdr, sdr->sockfd, sdr->validator);
+		return kDNSServiceErr_BadReference;
+		}
 
-#if defined(USE_TCP_LOOPBACK)
+	if (!hdr) { syslog(LOG_WARNING, "dnssd_clientstub deliver_request: !hdr"); return kDNSServiceErr_Unknown; }
+
+	if (MakeSeparateReturnSocket)
+		{
+		#if defined(USE_TCP_LOOPBACK)
 			{
 			union { uint16_t s; u_char b[2]; } port;
+			dnssd_sockaddr_t caddr;
+			dnssd_socklen_t len = (dnssd_socklen_t) sizeof(caddr);
+			listenfd = socket(AF_DNSSD, SOCK_STREAM, 0);
+			if (!dnssd_SocketValid(listenfd)) goto cleanup;
+
 			caddr.sin_family      = AF_INET;
 			caddr.sin_port        = 0;
 			caddr.sin_addr.s_addr = inet_addr(MDNS_TCP_SERVERADDR);
-			ret = bind(listenfd, (struct sockaddr*) &caddr, sizeof(caddr));
-			if (ret < 0) goto cleanup;
+			if (bind(listenfd, (struct sockaddr*) &caddr, sizeof(caddr)) < 0) goto cleanup;
 			if (getsockname(listenfd, (struct sockaddr*) &caddr, &len) < 0) goto cleanup;
 			listen(listenfd, 1);
 			port.s = caddr.sin_port;
-			data[0] = port.b[0];	// don't switch the byte order, as the
-			data[1] = port.b[1];	// daemon expects it in network byte order
+			data[0] = port.b[0];  // don't switch the byte order, as the
+			data[1] = port.b[1];  // daemon expects it in network byte order
 			}
-#else
+		#elif defined(USE_NAMED_ERROR_RETURN_SOCKET)
 			{
+			dnssd_sockaddr_t caddr;
 			mode_t mask = umask(0);
+			listenfd = socket(AF_DNSSD, SOCK_STREAM, 0);
+			if (!dnssd_SocketValid(listenfd)) goto cleanup;
+
 			caddr.sun_family = AF_LOCAL;
-#ifndef NOT_HAVE_SA_LEN		// According to Stevens (section 3.2), there is no portable way to
-								// determine whether sa_len is defined on a particular platform.
+			// According to Stevens (section 3.2), there is no portable way to
+			// determine whether sa_len is defined on a particular platform.
+			#ifndef NOT_HAVE_SA_LEN
 			caddr.sun_len = sizeof(struct sockaddr_un);
-#endif
+			#endif
 			strcpy(caddr.sun_path, data);
-			ret = bind(listenfd, (struct sockaddr *)&caddr, sizeof(caddr));
 			umask(mask);
-			if (ret < 0) goto cleanup;
+			if (bind(listenfd, (struct sockaddr *)&caddr, sizeof(caddr)) < 0) goto cleanup;
 			listen(listenfd, 1);
 			}
+		#else
+			{
+			dnssd_sock_t sp[2];
+			//if (pipe(sp) < 0)
+			//	syslog(LOG_WARNING, "dnssd_clientstub ERROR: pipe() failed errno %d (%s)", errno, strerror(errno));
+			if (socketpair(AF_DNSSD, SOCK_STREAM, 0, sp) < 0)
+				syslog(LOG_WARNING, "dnssd_clientstub ERROR: socketpair() failed errno %d (%s)", errno, strerror(errno));
+			else
+				{
+				errsd    = sp[0];	// We'll read our four-byte error code from sp[0]
+				listenfd = sp[1];	// We'll send sp[1] to the daemon
+				}
+			}
+		#endif
+		}
+
+#if !defined(USE_TCP_LOOPBACK) && !defined(USE_NAMED_ERROR_RETURN_SOCKET)
+	// If we're going to make a separate error return socket, and pass it to the daemon
+	// using sendmsg, then we'll hold back one data byte to go with it.
+	// On some versions of Unix (including Leopard) sending a control message without
+	// any associated data does not work reliably -- e.g. one particular issue we ran
+	// into is that if the receiving program is in a kqueue loop waiting to be notified
+	// of the received message, it doesn't get woken up when the control message arrives.
+	if (MakeSeparateReturnSocket) datalen--;
+#endif
+
+	// At this point, our listening socket is set up and waiting, if necessary, for the daemon to connect back to
+	ConvertHeaderBytes(hdr);
+	//syslog(LOG_WARNING, "dnssd_clientstub deliver_request writing %ld bytes", datalen + sizeof(ipc_msg_hdr));
+	//if (MakeSeparateReturnSocket) syslog(LOG_WARNING, "dnssd_clientstub deliver_request name is %s", data);
+#if TEST_SENDING_ONE_BYTE_AT_A_TIME
+	unsigned int i;
+	for (i=0; i<datalen + sizeof(ipc_msg_hdr); i++)
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub writing %d", i);
+		if (write_all(sdr->sockfd, ((char *)hdr)+i, 1) < 0) goto cleanup;
+		usleep(10000);
+		}
+#else
+	if (write_all(sdr->sockfd, (char *)hdr, datalen + sizeof(ipc_msg_hdr)) < 0) goto cleanup;
+#endif
+
+	if (!MakeSeparateReturnSocket) errsd = sdr->sockfd;
+	else
+		{
+#if defined(USE_TCP_LOOPBACK) || defined(USE_NAMED_ERROR_RETURN_SOCKET)
+		// At this point we may block in accept for a few milliseconds waiting for the daemon to connect back to us,
+		// but that's okay -- the daemon is a trusted service and we know if won't take more than a few milliseconds to respond.
+		dnssd_sockaddr_t daddr;
+		dnssd_socklen_t len = sizeof(daddr);
+		errsd = accept(listenfd, (struct sockaddr *)&daddr, &len);
+		if (!dnssd_SocketValid(errsd)) goto cleanup;
+#else
+		struct iovec vec = { ((char *)hdr) + sizeof(ipc_msg_hdr) + datalen, 1 }; // Send the last byte along with the SCM_RIGHTS
+		struct msghdr msg;
+		struct cmsghdr *cmsg;
+		char cbuf[sizeof(struct cmsghdr) + sizeof(dnssd_sock_t)];
+		msg.msg_name       = 0;
+		msg.msg_namelen    = 0;
+		msg.msg_iov        = &vec;
+		msg.msg_iovlen     = 1;
+		msg.msg_control    = cbuf;
+		msg.msg_controllen = sizeof(cbuf);
+		msg.msg_flags      = 0;
+		cmsg = CMSG_FIRSTHDR(&msg);
+		cmsg->cmsg_len     = sizeof(cbuf);
+		cmsg->cmsg_level   = SOL_SOCKET;
+		cmsg->cmsg_type    = SCM_RIGHTS;
+		*((dnssd_sock_t *)CMSG_DATA(cmsg)) = listenfd;
+#if TEST_KQUEUE_CONTROL_MESSAGE_BUG
+		sleep(1);
+#endif
+		if (sendmsg(sdr->sockfd, &msg, 0) < 0)
+			syslog(LOG_WARNING, "dnssd_clientstub ERROR: sendmsg failed read sd=%d write sd=%d errno %d (%s)",
+				errsd, listenfd, errno, strerror(errno));
 #endif
 		}
 
-	ConvertHeaderBytes(hdr);
-    if (my_write(sdr->sockfd, msg, datalen + sizeof(ipc_msg_hdr)) < 0)
-        goto cleanup;
-    free(msg);
-    msg = NULL;
+	// At this point we may block in read_all for a few milliseconds waiting for the daemon to send us the error code,
+	// but that's okay -- the daemon is a trusted service and we know if won't take more than a few milliseconds to respond.
+	if (read_all(errsd, (char*)&err, (int)sizeof(err)) < 0)
+		err = kDNSServiceErr_ServiceNotRunning;	// On failure read_all will have written a message to syslog for us
+	else
+		err = ntohl(err);
 
-    if (reuse_sd) errsd = sdr->sockfd;
-    else
-        {
-        len = sizeof(daddr);
-        errsd = accept(listenfd, (struct sockaddr *)&daddr, &len);
-        if (errsd < 0)  goto cleanup;
-        }
-
-    if (my_read(errsd, (char*)&err, (int)sizeof(err)) < 0)
-        err = kDNSServiceErr_Unknown;
-    else
-    	err = ntohl(err);
+	//syslog(LOG_WARNING, "dnssd_clientstub deliver_request: retrieved error code %d", err);
 
 cleanup:
-    if (!reuse_sd && listenfd > 0) dnssd_close(listenfd);
-    if (!reuse_sd && errsd > 0) dnssd_close(errsd);
-#if !defined(USE_TCP_LOOPBACK)
-    if (!reuse_sd && data) unlink(data);
+	if (MakeSeparateReturnSocket)
+		{
+		if (dnssd_SocketValid(listenfd)) dnssd_close(listenfd);
+		if (dnssd_SocketValid(errsd))    dnssd_close(errsd);
+#if defined(USE_NAMED_ERROR_RETURN_SOCKET)
+		// syslog(LOG_WARNING, "dnssd_clientstub deliver_request: removing UDS: %s", data);
+		if (unlink(data) != 0)
+			syslog(LOG_WARNING, "dnssd_clientstub WARNING: unlink(\"%s\") failed errno %d (%s)", data, errno, strerror(errno));
+		// else syslog(LOG_WARNING, "dnssd_clientstub deliver_request: removed UDS: %s", data);
 #endif
-    if (msg) free(msg);
-    return err;
-    }
+		}
+	free(hdr);
+	return err;
+	}
 
 int DNSSD_API DNSServiceRefSockFD(DNSServiceRef sdRef)
-    {
-    if (!sdRef) return -1;
-    return (int) sdRef->sockfd;
-    }
+	{
+	if (!sdRef) { syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRefSockFD called with NULL DNSServiceRef"); return dnssd_InvalidSocket; }
 
-// handle reply from server, calling application client callback.  If there is no reply
+	if (!DNSServiceRefValid(sdRef))
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRefSockFD called with invalid DNSServiceRef %p %08X %08X",
+			sdRef, sdRef->sockfd, sdRef->validator);
+		return dnssd_InvalidSocket;
+		}
+
+	if (sdRef->primary)
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRefSockFD undefined for kDNSServiceFlagsShareConnection subordinate DNSServiceRef %p", sdRef);
+		return dnssd_InvalidSocket;
+		}
+
+	return (int) sdRef->sockfd;
+	}
+
+// Handle reply from server, calling application client callback. If there is no reply
 // from the daemon on the socket contained in sdRef, the call will block.
 DNSServiceErrorType DNSSD_API DNSServiceProcessResult(DNSServiceRef sdRef)
-    {
-    ipc_msg_hdr hdr;
-    char *data;
+	{
+	int morebytes = 0;
 
-    if (!sdRef || sdRef->sockfd < 0 || !sdRef->process_reply)
-        return kDNSServiceErr_BadReference;
+	if (!sdRef) { syslog(LOG_WARNING, "dnssd_clientstub DNSServiceProcessResult called with NULL DNSServiceRef"); return kDNSServiceErr_BadParam; }
 
-    if (my_read(sdRef->sockfd, (void *)&hdr, sizeof(hdr)) < 0)
+	if (!DNSServiceRefValid(sdRef))
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceProcessResult called with invalid DNSServiceRef %p %08X %08X", sdRef, sdRef->sockfd, sdRef->validator);
+		return kDNSServiceErr_BadReference;
+		}
+
+	if (sdRef->primary)
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceProcessResult undefined for kDNSServiceFlagsShareConnection subordinate DNSServiceRef %p", sdRef);
+		return kDNSServiceErr_BadReference;
+		}
+
+	if (!sdRef->ProcessReply)
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceProcessResult called with DNSServiceRef with no ProcessReply function");
+		return kDNSServiceErr_BadReference;
+		}
+
+	do
+		{
+		CallbackHeader cbh;
+		char *data;
+	
 		// return NoError on EWOULDBLOCK. This will handle the case
-		// where a non-blocking socket is told there is data, but
-		// it was a false positive.
-		return (dnssd_errno() == dnssd_EWOULDBLOCK) ? kDNSServiceErr_NoError : kDNSServiceErr_Unknown;
-	ConvertHeaderBytes(&hdr);
-    if (hdr.version != VERSION)
-        return kDNSServiceErr_Incompatible;
-    data = malloc(hdr.datalen);
-    if (!data) return kDNSServiceErr_NoMemory;
-    if (my_read(sdRef->sockfd, data, hdr.datalen) < 0)
-        return kDNSServiceErr_Unknown;
-    sdRef->process_reply(sdRef, &hdr, data);
-    free(data);
-    return kDNSServiceErr_NoError;
-    }
+		// where a non-blocking socket is told there is data, but it was a false positive.
+		// On error, read_all will write a message to syslog for us, so don't need to duplicate that here
+		if (read_all(sdRef->sockfd, (void *)&cbh.ipc_hdr, sizeof(cbh.ipc_hdr)) < 0)
+			{
+			if (dnssd_errno() != dnssd_EWOULDBLOCK)
+				{
+				sdRef->ProcessReply = NULL;
+				return kDNSServiceErr_ServiceNotRunning;
+				}
+			else
+				{
+				if (morebytes && sdRef->logcounter < 100)
+					{
+					sdRef->logcounter++;
+					syslog(LOG_WARNING, "dnssd_clientstub DNSServiceProcessResult error: select indicated data was waiting but read_all returned EWOULDBLOCK");
+					}
+				return kDNSServiceErr_NoError;
+				}
+			}
+	
+		ConvertHeaderBytes(&cbh.ipc_hdr);
+		if (cbh.ipc_hdr.version != VERSION)
+			{
+			syslog(LOG_WARNING, "dnssd_clientstub DNSServiceProcessResult daemon version %d does not match client version %d", cbh.ipc_hdr.version, VERSION);
+			sdRef->ProcessReply = NULL;
+			return kDNSServiceErr_Incompatible;
+			}
+	
+		data = malloc(cbh.ipc_hdr.datalen);
+		if (!data) return kDNSServiceErr_NoMemory;
+		if (read_all(sdRef->sockfd, data, cbh.ipc_hdr.datalen) < 0) // On error, read_all will write a message to syslog for us
+			{
+			free(data);
+			sdRef->ProcessReply = NULL;
+			return kDNSServiceErr_ServiceNotRunning;
+			}
+		else
+			{
+			char *ptr = data;
+			cbh.cb_flags     = get_flags     (&ptr, data + cbh.ipc_hdr.datalen);
+			cbh.cb_interface = get_uint32    (&ptr, data + cbh.ipc_hdr.datalen);
+			cbh.cb_err       = get_error_code(&ptr, data + cbh.ipc_hdr.datalen);
+
+			// CAUTION: We have to handle the case where the client calls DNSServiceRefDeallocate from within the callback function.
+			// To do this we set moreptr to point to morebytes. If the client does call DNSServiceRefDeallocate(),
+			// then that routine will clear morebytes for us, and cause us to exit our loop.
+			morebytes = more_bytes(sdRef->sockfd);
+			if (morebytes)
+				{
+				cbh.cb_flags |= kDNSServiceFlagsMoreComing;
+				sdRef->moreptr = &morebytes;
+				}
+			if (ptr) sdRef->ProcessReply(sdRef, &cbh, ptr, data + cbh.ipc_hdr.datalen);
+			// Careful code here:
+			// If morebytes is non-zero, that means we set sdRef->moreptr above, and the operation was not
+			// cancelled out from under us, so now we need to clear sdRef->moreptr so we don't leave a stray
+			// dangling pointer pointing to a long-gone stack variable.
+			// If morebytes is zero, then one of two thing happened:
+			// (a) morebytes was 0 above, so we didn't set sdRef->moreptr, so we don't need to clear it
+			// (b) morebytes was 1 above, and we set sdRef->moreptr, but the operation was cancelled (with DNSServiceRefDeallocate()),
+			//     so we MUST NOT try to dereference our stale sdRef pointer.
+			if (morebytes) sdRef->moreptr = NULL;
+			}
+		free(data);
+		} while (morebytes);
+
+	return kDNSServiceErr_NoError;
+	}
 
 void DNSSD_API DNSServiceRefDeallocate(DNSServiceRef sdRef)
-    {
-    if (!sdRef) return;
-    if (sdRef->sockfd > 0) dnssd_close(sdRef->sockfd);
-    free(sdRef);
-    }
+	{
+	if (!sdRef) { syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRefDeallocate called with NULL DNSServiceRef"); return; }
 
-static void handle_resolve_response(DNSServiceRef sdr, ipc_msg_hdr *hdr, char *data)
-    {
-    DNSServiceFlags flags;
-    char fullname[kDNSServiceMaxDomainName];
-    char target[kDNSServiceMaxDomainName];
-    uint16_t txtlen;
-    union { uint16_t s; u_char b[2]; } port;
-    uint32_t ifi;
-    DNSServiceErrorType err;
-    char *txtrecord;
-    int str_error = 0;
-    (void)hdr; 		//unused
+	if (!DNSServiceRefValid(sdRef))		// Also verifies dnssd_SocketValid(sdRef->sockfd) for us too
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRefDeallocate called with invalid DNSServiceRef %p %08X %08X", sdRef, sdRef->sockfd, sdRef->validator);
+		return;
+		}
 
-    flags = get_flags(&data);
-    ifi = get_long(&data);
-    err = get_error_code(&data);
-    if (get_string(&data, fullname, kDNSServiceMaxDomainName) < 0) str_error = 1;
-    if (get_string(&data, target, kDNSServiceMaxDomainName) < 0) str_error = 1;
-    port.b[0] = *data++;
-    port.b[1] = *data++;
-    txtlen = get_short(&data);
-    txtrecord = get_rdata(&data, txtlen);
+	// If we're in the middle of a DNSServiceProcessResult() invocation for this DNSServiceRef, clear its morebytes flag to break it out of its while loop
+	if (sdRef->moreptr) *(sdRef->moreptr) = 0;
 
-	if (!err && str_error) err = kDNSServiceErr_Unknown;
-    ((DNSServiceResolveReply)sdr->app_callback)(sdr, flags, ifi, err, fullname, target, port.s, txtlen, txtrecord, sdr->app_context);
-    }
+	if (sdRef->primary)		// If this is a subordinate DNSServiceOp, just send a 'stop' command
+		{
+		DNSServiceOp **p = &sdRef->primary->next;
+		while (*p && *p != sdRef) p = &(*p)->next;
+		if (*p)
+			{
+			char *ptr;
+			size_t len = 0;
+			ipc_msg_hdr *hdr = create_hdr(cancel_request, &len, &ptr, 0, sdRef);
+			ConvertHeaderBytes(hdr);
+			write_all(sdRef->sockfd, (char *)hdr, len);
+			free(hdr);
+			*p = sdRef->next;
+			FreeDNSServiceOp(sdRef);
+			}
+		}
+	else					// else, make sure to terminate all subordinates as well
+		{
+		dnssd_close(sdRef->sockfd);
+		while (sdRef)
+			{
+			DNSServiceOp *p = sdRef;
+			sdRef = sdRef->next;
+			FreeDNSServiceOp(p);
+			}
+		}
+	}
+
+DNSServiceErrorType DNSSD_API DNSServiceGetProperty(const char *property, void *result, uint32_t *size)
+	{
+	char *ptr;
+	size_t len = strlen(property) + 1;
+	ipc_msg_hdr *hdr;
+	DNSServiceOp *tmp;
+	uint32_t actualsize;
+
+	DNSServiceErrorType err = ConnectToServer(&tmp, 0, getproperty_request, NULL, NULL, NULL);
+	if (err) return err;
+
+	hdr = create_hdr(getproperty_request, &len, &ptr, 0, tmp);
+	if (!hdr) { DNSServiceRefDeallocate(tmp); return kDNSServiceErr_NoMemory; }
+
+	put_string(property, &ptr);
+	err = deliver_request(hdr, tmp);		// Will free hdr for us
+	if (read_all(tmp->sockfd, (char*)&actualsize, (int)sizeof(actualsize)) < 0)
+		{ DNSServiceRefDeallocate(tmp); return kDNSServiceErr_ServiceNotRunning; }
+
+	actualsize = ntohl(actualsize);
+	if (read_all(tmp->sockfd, (char*)result, actualsize < *size ? actualsize : *size) < 0)
+		{ DNSServiceRefDeallocate(tmp); return kDNSServiceErr_ServiceNotRunning; }
+	DNSServiceRefDeallocate(tmp);
+
+	// Swap version result back to local process byte order
+	if (!strcmp(property, kDNSServiceProperty_DaemonVersion) && *size >= 4)
+		*(uint32_t*)result = ntohl(*(uint32_t*)result);
+
+	*size = actualsize;
+	return kDNSServiceErr_NoError;
+	}
+
+static void handle_resolve_response(DNSServiceOp *sdr, CallbackHeader *cbh, char *data, char *end)
+	{
+	char fullname[kDNSServiceMaxDomainName];
+	char target[kDNSServiceMaxDomainName];
+	uint16_t txtlen;
+	union { uint16_t s; u_char b[2]; } port;
+	unsigned char *txtrecord;
+
+	get_string(&data, end, fullname, kDNSServiceMaxDomainName);
+	get_string(&data, end, target,   kDNSServiceMaxDomainName);
+	if (data + 2 > end) data = NULL;
+	else
+		{
+		port.b[0] = *data++;
+		port.b[1] = *data++;
+		}
+	txtlen = get_uint16(&data, end);
+	txtrecord = (unsigned char *)get_rdata(&data, end, txtlen);
+
+	if (!data) syslog(LOG_WARNING, "dnssd_clientstub handle_resolve_response: error reading result from daemon");
+	else ((DNSServiceResolveReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, fullname, target, port.s, txtlen, txtrecord, sdr->AppContext);
+	// MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
+	}
 
 DNSServiceErrorType DNSSD_API DNSServiceResolve
-    (
-    DNSServiceRef                  	*sdRef,
-    DNSServiceFlags               flags,
-    uint32_t                      interfaceIndex,
-    const char                         	*name,
-    const char                         	*regtype,
-    const char                         	*domain,
-    DNSServiceResolveReply        callBack,
-    void                               	*context
-    )
-    {
-    char *msg = NULL, *ptr;
-    size_t len;
-    ipc_msg_hdr *hdr;
-    DNSServiceRef sdr;
-    DNSServiceErrorType err;
-
-    if (!sdRef) return kDNSServiceErr_BadParam;
-    *sdRef = NULL;
+	(
+	DNSServiceRef                 *sdRef,
+	DNSServiceFlags               flags,
+	uint32_t                      interfaceIndex,
+	const char                    *name,
+	const char                    *regtype,
+	const char                    *domain,
+	DNSServiceResolveReply        callBack,
+	void                          *context
+	)
+	{
+	char *ptr;
+	size_t len;
+	ipc_msg_hdr *hdr;
+	DNSServiceErrorType err;
 
 	if (!name || !regtype || !domain || !callBack) return kDNSServiceErr_BadParam;
 
-    // calculate total message length
-    len = sizeof(flags);
-    len += sizeof(interfaceIndex);
-    len += strlen(name) + 1;
-    len += strlen(regtype) + 1;
-    len += strlen(domain) + 1;
+	err = ConnectToServer(sdRef, flags, resolve_request, handle_resolve_response, callBack, context);
+	if (err) return err;	// On error ConnectToServer leaves *sdRef set to NULL
 
-    hdr = create_hdr(resolve_request, &len, &ptr, 1);
-    if (!hdr) goto error;
-    msg = (void *)hdr;
+	// Calculate total message length
+	len = sizeof(flags);
+	len += sizeof(interfaceIndex);
+	len += strlen(name) + 1;
+	len += strlen(regtype) + 1;
+	len += strlen(domain) + 1;
 
-    put_flags(flags, &ptr);
-    put_long(interfaceIndex, &ptr);
-    put_string(name, &ptr);
-    put_string(regtype, &ptr);
-    put_string(domain, &ptr);
+	hdr = create_hdr(resolve_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
+	if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
 
-    sdr = connect_to_server();
-    if (!sdr) goto error;
-    err = deliver_request(msg, sdr, 1);
-    if (err)
-        {
-        DNSServiceRefDeallocate(sdr);
-        return err;
-        }
-    sdr->op = resolve_request;
-    sdr->process_reply = handle_resolve_response;
-    sdr->app_callback = callBack;
-    sdr->app_context = context;
-    *sdRef = sdr;
+	put_flags(flags, &ptr);
+	put_uint32(interfaceIndex, &ptr);
+	put_string(name, &ptr);
+	put_string(regtype, &ptr);
+	put_string(domain, &ptr);
 
-    return err;
+	err = deliver_request(hdr, *sdRef);		// Will free hdr for us
+	if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
+	return err;
+	}
 
-error:
-    if (msg) free(msg);
-    if (*sdRef) { free(*sdRef);  *sdRef = NULL; }
-    return kDNSServiceErr_Unknown;
-    }
+static void handle_query_response(DNSServiceOp *sdr, CallbackHeader *cbh, char *data, char *end)
+	{
+	uint32_t ttl;
+	char name[kDNSServiceMaxDomainName];
+	uint16_t rrtype, rrclass, rdlen;
+	char *rdata;
 
-static void handle_query_response(DNSServiceRef sdr, ipc_msg_hdr *hdr, char *data)
-    {
-    DNSServiceFlags flags;
-    uint32_t interfaceIndex, ttl;
-    DNSServiceErrorType errorCode;
-    char name[kDNSServiceMaxDomainName];
-    uint16_t rrtype, rrclass, rdlen;
-    char *rdata;
-    int str_error = 0;
-    (void)hdr;//Unused
+	get_string(&data, end, name, kDNSServiceMaxDomainName);
+	rrtype  = get_uint16(&data, end);
+	rrclass = get_uint16(&data, end);
+	rdlen   = get_uint16(&data, end);
+	rdata   = get_rdata(&data, end, rdlen);
+	ttl     = get_uint32(&data, end);
 
-    flags = get_flags(&data);
-    interfaceIndex = get_long(&data);
-    errorCode = get_error_code(&data);
-    if (get_string(&data, name, kDNSServiceMaxDomainName) < 0) str_error = 1;
-    rrtype = get_short(&data);
-    rrclass = get_short(&data);
-    rdlen = get_short(&data);
-    rdata = get_rdata(&data, rdlen);
-	ttl = get_long(&data);
-
-	if (!errorCode && str_error) errorCode = kDNSServiceErr_Unknown;
-	((DNSServiceQueryRecordReply)sdr->app_callback)(sdr, flags, interfaceIndex, errorCode, name, rrtype, rrclass,
-													rdlen, rdata, ttl, sdr->app_context);
-    return;
-    }
+	if (!data) syslog(LOG_WARNING, "dnssd_clientstub handle_query_response: error reading result from daemon");
+	else ((DNSServiceQueryRecordReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, name, rrtype, rrclass, rdlen, rdata, ttl, sdr->AppContext);
+	// MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
+	}
 
 DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
-(
- DNSServiceRef       	         	*sdRef,
- DNSServiceFlags		         flags,
- uint32_t                      	interfaceIndex,
- const char                   		*name,
- uint16_t                      	rrtype,
- uint16_t                      	rrclass,
- DNSServiceQueryRecordReply     	callBack,
- void                               	*context
- )
-    {
-    char *msg = NULL, *ptr;
-    size_t len;
-    ipc_msg_hdr *hdr;
-    DNSServiceRef sdr;
-    DNSServiceErrorType err;
+	(
+	DNSServiceRef              *sdRef,
+	DNSServiceFlags             flags,
+	uint32_t                    interfaceIndex,
+	const char                 *name,
+	uint16_t                    rrtype,
+	uint16_t                    rrclass,
+	DNSServiceQueryRecordReply  callBack,
+	void                       *context
+	)
+	{
+	char *ptr;
+	size_t len;
+	ipc_msg_hdr *hdr;
+	DNSServiceErrorType err = ConnectToServer(sdRef, flags, query_request, handle_query_response, callBack, context);
+	if (err) return err;	// On error ConnectToServer leaves *sdRef set to NULL
 
-    if (!sdRef) return kDNSServiceErr_BadParam;
-    *sdRef = NULL;
+	if (!name) name = "\0";
 
-    if (!name) name = "\0";
+	// Calculate total message length
+	len = sizeof(flags);
+	len += sizeof(uint32_t);  // interfaceIndex
+	len += strlen(name) + 1;
+	len += 2 * sizeof(uint16_t);  // rrtype, rrclass
 
-    // calculate total message length
-    len = sizeof(flags);
-    len += sizeof(uint32_t);  //interfaceIndex
-    len += strlen(name) + 1;
-    len += 2 * sizeof(uint16_t);  // rrtype, rrclass
+	hdr = create_hdr(query_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
+	if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
 
-    hdr = create_hdr(query_request, &len, &ptr, 1);
-    if (!hdr) goto error;
-    msg = (void *)hdr;
+	put_flags(flags, &ptr);
+	put_uint32(interfaceIndex, &ptr);
+	put_string(name, &ptr);
+	put_uint16(rrtype, &ptr);
+	put_uint16(rrclass, &ptr);
 
-    put_flags(flags, &ptr);
-    put_long(interfaceIndex, &ptr);
-    put_string(name, &ptr);
-    put_short(rrtype, &ptr);
-    put_short(rrclass, &ptr);
+	err = deliver_request(hdr, *sdRef);		// Will free hdr for us
+	if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
+	return err;
+	}
 
-    sdr = connect_to_server();
-    if (!sdr) goto error;
-    err = deliver_request(msg, sdr, 1);
-    if (err)
-        {
-        DNSServiceRefDeallocate(sdr);
-        return err;
-        }
+static void handle_addrinfo_response(DNSServiceOp *sdr, CallbackHeader *cbh, char *data, char *end)
+	{
+	uint32_t ttl;
+	char hostname[kDNSServiceMaxDomainName];
+	uint16_t rrtype, rrclass, rdlen;
+	char *rdata;
+	struct sockaddr_in  sa4;
+	struct sockaddr_in6 sa6;
+	struct sockaddr   * sa = NULL;
 
-    sdr->op = query_request;
-    sdr->process_reply = handle_query_response;
-    sdr->app_callback = callBack;
-    sdr->app_context = context;
-    *sdRef = sdr;
-    return err;
+	get_string(&data, end, hostname, kDNSServiceMaxDomainName);
+	rrtype  = get_uint16(&data, end);
+	rrclass = get_uint16(&data, end);
+	rdlen   = get_uint16(&data, end);
+	rdata   = get_rdata(&data, end, rdlen);
+	ttl     = get_uint32(&data, end);
+	
+	if (!data) syslog(LOG_WARNING, "dnssd_clientstub handle_addrinfo_response: error reading result from daemon");
+	else
+		{
+		if (rrtype == kDNSServiceType_A)
+			{
+			sa = (struct sockaddr *)&sa4;
+			bzero(&sa4, sizeof(sa4));
+			#ifndef NOT_HAVE_SA_LEN
+			sa->sa_len = sizeof(struct sockaddr_in);
+			#endif
+			sa->sa_family = AF_INET;
+			if (!cbh->cb_err) memcpy(&sa4.sin_addr, rdata, rdlen);
+			}
+		else if (rrtype == kDNSServiceType_AAAA)
+			{
+			sa = (struct sockaddr *)&sa6;
+			bzero(&sa6, sizeof(sa6));
+			#ifndef NOT_HAVE_SA_LEN
+			sa->sa_len = sizeof(struct sockaddr_in6);
+			#endif
+			sa->sa_family = AF_INET6;
+			if (!cbh->cb_err) memcpy(&sa6.sin6_addr, rdata, rdlen);
+			}
+		((DNSServiceGetAddrInfoReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, hostname, sa, ttl, sdr->AppContext);
+		// MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
+		}
+	}
 
-error:
-    if (msg) free(msg);
-    if (*sdRef) { free(*sdRef);  *sdRef = NULL; }
-    return kDNSServiceErr_Unknown;
-    }
+DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo
+	(
+	DNSServiceRef                    *sdRef,
+	DNSServiceFlags                  flags,
+	uint32_t                         interfaceIndex,
+	uint32_t                         protocol,
+	const char                       *hostname,
+	DNSServiceGetAddrInfoReply       callBack,
+	void                             *context          /* may be NULL */
+	)
+	{
+	char *ptr;
+	size_t len;
+	ipc_msg_hdr *hdr;
+	DNSServiceErrorType err;
 
-static void handle_browse_response(DNSServiceRef sdr, ipc_msg_hdr *hdr, char *data)
-    {
-    DNSServiceFlags      flags;
-    uint32_t                      interfaceIndex;
-    DNSServiceErrorType      errorCode;
-    char replyName[256], replyType[kDNSServiceMaxDomainName],
-        replyDomain[kDNSServiceMaxDomainName];
-    int str_error = 0;
-	(void)hdr;//Unused
+	if (!hostname) return kDNSServiceErr_BadParam;
 
-    flags = get_flags(&data);
-    interfaceIndex = get_long(&data);
-    errorCode = get_error_code(&data);
-    if (get_string(&data, replyName, 256) < 0) str_error = 1;
-    if (get_string(&data, replyType, kDNSServiceMaxDomainName) < 0) str_error = 1;
-    if (get_string(&data, replyDomain, kDNSServiceMaxDomainName) < 0) str_error = 1;
-	if (!errorCode && str_error) errorCode = kDNSServiceErr_Unknown;
-	((DNSServiceBrowseReply)sdr->app_callback)(sdr, flags, interfaceIndex, errorCode, replyName, replyType, replyDomain, sdr->app_context);
-    }
+	err = ConnectToServer(sdRef, flags, addrinfo_request, handle_addrinfo_response, callBack, context);
+	if (err) return err;	// On error ConnectToServer leaves *sdRef set to NULL
+
+	// Calculate total message length
+	len = sizeof(flags);
+	len += sizeof(uint32_t);      // interfaceIndex
+	len += sizeof(uint32_t);      // protocol
+	len += strlen(hostname) + 1;
+
+	hdr = create_hdr(addrinfo_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
+	if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
+
+	put_flags(flags, &ptr);
+	put_uint32(interfaceIndex, &ptr);
+	put_uint32(protocol, &ptr);
+	put_string(hostname, &ptr);
+
+	err = deliver_request(hdr, *sdRef);		// Will free hdr for us
+	if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
+	return err;
+	}
+	
+static void handle_browse_response(DNSServiceOp *sdr, CallbackHeader *cbh, char *data, char *end)
+	{
+	char replyName[256], replyType[kDNSServiceMaxDomainName], replyDomain[kDNSServiceMaxDomainName];
+	get_string(&data, end, replyName, 256);
+	get_string(&data, end, replyType, kDNSServiceMaxDomainName);
+	get_string(&data, end, replyDomain, kDNSServiceMaxDomainName);
+	if (!data) syslog(LOG_WARNING, "dnssd_clientstub handle_browse_response: error reading result from daemon");
+	else ((DNSServiceBrowseReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, replyName, replyType, replyDomain, sdr->AppContext);
+	// MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
+	}
 
 DNSServiceErrorType DNSSD_API DNSServiceBrowse
-(
- DNSServiceRef                      *sdRef,
- DNSServiceFlags              flags,
- uint32_t                     interfaceIndex,
- const char                         *regtype,
- const char                         *domain,
- DNSServiceBrowseReply        callBack,
- void                               *context
- )
-    {
-    char *msg = NULL, *ptr;
-    size_t len;
-    ipc_msg_hdr *hdr;
-    DNSServiceRef sdr;
-    DNSServiceErrorType err;
+	(
+	DNSServiceRef         *sdRef,
+	DNSServiceFlags        flags,
+	uint32_t               interfaceIndex,
+	const char            *regtype,
+	const char            *domain,
+	DNSServiceBrowseReply  callBack,
+	void                  *context
+	)
+	{
+	char *ptr;
+	size_t len;
+	ipc_msg_hdr *hdr;
+	DNSServiceErrorType err = ConnectToServer(sdRef, flags, browse_request, handle_browse_response, callBack, context);
+	if (err) return err;	// On error ConnectToServer leaves *sdRef set to NULL
 
-    if (!sdRef) return kDNSServiceErr_BadParam;
-    *sdRef = NULL;
+	if (!domain) domain = "";
+	len = sizeof(flags);
+	len += sizeof(interfaceIndex);
+	len += strlen(regtype) + 1;
+	len += strlen(domain) + 1;
 
-    if (!domain) domain = "";
+	hdr = create_hdr(browse_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
+	if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
 
-    len = sizeof(flags);
-    len += sizeof(interfaceIndex);
-    len += strlen(regtype) + 1;
-    len += strlen(domain) + 1;
+	put_flags(flags, &ptr);
+	put_uint32(interfaceIndex, &ptr);
+	put_string(regtype, &ptr);
+	put_string(domain, &ptr);
 
-    hdr = create_hdr(browse_request, &len, &ptr, 1);
-    if (!hdr) goto error;
-    msg = (char *)hdr;
-    put_flags(flags, &ptr);
-    put_long(interfaceIndex, &ptr);
-    put_string(regtype, &ptr);
-    put_string(domain, &ptr);
-
-    sdr = connect_to_server();
-    if (!sdr) goto error;
-    err = deliver_request(msg, sdr, 1);
-    if (err)
-        {
-        DNSServiceRefDeallocate(sdr);
-        return err;
-        }
-    sdr->op = browse_request;
-    sdr->process_reply = handle_browse_response;
-    sdr->app_callback = callBack;
-    sdr->app_context = context;
-    *sdRef = sdr;
-    return err;
-
-error:
-    if (msg) free(msg);
-    if (*sdRef) { free(*sdRef);  *sdRef = NULL; }
-    return kDNSServiceErr_Unknown;
-    }
-
-DNSServiceErrorType DNSSD_API DNSServiceSetDefaultDomainForUser
-(
- DNSServiceFlags                    flags,
- const char                         *domain
- )
-    {
-    DNSServiceRef sdr;
-    DNSServiceErrorType err;
-    char *ptr = NULL;
-    size_t len = sizeof(flags) + strlen(domain) + 1;
-    ipc_msg_hdr *hdr = create_hdr(setdomain_request, &len, &ptr, 1);
-
-    if (!hdr) return kDNSServiceErr_Unknown;
-    put_flags(flags, &ptr);
-    put_string(domain, &ptr);
-
-    sdr = connect_to_server();
-    if (!sdr) { free(hdr); return kDNSServiceErr_Unknown; }
-    err = deliver_request((char *)hdr, sdr, 1);		// deliver_request frees the message for us
-	DNSServiceRefDeallocate(sdr);
+	err = deliver_request(hdr, *sdRef);		// Will free hdr for us
+	if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
 	return err;
-    }
+	}
 
+DNSServiceErrorType DNSSD_API DNSServiceSetDefaultDomainForUser(DNSServiceFlags flags, const char *domain)
+	{
+	DNSServiceOp *tmp;
+	char *ptr;
+	size_t len = sizeof(flags) + strlen(domain) + 1;
+	ipc_msg_hdr *hdr;
+	DNSServiceErrorType err = ConnectToServer(&tmp, 0, setdomain_request, NULL, NULL, NULL);
+	if (err) return err;
 
-static void handle_regservice_response(DNSServiceRef sdr, ipc_msg_hdr *hdr, char *data)
-    {
-    DNSServiceFlags flags;
-    uint32_t interfaceIndex;
-    DNSServiceErrorType errorCode;
-    char name[256], regtype[kDNSServiceMaxDomainName], domain[kDNSServiceMaxDomainName];
-    int str_error = 0;
-	(void)hdr;//Unused
+	hdr = create_hdr(setdomain_request, &len, &ptr, 0, tmp);
+	if (!hdr) { DNSServiceRefDeallocate(tmp); return kDNSServiceErr_NoMemory; }
 
-    flags = get_flags(&data);
-    interfaceIndex = get_long(&data);
-    errorCode = get_error_code(&data);
-    if (get_string(&data, name, 256) < 0) str_error = 1;
-    if (get_string(&data, regtype, kDNSServiceMaxDomainName) < 0) str_error = 1;
-    if (get_string(&data, domain, kDNSServiceMaxDomainName) < 0) str_error = 1;
-	if (!errorCode && str_error) errorCode = kDNSServiceErr_Unknown;
-    ((DNSServiceRegisterReply)sdr->app_callback)(sdr, flags, errorCode, name, regtype, domain, sdr->app_context);
-    }
+	put_flags(flags, &ptr);
+	put_string(domain, &ptr);
+	err = deliver_request(hdr, tmp);		// Will free hdr for us
+	DNSServiceRefDeallocate(tmp);
+	return err;
+	}
+
+static void handle_regservice_response(DNSServiceOp *sdr, CallbackHeader *cbh, char *data, char *end)
+	{
+	char name[256], regtype[kDNSServiceMaxDomainName], domain[kDNSServiceMaxDomainName];
+	get_string(&data, end, name, 256);
+	get_string(&data, end, regtype, kDNSServiceMaxDomainName);
+	get_string(&data, end, domain,  kDNSServiceMaxDomainName);
+	if (!data) syslog(LOG_WARNING, "dnssd_clientstub handle_regservice_response: error reading result from daemon");
+	else ((DNSServiceRegisterReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_err, name, regtype, domain, sdr->AppContext);
+	// MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
+	}
 
 DNSServiceErrorType DNSSD_API DNSServiceRegister
-    (
-    DNSServiceRef                       *sdRef,
-    DNSServiceFlags                     flags,
-    uint32_t                            interfaceIndex,
-    const char                          *name,
-    const char                          *regtype,
-    const char                          *domain,
-    const char                          *host,
-    uint16_t                            PortInNetworkByteOrder,
-    uint16_t                            txtLen,
-    const void                          *txtRecord,
-    DNSServiceRegisterReply             callBack,
-    void                                *context
-    )
-    {
-    char *msg = NULL, *ptr;
-    size_t len;
-    ipc_msg_hdr *hdr;
-    DNSServiceRef sdr;
-    DNSServiceErrorType err;
-    union { uint16_t s; u_char b[2]; } port = { PortInNetworkByteOrder };
+	(
+	DNSServiceRef                       *sdRef,
+	DNSServiceFlags                     flags,
+	uint32_t                            interfaceIndex,
+	const char                          *name,
+	const char                          *regtype,
+	const char                          *domain,
+	const char                          *host,
+	uint16_t                            PortInNetworkByteOrder,
+	uint16_t                            txtLen,
+	const void                          *txtRecord,
+	DNSServiceRegisterReply             callBack,
+	void                                *context
+	)
+	{
+	char *ptr;
+	size_t len;
+	ipc_msg_hdr *hdr;
+	DNSServiceErrorType err;
+	union { uint16_t s; u_char b[2]; } port = { PortInNetworkByteOrder };
 
-    if (!sdRef) return kDNSServiceErr_BadParam;
-    *sdRef = NULL;
+	if (!name) name = "";
+	if (!regtype) return kDNSServiceErr_BadParam;
+	if (!domain) domain = "";
+	if (!host) host = "";
+	if (!txtRecord) txtRecord = (void*)"";
 
-    if (!name) name = "";
-    if (!regtype) return kDNSServiceErr_BadParam;
-    if (!domain) domain = "";
-    if (!host) host = "";
-    if (!txtRecord) txtRecord = (void*)"";
+	// No callback must have auto-rename
+	if (!callBack && (flags & kDNSServiceFlagsNoAutoRename)) return kDNSServiceErr_BadParam;
 
-    // auto-name must also have auto-rename
-    if (!name[0]  && (flags & kDNSServiceFlagsNoAutoRename))
-        return kDNSServiceErr_BadParam;
+	err = ConnectToServer(sdRef, flags, reg_service_request, callBack ? handle_regservice_response : NULL, callBack, context);
+	if (err) return err;	// On error ConnectToServer leaves *sdRef set to NULL
 
-    // no callback must have auto-name
-    if (!callBack && name[0]) return kDNSServiceErr_BadParam;
+	len = sizeof(DNSServiceFlags);
+	len += sizeof(uint32_t);  // interfaceIndex
+	len += strlen(name) + strlen(regtype) + strlen(domain) + strlen(host) + 4;
+	len += 2 * sizeof(uint16_t);  // port, txtLen
+	len += txtLen;
 
-    len = sizeof(DNSServiceFlags);
-    len += sizeof(uint32_t);  // interfaceIndex
-    len += strlen(name) + strlen(regtype) + strlen(domain) + strlen(host) + 4;
-    len += 2 * sizeof(uint16_t);  // port, txtLen
-    len += txtLen;
+	hdr = create_hdr(reg_service_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
+	if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
+	if (!callBack) hdr->ipc_flags |= IPC_FLAGS_NOREPLY;
 
-    hdr = create_hdr(reg_service_request, &len, &ptr, 1);
-    if (!hdr) goto error;
-    if (!callBack) hdr->flags |= IPC_FLAGS_NOREPLY;
-    msg = (char *)hdr;
-    put_flags(flags, &ptr);
-    put_long(interfaceIndex, &ptr);
-    put_string(name, &ptr);
-    put_string(regtype, &ptr);
-    put_string(domain, &ptr);
-    put_string(host, &ptr);
-    *ptr++ = port.b[0];
-    *ptr++ = port.b[1];
-    put_short(txtLen, &ptr);
-    put_rdata(txtLen, txtRecord, &ptr);
+	put_flags(flags, &ptr);
+	put_uint32(interfaceIndex, &ptr);
+	put_string(name, &ptr);
+	put_string(regtype, &ptr);
+	put_string(domain, &ptr);
+	put_string(host, &ptr);
+	*ptr++ = port.b[0];
+	*ptr++ = port.b[1];
+	put_uint16(txtLen, &ptr);
+	put_rdata(txtLen, txtRecord, &ptr);
 
-    sdr = connect_to_server();
-    if (!sdr) goto error;
-    err = deliver_request(msg, sdr, 1);
-    if (err)
-        {
-        DNSServiceRefDeallocate(sdr);
-        return err;
-        }
+	err = deliver_request(hdr, *sdRef);		// Will free hdr for us
+	if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
+	return err;
+	}
 
-    sdr->op = reg_service_request;
-    sdr->process_reply = callBack ? handle_regservice_response : NULL;
-    sdr->app_callback = callBack;
-    sdr->app_context = context;
-    *sdRef = sdr;
-
-    return err;
-
-error:
-    if (msg) free(msg);
-    if (*sdRef) 	{ free(*sdRef);  *sdRef = NULL; }
-    return kDNSServiceErr_Unknown;
-    }
-
-static void handle_enumeration_response(DNSServiceRef sdr, ipc_msg_hdr *hdr, char *data)
-    {
-    DNSServiceFlags flags;
-    uint32_t interfaceIndex;
-    DNSServiceErrorType err;
-    char domain[kDNSServiceMaxDomainName];
-    int str_error = 0;
-	(void)hdr;//Unused
-
-    flags = get_flags(&data);
-    interfaceIndex = get_long(&data);
-    err = get_error_code(&data);
-    if (get_string(&data, domain, kDNSServiceMaxDomainName) < 0) str_error = 1;
-	if (!err && str_error) err = kDNSServiceErr_Unknown;
-    ((DNSServiceDomainEnumReply)sdr->app_callback)(sdr, flags, interfaceIndex, err, domain, sdr->app_context);
-    }
+static void handle_enumeration_response(DNSServiceOp *sdr, CallbackHeader *cbh, char *data, char *end)
+	{
+	char domain[kDNSServiceMaxDomainName];
+	get_string(&data, end, domain, kDNSServiceMaxDomainName);
+	if (!data) syslog(LOG_WARNING, "dnssd_clientstub handle_enumeration_response: error reading result from daemon");
+	else ((DNSServiceDomainEnumReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, domain, sdr->AppContext);
+	// MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
+	}
 
 DNSServiceErrorType DNSSD_API DNSServiceEnumerateDomains
-(
- DNSServiceRef                    *sdRef,
- DNSServiceFlags            flags,
- uint32_t                   interfaceIndex,
- DNSServiceDomainEnumReply  callBack,
- void                             *context
- )
-    {
-    char *msg = NULL, *ptr;
-    size_t len;
-    ipc_msg_hdr *hdr;
-    DNSServiceRef sdr;
-    DNSServiceErrorType err;
-    int f1 = (flags & kDNSServiceFlagsBrowseDomains) != 0;
-    int f2 = (flags & kDNSServiceFlagsRegistrationDomains) != 0;
-    if (f1 + f2 != 1) return kDNSServiceErr_BadParam;
+	(
+	DNSServiceRef             *sdRef,
+	DNSServiceFlags            flags,
+	uint32_t                   interfaceIndex,
+	DNSServiceDomainEnumReply  callBack,
+	void                      *context
+	)
+	{
+	char *ptr;
+	size_t len;
+	ipc_msg_hdr *hdr;
+	DNSServiceErrorType err;
 
-    if (!sdRef) return kDNSServiceErr_BadParam;
-    *sdRef = NULL;
+	int f1 = (flags & kDNSServiceFlagsBrowseDomains) != 0;
+	int f2 = (flags & kDNSServiceFlagsRegistrationDomains) != 0;
+	if (f1 + f2 != 1) return kDNSServiceErr_BadParam;
+
+	err = ConnectToServer(sdRef, flags, enumeration_request, handle_enumeration_response, callBack, context);
+	if (err) return err;	// On error ConnectToServer leaves *sdRef set to NULL
 
 	len = sizeof(DNSServiceFlags);
-    len += sizeof(uint32_t);
+	len += sizeof(uint32_t);
 
-    hdr = create_hdr(enumeration_request, &len, &ptr, 1);
-    if (!hdr) goto error;
-    msg = (void *)hdr;
+	hdr = create_hdr(enumeration_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
+	if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
 
-    put_flags(flags, &ptr);
-    put_long(interfaceIndex, &ptr);
+	put_flags(flags, &ptr);
+	put_uint32(interfaceIndex, &ptr);
 
-    sdr = connect_to_server();
-    if (!sdr) goto error;
-    err = deliver_request(msg, sdr, 1);
-    if (err)
-        {
-        DNSServiceRefDeallocate(sdr);
-        return err;
-        }
+	err = deliver_request(hdr, *sdRef);		// Will free hdr for us
+	if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
+	return err;
+	}
 
-    sdr->op = enumeration_request;
-    sdr->process_reply = handle_enumeration_response;
-    sdr->app_callback = callBack;
-    sdr->app_context = context;
-    *sdRef = sdr;
-    return err;
+static void ConnectionResponse(DNSServiceOp *sdr, CallbackHeader *cbh, char *data, char *end)
+	{
+	DNSRecordRef rref = cbh->ipc_hdr.client_context.context;
+	(void)data; // Unused
 
-error:
-    if (msg) free(msg);
-    if (*sdRef) { free(*sdRef);  *sdRef = NULL; }
-    return kDNSServiceErr_Unknown;
-    }
+	//printf("ConnectionResponse got %d\n", cbh->ipc_hdr.op);
+	if (cbh->ipc_hdr.op != reg_record_reply_op)
+		{
+		// When using kDNSServiceFlagsShareConnection, need to search the list of associated DNSServiceOps
+		// to find the one this response is intended for, and then call through to its ProcessReply handler
+		while (sdr && (sdr->uid.u32[0] != cbh->ipc_hdr.client_context.u32[0] || sdr->uid.u32[1] != cbh->ipc_hdr.client_context.u32[1]))
+			sdr = sdr->next;
+		// NOTE: We may sometimes not find a matching DNSServiceOp, in the case where the client has
+		// cancelled the subordinate DNSServiceOp, but there are still messages in the pipeline from the daemon
+		if (sdr && sdr->ProcessReply) sdr->ProcessReply(sdr, cbh, data, end);
+		// WARNING: Don't touch sdr after this -- client may have called DNSServiceRefDeallocate
+		return;
+		}
 
-static void handle_regrecord_response(DNSServiceRef sdr, ipc_msg_hdr *hdr, char *data)
-    {
-    DNSServiceFlags flags;
-    uint32_t interfaceIndex;
-    DNSServiceErrorType errorCode;
-    DNSRecordRef rref = hdr->client_context.context;
-
-    if (sdr->op != connection)
-        {
-        rref->app_callback(rref->sdr, rref, 0, kDNSServiceErr_Unknown, rref->app_context);
-        return;
-        }
-    flags = get_flags(&data);
-    interfaceIndex = get_long(&data);
-    errorCode = get_error_code(&data);
-
-    rref->app_callback(rref->sdr, rref, flags, errorCode, rref->app_context);
-    }
+	if (sdr->op == connection_request)
+		rref->AppCallback(rref->sdr, rref, cbh->cb_flags, cbh->cb_err, rref->AppContext);
+	else
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub handle_regrecord_response: sdr->op != connection_request");
+		rref->AppCallback(rref->sdr, rref, 0, kDNSServiceErr_Unknown, rref->AppContext);
+		}
+	// MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
+	}
 
 DNSServiceErrorType DNSSD_API DNSServiceCreateConnection(DNSServiceRef *sdRef)
-    {
-    if (!sdRef) return kDNSServiceErr_BadParam;
-    *sdRef = connect_to_server();
-    if (!*sdRef)
-            return kDNSServiceErr_Unknown;
-    (*sdRef)->op = connection;
-    (*sdRef)->process_reply = handle_regrecord_response;
-    return 0;
-    }
+	{
+	char *ptr;
+	size_t len = 0;
+	ipc_msg_hdr *hdr;
+	DNSServiceErrorType err = ConnectToServer(sdRef, 0, connection_request, ConnectionResponse, NULL, NULL);
+	if (err) return err;	// On error ConnectToServer leaves *sdRef set to NULL
+	
+	hdr = create_hdr(connection_request, &len, &ptr, 0, *sdRef);
+	if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
+
+	err = deliver_request(hdr, *sdRef);		// Will free hdr for us
+	if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
+	return err;
+	}
 
 DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
-(
- DNSServiceRef            	sdRef,
- DNSRecordRef                 		*RecordRef,
- DNSServiceFlags      	        flags,
- uint32_t                      	interfaceIndex,
- const char                         	*fullname,
- uint16_t                      	rrtype,
- uint16_t                      	rrclass,
- uint16_t                      	rdlen,
- const void                         	*rdata,
- uint32_t                      	ttl,
- DNSServiceRegisterRecordReply  	callBack,
- void                               	*context
- )
-    {
-    char *msg = NULL, *ptr;
-    size_t len;
-    ipc_msg_hdr *hdr = NULL;
-    DNSServiceRef tmp = NULL;
-    DNSRecordRef rref = NULL;
-    int f1 = (flags & kDNSServiceFlagsShared) != 0;
-    int f2 = (flags & kDNSServiceFlagsUnique) != 0;
-    if (f1 + f2 != 1) return kDNSServiceErr_BadParam;
+	(
+	DNSServiceRef                  sdRef,
+	DNSRecordRef                  *RecordRef,
+	DNSServiceFlags                flags,
+	uint32_t                       interfaceIndex,
+	const char                    *fullname,
+	uint16_t                       rrtype,
+	uint16_t                       rrclass,
+	uint16_t                       rdlen,
+	const void                    *rdata,
+	uint32_t                       ttl,
+	DNSServiceRegisterRecordReply  callBack,
+	void                          *context
+	)
+	{
+	char *ptr;
+	size_t len;
+	ipc_msg_hdr *hdr = NULL;
+	DNSRecordRef rref = NULL;
+	int f1 = (flags & kDNSServiceFlagsShared) != 0;
+	int f2 = (flags & kDNSServiceFlagsUnique) != 0;
+	if (f1 + f2 != 1) return kDNSServiceErr_BadParam;
 
-    if (!sdRef || sdRef->op != connection || sdRef->sockfd < 0)
-        return kDNSServiceErr_BadReference;
-    *RecordRef = NULL;
+	if (!sdRef) { syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRegisterRecord called with NULL DNSServiceRef"); return kDNSServiceErr_BadParam; }
+
+	if (!DNSServiceRefValid(sdRef))
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRegisterRecord called with invalid DNSServiceRef %p %08X %08X", sdRef, sdRef->sockfd, sdRef->validator);
+		return kDNSServiceErr_BadReference;
+		}
+
+	if (sdRef->op != connection_request)
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRegisterRecord called with non-DNSServiceCreateConnection DNSServiceRef %p %d", sdRef, sdRef->op);
+		return kDNSServiceErr_BadReference;
+		}
+
+	*RecordRef = NULL;
 
 	len = sizeof(DNSServiceFlags);
-    len += 2 * sizeof(uint32_t);  // interfaceIndex, ttl
-    len += 3 * sizeof(uint16_t);  // rrtype, rrclass, rdlen
-    len += strlen(fullname) + 1;
-    len += rdlen;
+	len += 2 * sizeof(uint32_t);  // interfaceIndex, ttl
+	len += 3 * sizeof(uint16_t);  // rrtype, rrclass, rdlen
+	len += strlen(fullname) + 1;
+	len += rdlen;
 
-    hdr = create_hdr(reg_record_request, &len, &ptr, 0);
-    if (!hdr) goto error;
-    msg = (char *)hdr;
-    put_flags(flags, &ptr);
-    put_long(interfaceIndex, &ptr);
-    put_string(fullname, &ptr);
-    put_short(rrtype, &ptr);
-    put_short(rrclass, &ptr);
-    put_short(rdlen, &ptr);
-    put_rdata(rdlen, rdata, &ptr);
-    put_long(ttl, &ptr);
+	hdr = create_hdr(reg_record_request, &len, &ptr, 1, sdRef);
+	if (!hdr) return kDNSServiceErr_NoMemory;
 
-    rref = malloc(sizeof(_DNSRecordRef_t));
-    if (!rref) goto error;
-    rref->app_context = context;
-    rref->app_callback = callBack;
-    rref->record_index = sdRef->max_index++;
-    rref->sdr = sdRef;
-    *RecordRef = rref;
-    hdr->client_context.context = rref;
-    hdr->reg_index = rref->record_index;
+	put_flags(flags, &ptr);
+	put_uint32(interfaceIndex, &ptr);
+	put_string(fullname, &ptr);
+	put_uint16(rrtype, &ptr);
+	put_uint16(rrclass, &ptr);
+	put_uint16(rdlen, &ptr);
+	put_rdata(rdlen, rdata, &ptr);
+	put_uint32(ttl, &ptr);
 
-    return deliver_request(msg, sdRef, 0);
+	rref = malloc(sizeof(DNSRecord));
+	if (!rref) { free(hdr); return kDNSServiceErr_NoMemory; }
+	rref->AppContext = context;
+	rref->AppCallback = callBack;
+	rref->record_index = sdRef->max_index++;
+	rref->sdr = sdRef;
+	*RecordRef = rref;
+	hdr->client_context.context = rref;
+	hdr->reg_index = rref->record_index;
 
-error:
-    if (rref) free(rref);
-    if (tmp) free(tmp);
-    if (hdr) free(hdr);
-    return kDNSServiceErr_Unknown;
-    }
+	return deliver_request(hdr, sdRef);		// Will free hdr for us
+	}
 
-//sdRef returned by DNSServiceRegister()
+// sdRef returned by DNSServiceRegister()
 DNSServiceErrorType DNSSD_API DNSServiceAddRecord
-    (
-    DNSServiceRef	                sdRef,
-    DNSRecordRef			*RecordRef,
-    DNSServiceFlags               flags,
-    uint16_t			rrtype,
-    uint16_t			rdlen,
-    const void				*rdata,
-    uint32_t			ttl
-    )
-    {
-    ipc_msg_hdr *hdr;
-    size_t len = 0;
-    char *ptr;
-    DNSRecordRef rref;
+	(
+	DNSServiceRef    sdRef,
+	DNSRecordRef    *RecordRef,
+	DNSServiceFlags  flags,
+	uint16_t         rrtype,
+	uint16_t         rdlen,
+	const void      *rdata,
+	uint32_t         ttl
+	)
+	{
+	ipc_msg_hdr *hdr;
+	size_t len = 0;
+	char *ptr;
+	DNSRecordRef rref;
 
-    if (!sdRef || (sdRef->op != reg_service_request) || !RecordRef)
-        return kDNSServiceErr_BadReference;
-    *RecordRef = NULL;
+	if (!sdRef)     { syslog(LOG_WARNING, "dnssd_clientstub DNSServiceAddRecord called with NULL DNSServiceRef");        return kDNSServiceErr_BadParam; }
+	if (!RecordRef) { syslog(LOG_WARNING, "dnssd_clientstub DNSServiceAddRecord called with NULL DNSRecordRef pointer"); return kDNSServiceErr_BadParam; }
+	if (sdRef->op != reg_service_request)
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceAddRecord called with non-DNSServiceRegister DNSServiceRef %p %d", sdRef, sdRef->op);
+		return kDNSServiceErr_BadReference;
+		}
 
-    len += 2 * sizeof(uint16_t);  //rrtype, rdlen
-    len += rdlen;
-    len += sizeof(uint32_t);
-    len += sizeof(DNSServiceFlags);
+	if (!DNSServiceRefValid(sdRef))
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceAddRecord called with invalid DNSServiceRef %p %08X %08X", sdRef, sdRef->sockfd, sdRef->validator);
+		return kDNSServiceErr_BadReference;
+		}
 
-    hdr = create_hdr(add_record_request, &len, &ptr, 0);
-    if (!hdr) return kDNSServiceErr_Unknown;
-    put_flags(flags, &ptr);
-    put_short(rrtype, &ptr);
-    put_short(rdlen, &ptr);
-    put_rdata(rdlen, rdata, &ptr);
-    put_long(ttl, &ptr);
+	*RecordRef = NULL;
 
-    rref = malloc(sizeof(_DNSRecordRef_t));
-    if (!rref) goto error;
-    rref->app_context = NULL;
-    rref->app_callback = NULL;
-    rref->record_index = sdRef->max_index++;
-    rref->sdr = sdRef;
-    *RecordRef = rref;
-    hdr->client_context.context = rref;
-    hdr->reg_index = rref->record_index;
-    return deliver_request((char *)hdr, sdRef, 0);
+	len += 2 * sizeof(uint16_t);  // rrtype, rdlen
+	len += rdlen;
+	len += sizeof(uint32_t);
+	len += sizeof(DNSServiceFlags);
 
-error:
-    if (hdr) free(hdr);
-    if (rref) free(rref);
-    if (*RecordRef) *RecordRef = NULL;
-    return kDNSServiceErr_Unknown;
-}
+	hdr = create_hdr(add_record_request, &len, &ptr, 1, sdRef);
+	if (!hdr) return kDNSServiceErr_NoMemory;
+	put_flags(flags, &ptr);
+	put_uint16(rrtype, &ptr);
+	put_uint16(rdlen, &ptr);
+	put_rdata(rdlen, rdata, &ptr);
+	put_uint32(ttl, &ptr);
 
-//DNSRecordRef returned by DNSServiceRegisterRecord or DNSServiceAddRecord
+	rref = malloc(sizeof(DNSRecord));
+	if (!rref) { free(hdr); return kDNSServiceErr_NoMemory; }
+	rref->AppContext = NULL;
+	rref->AppCallback = NULL;
+	rref->record_index = sdRef->max_index++;
+	rref->sdr = sdRef;
+	*RecordRef = rref;
+	hdr->client_context.context = rref;
+	hdr->reg_index = rref->record_index;
+
+	return deliver_request(hdr, sdRef);		// Will free hdr for us
+	}
+
+// DNSRecordRef returned by DNSServiceRegisterRecord or DNSServiceAddRecord
 DNSServiceErrorType DNSSD_API DNSServiceUpdateRecord
-    (
-    DNSServiceRef         	sdRef,
-    DNSRecordRef			RecordRef,
-    DNSServiceFlags               flags,
-    uint16_t			rdlen,
-    const void				*rdata,
-    uint32_t			ttl
-    )
-    {
-    ipc_msg_hdr *hdr;
-    size_t len = 0;
-    char *ptr;
+	(
+	DNSServiceRef    sdRef,
+	DNSRecordRef     RecordRef,
+	DNSServiceFlags  flags,
+	uint16_t         rdlen,
+	const void      *rdata,
+	uint32_t         ttl
+	)
+	{
+	ipc_msg_hdr *hdr;
+	size_t len = 0;
+	char *ptr;
 
-	if (!sdRef) return kDNSServiceErr_BadReference;
+	if (!sdRef) { syslog(LOG_WARNING, "dnssd_clientstub DNSServiceUpdateRecord called with NULL DNSServiceRef"); return kDNSServiceErr_BadParam; }
 
-    len += sizeof(uint16_t);
-    len += rdlen;
-    len += sizeof(uint32_t);
-    len += sizeof(DNSServiceFlags);
+	if (!DNSServiceRefValid(sdRef))
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceUpdateRecord called with invalid DNSServiceRef %p %08X %08X", sdRef, sdRef->sockfd, sdRef->validator);
+		return kDNSServiceErr_BadReference;
+		}
 
-    hdr = create_hdr(update_record_request, &len, &ptr, 0);
-    if (!hdr) return kDNSServiceErr_Unknown;
-    hdr->reg_index = RecordRef ? RecordRef->record_index : TXT_RECORD_INDEX;
-    put_flags(flags, &ptr);
-    put_short(rdlen, &ptr);
-    put_rdata(rdlen, rdata, &ptr);
-    put_long(ttl, &ptr);
-    return deliver_request((char *)hdr, sdRef, 0);
-    }
+	// Note: RecordRef is allowed to be NULL
+
+	len += sizeof(uint16_t);
+	len += rdlen;
+	len += sizeof(uint32_t);
+	len += sizeof(DNSServiceFlags);
+
+	hdr = create_hdr(update_record_request, &len, &ptr, 1, sdRef);
+	if (!hdr) return kDNSServiceErr_NoMemory;
+	hdr->reg_index = RecordRef ? RecordRef->record_index : TXT_RECORD_INDEX;
+	put_flags(flags, &ptr);
+	put_uint16(rdlen, &ptr);
+	put_rdata(rdlen, rdata, &ptr);
+	put_uint32(ttl, &ptr);
+	return deliver_request(hdr, sdRef);		// Will free hdr for us
+	}
 
 DNSServiceErrorType DNSSD_API DNSServiceRemoveRecord
-(
- DNSServiceRef            sdRef,
- DNSRecordRef            	RecordRef,
- DNSServiceFlags          flags
- )
-    {
-    ipc_msg_hdr *hdr;
-    size_t len = 0;
-    char *ptr;
-    DNSServiceErrorType err;
+	(
+	DNSServiceRef    sdRef,
+	DNSRecordRef     RecordRef,
+	DNSServiceFlags  flags
+	)
+	{
+	ipc_msg_hdr *hdr;
+	size_t len = 0;
+	char *ptr;
+	DNSServiceErrorType err;
 
-    if (!sdRef || !RecordRef || !sdRef->max_index)
-        return kDNSServiceErr_BadReference;
+	if (!sdRef)            { syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRemoveRecord called with NULL DNSServiceRef"); return kDNSServiceErr_BadParam; }
+	if (!RecordRef)        { syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRemoveRecord called with NULL DNSRecordRef");  return kDNSServiceErr_BadParam; }
+	if (!sdRef->max_index) { syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRemoveRecord called with bad DNSServiceRef");  return kDNSServiceErr_BadReference; }
 
-    len += sizeof(flags);
-    hdr = create_hdr(remove_record_request, &len, &ptr, 0);
-    if (!hdr) return kDNSServiceErr_Unknown;
-    hdr->reg_index = RecordRef->record_index;
-    put_flags(flags, &ptr);
-    err = deliver_request((char *)hdr, sdRef, 0);
-    if (!err) free(RecordRef);
-    return err;
-    }
+	if (!DNSServiceRefValid(sdRef))
+		{
+		syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRemoveRecord called with invalid DNSServiceRef %p %08X %08X", sdRef, sdRef->sockfd, sdRef->validator);
+		return kDNSServiceErr_BadReference;
+		}
 
-void DNSSD_API DNSServiceReconfirmRecord
-(
- DNSServiceFlags              flags,
- uint32_t                     interfaceIndex,
- const char                         *fullname,
- uint16_t                     rrtype,
- uint16_t                     rrclass,
- uint16_t                     rdlen,
- const void                         *rdata
- )
-    {
-    char *ptr;
-    size_t len;
-    ipc_msg_hdr *hdr;
-    DNSServiceRef tmp;
+	len += sizeof(flags);
+	hdr = create_hdr(remove_record_request, &len, &ptr, 1, sdRef);
+	if (!hdr) return kDNSServiceErr_NoMemory;
+	hdr->reg_index = RecordRef->record_index;
+	put_flags(flags, &ptr);
+	err = deliver_request(hdr, sdRef);		// Will free hdr for us
+	if (!err) free(RecordRef);
+	return err;
+	}
 
-    len = sizeof(DNSServiceFlags);
-    len += sizeof(uint32_t);
-    len += strlen(fullname) + 1;
-    len += 3 * sizeof(uint16_t);
-    len += rdlen;
-    tmp = connect_to_server();
-    if (!tmp) return;
-    hdr = create_hdr(reconfirm_record_request, &len, &ptr, 1);
-    if (!hdr) return;
+DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
+	(
+	DNSServiceFlags  flags,
+	uint32_t         interfaceIndex,
+	const char      *fullname,
+	uint16_t         rrtype,
+	uint16_t         rrclass,
+	uint16_t         rdlen,
+	const void      *rdata
+	)
+	{
+	char *ptr;
+	size_t len;
+	ipc_msg_hdr *hdr;
+	DNSServiceOp *tmp;
 
-    put_flags(flags, &ptr);
-    put_long(interfaceIndex, &ptr);
-    put_string(fullname, &ptr);
-    put_short(rrtype, &ptr);
-    put_short(rrclass, &ptr);
-    put_short(rdlen, &ptr);
-    put_rdata(rdlen, rdata, &ptr);
-	ConvertHeaderBytes(hdr);
-    my_write(tmp->sockfd, (char *)hdr, (int) len);
-    free(hdr);
-    DNSServiceRefDeallocate(tmp);
-    }
+	DNSServiceErrorType err = ConnectToServer(&tmp, flags, reconfirm_record_request, NULL, NULL, NULL);
+	if (err) return err;
 
+	len = sizeof(DNSServiceFlags);
+	len += sizeof(uint32_t);
+	len += strlen(fullname) + 1;
+	len += 3 * sizeof(uint16_t);
+	len += rdlen;
+	hdr = create_hdr(reconfirm_record_request, &len, &ptr, 0, tmp);
+	if (!hdr) { DNSServiceRefDeallocate(tmp); return kDNSServiceErr_NoMemory; }
+
+	put_flags(flags, &ptr);
+	put_uint32(interfaceIndex, &ptr);
+	put_string(fullname, &ptr);
+	put_uint16(rrtype, &ptr);
+	put_uint16(rrclass, &ptr);
+	put_uint16(rdlen, &ptr);
+	put_rdata(rdlen, rdata, &ptr);
+
+	err = deliver_request(hdr, tmp);		// Will free hdr for us
+	DNSServiceRefDeallocate(tmp);
+	return err;
+	}
+
+static void handle_port_mapping_response(DNSServiceOp *sdr, CallbackHeader *cbh, char *data, char *end)
+	{
+	union { uint32_t l; u_char b[4]; } addr;
+	uint8_t protocol = 0;
+	union { uint16_t s; u_char b[2]; } privatePort;
+	union { uint16_t s; u_char b[2]; } publicPort;
+	uint32_t ttl = 0;
+
+	if (data + 13 > end) data = NULL;
+	else
+		{
+		addr       .b[0] = *data++;
+		addr       .b[1] = *data++;
+		addr       .b[2] = *data++;
+		addr       .b[3] = *data++;
+		protocol         = *data++;
+		privatePort.b[0] = *data++;
+		privatePort.b[1] = *data++;
+		publicPort .b[0] = *data++;
+		publicPort .b[1] = *data++;
+		ttl              = get_uint32(&data, end);
+		}
+
+	if (!data) syslog(LOG_WARNING, "dnssd_clientstub handle_port_mapping_response: error reading result from daemon");
+	else ((DNSServiceNATPortMappingReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, addr.l, protocol, privatePort.s, publicPort.s, ttl, sdr->AppContext);
+	// MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
+	}
+
+DNSServiceErrorType DNSSD_API DNSServiceNATPortMappingCreate
+	(
+	DNSServiceRef                       *sdRef,
+	DNSServiceFlags                     flags,
+	uint32_t                            interfaceIndex,
+	uint32_t                            protocol,     /* TCP and/or UDP */
+	uint16_t                            privatePortInNetworkByteOrder,
+	uint16_t                            publicPortInNetworkByteOrder,
+	uint32_t                            ttl,          /* time to live in seconds */
+	DNSServiceNATPortMappingReply       callBack,
+	void                                *context      /* may be NULL */
+	)
+	{
+	char *ptr;
+	size_t len;
+	ipc_msg_hdr *hdr;
+	union { uint16_t s; u_char b[2]; } privatePort = { privatePortInNetworkByteOrder };
+	union { uint16_t s; u_char b[2]; } publicPort  = { publicPortInNetworkByteOrder };
+
+	DNSServiceErrorType err = ConnectToServer(sdRef, flags, port_mapping_request, handle_port_mapping_response, callBack, context);
+	if (err) return err;	// On error ConnectToServer leaves *sdRef set to NULL
+
+	len = sizeof(flags);
+	len += sizeof(interfaceIndex);
+	len += sizeof(protocol);
+	len += sizeof(privatePort);
+	len += sizeof(publicPort);
+	len += sizeof(ttl);
+
+	hdr = create_hdr(port_mapping_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
+	if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
+
+	put_flags(flags, &ptr);
+	put_uint32(interfaceIndex, &ptr);
+	put_uint32(protocol, &ptr);
+	*ptr++ = privatePort.b[0];
+	*ptr++ = privatePort.b[1];
+	*ptr++ = publicPort .b[0];
+	*ptr++ = publicPort .b[1];
+	put_uint32(ttl, &ptr);
+
+	err = deliver_request(hdr, *sdRef);		// Will free hdr for us
+	if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
+	return err;
+	}

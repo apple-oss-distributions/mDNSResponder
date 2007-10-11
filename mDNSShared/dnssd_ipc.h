@@ -1,32 +1,93 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2003-2004, Apple Computer, Inc. All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without 
+ * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- * 1.  Redistributions of source code must retain the above copyright notice, 
- *     this list of conditions and the following disclaimer. 
- * 2.  Redistributions in binary form must reproduce the above copyright notice, 
- *     this list of conditions and the following disclaimer in the documentation 
- *     and/or other materials provided with the distribution. 
- * 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of its 
- *     contributors may be used to endorse or promote products derived from this 
- *     software without specific prior written permission. 
+ * 1.  Redistributions of source code must retain the above copyright notice,
+ *     this list of conditions and the following disclaimer.
+ * 2.  Redistributions in binary form must reproduce the above copyright notice,
+ *     this list of conditions and the following disclaimer in the documentation
+ *     and/or other materials provided with the distribution.
+ * 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of its
+ *     contributors may be used to endorse or promote products derived from this
+ *     software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY 
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED 
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
- * DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY 
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES 
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; 
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND 
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS 
+ * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
     Change History (most recent first):
 
 $Log: dnssd_ipc.h,v $
+Revision 1.40  2007/09/07 20:56:03  cheshire
+Renamed uint32_t field in client_context_t from "ptr64" to more accurate name "u32"
+
+Revision 1.39  2007/08/18 01:02:04  mcguire
+<rdar://problem/5415593> No Bonjour services are getting registered at boot
+
+Revision 1.38  2007/08/08 22:34:59  mcguire
+<rdar://problem/5197869> Security: Run mDNSResponder as user id mdnsresponder instead of root
+
+Revision 1.37  2007/07/28 00:00:43  cheshire
+Renamed CompileTimeAssertionCheck structure for consistency with others
+
+Revision 1.36  2007/07/23 22:12:53  cheshire
+<rdar://problem/5352299> Make mDNSResponder more defensive against malicious local clients
+
+Revision 1.35  2007/05/23 18:59:22  cheshire
+Remove unnecessary IPC_FLAGS_REUSE_SOCKET
+
+Revision 1.34  2007/05/22 01:07:42  cheshire
+<rdar://problem/3563675> API: Need a way to get version/feature information
+
+Revision 1.33  2007/05/18 23:55:22  cheshire
+<rdar://problem/4454655> Allow multiple register/browse/resolve operations to share single Unix Domain Socket
+
+Revision 1.32  2007/05/18 20:31:20  cheshire
+Rename port_mapping_create_request to port_mapping_request
+
+Revision 1.31  2007/05/18 17:56:20  cheshire
+Rename port_mapping_create_reply_op to port_mapping_reply_op
+
+Revision 1.30  2007/05/16 01:06:52  cheshire
+<rdar://problem/4471320> Improve reliability of kDNSServiceFlagsMoreComing flag on multiprocessor machines
+
+Revision 1.29  2007/05/15 21:57:16  cheshire
+<rdar://problem/4608220> Use dnssd_SocketValid(x) macro instead of just
+assuming that all negative values (or zero!) are invalid socket numbers
+
+Revision 1.28  2007/03/21 19:01:57  cheshire
+<rdar://problem/5078494> IPC code not 64-bit-savvy: assumes long=32bits, and short=16bits
+
+Revision 1.27  2006/10/27 00:38:22  cheshire
+Strip accidental trailing whitespace from lines
+
+Revision 1.26  2006/09/27 00:44:36  herscher
+<rdar://problem/4249761> API: Need DNSServiceGetAddrInfo()
+
+Revision 1.25  2006/09/26 01:51:07  herscher
+<rdar://problem/4245016> NAT Port Mapping API (for both NAT-PMP and UPnP Gateway Protocol)
+
+Revision 1.24  2006/09/18 19:21:42  cheshire
+<rdar://problem/4737048> gcc's structure padding breaks Bonjour APIs on
+64-bit clients; need to declare ipc_msg_hdr structure "packed"
+
+Revision 1.23  2006/08/14 23:05:53  cheshire
+Added "tab-width" emacs header line
+
+Revision 1.22  2006/06/28 08:56:26  cheshire
+Added "_op" to the end of the operation code enum values,
+to differentiate them from the routines with the same names
+
 Revision 1.21  2005/09/29 06:38:13  herscher
 Remove #define MSG_WAITALL on Windows.  We don't use this macro anymore, and it's presence causes warnings to be emitted when compiling against the latest Microsoft Platform SDK.
 
@@ -84,18 +145,17 @@ Update to APSL 2.0
 
 #include "dns_sd.h"
 
-
 //
 // Common cross platform services
 //
 #if defined(WIN32)
 #	include <winsock2.h>
 #	define dnssd_InvalidSocket	INVALID_SOCKET
+#	define dnssd_SocketValid(s) ((s) != INVALID_SOCKET)
 #	define dnssd_EWOULDBLOCK	WSAEWOULDBLOCK
 #	define dnssd_EINTR			WSAEINTR
 #	define dnssd_sock_t			SOCKET
 #	define dnssd_socklen_t		int
-#	define dnssd_sockbuf_t		const char*
 #	define dnssd_close(sock)	closesocket(sock)
 #	define dnssd_errno()		WSAGetLastError()
 #	define ssize_t				int
@@ -111,12 +171,12 @@ Update to APSL 2.0
 #	include <sys/socket.h>
 #	include <netinet/in.h>
 #	define dnssd_InvalidSocket	-1
+#	define dnssd_SocketValid(s) ((s) >= 0)
 #	define dnssd_EWOULDBLOCK	EWOULDBLOCK
 #	define dnssd_EINTR			EINTR
 #	define dnssd_EPIPE			EPIPE
 #	define dnssd_sock_t			int
 #	define dnssd_socklen_t		unsigned int
-#	define dnssd_sockbuf_t		const char*
 #	define dnssd_close(sock)	close(sock)
 #	define dnssd_errno()		errno
 #endif
@@ -134,12 +194,9 @@ Update to APSL 2.0
 #	endif
 #	define LISTENQ				100
     // longest legal control path length
-#	define MAX_CTLPATH			256	
+#	define MAX_CTLPATH			256
 #	define dnssd_sockaddr_t		struct sockaddr_un
 #endif
-
-
-//#define UDSDEBUG  // verbose debug output
 
 // Compatibility workaround
 #ifndef AF_LOCAL
@@ -152,13 +209,25 @@ Update to APSL 2.0
 // IPC data encoding constants and types
 #define VERSION 1
 #define IPC_FLAGS_NOREPLY 1	// set flag if no asynchronous replies are to be sent to client
-#define IPC_FLAGS_REUSE_SOCKET 2 // set flag if synchronous errors are to be sent via the primary socket
-                                // (if not set, first string in message buffer must be path to error socket
+
+// Structure packing macro. If we're not using GNUC, it's not fatal. Most compilers naturally pack the on-the-wire
+// structures correctly anyway, so a plain "struct" is usually fine. In the event that structures are not packed
+// correctly, our compile-time assertion checks will catch it and prevent inadvertent generation of non-working code.
+#ifndef packedstruct
+ #if ((__GNUC__ > 2) || ((__GNUC__ == 2) && (__GNUC_MINOR__ >= 9)))
+  #define packedstruct struct __attribute__((__packed__))
+  #define packedunion  union  __attribute__((__packed__))
+ #else
+  #define packedstruct struct
+  #define packedunion  union
+ #endif
+#endif
 
 typedef enum
     {
-    connection = 1,           // connected socket via DNSServiceConnect()
-    reg_record_request,	  // reg/remove record only valid for connected sockets
+    request_op_none = 0,	// No request yet received on this connection
+    connection_request = 1,	// connected socket via DNSServiceConnect()
+    reg_record_request,		// reg/remove record only valid for connected sockets
     remove_record_request,
     enumeration_request,
     reg_service_request,
@@ -168,75 +237,84 @@ typedef enum
     reconfirm_record_request,
     add_record_request,
     update_record_request,
-    setdomain_request
+    setdomain_request,		// Up to here is in Tiger and B4W 1.0.3
+	getproperty_request,	// New in B4W 1.0.4
+    port_mapping_request,	// New in Leopard and B4W 2.0
+	addrinfo_request,
+
+	cancel_request = 63
     } request_op_t;
 
 typedef enum
     {
-    enumeration_reply = 64,
-    reg_service_reply,
-    browse_reply,
-    resolve_reply,
-    query_reply,
-    reg_record_reply
+    enumeration_reply_op = 64,
+    reg_service_reply_op,
+    browse_reply_op,
+    resolve_reply_op,
+    query_reply_op,
+    reg_record_reply_op,	// Up to here is in Tiger and B4W 1.0.3
+    getproperty_reply_op,	// New in B4W 1.0.4
+    port_mapping_reply_op,	// New in Leopard and B4W 2.0
+	addrinfo_reply_op
     } reply_op_t;
 
-typedef struct ipc_msg_hdr_struct ipc_msg_hdr;
+#if defined(_WIN64)
+#	pragma pack(4)
+#endif
 
-// client stub callback to process message from server and deliver results to
-// client application
-
-typedef void (*process_reply_callback)
-    (
-    DNSServiceRef sdr,
-    ipc_msg_hdr *hdr,
-    char *msg
-    );
-
-// allow 64-bit client to interoperate w/ 32-bit daemon
-typedef union
+// Define context object big enough to hold a 64-bit pointer,
+// to accomodate 64-bit clients communicating with 32-bit daemon.
+// There's no reason for the daemon to ever be a 64-bit process, but its clients might be
+typedef packedunion
     {
     void *context;
-    uint32_t ptr64[2];
+    uint32_t u32[2];
     } client_context_t;
 
-typedef struct ipc_msg_hdr_struct
+typedef packedstruct
     {
     uint32_t version;
     uint32_t datalen;
-    uint32_t flags;
+    uint32_t ipc_flags;
     uint32_t op;		// request_op_t or reply_op_t
     client_context_t client_context; // context passed from client, returned by server in corresponding reply
     uint32_t reg_index;            // identifier for a record registered via DNSServiceRegisterRecord() on a
     // socket connected by DNSServiceConnect().  Must be unique in the scope of the connection, such that and
     // index/socket pair uniquely identifies a record.  (Used to select records for removal by DNSServiceRemoveRecord())
-    } ipc_msg_hdr_struct;
+    } ipc_msg_hdr;
 
-// it is advanced to point to the next field, or the end of the message
 // routines to write to and extract data from message buffers.
 // caller responsible for bounds checking.
 // ptr is the address of the pointer to the start of the field.
 // it is advanced to point to the next field, or the end of the message
 
-void put_long(const uint32_t l, char **ptr);
-uint32_t get_long(char **ptr);
+void put_uint32(const uint32_t l, char **ptr);
+uint32_t get_uint32(char **ptr, char *end);
 
-void put_short(uint16_t s, char **ptr);
-uint16_t get_short(char **ptr);
+void put_uint16(uint16_t s, char **ptr);
+uint16_t get_uint16(char **ptr, char *end);
 
-#define put_flags put_long
-#define get_flags get_long
+#define put_flags put_uint32
+#define get_flags get_uint32
 
-#define put_error_code put_long
-#define get_error_code get_long
+#define put_error_code put_uint32
+#define get_error_code get_uint32
 
 int put_string(const char *str, char **ptr);
-int get_string(char **ptr, char *buffer, int buflen);
+int get_string(char **ptr, char *end, char *buffer, int buflen);
 
 void put_rdata(const int rdlen, const unsigned char *rdata, char **ptr);
-char *get_rdata(char **ptr, int rdlen);  // return value is rdata pointed to by *ptr -
+char *get_rdata(char **ptr, char *end, int rdlen);  // return value is rdata pointed to by *ptr -
                                          // rdata is not copied from buffer.
 
 void ConvertHeaderBytes(ipc_msg_hdr *hdr);
+
+struct CompileTimeAssertionChecks_dnssd_ipc
+	{
+	// Check that the compiler generated our on-the-wire packet format structure definitions
+	// properly packed, without adding padding bytes to align fields on 32-bit or 64-bit boundaries.
+	char assert0[(sizeof(client_context_t) ==  8) ? 1 : -1];
+	char assert1[(sizeof(ipc_msg_hdr)      == 28) ? 1 : -1];
+	};
 
 #endif // DNSSD_IPC_H

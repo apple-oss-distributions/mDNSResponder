@@ -1,28 +1,37 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2002-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
 
 $Log: mDNSVxWorks.c,v $
+Revision 1.33  2007/03/22 18:31:48  cheshire
+Put dst parameter first in mDNSPlatformStrCopy/mDNSPlatformMemCopy, like conventional Posix strcpy/memcpy
+
+Revision 1.32  2006/12/19 22:43:56  cheshire
+Fix compiler warnings
+
+Revision 1.31  2006/11/10 00:54:16  cheshire
+<rdar://problem/4816598> Changing case of Computer Name doesn't work
+
+Revision 1.30  2006/08/14 23:25:18  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
+Revision 1.29  2006/03/19 02:00:12  cheshire
+<rdar://problem/4073825> Improve logic for delaying packets after repeated interface transitions
+
 Revision 1.28  2005/05/30 07:36:38  bradley
 New implementation of the mDNS platform plugin for VxWorks 5.5 or later with IPv6 support.
 
@@ -428,7 +437,7 @@ mDNSexport void mDNSPlatformTCPCloseConnection(int sd)
 	(void)sd;			// Unused
 	}
 
-mDNSexport int mDNSPlatformReadTCP(int sd, void *buf, int buflen)
+mDNSexport long mDNSPlatformReadTCP(int sd, void *buf, unsigned long buflen)
 	{
 	(void)sd;			// Unused
 	(void)buf;			// Unused
@@ -436,7 +445,7 @@ mDNSexport int mDNSPlatformReadTCP(int sd, void *buf, int buflen)
 	return(0);
 	}
 
-mDNSexport int mDNSPlatformWriteTCP(int sd, const char *msg, int len)
+mDNSexport long mDNSPlatformWriteTCP(int sd, const char *msg, unsigned long len)
 	{
 	(void)sd;			// Unused
 	(void)msg;			// Unused
@@ -498,7 +507,7 @@ mDNSu32	mDNSPlatformStrLen( const void *inSrc )
 //	mDNSPlatformStrCopy
 //===========================================================================================================================
 
-void	mDNSPlatformStrCopy( const void *inSrc, void *inDst )
+void	mDNSPlatformStrCopy( void *inDst, const void *inSrc )
 {
 	check( inSrc );
 	check( inDst );
@@ -510,7 +519,7 @@ void	mDNSPlatformStrCopy( const void *inSrc, void *inDst )
 //	mDNSPlatformMemCopy
 //===========================================================================================================================
 
-void	mDNSPlatformMemCopy( const void *inSrc, void *inDst, mDNSu32 inSize )
+void	mDNSPlatformMemCopy( void *inDst, const void *inSrc, mDNSu32 inSize )
 {
 	check( inSrc );
 	check( inDst );
@@ -522,7 +531,7 @@ void	mDNSPlatformMemCopy( const void *inSrc, void *inDst, mDNSu32 inSize )
 //	mDNSPlatformMemSame
 //===========================================================================================================================
 
-mDNSBool	mDNSPlatformMemSame( const void *inSrc, const void *inDst, mDNSu32 inSize )
+mDNSBool	mDNSPlatformMemSame( const void *inDst, const void *inSrc, mDNSu32 inSize )
 {
 	check( inSrc );
 	check( inDst );
@@ -609,7 +618,7 @@ mDNSexport mDNSs32	mDNSPlatformUTC( void )
 //	mDNSPlatformInterfaceIDfromInterfaceIndex
 //===========================================================================================================================
 
-mDNSexport mDNSInterfaceID	mDNSPlatformInterfaceIDfromInterfaceIndex( const mDNS *const inMDNS, mDNSu32 inIndex )
+mDNSexport mDNSInterfaceID	mDNSPlatformInterfaceIDfromInterfaceIndex( mDNS *const inMDNS, mDNSu32 inIndex )
 {
 	NetworkInterfaceInfoVxWorks *		i;
 	
@@ -630,7 +639,7 @@ mDNSexport mDNSInterfaceID	mDNSPlatformInterfaceIDfromInterfaceIndex( const mDNS
 //	mDNSPlatformInterfaceIndexfromInterfaceID
 //===========================================================================================================================
 
-mDNSexport mDNSu32	mDNSPlatformInterfaceIndexfromInterfaceID( const mDNS *const inMDNS, mDNSInterfaceID inID )
+mDNSexport mDNSu32	mDNSPlatformInterfaceIndexfromInterfaceID( mDNS *const inMDNS, mDNSInterfaceID inID )
 {
 	NetworkInterfaceInfoVxWorks *		i;
 	
@@ -971,13 +980,13 @@ mDNSlocal mStatus	UpdateInterfaceList( mDNS *const inMDNS, mDNSs32 inUTC )
 	
 	// Update our globals and mDNS with the new labels.
 	
-	if( !SameDomainLabel( inMDNS->p->userNiceLabel.c, nicelabel.c ) )
+	if( !SameDomainLabelCS( inMDNS->p->userNiceLabel.c, nicelabel.c ) )
 	{
 		dmsg( kDebugLevelInfo, DEBUG_NAME "Updating nicelabel to \"%#s\"\n", nicelabel.c );
 		inMDNS->p->userNiceLabel	= nicelabel;
 		inMDNS->nicelabel			= nicelabel;
 	}
-	if( !SameDomainLabel( inMDNS->p->userHostLabel.c, hostlabel.c ) )
+	if( !SameDomainLabelCS( inMDNS->p->userHostLabel.c, hostlabel.c ) )
 	{
 		dmsg( kDebugLevelInfo, DEBUG_NAME "Updating hostlabel to \"%#s\"\n", hostlabel.c );
 		inMDNS->p->userHostLabel	= hostlabel;
@@ -1106,7 +1115,7 @@ mDNSlocal int	SetupActiveInterfaces( mDNS *const inMDNS, mDNSs32 inUTC )
 			// If it's is an old one that went away and came back in less than a minute, we're in a flapping scenario.
 			
 			flapping = ( ( inUTC - i->lastSeen ) > 0 ) && ( ( inUTC - i->lastSeen ) < 60 );
-			mDNS_RegisterInterface( inMDNS, n, flapping ? mDNSPlatformOneSecond * 5 : 0 );
+			mDNS_RegisterInterface( inMDNS, n, flapping );
 			if( mDNSAddressIsNonLinkLocalIPv4( &i->ifinfo.ip ) ) ++count;
 			
 			dmsg( kDebugLevelInfo, DEBUG_NAME "%s:   Registered    %8s(%u) InterfaceID %#p %#a%s%s\n", __ROUTINE__, 
@@ -1189,7 +1198,7 @@ mDNSlocal int	ClearInactiveInterfaces( mDNS *const inMDNS, mDNSs32 inUTC, mDNSBo
 				i->ifinfo.ifname, i->scopeID, i->ifinfo.InterfaceID, &i->ifinfo.ip, 
 				i->ifinfo.InterfaceActive ? " (Primary)" : "" );
 			
-			mDNS_DeregisterInterface( inMDNS, &i->ifinfo );
+			mDNS_DeregisterInterface( inMDNS, &i->ifinfo, mDNSfalse );
 			i->ifinfo.InterfaceID = NULL;
 			if( mDNSAddressIsNonLinkLocalIPv4( &i->ifinfo.ip ) ) ++count;
 		}
@@ -1344,7 +1353,7 @@ mDNSlocal mStatus	SetupSocket( mDNS *const inMDNS, const mDNSAddr *inAddr, mDNSB
 			struct ip_mreq		mreqV4;
 			
 			addrV4.s_addr				= inAddr->ip.v4.NotAnInteger;
-			mreqV4.imr_multiaddr.s_addr = AllDNSLinkGroupv4.NotAnInteger;
+			mreqV4.imr_multiaddr.s_addr = AllDNSLinkGroup_v4.ip.v4.NotAnInteger;
 			mreqV4.imr_interface		= addrV4;
 			err = setsockopt( sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char *) &mreqV4, sizeof( mreqV4 ) );
 			check_translated_errno( err == 0, errno_compat(), kOptionErr );
@@ -1397,7 +1406,7 @@ mDNSlocal mStatus	SetupSocket( mDNS *const inMDNS, const mDNSAddr *inAddr, mDNSB
 			
 			ifindex					= inSS->info->scopeID;
 			mreqV6.ipv6mr_interface	= ifindex;
-			mreqV6.ipv6mr_multiaddr	= *( (struct in6_addr * ) &AllDNSLinkGroupv6 );
+			mreqV6.ipv6mr_multiaddr	= *( (struct in6_addr * ) &AllDNSLinkGroup_v6.ip.v6 );
 			err = setsockopt( sock, IPPROTO_IPV6, IPV6_JOIN_GROUP, (char *) &mreqV6, sizeof( mreqV6 ) );
 			check_translated_errno( err == 0, errno_compat(), kOptionErr );
 			

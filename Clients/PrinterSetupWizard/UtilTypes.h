@@ -1,28 +1,28 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 1997-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
     
 $Log: UtilTypes.h,v $
+Revision 1.16  2007/04/20 22:58:10  herscher
+<rdar://problem/4826126> mDNS: Printer Wizard doesn't offer generic HP printers or generic PS support on Vista RC2
+
+Revision 1.15  2006/08/14 23:24:09  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
 Revision 1.14  2005/06/30 18:02:54  shersche
 <rdar://problem/4124524> Workaround for Mac OS X Printer Sharing bug
 
@@ -97,6 +97,7 @@ namespace PrinterSetupWizard
 	typedef std::list<Printer*>	Printers;
 	typedef std::list<Service*>	Services;
 	typedef std::list<Model*>	Models;
+	typedef std::list<CString>	Decorations;
 
 	struct Printer
 	{
@@ -219,6 +220,7 @@ namespace PrinterSetupWizard
 		CString		name;
 		CString		tag;
 		Models		models;
+		Decorations	decorations;
 
 		Model*
 		find( const CString & name );

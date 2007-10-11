@@ -1,28 +1,34 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2003-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
     
 $Log: Service.c,v $
+Revision 1.42  2007/02/14 01:58:19  cheshire
+<rdar://problem/4995831> Don't delete Unix Domain Socket on exit if we didn't create it on startup
+
+Revision 1.41  2007/02/06 19:06:49  cheshire
+<rdar://problem/3956518> Need to go native with launchd
+
+Revision 1.40  2007/01/05 05:46:08  cheshire
+Add mDNS *const m parameter to udsserver_handle_configchange()
+
+Revision 1.39  2006/08/14 23:26:07  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
 Revision 1.38  2005/10/05 20:55:15  herscher
 <rdar://problem/4096464> Don't call SetLLRoute on loopback interface
 
@@ -30,7 +36,7 @@ Revision 1.37  2005/10/05 18:05:28  herscher
 <rdar://problem/4192011> Save Wide-Area preferences in a different spot in the registry so they don't get removed when doing an update install.
 
 Revision 1.36  2005/09/11 22:12:42  herscher
-<rdar://4247793> Remove dependency on WMI.  Ensure that the Windows firewall is turned on before trying to configure it.
+<rdar://problem/4247793> Remove dependency on WMI.  Ensure that the Windows firewall is turned on before trying to configure it.
 
 Revision 1.35  2005/06/30 18:29:49  shersche
 <rdar://problem/4090059> Don't overwrite the localized service description text
@@ -1246,7 +1252,7 @@ static OSStatus	ServiceSpecificInitialize( int argc, LPTSTR argv[] )
 	err = mDNS_Init( &gMDNSRecord, &gPlatformStorage, gRRCache, RR_CACHE_SIZE, mDNS_Init_AdvertiseLocalAddresses, CoreCallback, mDNS_Init_NoInitCallbackContext); 
 	require_noerr( err, exit);
 
-	err = udsserver_init();
+	err = udsserver_init(dnssd_InvalidSocket);
 	require_noerr( err, exit);
 
 	//
@@ -1340,7 +1346,7 @@ static void	ServiceSpecificFinalize( int argc, LPTSTR argv[] )
 	//
 	// give a chance for the udsserver code to clean up
 	//
-	udsserver_exit();
+	udsserver_exit(dnssd_InvalidSocket);
 
 	//
 	// and finally close down the mDNSCore
@@ -1400,7 +1406,7 @@ HostDescriptionChanged(mDNS * const inMDNS)
 {
 	DEBUG_UNUSED( inMDNS );
 
-	udsserver_handle_configchange();
+	udsserver_handle_configchange(inMDNS);
 }
 
 

@@ -176,13 +176,13 @@
 			Name="Support"
 			Filter="">
 			<File
-				RelativePath="..\..\mDNSWindows\CommonServices.h">
+				RelativePath="..\..\mDNSShared\CommonServices.h">
 			</File>
 			<File
-				RelativePath="..\..\mDNSWindows\DebugServices.c">
+				RelativePath="..\..\mDNSShared\DebugServices.c">
 			</File>
 			<File
-				RelativePath="..\..\mDNSWindows\DebugServices.h">
+				RelativePath="..\..\mDNSShared\DebugServices.h">
 			</File>
 			<File
 				RelativePath="..\..\mDNSWindows\isocode.h">

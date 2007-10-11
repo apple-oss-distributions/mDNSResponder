@@ -1,4 +1,5 @@
-/*
+/* -*- Mode: Java; tab-width: 4 -*-
+ *
  * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
  *
  * Disclaimer: IMPORTANT:  This Apple software is supplied to you by Apple Computer, Inc.

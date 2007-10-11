@@ -310,10 +310,10 @@
 				RelativePath="res\controlpanel.ico">
 			</File>
 			<File
-				RelativePath="ControlPanel.rc">
+				RelativePath="ControlPanelDll.rc">
 			</File>
 			<File
-				RelativePath="res\ControlPanel.rc2">
+				RelativePath="res\ControlPanelDll.rc2">
 			</File>
 			<File
 				RelativePath="res\failure.ico">

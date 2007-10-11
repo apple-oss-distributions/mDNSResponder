@@ -1,24 +1,18 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
 	Contains:	mDNS platform plugin for VxWorks.
 
@@ -27,6 +21,18 @@
 	Change History (most recent first):
 
 $Log: mDNSVxWorksIPv4Only.c,v $
+Revision 1.31  2007/03/22 18:31:49  cheshire
+Put dst parameter first in mDNSPlatformStrCopy/mDNSPlatformMemCopy, like conventional Posix strcpy/memcpy
+
+Revision 1.30  2006/12/19 22:43:56  cheshire
+Fix compiler warnings
+
+Revision 1.29  2006/08/14 23:25:18  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
+Revision 1.28  2006/03/19 02:00:12  cheshire
+<rdar://problem/4073825> Improve logic for delaying packets after repeated interface transitions
+
 Revision 1.27  2004/12/17 23:37:49  cheshire
 <rdar://problem/3485365> Guard against repeating wireless dissociation/re-association
 (and other repetitive configuration changes)
@@ -65,7 +71,7 @@ Convert ServiceRegDomain to domainname instead of C string
 Replace mDNS_GenerateFQDN/mDNS_GenerateGlobalFQDN with mDNS_SetFQDNs
 
 Revision 1.17  2004/07/29 19:26:03  ksekar
-Plaform-level changes for NATPMP support
+Plaform-level changes for NAT-PMP support
 
 Revision 1.16  2004/04/22 05:11:28  bradley
 Added mDNSPlatformUTC for TSIG signed dynamic updates.
@@ -587,7 +593,7 @@ mDNSexport void mDNSPlatformTCPCloseConnection(int sd)
 	(void)sd;			// Unused
 	}
 
-mDNSexport int mDNSPlatformReadTCP(int sd, void *buf, int buflen)
+mDNSexport long mDNSPlatformReadTCP(int sd, void *buf, unsigned long buflen)
 	{
 	(void)sd;			// Unused
 	(void)buf;			// Unused
@@ -595,7 +601,7 @@ mDNSexport int mDNSPlatformReadTCP(int sd, void *buf, int buflen)
 	return(0);
 	}
 
-mDNSexport int mDNSPlatformWriteTCP(int sd, const char *msg, int len)
+mDNSexport long mDNSPlatformWriteTCP(int sd, const char *msg, unsigned long len)
 	{
 	(void)sd;			// Unused
 	(void)msg;			// Unused
@@ -669,7 +675,7 @@ mDNSu32  mDNSPlatformStrLen( const void *inSrc )
 //	mDNSPlatformStrCopy
 //===========================================================================================================================
 
-void	mDNSPlatformStrCopy( const void *inSrc, void *inDst )
+void	mDNSPlatformStrCopy( void *inDst, const void *inSrc )
 {
 	check( inSrc );
 	check( inDst );
@@ -681,7 +687,7 @@ void	mDNSPlatformStrCopy( const void *inSrc, void *inDst )
 //	mDNSPlatformMemCopy
 //===========================================================================================================================
 
-void	mDNSPlatformMemCopy( const void *inSrc, void *inDst, mDNSu32 inSize )
+void	mDNSPlatformMemCopy( void *inDst, const void *inSrc, mDNSu32 inSize )
 {
 	check( inSrc );
 	check( inDst );
@@ -693,7 +699,7 @@ void	mDNSPlatformMemCopy( const void *inSrc, void *inDst, mDNSu32 inSize )
 //	mDNSPlatformMemSame
 //===========================================================================================================================
 
-mDNSBool	mDNSPlatformMemSame( const void *inSrc, const void *inDst, mDNSu32 inSize )
+mDNSBool	mDNSPlatformMemSame( const void *inDst, const void *inSrc, mDNSu32 inSize )
 {
 	check( inSrc );
 	check( inDst );
@@ -1104,7 +1110,7 @@ mDNSlocal mStatus	SetupInterface( mDNS * const inMDNS, const struct ifaddrs *inA
 	item->hostSet.Advertise               = inMDNS->AdvertiseLocalAddresses;
 	item->hostSet.McastTxRx               = mDNStrue;
 
-	err = mDNS_RegisterInterface( inMDNS, &item->hostSet, 0 );
+	err = mDNS_RegisterInterface( inMDNS, &item->hostSet, mDNSfalse );
 	require_noerr( err, exit );
 	item->hostRegistered = mDNStrue;
 	
@@ -1146,7 +1152,7 @@ mDNSlocal mStatus	TearDownInterface( mDNS * const inMDNS, MDNSInterfaceItem *inI
 	if( inItem->hostRegistered )
 	{
 		inItem->hostRegistered = mDNSfalse;
-		mDNS_DeregisterInterface( inMDNS, &inItem->hostSet );
+		mDNS_DeregisterInterface( inMDNS, &inItem->hostSet, mDNSfalse );
 	}
 	
 	// Close the multicast socket.
@@ -1224,7 +1230,7 @@ mDNSlocal mStatus
 		// Join the all-DNS multicast group so we receive Multicast DNS packets.
 		
 		ip.NotAnInteger 			= ipv4->sin_addr.s_addr;
-		mreq.imr_multiaddr.s_addr 	= AllDNSLinkGroupv4.NotAnInteger;
+		mreq.imr_multiaddr.s_addr 	= AllDNSLinkGroup_v4.ip.v4.NotAnInteger;
 		mreq.imr_interface.s_addr 	= ip.NotAnInteger;
 		err = setsockopt( socketRef, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char *) &mreq, sizeof( mreq ) );
 		check_errno( err, errno );
@@ -1234,7 +1240,7 @@ mDNSlocal mStatus
 		memset( &addr, 0, sizeof( addr ) );
 		addr.sin_family 		= AF_INET;
 		addr.sin_port 			= inPort.NotAnInteger;
-		addr.sin_addr.s_addr 	= AllDNSLinkGroupv4.NotAnInteger;
+		addr.sin_addr.s_addr 	= AllDNSLinkGroup_v4.ip.v4.NotAnInteger;
 		err = bind( socketRef, (struct sockaddr *) &addr, sizeof( addr ) );
 		check_errno( err, errno );
 		
@@ -1753,7 +1759,7 @@ mDNSlocal void	TaskProcessPacket( mDNS *inMDNS, MDNSInterfaceItem *inItem, MDNSS
 		srcAddr.ip.v4.NotAnInteger 	= addr.sin_addr.s_addr;
 		srcPort.NotAnInteger		= addr.sin_port;
 		dstAddr.type				= mDNSAddrType_IPv4;
-		dstAddr.ip.v4				= AllDNSLinkGroupv4;
+		dstAddr.ip.v4				= AllDNSLinkGroup_v4.ip.v4;
 		dstPort						= MulticastDNSPort;
 		
 		dlog( kDebugLevelChatty, DEBUG_NAME "packet received\n" );
@@ -1797,7 +1803,7 @@ mDNSlocal void	GenerateUniqueHostName( char *outName, long *ioSeed )
 	
 	// $$$ Non-Apple Platforms: Fill in appropriate name for device.
 	
-	mDNSPlatformStrCopy( kMDNSDefaultName, outName );
+	mDNSPlatformStrCopy( outName, kMDNSDefaultName );
 }
 
 //===========================================================================================================================
@@ -1813,7 +1819,7 @@ mDNSlocal void	GenerateUniqueDNSName( char *outName, long *ioSeed )
 	
 	// $$$ Non-Apple Platforms: Fill in appropriate DNS name for device.
 	
-	mDNSPlatformStrCopy( kMDNSDefaultName, outName );
+	mDNSPlatformStrCopy( outName, kMDNSDefaultName );
 }
 #endif
 

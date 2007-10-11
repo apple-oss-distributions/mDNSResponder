@@ -43,7 +43,23 @@
     ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
     Change History (most recent first):
+
 $Log: ddnswriteconfig.m,v $
+Revision 1.9  2007/09/18 19:09:02  cheshire
+<rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
+
+Revision 1.8  2007/07/20 23:41:03  mkrochma
+<rdar://problem/5348663> null deref in ddnswriteconfig
+
+Revision 1.7  2007/03/07 00:49:00  cheshire
+<rdar://problem/4618207> Security: ddnswriteconfig does not verify that authorization blob is of correct size
+
+Revision 1.6  2007/02/09 00:39:06  cheshire
+Fix compile warnings
+
+Revision 1.5  2006/08/14 23:15:47  cheshire
+Tidy up Change History comment
+
 Revision 1.4  2005/06/04 04:47:47  cheshire
 <rdar://problem/4138070> ddnswriteconfig (Bonjour PreferencePane) vulnerability
 Remove self-installing capability of ddnswriteconfig
@@ -84,7 +100,7 @@ Add Preference Pane to facilitate testing of DDNS & wide-area features
 
 static AuthorizationRef	gAuthRef = 0;
 
-OSStatus
+static OSStatus
 WriteArrayToDynDNS(CFStringRef arrayKey, CFArrayRef domainArray)
 {
     SCPreferencesRef	    store;
@@ -141,8 +157,8 @@ static int
 readTaggedBlock(int fd, u_int32_t *pTag, u_int32_t *pLen, char **ppBuff)
 // Read tag, block len and block data from stream and return. Dealloc *ppBuff via free().
 {
-	ssize_t		num;
-	u_int32_t	tag, len;
+	ssize_t		num, len;
+	u_int32_t	tag;
 	int			result = 0;
 
 	num = read(fd, &tag, sizeof tag);
@@ -170,7 +186,7 @@ GetTagFailed:
 
 
 
-int
+static int
 SetAuthInfo( int fd)
 {
 	int				result = 0;
@@ -179,6 +195,8 @@ SetAuthInfo( int fd)
 
 	result = readTaggedBlock( fd, &tag, &len, &p);
 	require( result == 0, ReadParamsFailed);
+	require( len == sizeof(AuthorizationExternalForm), ReadParamsFailed);
+	require( len == kAuthorizationExternalFormLength, ReadParamsFailed);
 
 	if (gAuthRef != 0) {
 		(void) AuthorizationFree(gAuthRef, kAuthorizationFlagDestroyRights);
@@ -193,7 +211,7 @@ ReadParamsFailed:
 }
 
 
-int
+static int
 HandleWriteDomain(int fd, int domainType)
 {
 	CFArrayRef      domainArray;
@@ -225,7 +243,7 @@ ReadParamsFailed:
 }
 
 
-int
+static int
 HandleWriteHostname(int fd)
 {
 	CFArrayRef      domainArray;
@@ -252,7 +270,7 @@ ReadParamsFailed:
 }
 
 
-SecAccessRef
+static SecAccessRef
 MyMakeUidAccess(uid_t uid)
 {
 	// make the "uid/gid" ACL subject
@@ -263,10 +281,10 @@ MyMakeUidAccess(uid_t uid)
 		uid,				// uid to match
 		0					// gid (not matched here)
 	};
-	CSSM_LIST_ELEMENT subject2 = { NULL, 0 };
+	CSSM_LIST_ELEMENT subject2 = { NULL, 0, 0, {{0,0,0}} };
 	subject2.Element.Word.Data = (UInt8 *)&selector;
 	subject2.Element.Word.Length = sizeof(selector);
-	CSSM_LIST_ELEMENT subject1 = { &subject2, CSSM_ACL_SUBJECT_TYPE_PROCESS, CSSM_LIST_ELEMENT_WORDID };
+	CSSM_LIST_ELEMENT subject1 = { &subject2, CSSM_ACL_SUBJECT_TYPE_PROCESS, CSSM_LIST_ELEMENT_WORDID, {{0,0,0}} };
 
 
 	// rights granted (replace with individual list if desired)
@@ -281,27 +299,27 @@ MyMakeUidAccess(uid_t uid)
 		false
 	};
 	// ACL entries (any number, just one here)
-	CSSM_ACL_ENTRY_INFO acls[] = {
+	CSSM_ACL_ENTRY_INFO acls =
 		{
-			// prototype
+		// CSSM_ACL_ENTRY_PROTOTYPE
 			{
-				// TypedSubject
-				{ CSSM_LIST_TYPE_UNKNOWN, &subject1, &subject2 },
-				false,	// Delegate
-				// rights for this entry
-				{ sizeof(rights) / sizeof(rights[0]), rights },
-				// rest is defaulted
-			}
-		}
-	};
+			{ CSSM_LIST_TYPE_UNKNOWN, &subject1, &subject2 }, // TypedSubject
+			false,	// Delegate
+			{ sizeof(rights) / sizeof(rights[0]), rights }, // Authorization rights for this entry
+			{ { 0, 0 }, { 0, 0 } }, // CSSM_ACL_VALIDITY_PERIOD
+			"" // CSSM_STRING EntryTag
+			},
+		// CSSM_ACL_HANDLE
+		0
+		};
 
 	SecAccessRef access = NULL;
-	(void) SecAccessCreateFromOwnerAndACL(&owner, sizeof(acls) / sizeof(acls[0]), acls, &access);
+	(void) SecAccessCreateFromOwnerAndACL(&owner, 1, &acls, &access);
 	return access;
 }
 
 
-OSStatus
+static OSStatus
 MyAddDynamicDNSPassword(SecKeychainRef keychain, SecAccessRef access, UInt32 serviceNameLength, const char *serviceName,
     UInt32 accountNameLength, const char *accountName, UInt32 passwordLength, const void *passwordData)
 {
@@ -327,7 +345,7 @@ MyAddDynamicDNSPassword(SecKeychainRef keychain, SecAccessRef access, UInt32 ser
 }
 
 
-int
+static int
 SetKeychainEntry(int fd)
 // Create a new entry in system keychain, or replace existing
 {
@@ -407,7 +425,7 @@ int	main( int argc, char **argv)
 	if ( argc == 3 && 0 == strcmp( argv[2], "V"))
 		return PRIV_OP_TOOL_VERS;
 
-	if ( argc >= 1)
+	if ( argc > 1)
 	{
 		commFD = strtol( argv[1], NULL, 0);
 		lseek( commFD, 0, SEEK_SET);
@@ -438,3 +456,17 @@ int	main( int argc, char **argv)
 	[pool release];
 	return result;
 }
+
+// Note: The C preprocessor stringify operator ('#') makes a string from its argument, without macro expansion
+// e.g. If "version" is #define'd to be "4", then STRINGIFY_AWE(version) will return the string "version", not "4"
+// To expand "version" to its value before making the string, use STRINGIFY(version) instead
+#define STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s) #s
+#define STRINGIFY(s) STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s)
+
+// NOT static -- otherwise the compiler may optimize it out
+// The "@(#) " pattern is a special prefix the "what" command looks for
+const char VersionString_SCCS[] = "@(#) ddnswriteconfig " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
+
+// If the process crashes, then this string will be magically included in the automatically-generated crash log
+const char *__crashreporter_info__ = VersionString_SCCS + 5;
+asm(".desc ___crashreporter_info__, 0x10");

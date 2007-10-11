@@ -1,28 +1,34 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
 
 $Log: WinVersRes.h,v $
+Revision 1.55  2007/04/27 20:34:31  herscher
+<rdar://problem/5159673> mDNS: Company name needs to be changed to Apple Inc.
+
+Revision 1.54  2006/08/14 23:25:21  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
+Revision 1.53  2006/02/28 20:07:53  herscher
+Bump to 1.0.3.1
+
+Revision 1.52  2006/01/09 20:45:29  cheshire
+Update copyright date to 2006
+
 Revision 1.51  2005/11/28 19:49:56  herscher
 Bump to 1.0.2.9
 
@@ -183,13 +189,16 @@ First checked in.
 
 #define MASTER_PROD_NAME	"Bonjour"
 
+// Define the company name for mDNSResponder on Windows
+#define MASTER_COMPANY_NAME   "Apple Inc."
+
 // Define the product version for mDNSResponder on Windows
-#define MASTER_PROD_VERS		1,0,2,9
-#define MASTER_PROD_VERS_STR	"1,0,2,9"
-#define MASTER_PROD_VERS_STR2	"1.0.2.9"
-#define MASTER_PROD_VERS_STR3 "Explorer Plugin 1.0.2.9"
+#define MASTER_PROD_VERS		1,0,3,1
+#define MASTER_PROD_VERS_STR	"1,0,3,1"
+#define MASTER_PROD_VERS_STR2	"1.0.3.1"
+#define MASTER_PROD_VERS_STR3 "Explorer Plugin 1.0.3.1"
 
 // Define the legal copyright
-#define MASTER_LEGAL_COPYRIGHT "Copyright (C) 2003-2005 Apple Computer, Inc."
+#define MASTER_LEGAL_COPYRIGHT "Copyright (C) 2003-2007 Apple Inc."
 
 #endif // WINRESVERS_H

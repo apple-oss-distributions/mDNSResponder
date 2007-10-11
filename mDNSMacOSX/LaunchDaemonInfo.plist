@@ -6,12 +6,33 @@
 	<string>com.apple.mDNSResponder</string>
 	<key>OnDemand</key>
 	<false/>
+        <key>UserName</key>
+        <string>_mdnsresponder</string>
+        <key>GroupName</key>
+        <string>_mdnsresponder</string>
 	<key>ProgramArguments</key>
 	<array>
-			<string>/usr/sbin/mDNSResponder</string>
-			<string>-launchdaemon</string>
+		<string>/usr/sbin/mDNSResponder</string>
+		<string>-launchd</string>
 	</array>
+	<key>MachServices</key>
+	<dict>
+		<key>com.apple.mDNSResponder</key>
+		<true/>
+	</dict>
+	<key>Sockets</key>
+	<dict>
+		<key>Listeners</key>
+		<dict>
+			<key>SockFamily</key>
+			<string>Unix</string>
+			<key>SockPathName</key>
+			<string>/var/run/mDNSResponder</string>
+			<key>SockPathMode</key>
+			<integer>438</integer>
+		</dict>
+	</dict>
 	<key>ServiceIPC</key>
-	<false/>
+	<true/>
 </dict>
 </plist>

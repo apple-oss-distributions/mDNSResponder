@@ -1,28 +1,31 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
     Change History (most recent first):
     
 $Log: mDNSWin32.h,v $
+Revision 1.26  2006/08/14 23:25:21  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
+Revision 1.25  2006/07/06 00:05:44  cheshire
+"dDNS.h" renamed to "uDNS.h"
+
+Revision 1.24  2006/02/26 19:31:04  herscher
+<rdar://problem/4455038> Bonjour For Windows takes 90 seconds to start. This was caused by a bad interaction between the VirtualPC check, and the removal of the WMI dependency.  The problem was fixed by: 1) checking to see if WMI is running before trying to talk to it.  2) Retrying the VirtualPC check every 10 seconds upon failure, stopping after 10 unsuccessful tries.
+
 Revision 1.23  2005/10/05 20:55:14  herscher
 <rdar://problem/4096464> Don't call SetLLRoute on loopback interface
 
@@ -122,7 +125,7 @@ Multicast DNS platform plugin for Win32
 #endif
 
 #include	"mDNSEmbeddedAPI.h"
-#include	"dDNS.h"
+#include	"uDNS.h"
 
 #ifdef	__cplusplus
 	extern "C" {
@@ -198,10 +201,14 @@ struct	mDNS_PlatformSupport_struct
 	HANDLE						ddnsChangedEvent;	// DynDNS config changed
 	HANDLE						wakeupEvent;
 	HANDLE						initEvent;
+	HANDLE						vpcCheckEvent;		// Timer handle to check if we're running in Virtual PC
+	int							vpcCheckCount;
 	HKEY						descKey;
 	HKEY						tcpipKey;
 	HKEY						ddnsKey;
 	mStatus						initStatus;
+	mDNSBool					inVirtualPC;
+	int							timersCount;
 	mDNSBool					registeredLoopback4;
 	SocketRef					interfaceListChangedSocket;
 	int							interfaceCount;

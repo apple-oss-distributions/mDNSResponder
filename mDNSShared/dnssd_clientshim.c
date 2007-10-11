@@ -1,24 +1,18 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
  * 
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
  * This file defines a simple shim layer between a client calling the "/usr/include/dns_sd.h" APIs
  * and an implementation of mDNSCore ("mDNSEmbeddedAPI.h" APIs) in the same address space.
@@ -31,6 +25,28 @@
 	Change History (most recent first):
 
 $Log: dnssd_clientshim.c,v $
+Revision 1.15  2007/07/27 19:30:41  cheshire
+Changed mDNSQuestionCallback parameter from mDNSBool to QC_result,
+to properly reflect tri-state nature of the possible responses
+
+Revision 1.14  2007/07/17 19:15:26  cheshire
+<rdar://problem/5297410> Crash in DNSServiceRegister() in dnssd_clientshim.c
+
+Revision 1.13  2007/01/04 20:57:49  cheshire
+Rename ReturnCNAME to ReturnIntermed (for ReturnIntermediates)
+
+Revision 1.12  2006/12/19 22:43:55  cheshire
+Fix compiler warnings
+
+Revision 1.11  2006/10/27 01:30:23  cheshire
+Need explicitly to set ReturnIntermed = mDNSfalse
+
+Revision 1.10  2006/08/14 23:24:56  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
+Revision 1.9  2006/07/24 23:45:55  cheshire
+<rdar://problem/4605276> DNSServiceReconfirmRecord() should return error code
+
 Revision 1.8  2004/12/16 20:47:34  cheshire
 <rdar://problem/3324626> Cache memory management improvements
 
@@ -96,6 +112,7 @@ typedef struct
 	mDNSBool                autoname;		// Set if this name is tied to the Computer Name
 	mDNSBool                autorename;		// Set if we just got a name conflict and now need to automatically pick a new name
 	domainlabel             name;
+	domainname              host;
 	ServiceRecordSet        s;
 	} mDNS_DirectOP_Register;
 
@@ -272,6 +289,7 @@ DNSServiceErrorType DNSServiceRegister
 	(void)interfaceIndex;	// Unused
 
 	// Check parameters
+	if (!name) name = "";
 	if (!name[0]) n = mDNSStorage.nicelabel;
 	else if (!MakeDomainLabelFromLiteralString(&n, name))                              { errormsg = "Bad Instance Name"; goto badparam; }
 	if (!regtype || !*regtype || !MakeDomainNameFromDNSNameString(&t, regtype))        { errormsg = "Bad Service Type";  goto badparam; }
@@ -293,11 +311,12 @@ DNSServiceErrorType DNSServiceRegister
 	x->autoname = (!name[0]);
 	x->autorename = mDNSfalse;
 	x->name = n;
+	x->host = h;
 
 	// Do the operation
 	err = mDNS_RegisterService(&mDNSStorage, &x->s,
 		&x->name, &t, &d,		// Name, type, domain
-		&h, port,				// Host and port
+		&x->host, port,			// Host and port
 		txtRecord, txtLen,		// TXT data, length
 		SubTypes, NumSubTypes,	// Subtypes
 		mDNSInterface_Any,		// Interface ID
@@ -388,7 +407,7 @@ static void DNSServiceBrowseDispose(mDNS_DirectOP *op)
 	mDNSPlatformMemFree(x);
 	}
 
-mDNSlocal void FoundInstance(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, mDNSBool AddRecord)
+mDNSlocal void FoundInstance(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 	{
 	DNSServiceFlags flags = AddRecord ? kDNSServiceFlagsAdd : (DNSServiceFlags)0;
 	domainlabel name;
@@ -474,7 +493,7 @@ static void DNSServiceResolveDispose(mDNS_DirectOP *op)
 	mDNSPlatformMemFree(x);
 	}
 
-mDNSlocal void FoundServiceInfo(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, mDNSBool AddRecord)
+mDNSlocal void FoundServiceInfo(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 	{
 	mDNS_DirectOP_Resolve *x = (mDNS_DirectOP_Resolve*)question->QuestionContext;
 	(void)m;	// Unused
@@ -493,7 +512,7 @@ mDNSlocal void FoundServiceInfo(mDNS *const m, DNSQuestion *question, const Reso
 		    ConvertDomainNameToCString(answer->name, fullname);
 		    ConvertDomainNameToCString(&x->SRV->rdata->u.srv.target, targethost);
 			x->callback((DNSServiceRef)x, 0, 0, kDNSServiceErr_NoError, fullname, targethost,
-				x->SRV->rdata->u.srv.port.NotAnInteger, x->TXT->rdlength, (char*)x->TXT->rdata->u.txt.c, x->context);
+				x->SRV->rdata->u.srv.port.NotAnInteger, x->TXT->rdlength, (unsigned char*)x->TXT->rdata->u.txt.c, x->context);
 			}
 		}
 	}
@@ -545,6 +564,7 @@ DNSServiceErrorType DNSServiceResolve
 	x->qSRV.LongLived           = mDNSfalse;
 	x->qSRV.ExpectUnique        = mDNStrue;
 	x->qSRV.ForceMCast          = mDNSfalse;
+	x->qSRV.ReturnIntermed      = mDNSfalse;
 	x->qSRV.QuestionCallback    = FoundServiceInfo;
 	x->qSRV.QuestionContext     = x;
 
@@ -557,6 +577,7 @@ DNSServiceErrorType DNSServiceResolve
 	x->qTXT.LongLived           = mDNSfalse;
 	x->qTXT.ExpectUnique        = mDNStrue;
 	x->qTXT.ForceMCast          = mDNSfalse;
+	x->qTXT.ReturnIntermed      = mDNSfalse;
 	x->qTXT.QuestionCallback    = FoundServiceInfo;
 	x->qTXT.QuestionContext     = x;
 
@@ -632,7 +653,7 @@ static void DNSServiceQueryRecordDispose(mDNS_DirectOP *op)
 	mDNSPlatformMemFree(x);
 	}
 
-mDNSlocal void DNSServiceQueryRecordResponse(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, mDNSBool AddRecord)
+mDNSlocal void DNSServiceQueryRecordResponse(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 	{
 	mDNS_DirectOP_QueryRecord *x = (mDNS_DirectOP_QueryRecord*)question->QuestionContext;
 	char fullname[MAX_ESCAPED_DOMAIN_NAME];
@@ -679,6 +700,7 @@ DNSServiceErrorType DNSServiceQueryRecord
 	x->q.LongLived           = (flags & kDNSServiceFlagsLongLivedQuery) != 0;
 	x->q.ExpectUnique        = mDNSfalse;
 	x->q.ForceMCast          = (flags & kDNSServiceFlagsForceMulticast) != 0;
+	x->q.ReturnIntermed      = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
 	x->q.QuestionCallback    = DNSServiceQueryRecordResponse;
 	x->q.QuestionContext     = x;
 
@@ -704,7 +726,7 @@ fail:
 // is run against this Extension, it will get a reasonable error code instead of just
 // failing to launch (Strong Link) or calling an unresolved symbol and crashing (Weak Link)
 #if !MDNS_BUILDINGSTUBLIBRARY
-void DNSServiceReconfirmRecord
+DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
 	(
 	DNSServiceFlags                    flags,
 	uint32_t                           interfaceIndex,
@@ -722,5 +744,6 @@ void DNSServiceReconfirmRecord
 	(void)rrclass;			// Unused
 	(void)rdlen;			// Unused
 	(void)rdata;			// Unused
+	return(kDNSServiceErr_Unsupported);
 	}
 #endif

@@ -1,24 +1,18 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
+ *
  * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
 
  	File:		mDNSDebug.c
 
@@ -29,6 +23,24 @@
     Change History (most recent first):
 
 $Log: mDNSDebug.c,v $
+Revision 1.12  2007/10/01 19:06:19  cheshire
+Defined symbolic constant MDNS_LOG_INITIAL_LEVEL to set the logging level we start out at
+
+Revision 1.11  2007/07/27 20:19:56  cheshire
+For now, comment out unused log levels MDNS_LOG_ERROR, MDNS_LOG_WARN, MDNS_LOG_INFO, MDNS_LOG_DEBUG
+
+Revision 1.10  2007/06/15 21:54:51  cheshire
+<rdar://problem/4883206> Add packet logging to help debugging private browsing over TLS
+
+Revision 1.9  2007/04/05 19:52:32  cheshire
+Display correct ident in syslog messages (i.e. in dnsextd, ProgramName is not "mDNSResponder")
+
+Revision 1.8  2007/01/20 01:43:27  cheshire
+<rdar://problem/4058383> Should not write log messages to /dev/console
+
+Revision 1.7  2006/08/14 23:24:56  cheshire
+Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
+
 Revision 1.6  2005/01/27 22:57:56  cheshire
 Fix compile errors on gcc4
 
@@ -69,6 +81,8 @@ Changes necessary to support mDNSResponder on Linux.
 #endif
 
 #include "mDNSEmbeddedAPI.h"
+
+mDNSexport LogLevel_t mDNS_LogLevel = MDNS_LOG_INITIAL_LEVEL;
 
 #if MDNS_DEBUGMSGS
 mDNSexport int mDNS_DebugMode = mDNStrue;
@@ -113,7 +127,7 @@ mDNSlocal void WriteLogMsg(const char *ident, const char *buffer, int logoptflag
 		}
 	else				// else, in production mode, we write to syslog
 		{
-		openlog(ident, LOG_CONS | LOG_PERROR | logoptflags, LOG_DAEMON);
+		openlog(ident, LOG_CONS | logoptflags, LOG_DAEMON);
 		syslog(LOG_ERR, "%s", buffer);
 		closelog();
 		}
@@ -127,7 +141,7 @@ mDNSexport void LogMsg(const char *format, ...)
 	va_start(ptr,format);
 	buffer[mDNS_vsnprintf((char *)buffer, sizeof(buffer), format, ptr)] = 0;
 	va_end(ptr);
-	WriteLogMsg("mDNSResponder", buffer, 0);
+	WriteLogMsg(ProgramName, buffer, 0);
 	}
 
 // Log message with specified ident string at the start
@@ -150,4 +164,25 @@ mDNSexport void LogMsgNoIdent(const char *format, ...)
 	buffer[mDNS_vsnprintf((char *)buffer, sizeof(buffer), format, ptr)] = 0;
 	va_end(ptr);
 	WriteLogMsg("", buffer, 0);
+	}
+
+mDNSlocal const char *CStringForLogLevel(LogLevel_t level)
+	{
+	switch (level) 
+		{
+		case MDNS_LOG_NONE:          return "MDNS_LOG_NONE";
+//		case MDNS_LOG_ERROR:         return "MDNS_LOG_ERROR";
+//		case MDNS_LOG_WARN:          return "MDNS_LOG_WARN";
+//		case MDNS_LOG_INFO:          return "MDNS_LOG_INFO";
+//		case MDNS_LOG_DEBUG:         return "MDNS_LOG_DEBUG";
+		case MDNS_LOG_VERBOSE_DEBUG: return "MDNS_LOG_VERBOSE_DEBUG";
+		default:                     return "MDNS_LOG_UNKNOWN"; 
+		}
+	}
+
+mDNSexport void SigLogLevel(void)
+	{
+	if (mDNS_LogLevel < MDNS_LOG_VERBOSE_DEBUG) mDNS_LogLevel++;
+	else mDNS_LogLevel = MDNS_LOG_NONE;
+	LogMsg("Log Level Changed to %s", CStringForLogLevel(mDNS_LogLevel));
 	}

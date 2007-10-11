@@ -69,10 +69,16 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "JavaSamples", "Clients\Java
 		{9CE2568A-3170-41C6-9F20-A0188A9EC114} = {9CE2568A-3170-41C6-9F20-A0188A9EC114}
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ControlPanel (Vista)", "mDNSWindows\ControlPanel\ControlPanelExe.vcproj", "{0DF09484-B4C2-4AB4-9FC0-7B091ADEAFEB}"
+	ProjectSection(ProjectDependencies) = postProject
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfiguration) = preSolution
 		Debug = Debug
 		Release = Release
+	EndGlobalSection
+	GlobalSection(ProjectDependencies) = postSolution
 	EndGlobalSection
 	GlobalSection(ProjectConfiguration) = postSolution
 		{AB581101-18F0-46F6-B56A-83A6B1EA657E}.Debug.ActiveCfg = Debug|Win32
@@ -135,6 +141,10 @@ Global
 		{A987A0C1-344F-475C-869C-F082EB11EEBA}.Debug.Build.0 = Debug|Win32
 		{A987A0C1-344F-475C-869C-F082EB11EEBA}.Release.ActiveCfg = Release|Win32
 		{A987A0C1-344F-475C-869C-F082EB11EEBA}.Release.Build.0 = Release|Win32
+		{0DF09484-B4C2-4AB4-9FC0-7B091ADEAFEB}.Debug.ActiveCfg = Debug|Win32
+		{0DF09484-B4C2-4AB4-9FC0-7B091ADEAFEB}.Debug.Build.0 = Debug|Win32
+		{0DF09484-B4C2-4AB4-9FC0-7B091ADEAFEB}.Release.ActiveCfg = Release|Win32
+		{0DF09484-B4C2-4AB4-9FC0-7B091ADEAFEB}.Release.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 	EndGlobalSection

@@ -120,7 +120,7 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "Apple Computer, Inc."
+            VALUE "CompanyName", MASTER_COMPANY_NAME
             VALUE "FileDescription", "Bonjour Resource Module"
             VALUE "FileVersion", MASTER_PROD_VERS_STR
             VALUE "InternalName", "PrinterWizardLocalized.dll"
