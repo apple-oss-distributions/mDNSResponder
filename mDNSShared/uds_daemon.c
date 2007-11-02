@@ -17,6 +17,46 @@
 	Change History (most recent first):
 
 $Log: uds_daemon.c,v $
+Revision 1.379  2007/11/01 19:32:14  cheshire
+Added "DEBUG_64BIT_SCM_RIGHTS" debugging code
+
+Revision 1.378  2007/10/31 19:21:40  cheshire
+Don't show Expire time for records and services that aren't currently registered
+
+Revision 1.377  2007/10/30 23:48:20  cheshire
+Improved SIGINFO listing of question state
+
+Revision 1.376  2007/10/30 20:43:54  cheshire
+Fixed compiler warning when LogAllOperations is turned off
+
+Revision 1.375  2007/10/26 22:51:38  cheshire
+Improved SIGINFO output to show timers for AuthRecords and ServiceRegistrations
+
+Revision 1.374  2007/10/25 22:45:02  cheshire
+Tidied up code for DNSServiceRegister callback status messages
+
+Revision 1.373  2007/10/25 21:28:43  cheshire
+Add ServiceRegistrations to SIGINFO output
+
+Revision 1.372  2007/10/25 21:21:45  cheshire
+<rdar://problem/5496734> BTMM: Need to retry registrations after failures
+Don't unlink_and_free_service_instance at the first error
+
+Revision 1.371  2007/10/18 23:34:40  cheshire
+<rdar://problem/5532821> Need "considerable burden on the network" warning in uds_daemon.c
+
+Revision 1.370  2007/10/17 18:44:23  cheshire
+<rdar://problem/5539930> Goodbye packets not being sent for services on shutdown
+
+Revision 1.369  2007/10/16 17:18:27  cheshire
+Fixed Posix compile errors
+
+Revision 1.368  2007/10/16 16:58:58  cheshire
+Improved debugging error messages in read_msg()
+
+Revision 1.367  2007/10/15 22:55:14  cheshire
+Make read_msg return "void" (since request_callback just ignores the redundant return value anyway)
+
 Revision 1.366  2007/10/10 00:48:54  cheshire
 <rdar://problem/5526379> Daemon spins in an infinite loop when it doesn't get the control message it's expecting
 
@@ -778,6 +818,7 @@ struct request_state
 			DNSQuestion qsrv;
 			const ResourceRecord *txt;
 			const ResourceRecord *srv;
+			mDNSs32 ReportTime;
 			} resolve;
 		 ;
 		} u;
@@ -1168,6 +1209,12 @@ mDNSlocal void regservice_callback(mDNS *const m, ServiceRecordSet *const srs, m
 	mDNSBool SuppressError = mDNSfalse;
 	service_instance *instance = srs->ServiceContext;
 	reply_state         *rep;
+#if LogAllOperations || MDNS_DEBUGMSGS
+	char *fmt = (result == mStatus_NoError)      ? "%3d: DNSServiceRegister(%##s, %u) REGISTERED"    :
+				(result == mStatus_MemFree)      ? "%3d: DNSServiceRegister(%##s, %u) DEREGISTERED"  :
+				(result == mStatus_NameConflict) ? "%3d: DNSServiceRegister(%##s, %u) NAME CONFLICT" :
+				                                   "%3d: DNSServiceRegister(%##s, %u) %s %d";
+#endif
 	(void)m; // Unused
 	if (!srs)      { LogMsg("regservice_callback: srs is NULL %d",                 result); return; }
 	if (!instance) { LogMsg("regservice_callback: srs->ServiceContext is NULL %d", result); return; }
@@ -1178,14 +1225,7 @@ mDNSlocal void regservice_callback(mDNS *const m, ServiceRecordSet *const srs, m
 		!instance->default_local)
 		SuppressError = mDNStrue;
 
-	if (result == mStatus_NoError)
-		LogOperation("%3d: DNSServiceRegister(%##s, %u) REGISTERED",    instance->sd, srs->RR_SRV.resrec.name->c, mDNSVal16(srs->RR_SRV.resrec.rdata->u.srv.port));
-	else if (result == mStatus_MemFree)
-		LogOperation("%3d: DNSServiceRegister(%##s, %u) DEREGISTERED",  instance->sd, srs->RR_SRV.resrec.name->c, mDNSVal16(srs->RR_SRV.resrec.rdata->u.srv.port));
-	else if (result == mStatus_NameConflict)
-		LogOperation("%3d: DNSServiceRegister(%##s, %u) NAME CONFLICT", instance->sd, srs->RR_SRV.resrec.name->c, mDNSVal16(srs->RR_SRV.resrec.rdata->u.srv.port));
-	else
-		LogOperation("%3d: DNSServiceRegister(%##s, %u) CALLBACK %d",   instance->sd, srs->RR_SRV.resrec.name->c, mDNSVal16(srs->RR_SRV.resrec.rdata->u.srv.port), result);
+	LogOperation(fmt, instance->sd, srs->RR_SRV.resrec.name->c, mDNSVal16(srs->RR_SRV.resrec.rdata->u.srv.port), SuppressError ? "suppressed error" : "CALLBACK", result);
 
 	if (!instance->request && result != mStatus_MemFree) { LogMsg("regservice_callback: instance->request is NULL %d", result); return; }
 
@@ -1249,15 +1289,12 @@ mDNSlocal void regservice_callback(mDNS *const m, ServiceRecordSet *const srs, m
 		}
 	else
 		{
-		if (result != mStatus_NATTraversal)
-			LogMsg("regservice_callback: Error %d%s for %s", result, SuppressError ? " (suppressed)" : "", ARDisplayString(m, &srs->RR_SRV));
 		if (!SuppressError) 
 			{
 			if (GenerateNTDResponse(srs->RR_SRV.resrec.name, srs->RR_SRV.resrec.InterfaceID, instance->request, &rep, reg_service_reply_op, kDNSServiceFlagsAdd, result) != mStatus_NoError)
 				LogMsg("%3d: regservice_callback: %##s is not valid DNS-SD SRV name", instance->sd, srs->RR_SRV.resrec.name->c);
 			else { append_reply(instance->request, rep); instance->clientnotified = mDNStrue; }
 			}
-		unlink_and_free_service_instance(instance);
 		}
 	}
 
@@ -2044,7 +2081,16 @@ mDNSlocal void udsserver_automatic_browse_domain_changed(const DNameListElem *co
 mDNSlocal void FreeARElemCallback(mDNS *const m, AuthRecord *const rr, mStatus result)
 	{
 	(void)m;  // unused
-	if (result == mStatus_MemFree) mDNSPlatformMemFree(rr->RecordContext);
+	if (result == mStatus_MemFree)
+		{
+		// On shutdown, mDNS_Close automatically deregisters all records
+		// Since in this case no one has called DeregisterLocalOnlyDomainEnumPTR to cut the record
+		// from the LocalDomainEnumRecords list, we do this here before we free the memory.
+		ARListElem **ptr = &LocalDomainEnumRecords;
+		while (*ptr && &(*ptr)->ar != rr) ptr = &(*ptr)->next;
+		if (*ptr) *ptr = (*ptr)->next;
+		mDNSPlatformMemFree(rr->RecordContext);
+		}
 	}
 
 mDNSlocal void RegisterLocalOnlyDomainEnumPTR(mDNS *m, const domainname *d, int type)
@@ -2457,6 +2503,7 @@ mDNSlocal mStatus handle_resolve_request(request_state *request)
 	request->u.resolve.qtxt.ReturnIntermed   = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
 	request->u.resolve.qtxt.QuestionCallback = resolve_result_callback;
 	request->u.resolve.qtxt.QuestionContext  = request;
+	request->u.resolve.ReportTime            = NonZeroTime(mDNS_TimeNow(&mDNSStorage) + 130 * mDNSPlatformOneSecond);
 
 	// ask the questions
 	LogOperation("%3d: DNSServiceResolve(%##s) START", request->sd, request->u.resolve.qsrv.qname.c);
@@ -3006,71 +3053,50 @@ mDNSlocal request_state *NewRequest(void)
 	}
 
 // read_msg may be called any time when the transfer state (req->ts) is t_morecoming.
-// returns the current state of the request (morecoming, error, complete, terminated.)
 // if there is no data on the socket, the socket will be closed and t_terminated will be returned
-// *** NOTE return value is actually ignored -- should change return type to void ***
-mDNSlocal int read_msg(request_state *req)
+mDNSlocal void read_msg(request_state *req)
 	{
-	mDNSu32 nleft;
-	int nread;
-
 	if (req->ts == t_terminated || req->ts == t_error)
-		{
-		LogMsg("ERROR: read_msg called with transfer state terminated or error");
-		req->ts = t_error;
-		return t_error;
-		}
+		{ LogMsg("%3d: ERROR: read_msg called with transfer state terminated or error", req->sd); req->ts = t_error; return; }
 
 	if (req->ts == t_complete)	// this must be death or something is wrong
 		{
 		char buf[4];	// dummy for death notification
-		nread = recv(req->sd, buf, 4, 0);
-		if (!nread) { req->ts = t_terminated; return t_terminated; }
+		int nread = recv(req->sd, buf, 4, 0);
+		if (!nread) { req->ts = t_terminated; return; }
 		if (nread < 0) goto rerror;
-		LogMsg("ERROR: read data from a completed request.");
+		LogMsg("%3d: ERROR: read data from a completed request", req->sd);
 		req->ts = t_error;
-		return t_error;
+		return;
 		}
 
 	if (req->ts != t_morecoming)
-		{
-		LogMsg("ERROR: read_msg called with invalid transfer state (%d)", req->ts);
-		req->ts = t_error;
-		return t_error;
-		}
+		{ LogMsg("%3d: ERROR: read_msg called with invalid transfer state (%d)", req->sd, req->ts); req->ts = t_error; return; }
 
 	if (req->hdr_bytes < sizeof(ipc_msg_hdr))
 		{
-		nleft = sizeof(ipc_msg_hdr) - req->hdr_bytes;
-		nread = recv(req->sd, (char *)&req->hdr + req->hdr_bytes, nleft, 0);
-		if (nread == 0) { req->ts = t_terminated; return t_terminated; }
+		mDNSu32 nleft = sizeof(ipc_msg_hdr) - req->hdr_bytes;
+		int nread = recv(req->sd, (char *)&req->hdr + req->hdr_bytes, nleft, 0);
+		if (nread == 0) { req->ts = t_terminated; return; }
 		if (nread < 0) goto rerror;
 		req->hdr_bytes += nread;
 		if (req->hdr_bytes > sizeof(ipc_msg_hdr))
-			{
-			LogMsg("ERROR: read_msg - read too many header bytes");
-			req->ts = t_error;
-			return t_error;
-			}
+			{ LogMsg("%3d: ERROR: read_msg - read too many header bytes", req->sd); req->ts = t_error; return; }
 
 		// only read data if header is complete
 		if (req->hdr_bytes == sizeof(ipc_msg_hdr))
 			{
 			ConvertHeaderBytes(&req->hdr);
 			if (req->hdr.version != VERSION)
-				{ LogMsg("ERROR: client version 0x%08X daemon version 0x%08X", req->hdr.version, VERSION); req->ts = t_error; return t_error; }
+				{ LogMsg("%3d: ERROR: client version 0x%08X daemon version 0x%08X", req->sd, req->hdr.version, VERSION); req->ts = t_error; return; }
 
 			// Largest conceivable single request is a DNSServiceRegisterRecord() or DNSServiceAddRecord()
 			// with 64kB of rdata. Adding 1005 byte for a maximal domain name, plus a safety margin
 			// for other overhead, this means any message above 70kB is definitely bogus.
 			if (req->hdr.datalen > 70000)
-				{
-				LogMsg("ERROR: read_msg - hdr.datalen %lu (%X) > 70000", req->hdr.datalen, req->hdr.datalen);
-				req->ts = t_error;
-				return t_error;
-				}
+				{ LogMsg("%3d: ERROR: read_msg - hdr.datalen %lu (%X) > 70000", req->sd, req->hdr.datalen, req->hdr.datalen); req->ts = t_error; return; }
 			req->msgbuf = mallocL("request_state msgbuf", req->hdr.datalen + MSG_PAD_BYTES);
-			if (!req->msgbuf) { my_perror("ERROR: malloc"); req->ts = t_error; return t_error; }
+			if (!req->msgbuf) { my_perror("ERROR: malloc"); req->ts = t_error; return; }
 			req->msgptr = req->msgbuf;
 			req->msgend = req->msgbuf + req->hdr.datalen;
 			mDNSPlatformMemZero(req->msgbuf, req->hdr.datalen + MSG_PAD_BYTES);
@@ -3083,11 +3109,12 @@ mDNSlocal int read_msg(request_state *req)
 	// (even if only the one-byte empty C string placeholder for the old ctrl_path parameter)
 	if (req->hdr_bytes == sizeof(ipc_msg_hdr) && req->data_bytes < req->hdr.datalen)
 		{
-		nleft = req->hdr.datalen - req->data_bytes;
+		mDNSu32 nleft = req->hdr.datalen - req->data_bytes;
+		int nread;
 		struct iovec vec = { req->msgbuf + req->data_bytes, nleft };	// Tell recvmsg where we want the bytes put
 		struct msghdr msg;
 		struct cmsghdr *cmsg;
-		char cbuf[sizeof(struct cmsghdr) + sizeof(dnssd_sock_t)];
+		char cbuf[CMSG_SPACE(sizeof(dnssd_sock_t))];
 		msg.msg_name       = 0;
 		msg.msg_namelen    = 0;
 		msg.msg_iov        = &vec;
@@ -3096,28 +3123,31 @@ mDNSlocal int read_msg(request_state *req)
 		msg.msg_controllen = sizeof(cbuf);
 		msg.msg_flags      = 0;
 		nread = recvmsg(req->sd, &msg, 0);
-		if (nread == 0) { req->ts = t_terminated; return t_terminated; }
+		if (nread == 0) { req->ts = t_terminated; return; }
 		if (nread < 0) goto rerror;
 		req->data_bytes += nread;
 		if (req->data_bytes > req->hdr.datalen)
-			{
-			LogMsg("ERROR: read_msg - read too many data bytes");
-			req->ts = t_error;
-			return t_error;
-			}
+			{ LogMsg("%3d: ERROR: read_msg - read too many data bytes", req->sd); req->ts = t_error; return; }
 		cmsg = CMSG_FIRSTHDR(&msg);
+#if DEBUG_64BIT_SCM_RIGHTS
+		LogMsg("%3d: Expecting %d %d %d %d", req->sd, sizeof(cbuf),       sizeof(cbuf),   SOL_SOCKET,       SCM_RIGHTS);
+		LogMsg("%3d: Got       %d %d %d %d", req->sd, msg.msg_controllen, cmsg->cmsg_len, cmsg->cmsg_level, cmsg->cmsg_type);
+#endif DEBUG_64BIT_SCM_RIGHTS
 		if (msg.msg_controllen == sizeof(cbuf) &&
 			cmsg->cmsg_len     == sizeof(cbuf) &&
 			cmsg->cmsg_level   == SOL_SOCKET   &&
 			cmsg->cmsg_type    == SCM_RIGHTS)
 			{
 			req->errsd = *(dnssd_sock_t *)CMSG_DATA(cmsg);
+#if DEBUG_64BIT_SCM_RIGHTS
+			LogMsg("%3d: read req->errsd %d", req->sd, req->errsd);
+#endif DEBUG_64BIT_SCM_RIGHTS
 			if (req->data_bytes < req->hdr.datalen)
 				{
 				LogMsg("%3d: Client sent error socket %d via SCM_RIGHTS with req->data_bytes %d < req->hdr.datalen %d",
 					req->sd, req->errsd, req->data_bytes, req->hdr.datalen);
 				req->ts = t_error;
-				return t_error;
+				return;
 				}
 			}
 		}
@@ -3148,27 +3178,27 @@ mDNSlocal int read_msg(request_state *req)
 			if (ctrl_path[0] == 0)
 				{
 				if (req->errsd == req->sd)
-					{ LogMsg("%3d: request_callback: ERROR failed to get errsd via SCM_RIGHTS", req->sd); req->ts = t_error; return t_error; }
+					{ LogMsg("%3d: read_msg: ERROR failed to get errsd via SCM_RIGHTS", req->sd); req->ts = t_error; return; }
 				goto got_errfd;
 				}
 #endif
 	
 			req->errsd = socket(AF_DNSSD, SOCK_STREAM, 0);
-			if (!dnssd_SocketValid(req->errsd)) { my_perror("ERROR: socket"); req->ts = t_error; return t_error; }
-	
+			if (!dnssd_SocketValid(req->errsd)) { my_perror("ERROR: socket"); req->ts = t_error; return; }
+
 			if (connect(req->errsd, (struct sockaddr *)&cliaddr, sizeof(cliaddr)) < 0)
 				{
 #if !defined(USE_TCP_LOOPBACK)
 				struct stat sb;
-				LogMsg("request_callback: Couldn't connect to error return path socket “%s” errno %d %s",
-					cliaddr.sun_path, dnssd_errno(), dnssd_strerror(dnssd_errno()));
+				LogMsg("%3d: read_msg: Couldn't connect to error return path socket “%s” errno %d %s",
+					req->sd, cliaddr.sun_path, dnssd_errno(), dnssd_strerror(dnssd_errno()));
 				if (stat(cliaddr.sun_path, &sb) < 0)
-					LogMsg("request_callback: stat failed “%s” errno %d %s", cliaddr.sun_path, dnssd_errno(), dnssd_strerror(dnssd_errno()));
+					LogMsg("%3d: read_msg: stat failed “%s” errno %d %s", req->sd, cliaddr.sun_path, dnssd_errno(), dnssd_strerror(dnssd_errno()));
 				else
-					LogMsg("request_callback: file “%s” mode %o (octal) uid %d gid %d", cliaddr.sun_path, sb.st_mode, sb.st_uid, sb.st_gid);
+					LogMsg("%3d: read_msg: file “%s” mode %o (octal) uid %d gid %d", req->sd, cliaddr.sun_path, sb.st_mode, sb.st_uid, sb.st_gid);
 #endif
 				req->ts = t_error;
-				return t_error;
+				return;
 				}
 	
 got_errfd:
@@ -3178,19 +3208,23 @@ got_errfd:
 #else
 			if (fcntl(req->errsd, F_SETFL, fcntl(req->errsd, F_GETFL, 0) | O_NONBLOCK) != 0)
 #endif
-				{ my_perror("ERROR: could not set control socket to non-blocking mode"); req->ts = t_error; return t_error; }
+				{
+				LogMsg("%3d: ERROR: could not set control socket to non-blocking mode errno %d %s",
+					req->sd, dnssd_errno(), dnssd_strerror(dnssd_errno()));
+				req->ts = t_error;
+				return;
+				}
 			}
 		
 		req->ts = t_complete;
 		}
 
-	return req->ts;
+	return;
 
 rerror:
-	if (dnssd_errno() == dnssd_EWOULDBLOCK || dnssd_errno() == dnssd_EINTR) return t_morecoming;
-	my_perror("ERROR: read_msg");
+	if (dnssd_errno() == dnssd_EWOULDBLOCK || dnssd_errno() == dnssd_EINTR) return;
+	LogMsg("%3d: ERROR: read_msg errno %d %s", req->sd, dnssd_errno(), dnssd_strerror(dnssd_errno()));
 	req->ts = t_error;
-	return t_error;
 	}
 
 #define RecordOrientedOp(X) \
@@ -3216,8 +3250,7 @@ mDNSlocal void request_callback(int fd, short filter, void *info)
 
 	if (req->hdr.version != VERSION)
 		{
-		LogMsg("ERROR: client incompatible with daemon (client version = %d, "
-			   "daemon version = %d)\n", req->hdr.version, VERSION);
+		LogMsg("ERROR: client version %d incompatible with daemon version %d", req->hdr.version, VERSION);
 		AbortUnlinkAndFree(req);
 		return;
 		}
@@ -3630,8 +3663,27 @@ mDNSexport void udsserver_info(mDNS *const m)
 	else
 		{
 		AuthRecord *ar;
+		LogMsgNoIdent("    Int    Next  Expire   State");
 		for (ar = m->ResourceRecords; ar; ar=ar->next)
-			LogMsgNoIdent("%s", ARDisplayString(m, ar));
+			LogMsgNoIdent("%7d %7d %7d %7d %s",
+				ar->ThisAPInterval / mDNSPlatformOneSecond,
+				AuthRecord_uDNS(ar) || ar->AnnounceCount ? (ar->LastAPTime + ar->ThisAPInterval - now) / mDNSPlatformOneSecond : 0,
+				AuthRecord_uDNS(ar) && ar->expire        ? (ar->expire - now) / mDNSPlatformOneSecond : 0,
+				ar->state, ARDisplayString(m, ar));
+		}
+
+	LogMsgNoIdent("----- ServiceRegistrations -----");
+	if (!m->ServiceRegistrations) LogMsgNoIdent("<None>");
+	else
+		{
+		ServiceRecordSet *s;
+		LogMsgNoIdent("    Int    Next  Expire   State");
+		for (s = m->ServiceRegistrations; s; s = s->uDNS_next)
+			LogMsgNoIdent("%7d %7d %7d %7d %s",
+				s->RR_SRV.ThisAPInterval / mDNSPlatformOneSecond,
+				(s->RR_SRV.LastAPTime + s->RR_SRV.ThisAPInterval - now) / mDNSPlatformOneSecond,
+				s->RR_SRV.expire ? (s->RR_SRV.expire - now) / mDNSPlatformOneSecond : 0,
+				s->state, ARDisplayString(m, &s->RR_SRV));
 		}
 
 	LogMsgNoIdent("---------- Questions -----------");
@@ -3641,7 +3693,7 @@ mDNSexport void udsserver_info(mDNS *const m)
 		DNSQuestion *q;
 		CacheUsed = 0;
 		CacheActive = 0;
-		LogMsgNoIdent("   Int  Next if    T NumAns Type  Name");
+		LogMsgNoIdent("   Int  Next if    T  NumAns Type  Name");
 		for (q = m->Questions; q; q=q->next)
 			{
 			mDNSs32 i = q->ThisQInterval / mDNSPlatformOneSecond;
@@ -3649,10 +3701,11 @@ mDNSexport void udsserver_info(mDNS *const m)
 			NetworkInterfaceInfo *info = (NetworkInterfaceInfo *)q->InterfaceID;
 			CacheUsed++;
 			if (q->ThisQInterval) CacheActive++;
-			LogMsgNoIdent("%6d%6d %-6s%s %5d  %-6s%##s%s",
+			LogMsgNoIdent("%6d%6d %-6s%s%s %5d  %-6s%##s%s",
 				i, n,
 				info ? info->ifname : mDNSOpaque16IsZero(q->TargetQID) ? "" : "-U-",
 				mDNSOpaque16IsZero(q->TargetQID) ? " " : q->LongLived ? "L" : "O", // mDNS, long-lived, or one-shot query?
+				q->AuthInfo    ? "P" : " ",
 				q->CurrentAnswers,
 				DNSTypeName(q->qtype), q->qname.c, q->DuplicateOf ? " (dup)" : "");
 			usleep(1000);	// Limit rate a little so we don't flood syslog too fast
@@ -3807,6 +3860,14 @@ mDNSexport mDNSs32 udsserver_idle(mDNSs32 nextevent)
 
 	while (*req)
 		{
+		if ((*req)->terminate == resolve_termination_callback)
+			if ((*req)->u.resolve.ReportTime && now - (*req)->u.resolve.ReportTime >= 0)
+				{
+				(*req)->u.resolve.ReportTime = 0;
+				LogMsgNoIdent("Client application bug: DNSServiceResolver(%##s) active for over two minutes. "
+					"This places considerable burden on the network.", (*req)->u.resolve.qsrv.qname.c);
+				}
+
 		while ((*req)->replies)		// Send queued replies
 			{
 			transfer_state result;

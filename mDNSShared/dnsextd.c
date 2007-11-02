@@ -17,6 +17,12 @@
     Change History (most recent first):
 
 $Log: dnsextd.c,v $
+Revision 1.84  2007/10/24 18:19:37  cheshire
+Fixed header byte order bug sending update responses
+
+Revision 1.83  2007/10/17 22:52:26  cheshire
+Get rid of unused mDNS_UpdateLLQs()
+
 Revision 1.82  2007/09/27 17:42:49  cheshire
 Fix naming: for consistency, "kDNSFlag1_RC" should be "kDNSFlag1_RC_Mask"
 
@@ -1602,6 +1608,7 @@ mDNSlocal PktMsg *FormatLeaseReply(DaemonInfo *d, PktMsg *orig, mDNSu32 lease)
 	ptr = putUpdateLease(&reply->msg, ptr, lease);
 	if (!ptr) { Log("FormatLeaseReply: putUpdateLease failed"); free(reply); return NULL; }
 	reply->len = ptr - (mDNSu8 *)&reply->msg;
+	HdrHToN(reply);
 	return reply;
 	}
 
@@ -1627,7 +1634,7 @@ HandleRequest
 		int i, adds = 0, dels = 0;
 		const mDNSu8 *ptr, *end = (mDNSu8 *)&request->msg + request->len;
 		HdrNToH(request);
-		lease = GetPktLease(NULL, &request->msg, end);
+		lease = GetPktLease(&mDNSStorage, &request->msg, end);
 		ptr = LocateAuthorities(&request->msg, end);
 		for (i = 0; i < request->msg.h.mDNS_numUpdates; i++)
 			{
@@ -3236,7 +3243,6 @@ mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
 	const domainname *domain, const domainname *keyname, const char *b64keydata, mDNSBool AutoTunnel)
 	{ ( void ) m; ( void ) info; ( void ) domain; ( void ) keyname; ( void ) b64keydata; ( void ) AutoTunnel; return 0; }
 mStatus mDNS_StopQuery(mDNS *const m, DNSQuestion *const question) { ( void ) m; ( void ) question; return 0; }
-void mDNS_UpdateLLQs(mDNS * const m) { ( void ) m; }
 mDNS mDNSStorage;
 
 

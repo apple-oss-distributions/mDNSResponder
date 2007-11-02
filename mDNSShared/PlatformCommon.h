@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: PlatformCommon.h,v $
+Revision 1.8  2007/10/22 20:07:52  cheshire
+Deleted unused FindSourceAddrForIP() function
+
 Revision 1.7  2007/07/31 23:08:34  mcguire
 <rdar://problem/5329542> BTMM: Make AutoTunnel mode work with multihoming
 
@@ -41,5 +44,4 @@ Move ReadDDNSSettingsFromConfFile() from mDNSMacOSX.c to PlatformCommon.c
 
  */
 
-extern void FindSourceAddrForIP(mDNSAddr *const dst, mDNSAddr *src);
 extern void ReadDDNSSettingsFromConfFile(mDNS *const m, const char *const filename, domainname *const hostname, domainname *const domain, mDNSBool *DomainDiscoveryDisabled);

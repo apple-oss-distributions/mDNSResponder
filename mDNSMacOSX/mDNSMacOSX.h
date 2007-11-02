@@ -17,6 +17,12 @@
     Change History (most recent first):
 
 $Log: mDNSMacOSX.h,v $
+Revision 1.74  2007/11/02 20:18:13  cheshire
+<rdar://problem/5575583> BTMM: Work around keychain notification bug <rdar://problem/5124399>
+
+Revision 1.73  2007/10/17 18:42:06  cheshire
+Export SetDomainSecrets so its callable from other files
+
 Revision 1.72  2007/08/01 16:09:14  cheshire
 Removed unused NATTraversalInfo substructure from AuthRecord; reduced structure sizecheck values accordingly
 
@@ -152,6 +158,14 @@ struct mDNS_PlatformSupport_struct
 	mDNSs32                  NotifyUser;
 	mDNSs32                  HostNameConflict;	// Time we experienced conflict on our link-local host name
 	mDNSs32                  NetworkChanged;
+	
+	// KeyChain frequently fails to notify clients of change events. To work around this
+	// we set a timer and periodically poll to detect if any changes have occurred.
+	// Without this Back To My Mac just does't work for a large number of users.
+	// See <rdar://problem/5124399> Not getting Keychain Changed events when enabling BTMM
+	mDNSs32                  KeyChainBugTimer;
+	mDNSs32                  KeyChainBugInterval;
+	
 	SCDynamicStoreRef        Store;
 	CFRunLoopSourceRef       StoreRLS;
 	IONotificationPortRef    PowerPortRef;
@@ -165,6 +179,7 @@ struct mDNS_PlatformSupport_struct
 extern int KQueueFD;
 
 extern void NotifyOfElusiveBug(const char *title, const char *msg);	// Both strings are UTF-8 text
+extern void SetDomainSecrets(mDNS *m);
 extern void mDNSMacOSXNetworkChanged(mDNS *const m);
 extern int mDNSMacOSXSystemBuildNumber(char *HINFO_SWstring);
 

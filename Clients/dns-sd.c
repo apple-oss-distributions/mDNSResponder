@@ -799,10 +799,18 @@ static DNSServiceErrorType RegisterService(DNSServiceRef *sdref,
 	return(DNSServiceRegister(sdref, flags, opinterface, nam, typ, dom, host, registerPort.NotAnInteger, (uint16_t) (ptr-txt), txt, reg_reply, NULL));
 	}
 
+#define TypeBufferSize 80
+static char *gettype(char *buffer, char *typ)
+	{
+	if (!typ || !*typ || (typ[0] == '.' && typ[1] == 0)) typ = "_http._tcp";
+	if (!strchr(typ, '.')) { snprintf(buffer, TypeBufferSize, "%s._tcp", typ); typ = buffer; }
+	return(typ);
+	}
+
 int main(int argc, char **argv)
 	{
 	DNSServiceErrorType err;
-	char *dom;
+	char buffer[TypeBufferSize], *typ, *dom;
 	int optind;
 
 	// Extract the program name from argv[0], which by convention contains the path to this executable.
@@ -863,26 +871,29 @@ int main(int argc, char **argv)
 					//enum_reply(client, kDNSServiceFlagsAdd, 0, 0, "dns-sd.ibm.com.", NULL);
 					break;
 
-		case 'B':	{
-					char buffer[64], *typ;
-					typ = (argc < optind+1) ? "_http" : argv[optind+0]; // If no type argument, browse for advertised web pages
+		case 'B':	typ = (argc < optind+1) ? "" : argv[optind+0];
 					dom = (argc < optind+2) ? "" : argv[optind+1];  // Missing domain argument is the same as empty string i.e. use system default(s)
+					typ = gettype(buffer, typ);
 					if (dom[0] == '.' && dom[1] == 0) dom[0] = 0;   // We allow '.' on the command line as a synonym for empty string
-					if (!strchr(typ, '.')) { snprintf(buffer, sizeof(buffer), "%s._tcp", typ); typ = buffer; }
 					printf("Browsing for %s%s%s\n", typ, dom[0] ? "." : "", dom);
 					err = DNSServiceBrowse(&client, 0, opinterface, typ, dom, browse_reply, NULL);
 					break;
-					}
 
 		case 'L':	if (argc < optind+2) goto Fail;
+					typ = (argc < optind+2) ? ""      : argv[optind+1];
 					dom = (argc < optind+3) ? "local" : argv[optind+2];
+					typ = gettype(buffer, typ);
 					if (dom[0] == '.' && dom[1] == 0) dom = "local";   // We allow '.' on the command line as a synonym for "local"
-					printf("Lookup %s.%s.%s\n", argv[optind+0], argv[optind+1], dom);
-					err = DNSServiceResolve(&client, 0, opinterface, argv[optind+0], argv[optind+1], dom, (DNSServiceResolveReply)resolve_reply, NULL);
+					printf("Lookup %s.%s.%s\n", argv[optind+0], typ, dom);
+					err = DNSServiceResolve(&client, 0, opinterface, argv[optind+0], typ, dom, (DNSServiceResolveReply)resolve_reply, NULL);
 					break;
 
 		case 'R':	if (argc < optind+4) goto Fail;
-					err = RegisterService(&client, argv[optind+0], argv[optind+1], argv[optind+2], NULL, argv[optind+3], argc-(optind+4), argv+(optind+4));
+					typ = (argc < optind+2) ? "" : argv[optind+1];
+					dom = (argc < optind+3) ? "" : argv[optind+2];
+					typ = gettype(buffer, typ);
+					if (dom[0] == '.' && dom[1] == 0) dom[0] = 0;   // We allow '.' on the command line as a synonym for empty string
+					err = RegisterService(&client, argv[optind+0], typ, dom, NULL, argv[optind+3], argc-(optind+4), argv+(optind+4));
 					break;
 
 		case 'P':	if (argc < optind+6) goto Fail;

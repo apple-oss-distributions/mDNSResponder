@@ -30,6 +30,16 @@
     Change History (most recent first):
 
 $Log: daemon.c,v $
+Revision 1.347  2007/11/02 22:00:13  cheshire
+<rdar://problem/5575583> BTMM: Work around keychain notification bug <rdar://problem/5124399>
+Need to hold the lock while calling SetDomainSecrets
+
+Revision 1.346  2007/11/02 20:18:13  cheshire
+<rdar://problem/5575583> BTMM: Work around keychain notification bug <rdar://problem/5124399>
+
+Revision 1.345  2007/10/17 18:41:21  cheshire
+For debugging, make SIGUSR1 simulate a KeychainChanged event as well as a NetworkChanged
+
 Revision 1.344  2007/09/29 01:06:17  mcguire
 <rdar://problem/5507862> 9A564: mDNSResponder crash in mDNS_Execute
 
@@ -2042,11 +2052,13 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
 	(void)size;		// Unused
 	(void)info;		// Unused
 	mach_msg_header_t *msg_header = (mach_msg_header_t *)msg;
-	KQueueLock(&mDNSStorage);
+	mDNS *const m = &mDNSStorage;
+
+	// We're running on the CFRunLoop (Mach port) thread, not the kqueue thread, so we need to grab the KQueueLock before proceeding
+	KQueueLock(m);
 	switch(msg_header->msgh_id)
 		{
 		case SIGHUP:	{
-						mDNS *m = &mDNSStorage;
 						mDNSu32 slot;
 						CacheGroup *cg;
 						CacheRecord *rr;
@@ -2057,11 +2069,18 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
 		case SIGTERM:	ExitCallback(msg_header->msgh_id); break;
 		case SIGINFO:	INFOCallback(); break;
 		case SIGUSR1:	LogMsg("SIGUSR1: Simulate Network Configuration Change Event");
-						mDNSMacOSXNetworkChanged(&mDNSStorage); break;
+						mDNSMacOSXNetworkChanged(m);
+
+						// Simulate KeychainChanged
+						mDNS_Lock(m);
+						SetDomainSecrets(m);
+						mDNS_Unlock(m);
+
+						break;
 		case SIGUSR2:	SigLogLevel(); break;
 		default: LogMsg("SignalCallback: Unknown signal %d", msg_header->msgh_id); break;
 		}
-	KQueueUnlock(&mDNSStorage, "Unix Signal");
+	KQueueUnlock(m, "Unix Signal");
 	}
 
 // On 10.2 the MachServerName is DNSServiceDiscoveryServer
@@ -2131,12 +2150,30 @@ mDNSlocal mDNSs32 mDNSDaemonIdle(mDNS *const m)
 	// we then systematically lose our own looped-back packets.
 	if (m->p->NetworkChanged && now - m->p->NetworkChanged >= 0) mDNSMacOSXNetworkChanged(m);
 
+	// KeyChain frequently fails to notify clients of change events. To work around this
+	// we set a timer and periodically poll to detect if any changes have occurred.
+	// Without this Back To My Mac just does't work for a large number of users.
+	// See <rdar://problem/5124399> Not getting Keychain Changed events when enabling BTMM
+	if (m->p->KeyChainBugTimer && now - m->p->KeyChainBugTimer >= 0)
+		{
+		m->p->KeyChainBugTimer = NonZeroTime(now + m->p->KeyChainBugInterval);
+		m->p->KeyChainBugInterval *= 2;
+		if (m->p->KeyChainBugInterval > 16 * mDNSPlatformOneSecond) m->p->KeyChainBugTimer = 0;
+		mDNS_Lock(m);
+		SetDomainSecrets(m);
+		mDNS_Unlock(m);
+		}
+
 	// 2. Call mDNS_Execute() to let mDNSCore do what it needs to do
 	mDNSs32 nextevent = mDNS_Execute(m);
 
 	if (m->p->NetworkChanged)
 		if (nextevent - m->p->NetworkChanged > 0)
 			nextevent = m->p->NetworkChanged;
+
+	if (m->p->KeyChainBugTimer)
+		if (nextevent - m->p->KeyChainBugTimer > 0)
+			nextevent = m->p->KeyChainBugTimer;
 
 	// 3. Deliver any waiting browse messages to clients
 	DNSServiceBrowser *b = DNSServiceBrowserList;

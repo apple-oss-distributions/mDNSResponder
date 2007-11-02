@@ -17,6 +17,10 @@
     Change History (most recent first):
 
 $Log: DNSCommon.c,v $
+Revision 1.185  2007/10/10 20:22:03  cheshire
+Added sanity checks in mDNSSendDNSMessage -- we've seen crashes in DNSDigest_SignMessage
+apparently caused by trying to sign zero-length messages
+
 Revision 1.184  2007/10/05 17:56:07  cheshire
 Move CountLabels and SkipLeadingLabels to DNSCommon.c so they're callable from other files
 
@@ -2494,6 +2498,12 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
 	mDNSu16 numAuthorities = msg->h.numAuthorities;
 	mDNSu16 numAdditionals = msg->h.numAdditionals;
 	mDNSu8 *ptr = (mDNSu8 *)&msg->h.numQuestions;
+
+	if (end <= msg->data || end - msg->data > AbsoluteMaxDNSMessageData)
+		{
+		LogMsg("mDNSSendDNSMessage: invalid message %p %p %d", msg->data, end, end - msg->data);
+		return mStatus_BadParamErr;
+		}
 
 	// Put all the integer values in IETF byte-order (MSB first, LSB second)
 	*ptr++ = (mDNSu8)(numQuestions   >> 8);

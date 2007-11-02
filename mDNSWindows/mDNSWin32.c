@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: mDNSWin32.c,v $
+Revision 1.129  2007/10/17 22:52:26  cheshire
+Get rid of unused mDNS_UpdateLLQs()
+
 Revision 1.128  2007/09/12 19:23:17  cheshire
 Get rid of unnecessary mDNSPlatformTCPIsConnected() routine
 
@@ -3672,10 +3675,6 @@ mDNSlocal void	ProcessingThreadInterfaceListChanged( mDNS *inMDNS )
 	err = uDNS_SetupDNSConfig( inMDNS );
 	check_noerr( err );
 
-	// so that LLQs are restarted against the up to date name servers
-
-	mDNS_UpdateLLQs( inMDNS );
-
 	mDNSPlatformUnlock( inMDNS );
 	
 	// Inform clients of the change.
@@ -3737,10 +3736,6 @@ mDNSlocal void ProcessingThreadTCPIPConfigChanged( mDNS * inMDNS )
 	err = uDNS_SetupDNSConfig( inMDNS );
 	check_noerr( err );
 
-	// so that LLQs are restarted against the up to date name servers
-
-	mDNS_UpdateLLQs( inMDNS );
-
 	// and reset the event handler
 
 	if ( ( inMDNS->p->tcpipKey != NULL ) && ( inMDNS->p->tcpipChangedEvent ) )
@@ -3769,10 +3764,6 @@ mDNSlocal void	ProcessingThreadDynDNSConfigChanged( mDNS *inMDNS )
 
 	err = uDNS_SetupDNSConfig( inMDNS );
 	check_noerr( err );
-
-	// so that LLQs are restarted against the up to date name servers
-
-	mDNS_UpdateLLQs( inMDNS );
 
 	// and reset the event handler
 

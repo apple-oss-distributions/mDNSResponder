@@ -17,6 +17,14 @@
     Change History (most recent first):
 
 $Log: PlatformCommon.c,v $
+Revision 1.13  2007/10/22 20:07:07  cheshire
+Moved mDNSPlatformSourceAddrForDest from mDNSMacOSX.c to PlatformCommon.c so
+Posix build can share the code (better than just pasting it into mDNSPosix.c)
+
+Revision 1.12  2007/10/16 17:19:53  cheshire
+<rdar://problem/3557903> Performance: Core code will not work on platforms with small stacks
+Cut ReadDDNSSettingsFromConfFile stack from 2112 to 1104 bytes
+
 Revision 1.11  2007/07/31 23:08:34  mcguire
 <rdar://problem/5329542> BTMM: Make AutoTunnel mode work with multihoming
 
@@ -58,7 +66,7 @@ Move ReadDDNSSettingsFromConfFile() from mDNSMacOSX.c to PlatformCommon.c
 #include <stdio.h>				// Needed for fopen() etc.
 #include <unistd.h>				// Needed for close()
 #include <string.h>				// Needed for strlen() etc.
-#include <errno.h>			// Needed for errno etc.
+#include <errno.h>				// Needed for errno etc.
 #include <sys/socket.h>			// Needed for socket() etc.
 #include <netinet/in.h>			// Needed for sockaddr_in
 
@@ -71,23 +79,42 @@ Move ReadDDNSSettingsFromConfFile() from mDNSMacOSX.c to PlatformCommon.c
 #endif
 
 // Bind a UDP socket to find the source address to a destination
-mDNSexport void FindSourceAddrForIP(mDNSAddr *const dst, mDNSAddr *src)
+mDNSexport void mDNSPlatformSourceAddrForDest(mDNSAddr *const src, const mDNSAddr *const dst)
 	{
-	struct sockaddr_in addr;
+	union { struct sockaddr s; struct sockaddr_in a4; struct sockaddr_in6 a6; } addr;
 	socklen_t len = sizeof(addr);
-	int sock = socket(AF_INET,SOCK_DGRAM,0);
+	int sock = socket(AF_INET, SOCK_DGRAM, 0);
 	src->type = mDNSAddrType_None;
 	if (sock == -1) return;
-	if (dst->type != mDNSAddrType_IPv4) return; // Only support v4 for now
-	addr.sin_family = AF_INET;
-	addr.sin_port = 1;	// Not important, any port will do
-	if (dst == NULL) addr.sin_addr.s_addr = 0x11111111;
-	else addr.sin_addr.s_addr = dst->ip.v4.NotAnInteger;
-	if ((connect(sock,(const struct sockaddr*)&addr,sizeof(addr))) == -1) { close(sock); return; }
-	if ((getsockname(sock,(struct sockaddr*)&addr, &len)) == -1) { close(sock); return; }
+	if (dst->type == mDNSAddrType_IPv4)
+		{
+		addr.a4.sin_len         = sizeof(addr.a4);
+		addr.a4.sin_family      = AF_INET;
+		addr.a4.sin_port        = 1;	// Not important, any port will do
+		addr.a4.sin_addr.s_addr = dst->ip.v4.NotAnInteger;
+		}
+	else if (dst->type == mDNSAddrType_IPv6)
+		{
+		addr.a6.sin6_len      = sizeof(addr.a6);
+		addr.a6.sin6_family   = AF_INET6;
+		addr.a6.sin6_flowinfo = 0;
+		addr.a6.sin6_port     = 1;	// Not important, any port will do
+		addr.a6.sin6_addr     = *(struct in6_addr*)&dst->ip.v6;
+		addr.a6.sin6_scope_id = 0;
+		}
+	else return;
+	
+	if ((connect(sock, &addr.s, addr.s.sa_len)) < 0)
+		{ LogMsg("mDNSPlatformSourceAddrForDest: connect %#a failed errno %d (%s)", dst, errno, strerror(errno)); goto exit; }
+
+	if ((getsockname(sock, &addr.s, &len)) < 0)
+		{ LogMsg("mDNSPlatformSourceAddrForDest: getsockname failed errno %d (%s)", errno, strerror(errno)); goto exit; }
+
+	src->type = dst->type;
+	if (dst->type == mDNSAddrType_IPv4) src->ip.v4.NotAnInteger = addr.a4.sin_addr.s_addr;
+	else                                src->ip.v6 = *(mDNSv6Addr*)&addr.a6.sin6_addr;
+exit:
 	close(sock);
-	src->type = mDNSAddrType_IPv4;
-	src->ip.v4.NotAnInteger = addr.sin_addr.s_addr;
 	}
 
 // dst must be at least MAX_ESCAPED_DOMAIN_NAME bytes, and option must be less than 32 bytes in length
@@ -114,8 +141,7 @@ mDNSlocal mDNSBool GetConfigOption(char *dst, const char *option, FILE *f)
 
 mDNSexport void ReadDDNSSettingsFromConfFile(mDNS *const m, const char *const filename, domainname *const hostname, domainname *const domain, mDNSBool *DomainDiscoveryDisabled)
 	{
-	char buf   [MAX_ESCAPED_DOMAIN_NAME];
-	char secret[MAX_ESCAPED_DOMAIN_NAME] = "";
+	char buf[MAX_ESCAPED_DOMAIN_NAME] = "";
 	mStatus err;
 	FILE *f = fopen(filename, "r");
 
@@ -128,7 +154,8 @@ mDNSexport void ReadDDNSSettingsFromConfFile(mDNS *const m, const char *const fi
 		if (DomainDiscoveryDisabled && GetConfigOption(buf, "DomainDiscoveryDisabled", f) && !strcasecmp(buf, "true")) *DomainDiscoveryDisabled = mDNStrue;
 		if (hostname && GetConfigOption(buf, "hostname", f) && !MakeDomainNameFromDNSNameString(hostname, buf)) goto badf;
 		if (domain && GetConfigOption(buf, "zone", f) && !MakeDomainNameFromDNSNameString(domain, buf)) goto badf;
-		GetConfigOption(secret, "secret-64", f);  // failure means no authentication	   		
+		buf[0] = 0;
+		GetConfigOption(buf, "secret-64", f);  // failure means no authentication	   		
 		fclose(f);
 		f = NULL;
 		}
@@ -138,11 +165,11 @@ mDNSexport void ReadDDNSSettingsFromConfFile(mDNS *const m, const char *const fi
 		return;
 		}
 
-	if (domain && domain->c[0] && secret[0])
+	if (domain && domain->c[0] && buf[0])
 		{
 		DomainAuthInfo *info = (DomainAuthInfo*)mDNSPlatformMemAllocate(sizeof(*info));
 		// for now we assume keyname = service reg domain and we use same key for service and hostname registration
-		err = mDNS_SetSecretForDomain(m, info, domain, domain, secret, mDNSfalse);
+		err = mDNS_SetSecretForDomain(m, info, domain, domain, buf, mDNSfalse);
 		if (err) LogMsg("ERROR: mDNS_SetSecretForDomain returned %d for domain %##s", err, domain->c);
 		}
 

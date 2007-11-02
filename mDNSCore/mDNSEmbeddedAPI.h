@@ -54,6 +54,34 @@
     Change History (most recent first):
 
 $Log: mDNSEmbeddedAPI.h,v $
+Revision 1.453  2007/10/29 23:51:22  cheshire
+Added comment about NATTraversalInfo ExternalAddress field
+
+Revision 1.452  2007/10/29 18:13:40  cheshire
+Added Question_uDNS macro, analogous to AuthRecord_uDNS macro
+
+Revision 1.451  2007/10/26 23:42:57  cheshire
+Removed unused "mDNSs32 expire" field from ServiceRecordSet_struct
+
+Revision 1.450  2007/10/26 22:24:08  cheshire
+Added AuthRecord_uDNS() macro to determine when a given AuthRecord needs to be registered via unicast DNS
+
+Revision 1.449  2007/10/25 20:48:47  cheshire
+For naming consistency (with AuthRecord's UpdateServer) renamed 'ns' to 'SRSUpdateServer'
+
+Revision 1.448  2007/10/22 22:19:44  cheshire
+Tidied up code alignment
+
+Revision 1.447  2007/10/22 19:40:30  cheshire
+<rdar://problem/5519458> BTMM: Machines don't appear in the sidebar on wake from sleep
+Made subroutine mDNSPlatformSourceAddrForDest(mDNSAddr *const src, const mDNSAddr *const dst)
+
+Revision 1.446  2007/10/17 22:49:54  cheshire
+<rdar://problem/5519458> BTMM: Machines don't appear in the sidebar on wake from sleep
+
+Revision 1.445  2007/10/17 22:37:23  cheshire
+<rdar://problem/5536979> BTMM: Need to create NAT port mapping for receiving LLQ events
+
 Revision 1.444  2007/09/29 03:14:52  cheshire
 <rdar://problem/5513168> BTMM: mDNSResponder memory corruption in GetAuthInfoForName_internal
 Added AutoTunnelUnregistered macro to check state of DomainAuthInfo AuthRecords
@@ -1139,12 +1167,12 @@ typedef enum
 
 enum
 	{
-	NATErr_None = 0,
-	NATErr_Vers = 1,
+	NATErr_None    = 0,
+	NATErr_Vers    = 1,
 	NATErr_Refused = 2,
 	NATErr_NetFail = 3,
-	NATErr_Res = 4,
-	NATErr_Opcode = 5
+	NATErr_Res     = 4,
+	NATErr_Opcode  = 5
 	};
 
 typedef mDNSu16 NATErr_t;
@@ -1243,7 +1271,7 @@ struct NATTraversalInfo_struct
 	// mapping response from the NAT-PMP or UPnP gateway. For example, if we ask for port 80, and
 	// get assigned port 81, then thereafter we'll contine asking for port 81.
 	mDNSInterfaceID             InterfaceID;
-	mDNSv4Addr                  ExternalAddress;
+	mDNSv4Addr                  ExternalAddress;	// Initially set to onesIPv4Addr, until first callback
 	mDNSIPPort                  ExternalPort;
 	mDNSu32                     Lifetime;
 	mStatus                     Result;
@@ -1391,6 +1419,9 @@ struct AuthRecord_struct
 	// are appended after the end of the AuthRecord, logically augmenting the size of the rdatastorage
 	// DO NOT ADD ANY MORE FIELDS HERE
 	};
+
+#define AuthRecord_uDNS(R) ((R)->resrec.InterfaceID == mDNSInterface_Any && !(R)->ForceMCast && !IsLocalDomain((R)->resrec.name))
+#define Question_uDNS(Q)   ((Q)->InterfaceID == mDNSInterface_Any        && !(Q)->ForceMCast && !IsLocalDomain(&(Q)->qname))
 
 // Wrapper struct for Auth Records for higher-level code that cannot use the AuthRecord's ->next pointer field
 typedef struct ARListElem
@@ -1550,15 +1581,14 @@ struct ServiceRecordSet_struct
 	ServiceRecordSet *uDNS_next;
 	regState_t        state;
 	mDNSBool          srs_uselease;				// dynamic update contains (should contain) lease option
-	mDNSs32           expire;					// expiration of lease (-1 for static)
 	mDNSBool          TestForSelfConflict;		// on name conflict, check if we're just seeing our own orphaned records
 	mDNSBool          Private;					// If zone is private, DNS updates may have to be encrypted to prevent eavesdropping
 	ZoneData         *nta;
 	mDNSOpaque16      id;
 	domainname        zone;						// the zone that is updated
-	mDNSAddr          ns;						// primary name server for the record's zone  !!!KRS not technically correct to cache longer than TTL
+	mDNSAddr          SRSUpdateServer;			// primary name server for the record's zone  !!!KRS not technically correct to cache longer than TTL
 	mDNSIPPort        SRSUpdatePort;			// port on which server accepts dynamic updates
-	NATTraversalInfo  NATinfo;					// may be NULL
+	NATTraversalInfo  NATinfo;
 	mDNSBool          ClientCallbackDeferred;	// invoke client callback on completion of pending operation(s)
 	mStatus           DeferredStatus;			// status to deliver when above flag is set
 	mDNSBool          SRVUpdateDeferred;		// do we need to change target or port once current operation completes?
@@ -1602,24 +1632,10 @@ typedef struct
 
 typedef enum
 	{
-	// Setup states
-	LLQ_UnInit            = 0,
-	LLQ_GetZoneInfo       = 1,
-	LLQ_InitialRequest    = 2,
-	LLQ_SecondaryRequest  = 3,
-	LLQ_Refresh           = 4,
-	LLQ_Retry             = 5,
-	LLQ_Established       = 6,
-	LLQ_Suspended         = 7,
-	LLQ_SuspendDeferred   = 8, // suspend once we get zone info
-	LLQ_SuspendedPoll     = 9, // suspended from polling state
-	LLQ_NatMapWaitUDP     = 10,
-
-	// Established/error states
-	LLQ_Static            = 16,
-	LLQ_Poll              = 17,
-	LLQ_Error             = 18,
-	LLQ_Cancelled         = 19
+	LLQ_InitialRequest    = 1,
+	LLQ_SecondaryRequest  = 2,
+	LLQ_Established       = 3,
+	LLQ_Poll              = 4
 	} LLQ_State;
 
 // LLQ constants
@@ -1629,7 +1645,6 @@ typedef enum
 #define kLLQ_DefLease  7200 // 2 hours
 #define kLLQ_MAX_TRIES 3    // retry an operation 3 times max
 #define kLLQ_INIT_RESEND 2 // resend an un-ack'd packet after 2 seconds, then double for each additional
-#define kLLQ_DEF_RETRY 1800 // retry a failed operation after 30 minutes
 // LLQ Operation Codes
 #define kLLQOp_Setup     1
 #define kLLQOp_Refresh   2
@@ -1641,12 +1656,12 @@ typedef enum
 // LLQ Errror Codes
 enum
 	{
-	LLQErr_NoError = 0,
-	LLQErr_ServFull = 1,
-	LLQErr_Static = 2,
-	LLQErr_FormErr = 3,
-	LLQErr_NoSuchLLQ = 4,
-	LLQErr_BadVers = 5,
+	LLQErr_NoError    = 0,
+	LLQErr_ServFull   = 1,
+	LLQErr_Static     = 2,
+	LLQErr_FormErr    = 3,
+	LLQErr_NoSuchLLQ  = 4,
+	LLQErr_BadVers    = 5,
 	LLQErr_UnknownErr = 6
 	};
 
@@ -1723,8 +1738,6 @@ struct DNSQuestion_struct
 
 	// LLQ-specific fields. These fields are only meaningful when LongLived flag is set
 	LLQ_State             state;
-	NATTraversalInfo      NATInfoUDP;
-	mDNSIPPort            eventPort;		// This is non-zero if this is a private LLQ. If we're behind NAT, it's the external UDP port.
 	mDNSu32               origLease;		// seconds (relative)
 	mDNSs32               expire;			// ticks (absolute)
 	mDNSs16               ntries;
@@ -1943,6 +1956,7 @@ struct mDNS_struct
 	mDNSBool          RegisterSearchDomains;
 
 	// NAT traversal fields
+	NATTraversalInfo  LLQNAT;					// Single shared NAT Traversal to receive inbound LLQ notifications
 	NATTraversalInfo *NATTraversals;
 	NATTraversalInfo *CurrentNATTraversal;
 	mDNSs32           retryIntervalGetAddr;		// delta between time sent and retry
@@ -2407,10 +2421,6 @@ extern mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
 // Host domains added prior to specification of the primary interface address and computer name will be deferred until
 // these values are initialized.
 
-// When routable V4 interfaces are added or removed, mDNS_UpdateLLQs should be called to re-estabish LLQs in case the
-// destination address for events (i.e. the route) has changed.  For performance reasons, the caller is responsible for
-// batching changes, e.g.  calling the routine only once if multiple interfaces are simultanously removed or added.
-
 // DNS servers used to resolve unicast queries are specified by mDNS_AddDNSServer.
 // For "split" DNS configurations, in which queries for different domains are sent to different servers (e.g. VPN and external),
 // a domain may be associated with a DNS server.  For standard configurations, specify the root label (".") or NULL.
@@ -2418,7 +2428,6 @@ extern mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
 extern void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCallback *StatusCallback, const void *StatusContext);
 extern void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn);
 extern void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const mDNSAddr *v6addr, const mDNSAddr *router);
-extern void mDNS_UpdateLLQs(mDNS *m);
 extern DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSAddr *addr, const mDNSIPPort port);
 extern void mDNS_AddSearchDomain(const domainname *const domain);
 
@@ -2541,6 +2550,7 @@ extern long       mDNSPlatformReadTCP(TCPSocket *sock, void *buf, unsigned long 
 extern long       mDNSPlatformWriteTCP(TCPSocket *sock, const char *msg, unsigned long len);
 extern UDPSocket *mDNSPlatformUDPSocket(mDNS *const m, mDNSIPPort port);
 extern void       mDNSPlatformUDPClose(UDPSocket *sock);
+extern void       mDNSPlatformSourceAddrForDest(mDNSAddr *const src, const mDNSAddr *const dst);
 
 // mDNSPlatformTLSSetupCerts/mDNSPlatformTLSTearDownCerts used by dnsextd
 extern mStatus    mDNSPlatformTLSSetupCerts(void);
@@ -2660,7 +2670,7 @@ struct CompileTimeAssertionChecks_mDNS
 	char sizecheck_AuthRecord          [(sizeof(AuthRecord)           <=  1290) ? 1 : -1];
 	char sizecheck_CacheRecord         [(sizeof(CacheRecord)          <=   170) ? 1 : -1];
 	char sizecheck_CacheGroup          [(sizeof(CacheGroup)           <=   170) ? 1 : -1];
-	char sizecheck_DNSQuestion         [(sizeof(DNSQuestion)          <=   700) ? 1 : -1];
+	char sizecheck_DNSQuestion         [(sizeof(DNSQuestion)          <=   560) ? 1 : -1];
 	char sizecheck_ZoneData            [(sizeof(ZoneData)             <=  1600) ? 1 : -1];
 	char sizecheck_NATTraversalInfo    [(sizeof(NATTraversalInfo)     <=   140) ? 1 : -1];
 	char sizecheck_HostnameInfo        [(sizeof(HostnameInfo)         <=  3000) ? 1 : -1];

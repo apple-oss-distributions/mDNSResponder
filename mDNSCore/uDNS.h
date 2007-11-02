@@ -17,6 +17,35 @@
     Change History (most recent first):
 
 $Log: uDNS.h,v $
+Revision 1.88  2007/10/25 20:06:13  cheshire
+Don't try to do SOA queries using private DNS (TLS over TCP) queries
+
+Revision 1.87  2007/10/24 22:40:06  cheshire
+Renamed: RecordRegistrationCallback          -> RecordRegistrationGotZoneData
+Renamed: ServiceRegistrationZoneDataComplete -> ServiceRegistrationGotZoneData
+
+Revision 1.86  2007/10/18 23:06:42  cheshire
+<rdar://problem/5519458> BTMM: Machines don't appear in the sidebar on wake from sleep
+Additional fixes and refinements
+
+Revision 1.85  2007/10/18 20:23:17  cheshire
+Moved SuspendLLQs into mDNS.c, since it's only called from one place
+
+Revision 1.84  2007/10/17 22:49:54  cheshire
+<rdar://problem/5519458> BTMM: Machines don't appear in the sidebar on wake from sleep
+
+Revision 1.83  2007/10/17 22:37:23  cheshire
+<rdar://problem/5536979> BTMM: Need to create NAT port mapping for receiving LLQ events
+
+Revision 1.82  2007/10/17 21:53:51  cheshire
+Improved debugging messages; renamed startLLQHandshakeCallback to LLQGotZoneData
+
+Revision 1.81  2007/10/16 21:16:50  cheshire
+Get rid of unused uDNS_Sleep() routine
+
+Revision 1.80  2007/10/16 20:59:41  cheshire
+Export SuspendLLQs/SleepServiceRegistrations/SleepRecordRegistrations so they're callable from other files
+
 Revision 1.79  2007/09/20 01:13:19  cheshire
 Export CacheGroupForName so it's callable from other files
 
@@ -200,12 +229,14 @@ Revision 1.33  2006/07/05 22:53:28  cheshire
 
 // Entry points into unicast-specific routines
 
-extern void startLLQHandshakeCallback(mDNS *const m, mStatus err, const ZoneData *zoneInfo);
+extern void LLQGotZoneData(mDNS *const m, mStatus err, const ZoneData *zoneInfo);
+extern void startLLQHandshake(mDNS *m, DNSQuestion *q);
+extern void sendLLQRefresh(mDNS *m, DNSQuestion *q, mDNSu32 lease);
 
-extern void    uDNS_StopLongLivedQuery(mDNS *const m, DNSQuestion *const question);
-
-extern void uDNS_Sleep(mDNS *const m);
 extern void uDNS_Wake(mDNS *const m);
+
+extern void SleepServiceRegistrations(mDNS *m);
+extern void SleepRecordRegistrations(mDNS *m);
 
 // uDNS_UpdateRecord
 // following fields must be set, and the update validated, upon entry.
@@ -228,11 +259,10 @@ extern mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const questi
 extern mStatus mDNS_StopQuery_internal(mDNS *const m, DNSQuestion *const question);
 extern mStatus mDNS_StartNATOperation_internal(mDNS *const m, NATTraversalInfo *traversal);
 
-extern void RecordRegistrationCallback(mDNS *const m, mStatus err, const ZoneData *zoneData);
-extern void GetZoneData_QuestionCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord);
+extern void RecordRegistrationGotZoneData(mDNS *const m, mStatus err, const ZoneData *zoneData);
 extern mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr);
 
-extern void ServiceRegistrationZoneDataComplete(mDNS *const m, mStatus err, const ZoneData *result);
+extern void ServiceRegistrationGotZoneData(mDNS *const m, mStatus err, const ZoneData *result);
 extern const domainname *GetServiceTarget(mDNS *m, ServiceRecordSet *srs);
 extern mStatus uDNS_DeregisterService(mDNS *const m, ServiceRecordSet *srs);
 
@@ -251,13 +281,14 @@ extern mStatus         uDNS_RegisterSearchDomains(mDNS *const m);
 typedef enum
 	{
 	uDNS_LLQ_Not = 0,	// Normal uDNS answer: Flush any stale records from cache, and respect record TTL
-	uDNS_LLQ_Poll,		// LLQ Poll: Flush any stale records from cache, but assume TTL is 2 x poll interval
-	uDNS_LLQ_Setup,		// LLQ Initial answer packet: Flush any stale records from cache; assume TTL is 2 x LLQ refresh interval
+	uDNS_LLQ_Ignore,	// LLQ initial challenge packet: ignore -- has no useful records for us
+	uDNS_LLQ_Entire,	// LLQ initial set of answers: Flush any stale records from cache, but assume TTL is 2 x LLQ refresh interval
 	uDNS_LLQ_Events		// LLQ event packet: don't flush cache; assume TTL is 2 x LLQ refresh interval
 	} uDNS_LLQType;
 
 extern uDNS_LLQType    uDNS_recvLLQResponse(mDNS *const m, const DNSMessage *const msg, const mDNSu8 *const end, const mDNSAddr *const srcaddr, const mDNSIPPort srcport);
 extern DomainAuthInfo *GetAuthInfoForName_internal(mDNS *m, const domainname *const name);
+extern DomainAuthInfo *GetAuthInfoForQuestion(mDNS *m, const DNSQuestion *const q);
 extern void DisposeTCPConn(struct tcpInfo_t *tcp);
 
 // NAT traversal

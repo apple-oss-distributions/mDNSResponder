@@ -17,6 +17,47 @@
     Change History (most recent first):
 
 $Log: mDNSMacOSX.c,v $
+Revision 1.508  2007/11/02 21:59:37  cheshire
+Added comment about locking
+
+Revision 1.507  2007/11/02 20:18:13  cheshire
+<rdar://problem/5575583> BTMM: Work around keychain notification bug <rdar://problem/5124399>
+
+Revision 1.506  2007/10/30 20:46:45  cheshire
+<rdar://problem/5496734> BTMM: Need to retry registrations after failures
+
+Revision 1.505  2007/10/29 23:55:10  cheshire
+<rdar://problem/5526791> BTMM: Changing Local Hostname doesn't update Back to My Mac registered records
+Don't need to manually fake another AutoTunnelNATCallback if it has not yet received its first callback
+(and indeed should not, since the result fields will not yet be set up correctly in this case)
+
+Revision 1.504  2007/10/26 00:50:37  cheshire
+<rdar://problem/5526791> BTMM: Changing Local Hostname doesn't update Back to My Mac registered records
+
+Revision 1.503  2007/10/25 23:11:42  cheshire
+Ignore IPv6 ULA addresses configured on lo0 loopback interface
+
+Revision 1.502  2007/10/22 20:07:07  cheshire
+Moved mDNSPlatformSourceAddrForDest from mDNSMacOSX.c to PlatformCommon.c so
+Posix build can share the code (better than just pasting it into mDNSPosix.c)
+
+Revision 1.501  2007/10/22 19:40:30  cheshire
+<rdar://problem/5519458> BTMM: Machines don't appear in the sidebar on wake from sleep
+Made subroutine mDNSPlatformSourceAddrForDest(mDNSAddr *const src, const mDNSAddr *const dst)
+
+Revision 1.500  2007/10/17 22:49:55  cheshire
+<rdar://problem/5519458> BTMM: Machines don't appear in the sidebar on wake from sleep
+
+Revision 1.499  2007/10/17 19:47:54  cheshire
+Improved debugging messages
+
+Revision 1.498  2007/10/17 18:42:06  cheshire
+Export SetDomainSecrets so its callable from other files
+
+Revision 1.497  2007/10/16 17:03:07  cheshire
+<rdar://problem/3557903> Performance: Core code will not work on platforms with small stacks
+Cut SetDomainSecrets stack from 3792 to 1760 bytes
+
 Revision 1.496  2007/10/04 20:33:05  mcguire
 <rdar://problem/5518845> BTMM: Racoon configuration removed when network changes
 
@@ -936,6 +977,9 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
 	else
 		{
 		LogMsg("mDNSPlatformSendUDP: dst is not an IPv4 or IPv6 address!");
+#if ForceAlerts
+		*(long*)0 = 0;
+#endif
 		return mStatus_BadParamErr;
 		}
 
@@ -2055,32 +2099,54 @@ mDNSlocal mDNSBool TunnelClients(mDNS *const m)
 
 mDNSlocal void RegisterAutoTunnelRecords(mDNS *m, DomainAuthInfo *info)
 	{
-	if (!info->AutoTunnelNAT.Result && !mDNSIPPortIsZero(info->AutoTunnelNAT.ExternalPort) && AutoTunnelUnregistered(info))
+	if (info->AutoTunnelNAT.clientContext && !info->AutoTunnelNAT.Result && !mDNSIPPortIsZero(info->AutoTunnelNAT.ExternalPort) && AutoTunnelUnregistered(info))
 		{
-		LogOperation("RegisterAutoTunnelRecords %##s", info->AutoTunnelService.namestorage.c);
 		mStatus err;
-		info->AutoTunnelService.resrec.rdata->u.srv.port = info->AutoTunnelNAT.ExternalPort;
-		info->AutoTunnelService.resrec.RecordType = kDNSRecordTypeKnownUnique;
-		err = mDNS_Register(m, &info->AutoTunnelService);
-		if (err) LogMsg("RegisterAutoTunnelRecords error %d registering AutoTunnelService %##s", err, info->AutoTunnelService.namestorage.c);
-		
-		info->AutoTunnelTarget.resrec.RecordType = kDNSRecordTypeKnownUnique;
-		mDNS_Lock(m);
-		mDNS_AddDynDNSHostName(m, &info->AutoTunnelTarget.namestorage, mDNSNULL, info);
-		mDNS_Unlock(m);
+		LogOperation("RegisterAutoTunnelRecords %##s (%#s)", info->domain.c, m->hostlabel.c);
 
-		if (info->AutoTunnelHostRecord.namestorage.c[0] == 0)
-			{
-			AppendDomainLabel(&info->AutoTunnelHostRecord.namestorage, &m->hostlabel);
-			AppendDomainName (&info->AutoTunnelHostRecord.namestorage, &info->domain);
-			}
+		// 1. Set up our address record for the internal tunnel address
+		// (User-visible user-friendly host name, used as target in AutoTunnel SRV records)
+		info->AutoTunnelHostRecord.namestorage.c[0] = 0;
+		AppendDomainLabel(&info->AutoTunnelHostRecord.namestorage, &m->hostlabel);
+		AppendDomainName (&info->AutoTunnelHostRecord.namestorage, &info->domain);
+		info->AutoTunnelHostRecord.resrec.rdata->u.ipv6 = m->AutoTunnelHostAddr;
 		info->AutoTunnelHostRecord.resrec.RecordType = kDNSRecordTypeKnownUnique;
 		err = mDNS_Register(m, &info->AutoTunnelHostRecord);
 		if (err) LogMsg("RegisterAutoTunnelRecords error %d registering AutoTunnelHostRecord %##s", err, info->AutoTunnelHostRecord.namestorage.c);	
 
+		// 2. Set up device info record
+		ConstructServiceName(&info->AutoTunnelDeviceInfo.namestorage, &m->nicelabel, &DeviceInfoName, &info->domain);
+		mDNSu8 len = m->HIHardware.c[0] < 255 - 6 ? m->HIHardware.c[0] : 255 - 6;
+		mDNSPlatformMemCopy(info->AutoTunnelDeviceInfo.resrec.rdata->u.data + 1, "model=", 6);
+		mDNSPlatformMemCopy(info->AutoTunnelDeviceInfo.resrec.rdata->u.data + 7, m->HIHardware.c + 1, len);
+		info->AutoTunnelDeviceInfo.resrec.rdata->u.data[0] = 6 + len;	// "model=" plus the device string
+		info->AutoTunnelDeviceInfo.resrec.rdlength         = 7 + len;	// One extra for the length byte at the start of the string
 		info->AutoTunnelDeviceInfo.resrec.RecordType = kDNSRecordTypeKnownUnique;
 		err = mDNS_Register(m, &info->AutoTunnelDeviceInfo);
 		if (err) LogMsg("RegisterAutoTunnelRecords error %d registering AutoTunnelDeviceInfo %##s", err, info->AutoTunnelDeviceInfo.namestorage.c);
+
+		// 3. Set up our address record for the external tunnel address
+		// (Constructed name, not generally user-visible, used as target in IKE tunnel's SRV record)
+		info->AutoTunnelTarget.namestorage.c[0] = 0;
+		AppendDomainLabel(&info->AutoTunnelTarget.namestorage, &m->AutoTunnelLabel);
+		AppendDomainName (&info->AutoTunnelTarget.namestorage, &info->domain);
+		info->AutoTunnelTarget.resrec.RecordType = kDNSRecordTypeKnownUnique;
+
+		mDNS_Lock(m);
+		mDNS_AddDynDNSHostName(m, &info->AutoTunnelTarget.namestorage, mDNSNULL, info);
+		mDNS_Unlock(m);
+
+		// 4. Set up IKE tunnel's SRV record: "AutoTunnelHostRecord SRV 0 0 port AutoTunnelTarget"
+		AssignDomainName (&info->AutoTunnelService.namestorage, (const domainname*) "\x0B" "_autotunnel" "\x04" "_udp");
+		AppendDomainLabel(&info->AutoTunnelService.namestorage, &m->hostlabel);
+		AppendDomainName (&info->AutoTunnelService.namestorage, &info->domain);
+		info->AutoTunnelService.resrec.rdata->u.srv.priority = 0;
+		info->AutoTunnelService.resrec.rdata->u.srv.weight   = 0;
+		info->AutoTunnelService.resrec.rdata->u.srv.port     = info->AutoTunnelNAT.ExternalPort;
+		AssignDomainName(&info->AutoTunnelService.resrec.rdata->u.srv.target, &info->AutoTunnelTarget.namestorage);
+		info->AutoTunnelService.resrec.RecordType = kDNSRecordTypeKnownUnique;
+		err = mDNS_Register(m, &info->AutoTunnelService);
+		if (err) LogMsg("RegisterAutoTunnelRecords error %d registering AutoTunnelService %##s", err, info->AutoTunnelService.namestorage.c);
 
 		LogMsg("AutoTunnel server listening for connections on %##s[%.4a]:%d:%##s[%.16a]",
 			info->AutoTunnelTarget.namestorage.c,     &m->AdvertisedV4.ip.v4, mDNSVal16(info->AutoTunnelNAT.IntPort),
@@ -2090,7 +2156,7 @@ mDNSlocal void RegisterAutoTunnelRecords(mDNS *m, DomainAuthInfo *info)
 
 mDNSlocal void DeregisterAutoTunnelRecords(mDNS *m, DomainAuthInfo *info)
 	{
-	LogOperation("DeregisterAutoTunnelRecords %##s", info->AutoTunnelService.namestorage.c);
+	LogOperation("DeregisterAutoTunnelRecords %##s", info->domain.c);
 	if (info->AutoTunnelService.resrec.RecordType > kDNSRecordTypeDeregistering)
 		{
 		mStatus err = mDNS_Deregister(m, &info->AutoTunnelService);
@@ -2113,7 +2179,6 @@ mDNSlocal void DeregisterAutoTunnelRecords(mDNS *m, DomainAuthInfo *info)
 			info->AutoTunnelHostRecord.resrec.RecordType = kDNSRecordTypeUnregistered;
 			LogMsg("DeregisterAutoTunnelRecords error %d deregistering AutoTunnelHostRecord %##s", err, info->AutoTunnelHostRecord.namestorage.c);
 			}
-		info->AutoTunnelHostRecord.namestorage.c[0] = 0;
 		}
 
 	if (info->AutoTunnelDeviceInfo.resrec.RecordType > kDNSRecordTypeDeregistering)
@@ -2140,7 +2205,8 @@ mDNSlocal void AutoTunnelRecordCallback(mDNS *const m, AuthRecord *const rr, mSt
 mDNSlocal void AutoTunnelNATCallback(mDNS *m, NATTraversalInfo *n)
 	{
 	DomainAuthInfo *info = (DomainAuthInfo *)n->clientContext;
-	LogOperation("AutoTunnelNATCallback Result %d %.4a Internal %d External %d %##s", n->Result, &n->ExternalAddress, mDNSVal16(n->IntPort), mDNSVal16(n->ExternalPort), info->AutoTunnelService.namestorage.c);
+	LogOperation("AutoTunnelNATCallback Result %d %.4a Internal %d External %d %#s.%##s",
+		n->Result, &n->ExternalAddress, mDNSVal16(n->IntPort), mDNSVal16(n->ExternalPort), m->hostlabel.c, info->domain.c);
 
 	m->NextSRVUpdate = m->timenow;
 	DeregisterAutoTunnelRecords(m,info);
@@ -2157,6 +2223,17 @@ mDNSlocal void AutoTunnelNATCallback(mDNS *m, NATTraversalInfo *n)
 		// Create or revert configuration file, and start (or SIGHUP) Racoon
 		(void)mDNSConfigureServer(AnonymousRacoonConfig ? kmDNSUp : kmDNSDown, info ? info->b64keydata : "");
 		}
+	}
+
+mDNSlocal void AbortDeregistration(mDNS *const m, AuthRecord *rr)
+	{
+	if (rr->resrec.RecordType == kDNSRecordTypeDeregistering)
+		{
+		LogOperation("Aborting deregistration of %s", ARDisplayString(m, rr));
+		CompleteDeregistration(m, rr);
+		}
+	else if (rr->resrec.RecordType != kDNSRecordTypeUnregistered)
+		LogMsg("AbortDeregistration ERROR RecordType %02X for %s", ARDisplayString(m, rr));
 	}
 
 // Before SetupLocalAutoTunnelInterface_internal is called,
@@ -2182,36 +2259,15 @@ mDNSexport void SetupLocalAutoTunnelInterface_internal(mDNS *const m)
 			{
 			if (info->AutoTunnel && !info->deltime && !info->AutoTunnelNAT.clientContext)
 				{
-				// 1. Set up our address record for the internal tunnel address
-				// (User-visible user-friendly host name, used as target in AutoTunnel SRV records)
+				// If we just resurrected a DomainAuthInfo that is still deregistering, we need to abort the deregistration process before re-using the AuthRecord memory
+				AbortDeregistration(m, &info->AutoTunnelHostRecord);
+				AbortDeregistration(m, &info->AutoTunnelDeviceInfo);
+				AbortDeregistration(m, &info->AutoTunnelService);
+
 				mDNS_SetupResourceRecord(&info->AutoTunnelHostRecord, mDNSNULL, mDNSInterface_Any, kDNSType_AAAA, kHostNameTTL, kDNSRecordTypeUnregistered, AutoTunnelRecordCallback, info);
-				info->AutoTunnelHostRecord.namestorage.c[0] = 0;
-				info->AutoTunnelHostRecord.resrec.rdata->u.ipv6 = m->AutoTunnelHostAddr;
-
-				// 2. Set up device info record
-				mDNSu8 len = m->HIHardware.c[0] < 255 - 6 ? m->HIHardware.c[0] : 255 - 6;
-				mDNS_SetupResourceRecord(&info->AutoTunnelDeviceInfo, mDNSNULL, mDNSInterface_Any, kDNSType_TXT, kStandardTTL, kDNSRecordTypeUnregistered, AutoTunnelRecordCallback, info);
-				ConstructServiceName(&info->AutoTunnelDeviceInfo.namestorage, &m->nicelabel, &DeviceInfoName, &info->domain);
-				mDNSPlatformMemCopy(info->AutoTunnelDeviceInfo.resrec.rdata->u.data + 1, "model=", 6);
-				mDNSPlatformMemCopy(info->AutoTunnelDeviceInfo.resrec.rdata->u.data + 7, m->HIHardware.c + 1, len);
-				info->AutoTunnelDeviceInfo.resrec.rdata->u.data[0] = 6 + len;	// "model=" plus the device string
-				info->AutoTunnelDeviceInfo.resrec.rdlength         = 7 + len;	// One extra for the length byte at the start of the string
-
-				// 3. Set up our address record for the external tunnel address
-				// (Constructed name, not generally user-visible, used as target in IKE tunnel's SRV record)
-				mDNS_SetupResourceRecord(&info->AutoTunnelTarget, mDNSNULL, mDNSInterface_Any, kDNSType_A, kHostNameTTL, kDNSRecordTypeUnregistered, AutoTunnelRecordCallback, info);
-				info->AutoTunnelTarget.namestorage.c[0] = 0;
-				AppendDomainLabel(&info->AutoTunnelTarget.namestorage, &m->AutoTunnelLabel);
-				AppendDomainName (&info->AutoTunnelTarget.namestorage, &info->domain);
-
-				// 4. Set up IKE tunnel's SRV record: "AutoTunnelHostRecord SRV 0 0 port AutoTunnelTarget"
-				mDNS_SetupResourceRecord(&info->AutoTunnelService, mDNSNULL, mDNSInterface_Any, kDNSType_SRV, kHostNameTTL, kDNSRecordTypeUnregistered, AutoTunnelRecordCallback, info);
-				AssignDomainName(&info->AutoTunnelService.namestorage, (const domainname*) "\x0B" "_autotunnel" "\x04" "_udp");
-				AppendDomainLabel(&info->AutoTunnelService.namestorage, &m->hostlabel);
-				AppendDomainName (&info->AutoTunnelService.namestorage, &info->domain);
-				info->AutoTunnelService.resrec.rdata->u.srv.priority = 0;
-				info->AutoTunnelService.resrec.rdata->u.srv.weight   = 0;
-				AssignDomainName(&info->AutoTunnelService.resrec.rdata->u.srv.target, &info->AutoTunnelTarget.namestorage);
+				mDNS_SetupResourceRecord(&info->AutoTunnelDeviceInfo, mDNSNULL, mDNSInterface_Any, kDNSType_TXT,  kStandardTTL, kDNSRecordTypeUnregistered, AutoTunnelRecordCallback, info);
+				mDNS_SetupResourceRecord(&info->AutoTunnelTarget,     mDNSNULL, mDNSInterface_Any, kDNSType_A,    kHostNameTTL, kDNSRecordTypeUnregistered, AutoTunnelRecordCallback, info);
+				mDNS_SetupResourceRecord(&info->AutoTunnelService,    mDNSNULL, mDNSInterface_Any, kDNSType_SRV,  kHostNameTTL, kDNSRecordTypeUnregistered, AutoTunnelRecordCallback, info);
 
 				// Try to get a NAT port mapping for the AutoTunnelService
 				info->AutoTunnelNAT.clientCallback   = AutoTunnelNATCallback;
@@ -2320,7 +2376,7 @@ mDNSexport void AutoTunnelCallback(mDNS *const m, DNSQuestion *question, const R
 		mDNSAddr tmpDst = { mDNSAddrType_IPv4, {{{0}}} };
 		tmpDst.ip.v4 = tun->rmt_outer;
 		mDNSAddr tmpSrc = zeroAddr;
-		FindSourceAddrForIP(&tmpDst, &tmpSrc);
+		mDNSPlatformSourceAddrForDest(&tmpSrc, &tmpDst);
 		if (tmpSrc.type == mDNSAddrType_IPv4) tun->loc_outer = tmpSrc.ip.v4;
 		else tun->loc_outer = m->AdvertisedV4.ip.v4;
 
@@ -2470,9 +2526,9 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 					{
 					int ifru_flags6 = 0;
 #ifndef NO_IPV6
+					struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
 					if (ifa->ifa_addr->sa_family == AF_INET6 && InfoSocket >= 0)
 						{
-						struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
 						struct in6_ifreq ifr6;
 						mDNSPlatformMemZero((char *)&ifr6, sizeof(ifr6));
 						strlcpy(ifr6.ifr_name, ifa->ifa_name, sizeof(ifr6.ifr_name));
@@ -2485,8 +2541,12 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 					if (!(ifru_flags6 & (IN6_IFF_NOTREADY | IN6_IFF_DETACHED | IN6_IFF_DEPRECATED | IN6_IFF_TEMPORARY)))
 						{
 						if (ifa->ifa_flags & IFF_LOOPBACK)
-							if (ifa->ifa_addr->sa_family == AF_INET) v4Loopback = ifa;
-							else                                     v6Loopback = ifa;
+							{
+							if (ifa->ifa_addr->sa_family == AF_INET)     v4Loopback = ifa;
+#ifndef NO_IPV6
+							else if (sin6->sin6_addr.s6_addr[0] != 0xFD) v6Loopback = ifa;
+#endif
+							}
 						else
 							{
 							NetworkInterfaceInfoOSX *i = AddInterfaceToList(m, ifa, utc);
@@ -2577,6 +2637,8 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 		MakeDomainLabelFromLiteralString(&hostlabel, defaultname);
 		}
 
+	mDNSBool namechange = mDNSfalse;
+
 	// We use a case-sensitive comparison here because even though changing the capitalization
 	// of the name alone is not significant to DNS, it's still a change from the user's point of view
 	if (SameDomainLabelCS(m->p->usernicelabel.c, nicelabel.c))
@@ -2586,6 +2648,7 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 		if (m->p->usernicelabel.c[0])	// Don't show message first time through, when we first read name from prefs on boot
 			LogMsg("User updated Computer Name from %#s to %#s", m->p->usernicelabel.c, nicelabel.c);
 		m->p->usernicelabel = m->nicelabel = nicelabel;
+		namechange = mDNStrue;
 		}
 
 	if (SameDomainLabelCS(m->p->userhostlabel.c, hostlabel.c))
@@ -2596,7 +2659,18 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 			LogMsg("User updated Local Hostname from %#s to %#s", m->p->userhostlabel.c, hostlabel.c);
 		m->p->userhostlabel = m->hostlabel = hostlabel;
 		mDNS_SetFQDN(m);
+		namechange = mDNStrue;
 		}
+
+#if APPLE_OSX_mDNSResponder
+	if (namechange)		// If either name has changed, we need to tickle our AutoTunnel state machine to update its registered records
+		{
+		DomainAuthInfo *info;
+		for (info = m->AuthInfoList; info; info = info->next)
+			if (info->AutoTunnelNAT.clientContext && !mDNSIPv4AddressIsOnes(info->AutoTunnelNAT.ExternalAddress))
+				AutoTunnelNATCallback(m, &info->AutoTunnelNAT);
+		}
+#endif
 
 	return(mStatus_NoError);
 	}
@@ -2835,7 +2909,7 @@ mDNSexport void mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers, mDN
 			}
 		else
 			{
-			LogOperation("mDNSPlatformSetDNSConfig: Registering %d resolvers", config->n_resolver);
+			LogOperation("mDNSPlatformSetDNSConfig: config->n_resolver = %d", config->n_resolver);
 			if (setservers)
 				{
 				for (i = 0; i < config->n_resolver; i++)
@@ -3257,7 +3331,7 @@ mDNSexport void mDNSPlatformDynDNSHostNameStatusChanged(const domainname *const 
 	}
 
 // MUST be called holding the lock -- this routine calls SetupLocalAutoTunnelInterface_internal()
-mDNSlocal void SetDomainSecrets(mDNS *m)
+mDNSexport void SetDomainSecrets(mDNS *m)
 	{
 #ifdef NO_SECURITYFRAMEWORK
 	(void)m;
@@ -3288,6 +3362,7 @@ mDNSlocal void SetDomainSecrets(mDNS *m)
 	}
 #endif APPLE_OSX_mDNSResponder
 
+	// String Array used to write list of private domains to Dynamic Store
 	CFMutableArrayRef sa = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
 	if (!sa) { LogMsg("SetDomainSecrets: CFArrayCreateMutable failed"); return; }
 	CFIndex i;
@@ -3311,35 +3386,35 @@ mDNSlocal void SetDomainSecrets(mDNS *m)
 				if (CFDataGetTypeID() != CFGetTypeID(CFArrayGetValueAtIndex(entry, j)))
 					{ LogMsg("SetDomainSecrets: malformed entry item"); continue; }
 
-			// Validate that attributes are not too large
-			char dstring[MAX_ESCAPED_DOMAIN_NAME];
-			char keynamebuf[MAX_ESCAPED_DOMAIN_NAME];	// Max legal C-string name, including terminating NUL
 			// The names have already been vetted by the helper, but checking them again here helps humans and automated tools verify correctness
+
+			// Get DNS domain this key is for
+			char stringbuf[MAX_ESCAPED_DOMAIN_NAME];	// Max legal domainname as C-string, including terminating NUL
 			data = CFArrayGetValueAtIndex(entry, 0);
-			if (CFDataGetLength(data) >= (int)sizeof(dstring))
+			if (CFDataGetLength(data) >= (int)sizeof(stringbuf))
 				{ LogMsg("SetDomainSecrets: Bad kSecServiceItemAttr length %d", CFDataGetLength(data)); continue; }
-			CFDataGetBytes(data, CFRangeMake(0, CFDataGetLength(data)), (UInt8 *)dstring);
-			dstring[CFDataGetLength(data)] = '\0';
-			data = CFArrayGetValueAtIndex(entry, 1);
-			if (CFDataGetLength(data) >= (int)sizeof(keynamebuf))
-				{ LogMsg("SetDomainSecrets: Bad kSecAccountItemAttr length %d", CFDataGetLength(data)); continue; }
-			CFDataGetBytes(data, CFRangeMake(0,CFDataGetLength(data)), (UInt8 *)keynamebuf);
-			keynamebuf[CFDataGetLength(data)] = '\0';
+			CFDataGetBytes(data, CFRangeMake(0, CFDataGetLength(data)), (UInt8 *)stringbuf);
+			stringbuf[CFDataGetLength(data)] = '\0';
 
 			domainname domain;
-			if (!MakeDomainNameFromDNSNameString(&domain, dstring))     { LogMsg("SetDomainSecrets: bad key domain %s", dstring);  continue; }
+			if (!MakeDomainNameFromDNSNameString(&domain, stringbuf)) { LogMsg("SetDomainSecrets: bad key domain %s", stringbuf); continue; }
 
-			// Get DNS key name
+			// Get key name
+			data = CFArrayGetValueAtIndex(entry, 1);
+			if (CFDataGetLength(data) >= (int)sizeof(stringbuf))
+				{ LogMsg("SetDomainSecrets: Bad kSecAccountItemAttr length %d", CFDataGetLength(data)); continue; }
+			CFDataGetBytes(data, CFRangeMake(0,CFDataGetLength(data)), (UInt8 *)stringbuf);
+			stringbuf[CFDataGetLength(data)] = '\0';
+
 			domainname keyname;
-			if (!MakeDomainNameFromDNSNameString(&keyname, keynamebuf)) { LogMsg("SetDomainSecrets: bad key name %s", keynamebuf); continue; }
+			if (!MakeDomainNameFromDNSNameString(&keyname, stringbuf)) { LogMsg("SetDomainSecrets: bad key name %s", stringbuf); continue; }
 
-			// Get DNS key data
-			char keystring[1024];
+			// Get key data
 			data = CFArrayGetValueAtIndex(entry, 2);
-			if (CFDataGetLength(data) >= (int)sizeof(keystring))
+			if (CFDataGetLength(data) >= (int)sizeof(stringbuf))
 				{ LogMsg("SetDomainSecrets: Shared secret too long: %d", CFDataGetLength(data)); continue; }
-			CFDataGetBytes(data, CFRangeMake(0, CFDataGetLength(data)), (UInt8 *)keystring);
-			keystring[CFDataGetLength(data)] = '\0';	// mDNS_SetSecretForDomain requires NULL-terminated C string for key
+			CFDataGetBytes(data, CFRangeMake(0, CFDataGetLength(data)), (UInt8 *)stringbuf);
+			stringbuf[CFDataGetLength(data)] = '\0';	// mDNS_SetSecretForDomain requires NULL-terminated C string for key
 
 			DomainAuthInfo *FoundInList;
 			for (FoundInList = m->AuthInfoList; FoundInList; FoundInList = FoundInList->next)
@@ -3356,24 +3431,24 @@ mDNSlocal void SetDomainSecrets(mDNS *m)
 					LogOperation("SetDomainSecrets: tunnel to %##s no longer marked for deletion", client->dstname.c);
 					client->markedForDeletion = mDNSfalse;
 					// If the key has changed, reconfigure the tunnel
-					if (strncmp(keystring, client->b64keydata, sizeof(client->b64keydata)))
+					if (strncmp(stringbuf, client->b64keydata, sizeof(client->b64keydata)))
 						{
 						mDNSBool queryNotInProgress = client->q.ThisQInterval < 0;
 						LogOperation("SetDomainSecrets: secret changed for tunnel %##s %s", client->dstname.c, queryNotInProgress ? "reconfiguring" : "query in progress");
 						if (queryNotInProgress) AutoTunnelSetKeys(client, mDNSfalse);
-						mDNS_snprintf(client->b64keydata, sizeof(client->b64keydata), "%s", keystring);
+						mDNS_snprintf(client->b64keydata, sizeof(client->b64keydata), "%s", stringbuf);
 						if (queryNotInProgress) AutoTunnelSetKeys(client, mDNStrue);
 						}
 					}
 				}
 
-			mDNSBool keyChanged = FoundInList && FoundInList->AutoTunnel ? strncmp(keystring, FoundInList->b64keydata, sizeof(FoundInList->b64keydata)) : mDNSfalse;
+			mDNSBool keyChanged = FoundInList && FoundInList->AutoTunnel ? strncmp(stringbuf, FoundInList->b64keydata, sizeof(FoundInList->b64keydata)) : mDNSfalse;
 
 #endif APPLE_OSX_mDNSResponder
 
 			// Uncomment the line below to view the keys as they're read out of the system keychain
 			// DO NOT SHIP CODE THIS WAY OR YOU'LL LEAK SECRET DATA INTO A PUBLICLY READABLE FILE!
-			//LogOperation("SetDomainSecrets: %##s %##s %s", &domain.c, &keyname.c, keystring);
+			//LogOperation("SetDomainSecrets: %##s %##s %s", &domain.c, &keyname.c, stringbuf);
 
 			// If didn't find desired domain in the list, make a new entry
 			ptr = FoundInList;
@@ -3385,7 +3460,7 @@ mDNSlocal void SetDomainSecrets(mDNS *m)
 				}
 
 			LogOperation("SetDomainSecrets: %d of %d %##s", i, ArrayCount, &domain);
-			if (mDNS_SetSecretForDomain(m, ptr, &domain, &keyname, keystring, IsTunnelModeDomain(&domain)) == mStatus_BadParamErr)
+			if (mDNS_SetSecretForDomain(m, ptr, &domain, &keyname, stringbuf, IsTunnelModeDomain(&domain)) == mStatus_BadParamErr)
 				{
 				if (!FoundInList) mDNSPlatformMemFree(ptr);		// If we made a new DomainAuthInfo here, and it turned out bad, dispose it immediately
 				continue;
@@ -3395,11 +3470,12 @@ mDNSlocal void SetDomainSecrets(mDNS *m)
 			if (keyChanged && AnonymousRacoonConfig)
 				{
 				LogOperation("SetDomainSecrets: secret changed for %##s", &domain);
-				(void)mDNSConfigureServer(kmDNSUp, keystring);
+				(void)mDNSConfigureServer(kmDNSUp, stringbuf);
 				}
 #endif APPLE_OSX_mDNSResponder
 
-			CFStringRef cfs = CFStringCreateWithCString(NULL, dstring, kCFStringEncodingUTF8);
+			ConvertDomainNameToCString(&domain, stringbuf);
+			CFStringRef cfs = CFStringCreateWithCString(NULL, stringbuf, kCFStringEncodingUTF8);
 			if (cfs) { CFArrayAppendValue(sa, cfs); CFRelease(cfs); }
 			}
 		CFRelease(secrets);
@@ -3417,7 +3493,7 @@ mDNSlocal void SetDomainSecrets(mDNS *m)
 				{
 				ClientTunnel *cur = *ptr;
 				LogOperation("SetDomainSecrets: removing client %##s from list", cur->dstname.c);
-				if (cur->q.ThisQInterval >= 0)	mDNS_StopQuery(m, &cur->q);
+				if (cur->q.ThisQInterval >= 0) mDNS_StopQuery(m, &cur->q);
 				AutoTunnelSetKeys(cur, mDNSfalse);
 				*ptr = cur->next;
 				freeL("ClientTunnel", cur);
@@ -3433,9 +3509,9 @@ mDNSlocal void SetDomainSecrets(mDNS *m)
 				{
 				// stop the NAT operation
 				mDNS_StopNATOperation_internal(m, &info->AutoTunnelNAT);
-				if (info->AutoTunnelHostRecord.namestorage.c[0] && info->AutoTunnelNAT.clientCallback)
+				if (info->AutoTunnelNAT.clientCallback)
 					{
-					// reset port and let the AutoTunnelNATCallback handle cleanup
+					// Reset port and let the AutoTunnelNATCallback handle cleanup
 					info->AutoTunnelNAT.ExternalAddress = m->ExternalAddress;
 					info->AutoTunnelNAT.ExternalPort    = zeroIPPort;
 					info->AutoTunnelNAT.Lifetime        = 0;
@@ -3494,13 +3570,13 @@ mDNSexport void mDNSMacOSXNetworkChanged(mDNS *const m)
 	{
 	LogOperation("***   Network Configuration Change   ***  (%d)%s",
 		m->p->NetworkChanged ? mDNS_TimeNow(m) - m->p->NetworkChanged : 0,
-		m->p->NetworkChanged ? "": " (no scheduled configuration change)");
+		m->p->NetworkChanged ? "" : " (no scheduled configuration change)");
 	m->p->NetworkChanged = 0;		// If we received a network change event and deferred processing, we're now dealing with it
 	mDNSs32 utc = mDNSPlatformUTC();
 	MarkAllInterfacesInactive(m, utc);
 	UpdateInterfaceList(m, utc);
-	int nDeletions = ClearInactiveInterfaces(m, utc);
-	int nAdditions = SetupActiveInterfaces(m, utc);
+	ClearInactiveInterfaces(m, utc);
+	SetupActiveInterfaces(m, utc);
 
 	#if APPLE_OSX_mDNSResponder
 		{
@@ -3521,7 +3597,7 @@ mDNSexport void mDNSMacOSXNetworkChanged(mDNS *const m)
 				mDNSAddr tmpSrc = zeroAddr;
 				mDNSAddr tmpDst = { mDNSAddrType_IPv4, {{{0}}} };
 				tmpDst.ip.v4 = p->rmt_outer;
-				FindSourceAddrForIP(&tmpDst, &tmpSrc);
+				mDNSPlatformSourceAddrForDest(&tmpSrc, &tmpDst);
 				if (!mDNSSameIPv6Address(p->loc_inner, m->AutoTunnelHostAddr) ||
 					!mDNSSameIPv4Address(p->loc_outer, tmpSrc.ip.v4))
 					{
@@ -3534,8 +3610,7 @@ mDNSexport void mDNSMacOSXNetworkChanged(mDNS *const m)
 		}
 	#endif APPLE_OSX_mDNSResponder
 
-	uDNS_SetupDNSConfig(m);                           // note - call DynDNSConfigChanged *before* mDNS_UpdateLLQs
-	if (nDeletions || nAdditions) mDNS_UpdateLLQs(m); // so that LLQs are restarted against the up to date name servers
+	uDNS_SetupDNSConfig(m);
 
 	if (m->MainCallback)
 		m->MainCallback(m, mStatus_ConfigChanged);
@@ -3577,6 +3652,17 @@ mDNSlocal void NetworkChanged(SCDynamicStoreRef store, CFArrayRef changedKeys, v
 	if (!m->p->NetworkChanged ||
 		m->p->NetworkChanged - NonZeroTime(m->timenow + delay) < 0)
 		m->p->NetworkChanged = NonZeroTime(m->timenow + delay);
+
+	// KeyChain frequently fails to notify clients of change events. To work around this
+	// we set a timer and periodically poll to detect if any changes have occurred.
+	// Without this Back To My Mac just does't work for a large number of users.
+	// See <rdar://problem/5124399> Not getting Keychain Changed events when enabling BTMM
+	if (c3 || CFArrayContainsValue(changedKeys, range, NetworkChangedKey_BackToMyMac))
+		{
+		LogOperation("***   NetworkChanged   *** starting KeyChainBugTimer");
+		m->p->KeyChainBugTimer    = NonZeroTime(m->timenow + delay);
+		m->p->KeyChainBugInterval = mDNSPlatformOneSecond;
+		}
 
 	if (!m->SuppressSending ||
 		m->SuppressSending - m->p->NetworkChanged < 0)
@@ -3665,6 +3751,7 @@ mDNSlocal OSStatus KeychainChanged(SecKeychainEvent keychainEvent, SecKeychainCa
 					keychainEvent == kSecAddEvent    ? "kSecAddEvent" : 
 					keychainEvent == kSecDeleteEvent ? "kSecDeleteEvent" : 
 					keychainEvent == kSecUpdateEvent ? "kSecUpdateEvent" :  "<Unknown>");
+				// We're running on the CFRunLoop (Mach port) thread, not the kqueue thread, so we need to grab the KQueueLock before proceeding
 				KQueueLock(m);
 				mDNS_Lock(m);
 				SetDomainSecrets(m);
@@ -3849,6 +3936,7 @@ mDNSlocal mStatus mDNSPlatformInit_setup(mDNS *const m)
 	m->p->userhostlabel.c[0] = 0;
 	m->p->usernicelabel.c[0] = 0;
 	m->p->NotifyUser         = 0;
+	m->p->KeyChainBugTimer   = 0;
 
 	m->AutoTunnelHostAddr.b[0] = 0;		// Zero out AutoTunnelHostAddr so UpdateInterfaceList() know it has to set it up
 

@@ -31,6 +31,13 @@
 # then try typing "gmake os=xxx" instead.
 #
 # $Log: Makefile,v $
+# Revision 1.78  2007/10/22 20:16:49  cheshire
+# Got rid of jaguar and panther from list of target platforms;
+# changed "os=tiger" to "os=x" (which works with both Tiger and Leopard)
+#
+# Revision 1.77  2007/10/22 20:04:51  cheshire
+# Need to include PlatformCommon.c.o in embedded targets
+#
 # Revision 1.76  2007/07/31 23:39:02  mcguire
 # Don't bail on errors in flex-generated .c files
 #
@@ -367,25 +374,7 @@ CFLAGS_OS = -DHAVE_BROKEN_RECVDSTADDR
 LDCONFIG = ldconfig
 else
 
-ifeq ($(os),jaguar)
-CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror -DNOT_HAVE_SOCKLEN_T
-LD = libtool -dynamic
-LINKOPTS = -lSystem
-LDSUFFIX = dylib
-JDK = /System/Library/Frameworks/JavaVM.framework/Home
-JAVACFLAGS_OS = -dynamiclib -I/System/Library/Frameworks/JavaVM.framework/Headers -framework JavaVM 
-else
-
-ifeq ($(os),panther)
-CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror
-LD = libtool -dynamic
-LINKOPTS = -lSystem
-LDSUFFIX = dylib
-JDK = /System/Library/Frameworks/JavaVM.framework/Home
-JAVACFLAGS_OS = -dynamiclib -I/System/Library/Frameworks/JavaVM.framework/Headers -framework JavaVM 
-else
-
-ifeq ($(os),tiger)
+ifeq ($(os),x)
 CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror -Wdeclaration-after-statement #-Wunreachable-code
 CC = @gcc-4.0
 LD = $(CC) -dynamiclib
@@ -395,10 +384,8 @@ JDK = /System/Library/Frameworks/JavaVM.framework/Home
 JAVACFLAGS_OS = -dynamiclib -I/System/Library/Frameworks/JavaVM.framework/Headers -framework JavaVM 
 else
 
-$(error ERROR: Must specify target OS on command-line, e.g. "make os=tiger [target]".\
-Supported operating systems include: jaguar, panther, tiger, linux, netbsd, freebsd, openbsd, solaris) 
-endif
-endif
+$(error ERROR: Must specify target OS on command-line, e.g. "make os=x [target]".\
+Supported operating systems include: x, linux, netbsd, freebsd, openbsd, solaris) 
 endif
 endif
 endif
@@ -661,7 +648,8 @@ JavaDoc: Java setup
 #############################################################################
 
 # The following targets build embedded example programs
-SPECIALOBJ = $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/GenLinkedList.c.o $(OBJDIR)/DNSDigest.c.o $(OBJDIR)/uDNS.c.o $(OBJDIR)/DNSCommon.c.o
+SPECIALOBJ = $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/GenLinkedList.c.o \
+	$(OBJDIR)/DNSDigest.c.o $(OBJDIR)/uDNS.c.o $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/PlatformCommon.c.o
 COMMONOBJ  = $(SPECIALOBJ) $(OBJDIR)/mDNS.c.o
 APPOBJ     = $(COMMONOBJ) $(OBJDIR)/ExampleClientApp.c.o
 

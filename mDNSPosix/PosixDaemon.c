@@ -21,6 +21,9 @@
 	Change History (most recent first):
 
 $Log: PosixDaemon.c,v $
+Revision 1.43  2007/10/22 20:05:34  cheshire
+Use mDNSPlatformSourceAddrForDest instead of FindSourceAddrForIP
+
 Revision 1.42  2007/09/18 19:09:02  cheshire
 <rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
 
@@ -119,11 +122,12 @@ mDNSlocal void mDNS_StatusCallback(mDNS *const m, mStatus result)
 static void Reconfigure(mDNS *m)
 	{
 	mDNSAddr DynDNSIP;
+	const mDNSAddr dummy = { mDNSAddrType_IPv4, { { { 1, 1, 1, 1 } } } };;
 	mDNS_SetPrimaryInterfaceInfo(m, NULL, NULL, NULL);
 	if (ParseDNSServers(m, uDNS_SERVERS_FILE) < 0)
 		LogMsg("Unable to parse DNS server list. Unicast DNS-SD unavailable");
 	ReadDDNSSettingsFromConfFile(m, CONFIG_FILE, &DynDNSHostname, &DynDNSZone, NULL);
-	FindSourceAddrForIP(NULL, &DynDNSIP);
+	mDNSPlatformSourceAddrForDest(&DynDNSIP, &dummy);
 	if (DynDNSHostname.c[0]) mDNS_AddDynDNSHostName(m, &DynDNSHostname, NULL, NULL);
 	if (DynDNSIP.type)       mDNS_SetPrimaryInterfaceInfo(m, &DynDNSIP, NULL, NULL);
 	m->MainCallback(m, mStatus_ConfigChanged);
