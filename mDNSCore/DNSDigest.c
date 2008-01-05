@@ -17,6 +17,12 @@
     Change History (most recent first):
 
 $Log: DNSDigest.c,v $
+Revision 1.25  2007/12/17 23:48:29  cheshire
+DNSDigest_SignMessage doesn't need to return a result -- it already updates the 'end' parameter
+
+Revision 1.24  2007/11/30 23:03:51  cheshire
+Fixes for EFI: Use "mDNSPlatformMemCopy" instead of assuming existence of "memcpy"
+
 Revision 1.23  2007/09/21 21:12:36  cheshire
 DNSDigest_SignMessage does not need separate "mDNSu16 *numAdditionals" parameter
 
@@ -810,7 +816,7 @@ int HASH_UPDATE (HASH_CTX *c, const void *data_, unsigned long len)
 #if !defined(HASH_BLOCK_DATA_ORDER)
 			while (sw--)
 				{
-				memcpy (p=c->data,data,HASH_CBLOCK);
+				mDNSPlatformMemCopy(p=c->data,data,HASH_CBLOCK);
 				HASH_BLOCK_DATA_ORDER_ALIGNED(c,p,1);
 				data+=HASH_CBLOCK;
 				len-=HASH_CBLOCK;
@@ -853,7 +859,7 @@ void HASH_TRANSFORM (HASH_CTX *c, const unsigned char *data)
 	else
 #if !defined(HASH_BLOCK_DATA_ORDER)
 		{
-		memcpy (c->data,data,HASH_CBLOCK);
+		mDNSPlatformMemCopy(c->data,data,HASH_CBLOCK);
 		HASH_BLOCK_DATA_ORDER_ALIGNED (c,c->data,1);
 		}
 #endif
@@ -1404,7 +1410,7 @@ mDNSexport mDNSs32 DNSDigest_ConstructHMACKeyfromBase64(DomainAuthInfo *info, co
 	return(keylen);
 	}
 
-mDNSexport mDNSu8 *DNSDigest_SignMessage(DNSMessage *msg, mDNSu8 **end, DomainAuthInfo *info, mDNSu16 tcode)
+mDNSexport void DNSDigest_SignMessage(DNSMessage *msg, mDNSu8 **end, DomainAuthInfo *info, mDNSu16 tcode)
 	{
 	AuthRecord tsig;
 	mDNSu8  *rdata, *const countPtr = (mDNSu8 *)&msg->h.numAdditionals;	// Get existing numAdditionals value
@@ -1447,7 +1453,7 @@ mDNSexport mDNSu8 *DNSDigest_SignMessage(DNSMessage *msg, mDNSu8 **end, DomainAu
 	// time
 	// get UTC (universal time), convert to 48-bit unsigned in network byte order
 	utc32 = (mDNSu32)mDNSPlatformUTC();
-	if (utc32 == (unsigned)-1) { LogMsg("ERROR: DNSDigest_SignMessage - mDNSPlatformUTC returned bad time -1"); return mDNSNULL; }
+	if (utc32 == (unsigned)-1) { LogMsg("ERROR: DNSDigest_SignMessage - mDNSPlatformUTC returned bad time -1"); *end = mDNSNULL; }
 	utc48[0] = 0;
 	utc48[1] = 0;
 	utc48[2] = (mDNSu8)((utc32 >> 24) & 0xff);
@@ -1497,13 +1503,11 @@ mDNSexport mDNSu8 *DNSDigest_SignMessage(DNSMessage *msg, mDNSu8 **end, DomainAu
 	
 	tsig.resrec.rdlength = (mDNSu16)(rdata - tsig.resrec.rdata->u.data);
 	*end = PutResourceRecordTTLJumbo(msg, ptr, &numAdditionals, &tsig.resrec, 0);
-	if (!*end) { LogMsg("ERROR: DNSDigest_SignMessage - could not put TSIG"); return mDNSNULL; }
+	if (!*end) { LogMsg("ERROR: DNSDigest_SignMessage - could not put TSIG"); *end = mDNSNULL; return; }
 
 	// Write back updated numAdditionals value
 	countPtr[0] = (mDNSu8)(numAdditionals >> 8);
 	countPtr[1] = (mDNSu8)(numAdditionals &  0xFF);
-
-	return *end;
 	}
 
 mDNSexport mDNSBool DNSDigest_VerifyMessage(DNSMessage *msg, mDNSu8 *end, LargeCacheRecord * lcr, DomainAuthInfo *info, mDNSu16 * rcode, mDNSu16 * tcode)

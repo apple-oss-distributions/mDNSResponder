@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: mDNSMacOSX.h,v $
+Revision 1.75  2007/12/14 00:45:21  cheshire
+Add SleepLimit and SleepCookie, for when we need to delay sleep until TLS/TCP record deregistration completes
+
 Revision 1.74  2007/11/02 20:18:13  cheshire
 <rdar://problem/5575583> BTMM: Work around keychain notification bug <rdar://problem/5124399>
 
@@ -171,6 +174,8 @@ struct mDNS_PlatformSupport_struct
 	IONotificationPortRef    PowerPortRef;
 	io_connect_t             PowerConnection;
 	io_object_t              PowerNotifier;
+	mDNSs32                  SleepLimit;		// Set when we get kIOMessageSystemWillSleep notification
+	long                     SleepCookie;		// Cookie we need to pass to IOAllowPowerChange()
 	pthread_mutex_t          BigMutex;
 	mDNSs32                  BigMutexStartTime;
 	int						 WakeKQueueLoopFD;
@@ -218,7 +223,7 @@ struct CompileTimeAssertionChecks_mDNSMacOSX
 	// other overly-large structures instead of having a pointer to them, can inadvertently
 	// cause structure sizes (and therefore memory usage) to balloon unreasonably.
 	char sizecheck_NetworkInterfaceInfoOSX[(sizeof(NetworkInterfaceInfoOSX) <=  4100) ? 1 : -1];
-	char sizecheck_mDNS_PlatformSupport   [(sizeof(mDNS_PlatformSupport)    <=   260) ? 1 : -1];
+	char sizecheck_mDNS_PlatformSupport   [(sizeof(mDNS_PlatformSupport)    <=   268) ? 1 : -1];
 	};
 
 #ifdef  __cplusplus

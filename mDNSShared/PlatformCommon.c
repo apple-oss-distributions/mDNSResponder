@@ -17,6 +17,10 @@
     Change History (most recent first):
 
 $Log: PlatformCommon.c,v $
+Revision 1.14  2007/12/03 18:37:26  cheshire
+Moved mDNSPlatformWriteLogMsg & mDNSPlatformWriteDebugMsg
+from mDNSMacOSX.c to PlatformCommon.c, so that Posix build can use them
+
 Revision 1.13  2007/10/22 20:07:07  cheshire
 Moved mDNSPlatformSourceAddrForDest from mDNSMacOSX.c to PlatformCommon.c so
 Posix build can share the code (better than just pasting it into mDNSPosix.c)
@@ -69,6 +73,7 @@ Move ReadDDNSSettingsFromConfFile() from mDNSMacOSX.c to PlatformCommon.c
 #include <errno.h>				// Needed for errno etc.
 #include <sys/socket.h>			// Needed for socket() etc.
 #include <netinet/in.h>			// Needed for sockaddr_in
+#include <syslog.h>
 
 #include "mDNSEmbeddedAPI.h"	// Defines the interface provided to the client layer above
 #include "DNSCommon.h"
@@ -178,4 +183,27 @@ mDNSexport void ReadDDNSSettingsFromConfFile(mDNS *const m, const char *const fi
 	badf:
 	LogMsg("ERROR: malformatted config file");
 	if (f) fclose(f);	
+	}
+
+#if MDNS_DEBUGMSGS
+mDNSexport void	mDNSPlatformWriteDebugMsg(const char *msg)
+	{
+	fprintf(stderr,"%s\n", msg);
+	fflush(stderr);
+	}
+#endif
+
+mDNSexport void	mDNSPlatformWriteLogMsg(const char *ident, const char *buffer, int logoptflags)
+	{
+	if (mDNS_DebugMode)	// In debug mode we write to stderr
+		{
+		fprintf(stderr,"%s\n", buffer);
+		fflush(stderr);
+		}
+	else				// else, in production mode, we write to syslog
+		{
+		openlog(ident, LOG_CONS | logoptflags, LOG_DAEMON);
+		syslog(LOG_ERR, "%s", buffer);
+		closelog();
+		}
 	}

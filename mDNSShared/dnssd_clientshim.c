@@ -25,6 +25,9 @@
 	Change History (most recent first):
 
 $Log: dnssd_clientshim.c,v $
+Revision 1.16  2007/11/30 20:12:24  cheshire
+Removed unused "badparam:" label
+
 Revision 1.15  2007/07/27 19:30:41  cheshire
 Changed mDNSQuestionCallback parameter from mDNSBool to QC_result,
 to properly reflect tri-state nature of the possible responses
@@ -711,8 +714,6 @@ DNSServiceErrorType DNSServiceQueryRecord
 	*sdRef = (DNSServiceRef)x;
 	return(mStatus_NoError);
 
-badparam:
-	err = mStatus_BadParamErr;
 fail:
 	LogMsg("DNSServiceQueryRecord(\"%s\", %d, %d) failed: %s (%ld)", fullname, rrtype, rrclass, errormsg, err);
 	return(err);

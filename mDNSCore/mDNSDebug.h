@@ -17,6 +17,12 @@
     Change History (most recent first):
 
 $Log: mDNSDebug.h,v $
+Revision 1.38  2007/12/13 20:27:07  cheshire
+Remove unused VerifySameNameAssumptions symbol
+
+Revision 1.37  2007/12/01 00:33:17  cheshire
+Fixes from Bob Bradley for building on EFI
+
 Revision 1.36  2007/10/01 19:06:19  cheshire
 Defined symbolic constant MDNS_LOG_INITIAL_LEVEL to set the logging level we start out at
 
@@ -140,14 +146,39 @@ Merge in license terms from Quinn's copy, in preparation for Darwin release
 	extern "C" {
 #endif
 
+// Variable argument macro support. Use ANSI C99 __VA_ARGS__ where possible. Otherwise, use the next best thing.
+
+#if (defined(__GNUC__))
+	#if ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 2)))
+		#define	MDNS_C99_VA_ARGS		1
+		#define	MDNS_GNU_VA_ARGS		0
+	#else
+		#define	MDNS_C99_VA_ARGS		0
+		#define	MDNS_GNU_VA_ARGS		1
+	#endif
+	#define	MDNS_HAS_VA_ARG_MACROS		1
+#elif (_MSC_VER >= 1400) // Visual Studio 2005 and later
+	#define	MDNS_C99_VA_ARGS			1
+	#define	MDNS_GNU_VA_ARGS			0
+	#define	MDNS_HAS_VA_ARG_MACROS		1
+#elif (defined(__MWERKS__))
+	#define	MDNS_C99_VA_ARGS			1
+	#define	MDNS_GNU_VA_ARGS			0
+	#define	MDNS_HAS_VA_ARG_MACROS		1
+#else
+	#define	MDNS_C99_VA_ARGS			0
+	#define	MDNS_GNU_VA_ARGS			0
+	#define	MDNS_HAS_VA_ARG_MACROS		0
+#endif
+
 #if MDNS_DEBUGMSGS
 #define debugf debugf_
 extern void debugf_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
 #else // If debug breaks are off, use a preprocessor trick to optimize those calls out of the code
-	#if (defined(__GNUC__))
+	#if (MDNS_C99_VA_ARGS)
+		#define	debugf( ... ) ((void)0)
+	#elif (MDNS_GNU_VA_ARGS)
 		#define	debugf( ARGS... ) ((void)0)
-	#elif (defined(__MWERKS__))
-		#define	debugf( ... )
 	#else
 		#define debugf 1 ? ((void)0) : (void)
 	#endif
@@ -157,10 +188,10 @@ extern void debugf_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
 #define verbosedebugf verbosedebugf_
 extern void verbosedebugf_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
 #else
-	#if (defined(__GNUC__))
+	#if (MDNS_C99_VA_ARGS)
+		#define	verbosedebugf( ... ) ((void)0)
+	#elif (MDNS_GNU_VA_ARGS)
 		#define	verbosedebugf( ARGS... ) ((void)0)
-	#elif (defined(__MWERKS__))
-		#define	verbosedebugf( ... )
 	#else
 		#define verbosedebugf 1 ? ((void)0) : (void)
 	#endif
@@ -215,8 +246,6 @@ extern void udns_validatelists(void *const v);
 #endif
 
 #define ForceAlerts 0
-
-#define VerifySameNameAssumptions 0
 
 #ifdef	__cplusplus
 	}

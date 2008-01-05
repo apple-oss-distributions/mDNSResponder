@@ -28,6 +28,9 @@
    Change History (most recent first):
 
 $Log: dnssd_clientlib.c,v $
+Revision 1.18  2007/11/30 23:06:10  cheshire
+Fixed compile warning: declaration of 'index' shadows a global declaration
+
 Revision 1.17  2007/10/02 19:36:04  cheshire
 <rdar://problem/5516444> TXTRecordGetValuePtr should be case-insenstive
 
@@ -353,7 +356,7 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
 	(
 	uint16_t         txtLen,
 	const void       *txtRecord,
-	uint16_t         index,
+	uint16_t         itemIndex,
 	uint16_t         keyBufLen,
 	char             *key,
 	uint8_t          *valueLen,
@@ -363,7 +366,7 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
 	uint16_t count = 0;
 	uint8_t *p = (uint8_t*)txtRecord;
 	uint8_t *e = p + txtLen;
-	while (p<e && count<index) { p += 1 + p[0]; count++; }	// Find requested item
+	while (p<e && count<itemIndex) { p += 1 + p[0]; count++; }	// Find requested item
 	if (p<e && p + 1 + p[0] <= e)	// If valid
 		{
 		uint8_t *x = p+1;

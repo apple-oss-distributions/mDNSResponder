@@ -28,6 +28,33 @@
 	Change History (most recent first):
 
 $Log: dnssd_clientstub.c,v $
+Revision 1.100  2007/11/02 17:56:37  cheshire
+<rdar://problem/5565787> Bonjour API broken for 64-bit apps (SCM_RIGHTS sendmsg fails)
+Wrap hack code in "#if APPLE_OSX_mDNSResponder" since (as far as we know right now)
+we don't want to do this on 64-bit Linux, Solaris, etc.
+
+Revision 1.99  2007/11/02 17:29:40  cheshire
+<rdar://problem/5565787> Bonjour API broken for 64-bit apps (SCM_RIGHTS sendmsg fails)
+To get 64-bit code that works, we need to NOT use the standard CMSG_* macros
+
+Revision 1.98  2007/11/01 19:52:43  cheshire
+Wrap debugging messages in "#if DEBUG_64BIT_SCM_RIGHTS"
+
+Revision 1.97  2007/11/01 19:45:55  cheshire
+Added "DEBUG_64BIT_SCM_RIGHTS" debugging code
+See <rdar://problem/5565787> Bonjour API broken for 64-bit apps (SCM_RIGHTS sendmsg fails)
+
+Revision 1.96  2007/11/01 15:59:33  cheshire
+umask not being set and restored properly in USE_NAMED_ERROR_RETURN_SOCKET code
+(no longer used on OS X, but relevant for other platforms)
+
+Revision 1.95  2007/10/31 20:07:16  cheshire
+<rdar://problem/5541498> Set SO_NOSIGPIPE on client socket
+Refinement: the cleanup code still needs to close listenfd when necesssary
+
+Revision 1.94  2007/10/15 22:34:27  cheshire
+<rdar://problem/5541498> Set SO_NOSIGPIPE on client socket
+
 Revision 1.93  2007/10/10 00:48:54  cheshire
 <rdar://problem/5526379> Daemon spins in an infinite loop when it doesn't get the control message it's expecting
 
@@ -480,6 +507,9 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
 		}
 	else
 		{
+		#ifdef SO_NOSIGPIPE
+		const unsigned long optval = 1;
+		#endif
 		*ref = NULL;
 		sdr->sockfd    = socket(AF_DNSSD, SOCK_STREAM, 0);
 		sdr->validator = sdr->sockfd ^ ValidatorBits;
@@ -489,6 +519,11 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
 			FreeDNSServiceOp(sdr);
 			return kDNSServiceErr_NoMemory;
 			}
+		#ifdef SO_NOSIGPIPE
+		// Some environments (e.g. OS X) support turning off SIGPIPE for a socket
+		if (setsockopt(sdr->sockfd, SOL_SOCKET, SO_NOSIGPIPE, &optval, sizeof(optval)) < 0)
+			syslog(LOG_WARNING, "dnssd_clientstub ConnectToServer: SO_NOSIGPIPE failed %d %s", errno, strerror(errno));
+		#endif
 		#if defined(USE_TCP_LOOPBACK)
 		saddr.sin_family      = AF_INET;
 		saddr.sin_addr.s_addr = inet_addr(MDNS_TCP_SERVERADDR);
@@ -565,8 +600,9 @@ static DNSServiceErrorType deliver_request(ipc_msg_hdr *hdr, DNSServiceOp *sdr)
 			}
 		#elif defined(USE_NAMED_ERROR_RETURN_SOCKET)
 			{
+			mode_t mask;
+			int bindresult;
 			dnssd_sockaddr_t caddr;
-			mode_t mask = umask(0);
 			listenfd = socket(AF_DNSSD, SOCK_STREAM, 0);
 			if (!dnssd_SocketValid(listenfd)) goto cleanup;
 
@@ -577,8 +613,10 @@ static DNSServiceErrorType deliver_request(ipc_msg_hdr *hdr, DNSServiceOp *sdr)
 			caddr.sun_len = sizeof(struct sockaddr_un);
 			#endif
 			strcpy(caddr.sun_path, data);
+			mask = umask(0);
+			bindresult = bind(listenfd, (struct sockaddr *)&caddr, sizeof(caddr));
 			umask(mask);
-			if (bind(listenfd, (struct sockaddr *)&caddr, sizeof(caddr)) < 0) goto cleanup;
+			if (bindresult < 0) goto cleanup;
 			listen(listenfd, 1);
 			}
 		#else
@@ -634,29 +672,66 @@ static DNSServiceErrorType deliver_request(ipc_msg_hdr *hdr, DNSServiceOp *sdr)
 		errsd = accept(listenfd, (struct sockaddr *)&daddr, &len);
 		if (!dnssd_SocketValid(errsd)) goto cleanup;
 #else
+
+#if APPLE_OSX_mDNSResponder
+// On Leopard, the stock definitions of the CMSG_* macros in /usr/include/sys/socket.h,
+// while arguably correct in theory, nonetheless in practice produce code that doesn't work on 64-bit machines
+// For details see <rdar://problem/5565787> Bonjour API broken for 64-bit apps (SCM_RIGHTS sendmsg fails)
+#undef  CMSG_DATA
+#define CMSG_DATA(cmsg) ((unsigned char *)(cmsg) + (sizeof(struct cmsghdr)))
+#undef  CMSG_SPACE
+#define CMSG_SPACE(l)   ((sizeof(struct cmsghdr)) + (l))
+#undef  CMSG_LEN
+#define CMSG_LEN(l)     ((sizeof(struct cmsghdr)) + (l))
+#endif
+
 		struct iovec vec = { ((char *)hdr) + sizeof(ipc_msg_hdr) + datalen, 1 }; // Send the last byte along with the SCM_RIGHTS
 		struct msghdr msg;
 		struct cmsghdr *cmsg;
-		char cbuf[sizeof(struct cmsghdr) + sizeof(dnssd_sock_t)];
+		char cbuf[CMSG_SPACE(sizeof(dnssd_sock_t))];
 		msg.msg_name       = 0;
 		msg.msg_namelen    = 0;
 		msg.msg_iov        = &vec;
 		msg.msg_iovlen     = 1;
 		msg.msg_control    = cbuf;
-		msg.msg_controllen = sizeof(cbuf);
+		msg.msg_controllen = CMSG_LEN(sizeof(dnssd_sock_t));
 		msg.msg_flags      = 0;
 		cmsg = CMSG_FIRSTHDR(&msg);
-		cmsg->cmsg_len     = sizeof(cbuf);
+		cmsg->cmsg_len     = CMSG_LEN(sizeof(dnssd_sock_t));
 		cmsg->cmsg_level   = SOL_SOCKET;
 		cmsg->cmsg_type    = SCM_RIGHTS;
 		*((dnssd_sock_t *)CMSG_DATA(cmsg)) = listenfd;
+
 #if TEST_KQUEUE_CONTROL_MESSAGE_BUG
 		sleep(1);
 #endif
+
+#if DEBUG_64BIT_SCM_RIGHTS
+		syslog(LOG_WARNING, "dnssd_clientstub sendmsg read sd=%d write sd=%d %ld %ld %ld/%ld/%ld/%ld",
+			errsd, listenfd, sizeof(dnssd_sock_t), sizeof(void*),
+			sizeof(struct cmsghdr) + sizeof(dnssd_sock_t),
+			CMSG_LEN(sizeof(dnssd_sock_t)), (long)CMSG_SPACE(sizeof(dnssd_sock_t)),
+			(long)((char*)CMSG_DATA(cmsg) + 4 - cbuf));
+#endif DEBUG_64BIT_SCM_RIGHTS
+
 		if (sendmsg(sdr->sockfd, &msg, 0) < 0)
+			{
 			syslog(LOG_WARNING, "dnssd_clientstub ERROR: sendmsg failed read sd=%d write sd=%d errno %d (%s)",
 				errsd, listenfd, errno, strerror(errno));
+			err = kDNSServiceErr_Incompatible;
+			goto cleanup;
+			}
+
+#if DEBUG_64BIT_SCM_RIGHTS
+		syslog(LOG_WARNING, "dnssd_clientstub sendmsg read sd=%d write sd=%d okay", errsd, listenfd);
+#endif DEBUG_64BIT_SCM_RIGHTS
+
 #endif
+		// Close our end of the socketpair *before* blocking in read_all to get the four-byte error code.
+		// Otherwise, if the daemon closes our socket (or crashes), we block in read_all() forever
+		// because the socket is not closed (we still have an open reference to it ourselves).
+		dnssd_close(listenfd);
+		listenfd = dnssd_InvalidSocket;		// Make sure we don't close it a second time in the cleanup handling below
 		}
 
 	// At this point we may block in read_all for a few milliseconds waiting for the daemon to send us the error code,

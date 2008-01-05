@@ -17,6 +17,10 @@
     Change History (most recent first):
 
 $Log: JNISupport.c,v $
+Revision 1.22  2007/11/30 23:38:53  cheshire
+Fix compiler warning:
+/System/Library/Frameworks/JavaVM.framework/Versions/A/Headers/jni.h:609: warning: declaration of 'index' shadows a global declaration
+
 Revision 1.21  2007/09/18 19:09:02  cheshire
 <rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
 
@@ -122,9 +126,14 @@ static DWORD	if_nametoindex( const char * nameStr );
 #include <sys/socket.h>
 #include <net/if.h>
 #endif // _WIN32
-#include <jni.h>
 
+// When compiling with "-Wshadow" set, including jni.h produces the following error:
+// /System/Library/Frameworks/JavaVM.framework/Versions/A/Headers/jni.h:609: warning: declaration of 'index' shadows a global declaration
+// To work around this, we use the preprocessor to map the identifier 'index', which appears harmlessly in function prototype declarations,
+// to something 'jni_index', which doesn't conflict
+#define index jni_index
 #include "DNSSD.java.h"
+#undef index
 
 //#include <syslog.h>
 

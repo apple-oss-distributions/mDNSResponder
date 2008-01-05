@@ -43,6 +43,9 @@
     Change History (most recent first):
 
 $Log: DNSServiceDiscoveryPref.m,v $
+Revision 1.11  2007/11/30 23:42:09  cheshire
+Fixed compile warning: declaration of 'index' shadows a global declaration
+
 Revision 1.10  2007/09/18 19:09:02  cheshire
 <rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
 
@@ -777,11 +780,11 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 }
 
 
-- (id)comboBox:(NSComboBox *)aComboBox objectValueForItemAtIndex:(int)index
+- (id)comboBox:(NSComboBox *)aComboBox objectValueForItemAtIndex:(int)ind
 {
     NSString *domain = nil;
-    if      ([aComboBox isEqualTo:browseDomainsComboBox]) domain = [browseDataSource objectAtIndex:index];
-    else if ([aComboBox isEqualTo:regDomainsComboBox])    domain = [registrationDataSource objectAtIndex:index];
+    if      ([aComboBox isEqualTo:browseDomainsComboBox]) domain = [browseDataSource objectAtIndex:ind];
+    else if ([aComboBox isEqualTo:regDomainsComboBox])    domain = [registrationDataSource objectAtIndex:ind];
     return domain;
 }
 

@@ -433,6 +433,7 @@ static void myTimerCallBack(void)
 			else                      updatetest[1] = 'A';
 			updatetest[0] = 3 - updatetest[0];
 			updatetest[2] = updatetest[1];
+			printtimestamp();
 			printf("Updating Test TXT record to %c\n", updatetest[1]);
 			err = DNSServiceUpdateRecord(client, NULL, 0, 1+updatetest[0], &updatetest[0], 0);
 			}
@@ -689,19 +690,19 @@ static int getfirstoption(int argc, char **argv, const char *optstr, int *pOptIn
 	}
 #else
 	{
-	int operation = getopt(argc, (char *const *)argv, optstr);
+	int o = getopt(argc, (char *const *)argv, optstr);
 	*pOptInd = optind;
-	return operation;
+	return o;
 	}
 #endif
 
-static void DNSSD_API MyRegisterRecordCallback(DNSServiceRef service, DNSRecordRef record, const DNSServiceFlags flags,
+static void DNSSD_API MyRegisterRecordCallback(DNSServiceRef service, DNSRecordRef rec, const DNSServiceFlags flags,
     DNSServiceErrorType errorCode, void *context)
 	{
 	char *name = (char *)context;
 	
 	(void)service;	// Unused
-	(void)record;	// Unused
+	(void)rec;	// Unused
 	(void)flags;	// Unused
 	
 	printtimestamp();
@@ -714,7 +715,7 @@ static void DNSSD_API MyRegisterRecordCallback(DNSServiceRef service, DNSRecordR
 		default:                          printf("Error %d\n", errorCode); break;
 		}
 	if (!(flags & kDNSServiceFlagsMoreComing)) fflush(stdout);
-	// DNSServiceRemoveRecord(service, record, 0); to test record removal
+	// DNSServiceRemoveRecord(service, rec, 0); to test record removal
 	}
 
 static unsigned long getip(const char *const name)
@@ -811,7 +812,7 @@ int main(int argc, char **argv)
 	{
 	DNSServiceErrorType err;
 	char buffer[TypeBufferSize], *typ, *dom;
-	int optind;
+	int opi;
 
 	// Extract the program name from argv[0], which by convention contains the path to this executable.
 	// Note that this is just a voluntary convention, not enforced by the kernel --
@@ -852,7 +853,7 @@ int main(int argc, char **argv)
 								#if HAS_ADDRINFO_API
 									"G"
 								#endif
-								, &optind);
+								, &opi);
 	if (operation == -1) goto Fail;
 
 	if (opinterface) printf("Using interface %d\n", opinterface);
@@ -871,38 +872,38 @@ int main(int argc, char **argv)
 					//enum_reply(client, kDNSServiceFlagsAdd, 0, 0, "dns-sd.ibm.com.", NULL);
 					break;
 
-		case 'B':	typ = (argc < optind+1) ? "" : argv[optind+0];
-					dom = (argc < optind+2) ? "" : argv[optind+1];  // Missing domain argument is the same as empty string i.e. use system default(s)
+		case 'B':	typ = (argc < opi+1) ? "" : argv[opi+0];
+					dom = (argc < opi+2) ? "" : argv[opi+1];  // Missing domain argument is the same as empty string i.e. use system default(s)
 					typ = gettype(buffer, typ);
 					if (dom[0] == '.' && dom[1] == 0) dom[0] = 0;   // We allow '.' on the command line as a synonym for empty string
 					printf("Browsing for %s%s%s\n", typ, dom[0] ? "." : "", dom);
 					err = DNSServiceBrowse(&client, 0, opinterface, typ, dom, browse_reply, NULL);
 					break;
 
-		case 'L':	if (argc < optind+2) goto Fail;
-					typ = (argc < optind+2) ? ""      : argv[optind+1];
-					dom = (argc < optind+3) ? "local" : argv[optind+2];
+		case 'L':	if (argc < opi+2) goto Fail;
+					typ = (argc < opi+2) ? ""      : argv[opi+1];
+					dom = (argc < opi+3) ? "local" : argv[opi+2];
 					typ = gettype(buffer, typ);
 					if (dom[0] == '.' && dom[1] == 0) dom = "local";   // We allow '.' on the command line as a synonym for "local"
-					printf("Lookup %s.%s.%s\n", argv[optind+0], typ, dom);
-					err = DNSServiceResolve(&client, 0, opinterface, argv[optind+0], typ, dom, (DNSServiceResolveReply)resolve_reply, NULL);
+					printf("Lookup %s.%s.%s\n", argv[opi+0], typ, dom);
+					err = DNSServiceResolve(&client, 0, opinterface, argv[opi+0], typ, dom, (DNSServiceResolveReply)resolve_reply, NULL);
 					break;
 
-		case 'R':	if (argc < optind+4) goto Fail;
-					typ = (argc < optind+2) ? "" : argv[optind+1];
-					dom = (argc < optind+3) ? "" : argv[optind+2];
+		case 'R':	if (argc < opi+4) goto Fail;
+					typ = (argc < opi+2) ? "" : argv[opi+1];
+					dom = (argc < opi+3) ? "" : argv[opi+2];
 					typ = gettype(buffer, typ);
 					if (dom[0] == '.' && dom[1] == 0) dom[0] = 0;   // We allow '.' on the command line as a synonym for empty string
-					err = RegisterService(&client, argv[optind+0], typ, dom, NULL, argv[optind+3], argc-(optind+4), argv+(optind+4));
+					err = RegisterService(&client, argv[opi+0], typ, dom, NULL, argv[opi+3], argc-(opi+4), argv+(opi+4));
 					break;
 
-		case 'P':	if (argc < optind+6) goto Fail;
+		case 'P':	if (argc < opi+6) goto Fail;
 					err = DNSServiceCreateConnection(&client_pa);
 					if (err) { fprintf(stderr, "DNSServiceCreateConnection returned %d\n", err); return(err); }
-					err = RegisterProxyAddressRecord(client_pa, argv[optind+4], argv[optind+5]);
-					//err = RegisterProxyAddressRecord(client_pa, "two", argv[optind+5]);
+					err = RegisterProxyAddressRecord(client_pa, argv[opi+4], argv[opi+5]);
+					//err = RegisterProxyAddressRecord(client_pa, "two", argv[opi+5]);
 					if (err) break;
-					err = RegisterService(&client, argv[optind+0], argv[optind+1], argv[optind+2], argv[optind+4], argv[optind+3], argc-(optind+6), argv+(optind+6));
+					err = RegisterService(&client, argv[opi+0], argv[opi+1], argv[opi+2], argv[opi+4], argv[opi+3], argc-(opi+6), argv+(opi+6));
 					//DNSServiceRemoveRecord(client_pa, record, 0);
 					//DNSServiceRemoveRecord(client_pa, record, 0);
 					break;
@@ -911,11 +912,11 @@ int main(int argc, char **argv)
 		case 'C':	{
 					uint16_t rrtype, rrclass;
 					DNSServiceFlags flags = kDNSServiceFlagsReturnIntermediates;
-					if (argc < optind+1) goto Fail;
-					rrtype = (argc <= optind+1) ? kDNSServiceType_A  : GetRRType(argv[optind+1]);
-					rrclass = (argc <= optind+2) ? kDNSServiceClass_IN : atoi(argv[optind+2]);
+					if (argc < opi+1) goto Fail;
+					rrtype = (argc <= opi+1) ? kDNSServiceType_A  : GetRRType(argv[opi+1]);
+					rrclass = (argc <= opi+2) ? kDNSServiceClass_IN : atoi(argv[opi+2]);
 					if (rrtype == kDNSServiceType_TXT || rrtype == kDNSServiceType_PTR) flags |= kDNSServiceFlagsLongLivedQuery;
-					err = DNSServiceQueryRecord(&client, flags, opinterface, argv[optind+0], rrtype, rrclass, qr_reply, NULL);
+					err = DNSServiceQueryRecord(&client, flags, opinterface, argv[opi+0], rrtype, rrclass, qr_reply, NULL);
 					break;
 					}
 
@@ -963,14 +964,14 @@ int main(int argc, char **argv)
 
 #if HAS_NAT_PMP_API
 		case 'X':   {
-					if (argc == optind)	// If no arguments, just fetch IP address
+					if (argc == opi)	// If no arguments, just fetch IP address
 						err = DNSServiceNATPortMappingCreate(&client, 0, 0, 0, 0, 0, 0, port_mapping_create_reply, NULL);
-					else if (argc >= optind+2 && atoi(argv[optind+0]) == 0)
+					else if (argc >= opi+2 && atoi(argv[opi+0]) == 0)
 						{
-						DNSServiceProtocol prot  = GetProtocol(argv[optind+0]);						// Must specify TCP or UDP
-						uint16_t IntPortAsNumber = atoi(argv[optind+1]);							// Must specify internal port
-						uint16_t ExtPortAsNumber = (argc < optind+3) ? 0 : atoi(argv[optind+2]);	// Optional desired external port
-						uint32_t ttl             = (argc < optind+4) ? 0 : atoi(argv[optind+3]);	// Optional desired lease lifetime
+						DNSServiceProtocol prot  = GetProtocol(argv[opi+0]);						// Must specify TCP or UDP
+						uint16_t IntPortAsNumber = atoi(argv[opi+1]);							// Must specify internal port
+						uint16_t ExtPortAsNumber = (argc < opi+3) ? 0 : atoi(argv[opi+2]);	// Optional desired external port
+						uint32_t ttl             = (argc < opi+4) ? 0 : atoi(argv[opi+3]);	// Optional desired lease lifetime
 						Opaque16 intp = { { IntPortAsNumber >> 8, IntPortAsNumber & 0xFF } };
 						Opaque16 extp = { { ExtPortAsNumber >> 8, ExtPortAsNumber & 0xFF } };
 						err = DNSServiceNATPortMappingCreate(&client, 0, 0, prot, intp.NotAnInteger, extp.NotAnInteger, ttl, port_mapping_create_reply, NULL);
@@ -982,8 +983,8 @@ int main(int argc, char **argv)
 
 #if HAS_ADDRINFO_API
 		case 'G':   {
-					if (argc != optind+2) goto Fail;
-					else err = DNSServiceGetAddrInfo(&client, kDNSServiceFlagsReturnIntermediates, opinterface, GetProtocol(argv[optind+0]), argv[optind+1], addrinfo_reply, NULL);
+					if (argc != opi+2) goto Fail;
+					else err = DNSServiceGetAddrInfo(&client, kDNSServiceFlagsReturnIntermediates, opinterface, GetProtocol(argv[opi+0]), argv[opi+1], addrinfo_reply, NULL);
 					break;
 		            }
 #endif

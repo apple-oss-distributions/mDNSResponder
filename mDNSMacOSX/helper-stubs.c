@@ -16,6 +16,9 @@
     Change History (most recent first):
 
 $Log: helper-stubs.c,v $
+Revision 1.6  2007/12/10 23:23:48  cheshire
+Removed unnecessary log message ("mDNSKeychainGetSecrets failed 0 00000000" because mDNSKeychainGetSecrets was failing to return a valid array)
+
 Revision 1.5  2007/09/07 22:44:03  mcguire
 <rdar://problem/5448420> Move CFUserNotification code to mDNSResponderHelper
 
@@ -71,7 +74,6 @@ mDNSHelperError(int err)
 		p = errorstring[err - mDNSHelperErrorBase - 1];
 	return p;
 	}
-
 
 /* Ugly but handy. */
 #define MACHRETRYLOOP_BEGIN(kr, retry, err, fin) for (;;) {
@@ -171,13 +173,11 @@ mDNSKeychainGetSecrets(CFArrayRef *result)
 	int retry = 0;
 	int err = 0;
 
-
 	MACHRETRYLOOP_BEGIN(kr, retry, err, fin);
 	kr = proxy_mDNSKeychainGetSecrets(getHelperPort(retry),
 	    &numsecrets, (vm_offset_t *)&secrets, &secretsCnt, &err);
 	MACHRETRYLOOP_END(kr, retry, err, fin);
-	if (0 == numsecrets)
-		goto fin;
+
 	if (NULL == (bytes = CFDataCreateWithBytesNoCopy(kCFAllocatorDefault,
 	    secrets, secretsCnt, kCFAllocatorNull)))
 		{

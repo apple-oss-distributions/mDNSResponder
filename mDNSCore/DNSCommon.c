@@ -17,6 +17,37 @@
     Change History (most recent first):
 
 $Log: DNSCommon.c,v $
+Revision 1.193  2007/12/17 23:42:36  cheshire
+Added comments about DNSDigest_SignMessage()
+
+Revision 1.192  2007/12/17 21:24:09  cheshire
+<rdar://problem/5526800> BTMM: Need to deregister records and services on shutdown/sleep
+We suspend sending of mDNS queries responses when going to sleep, so calculate GetNextScheduledEvent() time accordingly
+
+Revision 1.191  2007/12/14 00:59:36  cheshire
+<rdar://problem/5526800> BTMM: Need to deregister records and services on shutdown/sleep
+While going to sleep, don't block event scheduling
+
+Revision 1.190  2007/12/13 20:20:17  cheshire
+Minor efficiency tweaks -- converted IdenticalResourceRecord, IdenticalSameNameRecord, and
+SameRData from functions to macros, which allows the code to be inlined (the compiler can't
+inline a function defined in a different compilation unit) and therefore optimized better.
+
+Revision 1.189  2007/12/13 00:17:32  cheshire
+RDataHashValue was not calculating hash value reliably for RDATA types that have 'holes' in the
+in-memory representation (particularly SOA was affected by this, resulting in multiple duplicate
+cache entities for the same SOA record, because they had erroneously different rdatahash values).
+
+Revision 1.188  2007/12/13 00:13:03  cheshire
+Simplified RDataHashValue to take a single ResourceRecord pointer, instead of separate rdlength and RDataBody
+
+Revision 1.187  2007/12/08 00:35:20  cheshire
+<rdar://problem/5636422> Updating TXT records is too slow
+m->SuppressSending should not suppress all activity, just mDNS Query/Probe/Response
+
+Revision 1.186  2007/11/15 22:52:29  cheshire
+<rdar://problem/5589039> ERROR: mDNSPlatformWriteTCP - send Broken pipe
+
 Revision 1.185  2007/10/10 20:22:03  cheshire
 Added sanity checks in mDNSSendDNSMessage -- we've seen crashes in DNSDigest_SignMessage
 apparently caused by trying to sign zero-length messages
@@ -1273,20 +1304,52 @@ mDNSexport void mDNS_SetupResourceRecord(AuthRecord *rr, RData *RDataStorage, mD
 	rr->namestorage.c[0]  = 0;		// MUST be set by client before calling mDNS_Register()
 	}
 
-mDNSexport mDNSu32 RDataHashValue(mDNSu16 const rdlength, const RDataBody *const rdb)
+mDNSexport mDNSu32 RDataHashValue(const ResourceRecord *const rr)
 	{
-	mDNSu32 sum = 0;
-	int i;
-	for (i=0; i+1 < rdlength; i+=2)
+	switch(rr->rrtype)
 		{
-		sum += (((mDNSu32)(rdb->data[i])) << 8) | rdb->data[i+1];
-		sum = (sum<<3) | (sum>>29);
+		case kDNSType_NS:
+		case kDNSType_CNAME:
+		case kDNSType_PTR:
+		case kDNSType_DNAME: return DomainNameHashValue(&rr->rdata->u.name);
+
+		case kDNSType_SOA:   return rr->rdata->u.soa.serial  +
+									rr->rdata->u.soa.refresh +
+									rr->rdata->u.soa.retry   +
+									rr->rdata->u.soa.expire  +
+									rr->rdata->u.soa.min     +
+									DomainNameHashValue(&rr->rdata->u.soa.mname) +
+									DomainNameHashValue(&rr->rdata->u.soa.rname);
+
+		case kDNSType_MX:
+		case kDNSType_AFSDB:
+		case kDNSType_RT:
+		case kDNSType_KX:	 return DomainNameHashValue(&rr->rdata->u.mx.exchange);
+
+		case kDNSType_RP:	 return DomainNameHashValue(&rr->rdata->u.rp.mbox)   + DomainNameHashValue(&rr->rdata->u.rp.txt);
+
+		case kDNSType_PX:	 return DomainNameHashValue(&rr->rdata->u.px.map822) + DomainNameHashValue(&rr->rdata->u.px.mapx400);
+
+		case kDNSType_SRV:	 return DomainNameHashValue(&rr->rdata->u.srv.target);
+
+		case kDNSType_OPT:	// Okay to use blind memory sum because there are no 'holes' in the in-memory representation
+
+		default:
+			{
+			mDNSu32 sum = 0;
+			int i;
+			for (i=0; i+1 < rr->rdlength; i+=2)
+				{
+				sum += (((mDNSu32)(rr->rdata->u.data[i])) << 8) | rr->rdata->u.data[i+1];
+				sum = (sum<<3) | (sum>>29);
+				}
+			if (i < rr->rdlength)
+				{
+				sum += ((mDNSu32)(rr->rdata->u.data[i])) << 8;
+				}
+			return(sum);
+			}
 		}
-	if (i < rdlength)
-		{
-		sum += ((mDNSu32)(rdb->data[i])) << 8;
-		}
-	return(sum);
 	}
 
 // r1 has to be a full ResourceRecord including rrtype and rdlength
@@ -1326,26 +1389,10 @@ mDNSexport mDNSBool SameRDataBody(const ResourceRecord *const r1, const RDataBod
 												mDNSSameIPPort(r1->rdata->u.srv.port, r2->srv.port) &&
 												SameDomainName(&r1->rdata->u.srv.target, &r2->srv.target));
 
-		case kDNSType_OPT:	// Okay to use memory compare because there are no 'holes' in the in-memory representation
+		case kDNSType_OPT:	// Okay to use blind memory compare because there are no 'holes' in the in-memory representation
 
 		default:			return(mDNSPlatformMemSame(r1->rdata->u.data, r2->data, r1->rdlength));
 		}
-	}
-
-mDNSexport mDNSBool SameRData(const ResourceRecord *const r1, const ResourceRecord *const r2)
-	{
-	if (r1->rrtype     != r2->rrtype)     return(mDNSfalse);
-	if (r1->rdlength   != r2->rdlength)   return(mDNSfalse);
-	if (r1->rdatahash  != r2->rdatahash)  return(mDNSfalse);
-	return(SameRDataBody(r1, &r2->rdata->u));
-	}
-
-mDNSexport mDNSBool SameResourceRecord(ResourceRecord *r1, ResourceRecord *r2)
-	{
-	return (r1->namehash == r2->namehash &&
-			r1->rrtype == r2->rrtype &&
-			SameDomainName(r1->name, r2->name) &&
-			SameRData(r1, r2));
 	}
 
 // ResourceRecordAnswersQuestion returns mDNStrue if the given resource record is a valid answer to the given question.
@@ -1367,14 +1414,6 @@ mDNSexport mDNSBool SameNameRecordAnswersQuestion(const ResourceRecord *const rr
 	// RR type CNAME matches any query type. QTYPE ANY matches any RR type. QCLASS ANY matches any RR class.
 	if (rr->rrtype != kDNSType_CNAME && rr->rrtype  != q->qtype  && q->qtype  != kDNSQType_ANY ) return(mDNSfalse);
 	if (                                rr->rrclass != q->qclass && q->qclass != kDNSQClass_ANY) return(mDNSfalse);
-
-#if VerifySameNameAssumptions
-	if (rr->namehash != q->qnamehash || !SameDomainName(rr->name, &q->qname))
-		{
-		LogMsg("Bogus SameNameRecordAnswersQuestion call: RR %##s does not match Q %##s", rr->name->c, q->qname.c);
-		return(mDNSfalse);
-		}
-#endif
 
 	return(mDNStrue);
 	}
@@ -2007,7 +2046,7 @@ mDNSexport void SetNewRData(ResourceRecord *const rr, RData *NewRData, mDNSu16 r
 	target = GetRRDomainNameTarget(rr);
 	rr->rdlength   = GetRDLength(rr, mDNSfalse);
 	rr->rdestimate = GetRDLength(rr, mDNStrue);
-	rr->rdatahash  = target ? DomainNameHashValue(target) : RDataHashValue(rr->rdlength, &rr->rdata->u);
+	rr->rdatahash  = target ? DomainNameHashValue(target) : RDataHashValue(rr);
 	}
 
 mDNSexport const mDNSu8 *skipDomainName(const DNSMessage *const msg, const mDNSu8 *ptr, const mDNSu8 *const end)
@@ -2159,9 +2198,9 @@ mDNSexport const mDNSu8 *GetLargeResourceRecord(mDNS *const m, const DNSMessage 
 
 	if (!RecordType) LogMsg("GetLargeResourceRecord: No RecordType for %##s", rr->resrec.name->c);
 
-	// IMPORTANT: Any record type we understand and unpack into a structure containing domainnames needs to have
-	// a corresponding case in SameRDataBody() to do a semantic comparison of the structure instead of a blind
-	// bitwise memory compare. This is because a domainname is a fixed size structure holding variable-length data.
+	// IMPORTANT: Any record type we understand and unpack into a structure containing domainnames needs to have corresponding
+	// cases in SameRDataBody() and RDataHashValue() to do a semantic comparison (or checksum) of the structure instead of a blind
+	// bitwise memory compare (or sum). This is because a domainname is a fixed size structure holding variable-length data.
 	// Any bytes past the logical end of the name are undefined, and a blind bitwise memory compare may indicate that
 	// two domainnames are different when semantically they are the same name and it's only the unused bytes that differ.
 	if (rr->resrec.rrclass == kDNSQClass_ANY && pktrdlength == 0)	// Used in update packets to mean "Delete An RRset" (RFC 2136)
@@ -2486,13 +2525,12 @@ mDNSexport void DumpPacket(mDNS *const m, mDNSBool sent, char *transport, const 
 // Stub definition of TCPSocket_struct so we can access flags field. (Rest of TCPSocket_struct is platform-dependent.)
 struct TCPSocket_struct { TCPSocketFlags flags; /* ... */ };
 
+// Note: When we sign a DNS message using DNSDigest_SignMessage(), the current real-time clock value is used, which
+// is why we generally defer signing until we send the message, to ensure the signature is as fresh as possible.
 mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNSu8 *end,
     mDNSInterfaceID InterfaceID, const mDNSAddr *dst, mDNSIPPort dstport, TCPSocket *sock, DomainAuthInfo *authInfo)
 	{
-	mStatus status;
-	long nsent;
-	unsigned long msglen;
-	mDNSu8 lenbuf[2];
+	mStatus status = mStatus_NoError;
 	mDNSu16 numQuestions   = msg->h.numQuestions;
 	mDNSu16 numAnswers     = msg->h.numAnswers;
 	mDNSu16 numAuthorities = msg->h.numAuthorities;
@@ -2515,30 +2553,25 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
 	*ptr++ = (mDNSu8)(numAdditionals >> 8);
 	*ptr++ = (mDNSu8)(numAdditionals &  0xFF);
 
-	if (authInfo)
-		{
-		end = DNSDigest_SignMessage(msg, &end, authInfo, 0);
-		if (!end) return mStatus_UnknownErr;
-		}
-
-	// Send the packet on the wire
-	if (sock)
-		{
-		msglen = (mDNSu16)(end - (mDNSu8 *)msg);
-		lenbuf[0] = (mDNSu8)(msglen >> 8);  // host->network byte conversion
-		lenbuf[1] = (mDNSu8)(msglen &  0xFF);
-
-		nsent = mDNSPlatformWriteTCP(sock, (char*)lenbuf, 2);
-		//!!!KRS make sure kernel is sending these as 1 packet!
-		if (nsent != 2) goto tcp_error;
-
-		nsent = mDNSPlatformWriteTCP(sock, (char *)msg, msglen);
-		if (nsent != (long)msglen) goto tcp_error;
-		status = mStatus_NoError;
-		}
+	if (authInfo) DNSDigest_SignMessage(msg, &end, authInfo, 0);	// DNSDigest_SignMessage operates on message in network byte order
+	if (!end) { LogMsg("mDNSSendDNSMessage: DNSDigest_SignMessage failed"); status = mStatus_NoMemoryErr; }
 	else
 		{
-		status = mDNSPlatformSendUDP(m, msg, end, InterfaceID, dst, dstport);
+		// Send the packet on the wire
+		if (!sock)
+			status = mDNSPlatformSendUDP(m, msg, end, InterfaceID, dst, dstport);
+		else
+			{
+			mDNSu16 msglen = (mDNSu16)(end - (mDNSu8 *)msg);
+			mDNSu8 lenbuf[2] = { (mDNSu8)(msglen >> 8), (mDNSu8)(msglen & 0xFF) };
+			long nsent = mDNSPlatformWriteTCP(sock, (char*)lenbuf, 2);		// Should do scatter/gather here -- this is probably going out as two packets
+			if (nsent != 2) { LogMsg("mDNSSendDNSMessage: write msg length failed %d/%d", nsent, 2); status = mStatus_ConnFailed; }
+			else
+				{
+				nsent = mDNSPlatformWriteTCP(sock, (char *)msg, msglen);
+				if (nsent != msglen) { LogMsg("mDNSSendDNSMessage: write msg body failed %d/%d", nsent, msglen); status = mStatus_ConnFailed; }
+				}
+			}
 		}
 
 	// Put all the integer values back the way they were before we return
@@ -2555,10 +2588,6 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
 		}
 
 	return(status);
-
-	tcp_error:
-	LogMsg("mDNSSendDNSMessage: error sending message over tcp");
-	return mStatus_UnknownErr;
 	}
 
 // ***************************************************************************
@@ -2615,7 +2644,7 @@ mDNSexport void mDNS_Lock_(mDNS *const m)
 mDNSlocal mDNSs32 GetNextScheduledEvent(const mDNS *const m)
 	{
 	mDNSs32 e = m->timenow + 0x78000000;
-	if (m->mDNSPlatformStatus != mStatus_NoError || m->SleepState) return(e);
+	if (m->mDNSPlatformStatus != mStatus_NoError) return(e);
 	if (m->NewQuestions)
 		{
 		if (m->NewQuestions->DelayAnswering) e = m->NewQuestions->DelayAnswering;
@@ -2623,15 +2652,25 @@ mDNSlocal mDNSs32 GetNextScheduledEvent(const mDNS *const m)
 		}
 	if (m->NewLocalOnlyQuestions)                                   return(m->timenow);
 	if (m->NewLocalRecords && LocalRecordReady(m->NewLocalRecords)) return(m->timenow);
-	if (m->SuppressSending)                                         return(m->SuppressSending);
 #ifndef UNICAST_DISABLED
 	if (e - m->NextuDNSEvent         > 0) e = m->NextuDNSEvent;
+	if (e - m->NextScheduledNATOp    > 0) e = m->NextScheduledNATOp;
 #endif
 	if (e - m->NextCacheCheck        > 0) e = m->NextCacheCheck;
-	if (e - m->NextScheduledQuery    > 0) e = m->NextScheduledQuery;
-	if (e - m->NextScheduledProbe    > 0) e = m->NextScheduledProbe;
-	if (e - m->NextScheduledResponse > 0) e = m->NextScheduledResponse;
-	if (e - m->NextScheduledNATOp    > 0) e = m->NextScheduledNATOp;
+
+	if (!m->SleepState)
+		{
+		if (m->SuppressSending)
+			{
+			if (e - m->SuppressSending       > 0) e = m->SuppressSending;
+			}
+		else
+			{
+			if (e - m->NextScheduledQuery    > 0) e = m->NextScheduledQuery;
+			if (e - m->NextScheduledProbe    > 0) e = m->NextScheduledProbe;
+			if (e - m->NextScheduledResponse > 0) e = m->NextScheduledResponse;
+			}
+		}
 	return(e);
 	}
 

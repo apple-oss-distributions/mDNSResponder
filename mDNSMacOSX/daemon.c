@@ -30,6 +30,39 @@
     Change History (most recent first):
 
 $Log: daemon.c,v $
+Revision 1.356  2007/12/18 00:28:56  cheshire
+<rdar://problem/5526800> BTMM: Need to deregister records and services on shutdown/sleep
+Error in ReadyForSleep() logic -- missing "not" in "!mDNSOpaque16IsZero(q->TargetQID)"
+
+Revision 1.355  2007/12/17 22:29:22  cheshire
+<rdar://problem/5526800> BTMM: Need to deregister records and services on shutdown/sleep
+Log message indicating when we make IOAllowPowerChange call; make sure nextTimerEvent is set appropriately
+
+Revision 1.354  2007/12/15 01:12:28  cheshire
+<rdar://problem/5526796> Need to remove active LLQs from server upon question cancellation, on sleep, and on shutdown
+
+Revision 1.353  2007/12/14 19:14:02  cheshire
+Added (commented out) code for testing sleep/wake
+
+Revision 1.352  2007/12/14 00:58:29  cheshire
+<rdar://problem/5526800> BTMM: Need to deregister records and services on shutdown/sleep
+Additional fixes: When going to sleep, mDNSResponder needs to postpone sleep
+until TLS/TCP deregistrations have completed (up to five seconds maximum)
+
+Revision 1.351  2007/12/12 21:34:18  cheshire
+Now that <rdar://problem/5124399> "Not getting Keychain events" is apparently fixed,
+it makes sense to reduce our workaround retry count from 5 to 2 retries. Once we've
+confirmed that the bug is definitely fixed we'll remove the workaround altogether.
+
+Revision 1.350  2007/12/07 00:45:58  cheshire
+<rdar://problem/5526800> BTMM: Need to clean up registrations on shutdown
+
+Revision 1.349  2007/12/04 22:00:54  cheshire
+Fixed mistake in comment
+
+Revision 1.348  2007/12/01 00:27:43  cheshire
+Fixed compile warning: declaration of 'r' shadows a previous local
+
 Revision 1.347  2007/11/02 22:00:13  cheshire
 <rdar://problem/5575583> BTMM: Work around keychain notification bug <rdar://problem/5124399>
 Need to hold the lock while calling SetDomainSecrets
@@ -709,9 +742,9 @@ mDNSlocal void AbortClient(mach_port_t ClientMachPort, void *m)
 			}
 		while (x->results)
 			{
-			DNSServiceBrowserResult *r = x->results;
+			DNSServiceBrowserResult *t = x->results;
 			x->results = x->results->next;
-			freeL("DNSServiceBrowserResult", r);
+			freeL("DNSServiceBrowserResult", t);
 			}
 		freeL("DNSServiceBrowser", x);
 		return;
@@ -999,10 +1032,10 @@ mDNSexport void machserver_automatic_browse_domain_changed(const domainname *d, 
 					{
 					if (SameDomainName(&(*q)->domain, d))
 						{
-						DNSServiceBrowserQuestion *remove = *q;
+						DNSServiceBrowserQuestion *rem = *q;
 						*q = (*q)->next;
-						mDNS_StopQueryWithRemoves(&mDNSStorage, &remove->q);
-						freeL("DNSServiceBrowserQuestion", remove );
+						mDNS_StopQueryWithRemoves(&mDNSStorage, &rem->q);
+						freeL("DNSServiceBrowserQuestion", rem);
 						return;
 						}
 					q = &(*q)->next;
@@ -1111,11 +1144,11 @@ mDNSlocal void FoundInstanceInfo(mDNS *const m, ServiceInfoQuery *query)
 
 	if (ifx && ifx->ifinfo.ip.type == mDNSAddrType_IPv4)
 		{
-		struct sockaddr_in *sin = (struct sockaddr_in*)&interface;
-		sin->sin_len         = sizeof(*sin);
-		sin->sin_family      = AF_INET;
-		sin->sin_port        = 0;
-		sin->sin_addr.s_addr = ifx->ifinfo.ip.ip.v4.NotAnInteger;
+		struct sockaddr_in *s = (struct sockaddr_in*)&interface;
+		s->sin_len         = sizeof(*s);
+		s->sin_family      = AF_INET;
+		s->sin_port        = 0;
+		s->sin_addr.s_addr = ifx->ifinfo.ip.ip.v4.NotAnInteger;
 		}
 	else if (ifx && ifx->ifinfo.ip.type == mDNSAddrType_IPv6)
 		{
@@ -1130,11 +1163,11 @@ mDNSlocal void FoundInstanceInfo(mDNS *const m, ServiceInfoQuery *query)
 
 	if (query->info->ip.type == mDNSAddrType_IPv4)
 		{
-		struct sockaddr_in *sin = (struct sockaddr_in*)&address;
-		sin->sin_len           = sizeof(*sin);
-		sin->sin_family        = AF_INET;
-		sin->sin_port          = query->info->port.NotAnInteger;
-		sin->sin_addr.s_addr   = query->info->ip.ip.v4.NotAnInteger;
+		struct sockaddr_in *s = (struct sockaddr_in*)&address;
+		s->sin_len         = sizeof(*s);
+		s->sin_family      = AF_INET;
+		s->sin_port        = query->info->port.NotAnInteger;
+		s->sin_addr.s_addr = query->info->ip.ip.v4.NotAnInteger;
 		}
 	else
 		{
@@ -1474,9 +1507,9 @@ mDNSexport kern_return_t provide_DNSServiceRegistrationCreate_rpc(mach_port_t un
 
 	if (x->DefaultDomain)
 		{
-		DNameListElem *ptr;
-		for (ptr = AutoRegistrationDomains; ptr; ptr = ptr->next)
-			AddServiceInstance(x, &ptr->name);
+		DNameListElem *p;
+		for (p = AutoRegistrationDomains; p; p = p->next)
+			AddServiceInstance(x, &p->name);
 		}
 
 	// Succeeded: Wrap up and return
@@ -1909,9 +1942,9 @@ mDNSlocal kern_return_t destroyBootstrapService()
 	return bootstrap_register(server_priv_port, (char*)kmDNSBootstrapName, MACH_PORT_NULL);
 	}
 
-mDNSlocal void ExitCallback(int signal)
+mDNSlocal void ExitCallback(int sig)
 	{
-	(void)signal; // Unused
+	(void)sig; // Unused
 	LogMsgIdent(mDNSResponderVersionString, "stopping");
 
 	debugf("ExitCallback");
@@ -1928,27 +1961,27 @@ mDNSlocal void ExitCallback(int signal)
 	while (DNSServiceRegistrationList)
 		AbortClient(DNSServiceRegistrationList     ->ClientMachPort, DNSServiceRegistrationList);
 
-	debugf("ExitCallback: mDNS_Close");
-	mDNS_Close(&mDNSStorage);
 	if (udsserver_exit(launchd_fd) < 0) LogMsg("ExitCallback: udsserver_exit failed");
-	exit(0);
+
+	debugf("ExitCallback: mDNS_StartExit");
+	mDNS_StartExit(&mDNSStorage);
 	}
 
 // Send a mach_msg to ourselves (since that is signal safe) telling us to cleanup and exit
-mDNSlocal void HandleSIG(int signal)
+mDNSlocal void HandleSIG(int sig)
 	{
 	debugf(" ");
-	debugf("HandleSIG %d", signal);
+	debugf("HandleSIG %d", sig);
 	mach_msg_header_t header;
 	header.msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_MAKE_SEND, 0);
 	header.msgh_remote_port = signal_port;
 	header.msgh_local_port = MACH_PORT_NULL;
 	header.msgh_size = sizeof(header);
-	header.msgh_id = signal;
+	header.msgh_id = sig;
 	if (mach_msg_send(&header) != MACH_MSG_SUCCESS)
 		{
-		LogMsg("HandleSIG %d: mach_msg_send failed", signal);
-		if (signal == SIGTERM || signal == SIGINT) exit(-1);
+		LogMsg("HandleSIG %d: mach_msg_send failed", sig);
+		if (sig == SIGTERM || sig == SIGINT) exit(-1);
 		}
 	}
 
@@ -2068,7 +2101,8 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
 		case SIGINT:
 		case SIGTERM:	ExitCallback(msg_header->msgh_id); break;
 		case SIGINFO:	INFOCallback(); break;
-		case SIGUSR1:	LogMsg("SIGUSR1: Simulate Network Configuration Change Event");
+		case SIGUSR1:	// mDNSCoreMachineSleep(m, !m->SleepState); break;
+						LogMsg("SIGUSR1: Simulate Network Configuration Change Event");
 						mDNSMacOSXNetworkChanged(m);
 
 						// Simulate KeychainChanged
@@ -2156,9 +2190,9 @@ mDNSlocal mDNSs32 mDNSDaemonIdle(mDNS *const m)
 	// See <rdar://problem/5124399> Not getting Keychain Changed events when enabling BTMM
 	if (m->p->KeyChainBugTimer && now - m->p->KeyChainBugTimer >= 0)
 		{
-		m->p->KeyChainBugTimer = NonZeroTime(now + m->p->KeyChainBugInterval);
 		m->p->KeyChainBugInterval *= 2;
-		if (m->p->KeyChainBugInterval > 16 * mDNSPlatformOneSecond) m->p->KeyChainBugTimer = 0;
+		m->p->KeyChainBugTimer = NonZeroTime(now + m->p->KeyChainBugInterval);
+		if (m->p->KeyChainBugInterval > 2 * mDNSPlatformOneSecond) m->p->KeyChainBugTimer = 0;
 		mDNS_Lock(m);
 		SetDomainSecrets(m);
 		mDNS_Unlock(m);
@@ -2263,7 +2297,7 @@ mDNSlocal void ShowTaskSchedulingError(mDNS *const m)
 
 	LogMsg("Task Scheduling Error: Continuously busy for more than a second");
 	
-	// NOTE: To accurately diagnose *why* we're busy, the debugging code here to show needs to mirror the logic in GetNextScheduledEvent
+	// NOTE: To accurately diagnose *why* we're busy, the debugging code here needs to mirror the logic in GetNextScheduledEvent
 
 	if (m->NewQuestions && (!m->NewQuestions->DelayAnswering || m->timenow - m->NewQuestions->DelayAnswering >= 0))
 		LogMsg("Task Scheduling Error: NewQuestion %##s (%s)",
@@ -2293,12 +2327,33 @@ mDNSlocal void ShowTaskSchedulingError(mDNS *const m)
 	mDNS_Unlock(&mDNSStorage);
 	}
 
+mDNSlocal mDNSBool ReadyForSleep(mDNS *m)
+	{
+	(void)m;
+
+	// 1. Scan list of private LLQs, and make sure they've all completed their handshake with the server
+	DNSQuestion *q;
+	for (q = m->Questions; q; q = q->next)
+		if (!mDNSOpaque16IsZero(q->TargetQID) && q->LongLived && q->ReqLease == 0 && q->tcp) return(mDNSfalse);
+
+	// 2. Scan list of registered records
+	AuthRecord *rr;
+	for (rr = m->ResourceRecords; rr; rr = rr->next)
+		if (rr->state == regState_Refresh && rr->tcp) return(mDNSfalse);
+
+	// 2. Scan list of registered services
+	ServiceRecordSet *srs;
+	for (srs = m->ServiceRegistrations; srs; srs = srs->uDNS_next)
+		if (srs->state == regState_NoTarget && srs->tcp) return(mDNSfalse);
+
+	return(mDNStrue);
+	}
+
 mDNSlocal void KQWokenFlushBytes(int fd, __unused short filter, __unused void *context)
 	{
 	// Read all of the bytes so we won't wake again.
 	char    buffer[100];
-	ssize_t read = sizeof(buffer);
-	while (read > 0) read = recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT);
+	while (recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) continue;
 	}
 
 mDNSlocal void * KQueueLoop(void *m_param)
@@ -2334,9 +2389,39 @@ mDNSlocal void * KQueueLoop(void *m_param)
 		mDNSs32 end            = mDNSPlatformRawTime();
 		if (end - start >= WatchDogReportingThreshold)
 			LogOperation("WARNING: Idle task took %dms to complete", end - start);
-		
+
+		mDNSs32 now = mDNS_TimeNow(m);
+
+		if (m->ShutdownTime)
+			{
+			if (mDNS_ExitNow(m, now))
+				{
+				LogOperation("mDNS_FinalExit");
+				mDNS_FinalExit(&mDNSStorage);
+				usleep(1000);		// Little 1ms pause before exiting, so we don't lose our final syslog messages
+				exit(0);
+				}
+			if (nextTimerEvent - m->ShutdownTime >= 0)
+				nextTimerEvent = m->ShutdownTime;
+			}
+
+		if (m->p->SleepLimit)
+			{
+			mDNSBool ready = ReadyForSleep(m);
+			if (ready || now - m->p->SleepLimit >= 0)
+				{
+				LogOperation("IOAllowPowerChange(%lX) %s at %ld (%d ticks remaining)", m->p->SleepCookie,
+					ready ? "ready for sleep" : "giving up", now, m->p->SleepLimit - now);
+				m->p->SleepLimit = 0;
+				IOAllowPowerChange(m->p->PowerConnection, m->p->SleepCookie);
+				}
+			else
+				if (nextTimerEvent - m->p->SleepLimit >= 0)
+					nextTimerEvent = m->p->SleepLimit;
+			}
+
 		// Convert absolute wakeup time to a relative time from now
-		mDNSs32 ticks = nextTimerEvent - mDNS_TimeNow(m);
+		mDNSs32 ticks = nextTimerEvent - now;
 		if (ticks < 1) ticks = 1;
 		
 		static mDNSs32 RepeatedBusy = 0;	// Debugging sanity check, to guard against CPU spins
@@ -2401,14 +2486,14 @@ mDNSlocal void * KQueueLoop(void *m_param)
 			for (i = 0; i < events_found; i++)
 				{
 				const KQueueEntry *const kqentry = new_events[i].udata;
-				mDNSs32 start = mDNSPlatformRawTime();
+				mDNSs32 stime = mDNSPlatformRawTime();
 #if LogAllOperations || MDNS_DEBUGMSGS
 				const char *const KQtask = kqentry->KQtask;	// Grab a copy in case KQcallback deletes the task
 #endif
 				kqentry->KQcallback(new_events[i].ident, new_events[i].filter, kqentry->KQcontext);
-				mDNSs32 end   = mDNSPlatformRawTime();
-				if (end - start >= WatchDogReportingThreshold)
-					LogOperation("WARNING: %s took %dms to complete", KQtask, end - start);
+				mDNSs32 etime = mDNSPlatformRawTime();
+				if (etime - stime >= WatchDogReportingThreshold)
+					LogOperation("WARNING: %s took %dms to complete", KQtask, etime - stime);
 				}
 			}
 		}

@@ -17,6 +17,10 @@
     Change History (most recent first):
 
 $Log: helper-error.h,v $
+Revision 1.8  2007/11/07 00:22:30  jgraessley
+Bug #: <rdar://problem/5573573> mDNSResponder doesn't build without IPSec
+Reviewed by: Stuart Cheshire
+
 Revision 1.7  2007/09/12 00:42:47  mcguire
 <rdar://problem/5468236> BTMM: Need to clean up security associations
 
@@ -73,3 +77,4 @@ ERROR(kmDNSHelperIPsecPolicyCreationFailed,       "Could not create IPsec policy
 ERROR(kmDNSHelperIPsecPolicySetFailed,            "Could not set IPsec policy")
 ERROR(kmDNSHelperIPsecRemoveSAFailed,             "Could not remove IPsec SA")
 ERROR(kmDNSHelperIPsecPolicySocketCreationFailed, "Could not create IPsec policy socket")
+ERROR(kmDNSHelperIPsecDisabled,                   "IPSec support was not compiled in to the helper")

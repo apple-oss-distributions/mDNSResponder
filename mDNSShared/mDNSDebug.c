@@ -23,6 +23,9 @@
     Change History (most recent first):
 
 $Log: mDNSDebug.c,v $
+Revision 1.13  2007/12/01 00:40:30  cheshire
+Fixes from Bob Bradley for building on EFI
+
 Revision 1.12  2007/10/01 19:06:19  cheshire
 Defined symbolic constant MDNS_LOG_INITIAL_LEVEL to set the logging level we start out at
 
@@ -68,14 +71,11 @@ Changes necessary to support mDNSResponder on Linux.
 
 #include <stdio.h>
 
-#if defined(WIN32)
-// Need to add Windows syslog support here
+#if defined(WIN32) || defined(EFI32) || defined(EFI64) || defined(EFIX64)
+// Need to add Windows/EFI syslog support here
 #define LOG_PID 0x01
 #define LOG_CONS 0x02
 #define LOG_PERROR 0x20
-#define openlog(A,B,C) (void)(A); (void)(B)
-#define syslog(A,B,C)
-#define closelog()
 #else
 #include <syslog.h>
 #endif
@@ -95,43 +95,26 @@ mDNSexport int mDNS_DebugMode = mDNSfalse;
 #if MDNS_DEBUGMSGS
 mDNSexport void debugf_(const char *format, ...)
 	{
-	unsigned char buffer[512];
+	char buffer[512];
 	va_list ptr;
 	va_start(ptr,format);
-	buffer[mDNS_vsnprintf((char *)buffer, sizeof(buffer), format, ptr)] = 0;
+	buffer[mDNS_vsnprintf(buffer, sizeof(buffer), format, ptr)] = 0;
 	va_end(ptr);
-	fprintf(stderr,"%s\n", buffer);
-	fflush(stderr);
+	mDNSPlatformWriteDebugMsg(buffer);
 	}
 #endif
 
 #if MDNS_DEBUGMSGS > 1
 mDNSexport void verbosedebugf_(const char *format, ...)
 	{
-	unsigned char buffer[512];
+	char buffer[512];
 	va_list ptr;
 	va_start(ptr,format);
-	buffer[mDNS_vsnprintf((char *)buffer, sizeof(buffer), format, ptr)] = 0;
+	buffer[mDNS_vsnprintf(buffer, sizeof(buffer), format, ptr)] = 0;
 	va_end(ptr);
-	fprintf(stderr,"%s\n", buffer);
-	fflush(stderr);
+	mDNSPlatformWriteDebugMsg(buffer);
 	}
 #endif
-
-mDNSlocal void WriteLogMsg(const char *ident, const char *buffer, int logoptflags)
-	{
-	if (mDNS_DebugMode)	// In debug mode we write to stderr
-		{
-		fprintf(stderr,"%s\n", buffer);
-		fflush(stderr);
-		}
-	else				// else, in production mode, we write to syslog
-		{
-		openlog(ident, LOG_CONS | logoptflags, LOG_DAEMON);
-		syslog(LOG_ERR, "%s", buffer);
-		closelog();
-		}
-	}
 
 // Log message with default "mDNSResponder" ident string at the start
 mDNSexport void LogMsg(const char *format, ...)
@@ -141,7 +124,7 @@ mDNSexport void LogMsg(const char *format, ...)
 	va_start(ptr,format);
 	buffer[mDNS_vsnprintf((char *)buffer, sizeof(buffer), format, ptr)] = 0;
 	va_end(ptr);
-	WriteLogMsg(ProgramName, buffer, 0);
+	mDNSPlatformWriteLogMsg(ProgramName, buffer, 0);
 	}
 
 // Log message with specified ident string at the start
@@ -152,7 +135,7 @@ mDNSexport void LogMsgIdent(const char *ident, const char *format, ...)
 	va_start(ptr,format);
 	buffer[mDNS_vsnprintf((char *)buffer, sizeof(buffer), format, ptr)] = 0;
 	va_end(ptr);
-	WriteLogMsg(ident, buffer, ident && *ident ? LOG_PID : 0);
+	mDNSPlatformWriteLogMsg(ident, buffer, ident && *ident ? LOG_PID : 0);
 	}
 
 // Log message with no ident string at the start
@@ -163,7 +146,7 @@ mDNSexport void LogMsgNoIdent(const char *format, ...)
 	va_start(ptr,format);
 	buffer[mDNS_vsnprintf((char *)buffer, sizeof(buffer), format, ptr)] = 0;
 	va_end(ptr);
-	WriteLogMsg("", buffer, 0);
+	mDNSPlatformWriteLogMsg("", buffer, 0);
 	}
 
 mDNSlocal const char *CStringForLogLevel(LogLevel_t level)

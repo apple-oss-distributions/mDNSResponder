@@ -60,6 +60,9 @@
 
 #include "ipsec_strerror.h"
 #include "libpfkey.h"
+#include "ipsec_options.h"
+
+#ifndef MDNS_NO_IPSEC
 
 #define CALLOC(size, cast) (cast)calloc(1, (size))
 
@@ -2124,3 +2127,5 @@ pfkey_setsadbxsa2(buf, lim, mode0, reqid)
 
 	return(buf + len);
 }
+
+#endif /* ndef MDNS_NO_IPSEC */

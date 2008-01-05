@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: mDNSUNP.c,v $
+Revision 1.35  2007/11/15 21:36:19  cheshire
+<rdar://problem/5289340> POSIX: Off by one overflow in get_ifi_info_linuxv6()
+
 Revision 1.34  2006/08/14 23:24:47  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -200,7 +203,7 @@ struct ifi_info *get_ifi_info_linuxv6(int family, int doaliases)
 	FILE *fp;
 	char addr[8][5];
 	int flags, myflags, index, plen, scope;
-	char ifname[8], lastname[IFNAMSIZ];
+	char ifname[9], lastname[IFNAMSIZ];
 	char addr6[32+7+1]; /* don't forget the seven ':' */
 	struct addrinfo hints, *res0;
 	struct sockaddr_in6 *sin6;

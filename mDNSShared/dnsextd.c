@@ -17,6 +17,16 @@
     Change History (most recent first):
 
 $Log: dnsextd.c,v $
+Revision 1.87  2007/12/17 23:34:50  cheshire
+Don't need to set ptr to result of DNSDigest_SignMessage -- ptr is updated anyway (it's passed by reference)
+
+Revision 1.86  2007/12/13 20:22:34  cheshire
+Got rid of redundant SameResourceRecord() routine; replaced calls to this
+with calls to IdenticalResourceRecord() which does exactly the same thing.
+
+Revision 1.85  2007/12/01 00:30:36  cheshire
+Fixed compile warning: declaration of 'time' shadows a global declaration
+
 Revision 1.84  2007/10/24 18:19:37  cheshire
 Fixed header byte order bug sending update responses
 
@@ -1094,7 +1104,7 @@ mDNSlocal int UpdateSRV(DaemonInfo *d, mDNSBool registration)
 
 		if ( zone->updateKeys )
 			{
-			ptr = DNSDigest_SignMessage( &pkt.msg, &ptr, zone->updateKeys, 0 );
+			DNSDigest_SignMessage( &pkt.msg, &ptr, zone->updateKeys, 0 );
 			require_action( ptr, exit, Log("UpdateSRV: Error constructing lease expiration update" ) );
 			}
 
@@ -1429,7 +1439,7 @@ mDNSlocal void DeleteOneRecord(DaemonInfo *d, CacheRecord *rr, domainname *zname
 
 	if ( zone && zone->updateKeys)
 		{
-		ptr = DNSDigest_SignMessage(&pkt.msg, &ptr, zone->updateKeys, 0 );
+		DNSDigest_SignMessage(&pkt.msg, &ptr, zone->updateKeys, 0 );
 		if (!ptr) goto end;
 		}
 
@@ -1493,7 +1503,7 @@ mDNSlocal void UpdateLeaseTable(PktMsg *pkt, DaemonInfo *d, mDNSs32 lease)
 	LargeCacheRecord lcr;
 	ResourceRecord *rr = &lcr.r.resrec;
 	const mDNSu8 *ptr, *end;
-	struct timeval time;
+	struct timeval tv;
 	DNSQuestion zone;
 	char buf[MaxMsg];
 	
@@ -1530,7 +1540,7 @@ mDNSlocal void UpdateLeaseTable(PktMsg *pkt, DaemonInfo *d, mDNSs32 lease)
 			  if (SameDomainName((*rptr)->rr.resrec.name, rr->name) &&
 				 (DeleteAllRRSets ||
 				 (DeleteOneRRSet && (*rptr)->rr.resrec.rrtype == rr->rrtype) ||
-				  (DeleteOneRR && SameResourceRecord(&(*rptr)->rr.resrec, rr))))
+				  (DeleteOneRR && IdenticalResourceRecord(&(*rptr)->rr.resrec, rr))))
 				  {
 				  tmp = *rptr;
 				  VLog("Received deletion update for %s", GetRRDisplayString_rdb(&tmp->rr.resrec, &tmp->rr.resrec.rdata->u, buf));
@@ -1544,12 +1554,12 @@ mDNSlocal void UpdateLeaseTable(PktMsg *pkt, DaemonInfo *d, mDNSs32 lease)
 		else if (lease > 0)
 			{
 			// see if add or refresh
-			while (*rptr && !SameResourceRecord(&(*rptr)->rr.resrec, rr)) rptr = &(*rptr)->next;
+			while (*rptr && !IdenticalResourceRecord(&(*rptr)->rr.resrec, rr)) rptr = &(*rptr)->next;
 			if (*rptr)
 				{
 				// refresh
-				if (gettimeofday(&time, NULL)) { LogErr("UpdateLeaseTable", "gettimeofday"); goto cleanup; }
-				(*rptr)->expire = time.tv_sec + (unsigned)lease;
+				if (gettimeofday(&tv, NULL)) { LogErr("UpdateLeaseTable", "gettimeofday"); goto cleanup; }
+				(*rptr)->expire = tv.tv_sec + (unsigned)lease;
 				VLog("Refreshing lease for %s", GetRRDisplayString_rdb(&lcr.r.resrec, &lcr.r.resrec.rdata->u, buf));
 				}
 			else
@@ -1561,7 +1571,7 @@ mDNSlocal void UpdateLeaseTable(PktMsg *pkt, DaemonInfo *d, mDNSs32 lease)
 					bucket = rr->namehash % d->nbuckets;
 					rptr = &d->table[bucket];
 					}
-				if (gettimeofday(&time, NULL)) { LogErr("UpdateLeaseTable", "gettimeofday"); goto cleanup; }
+				if (gettimeofday(&tv, NULL)) { LogErr("UpdateLeaseTable", "gettimeofday"); goto cleanup; }
 				allocsize = sizeof(RRTableElem);
 				if (rr->rdlength > InlineCacheRDSize) allocsize += (rr->rdlength - InlineCacheRDSize);
 				tmp = malloc(allocsize);
@@ -1570,7 +1580,7 @@ mDNSlocal void UpdateLeaseTable(PktMsg *pkt, DaemonInfo *d, mDNSs32 lease)
 				tmp->rr.resrec.rdata = (RData *)&tmp->rr.rdatastorage;
 				AssignDomainName(&tmp->name, rr->name);
 				tmp->rr.resrec.name = &tmp->name;
-				tmp->expire = time.tv_sec + (unsigned)lease;
+				tmp->expire = tv.tv_sec + (unsigned)lease;
 				tmp->cli.sin_addr = pkt->src.sin_addr;
 				AssignDomainName(&tmp->zone, &zone.qname);
 				tmp->next = d->table[bucket];
@@ -1953,7 +1963,7 @@ mDNSlocal void *UpdateAnswerList(void *args)
 		{
 		for (na = &NewAnswers; *na; na = &(*na)->next)
 			{
-			if (SameResourceRecord(&(*ka)->resrec, &(*na)->resrec))
+			if (IdenticalResourceRecord(&(*ka)->resrec, &(*na)->resrec))
 				{ (*ka)->resrec.rroriginalttl = 0; break; } // 0 means no change
 			}
 		}
@@ -1963,7 +1973,7 @@ mDNSlocal void *UpdateAnswerList(void *args)
 	while (*na)
 		{
 		for (ka = &a->KnownAnswers; *ka; ka = &(*ka)->next)
-			if (SameResourceRecord(&(*ka)->resrec, &(*na)->resrec)) break;
+			if (IdenticalResourceRecord(&(*ka)->resrec, &(*na)->resrec)) break;
 		if (!*ka)
 			{
 			// answer is not in list - splice from NewAnswers list, add to Event list
@@ -2708,19 +2718,18 @@ RecvUDPMessage
 
 	if ( IsNotify( &context->pkt ) )
 		{
-		int err = RecvNotify( self, &context->pkt );
+		int e = RecvNotify( self, &context->pkt );
 		free(context);
-		return err;
+		return e;
 		}
 	else if ( IsAuthorized( context->d, &context->pkt, &key, &rcode, &tcode ) )
 		{
 		if ( IsLLQRequest( &context->pkt ) )
 			{
 			// LLQ messages handled by main thread
-
-			int err = RecvLLQ( self, &context->pkt, NULL );
+			int e = RecvLLQ( self, &context->pkt, NULL );
 			free(context);
-			return err;
+			return e;
 			}
 
 		if ( IsLLQAck(&context->pkt ) )
@@ -2739,15 +2748,15 @@ RecvUDPMessage
 	else
 		{
 		PktMsg reply;
-		int    res;
+		int    e;
 
 		memcpy( &reply, &context->pkt, sizeof( PktMsg ) );
 
 		reply.msg.h.flags.b[0]  =  kDNSFlag0_QR_Response | kDNSFlag0_AA | kDNSFlag0_RD;
 		reply.msg.h.flags.b[1]  =  kDNSFlag1_RA | kDNSFlag1_RC_NXDomain;
 
-		res = sendto( sd, &reply.msg, reply.len, 0, ( struct sockaddr* ) &context->pkt.src, sizeof( context->pkt.src ) );
-		require_action_quiet( res == ( int ) reply.len, exit, LogErr( "RecvUDPMessage", "sendto" ) );
+		e = sendto( sd, &reply.msg, reply.len, 0, ( struct sockaddr* ) &context->pkt.src, sizeof( context->pkt.src ) );
+		require_action_quiet( e == ( int ) reply.len, exit, LogErr( "RecvUDPMessage", "sendto" ) );
 
 		err = mStatus_NoAuth;
 		}

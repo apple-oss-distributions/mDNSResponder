@@ -45,6 +45,9 @@
     Change History (most recent first):
 
 $Log: ddnswriteconfig.m,v $
+Revision 1.10  2007/11/30 23:43:04  cheshire
+Fixed compile warning: declaration of 'access' shadows a global declaration
+
 Revision 1.9  2007/09/18 19:09:02  cheshire
 <rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
 
@@ -313,14 +316,14 @@ MyMakeUidAccess(uid_t uid)
 		0
 		};
 
-	SecAccessRef access = NULL;
-	(void) SecAccessCreateFromOwnerAndACL(&owner, 1, &acls, &access);
-	return access;
+	SecAccessRef a = NULL;
+	(void) SecAccessCreateFromOwnerAndACL(&owner, 1, &acls, &a);
+	return a;
 }
 
 
 static OSStatus
-MyAddDynamicDNSPassword(SecKeychainRef keychain, SecAccessRef access, UInt32 serviceNameLength, const char *serviceName,
+MyAddDynamicDNSPassword(SecKeychainRef keychain, SecAccessRef a, UInt32 serviceNameLength, const char *serviceName,
     UInt32 accountNameLength, const char *accountName, UInt32 passwordLength, const void *passwordData)
 {
 	char * description       = DYNDNS_KEYCHAIN_DESCRIPTION;
@@ -340,7 +343,7 @@ MyAddDynamicDNSPassword(SecKeychainRef keychain, SecAccessRef access, UInt32 ser
                                      { kSecCreatorItemAttr,         creatorLength, (UInt32 *)&creator    } };
 	SecKeychainAttributeList attributes = { sizeof(attrs) / sizeof(attrs[0]), attrs };
 
-	err = SecKeychainItemCreateFromContent(kSecGenericPasswordItemClass, &attributes, passwordLength, passwordData, keychain, access, NULL);
+	err = SecKeychainItemCreateFromContent(kSecGenericPasswordItemClass, &attributes, passwordLength, passwordData, keychain, a, NULL);
     return err;
 }
 

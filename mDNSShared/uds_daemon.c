@@ -17,6 +17,21 @@
 	Change History (most recent first):
 
 $Log: uds_daemon.c,v $
+Revision 1.384  2007/12/22 01:38:05  cheshire
+Improve display of "Auth Records" SIGINFO output
+
+Revision 1.383  2007/12/07 00:45:58  cheshire
+<rdar://problem/5526800> BTMM: Need to deregister records and services on shutdown/sleep
+
+Revision 1.382  2007/11/30 20:11:48  cheshire
+Fixed compile warning: declaration of 'remove' shadows a global declaration
+
+Revision 1.381  2007/11/28 22:02:52  cheshire
+Remove pointless "if (!domain)" check (domain is an array on the stack, so its address can never be null)
+
+Revision 1.380  2007/11/28 18:38:41  cheshire
+Fixed typo in log message: "DNSServiceResolver" -> "DNSServiceResolve"
+
 Revision 1.379  2007/11/01 19:32:14  cheshire
 Added "DEBUG_64BIT_SCM_RIGHTS" debugging code
 
@@ -2067,10 +2082,10 @@ mDNSlocal void udsserver_automatic_browse_domain_changed(const DNameListElem *co
 					if (p) debugf("udsserver_automatic_browse_domain_changed %##s still in list, not removing", &d->name);
 					else
 						{
-						browser_t *remove = *ptr;
+						browser_t *rem = *ptr;
 						*ptr = (*ptr)->next;
-						mDNS_StopQueryWithRemoves(&mDNSStorage, &remove->q);
-						freeL("browser_t/udsserver_automatic_browse_domain_changed", remove);
+						mDNS_StopQueryWithRemoves(&mDNSStorage, &rem->q);
+						freeL("browser_t/udsserver_automatic_browse_domain_changed", rem);
 						}
 					}
 				}
@@ -2138,9 +2153,9 @@ mDNSlocal void DeregisterLocalOnlyDomainEnumPTR(mDNS *m, const domainname *d, in
 		{
 		if (SameDomainName(&(*ptr)->ar.resrec.rdata->u.name, d) && SameDomainName((*ptr)->ar.resrec.name, &lhs))
 			{
-			ARListElem *remove = *ptr;
+			ARListElem *rem = *ptr;
 			*ptr = (*ptr)->next;
-			mDNS_Deregister(m, &remove->ar);
+			mDNS_Deregister(m, &rem->ar);
 			return;
 			}
 		else ptr = &(*ptr)->next;
@@ -2335,7 +2350,7 @@ mDNSlocal mStatus handle_browse_request(request_state *request)
 
 	if (!request->msgptr) { LogMsg("%3d: DNSServiceBrowse(unreadable parameters)", request->sd); return(mStatus_BadParamErr); }
 
-	if (!domain || (domain[0] == '\0')) uDNS_RegisterSearchDomains(&mDNSStorage);
+	if (domain[0] == '\0') uDNS_RegisterSearchDomains(&mDNSStorage);
 
 	typedn.c[0] = 0;
 	NumSubTypes = ChopSubTypes(regtype);	// Note: Modifies regtype string to remove trailing subtypes
@@ -3300,7 +3315,13 @@ mDNSlocal void request_callback(int fd, short filter, void *info)
 		req = newreq;
 		}
 
-	switch(req->hdr.op)
+	// If we're shutting down, don't allow new client requests
+	// We do allow "cancel" and "getproperty" during shutdown
+	if (mDNSStorage.ShutdownTime && req->hdr.op != cancel_request && req->hdr.op != getproperty_request)
+		{
+		err = mStatus_ServiceNotRunning;
+		}
+	else switch(req->hdr.op)
 		{
 		// These are all operations that have their own first-class request_state object
 		case connection_request:
@@ -3331,8 +3352,7 @@ mDNSlocal void request_callback(int fd, short filter, void *info)
 	if (req->msgbuf) freeL("request_state msgbuf", req->msgbuf);
 
 	// There's no return data for a cancel request (DNSServiceRefDeallocate returns no result)
-	// For a DNSServiceGetProperty call, the handler already generated the response,
-	// so no need to do it again here
+	// For a DNSServiceGetProperty call, the handler already generated the response, so no need to do it again here
 	if (req->hdr.op != cancel_request && req->hdr.op != getproperty_request)
 		{
 		err = dnssd_htonl(err);
@@ -3402,10 +3422,10 @@ mDNSlocal void connect_callback(int fd, short filter, void *info)
 		request->errsd = sd;
 #if APPLE_OSX_mDNSResponder
 	struct xucred x;
-	socklen_t len = sizeof(x);
-	if (getsockopt(sd, 0, LOCAL_PEERCRED, &x, &len) >= 0 && x.cr_version == XUCRED_VERSION) request->uid = x.cr_uid;
+	socklen_t xucredlen = sizeof(x);
+	if (getsockopt(sd, 0, LOCAL_PEERCRED, &x, &xucredlen) >= 0 && x.cr_version == XUCRED_VERSION) request->uid = x.cr_uid;
 	else my_perror("ERROR: getsockopt, LOCAL_PEERCRED");
-	debugf("LOCAL_PEERCRED %d %u %u %d", len, x.cr_version, x.cr_uid, x.cr_ngroups);
+	debugf("LOCAL_PEERCRED %d %u %u %d", xucredlen, x.cr_version, x.cr_uid, x.cr_ngroups);
 #endif APPLE_OSX_mDNSResponder
 		LogOperation("%3d: Adding FD for uid %u", request->sd, request->uid);
 		udsSupportAddFDToEventLoop(sd, request_callback, request);
@@ -3665,11 +3685,19 @@ mDNSexport void udsserver_info(mDNS *const m)
 		AuthRecord *ar;
 		LogMsgNoIdent("    Int    Next  Expire   State");
 		for (ar = m->ResourceRecords; ar; ar=ar->next)
-			LogMsgNoIdent("%7d %7d %7d %7d %s",
-				ar->ThisAPInterval / mDNSPlatformOneSecond,
-				AuthRecord_uDNS(ar) || ar->AnnounceCount ? (ar->LastAPTime + ar->ThisAPInterval - now) / mDNSPlatformOneSecond : 0,
-				AuthRecord_uDNS(ar) && ar->expire        ? (ar->expire - now) / mDNSPlatformOneSecond : 0,
-				ar->state, ARDisplayString(m, ar));
+			if (AuthRecord_uDNS(ar))
+				LogMsgNoIdent("%7d %7d %7d %7d %s",
+					ar->ThisAPInterval / mDNSPlatformOneSecond,
+					(ar->LastAPTime + ar->ThisAPInterval - now) / mDNSPlatformOneSecond,
+					ar->expire ? (ar->expire - now) / mDNSPlatformOneSecond : 0,
+					ar->state, ARDisplayString(m, ar));
+			else if (ar->resrec.InterfaceID != mDNSInterface_LocalOnly)
+				LogMsgNoIdent("%7d %7d               M %s",
+					ar->ThisAPInterval / mDNSPlatformOneSecond,
+					ar->AnnounceCount ? (ar->LastAPTime + ar->ThisAPInterval - now) / mDNSPlatformOneSecond : 0,
+					ARDisplayString(m, ar));
+			else
+				LogMsgNoIdent("                             LO %s", ARDisplayString(m, ar));
 		}
 
 	LogMsgNoIdent("----- ServiceRegistrations -----");
@@ -3864,7 +3892,7 @@ mDNSexport mDNSs32 udsserver_idle(mDNSs32 nextevent)
 			if ((*req)->u.resolve.ReportTime && now - (*req)->u.resolve.ReportTime >= 0)
 				{
 				(*req)->u.resolve.ReportTime = 0;
-				LogMsgNoIdent("Client application bug: DNSServiceResolver(%##s) active for over two minutes. "
+				LogMsgNoIdent("Client application bug: DNSServiceResolve(%##s) active for over two minutes. "
 					"This places considerable burden on the network.", (*req)->u.resolve.qsrv.qname.c);
 				}
 

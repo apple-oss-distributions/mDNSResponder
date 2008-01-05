@@ -17,6 +17,17 @@
     Change History (most recent first):
 
 $Log: DNSCommon.h,v $
+Revision 1.57  2007/12/13 20:20:17  cheshire
+Minor efficiency tweaks -- converted IdenticalResourceRecord, IdenticalSameNameRecord, and
+SameRData from functions to macros, which allows the code to be inlined (the compiler can't
+inline a function defined in a different compilation unit) and therefore optimized better.
+
+Revision 1.56  2007/12/13 00:13:03  cheshire
+Simplified RDataHashValue to take a single ResourceRecord pointer, instead of separate rdlength and RDataBody
+
+Revision 1.55  2007/12/13 00:09:28  cheshire
+For completeness added MX, AFSDB, RT, KX to list of RRTYPES that are considered to have a target domainname in their rdata
+
 Revision 1.54  2007/10/05 17:56:10  cheshire
 Move CountLabels and SkipLeadingLabels to DNSCommon.c so they're callable from other files
 
@@ -192,18 +203,47 @@ extern void AppendLabelSuffix(domainlabel *name, mDNSu32 val, mDNSBool RichText)
 #pragma mark - Resource Record Utility Functions
 #endif
 
-extern mDNSu32 RDataHashValue(mDNSu16 const rdlength, const RDataBody *const rdb);
+// IdenticalResourceRecord returns true if two resources records have
+// the same name, type, class, and identical rdata (InterfaceID and TTL may differ)
+
+// IdenticalSameNameRecord is the same, except it skips the expensive SameDomainName() check,
+// which is at its most expensive and least useful in cases where we know in advance that the names match
+
+// Note: The dominant use of IdenticalResourceRecord is from ProcessQuery(), handling known-answer lists. In this case
+// it's common to have a whole bunch or records with exactly the same name (e.g. "_http._tcp.local") but different RDATA.
+// The SameDomainName() check is expensive when the names match, and in this case *all* the names match, so we
+// used to waste a lot of CPU time verifying that the names match, only then to find that the RDATA is different.
+// We observed mDNSResponder spending 30% of its total CPU time on this single task alone.
+// By swapping the checks so that we check the RDATA first, we can quickly detect when it's different
+// (99% of the time) and then bail out before we waste time on the expensive SameDomainName() check.
+
+#define IdenticalResourceRecord(r1,r2) ( \
+	(r1)->rrtype    == (r2)->rrtype      && \
+	(r1)->rrclass   == (r2)->rrclass     && \
+	(r1)->namehash  == (r2)->namehash    && \
+	(r1)->rdlength  == (r2)->rdlength    && \
+	(r1)->rdatahash == (r2)->rdatahash   && \
+	SameRDataBody((r1), &(r2)->rdata->u) && \
+	SameDomainName((r1)->name, (r2)->name))
+
+#define IdenticalSameNameRecord(r1,r2) ( \
+	(r1)->rrtype    == (r2)->rrtype      && \
+	(r1)->rrclass   == (r2)->rrclass     && \
+	(r1)->rdlength  == (r2)->rdlength    && \
+	(r1)->rdatahash == (r2)->rdatahash   && \
+	SameRDataBody((r1), &(r2)->rdata->u))
+
+extern mDNSu32 RDataHashValue(const ResourceRecord *const rr);
 extern mDNSBool SameRDataBody(const ResourceRecord *const r1, const RDataBody *const r2);
-extern mDNSBool SameRData(const ResourceRecord *const r1, const ResourceRecord *const r2);
+#define SameRData(r1,r2) ((r1)->rrtype == (r2)->rrtype && (r1)->rdlength == (r2)->rdlength && (r1)->rdatahash == (r2)->rdatahash && SameRDataBody((r1), &(r2)->rdata->u))
 extern mDNSBool ResourceRecordAnswersQuestion(const ResourceRecord *const rr, const DNSQuestion *const q);
 extern mDNSBool SameNameRecordAnswersQuestion(const ResourceRecord *const rr, const DNSQuestion *const q);
-extern mDNSBool SameResourceRecord(ResourceRecord *r1, ResourceRecord *r2);
 extern mDNSu16 GetRDLength(const ResourceRecord *const rr, mDNSBool estimate);
 extern mDNSBool ValidateRData(const mDNSu16 rrtype, const mDNSu16 rdlength, const RData *const rd);
 
 #define GetRRDomainNameTarget(RR) (                                                                          \
-	((RR)->rrtype == kDNSType_CNAME || (RR)->rrtype == kDNSType_PTR || (RR)->rrtype == kDNSType_NS)          \
-	                                                                 ? &(RR)->rdata->u.name       :          \
+	((RR)->rrtype == kDNSType_NS || (RR)->rrtype == kDNSType_CNAME || (RR)->rrtype == kDNSType_PTR || (RR)->rrtype == kDNSType_DNAME) ? &(RR)->rdata->u.name        : \
+	((RR)->rrtype == kDNSType_MX || (RR)->rrtype == kDNSType_AFSDB || (RR)->rrtype == kDNSType_RT  || (RR)->rrtype == kDNSType_KX   ) ? &(RR)->rdata->u.mx.exchange : \
 	((RR)->rrtype == kDNSType_SRV                                  ) ? &(RR)->rdata->u.srv.target : mDNSNULL )
 
 #define LocalRecordReady(X) ((X)->resrec.RecordType != kDNSRecordTypeUnique && (X)->resrec.RecordType != kDNSRecordTypeDeregistering)

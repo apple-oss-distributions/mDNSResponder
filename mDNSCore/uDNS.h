@@ -17,6 +17,12 @@
     Change History (most recent first):
 
 $Log: uDNS.h,v $
+Revision 1.90  2007/12/22 02:25:30  cheshire
+<rdar://problem/5661128> Records and Services sometimes not re-registering on wake from sleep
+
+Revision 1.89  2007/12/15 01:12:27  cheshire
+<rdar://problem/5526796> Need to remove active LLQs from server upon question cancellation, on sleep, and on shutdown
+
 Revision 1.88  2007/10/25 20:06:13  cheshire
 Don't try to do SOA queries using private DNS (TLS over TCP) queries
 
@@ -231,9 +237,7 @@ Revision 1.33  2006/07/05 22:53:28  cheshire
 
 extern void LLQGotZoneData(mDNS *const m, mStatus err, const ZoneData *zoneInfo);
 extern void startLLQHandshake(mDNS *m, DNSQuestion *q);
-extern void sendLLQRefresh(mDNS *m, DNSQuestion *q, mDNSu32 lease);
-
-extern void uDNS_Wake(mDNS *const m);
+extern void sendLLQRefresh(mDNS *m, DNSQuestion *q);
 
 extern void SleepServiceRegistrations(mDNS *m);
 extern void SleepRecordRegistrations(mDNS *m);

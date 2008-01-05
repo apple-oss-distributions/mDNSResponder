@@ -77,7 +77,7 @@
  */
 
 #ifndef _DNS_SD_H
-#define _DNS_SD_H 1640000
+#define _DNS_SD_H 1700000
 
 #ifdef  __cplusplus
     extern "C" {
@@ -101,14 +101,16 @@
 #include <sys/types.h>
 
 /* EFI does not have stdint.h, or anything else equivalent */
-#elif defined(EFI32) || defined(EFI64)
+#elif defined(EFI32) || defined(EFI64) || defined(EFIX64)
+#include "Tiano.h"
+#if !defined(_STDINT_H_)
 typedef UINT8       uint8_t;
 typedef INT8        int8_t;
 typedef UINT16      uint16_t;
 typedef INT16       int16_t;
 typedef UINT32      uint32_t;
 typedef INT32       int32_t;
-
+#endif
 /* Windows has its own differences */
 #elif defined(_WIN32)
 #include <windows.h>
@@ -299,7 +301,7 @@ enum
      * DNSServiceRef's created by other calls like DNSServiceBrowse() or DNSServiceResolve()
      * cannot be shared by copying them and using kDNSServiceFlagsShareConnection.
      *
-     * 3. Don't double-deallocate
+     * 3. Don't Double-Deallocate
      * Calling DNSServiceRefDeallocate(ref) for a particular operation's DNSServiceRef terminates
      * just that operation. Calling DNSServiceRefDeallocate(ref) for the main shared DNSServiceRef
      * (the parent DNSServiceRef, originally created by DNSServiceCreateConnection(&ref))
@@ -308,6 +310,13 @@ enum
      * The memory used by those subordinate DNSServiceRef's has already been freed, so any attempt
      * to do a DNSServiceRefDeallocate (or any other operation) on them will result in accesses
      * to freed memory, leading to crashes or other equally undesirable results.
+     *
+     * 4. Thread Safety
+     * The dns_sd.h API does not presuppose any particular threading model, and consequently
+     * does no locking of its own (which would require linking some specific threading library).
+     * If client code calls API routines on the same DNSServiceRef concurrently
+     * from multiple threads, it is the client's responsibility to use a mutext
+     * lock or take similar appropriate precautions to serialize those calls.
      */
 
     };
@@ -736,7 +745,6 @@ typedef void (DNSSD_API *DNSServiceDomainEnumReply)
 
 /* DNSServiceEnumerateDomains() Parameters:
  *
- *
  * sdRef:           A pointer to an uninitialized DNSServiceRef. If the call succeeds
  *                  then it initializes the DNSServiceRef, returns kDNSServiceErr_NoError,
  *                  and the enumeration operation will run indefinitely until the client
@@ -781,7 +789,6 @@ DNSServiceErrorType DNSSD_API DNSServiceEnumerateDomains
  *********************************************************************************************/
 
 /* Register a service that is discovered via Browse() and Resolve() calls.
- *
  *
  * DNSServiceRegisterReply() Callback Parameters:
  *
@@ -953,7 +960,6 @@ DNSServiceErrorType DNSSD_API DNSServiceRegister
  * DNSServiceRef, then it's the caller's responsibility to use a mutext lock
  * or take similar appropriate precautions to serialize those calls.
  *
- *
  * Parameters;
  *
  * sdRef:           A DNSServiceRef initialized by DNSServiceRegister().
@@ -995,7 +1001,6 @@ DNSServiceErrorType DNSSD_API DNSServiceAddRecord
  *   - The primary txt record of a service registered via DNSServiceRegister()
  *   - A record added to a registered service via DNSServiceAddRecord()
  *   - An individual record registered by DNSServiceRegisterRecord()
- *
  *
  * Parameters:
  *
@@ -1064,7 +1069,6 @@ DNSServiceErrorType DNSSD_API DNSServiceRemoveRecord
  *********************************************************************************************/
 
 /* Browse for instances of a service.
- *
  *
  * DNSServiceBrowseReply() Parameters:
  *
@@ -1303,7 +1307,6 @@ DNSServiceErrorType DNSSD_API DNSServiceResolve
  *
  * Query for an arbitrary DNS record.
  *
- *
  * DNSServiceQueryRecordReply() Callback Parameters:
  *
  * sdRef:           The DNSServiceRef initialized by DNSServiceQueryRecord().
@@ -1346,7 +1349,7 @@ DNSServiceErrorType DNSSD_API DNSServiceResolve
 
 typedef void (DNSSD_API *DNSServiceQueryRecordReply)
     (
-    DNSServiceRef                       DNSServiceRef,
+    DNSServiceRef                       sdRef,
     DNSServiceFlags                     flags,
     uint32_t                            interfaceIndex,
     DNSServiceErrorType                 errorCode,
@@ -1421,7 +1424,6 @@ DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
 /* DNSServiceGetAddrInfo
  *
  * Queries for the IP address of a hostname by using either Multicast or Unicast DNS.
- *
  *
  * DNSServiceGetAddrInfoReply() parameters:
  *
@@ -1538,7 +1540,6 @@ DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo
  * Create a connection to the daemon allowing efficient registration of
  * multiple individual records.
  *
- *
  * Parameters:
  *
  * sdRef:           A pointer to an uninitialized DNSServiceRef. Deallocating
@@ -1559,7 +1560,6 @@ DNSServiceErrorType DNSSD_API DNSServiceCreateConnection(DNSServiceRef *sdRef);
  *
  * Note that name conflicts occurring for records registered via this call must be handled
  * by the client in the callback.
- *
  *
  * DNSServiceRegisterRecordReply() parameters:
  *
@@ -1720,7 +1720,6 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
  * different public port being mapped for this client. Over the lifetime of any long-lived
  * port mapping, the client should be prepared to handle these notifications of changes
  * in the environment, and should update its recorded address and/or port as appropriate.
- *
  *
  * DNSServiceNATPortMappingReply() parameters:
  *
@@ -2193,7 +2192,7 @@ uint16_t DNSSD_API TXTRecordGetCount
  *
  * txtRecord:       Pointer to the received TXT Record bytes.
  *
- * index:           An index into the TXT Record.
+ * itemIndex:       An index into the TXT Record.
  *
  * keyBufLen:       The size of the string buffer being supplied.
  *
@@ -2218,7 +2217,7 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
     (
     uint16_t         txtLen,
     const void       *txtRecord,
-    uint16_t         index,
+    uint16_t         itemIndex,
     uint16_t         keyBufLen,
     char             *key,
     uint8_t          *valueLen,
@@ -2238,7 +2237,6 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
  * calls by this user that do not specify an explicit domain will browse and
  * register in this wide-area domain in addition to .local. In addition, this
  * domain will be returned as a Browse domain via domain enumeration calls.
- *
  *
  * Parameters:
  *

@@ -43,6 +43,9 @@
     Change History (most recent first):
 
 $Log: PrivilegedOperations.c,v $
+Revision 1.8  2007/11/30 23:42:33  cheshire
+Fixed compile warning: declaration of 'status' shadows a previous local
+
 Revision 1.7  2007/02/09 00:39:06  cheshire
 Fix compile warnings
 
@@ -146,7 +149,6 @@ OSStatus EnsureToolInstalled(void)
 			char *installerargs[] = { toolSourcePath, NULL };
 			err = AuthorizationExecuteWithPrivileges(authRef, toolInstallerPath, 0, installerargs, (FILE**) NULL);
 			if (err == noErr) {
-				int status;
 				int pid = wait(&status);
 				if (pid > 0 && WIFEXITED(status)) {
 					err = WEXITSTATUS(status);

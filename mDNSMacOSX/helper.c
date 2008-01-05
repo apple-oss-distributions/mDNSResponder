@@ -17,6 +17,16 @@
     Change History (most recent first):
 
 $Log: helper.c,v $
+Revision 1.23  2007/11/30 23:21:51  cheshire
+Rename variables to eliminate "declaration of 'sin_loc' shadows a previous local" warning
+
+Revision 1.22  2007/11/27 00:08:49  jgraessley
+<rdar://problem/5613538> Interface specific resolvers not setup correctly
+
+Revision 1.21  2007/11/07 00:22:30  jgraessley
+Bug #: <rdar://problem/5573573> mDNSResponder doesn't build without IPSec
+Reviewed by: Stuart Cheshire
+
 Revision 1.20  2007/09/12 18:07:44  cheshire
 Fix compile errors ("passing argument from incompatible pointer type")
 
@@ -103,6 +113,7 @@ Revision 1.1  2007/08/08 22:34:58  mcguire
 #include <SystemConfiguration/SCDynamicStore.h>
 #include <SystemConfiguration/SCPreferencesSetSpecific.h>
 #include <SystemConfiguration/SCDynamicStoreCopySpecific.h>
+#include <TargetConditionals.h>
 #include "mDNSEmbeddedAPI.h"
 #include "dns_sd.h"
 #include "dnssd_ipc.h"
@@ -110,8 +121,10 @@ Revision 1.1  2007/08/08 22:34:58  mcguire
 #include "helper.h"
 #include "helpermsgServer.h"
 #include "helper-server.h"
+#include "ipsec_options.h"
 
 #if TARGET_OS_EMBEDDED
+#define NO_CFUSERNOTIFICATION 1
 #define NO_SECURITYFRAMEWORK 1
 #endif
 
@@ -153,6 +166,7 @@ authorized(audit_token_t *token)
 	return ok;
 	}
 
+#ifndef MDNS_NO_IPSEC
 static void
 closefds(int from)
 	{
@@ -175,6 +189,7 @@ closefds(int from)
 		}
 	closedir(dirp);
 	}
+#endif
 
 kern_return_t
 do_mDNSIdleExit(__unused mach_port_t port, audit_token_t token)
@@ -272,6 +287,7 @@ char userhostname[MAX_DOMAIN_LABEL+1] = {0}; // the last local host name the use
 char lastcompname[MAX_DOMAIN_LABEL+1] = {0}; // the last computer name saved to preferences
 char lasthostname[MAX_DOMAIN_LABEL+1] = {0}; // the last local host name saved to preferences
 
+#ifndef NO_CFUSERNOTIFICATION
 static CFStringRef CFS_OQ = NULL;
 static CFStringRef CFS_CQ = NULL;
 static CFStringRef CFS_Format = NULL;
@@ -400,9 +416,11 @@ static CFMutableArrayRef GetHeader(const char* oldname, const char* newname, con
 
 	return alertHeader;
 	}
+#endif /* ndef NO_CFUSERNOTIFICATION */
 
 static void update_notification(void)
 	{
+#ifndef NO_CFUSERNOTIFICATION
 	debug("entry ucn=%s, uhn=%s, lcn=%s, lhn=%s", usercompname, userhostname, lastcompname, lasthostname);
 	if (!CFS_OQ)
 		{
@@ -453,6 +471,7 @@ static void update_notification(void)
 		ShowNameConflictNotification(header, *subtext);
 		CFRelease(header);
 		}
+#endif
 	}
 
 kern_return_t
@@ -874,6 +893,7 @@ fin:
 #endif
 	}
 
+#ifndef MDNS_NO_IPSEC
 typedef enum _mDNSTunnelPolicyWhich
 	{
 	kmDNSTunnelPolicySetup,
@@ -981,11 +1001,13 @@ fin:
 		close(s);
 	return err;
 	}
+#endif /* ifndef MDNS_NO_IPSEC */
 
 int
 do_mDNSAutoTunnelInterfaceUpDown(__unused mach_port_t port, int updown,
     v6addr_t address, int *err, audit_token_t token)
 	{
+#ifndef MDNS_NO_IPSEC
 	debug("entry");
 	*err = 0;
 	if (!authorized(&token))
@@ -1008,10 +1030,15 @@ do_mDNSAutoTunnelInterfaceUpDown(__unused mach_port_t port, int updown,
 	debug("succeeded");
 
 fin:
+#else
+	(void)port; (void)updown; (void)address; (void)token;
+	*err = kmDNSHelperIPsecDisabled;
+#endif
 	update_idle_timer();
 	return KERN_SUCCESS;
 	}
 
+#ifndef MDNS_NO_IPSEC
 static const char racoon_config_path[] = "/etc/racoon/remote/anonymous.conf";
 static const char racoon_config_path_orig[] = "/etc/racoon/remote/anonymous.conf.orig";
 
@@ -1237,9 +1264,12 @@ kickRacoon(void)
 	return startRacoon();
 	}
 
+#endif /* ndef MDNS_NO_IPSEC */
+
 int
 do_mDNSConfigureServer(__unused mach_port_t port, int updown, const char *keydata, int *err, audit_token_t token)
 	{
+#ifndef MDNS_NO_IPSEC
 	debug("entry");
 	*err = 0;
 
@@ -1271,9 +1301,15 @@ do_mDNSConfigureServer(__unused mach_port_t port, int updown, const char *keydat
 	debug("succeeded");
 
 fin:
+#else
+	(void)port; (void)updown; (void)keydata; (void)token;
+	*err = kmDNSHelperIPsecDisabled;
+#endif
 	update_idle_timer();
 	return KERN_SUCCESS;
 	}
+
+#ifndef MDNS_NO_IPSEC
 
 static unsigned int routeSeq = 1;
 
@@ -1532,8 +1568,8 @@ doTunnelPolicy(mDNSTunnelPolicyWhich which,
 	       v6addr_t rmt_inner, uint8_t rmt_bits,
 	       v4addr_t rmt_outer, uint16_t rmt_port)
 	{
-	struct sockaddr_in6 sin_loc;
-	struct sockaddr_in6 sin_rmt;
+	struct sockaddr_in6 sin6_loc;
+	struct sockaddr_in6 sin6_rmt;
 	ipsec_policy_t policy = NULL;
 	size_t len = 0;
 	int s = -1;
@@ -1549,17 +1585,17 @@ doTunnelPolicy(mDNSTunnelPolicyWhich which,
 		goto fin;
 		}
 
-	memset(&sin_loc, 0, sizeof(sin_loc));
-	sin_loc.sin6_len = sizeof(sin_loc);
-	sin_loc.sin6_family = AF_INET6;
-	sin_loc.sin6_port = htons(0);
-	memcpy(&sin_loc.sin6_addr, loc_inner, sizeof(sin_loc.sin6_addr));
+	memset(&sin6_loc, 0, sizeof(sin6_loc));
+	sin6_loc.sin6_len = sizeof(sin6_loc);
+	sin6_loc.sin6_family = AF_INET6;
+	sin6_loc.sin6_port = htons(0);
+	memcpy(&sin6_loc.sin6_addr, loc_inner, sizeof(sin6_loc.sin6_addr));
 
-	memset(&sin_rmt, 0, sizeof(sin_rmt));
-	sin_rmt.sin6_len = sizeof(sin_rmt);
-	sin_rmt.sin6_family = AF_INET6;
-	sin_rmt.sin6_port = htons(0);
-	memcpy(&sin_rmt.sin6_addr, rmt_inner, sizeof(sin_rmt.sin6_addr));
+	memset(&sin6_rmt, 0, sizeof(sin6_rmt));
+	sin6_rmt.sin6_len = sizeof(sin6_rmt);
+	sin6_rmt.sin6_family = AF_INET6;
+	sin6_rmt.sin6_port = htons(0);
+	memcpy(&sin6_rmt.sin6_addr, rmt_inner, sizeof(sin6_rmt.sin6_addr));
 
 	int setup = which != kmDNSTunnelPolicyTeardown;
 
@@ -1569,8 +1605,8 @@ doTunnelPolicy(mDNSTunnelPolicyWhich which,
 	    &policy, &len)))
 		goto fin;
 	if (0 != (err = sendPolicy(s, setup,
-	    (struct sockaddr *)&sin_rmt, rmt_bits,
-	    (struct sockaddr *)&sin_loc, loc_bits,
+	    (struct sockaddr *)&sin6_rmt, rmt_bits,
+	    (struct sockaddr *)&sin6_loc, loc_bits,
 	    policy, len)))
 		goto fin;
 	if (NULL != policy)
@@ -1584,8 +1620,8 @@ doTunnelPolicy(mDNSTunnelPolicyWhich which,
 	    &policy, &len)))
 		goto fin;
 	if (0 != (err = sendPolicy(s, setup,
-	    (struct sockaddr *)&sin_loc, loc_bits,
-	    (struct sockaddr *)&sin_rmt, rmt_bits,
+	    (struct sockaddr *)&sin6_loc, loc_bits,
+	    (struct sockaddr *)&sin6_rmt, rmt_bits,
 	    policy, len)))
 		goto fin;
 
@@ -1620,12 +1656,15 @@ fin:
 	return err;
 	}
 
+#endif /* ndef MDNS_NO_IPSEC */
+
 int
 do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
     v6addr_t loc_inner, v4addr_t loc_outer, uint16_t loc_port,
     v6addr_t rmt_inner, v4addr_t rmt_outer, uint16_t rmt_port,
     const char *keydata, int *err, audit_token_t token)
 	{
+#ifndef MDNS_NO_IPSEC
 	static const char config[] =
 	  "%s"
 	  "remote %s [%u] {\n"
@@ -1773,6 +1812,12 @@ fin:
 	if (0 <= fd)
 		close(fd);
 	unlink(tmp_path);
+#else
+	(void)replacedelete; (void)loc_inner; (void)loc_outer; (void)loc_port; (void)rmt_inner;
+	(void)rmt_outer; (void)rmt_port; (void)keydata; (void)token;
+	
+	*err = kmDNSHelperIPsecDisabled;
+#endif /* MDNS_NO_IPSEC */
 	update_idle_timer();
 	return KERN_SUCCESS;
 	}

@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: LegacyNATTraversal.c,v $
+Revision 1.45  2007/12/06 00:22:27  mcguire
+<rdar://problem/5604567> BTMM: Doesn't work with Linksys WAG300N 1.01.06 (sending from 1026/udp)
+
 Revision 1.44  2007/11/02 20:45:40  cheshire
 Don't log "connection failed" in customer builds
 
@@ -806,6 +809,9 @@ mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID Interface
 
 	if (ptr == mDNSNULL || ptr == end) return;	// not a valid message
 	LogOperation("Router port %d, URL set to [%s]...", mDNSVal16(m->UPnPRouterPort), m->UPnPRouterURL);
+	
+	// Don't need the SSDP socket anymore
+	if (m->SSDPSocket) { LogOperation("LNT_ConfigureRouterInfo destroying SSDPSocket %p", &m->SSDPSocket); mDNSPlatformUDPClose(m->SSDPSocket); m->SSDPSocket = mDNSNULL; }
 
 	// now send message to get the device description
 	GetDeviceDescription(m, &m->tcpDeviceInfo);
@@ -823,7 +829,10 @@ mDNSexport void LNT_SendDiscoveryMsg(mDNS *m)
 	LogOperation("LNT_SendDiscoveryMsg Router %.4a Current External Address %.4a", &m->Router.ip.v4, &m->ExternalAddress);
 
 	if (!mDNSIPv4AddressIsZero(m->Router.ip.v4) && mDNSIPv4AddressIsZero(m->ExternalAddress))
+		{
+		if (!m->SSDPSocket) { m->SSDPSocket = mDNSPlatformUDPSocket(m, zeroIPPort); LogOperation("LNT_SendDiscoveryMsg created SSDPSocket %p", &m->SSDPSocket); }
 		mDNSPlatformSendUDP(m, msg, msg + sizeof(msg) - 1, 0, &m->Router, SSDPPort);
+		}
 	}
 
 #endif /* _LEGACY_NAT_TRAVERSAL_ */

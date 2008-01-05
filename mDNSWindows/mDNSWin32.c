@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: mDNSWin32.c,v $
+Revision 1.130  2007/11/16 18:53:56  cheshire
+TCPSocketFlags needs to be first field of TCPSocket_struct
+
 Revision 1.129  2007/10/17 22:52:26  cheshire
 Get rid of unused mDNS_UpdateLLQs()
 
@@ -219,8 +222,8 @@ struct	mDNSPlatformInterfaceInfo
 
 struct TCPSocket_struct
 {
+	TCPSocketFlags flags;		// MUST BE FIRST FIELD -- mDNSCore expects every TCPSocket_struct to begin with TCPSocketFlags flags
 	SocketRef				fd;
-	TCPSocketFlags		flags;
 	BOOL					connected;
 	TCPConnectionCallback	callback;
 	void				*	context;

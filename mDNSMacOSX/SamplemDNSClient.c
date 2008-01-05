@@ -30,6 +30,9 @@
 	Change History (most recent first):
 
 $Log: SamplemDNSClient.c,v $
+Revision 1.54  2007/11/30 23:39:55  cheshire
+Fixed compile warning: declaration of 'client' shadows a global declaration
+
 Revision 1.53  2007/09/18 19:09:02  cheshire
 <rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
 
@@ -111,9 +114,9 @@ static void MyHandleMachMessage(CFMachPortRef port, void *msg, CFIndex size, voi
 	DNSServiceDiscovery_handleReply(msg);
 	}
 
-static int AddDNSServiceClientToRunLoop(dns_service_discovery_ref client)
+static int AddDNSServiceClientToRunLoop(dns_service_discovery_ref c)
 	{
-	mach_port_t port = DNSServiceDiscoveryMachPort(client);
+	mach_port_t port = DNSServiceDiscoveryMachPort(c);
 	if (!port)
 		return(-1);
 	else
@@ -316,7 +319,7 @@ static void reg_reply(DNSServiceRegistrationReplyErrorType errorCode, void *cont
 int main(int argc, char **argv)
 	{
 	const char *progname = strrchr(argv[0], '/') ? strrchr(argv[0], '/') + 1 : argv[0];
-	char *dom;
+	char *d;
 	setlinebuf(stdout);				// Want to see lines as they appear, not block buffered
 
 	if (argc < 2) goto Fail;		// Minimum command line is the command name and one argument
@@ -334,17 +337,17 @@ int main(int argc, char **argv)
 					break;
 
 		case 'B':	if (argc < optind+1) goto Fail;
-					dom = (argc < optind+2) ? "" : argv[optind+1];	// Missing domain argument is the same as empty string i.e. use system default(s)
-					if (dom[0] == '.' && dom[1] == 0) dom[0] = 0;	// We allow '.' on the command line as a synonym for empty string
-					printf("Browsing for %s%s\n", argv[optind+0], dom);
-					client = DNSServiceBrowserCreate(argv[optind+0], dom, browse_reply, nil);
+					d = (argc < optind+2) ? "" : argv[optind+1];	// Missing domain argument is the same as empty string i.e. use system default(s)
+					if (d[0] == '.' && d[1] == 0) d[0] = 0;	// We allow '.' on the command line as a synonym for empty string
+					printf("Browsing for %s%s\n", argv[optind+0], d);
+					client = DNSServiceBrowserCreate(argv[optind+0], d, browse_reply, nil);
 					break;
 
 		case 'L':	if (argc < optind+2) goto Fail;
-					dom = (argc < optind+3) ? "" : argv[optind+2];
-					if (dom[0] == '.' && dom[1] == 0) dom = "local";   // We allow '.' on the command line as a synonym for "local"
-					printf("Lookup %s.%s%s\n", argv[optind+0], argv[optind+1], dom);
-					client = DNSServiceResolverResolve(argv[optind+0], argv[optind+1], dom, resolve_reply, nil);
+					d = (argc < optind+3) ? "" : argv[optind+2];
+					if (d[0] == '.' && d[1] == 0) d = "local";   // We allow '.' on the command line as a synonym for "local"
+					printf("Lookup %s.%s%s\n", argv[optind+0], argv[optind+1], d);
+					client = DNSServiceResolverResolve(argv[optind+0], argv[optind+1], d, resolve_reply, nil);
 					break;
 
 		case 'R':	if (argc < optind+4) goto Fail;
