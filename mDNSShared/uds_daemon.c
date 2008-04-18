@@ -17,6 +17,15 @@
 	Change History (most recent first):
 
 $Log: uds_daemon.c,v $
+Revision 1.387  2008/02/26 21:24:13  cheshire
+Fixed spelling mistake in comment
+
+Revision 1.386  2008/02/26 20:23:15  cheshire
+Updated comments
+
+Revision 1.385  2008/02/19 21:50:52  cheshire
+Shortened some overly-long lines
+
 Revision 1.384  2007/12/22 01:38:05  cheshire
 Improve display of "Auth Records" SIGINFO output
 
@@ -722,7 +731,7 @@ typedef struct registered_record_entry
 	{
 	struct registered_record_entry *next;
 	mDNSu32 key;
-	AuthRecord *rr;		// Variable-sized AuthRecord
+	AuthRecord *rr;				// Pointer to variable-sized AuthRecord
 	client_context_t client_context;
 	request_state *request;
 	} registered_record_entry;
@@ -740,7 +749,7 @@ typedef struct service_instance
     mDNSBool clientnotified;		// Has client been notified of successful registration yet?
 	mDNSBool default_local;			// is this the "local." from an empty-string registration?
 	domainname domain;
-	ServiceRecordSet srs;			// note - must be last field in struct
+	ServiceRecordSet srs;			// note -- variable-sized object -- must be last field in struct
 	} service_instance;
 
 // for multi-domain default browsing
@@ -766,7 +775,7 @@ struct request_state
 	transfer_state ts;
 	mDNSu32 hdr_bytes;				// bytes of header already read
 	ipc_msg_hdr hdr;
-	mDNSu32 data_bytes;			// bytes of message data already read
+	mDNSu32 data_bytes;				// bytes of message data already read
 	char *msgbuf;					// pointer to data storage to pass to free()
 	char *msgptr;					// pointer to data to be read from (may be modified)
 	char *msgend;					// pointer to byte after last byte of message
@@ -1709,7 +1718,8 @@ mDNSlocal mStatus register_service_instance(request_state *request, const domain
 			{ LogMsg("register_service_instance: domain %##s already registered", domain->c); return mStatus_AlreadyRegistered; }
 		}
 
-	// Special-case hack: We don't advertise SMB service in AutoTunnel domains, because AutoTunnel services have to support IPv6, and our SMB server does not
+	// Special-case hack: We don't advertise SMB service in AutoTunnel domains, because AutoTunnel
+	// services have to support IPv6, and our SMB server does not
 	// <rdar://problem/5482322> BTMM: Don't advertise SMB with BTMM because it doesn't support IPv6
 	if (SameDomainName(&request->u.servicereg.type, (const domainname *) "\x4" "_smb" "\x4" "_tcp"))
 		{
@@ -2545,11 +2555,6 @@ mDNSlocal mStatus handle_resolve_request(request_state *request)
 // to the mDNSCore routine) that sends results back to the client, and a termination routine that aborts
 // the mDNSCore operation if the client dies or closes its socket.
 
-// query and resolve calls have separate request handlers that parse the arguments from the client and
-// massage the name parameters appropriately, but the rest of the operations (making the query call,
-// delivering the result to the client, and termination) are identical.
-
-// what gets called when a resolve is completed and we need to send the data back to the client
 mDNSlocal void queryrecord_result_callback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 	{
 	char name[MAX_ESCAPED_DOMAIN_NAME];
@@ -2636,7 +2641,8 @@ mDNSlocal mStatus handle_queryrecord_request(request_state *request)
 	rrtype  = get_uint16(&request->msgptr, request->msgend);
 	rrclass = get_uint16(&request->msgptr, request->msgend);
 
-	if (!request->msgptr) { LogMsg("%3d: DNSServiceQueryRecord(unreadable parameters)", request->sd); return(mStatus_BadParamErr); }
+	if (!request->msgptr)
+		{ LogMsg("%3d: DNSServiceQueryRecord(unreadable parameters)", request->sd); return(mStatus_BadParamErr); }
 
 	mDNSPlatformMemZero(&request->u.queryrecord.q, sizeof(&request->u.queryrecord.q));
 
@@ -2736,7 +2742,8 @@ mDNSlocal mStatus handle_enum_request(request_state *request)
 	mDNSInterfaceID InterfaceID = mDNSPlatformInterfaceIDfromInterfaceIndex(&mDNSStorage, interfaceIndex);
 	if (interfaceIndex && !InterfaceID) return(mStatus_BadParamErr);
 
-	if (!request->msgptr) { LogMsg("%3d: DNSServiceEnumerateDomains(unreadable parameters)", request->sd); return(mStatus_BadParamErr); }
+	if (!request->msgptr)
+		{ LogMsg("%3d: DNSServiceEnumerateDomains(unreadable parameters)", request->sd); return(mStatus_BadParamErr); }
 
 	// allocate context structures
 	uDNS_RegisterSearchDomains(&mDNSStorage);
@@ -2909,7 +2916,8 @@ mDNSlocal mStatus handle_port_mapping_request(request_state *request)
 		ttl = get_uint32(&request->msgptr, request->msgend);
 		}
 
-	if (!request->msgptr) { LogMsg("%3d: DNSServiceNATPortMappingCreate(unreadable parameters)", request->sd); return(mStatus_BadParamErr); }
+	if (!request->msgptr)
+		{ LogMsg("%3d: DNSServiceNATPortMappingCreate(unreadable parameters)", request->sd); return(mStatus_BadParamErr); }
 
 	if (protocol == 0)	// If protocol == 0 (i.e. just request public address) then IntPort, ExtPort, ttl must be zero too
 		{
@@ -3554,9 +3562,10 @@ mDNSexport int udsserver_init(dnssd_sock_t skt)
 	mDNS_GetDomains(&mDNSStorage, &mDNSStorage.AutomaticBrowseDomainQ, mDNS_DomainTypeBrowseAutomatic,
 		mDNSNULL, mDNSInterface_LocalOnly, AutomaticBrowseDomainChange, mDNSNULL);
 
-	RegisterLocalOnlyDomainEnumPTR(&mDNSStorage, &localdomain, mDNS_DomainTypeRegistration);		// Add "local" as recommended registration domain ("dns-sd -E")
-	RegisterLocalOnlyDomainEnumPTR(&mDNSStorage, &localdomain, mDNS_DomainTypeBrowse);				// Add "local" as recommended browsing domain ("dns-sd -F")
-	AddAutoBrowseDomain(0, &localdomain);															// Add "local" as automatic browsing domain
+	// Add "local" as recommended registration domain ("dns-sd -E"), recommended browsing domain ("dns-sd -F"), and automatic browsing domain
+	RegisterLocalOnlyDomainEnumPTR(&mDNSStorage, &localdomain, mDNS_DomainTypeRegistration);
+	RegisterLocalOnlyDomainEnumPTR(&mDNSStorage, &localdomain, mDNS_DomainTypeBrowse);
+	AddAutoBrowseDomain(0, &localdomain);
 
 	udsserver_handle_configchange(&mDNSStorage);
 	return 0;
@@ -3787,7 +3796,8 @@ mDNSexport void udsserver_info(mDNS *const m)
 		{
 		ClientTunnel *c;
 		for (c = m->TunnelClients; c; c = c->next)
-			LogMsgNoIdent("%##s local %.16a %.4a remote %.16a %.4a %5d interval %d", c->dstname.c, &c->loc_inner, &c->loc_outer, &c->rmt_inner, &c->rmt_outer, mDNSVal16(c->rmt_outer_port), c->q.ThisQInterval);
+			LogMsgNoIdent("%##s local %.16a %.4a remote %.16a %.4a %5d interval %d",
+				c->dstname.c, &c->loc_inner, &c->loc_outer, &c->rmt_inner, &c->rmt_outer, mDNSVal16(c->rmt_outer_port), c->q.ThisQInterval);
 		}
 	#endif
 	}

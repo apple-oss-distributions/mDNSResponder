@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: mDNSDebug.h,v $
+Revision 1.39  2008/02/26 21:17:11  cheshire
+Grouped all user settings together near the start of the file; added LogTimeStamps option
+
 Revision 1.38  2007/12/13 20:27:07  cheshire
 Remove unused VerifySameNameAssumptions symbol
 
@@ -136,6 +139,32 @@ Merge in license terms from Quinn's copy, in preparation for Darwin release
 //    warning: repeated `#' flag in format              (for %##s             -- DNS name string format)
 //    warning: double format, pointer arg (arg 2)       (for %.4a, %.16a, %#a -- IP address formats)
 #define MDNS_CHECK_PRINTF_STYLE_FUNCTIONS 0
+
+typedef enum
+	{
+	MDNS_LOG_NONE,
+//	MDNS_LOG_ERROR,
+//	MDNS_LOG_WARN,
+//	MDNS_LOG_INFO,
+//	MDNS_LOG_DEBUG,
+	MDNS_LOG_VERBOSE_DEBUG
+	} LogLevel_t;
+
+#define MDNS_LOG_INITIAL_LEVEL MDNS_LOG_NONE
+
+// Set this symbol to 1 to answer remote queries for our Address, reverse mapping PTR, and HINFO records
+#define ANSWER_REMOTE_HOSTNAME_QUERIES 0
+
+// Set this symbol to 1 to do extra debug checks on malloc() and free()
+// Set this symbol to 2 to write a log message for every malloc() and free()
+#define MACOSX_MDNS_MALLOC_DEBUGGING 0
+
+#define LogAllOperations 0
+#define LogTimeStamps 0
+#define ForceAlerts 0
+
+// Developer-settings section ends here
+
 #if MDNS_CHECK_PRINTF_STYLE_FUNCTIONS
 #define IS_A_PRINTF_STYLE_FUNCTION(F,A) __attribute__ ((format(printf,F,A)))
 #else
@@ -198,18 +227,6 @@ extern void verbosedebugf_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1
 #endif
 
 // LogMsg is used even in shipping code, to write truly serious error messages to syslog (or equivalent)
-typedef enum
-	{
-	MDNS_LOG_NONE,
-//	MDNS_LOG_ERROR,
-//	MDNS_LOG_WARN,
-//	MDNS_LOG_INFO,
-//	MDNS_LOG_DEBUG,
-	MDNS_LOG_VERBOSE_DEBUG
-	} LogLevel_t;
-
-#define MDNS_LOG_INITIAL_LEVEL MDNS_LOG_NONE
-
 extern LogLevel_t mDNS_LogLevel;
 extern int        mDNS_DebugMode;	// If non-zero, LogMsg() writes to stderr instead of syslog
 extern const char ProgramName[];	// Program Name for use with LogMsgIdent
@@ -218,13 +235,6 @@ extern void LogMsg(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
 extern void LogMsgIdent(const char *ident, const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(2,3);
 extern void LogMsgNoIdent(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
 extern void SigLogLevel(void);
-
-// Set this symbol to 1 to answer remote queries for our Address, reverse mapping PTR, and HINFO records
-#define ANSWER_REMOTE_HOSTNAME_QUERIES 0
-
-// Set this symbol to 1 to do extra debug checks on malloc() and free()
-// Set this symbol to 2 to write a log message for every malloc() and free()
-#define MACOSX_MDNS_MALLOC_DEBUGGING 0
 
 #if APPLE_OSX_mDNSResponder && MACOSX_MDNS_MALLOC_DEBUGGING >= 1
 extern void *mallocL(char *msg, unsigned int size);
@@ -237,15 +247,11 @@ extern void udns_validatelists(void *const v);
 #define freeL(X,Y) free(Y)
 #endif
 
-#define LogAllOperations 0
-
 #if LogAllOperations
 #define LogOperation LogMsg
 #else
 #define	LogOperation debugf
 #endif
-
-#define ForceAlerts 0
 
 #ifdef	__cplusplus
 	}

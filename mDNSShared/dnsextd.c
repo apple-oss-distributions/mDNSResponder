@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: dnsextd.c,v $
+Revision 1.88  2008/03/06 21:26:11  cheshire
+Moved duplicated STRINGIFY macro from individual C files to DNSCommon.h
+
 Revision 1.87  2007/12/17 23:34:50  cheshire
 Don't need to set ptr to result of DNSDigest_SignMessage -- ptr is updated anyway (it's passed by reference)
 
@@ -3254,12 +3257,6 @@ mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
 mStatus mDNS_StopQuery(mDNS *const m, DNSQuestion *const question) { ( void ) m; ( void ) question; return 0; }
 mDNS mDNSStorage;
 
-
-// Note: The C preprocessor stringify operator ('#') makes a string from its argument, without macro expansion
-// e.g. If "version" is #define'd to be "4", then STRINGIFY_AWE(version) will return the string "version", not "4"
-// To expand "version" to its value before making the string, use STRINGIFY(version) instead
-#define STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s) #s
-#define STRINGIFY(s) STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s)
 
 // For convenience when using the "strings" command, this is the last thing in the file
 // The "@(#) " pattern is a special prefix the "what" command looks for

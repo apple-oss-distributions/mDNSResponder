@@ -1865,6 +1865,7 @@
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				HEADER_SEARCH_PATHS = (
 					../mDNSShared,
+					"${SYSTEM_LIBRARY_DIR}/Frameworks/System.framework/PrivateHeaders",
 					"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers",
 					"${CONFIGURATION_TEMP_DIR}",
 				);
@@ -1905,6 +1906,7 @@
 				);
 				HEADER_SEARCH_PATHS = (
 					../mDNSShared,
+					"${SYSTEM_LIBRARY_DIR}/Frameworks/System.framework/PrivateHeaders",
 					"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers",
 					"${CONFIGURATION_TEMP_DIR}",
 				);
@@ -1958,7 +1960,7 @@
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				HEADER_SEARCH_PATHS = ../mDNSShared;
 				INSTALL_PATH = /usr/bin;
-				MACOSX_DEPLOYMENT_TARGET = 10.3;
+				MACOSX_DEPLOYMENT_TARGET = 10.4;
 				OTHER_CFLAGS = "-no-cpp-precomp";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";

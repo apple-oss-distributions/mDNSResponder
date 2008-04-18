@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: helper.c,v $
+Revision 1.24  2008/01/30 19:01:51  mcguire
+<rdar://problem/5703989> Crash in mDNSResponderHelper
+
 Revision 1.23  2007/11/30 23:21:51  cheshire
 Rename variables to eliminate "declaration of 'sin_loc' shadows a previous local" warning
 
@@ -139,14 +142,11 @@ debug_(const char *func, const char *fmt, ...)
 	{
 	char buf[2048];
 	va_list ap;
-	ssize_t n = snprintf(buf, sizeof(buf), "%s: ", func);
 
-	if (n >= (int)sizeof(buf))
-		return;
 	va_start(ap, fmt);
-	vsnprintf(&buf[n], sizeof(buf)-n, fmt, ap);
+	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
-	helplog(ASL_LEVEL_DEBUG, buf);
+	helplog(ASL_LEVEL_DEBUG, "%s: %s", func, buf);
 	}
 
 static int

@@ -22,6 +22,37 @@
 	Change History (most recent first):
 
 $Log: uDNS.c,v $
+Revision 1.553.2.1  2008/03/14 20:11:25  mcguire
+<rdar://problem/5500969> BTMM: Need ability to identify version of mDNSResponder client
+Make sure we add the record when sending LLQ refreshes
+
+Revision 1.553  2008/03/06 02:48:34  mcguire
+<rdar://problem/5321824> write status to the DS
+
+Revision 1.552  2008/03/05 01:56:42  cheshire
+<rdar://problem/5687667> BTMM: Don't fallback to unencrypted operations when SRV lookup fails
+
+Revision 1.551  2008/03/01 01:43:04  cheshire
+<rdar://problem/5631565> BTMM: Lots of "Error getting external address 3" when double-NATed prevents sleep
+Added code to suppress logging of multiple identical error results
+
+Revision 1.550  2008/03/01 01:34:47  cheshire
+<rdar://problem/5736313> BTMM: Double-NAT'd machines register all but AutoTunnel v4 address records
+Further refinements
+
+Revision 1.549  2008/02/29 01:35:37  mcguire
+<rdar://problem/5736313> BTMM: Double-NAT'd machines register all but AutoTunnel v4 address records
+
+Revision 1.548  2008/02/20 23:54:18  cheshire
+<rdar://problem/5661518> "Failed to obtain NAT port mapping" syslog messages
+Improved log message so it tells us more about what's going on
+
+Revision 1.547  2008/02/20 00:41:09  cheshire
+Change "PrivateQueryGotZoneData ... invoked with error code" from LogMsg to LogOperation
+
+Revision 1.546  2008/02/19 23:26:50  cheshire
+<rdar://problem/5661661> BTMM: Too many members.mac.com SOA queries
+
 Revision 1.545  2007/12/22 02:25:29  cheshire
 <rdar://problem/5661128> Records and Services sometimes not re-registering on wake from sleep
 
@@ -1461,7 +1492,11 @@ mDNSlocal void ClearUPnPState(mDNS *const m)
 
 mDNSexport void natTraversalHandleAddressReply(mDNS *const m, mDNSu16 err, mDNSv4Addr ExtAddr)
 	{
-	if (err) LogMsg("Error getting external address %d", err);
+	static mDNSu16 last_err;
+	if (err)
+		{
+		if (err != last_err) LogMsg("Error getting external address %d", err);
+		}
 	else if (!mDNSSameIPv4Address(m->ExternalAddress, ExtAddr))
 		{
 		LogOperation("Received external IP address %.4a from NAT", &ExtAddr);
@@ -1477,6 +1512,8 @@ mDNSexport void natTraversalHandleAddressReply(mDNS *const m, mDNSu16 err, mDNSv
 	m->retryGetAddr = m->timenow + m->retryIntervalGetAddr;
 	if (m->NextScheduledNATOp - m->retryIntervalGetAddr > 0)
 		m->NextScheduledNATOp = m->retryIntervalGetAddr;
+
+	last_err = err;
 	}
 
 // Both places that call NATSetNextRenewalTime() update m->NextScheduledNATOp correctly afterwards
@@ -1635,6 +1672,9 @@ mDNSlocal void StartLLQPolling(mDNS *const m, DNSQuestion *q)
 	// we risk causing spurious "SendQueries didn't send all its queries" log messages
 	q->LastQTime     = m->timenow - q->ThisQInterval + 1;
 	SetNextQueryTime(m, q);
+#if APPLE_OSX_mDNSResponder
+	UpdateAutoTunnelDomainStatuses(m);
+#endif
 	}
 
 mDNSlocal mDNSu8 *putLLQ(DNSMessage *const msg, mDNSu8 *ptr, const DNSQuestion *const question, const LLQOptData *const data, mDNSBool includeQuestion)
@@ -1789,6 +1829,9 @@ mDNSlocal void recvSetupResponse(mDNS *const m, mDNSu8 rcode, DNSQuestion *const
 		q->state         = LLQ_Established;
 		q->ntries        = 0;
 		SetLLQTimer(m, q, llq);
+#if APPLE_OSX_mDNSResponder
+		UpdateAutoTunnelDomainStatuses(m);
+#endif
 		}
 	}
 
@@ -2426,12 +2469,17 @@ mDNSlocal void GetZoneData_QuestionCallback(mDNS *const m, DNSQuestion *question
 		{
 		debugf("GetZoneData GOT SRV %s", RRDisplayString(m, answer));
 		mDNS_StopQuery(m, question);
+// Right now we don't want to fail back to non-encrypted operations
+// If the AuthInfo has the AutoTunnel field set, then we want private or nothing
+// <rdar://problem/5687667> BTMM: Don't fallback to unencrypted operations when SRV lookup fails
+#if 0
 		if (!answer->rdlength && zd->ZonePrivate && zd->ZoneService != ZoneServiceQuery)
 			{
 			zd->ZonePrivate = mDNSfalse;	// Causes ZoneDataSRV() to yield a different SRV name when building the query
 			GetZoneData_StartQuery(m, zd, kDNSType_SRV);		// Try again, non-private this time
 			}
 		else
+#endif
 			{
 			if (answer->rdlength)
 				{
@@ -2515,7 +2563,7 @@ mDNSexport ZoneData *StartGetZoneData(mDNS *const m, const domainname *const nam
 	zd->Host.c[0]        = 0;
 	zd->Port             = zeroIPPort;
 	zd->Addr             = zeroAddr;
-	zd->ZonePrivate      = AuthInfo ? mDNStrue : mDNSfalse;
+	zd->ZonePrivate      = AuthInfo && AuthInfo->AutoTunnel ? mDNStrue : mDNSfalse;
 	zd->ZoneDataCallback = callback;
 	zd->ZoneDataContext  = ZoneDataContext;
 
@@ -3131,6 +3179,9 @@ mDNSexport void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr, co
 
 		UpdateSRVRecords(m);
 		GetStaticHostname(m);	// look up reverse map record to find any static hostnames for our IP address
+#if APPLE_OSX_mDNSResponder
+		UpdateAutoTunnelDomainStatuses(m);
+#endif
 		}
 
 	mDNS_Unlock(m);
@@ -3719,6 +3770,27 @@ mDNSlocal const domainname *DNSRelayTestQuestion = (const domainname*)
 	"\x1" "1" "\x1" "0" "\x1" "0" "\x3" "127" "\xa" "dnsbugtest"
 	"\x1" "1" "\x1" "0" "\x1" "0" "\x3" "127" "\x7" "in-addr" "\x4" "arpa";
 
+// See comments above for DNSRelayTestQuestion
+// If this is the kind of query that has the risk of crashing buggy DNS servers, we do a test question first
+mDNSlocal mDNSBool NoTestQuery(DNSQuestion *q)
+	{
+	int i;
+	mDNSu8 *p = q->qname.c;
+	if (q->AuthInfo) return(mDNStrue);		// Don't need a test query for private queries sent directly to authoritative server over TLS/TCP
+	if (q->qtype != kDNSType_PTR) return(mDNStrue);		// Don't need a test query for any non-PTR queries
+	for (i=0; i<4; i++)		// If qname does not begin with num.num.num.num, can't skip the test query
+		{
+		if (p[0] < 1 || p[0] > 3) return(mDNSfalse);
+		if (              p[1] < '0' || p[1] > '9' ) return(mDNSfalse);
+		if (p[0] >= 2 && (p[2] < '0' || p[2] > '9')) return(mDNSfalse);
+		if (p[0] >= 3 && (p[3] < '0' || p[3] > '9')) return(mDNSfalse);
+		p += 1 + p[0];
+		}
+	// If remainder of qname is ".in-addr.arpa.", this is a vanilla reverse-mapping query and
+	// we can safely do it without needing a test query first, otherwise we need the test query.
+	return(SameDomainName((domainname*)p, (const domainname*)"\x7" "in-addr" "\x4" "arpa"));
+	}
+
 // Returns mDNStrue if response was handled
 mDNSlocal mDNSBool uDNS_ReceiveTestQuestionResponse(mDNS *const m, DNSMessage *const msg, const mDNSu8 *const end,
 	const mDNSAddr *const srcaddr, const mDNSIPPort srcport)
@@ -3747,15 +3819,15 @@ mDNSlocal mDNSBool uDNS_ReceiveTestQuestionResponse(mDNS *const m, DNSMessage *c
 		if (mDNSSameAddress(srcaddr, &s->addr) && mDNSSameIPPort(srcport, s->port) && s->teststate != result)
 			{
 			DNSQuestion *q;
-			if (s->teststate != result)
-				{
-				s->teststate = result;
-				if (result == DNSServer_Passed) LogOperation("DNS Server %#a:%d passed", srcaddr, mDNSVal16(srcport));
-				else LogMsg("NOTE: Wide-Area Service Discovery disabled to avoid crashing defective DNS relay %#a:%d", srcaddr, mDNSVal16(srcport));
-				}
+			s->teststate = result;
+			if (result == DNSServer_Passed) LogOperation("DNS Server %#a:%d passed", srcaddr, mDNSVal16(srcport));
+			else LogMsg("NOTE: Wide-Area Service Discovery disabled to avoid crashing defective DNS relay %#a:%d", srcaddr, mDNSVal16(srcport));
+
+			// If this server has just changed state from DNSServer_Untested to DNSServer_Passed, then retrigger any waiting questions.
+			// We use the NoTestQuery() test so that we only retrigger questions that were actually blocked waiting for this test to complete.
 			if (result == DNSServer_Passed)		// Unblock any questions that were waiting for this result
 				for (q = m->Questions; q; q=q->next)
-					if (q->qDNSServer == s)
+					if (q->qDNSServer == s && !NoTestQuery(q))
 						{ q->LastQTime = m->timenow - q->ThisQInterval; m->NextScheduledQuery = m->timenow; }
 			}
 
@@ -3882,6 +3954,12 @@ mDNSexport void sendLLQRefresh(mDNS *m, DNSQuestion *q)
 	InitializeDNSMessage(&m->omsg.h, q->TargetQID, uQueryFlags);
 	end = putLLQ(&m->omsg, m->omsg.data, q, &llq, mDNStrue);
 	if (!end) { LogMsg("sendLLQRefresh: putLLQ failed %##s (%s)", q->qname.c, DNSTypeName(q->qtype)); return; }
+
+	// Note that we (conditionally) add HINFO and TSIG here, since the question might be going away,
+	// so we may not be able to reference it (most importantly it's AuthInfo) when we actually send the message
+	end = putHINFO(m, &m->omsg, end, q->AuthInfo);
+	if (!end) { LogMsg("sendLLQRefresh: putHINFO failed %##s (%s)", q->qname.c, DNSTypeName(q->qtype)); return; }
+
 	if (q->AuthInfo)
 		{
 		DNSDigest_SignMessageHostByteOrder(&m->omsg, &end, q->AuthInfo);
@@ -3951,9 +4029,12 @@ mDNSlocal void PrivateQueryGotZoneData(mDNS *const m, mStatus err, const ZoneDat
 	// we use for cleaning up if our LLQ is cancelled *before* the GetZoneData operation has completes).
 	q->nta = mDNSNULL;
 
-	if (err)
+	if (err || !zoneInfo || mDNSAddressIsZero(&zoneInfo->Addr) || mDNSIPPortIsZero(zoneInfo->Port))
 		{
-		LogMsg("ERROR: PrivateQueryGotZoneData %##s (%s) invoked with error code %ld", q->qname.c, DNSTypeName(q->qtype), err);
+		LogOperation("ERROR: PrivateQueryGotZoneData %##s (%s) invoked with error code %ld %p %#a:%d",
+			q->qname.c, DNSTypeName(q->qtype), err, zoneInfo,
+			zoneInfo ? &zoneInfo->Addr : mDNSNULL,
+			zoneInfo ? mDNSVal16(zoneInfo->Port) : 0);
 		return;
 		}
 
@@ -4250,27 +4331,6 @@ mDNSexport mStatus uDNS_UpdateRecord(mDNS *m, AuthRecord *rr)
 #pragma mark - Periodic Execution Routines
 #endif
 
-// See comments above for DNSRelayTestQuestion
-// If this is the kind of query that has the risk of crashing buggy DNS servers, we do a test question first
-mDNSlocal mDNSBool NoTestQuery(DNSQuestion *q)
-	{
-	int i;
-	mDNSu8 *p = q->qname.c;
-	if (q->AuthInfo) return(mDNStrue);		// Don't need a test query for private queries sent directly to authoritative server over TLS/TCP
-	if (q->qtype != kDNSType_PTR) return(mDNStrue);		// Don't need a test query for any non-PTR queries
-	for (i=0; i<4; i++)		// If qname does not begin with num.num.num.num, can't skip the test query
-		{
-		if (p[0] < 1 || p[0] > 3) return(mDNSfalse);
-		if (              p[1] < '0' || p[1] > '9' ) return(mDNSfalse);
-		if (p[0] >= 2 && (p[2] < '0' || p[2] > '9')) return(mDNSfalse);
-		if (p[0] >= 3 && (p[3] < '0' || p[3] > '9')) return(mDNSfalse);
-		p += 1 + p[0];
-		}
-	// If remainder of qname is ".in-addr.arpa.", this is a vanilla reverse-mapping query and
-	// we can safely do it without needing a test query first, otherwise we need the test query.
-	return(SameDomainName((domainname*)p, (const domainname*)"\x7" "in-addr" "\x4" "arpa"));
-	}
-
 // The question to be checked is not passed in as an explicit parameter;
 // instead it is implicit that the question to be checked is m->CurrentQuestion.
 mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
@@ -4300,13 +4360,13 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
 			{
 			mDNSu8 *end = m->omsg.data;
 			mStatus err = mStatus_NoError;
-			DomainAuthInfo *private = mDNSNULL;
+			mDNSBool private = mDNSfalse;
 
 			if (q->qDNSServer->teststate != DNSServer_Untested || NoTestQuery(q))
 				{
 				InitializeDNSMessage(&m->omsg.h, q->TargetQID, uQueryFlags);
 				end = putQuestion(&m->omsg, m->omsg.data, m->omsg.data + AbsoluteMaxDNSMessageData, &q->qname, q->qtype, q->qclass);
-				private = q->AuthInfo;
+				private = (q->AuthInfo && q->AuthInfo->AutoTunnel);
 				}
 			else if (m->timenow - q->qDNSServer->lasttest >= INIT_UCAST_POLL_INTERVAL)	// Make sure at least three seconds has elapsed since last test query
 				{
@@ -4468,22 +4528,24 @@ mDNSlocal void CheckNATMappings(mDNS *m)
 		// and (3) we have new data to give the client that's changed since the last callback
 		if (!mDNSIPv4AddressIsZero(m->ExternalAddress) || m->retryIntervalGetAddr > NATMAP_INIT_RETRY * 8)
 			{
+			const mStatus EffectiveResult = cur->NewResult ? cur->NewResult : mDNSv4AddrIsRFC1918(&m->ExternalAddress) ? mStatus_DoubleNAT : mStatus_NoError;
 			const mDNSIPPort ExternalPort = HaveRoutable ? cur->IntPort :
 				!mDNSIPv4AddressIsZero(m->ExternalAddress) && cur->ExpiryTime ? cur->RequestedPort : zeroIPPort;
 			if (!cur->Protocol || HaveRoutable || cur->ExpiryTime || cur->retryInterval > NATMAP_INIT_RETRY * 8)
 				if (!mDNSSameIPv4Address(cur->ExternalAddress, m->ExternalAddress) ||
 					!mDNSSameIPPort     (cur->ExternalPort,       ExternalPort)    ||
-					cur->Result != cur->NewResult)
+					cur->Result != EffectiveResult)
 					{
 					//LogMsg("NAT callback %d %d %d", cur->Protocol, cur->ExpiryTime, cur->retryInterval);
 					if (cur->Protocol && mDNSIPPortIsZero(ExternalPort) && !mDNSIPv4AddressIsZero(m->Router.ip.v4))
-						LogMsg("Failed to obtain NAT port mapping from router %#a external address %.4a internal port %d",
-							&m->Router, &m->ExternalAddress, mDNSVal16(cur->IntPort));
+						LogMsg("Failed to obtain NAT port mapping %p from router %#a external address %.4a internal port %d error %d",
+							cur, &m->Router, &m->ExternalAddress, mDNSVal16(cur->IntPort), EffectiveResult);
+
 					cur->ExternalAddress = m->ExternalAddress;
 					cur->ExternalPort    = ExternalPort;
 					cur->Lifetime        = cur->ExpiryTime && !mDNSIPPortIsZero(ExternalPort) ?
 						(cur->ExpiryTime - m->timenow + mDNSPlatformOneSecond/2) / mDNSPlatformOneSecond : 0;
-					cur->Result          = cur->NewResult;
+					cur->Result          = EffectiveResult;
 					mDNS_DropLockBeforeCallback();		// Allow client to legally make mDNS API calls from the callback
 					if (cur->clientCallback)
 						cur->clientCallback(m, cur);

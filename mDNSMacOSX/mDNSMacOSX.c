@@ -17,6 +17,65 @@
     Change History (most recent first):
 
 $Log: mDNSMacOSX.c,v $
+Revision 1.536  2008/03/25 01:27:30  mcguire
+<rdar://problem/5810718> Status sometimes wrong when link goes down
+
+Revision 1.535  2008/03/14 22:52:51  mcguire
+<rdar://problem/5321824> write status to the DS
+Ignore duplicate queries, which don't get established (since they're duplicates)
+
+Revision 1.534  2008/03/12 22:58:15  mcguire
+<rdar://problem/5321824> write status to the DS
+Fixes for NO_SECURITYFRAMEWORK
+
+Revision 1.533  2008/03/07 00:48:54  mcguire
+<rdar://problem/5321824> write status to the DS
+cleanup strings
+
+Revision 1.532  2008/03/06 23:44:39  mcguire
+<rdar://problem/5321824> write status to the DS
+cleanup function names & log messages
+add external port numbers to dictionary
+add defensive code in case CF*Create fails
+don't output NAT statuses if zero
+
+Revision 1.531  2008/03/06 21:27:47  cheshire
+<rdar://problem/5500969> BTMM: Need ability to identify version of mDNSResponder client
+To save network bandwidth, removed unnecessary redundant information from HINFO record
+
+Revision 1.530  2008/03/06 03:15:48  mcguire
+<rdar://problem/5321824> write status to the DS
+use mStatus_* instead of kDNSServiceErr_*
+
+Revision 1.529  2008/03/06 02:48:35  mcguire
+<rdar://problem/5321824> write status to the DS
+
+Revision 1.528  2008/02/29 01:33:57  mcguire
+<rdar://problem/5611801> BTMM: Services stay registered after previously successful NAT Port mapping fails
+
+Revision 1.527  2008/02/28 03:25:26  mcguire
+<rdar://problem/5535772> config cleanup on shutdown/reboot
+
+Revision 1.526  2008/02/26 21:43:54  cheshire
+Renamed 'clockdivisor' to 'mDNSPlatformClockDivisor' (LogTimeStamps code needs to be able to access it)
+
+Revision 1.525  2008/02/20 00:53:20  cheshire
+<rdar://problem/5492035> getifaddrs is returning invalid netmask family for fw0 and vmnet
+Removed overly alarming syslog message
+
+Revision 1.524  2008/01/31 22:25:10  jgraessley
+<rdar://problem/5715434> using default Macintosh-0016CBF62EFD.local
+Use sysctlbyname to get hardware type for the default name.
+
+Revision 1.523  2008/01/15 01:32:56  jgraessley
+Bug #: 5595309
+Reviewed by: Stuart Cheshire
+Additional change to print warning message up to 1000 times to make it more visible
+
+Revision 1.522  2008/01/15 01:14:02  mcguire
+<rdar://problem/5674390> mDNSPlatformSendUDP should allow unicast queries on specific interfaces
+removed check and log message, as they are no longer relevant
+
 Revision 1.521  2007/12/14 00:58:28  cheshire
 <rdar://problem/5526800> BTMM: Need to deregister records and services on shutdown/sleep
 Additional fixes: When going to sleep, mDNSResponder needs to postpone sleep
@@ -778,8 +837,6 @@ Add (commented out) trigger value for testing "mach_absolute_time went backwards
 #pragma mark - Globals
 #endif
 
-static mDNSu32 clockdivisor = 0;
-
 mDNSexport int KQueueFD;
 
 #ifndef NO_SECURITYFRAMEWORK
@@ -966,13 +1023,6 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
 	int s = -1, err;
 	mStatus result = mStatus_NoError;
 
-	// Sanity check: Make sure that if we're sending a query via unicast, we're sending it using our
-	// anonymous socket created for this purpose, so that we'll receive the response.
-	// If we use one of the many multicast sockets bound to port 5353 then we may not receive responses reliably.
-	if (InterfaceID && !mDNSAddrIsDNSMulticast(dst))
-		if ((((DNSMessage *)msg)->h.flags.b[0] & kDNSFlag0_QR_Mask) == kDNSFlag0_QR_Query)
-			LogMsg("mDNSPlatformSendUDP: ERROR: Sending query OP from mDNS port to non-mDNS destination %#a:%d", dst, mDNSVal16(dstPort));
-
 	if (dst->type == mDNSAddrType_IPv4)
 		{
 		struct sockaddr_in *sin_to = (struct sockaddr_in*)&to;
@@ -996,9 +1046,9 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
 				#else
 					{
 					static int displayed = 0;
-					if (!displayed)
+					if (displayed < 1000)
 						{
-						displayed = 1;
+						displayed++;
 						LogOperation("IP_FORCE_OUT_IFP Socket option not defined -- cannot specify interface for unicast packets");
 						}
 					}
@@ -2127,6 +2177,230 @@ mDNSlocal NetworkInterfaceInfoOSX *FindRoutableIPv4(mDNS *const m, mDNSu32 scope
 
 static mDNSBool AnonymousRacoonConfig = mDNSfalse;
 
+#ifndef NO_SECURITYFRAMEWORK
+
+static CFMutableDictionaryRef domainStatusDict = NULL;
+
+// MUST be called with lock held
+mDNSlocal void RemoveAutoTunnelDomainStatus(const DomainAuthInfo *const info)
+	{
+	char buffer[1024];
+	CFStringRef domain;
+
+	LogOperation("RemoveAutoTunnelDomainStatus: %##s", info->domain.c);
+
+	if (!domainStatusDict) { LogMsg("RemoveAutoTunnelDomainStatus: No domainStatusDict"); return; }
+	
+	buffer[mDNS_snprintf(buffer, sizeof(buffer), "%##s", info->domain.c) - 1] = 0;
+	domain = CFStringCreateWithCString(NULL, buffer, kCFStringEncodingUTF8);
+	if (!domain) { LogMsg("RemoveAutoTunnelDomainStatus: Could not create CFString domain"); return; }
+	
+	if (CFDictionaryContainsKey(domainStatusDict, domain))
+		{
+		CFDictionaryRemoveValue(domainStatusDict, domain);
+		mDNSDynamicStoreSetConfig(kmDNSBackToMyMacConfig, domainStatusDict);
+		}
+	CFRelease(domain);
+	}
+
+#endif // ndef NO_SECURITYFRAMEWORK
+
+// MUST be called with lock held
+mDNSlocal void UpdateAutoTunnelDomainStatus(const mDNS *const m, const DomainAuthInfo *const info)
+	{
+#ifdef NO_SECURITYFRAMEWORK
+	(void)m;
+	(void)info;
+#else
+	const NATTraversalInfo *const llq = m->LLQNAT.clientContext ? &m->LLQNAT : mDNSNULL;
+	const NATTraversalInfo *const tun = info->AutoTunnelNAT.clientContext ? &info->AutoTunnelNAT : mDNSNULL;
+	char buffer[1024];
+	CFMutableDictionaryRef dict = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	CFStringRef domain = NULL;
+	CFStringRef tmp = NULL;
+	CFNumberRef num = NULL;
+	mStatus status = mStatus_NoError;
+	
+	if (!domainStatusDict)
+		{
+		domainStatusDict = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+		if (!domainStatusDict) { LogMsg("UpdateAutoTunnelDomainStatus: Could not create CFDictionary domainStatusDict"); return; }
+		}
+	
+	if (!dict) { LogMsg("UpdateAutoTunnelDomainStatus: Could not create CFDictionary dict"); return; }
+
+	buffer[mDNS_snprintf(buffer, sizeof(buffer), "%##s", info->domain.c) - 1] = 0;
+	domain = CFStringCreateWithCString(NULL, buffer, kCFStringEncodingUTF8);
+	if (!domain) { LogMsg("UpdateAutoTunnelDomainStatus: Could not create CFString domain"); return; }
+
+	mDNS_snprintf(buffer, sizeof(buffer), "%#a", &m->Router);
+	tmp = CFStringCreateWithCString(NULL, buffer, kCFStringEncodingUTF8);
+	if (!tmp)
+		LogMsg("UpdateAutoTunnelDomainStatus: Could not create CFString RouterAddress");
+	else
+		{
+		CFDictionarySetValue(dict, CFSTR("RouterAddress"), tmp);
+		CFRelease(tmp);
+		}
+	
+	mDNS_snprintf(buffer, sizeof(buffer), "%.4a", &m->ExternalAddress);
+	tmp = CFStringCreateWithCString(NULL, buffer, kCFStringEncodingUTF8);
+	if (!tmp)
+		LogMsg("UpdateAutoTunnelDomainStatus: Could not create CFString ExternalAddress");
+	else
+		{
+		CFDictionarySetValue(dict, CFSTR("ExternalAddress"), tmp);
+		CFRelease(tmp);
+		}
+	
+	if (llq)
+		{
+		mDNSu32 port = mDNSVal16(llq->ExternalPort);
+		
+		num = CFNumberCreate(NULL, kCFNumberSInt32Type, &port);
+		if (!num)
+			LogMsg("UpdateAutoTunnelDomainStatus: Could not create CFNumber LLQExternalPort");
+		else
+			{
+			CFDictionarySetValue(dict, CFSTR("LLQExternalPort"), num);
+			CFRelease(num);
+			}
+
+		if (llq->Result)
+			{
+			num = CFNumberCreate(NULL, kCFNumberSInt32Type, &llq->Result);
+			if (!num)
+				LogMsg("UpdateAutoTunnelDomainStatus: Could not create CFNumber LLQNPMStatus");
+			else
+				{
+				CFDictionarySetValue(dict, CFSTR("LLQNPMStatus"), num);
+				CFRelease(num);
+				}
+			}
+		}
+	
+	if (tun)
+		{
+		mDNSu32 port = mDNSVal16(tun->ExternalPort);
+		
+		num = CFNumberCreate(NULL, kCFNumberSInt32Type, &port);
+		if (!num)
+			LogMsg("UpdateAutoTunnelDomainStatus: Could not create CFNumber AutoTunnelExternalPort");
+		else
+			{
+			CFDictionarySetValue(dict, CFSTR("AutoTunnelExternalPort"), num);
+			CFRelease(num);
+			}
+
+		if (tun->Result)
+			{
+			num = CFNumberCreate(NULL, kCFNumberSInt32Type, &tun->Result);
+			if (!num)
+				LogMsg("UpdateAutoTunnelDomainStatus: Could not create CFNumber AutoTunnelNPMStatus");
+			else
+				{
+				CFDictionarySetValue(dict, CFSTR("AutoTunnelNPMStatus"), num);
+				CFRelease(num);
+				}
+			}
+		}
+	
+	if (!llq && !tun)
+		{
+		status = mStatus_NotInitializedErr;
+		mDNS_snprintf(buffer, sizeof(buffer), "Neither LLQ nor AutoTunnel NAT port mapping is currently active");
+		}	
+	else if ((llq && llq->Result == mStatus_DoubleNAT) || (tun && tun->Result == mStatus_DoubleNAT))
+		{
+		status = mStatus_DoubleNAT;
+		mDNS_snprintf(buffer, sizeof(buffer), "Double NAT: Router is reporting an external address");
+		}
+	else if ((llq && llq->Result) || (tun && tun->Result))
+		{
+		status = mStatus_NATTraversal;
+		mDNS_snprintf(buffer, sizeof(buffer), "Error obtaining NAT port mapping from router");
+		}
+	else if (m->Router.type == mDNSAddrType_None)
+		{
+		status = mStatus_NoRouter;
+		mDNS_snprintf(buffer, sizeof(buffer), "No network connection - none");
+		}
+	else if (m->Router.type == mDNSAddrType_IPv4 && mDNSIPv4AddressIsZero(m->Router.ip.v4))
+		{
+		status = mStatus_NoRouter;
+		mDNS_snprintf(buffer, sizeof(buffer), "No network connection - v4 zero");
+		}
+	else if ((llq && mDNSIPPortIsZero(llq->ExternalPort)) || (tun && mDNSIPPortIsZero(tun->ExternalPort)))
+		{
+		status = mStatus_NATTraversal;
+		mDNS_snprintf(buffer, sizeof(buffer), "Unable to obtain NAT port mapping from router");
+		}
+	else
+		{
+		DNSQuestion* q;
+		for (q = m->Questions; q; q=q->next)
+			if (q->LongLived && q->AuthInfo == info && q->state == LLQ_Poll)
+				{
+				status = mStatus_PollingMode;
+				mDNS_snprintf(buffer, sizeof(buffer), "Query polling %##s", q->qname.c);
+				break;
+				}
+		if (status == mStatus_NoError)
+			for (q = m->Questions; q; q=q->next)
+				if (q->LongLived && q->AuthInfo == info && q->state != LLQ_Established && !q->DuplicateOf)
+					{
+					status = mStatus_TransientErr;
+					mDNS_snprintf(buffer, sizeof(buffer), "Query not yet established %##s", q->qname.c);
+					break;
+					}
+		if (status == mStatus_NoError) mDNS_snprintf(buffer, sizeof(buffer), "Success");
+		}
+	
+	num = CFNumberCreate(NULL, kCFNumberSInt32Type, &status);
+	if (!num)
+		LogMsg("UpdateAutoTunnelDomainStatus: Could not create CFNumber StatusCode");
+	else
+		{
+		CFDictionarySetValue(dict, CFSTR("StatusCode"), num);
+		CFRelease(num);
+		}
+		
+	tmp = CFStringCreateWithCString(NULL, buffer, kCFStringEncodingUTF8);
+	if (!tmp)
+		LogMsg("UpdateAutoTunnelDomainStatus: Could not create CFString StatusMessage");
+	else
+		{
+		CFDictionarySetValue(dict, CFSTR("StatusMessage"), tmp);
+		CFRelease(tmp);
+		}
+
+	if (!CFDictionaryContainsKey(domainStatusDict, domain) ||
+	    !CFEqual(dict, (CFMutableDictionaryRef)CFDictionaryGetValue(domainStatusDict, domain)))
+	    {
+		CFDictionarySetValue(domainStatusDict, domain, dict);
+		mDNSDynamicStoreSetConfig(kmDNSBackToMyMacConfig, domainStatusDict);
+		}
+		
+	CFRelease(domain);
+	CFRelease(dict);
+
+	LogOperation("UpdateAutoTunnelDomainStatus: %s", buffer);
+#endif // def NO_SECURITYFRAMEWORK
+	}
+
+// MUST be called with lock held
+mDNSexport void UpdateAutoTunnelDomainStatuses(const mDNS *const m)
+	{
+#ifdef NO_SECURITYFRAMEWORK
+	(void)m;
+#else
+	DomainAuthInfo* info;
+	for (info = m->AuthInfoList; info; info = info->next)
+		if (info->AutoTunnel && !info->deltime)
+			UpdateAutoTunnelDomainStatus(m, info);
+#endif // def NO_SECURITYFRAMEWORK
+	}
+	
 // MUST be called with lock held
 mDNSlocal mDNSBool TunnelServers(mDNS *const m)
 	{
@@ -2250,6 +2524,12 @@ mDNSlocal void AutoTunnelRecordCallback(mDNS *const m, AuthRecord *const rr, mSt
 	if (result == mStatus_MemFree)
 		{
 		LogOperation("AutoTunnelRecordCallback MemFree %s", ARDisplayString(m, rr));
+		// Reset the host record namestorage to force high-level PTR/SRV/TXT to deregister
+		if (rr == &info->AutoTunnelHostRecord)
+			{
+			rr->namestorage.c[0] = 0;
+			m->NextSRVUpdate = NonZeroTime(m->timenow);
+			}
 		RegisterAutoTunnelRecords(m,info);
 		}
 	}
@@ -2275,6 +2555,8 @@ mDNSlocal void AutoTunnelNATCallback(mDNS *m, NATTraversalInfo *n)
 		// Create or revert configuration file, and start (or SIGHUP) Racoon
 		(void)mDNSConfigureServer(AnonymousRacoonConfig ? kmDNSUp : kmDNSDown, info ? info->b64keydata : "");
 		}
+		
+	UpdateAutoTunnelDomainStatus(m, (DomainAuthInfo *)n->clientContext);
 	}
 
 mDNSlocal void AbortDeregistration(mDNS *const m, AuthRecord *rr)
@@ -2522,6 +2804,32 @@ mDNSexport void AddNewClientTunnel(mDNS *const m, DNSQuestion *const q)
 #pragma mark - Power State & Configuration Change Management
 #endif
 
+mDNSlocal void GenerateDefaultName(const mDNSEthAddr PrimaryMAC, char *buffer, mDNSu32 length)
+{
+	char	hwName[32];
+	size_t	hwNameLen = sizeof(hwName);
+	
+	hwName[0] = 0;
+	if (sysctlbyname("hw.model", &hwName, &hwNameLen, NULL, 0) == 0)
+		{
+		// hw.model contains a number like iMac6,1. We want the "iMac" part.
+		hwName[sizeof(hwName) - 1] = 0;
+		char	*ptr;
+		for (ptr = hwName; *ptr != 0; ptr++)
+			{
+			if (*ptr >= '0' && *ptr <= '9') *ptr = 0;
+			if (*ptr == ',') break;
+			}
+		// Prototype model names do not contain commas, do not use prototype names
+		if (*ptr != ',') hwName[0] = 0;
+		}
+	
+	if (hwName[0] == 0) strlcpy(hwName, "Device", sizeof(hwName));
+	
+	mDNS_snprintf(buffer, length, "%s-%02X%02X%02X%02X%02X%02X", hwName,
+		PrimaryMAC.b[0], PrimaryMAC.b[1], PrimaryMAC.b[2], PrimaryMAC.b[3], PrimaryMAC.b[4], PrimaryMAC.b[5]);
+}
+
 mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 	{
 	mDNSBool foundav4           = mDNSfalse;
@@ -2530,7 +2838,7 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 	struct ifaddrs *v4Loopback  = NULL;
 	struct ifaddrs *v6Loopback  = NULL;
 	mDNSEthAddr PrimaryMAC      = zeroEthAddr;
-	char defaultname[32];
+	char defaultname[64];
 #ifndef NO_IPV6
 	int InfoSocket              = socket(AF_INET6, SOCK_DGRAM, 0);
 	if (InfoSocket < 3 && errno != EAFNOSUPPORT) LogMsg("UpdateInterfaceList: InfoSocket error %d errno %d (%s)", InfoSocket, errno, strerror(errno));
@@ -2580,7 +2888,9 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 					LogMsg("getifaddrs: ifa_netmask is NULL for %5s(%d) Flags %04X Family %2d %#a",
 						ifa->ifa_name, if_nametoindex(ifa->ifa_name), ifa->ifa_flags, ifa->ifa_addr->sa_family, &ip);
 					}
-				else if (ifa->ifa_addr->sa_family != ifa->ifa_netmask->sa_family)
+				// Apparently it's normal for the sa_family of an ifa_netmask to sometimes be zero, so we don't complain about that
+				// <rdar://problem/5492035> getifaddrs is returning invalid netmask family for fw0 and vmnet
+				else if (ifa->ifa_netmask->sa_family != ifa->ifa_addr->sa_family && ifa->ifa_netmask->sa_family != 0)
 					{
 					mDNSAddr ip;
 					SetupAddr(&ip, ifa->ifa_addr);
@@ -2589,6 +2899,9 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 					}
 				else
 					{
+					// Make sure ifa_netmask->sa_family is set correctly
+					// <rdar://problem/5492035> getifaddrs is returning invalid netmask family for fw0 and vmnet
+					ifa->ifa_netmask->sa_family = ifa->ifa_addr->sa_family;
 					int ifru_flags6 = 0;
 #ifndef NO_IPV6
 					struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
@@ -2675,12 +2988,8 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 			m->AutoTunnelHostAddr.b[0xC], m->AutoTunnelHostAddr.b[0xD], m->AutoTunnelHostAddr.b[0xE], m->AutoTunnelHostAddr.b[0xF]);
 		LogOperation("m->AutoTunnelLabel %#s", m->AutoTunnelLabel.c);
 		}
-
-	#ifndef kDefaultLocalHostNamePrefix
-	#define kDefaultLocalHostNamePrefix "Macintosh"
-	#endif
-	mDNS_snprintf(defaultname, sizeof(defaultname), kDefaultLocalHostNamePrefix "-%02X%02X%02X%02X%02X%02X",
-		PrimaryMAC.b[0], PrimaryMAC.b[1], PrimaryMAC.b[2], PrimaryMAC.b[3], PrimaryMAC.b[4], PrimaryMAC.b[5]);
+	
+	GenerateDefaultName(PrimaryMAC, defaultname, sizeof(defaultname));
 
 	// Set up the nice label
 	domainlabel nicelabel;
@@ -2977,9 +3286,12 @@ mDNSexport void mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers, mDN
 				ifa->ifa_netmask                    &&
 				!(ifa->ifa_flags & IFF_LOOPBACK)	&&
 				!SetupAddr(&a, ifa->ifa_addr)		&&
-				!SetupAddr(&n, ifa->ifa_netmask)	&&
 				!mDNSv4AddressIsLinkLocal(&a.ip.v4)  )
 				{
+				// Apparently it's normal for the sa_family of an ifa_netmask to sometimes be incorrect, so we explicitly fix it here before calling SetupAddr
+				// <rdar://problem/5492035> getifaddrs is returning invalid netmask family for fw0 and vmnet
+				ifa->ifa_netmask->sa_family = ifa->ifa_addr->sa_family;		// Make sure ifa_netmask->sa_family is set correctly
+				SetupAddr(&n, ifa->ifa_netmask);
 				// Note: This is reverse order compared to a normal dotted-decimal IP address, so we can't use our customary "%.4a" format code
 				mDNS_snprintf(buf, sizeof(buf), "%d.%d.%d.%d.in-addr.arpa.", a.ip.v4.b[3] & n.ip.v4.b[3],
 																			 a.ip.v4.b[2] & n.ip.v4.b[2],
@@ -3546,6 +3858,8 @@ mDNSexport void SetDomainSecrets(mDNS *m)
 				LogOperation("SetDomainSecrets: secret changed for %##s", &domain);
 				(void)mDNSConfigureServer(kmDNSUp, stringbuf);
 				}
+				
+			if (ptr->AutoTunnel) UpdateAutoTunnelDomainStatus(m, ptr);
 #endif APPLE_OSX_mDNSResponder
 
 			ConvertDomainNameToCString(&domain, stringbuf);
@@ -3579,22 +3893,26 @@ mDNSexport void SetDomainSecrets(mDNS *m)
 		DomainAuthInfo *info = m->AuthInfoList;
 		while (info)
 			{
-			if (info->AutoTunnel && info->deltime && info->AutoTunnelNAT.clientContext)
+			if (info->AutoTunnel && info->deltime)
 				{
-				// stop the NAT operation
-				mDNS_StopNATOperation_internal(m, &info->AutoTunnelNAT);
-				if (info->AutoTunnelNAT.clientCallback)
+				if (info->AutoTunnelNAT.clientContext)
 					{
-					// Reset port and let the AutoTunnelNATCallback handle cleanup
-					info->AutoTunnelNAT.ExternalAddress = m->ExternalAddress;
-					info->AutoTunnelNAT.ExternalPort    = zeroIPPort;
-					info->AutoTunnelNAT.Lifetime        = 0;
-					info->AutoTunnelNAT.Result          = mStatus_NoError;
-					mDNS_DropLockBeforeCallback(); // Allow client to legally make mDNS API calls from the callback
-					info->AutoTunnelNAT.clientCallback(m, &info->AutoTunnelNAT);
-					mDNS_ReclaimLockAfterCallback(); // Decrement mDNS_reentrancy to block mDNS API calls again
+					// stop the NAT operation
+					mDNS_StopNATOperation_internal(m, &info->AutoTunnelNAT);
+					if (info->AutoTunnelNAT.clientCallback)
+						{
+						// Reset port and let the AutoTunnelNATCallback handle cleanup
+						info->AutoTunnelNAT.ExternalAddress = m->ExternalAddress;
+						info->AutoTunnelNAT.ExternalPort    = zeroIPPort;
+						info->AutoTunnelNAT.Lifetime        = 0;
+						info->AutoTunnelNAT.Result          = mStatus_NoError;
+						mDNS_DropLockBeforeCallback(); // Allow client to legally make mDNS API calls from the callback
+						info->AutoTunnelNAT.clientCallback(m, &info->AutoTunnelNAT);
+						mDNS_ReclaimLockAfterCallback(); // Decrement mDNS_reentrancy to block mDNS API calls again
+						}
+					info->AutoTunnelNAT.clientContext = mDNSNULL;
 					}
-				info->AutoTunnelNAT.clientContext = mDNSNULL;
+				RemoveAutoTunnelDomainStatus(info);
 				}
 			info = info->next;
 			}
@@ -3916,7 +4234,7 @@ mDNSexport int mDNSMacOSXSystemBuildNumber(char *HINFO_SWstring)
 		CFRelease(vers);
 		}
 	if (!major) { major=8; LogMsg("Note: No Major Build Version number found; assuming 8"); }
-	if (HINFO_SWstring) mDNS_snprintf(HINFO_SWstring, 256, "%s %s (%s), %s", prodname, prodvers, buildver, mDNSResponderVersionString);
+	if (HINFO_SWstring) mDNS_snprintf(HINFO_SWstring, 256, "%s %s (%s), %s", prodname, prodvers, buildver, STRINGIFY(mDNSResponderVersion));
 	return(major);
 	}
 
@@ -4111,10 +4429,28 @@ mDNSexport void mDNSPlatformClose(mDNS *const m)
 	CloseSocketSet(&m->p->permanentsockets);
 
 	#if APPLE_OSX_mDNSResponder
+	// clean up tunnels
+	while (m->TunnelClients)
+		{
+		ClientTunnel *cur = m->TunnelClients;
+		LogOperation("mDNSPlatformClose: removing client tunnel %p %##s from list", cur, cur->dstname.c);
+		if (cur->q.ThisQInterval >= 0) mDNS_StopQuery(m, &cur->q);
+		AutoTunnelSetKeys(cur, mDNSfalse);
+		m->TunnelClients = cur->next;
+		freeL("ClientTunnel", cur);
+		}
+
+	if (AnonymousRacoonConfig)
+		{
+		AnonymousRacoonConfig = mDNSfalse;
+		LogOperation("mDNSPlatformClose: Deconfiguring autotunnel");
+		(void)mDNSConfigureServer(kmDNSDown, "");
+		}
+
 	if (m->AutoTunnelHostAddrActive && m->AutoTunnelHostAddr.b[0])
 		{
 		m->AutoTunnelHostAddrActive = mDNSfalse;
-		LogMsg("Removing AutoTunnel address %.16a", &m->AutoTunnelHostAddr);
+		LogOperation("mDNSPlatformClose: Removing AutoTunnel address %.16a", &m->AutoTunnelHostAddr);
 		(void)mDNSAutoTunnelInterfaceUpDown(kmDNSDown, m->AutoTunnelHostAddr.b);
 		}
 	#endif // APPLE_OSX_mDNSResponder
@@ -4131,6 +4467,7 @@ mDNSexport mDNSu32 mDNSPlatformRandomSeed(void)
 	}
 
 mDNSexport mDNSs32 mDNSPlatformOneSecond = 1000;
+mDNSexport mDNSu32 mDNSPlatformClockDivisor = 0;
 
 mDNSexport mStatus mDNSPlatformTimeInit(void)
 	{
@@ -4154,13 +4491,13 @@ mDNSexport mStatus mDNSPlatformTimeInit(void)
 	// When we ship Macs with clock frequencies above 1000GHz, we may have to update this code.
 	struct mach_timebase_info tbi;
 	kern_return_t result = mach_timebase_info(&tbi);
-	if (result == KERN_SUCCESS) clockdivisor = ((uint64_t)tbi.denom * 1000000) / tbi.numer;
+	if (result == KERN_SUCCESS) mDNSPlatformClockDivisor = ((uint64_t)tbi.denom * 1000000) / tbi.numer;
 	return(result);
 	}
 
 mDNSexport mDNSs32 mDNSPlatformRawTime(void)
 	{
-	if (clockdivisor == 0) { LogMsg("mDNSPlatformRawTime called before mDNSPlatformTimeInit"); return(0); }
+	if (mDNSPlatformClockDivisor == 0) { LogMsg("mDNSPlatformRawTime called before mDNSPlatformTimeInit"); return(0); }
 
 	static uint64_t last_mach_absolute_time = 0;
 	//static uint64_t last_mach_absolute_time = 0x8000000000000000LL;	// Use this value for testing the alert display
@@ -4182,7 +4519,7 @@ mDNSexport mDNSs32 mDNSPlatformRawTime(void)
 		}
 	last_mach_absolute_time = this_mach_absolute_time;
 
-	return((mDNSs32)(this_mach_absolute_time / clockdivisor));
+	return((mDNSs32)(this_mach_absolute_time / mDNSPlatformClockDivisor));
 	}
 
 mDNSexport mDNSs32 mDNSPlatformUTC(void)

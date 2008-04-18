@@ -26,6 +26,9 @@
 ; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;
 ; $Log: mDNSResponder.sb,v $
+; Revision 1.25  2008/03/17 18:04:41  mcguire
+; <rdar://problem/5800476> SC now reads preference file
+;
 ; Revision 1.24  2007/09/20 22:33:17  cheshire
 ; Tidied up inconsistent and error-prone naming -- used to be mDNSResponderHelper in
 ; some places and mDNSResponder.helper in others; now mDNSResponderHelper everywhere
@@ -165,6 +168,7 @@
 (allow file-read-data                 (regex "^/usr/share/icu/.*\$"))
 (allow file-read-data                 (regex "^/usr/share/zoneinfo/.*\$"))
 (allow file-read-data                 (regex "^/System/Library/CoreServices/SystemVersion.*\$"))
+(allow file-read-data                 (regex "^/Library/Preferences/SystemConfiguration/preferences\.plist\$"))
 (allow file-read-data                 (regex "^/Library/Preferences/(ByHost/)?\.GlobalPreferences.*\.plist\$"))
 (allow file-read-data                 (regex "^/Library/Preferences/com\.apple\.security.*\.plist\$"))
 (allow file-read-data                 (regex "^/Library/Preferences/com\.apple\.crypto\.plist\$"))

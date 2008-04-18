@@ -30,6 +30,12 @@
     Change History (most recent first):
 
 $Log: daemon.c,v $
+Revision 1.358  2008/03/06 21:26:11  cheshire
+Moved duplicated STRINGIFY macro from individual C files to DNSCommon.h
+
+Revision 1.357  2008/02/13 17:40:43  cheshire
+<rdar://problem/5740501> Investigate mysterious SIGABRTs in mDNSResponder
+
 Revision 1.356  2007/12/18 00:28:56  cheshire
 <rdar://problem/5526800> BTMM: Need to deregister records and services on shutdown/sleep
 Error in ReadyForSleep() logic -- missing "not" in "!mDNSOpaque16IsZero(q->TargetQID)"
@@ -377,15 +383,6 @@ Revision 1.261  2006/01/06 01:22:28  cheshire
 
 #include <DNSServiceDiscovery/DNSServiceDiscovery.h>
 #include "helper.h"
-
-//*************************************************************************************************************
-// Macros
-
-// Note: The C preprocessor stringify operator ('#') makes a string from its argument, without macro expansion
-// e.g. If "version" is #define'd to be "4", then STRINGIFY_AWE(version) will return the string "version", not "4"
-// To expand "version" to its value before making the string, use STRINGIFY(version) instead
-#define STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s) #s
-#define STRINGIFY(s) STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s)
 
 //*************************************************************************************************************
 // Globals
@@ -1985,6 +1982,13 @@ mDNSlocal void HandleSIG(int sig)
 		}
 	}
 
+mDNSlocal void CatchABRT(int sig)
+	{
+	LogMsg("Received SIGABRT %d", sig);
+	sleep(1);					// Pause to make sure syslog gets the message
+	while(1) *(long*)0 = 0;		// Generate a CrashReporter stack trace so we can find out what library called abort();
+	}
+
 mDNSlocal void INFOCallback(void)
 	{
 	mDNSs32 utc = mDNSPlatformUTC();
@@ -2611,6 +2615,7 @@ mDNSexport int main(int argc, char **argv)
 
 	signal(SIGHUP,  HandleSIG);		// (Debugging) Purge the cache to check for cache handling bugs
 	signal(SIGINT,  HandleSIG);		// Ctrl-C: Detach from Mach BootstrapService and exit cleanly
+	signal(SIGABRT, CatchABRT);		// For debugging -- SIGABRT should never happen
 	signal(SIGPIPE, SIG_IGN  );		// Don't want SIGPIPE signals -- we'll handle EPIPE errors directly
 	signal(SIGTERM, HandleSIG);		// Machine shutting down: Detach from and exit cleanly like Ctrl-C
 	signal(SIGINFO, HandleSIG);		// (Debugging) Write state snapshot to syslog

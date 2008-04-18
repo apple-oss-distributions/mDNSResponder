@@ -54,6 +54,21 @@
     Change History (most recent first):
 
 $Log: mDNSEmbeddedAPI.h,v $
+Revision 1.468  2008/03/06 02:48:34  mcguire
+<rdar://problem/5321824> write status to the DS
+
+Revision 1.467  2008/02/26 20:48:46  cheshire
+Need parentheses around use of macro argument in mDNS_TimeNow_NoLock(m)
+
+Revision 1.466  2008/02/21 21:36:32  cheshire
+Updated comment about record type values (kDNSRecordTypePacketAns/Auth/Add)
+
+Revision 1.465  2008/02/20 00:39:05  mcguire
+<rdar://problem/5427102> Some device info XML blobs too large
+
+Revision 1.464  2008/01/31 23:33:29  mcguire
+<rdar://problem/5614450> changes to build using gcc 4.2 with -Werror
+
 Revision 1.463  2007/12/17 23:53:25  cheshire
 Added DNSDigest_SignMessageHostByteOrder, for signing messages not yet converted to network byte order
 
@@ -892,9 +907,11 @@ enum
 	mStatus_BadKey                    = -65561,
 	mStatus_TransientErr              = -65562,     // transient failures, e.g. sending packets shortly after a network transition or wake from sleep
 	mStatus_ServiceNotRunning         = -65563,     // Background daemon not running
-	mStatus_NATPortMappingUnsupported = -65564,     // No NAT or if the NAT doesn't support NAT-PMP or UPnP
+	mStatus_NATPortMappingUnsupported = -65564,     // NAT doesn't support NAT-PMP or UPnP
 	mStatus_NATPortMappingDisabled    = -65565,     // NAT supports NAT-PMP or UPnP but it's disabled by the administrator
-	// -65566 to -65786 currently unused; available for allocation
+	mStatus_NoRouter                  = -65566,
+	mStatus_PollingMode               = -65567,
+	// -65568 to -65786 currently unused; available for allocation
 
 	// tcp connection status
 	mStatus_ConnPending       = -65787,
@@ -1070,7 +1087,7 @@ typedef struct tcpInfo_t
 // Cache Resource Records (received from the network):
 // There are four basic types: Answer, Unique Answer, Additional, Unique Additional
 // Bit 7 (the top bit) of kDNSRecordType is always set for Cache Resource Records; always clear for Authoritative Resource Records
-// Bit 6 (value 0x40) is set for answer records; clear for additional records
+// Bit 6 (value 0x40) is set for answer records; clear for authority/additional records
 // Bit 5 (value 0x20) is set for records received with the kDNSClass_UniqueRRSet
 
 enum
@@ -1271,7 +1288,7 @@ typedef enum
 	LNTPortMapDeleteOp  = 4
 	} LNTOp_t;
 
-#define LNT_MAXBUFSIZE 4096
+#define LNT_MAXBUFSIZE 8192
 typedef struct tcpLNTInfo_struct tcpLNTInfo;
 struct tcpLNTInfo_struct
 	{
@@ -2493,8 +2510,9 @@ extern void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const
 extern DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSAddr *addr, const mDNSIPPort port);
 extern void mDNS_AddSearchDomain(const domainname *const domain);
 
+// We use ((void *)0) here instead of mDNSNULL to avoid compile warnings on gcc 4.2
 #define mDNS_AddSearchDomain_CString(X) \
-	do { domainname d__; if ((X) && MakeDomainNameFromDNSNameString(&d__, (X)) && d__.c[0]) mDNS_AddSearchDomain(&d__); } while(0)
+	do { domainname d__; if (((X) != (void*)0) && MakeDomainNameFromDNSNameString(&d__, (X)) && d__.c[0]) mDNS_AddSearchDomain(&d__); } while(0)
 
 // Routines called by the core, exported by DNSDigest.c
 
@@ -2580,7 +2598,7 @@ extern mDNSu32  mDNSPlatformRandomSeed  (void);
 extern mStatus  mDNSPlatformTimeInit    (void);
 extern mDNSs32  mDNSPlatformRawTime     (void);
 extern mDNSs32  mDNSPlatformUTC         (void);
-#define mDNS_TimeNow_NoLock(m) (mDNSPlatformRawTime() + m->timenow_adjust)
+#define mDNS_TimeNow_NoLock(m) (mDNSPlatformRawTime() + (m)->timenow_adjust)
 
 #if MDNS_DEBUGMSGS
 extern void	mDNSPlatformWriteDebugMsg(const char *msg);
@@ -2707,6 +2725,7 @@ extern void AnswerCurrentQuestionWithResourceRecord(mDNS *const m, CacheRecord *
 extern void AutoTunnelCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord);
 extern void AddNewClientTunnel(mDNS *const m, DNSQuestion *const q);
 extern void SetupLocalAutoTunnelInterface_internal(mDNS *const m);
+extern void UpdateAutoTunnelDomainStatuses(const mDNS *const m);
 #endif
 
 // ***************************************************************************

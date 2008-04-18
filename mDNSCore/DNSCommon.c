@@ -17,6 +17,29 @@
     Change History (most recent first):
 
 $Log: DNSCommon.c,v $
+Revision 1.199  2008/03/14 19:58:38  mcguire
+<rdar://problem/5500969> BTMM: Need ability to identify version of mDNSResponder client
+Make sure we add the record when sending LLQ refreshes
+
+Revision 1.198  2008/03/07 23:29:24  cheshire
+Fixed cosmetic byte order display issue in DumpPacket output
+
+Revision 1.197  2008/03/05 22:51:29  mcguire
+<rdar://problem/5500969> BTMM: Need ability to identify version of mDNSResponder client
+Even further refinements
+
+Revision 1.196  2008/03/05 22:01:53  cheshire
+<rdar://problem/5500969> BTMM: Need ability to identify version of mDNSResponder client
+Now that we optionally add the HINFO record, when rewriting the header fields into network byte
+order, we need to use our updated msg->h.numAdditionals, not the stack variable numAdditionals
+
+Revision 1.195  2008/03/05 19:06:30  mcguire
+<rdar://problem/5500969> BTMM: Need ability to identify version of mDNSResponder client
+further refinements
+
+Revision 1.194  2008/03/05 00:26:06  cheshire
+<rdar://problem/5500969> BTMM: Need ability to identify version of mDNSResponder client
+
 Revision 1.193  2007/12/17 23:42:36  cheshire
 Added comments about DNSDigest_SignMessage()
 
@@ -527,7 +550,7 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *rr, RDataBody *rd,
 								rd->soa.serial, rd->soa.refresh, rd->soa.retry, rd->soa.expire, rd->soa.min);
 							break;
 
-		case kDNSType_HINFO:// Display this the same as TXT (show all constituent string)
+		case kDNSType_HINFO:// Display this the same as TXT (show all constituent strings)
 		case kDNSType_TXT:  {
 							mDNSu8 *t = rd->txt.c;
 							while (t < rd->txt.c + rr->rdlength)
@@ -2013,6 +2036,30 @@ mDNSexport mDNSu8 *putUpdateLease(DNSMessage *msg, mDNSu8 *end, mDNSu32 lease)
 	return end;
 	}
 
+mDNSexport mDNSu8 *putHINFO(const mDNS *const m, DNSMessage *const msg, mDNSu8 *end, DomainAuthInfo *authInfo)
+	{
+	if (authInfo && authInfo->AutoTunnel)
+		{
+		AuthRecord hinfo;
+		mDNSu8 *h = hinfo.rdatastorage.u.data;
+		mDNSu16 len = 2 + m->HIHardware.c[0] + m->HISoftware.c[0];
+		mDNSu8 *newptr;
+		mDNS_SetupResourceRecord(&hinfo, mDNSNULL, mDNSInterface_Any, kDNSType_HINFO, 0, kDNSRecordTypeUnique, mDNSNULL, mDNSNULL);
+		AppendDomainLabel(&hinfo.namestorage, &m->hostlabel);
+		AppendDomainName (&hinfo.namestorage, &authInfo->domain);
+		hinfo.resrec.rroriginalttl = 0;
+		mDNSPlatformMemCopy(h, &m->HIHardware, 1 + (mDNSu32)m->HIHardware.c[0]);
+		h += 1 + (int)h[0];
+		mDNSPlatformMemCopy(h, &m->HISoftware, 1 + (mDNSu32)m->HISoftware.c[0]);
+		hinfo.resrec.rdlength   = len;
+		hinfo.resrec.rdestimate = len;
+		newptr = PutResourceRecord(msg, end, &msg->h.numAdditionals, &hinfo.resrec);
+		return newptr;
+		}
+	else
+		return end;
+	}
+
 // ***************************************************************************
 #if COMPILER_LIKES_PRAGMA_MARK
 #pragma mark -
@@ -2531,10 +2578,11 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
     mDNSInterfaceID InterfaceID, const mDNSAddr *dst, mDNSIPPort dstport, TCPSocket *sock, DomainAuthInfo *authInfo)
 	{
 	mStatus status = mStatus_NoError;
-	mDNSu16 numQuestions   = msg->h.numQuestions;
-	mDNSu16 numAnswers     = msg->h.numAnswers;
-	mDNSu16 numAuthorities = msg->h.numAuthorities;
-	mDNSu16 numAdditionals = msg->h.numAdditionals;
+	const mDNSu16 numQuestions   = msg->h.numQuestions;
+	const mDNSu16 numAnswers     = msg->h.numAnswers;
+	const mDNSu16 numAuthorities = msg->h.numAuthorities;
+	const mDNSu16 numAdditionals = msg->h.numAdditionals;
+	mDNSu16 tmpNumAdditionals = numAdditionals;
 	mDNSu8 *ptr = (mDNSu8 *)&msg->h.numQuestions;
 
 	if (end <= msg->data || end - msg->data > AbsoluteMaxDNSMessageData)
@@ -2543,33 +2591,40 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
 		return mStatus_BadParamErr;
 		}
 
-	// Put all the integer values in IETF byte-order (MSB first, LSB second)
-	*ptr++ = (mDNSu8)(numQuestions   >> 8);
-	*ptr++ = (mDNSu8)(numQuestions   &  0xFF);
-	*ptr++ = (mDNSu8)(numAnswers     >> 8);
-	*ptr++ = (mDNSu8)(numAnswers     &  0xFF);
-	*ptr++ = (mDNSu8)(numAuthorities >> 8);
-	*ptr++ = (mDNSu8)(numAuthorities &  0xFF);
-	*ptr++ = (mDNSu8)(numAdditionals >> 8);
-	*ptr++ = (mDNSu8)(numAdditionals &  0xFF);
-
-	if (authInfo) DNSDigest_SignMessage(msg, &end, authInfo, 0);	// DNSDigest_SignMessage operates on message in network byte order
-	if (!end) { LogMsg("mDNSSendDNSMessage: DNSDigest_SignMessage failed"); status = mStatus_NoMemoryErr; }
+	end = putHINFO(m, msg, end, authInfo);
+	if (!end) { LogMsg("mDNSSendDNSMessage: putHINFO failed"); status = mStatus_NoMemoryErr; }
 	else
 		{
-		// Send the packet on the wire
-		if (!sock)
-			status = mDNSPlatformSendUDP(m, msg, end, InterfaceID, dst, dstport);
+		tmpNumAdditionals = msg->h.numAdditionals;
+	
+		// Put all the integer values in IETF byte-order (MSB first, LSB second)
+		*ptr++ = (mDNSu8)(numQuestions   >> 8);
+		*ptr++ = (mDNSu8)(numQuestions   &  0xFF);
+		*ptr++ = (mDNSu8)(numAnswers     >> 8);
+		*ptr++ = (mDNSu8)(numAnswers     &  0xFF);
+		*ptr++ = (mDNSu8)(numAuthorities >> 8);
+		*ptr++ = (mDNSu8)(numAuthorities &  0xFF);
+		*ptr++ = (mDNSu8)(tmpNumAdditionals >> 8);
+		*ptr++ = (mDNSu8)(tmpNumAdditionals &  0xFF);
+	
+		if (authInfo) DNSDigest_SignMessage(msg, &end, authInfo, 0);	// DNSDigest_SignMessage operates on message in network byte order
+		if (!end) { LogMsg("mDNSSendDNSMessage: DNSDigest_SignMessage failed"); status = mStatus_NoMemoryErr; }
 		else
 			{
-			mDNSu16 msglen = (mDNSu16)(end - (mDNSu8 *)msg);
-			mDNSu8 lenbuf[2] = { (mDNSu8)(msglen >> 8), (mDNSu8)(msglen & 0xFF) };
-			long nsent = mDNSPlatformWriteTCP(sock, (char*)lenbuf, 2);		// Should do scatter/gather here -- this is probably going out as two packets
-			if (nsent != 2) { LogMsg("mDNSSendDNSMessage: write msg length failed %d/%d", nsent, 2); status = mStatus_ConnFailed; }
+			// Send the packet on the wire
+			if (!sock)
+				status = mDNSPlatformSendUDP(m, msg, end, InterfaceID, dst, dstport);
 			else
 				{
-				nsent = mDNSPlatformWriteTCP(sock, (char *)msg, msglen);
-				if (nsent != msglen) { LogMsg("mDNSSendDNSMessage: write msg body failed %d/%d", nsent, msglen); status = mStatus_ConnFailed; }
+				mDNSu16 msglen = (mDNSu16)(end - (mDNSu8 *)msg);
+				mDNSu8 lenbuf[2] = { (mDNSu8)(msglen >> 8), (mDNSu8)(msglen & 0xFF) };
+				long nsent = mDNSPlatformWriteTCP(sock, (char*)lenbuf, 2);		// Should do scatter/gather here -- this is probably going out as two packets
+				if (nsent != 2) { LogMsg("mDNSSendDNSMessage: write msg length failed %d/%d", nsent, 2); status = mStatus_ConnFailed; }
+				else
+					{
+					nsent = mDNSPlatformWriteTCP(sock, (char *)msg, msglen);
+					if (nsent != msglen) { LogMsg("mDNSSendDNSMessage: write msg body failed %d/%d", nsent, msglen); status = mStatus_ConnFailed; }
+					}
 				}
 			}
 		}
@@ -2578,14 +2633,17 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
 	msg->h.numQuestions   = numQuestions;
 	msg->h.numAnswers     = numAnswers;
 	msg->h.numAuthorities = numAuthorities;
-	msg->h.numAdditionals = numAdditionals;
 
+	// Dump the packet with the HINFO and TSIG
 	if (mDNS_LogLevel >= MDNS_LOG_VERBOSE_DEBUG && !mDNSOpaque16IsZero(msg->h.id))
 		{
-		if (authInfo) msg->h.numAdditionals++;	// Want to include TSIG in DumpPacket output
+		ptr = (mDNSu8 *)&msg->h.numAdditionals;
+		msg->h.numAdditionals = (mDNSu16)ptr[0] << 8 | (mDNSu16)ptr[1];
 		DumpPacket(m, mDNStrue, sock && (sock->flags & kTCPSocketFlags_UseTLS) ? "TLS" : sock ? "TCP" : "UDP", dst, dstport, msg, end);
-		if (authInfo) msg->h.numAdditionals--;
 		}
+
+	// put the final integer value back the way it was
+	msg->h.numAdditionals = numAdditionals;
 
 	return(status);
 	}
