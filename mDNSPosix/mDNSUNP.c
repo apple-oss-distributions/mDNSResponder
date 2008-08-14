@@ -17,6 +17,10 @@
     Change History (most recent first):
 
 $Log: mDNSUNP.c,v $
+Revision 1.36  2008/04/21 18:21:22  mkrochma
+<rdar://problem/5877307> Need to free ifi_netmask
+Submitted by Igor Seleznev
+
 Revision 1.35  2007/11/15 21:36:19  cheshire
 <rdar://problem/5289340> POSIX: Off by one overflow in get_ifi_info_linuxv6()
 
@@ -550,6 +554,8 @@ free_ifi_info(struct ifi_info *ifihead)
     for (ifi = ifihead; ifi != NULL; ifi = ifinext) {
         if (ifi->ifi_addr != NULL)
             free(ifi->ifi_addr);
+        if (ifi->ifi_netmask != NULL)
+            free(ifi->ifi_netmask);
         if (ifi->ifi_brdaddr != NULL)
             free(ifi->ifi_brdaddr);
         if (ifi->ifi_dstaddr != NULL)

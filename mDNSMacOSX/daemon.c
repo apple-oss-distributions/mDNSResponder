@@ -30,6 +30,13 @@
     Change History (most recent first):
 
 $Log: daemon.c,v $
+Revision 1.360  2008/03/13 20:55:16  mcguire
+<rdar://problem/5769316> fix deprecated warnings/errors
+Additional cleanup: use a conditional macro instead of lots of #if
+
+Revision 1.359  2008/03/12 23:02:58  mcguire
+<rdar://problem/5769316> fix deprecated warnings/errors
+
 Revision 1.358  2008/03/06 21:26:11  cheshire
 Moved duplicated STRINGIFY macro from individual C files to DNSCommon.h
 
@@ -371,6 +378,12 @@ Revision 1.261  2006/01/06 01:22:28  cheshire
 #include <pthread.h>
 #include <sandbox.h>
 #include <SystemConfiguration/SCPreferencesSetSpecific.h>
+
+#if TARGET_OS_EMBEDDED
+#include <bootstrap_priv.h>
+
+#define bootstrap_register(A,B,C) bootstrap_register2((A),(B),(C),0)
+#endif
 
 #include "DNSServiceDiscoveryRequestServer.h"
 #include "DNSServiceDiscoveryReply.h"
@@ -2137,14 +2150,14 @@ mDNSlocal kern_return_t mDNSDaemonInitialize(void)
 		s_port = CFMachPortCreate(NULL, DNSserverCallback, NULL, NULL);
 		m_port = CFMachPortGetPort(s_port);
 		char *MachServerName = OSXVers < 7 ? "DNSServiceDiscoveryServer" : "com.apple.mDNSResponder";
-		kern_return_t      status = bootstrap_register(bootstrap_port, MachServerName, m_port);
+		kern_return_t status = bootstrap_register(bootstrap_port, MachServerName, m_port);
 	
 		if (status)
 			{
 			if (status == 1103)
-				LogMsg("Bootstrap_register failed(): A copy of the daemon is apparently already running");
+				LogMsg("bootstrap_register() failed: A copy of the daemon is apparently already running");
 			else
-				LogMsg("Bootstrap_register failed(): %s %d", mach_error_string(status), status);
+				LogMsg("bootstrap_register() failed: %s %d", mach_error_string(status), status);
 			return(status);
 			}
 		}

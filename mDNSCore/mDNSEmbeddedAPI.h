@@ -54,6 +54,18 @@
     Change History (most recent first):
 
 $Log: mDNSEmbeddedAPI.h,v $
+Revision 1.468.2.3  2008/07/29 20:46:57  mcguire
+<rdar://problem/6090007> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+merge r1.474 from <rdar://problem/3988320>
+
+Revision 1.468.2.2  2008/07/29 19:44:38  mcguire
+<rdar://problem/6090024> BTMM: alternate SSDP queries between multicast & unicast
+merge r1.472, r1.473 for <rdar://problem/5736845>
+
+Revision 1.468.2.1  2008/07/29 19:10:53  mcguire
+<rdar://problem/6090041> Use all configured DNS servers
+merege 1.470 from <rdar://problem/4206534>
+
 Revision 1.468  2008/03/06 02:48:34  mcguire
 <rdar://problem/5321824> write status to the DS
 
@@ -1801,6 +1813,7 @@ struct DNSQuestion_struct
 
 	// Wide Area fields. These are used internally by the uDNS core
 	DNSServer            *qDNSServer;		// Caching server for this query (in the absence of an SRV saying otherwise)
+	mDNSu8                unansweredQueries;// The number of unanswered queries to this server
 
 	ZoneData             *nta;				// Used for getting zone data for private or LLQ query
 	mDNSAddr              servAddr;			// Address and port learned from _dns-llq, _dns-llq-tls or _dns-query-tls SRV query
@@ -1820,6 +1833,7 @@ struct DNSQuestion_struct
 	mDNSAddr              Target;			// Non-zero if you want to direct queries to a specific unicast target address
 	mDNSIPPort            TargetPort;		// Must be set if Target is set
 	mDNSOpaque16          TargetQID;		// Must be set if Target is set
+	UDPSocket            *LocalSocket;
 	domainname            qname;
 	mDNSu16               qtype;
 	mDNSu16               qclass;
@@ -2007,7 +2021,6 @@ struct mDNS_struct
 	mDNSs32 SuppressStdPort53Queries;       // Wait before allowing the next standard unicast query to the user's configured DNS server
 
 	ServiceRecordSet *ServiceRegistrations;
-	mDNSu16           NextMessageID;
 	DNSServer        *DNSServers;           // list of DNS servers
 
 	mDNSAddr          Router;
@@ -2045,6 +2058,7 @@ struct mDNS_struct
 	tcpLNTInfo       *tcpInfoUnmapList;			// list of pending unmap requests
 	mDNSInterfaceID   UPnPInterfaceID;
 	UDPSocket        *SSDPSocket;               // For SSDP request/response
+	mDNSBool          SSDPMulticast;            // whether we should send the SSDP query via multicast
 	mDNSIPPort        UPnPRouterPort;			// port we send discovery messages to
 	mDNSIPPort        UPnPSOAPPort;				// port we send SOAP messages to
 	mDNSu8           *UPnPRouterURL;			// router's URL string
@@ -2325,6 +2339,8 @@ extern mStatus mDNS_AdvertiseDomains(mDNS *const m, AuthRecord *rr, mDNS_DomainT
 #define        mDNS_StopAdvertiseDomains mDNS_Deregister
 
 extern mDNSOpaque16 mDNS_NewMessageID(mDNS *const m);
+		
+extern DNSServer *GetServerForName(mDNS *m, const domainname *name);
 
 // ***************************************************************************
 #if 0
@@ -2578,7 +2594,7 @@ extern mDNSBool DNSDigest_VerifyMessage(DNSMessage *msg, mDNSu8 *end, LargeCache
 extern mStatus  mDNSPlatformInit        (mDNS *const m);
 extern void     mDNSPlatformClose       (mDNS *const m);
 extern mStatus  mDNSPlatformSendUDP(const mDNS *const m, const void *const msg, const mDNSu8 *const end,
-mDNSInterfaceID InterfaceID, const mDNSAddr *dst, mDNSIPPort dstport);
+mDNSInterfaceID InterfaceID, UDPSocket *src, const mDNSAddr *dst, mDNSIPPort dstport);
 
 extern void     mDNSPlatformLock        (const mDNS *const m);
 extern void     mDNSPlatformUnlock      (const mDNS *const m);
@@ -2643,7 +2659,7 @@ extern mStatus    mDNSPlatformTCPConnect(TCPSocket *sock, const mDNSAddr *dst, m
 extern void       mDNSPlatformTCPCloseConnection(TCPSocket *sock);
 extern long       mDNSPlatformReadTCP(TCPSocket *sock, void *buf, unsigned long buflen, mDNSBool *closed);
 extern long       mDNSPlatformWriteTCP(TCPSocket *sock, const char *msg, unsigned long len);
-extern UDPSocket *mDNSPlatformUDPSocket(mDNS *const m, mDNSIPPort port);
+extern UDPSocket *mDNSPlatformUDPSocket(mDNS *const m, const mDNSIPPort requestedport);
 extern void       mDNSPlatformUDPClose(UDPSocket *sock);
 extern void       mDNSPlatformSourceAddrForDest(mDNSAddr *const src, const mDNSAddr *const dst);
 
@@ -2762,21 +2778,21 @@ struct CompileTimeAssertionChecks_mDNS
 	// Check our structures are reasonable sizes. Including overly-large buffers, or embedding
 	// other overly-large structures instead of having a pointer to them, can inadvertently
 	// cause structure sizes (and therefore memory usage) to balloon unreasonably.
-	char sizecheck_ResourceRecord      [(sizeof(ResourceRecord)       <=    40) ? 1 : -1];
-	char sizecheck_AuthRecord          [(sizeof(AuthRecord)           <=  1290) ? 1 : -1];
-	char sizecheck_CacheRecord         [(sizeof(CacheRecord)          <=   170) ? 1 : -1];
-	char sizecheck_CacheGroup          [(sizeof(CacheGroup)           <=   170) ? 1 : -1];
-	char sizecheck_DNSQuestion         [(sizeof(DNSQuestion)          <=   560) ? 1 : -1];
-	char sizecheck_ZoneData            [(sizeof(ZoneData)             <=  1600) ? 1 : -1];
-	char sizecheck_NATTraversalInfo    [(sizeof(NATTraversalInfo)     <=   140) ? 1 : -1];
-	char sizecheck_HostnameInfo        [(sizeof(HostnameInfo)         <=  3000) ? 1 : -1];
-	char sizecheck_DNSServer           [(sizeof(DNSServer)            <=   300) ? 1 : -1];
-	char sizecheck_NetworkInterfaceInfo[(sizeof(NetworkInterfaceInfo) <=  4000) ? 1 : -1];
-	char sizecheck_ServiceRecordSet    [(sizeof(ServiceRecordSet)     <=  5700) ? 1 : -1];
-	char sizecheck_DomainAuthInfo      [(sizeof(DomainAuthInfo)       <=  6000) ? 1 : -1];
-	char sizecheck_ServiceInfoQuery    [(sizeof(ServiceInfoQuery)     <=  2900) ? 1 : -1];
+	char sizecheck_ResourceRecord      [(sizeof(ResourceRecord)       <=    56) ? 1 : -1];
+	char sizecheck_AuthRecord          [(sizeof(AuthRecord)           <=  1416) ? 1 : -1];
+	char sizecheck_CacheRecord         [(sizeof(CacheRecord)          <=   200) ? 1 : -1];
+	char sizecheck_CacheGroup          [(sizeof(CacheGroup)           <=   184) ? 1 : -1];
+	char sizecheck_DNSQuestion         [(sizeof(DNSQuestion)          <=   720) ? 1 : -1];
+	char sizecheck_ZoneData            [(sizeof(ZoneData)             <=  1552) ? 1 : -1];
+	char sizecheck_NATTraversalInfo    [(sizeof(NATTraversalInfo)     <=   192) ? 1 : -1];
+	char sizecheck_HostnameInfo        [(sizeof(HostnameInfo)         <=  3304) ? 1 : -1];
+	char sizecheck_DNSServer           [(sizeof(DNSServer)            <=   312) ? 1 : -1];
+	char sizecheck_NetworkInterfaceInfo[(sizeof(NetworkInterfaceInfo) <=  4392) ? 1 : -1];
+	char sizecheck_ServiceRecordSet    [(sizeof(ServiceRecordSet)     <=  6248) ? 1 : -1];
+	char sizecheck_DomainAuthInfo      [(sizeof(DomainAuthInfo)       <=  6544) ? 1 : -1];
+	char sizecheck_ServiceInfoQuery    [(sizeof(ServiceInfoQuery)     <=  2912) ? 1 : -1];
 #if APPLE_OSX_mDNSResponder
-	char sizecheck_ClientTunnel        [(sizeof(ClientTunnel)         <=  1040) ? 1 : -1];
+	char sizecheck_ClientTunnel        [(sizeof(ClientTunnel)         <=  1064) ? 1 : -1];
 #endif
 	};
 

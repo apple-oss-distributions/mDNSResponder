@@ -17,6 +17,14 @@
     Change History (most recent first):
 
 $Log: mDNSMacOSX.c,v $
+Revision 1.536.2.2  2008/07/30 01:08:17  mcguire
+<rdar://problem/6090007> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+merge r1.540 from <rdar://problem/3988320>
+
+Revision 1.536.2.1  2008/07/29 20:48:10  mcguire
+<rdar://problem/6090007> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+merge r1.539 from <rdar://problem/3988320>
+
 Revision 1.536  2008/03/25 01:27:30  mcguire
 <rdar://problem/5810718> Status sometimes wrong when link goes down
 
@@ -1002,17 +1010,12 @@ mDNSlocal mDNSBool AddrRequiresPPPConnection(const struct sockaddr *addr)
 	return result;
 	}
 
-struct UDPSocket_struct
-	{
-	mDNSIPPort port; // MUST BE FIRST FIELD -- mDNSCore expects every UDPSocket_struct to begin with mDNSIPPort port
-	KQSocketSet ss;
-	};
-
 // NOTE: If InterfaceID is NULL, it means, "send this packet through our anonymous unicast socket"
 // NOTE: If InterfaceID is non-NULL it means, "send this packet through our port 5353 socket on the specified interface"
 // OR send via our primary v4 unicast socket
+// UPDATE: The UDPSocket *src parameter now allows the caller to specify the source socket
 mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const msg, const mDNSu8 *const end,
-	mDNSInterfaceID InterfaceID, const mDNSAddr *dst, mDNSIPPort dstPort)
+	mDNSInterfaceID InterfaceID, UDPSocket *src, const mDNSAddr *dst, mDNSIPPort dstPort)
 	{
 	// Note: For this platform we've adopted the convention that InterfaceIDs are secretly pointers
 	// to the NetworkInterfaceInfoOSX structure that holds the active sockets. The mDNSCore code
@@ -1032,10 +1035,7 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
 		sin_to->sin_addr.s_addr    = dst->ip.v4.NotAnInteger;
 		s = m->p->permanentsockets.sktv4;
 
-#ifdef _LEGACY_NAT_TRAVERSAL_
-		if (m->SSDPSocket && mDNSSameIPPort(dstPort, SSDPPort))
-			s = m->SSDPSocket->ss.sktv4;
-#endif _LEGACY_NAT_TRAVERSAL_
+		if (src) { s = src->ss.sktv4; debugf("mDNSPlatformSendUDP using port %d %d %d", mDNSVal16(src->ss.port), m->p->permanentsockets.sktv4, s); }
 
 		if (info)	// Specify outgoing interface
 			{
@@ -1216,9 +1216,9 @@ mDNSlocal ssize_t myrecvfrom(const int s, void *const buffer, const size_t max,
 
 mDNSlocal void myKQSocketCallBack(int s1, short filter, void *context)
 	{
-	const KQSocketSet *const ss = (const KQSocketSet *)context;
+	KQSocketSet *const ss = (KQSocketSet *)context;
 	mDNS *const m = ss->m;
-	int err, count = 0;
+	int err = 0, count = 0, closed = 0;
 
 	if (filter != EVFILT_READ)
 		LogMsg("myKQSocketCallBack: Why is filter %d not EVFILT_READ (%d)?", filter, EVFILT_READ);
@@ -1230,10 +1230,10 @@ mDNSlocal void myKQSocketCallBack(int s1, short filter, void *context)
 		LogMsg("myKQSocketCallBack: sktv6 %d", ss->sktv6);
  		}
 
-	while (1)
+	while (!closed)
 		{
 		mDNSAddr senderAddr, destAddr;
-		mDNSIPPort senderPort, destPort = (m->SSDPSocket && ss == &m->SSDPSocket->ss ? m->SSDPSocket->port : MulticastDNSPort);
+		mDNSIPPort senderPort;
 		struct sockaddr_storage from;
 		size_t fromlen = sizeof(from);
 		char packetifname[IF_NAMESIZE] = "";
@@ -1279,7 +1279,17 @@ mDNSlocal void myKQSocketCallBack(int s1, short filter, void *context)
 //		LogMsg("myKQSocketCallBack got packet from %#a to %#a on interface %#a/%s",
 //			&senderAddr, &destAddr, &ss->info->ifinfo.ip, ss->info->ifa_name);
 
-		mDNSCoreReceive(m, &m->imsg, (unsigned char*)&m->imsg + err, &senderAddr, senderPort, &destAddr, destPort, InterfaceID);
+		// mDNSCoreReceive may close the socket we're reading from.  We must break out of our
+		// loop when that happens, or we may try to read from an invalid FD.  We do this by
+		// setting the closeFlag pointer in the socketset, so CloseSocketSet can inform us
+		// if it closes the socketset.
+		ss->closeFlag = &closed;
+
+		mDNSCoreReceive(m, &m->imsg, (unsigned char*)&m->imsg + err, &senderAddr, senderPort, &destAddr, ss->port, InterfaceID);
+
+		// if we didn't close, we can safely dereference the socketset, and should to
+		// reset the closeFlag, since it points to something on the stack
+		if (!closed) ss->closeFlag = mDNSNULL;
 		}
 
 	if (err < 0 && (errno != EWOULDBLOCK || count == 0))
@@ -1740,6 +1750,8 @@ mDNSlocal mStatus SetupSocket(KQSocketSet *cp, const mDNSIPPort port, u_short sa
 	const int twofivefive = 255;
 	mStatus err = mStatus_NoError;
 	char *errstr = mDNSNULL;
+	
+	cp->closeFlag = mDNSNULL;
 
 	int skt = socket(sa_family, SOCK_DGRAM, IPPROTO_UDP);
 	if (skt < 3) { if (errno != EAFNOSUPPORT) LogMsg("SetupSocket: socket error %d errno %d (%s)", skt, errno, strerror(errno)); return(skt); }
@@ -1777,7 +1789,7 @@ mDNSlocal mStatus SetupSocket(KQSocketSet *cp, const mDNSIPPort port, u_short sa
 		// And start listening for packets
 		struct sockaddr_in listening_sockaddr;
 		listening_sockaddr.sin_family      = AF_INET;
-		listening_sockaddr.sin_port        = port.NotAnInteger;
+		listening_sockaddr.sin_port        = port.NotAnInteger;		// Pass in opaque ID without any byte swapping
 		listening_sockaddr.sin_addr.s_addr = 0; // Want to receive multicasts AND unicasts on this socket
 		err = bind(skt, (struct sockaddr *) &listening_sockaddr, sizeof(listening_sockaddr));
 		if (err) { errstr = "bind"; goto fail; }
@@ -1823,7 +1835,7 @@ mDNSlocal mStatus SetupSocket(KQSocketSet *cp, const mDNSIPPort port, u_short sa
 		mDNSPlatformMemZero(&listening_sockaddr6, sizeof(listening_sockaddr6));
 		listening_sockaddr6.sin6_len         = sizeof(listening_sockaddr6);
 		listening_sockaddr6.sin6_family      = AF_INET6;
-		listening_sockaddr6.sin6_port        = port.NotAnInteger;
+		listening_sockaddr6.sin6_port        = port.NotAnInteger;		// Pass in opaque ID without any byte swapping
 		listening_sockaddr6.sin6_flowinfo    = 0;
 		listening_sockaddr6.sin6_addr        = in6addr_any; // Want to receive multicasts AND unicasts on this socket
 		listening_sockaddr6.sin6_scope_id    = 0;
@@ -1845,7 +1857,7 @@ mDNSlocal mStatus SetupSocket(KQSocketSet *cp, const mDNSIPPort port, u_short sa
 	fail:
 	// For "bind" failures, only write log messages for our shared mDNS port, or for binding to zero
 	if (strcmp(errstr, "bind") || mDNSSameIPPort(port, MulticastDNSPort) || mDNSIPPortIsZero(port))
-		LogMsg("%s error %ld errno %d (%s)", errstr, err, errno, strerror(errno));
+		LogMsg("%s skt %d port %d error %ld errno %d (%s)", errstr, skt, mDNSVal16(port), err, errno, strerror(errno));
 
 	// If we got a "bind" failure with an EADDRINUSE error for our shared mDNS port, display error alert
 	if (!strcmp(errstr, "bind") && mDNSSameIPPort(port, MulticastDNSPort) && errno == EADDRINUSE)
@@ -1859,24 +1871,33 @@ mDNSlocal mStatus SetupSocket(KQSocketSet *cp, const mDNSIPPort port, u_short sa
 	return(err);
 	}
 
-mDNSexport UDPSocket *mDNSPlatformUDPSocket(mDNS *const m, const mDNSIPPort port)
+mDNSexport UDPSocket *mDNSPlatformUDPSocket(mDNS *const m, const mDNSIPPort requestedport)
 	{
+	int i;
 	mStatus err;
+	mDNSIPPort port = requestedport;
 	UDPSocket *p = mallocL("UDPSocket", sizeof(UDPSocket));
 	if (!p) { LogMsg("mDNSPlatformUDPSocket: memory exhausted"); return(mDNSNULL); }
 	memset(p, 0, sizeof(UDPSocket));
+	p->ss.port  = zeroIPPort;
 	p->ss.m     = m;
 	p->ss.sktv4 = -1;
 	p->ss.sktv6 = -1;
-	p->port = zeroIPPort;
-	err = SetupSocket(&p->ss, port, AF_INET, &p->port);
+
+	for (i=0; i<10000; i++)	// Try at most 10000 times to get a unique random port
+		{
+		// The kernel doesn't do cryptographically strong random port allocation, so we do it ourselves here
+		if (mDNSIPPortIsZero(requestedport)) port = mDNSOpaque16fromIntVal(0xC000 + mDNSRandom(0x3FFF));
+		err = SetupSocket(&p->ss, port, AF_INET, &p->ss.port);
+		if (!err) break;
+		}
 	if (err)
 		{
 		// In customer builds we don't want to log failures with port 5351, because this is a known issue
 		// of failing to bind to this port when Internet Sharing has already bound to it
-		if (mDNSSameIPPort(port, NATPMPPort))
-			LogOperation("mDNSPlatformUDPSocket: SetupSocket %d failed", mDNSVal16(port));
-		else LogMsg     ("mDNSPlatformUDPSocket: SetupSocket %d failed", mDNSVal16(port));
+		if (mDNSSameIPPort(requestedport, NATPMPPort))
+			LogOperation("mDNSPlatformUDPSocket: SetupSocket %d failed error %ld errno %d (%s)", mDNSVal16(requestedport), err, errno, strerror(errno));
+		else LogMsg     ("mDNSPlatformUDPSocket: SetupSocket %d failed error %ld errno %d (%s)", mDNSVal16(requestedport), err, errno, strerror(errno));
 		freeL("UDPSocket", p);
 		return(mDNSNULL);
 		}
@@ -1895,6 +1916,7 @@ mDNSlocal void CloseSocketSet(KQSocketSet *ss)
 		close(ss->sktv6);
 		ss->sktv6 = -1;
 		}
+	if (ss->closeFlag) *ss->closeFlag = 1;
 	}
 
 mDNSexport void mDNSPlatformUDPClose(UDPSocket *sock)
@@ -4311,6 +4333,7 @@ mDNSlocal mStatus mDNSPlatformInit_setup(mDNS *const m)
 		mDNSPlatformMemCopy(&m->HISoftware.c[1], HINFO_SWstring, slen);
 		}
 
+ 	m->p->permanentsockets.port  = MulticastDNSPort;
  	m->p->permanentsockets.m     = m;
 	m->p->permanentsockets.sktv4 = m->p->permanentsockets.sktv6 = -1;
 	m->p->permanentsockets.kqsv4.KQcallback = m->p->permanentsockets.kqsv6.KQcallback = myKQSocketCallBack;

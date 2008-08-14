@@ -26,6 +26,10 @@
 ; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;
 ; $Log: mDNSResponder.sb,v $
+; Revision 1.25.2.1  2008/07/29 20:48:34  mcguire
+; <rdar://problem/6090007> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+; merge r1.27 from <rdar://problem/3988320>
+;
 ; Revision 1.25  2008/03/17 18:04:41  mcguire
 ; <rdar://problem/5800476> SC now reads preference file
 ;
@@ -164,15 +168,16 @@
 (allow file-read*     file-write*     (regex "^/private/var/run/mDNSResponder\$"))
 
 ; Allow us to read system version, settings, and other miscellaneous necessary file system accesses
+(allow file-read-data                 (regex "^/dev/urandom$"))
 (allow file-read-data                 (regex "^/usr/sbin(/mDNSResponder)?\$"))		; Needed for CFCopyVersionDictionary()
 (allow file-read-data                 (regex "^/usr/share/icu/.*\$"))
 (allow file-read-data                 (regex "^/usr/share/zoneinfo/.*\$"))
-(allow file-read-data                 (regex "^/System/Library/CoreServices/SystemVersion.*\$"))
 (allow file-read-data                 (regex "^/Library/Preferences/SystemConfiguration/preferences\.plist\$"))
 (allow file-read-data                 (regex "^/Library/Preferences/(ByHost/)?\.GlobalPreferences.*\.plist\$"))
 (allow file-read-data                 (regex "^/Library/Preferences/com\.apple\.security.*\.plist\$"))
 (allow file-read-data                 (regex "^/Library/Preferences/com\.apple\.crypto\.plist\$"))
 (allow file-read-data                 (regex "^/Library/Security/Trust Settings/Admin\.plist\$"))
+(allow file-read-data                 (regex "^/System/Library/CoreServices/SystemVersion.*\$"))
 (allow file-read-data                 (regex "^/System/Library/Preferences/com\.apple\.security.*\.plist\$"))
 (allow file-read-data                 (regex "^/System/Library/Preferences/com\.apple\.crypto\.plist\$"))
 

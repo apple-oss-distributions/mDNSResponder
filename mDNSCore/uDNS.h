@@ -17,6 +17,12 @@
     Change History (most recent first):
 
 $Log: uDNS.h,v $
+Revision 1.92  2008/06/19 23:42:03  mcguire
+<rdar://problem/4206534> Use all configured DNS servers
+
+Revision 1.91  2008/06/19 01:20:50  mcguire
+<rdar://problem/4206534> Use all configured DNS servers
+
 Revision 1.90  2007/12/22 02:25:30  cheshire
 <rdar://problem/5661128> Records and Services sometimes not re-registering on wake from sleep
 
@@ -225,6 +231,7 @@ Revision 1.33  2006/07/05 22:53:28  cheshire
 //#define MAX_UCAST_POLL_INTERVAL (1 * 60 * mDNSPlatformOneSecond)
 #define LLQ_POLL_INTERVAL       (15 * 60 * mDNSPlatformOneSecond) // Polling interval for zones w/ an advertised LLQ port (ie not static zones) if LLQ fails due to NAT, etc.
 #define RESPONSE_WINDOW (60 * mDNSPlatformOneSecond)         // require server responses within one minute of request
+#define MAX_UCAST_UNANSWERED_QUERIES 2                       // the number of unanswered queries from any one uDNS server before trying another server
 
 #define DEFAULT_UPDATE_LEASE 7200
 

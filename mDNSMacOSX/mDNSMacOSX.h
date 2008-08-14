@@ -17,6 +17,19 @@
     Change History (most recent first):
 
 $Log: mDNSMacOSX.h,v $
+Revision 1.79  2008/07/30 00:55:56  mcguire
+<rdar://problem/3988320> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+Additional fixes so that we know when a socket has been closed while in a loop reading from it
+
+Revision 1.78  2008/07/25 22:34:11  mcguire
+fix sizecheck issues for 64bit
+
+Revision 1.77  2008/07/24 20:23:04  cheshire
+<rdar://problem/3988320> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+
+Revision 1.76  2008/07/01 01:40:01  mcguire
+<rdar://problem/5823010> 64-bit fixes
+
 Revision 1.75  2007/12/14 00:45:21  cheshire
 Add SleepLimit and SleepCookie, for when we need to delay sleep until TLS/TCP record deregistration completes
 
@@ -124,12 +137,20 @@ typedef struct
 
 typedef struct
 	{
+	mDNSIPPort port; // MUST BE FIRST FIELD -- UDPSocket_struct begins with a KQSocketSet,
+	// and mDNSCore requires every UDPSocket_struct to begin with a mDNSIPPort port
 	mDNS                    *m;
 	int                      sktv4;
 	KQueueEntry				 kqsv4;
 	int                      sktv6;
 	KQueueEntry	             kqsv6;
+	int                     *closeFlag;
 	} KQSocketSet;
+
+struct UDPSocket_struct
+	{
+	KQSocketSet ss;		// First field of KQSocketSet has to be mDNSIPPort -- mDNSCore requires every UDPSocket_struct to begin with mDNSIPPort port
+	};
 
 struct NetworkInterfaceInfoOSX_struct
 	{
@@ -222,8 +243,8 @@ struct CompileTimeAssertionChecks_mDNSMacOSX
 	// Check our structures are reasonable sizes. Including overly-large buffers, or embedding
 	// other overly-large structures instead of having a pointer to them, can inadvertently
 	// cause structure sizes (and therefore memory usage) to balloon unreasonably.
-	char sizecheck_NetworkInterfaceInfoOSX[(sizeof(NetworkInterfaceInfoOSX) <=  4100) ? 1 : -1];
-	char sizecheck_mDNS_PlatformSupport   [(sizeof(mDNS_PlatformSupport)    <=   268) ? 1 : -1];
+	char sizecheck_NetworkInterfaceInfoOSX[(sizeof(NetworkInterfaceInfoOSX) <=  4456) ? 1 : -1];
+	char sizecheck_mDNS_PlatformSupport   [(sizeof(mDNS_PlatformSupport)    <=   368) ? 1 : -1];
 	};
 
 #ifdef  __cplusplus

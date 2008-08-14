@@ -38,6 +38,24 @@
     Change History (most recent first):
 
 $Log: mDNS.c,v $
+Revision 1.777.4.4  2008/08/14 20:43:59  cheshire
+<rdar://problem/6143846> Back to My Mac not working with Time Capsule shared volume
+
+Revision 1.777.4.3  2008/07/29 20:46:05  mcguire
+<rdar://problem/6090007> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+merge r1.782 & r1.783 from <rdar://problem/3988320>
+
+Revision 1.777.4.2  2008/07/29 20:13:52  mcguire
+<rdar://problem/6090024> BTMM: alternate SSDP queries between multicast & unicast
+merged r1.781 for <rdar://problem/5736845>
+
+Revision 1.777.4.1  2008/07/29 19:17:55  mcguire
+<rdar://problem/6090046> Only trigger reconfirm on hostname if both A and AAAA query fail to elicit a response
+merge r1.779, r.1780 from <rdar://problem/6041178>
+
+Revision 1.777  2008/06/19 01:20:48  mcguire
+<rdar://problem/4206534> Use all configured DNS servers
+
 Revision 1.776  2008/04/17 20:14:14  cheshire
 <rdar://problem/5870023> CurrentAnswers/LargeAnswers/UniqueAnswers counter mismatch
 
@@ -1793,7 +1811,7 @@ mDNSlocal void SendDelayedUnicastResponse(mDNS *const m, const mDNSAddr *const d
 			rr->NR_AdditionalTo = mDNSNULL;
 			}
 
-		if (m->omsg.h.numAnswers) mDNSSendDNSMessage(m, &m->omsg, responseptr, mDNSInterface_Any, dest, MulticastDNSPort, mDNSNULL, mDNSNULL);
+		if (m->omsg.h.numAnswers) mDNSSendDNSMessage(m, &m->omsg, responseptr, mDNSInterface_Any, mDNSNULL, dest, MulticastDNSPort, mDNSNULL, mDNSNULL);
 		}
 	}
 
@@ -2101,8 +2119,8 @@ mDNSlocal void SendResponses(mDNS *const m)
 				numAnnounce,               numAnnounce               == 1 ? "" : "s",
 				numAnswer,                 numAnswer                 == 1 ? "" : "s",
 				m->omsg.h.numAdditionals, m->omsg.h.numAdditionals == 1 ? "" : "s", intf->InterfaceID);
-			if (intf->IPv4Available) mDNSSendDNSMessage(m, &m->omsg, responseptr, intf->InterfaceID, &AllDNSLinkGroup_v4, MulticastDNSPort, mDNSNULL, mDNSNULL);
-			if (intf->IPv6Available) mDNSSendDNSMessage(m, &m->omsg, responseptr, intf->InterfaceID, &AllDNSLinkGroup_v6, MulticastDNSPort, mDNSNULL, mDNSNULL);
+			if (intf->IPv4Available) mDNSSendDNSMessage(m, &m->omsg, responseptr, intf->InterfaceID, mDNSNULL, &AllDNSLinkGroup_v4, MulticastDNSPort, mDNSNULL, mDNSNULL);
+			if (intf->IPv6Available) mDNSSendDNSMessage(m, &m->omsg, responseptr, intf->InterfaceID, mDNSNULL, &AllDNSLinkGroup_v6, MulticastDNSPort, mDNSNULL, mDNSNULL);
 			if (!m->SuppressSending) m->SuppressSending = NonZeroTime(m->timenow + (mDNSPlatformOneSecond+9)/10);
 			if (++pktcount >= 1000) { LogMsg("SendResponses exceeded loop limit %d: giving up", pktcount); break; }
 			// There might be more things to send on this interface, so go around one more time and try again.
@@ -2340,6 +2358,18 @@ mDNSlocal void ReconfirmAntecedents(mDNS *const m, const domainname *const name,
 		}
 	}
 
+// If we get no answer for a AAAA query, then before doing an automatic implicit ReconfirmAntecedents
+// we check if we have an address record for the same name. If we do have an IPv4 address for a given
+// name but not an IPv6 address, that's okay (it just means the device doesn't do IPv6) so the failure
+// to get a AAAA response is not grounds to doubt the PTR/SRV chain that lead us to that name.
+mDNSlocal CacheRecord *CacheHasAddressTypeForName(mDNS *const m, const domainname *const name, const mDNSu32 namehash)
+	{
+	CacheGroup *const cg = CacheGroupForName(m, HashSlot(name), namehash, name);
+	CacheRecord *cr = cg ? cg->members : mDNSNULL;
+	while (cr && !RRTypeIsAddressType(cr->resrec.rrtype)) cr=cr->next;
+	return(cr);
+	}
+
 // Only DupSuppressInfos newer than the specified 'time' are allowed to remain active
 mDNSlocal void ExpireDupSuppressInfo(DupSuppressInfo ds[DupSuppressInfoSize], mDNSs32 time)
 	{
@@ -2489,7 +2519,7 @@ mDNSlocal void SendQueries(mDNS *const m)
 				const mDNSu8 *const limit = m->omsg.data + sizeof(m->omsg.data);
 				InitializeDNSMessage(&m->omsg.h, q->TargetQID, QueryFlags);
 				qptr = putQuestion(&m->omsg, qptr, limit, &q->qname, q->qtype, q->qclass);
-				mDNSSendDNSMessage(m, &m->omsg, qptr, mDNSInterface_Any, &q->Target, q->TargetPort, mDNSNULL, mDNSNULL);
+				mDNSSendDNSMessage(m, &m->omsg, qptr, mDNSInterface_Any, q->LocalSocket, &q->Target, q->TargetPort, mDNSNULL, mDNSNULL);
 				q->ThisQInterval    *= QuestionIntervalStep;
 				if (q->ThisQInterval > MaxQuestionInterval)
 					q->ThisQInterval = MaxQuestionInterval;
@@ -2532,10 +2562,13 @@ mDNSlocal void SendQueries(mDNS *const m)
 					{
 					//LogOperation("Accelerating %##s (%s) %d", q->qname.c, DNSTypeName(q->qtype), m->timenow - (q->LastQTime + q->ThisQInterval));
 					q->SendQNow = mDNSInterfaceMark;	// Mark this question for sending on all interfaces
+					debugf("SendQueries: %##s (%s) next interval %d seconds RequestUnicast = %d",
+						q->qname.c, DNSTypeName(q->qtype), q->ThisQInterval / InitialQuestionInterval, q->RequestUnicast);
 					q->ThisQInterval *= QuestionIntervalStep;
 					if (q->ThisQInterval > MaxQuestionInterval)
 						q->ThisQInterval = MaxQuestionInterval;
-					else if (q->CurrentAnswers == 0 && q->ThisQInterval == InitialQuestionInterval * QuestionIntervalStep2)
+					else if (q->CurrentAnswers == 0 && q->ThisQInterval == InitialQuestionInterval * QuestionIntervalStep3 && !q->RequestUnicast &&
+							!(RRTypeIsAddressType(q->qtype) && CacheHasAddressTypeForName(m, &q->qname, q->qnamehash)))
 						{
 						// Generally don't need to log this.
 						// It's not especially noteworthy if a query finds no results -- this usually happens for domain
@@ -2738,8 +2771,8 @@ mDNSlocal void SendQueries(mDNS *const m)
 				m->omsg.h.numQuestions,   m->omsg.h.numQuestions   == 1 ? "" : "s",
 				m->omsg.h.numAnswers,     m->omsg.h.numAnswers     == 1 ? "" : "s",
 				m->omsg.h.numAuthorities, m->omsg.h.numAuthorities == 1 ? "" : "s", intf->InterfaceID);
-			if (intf->IPv4Available) mDNSSendDNSMessage(m, &m->omsg, queryptr, intf->InterfaceID, &AllDNSLinkGroup_v4, MulticastDNSPort, mDNSNULL, mDNSNULL);
-			if (intf->IPv6Available) mDNSSendDNSMessage(m, &m->omsg, queryptr, intf->InterfaceID, &AllDNSLinkGroup_v6, MulticastDNSPort, mDNSNULL, mDNSNULL);
+			if (intf->IPv4Available) mDNSSendDNSMessage(m, &m->omsg, queryptr, intf->InterfaceID, mDNSNULL, &AllDNSLinkGroup_v4, MulticastDNSPort, mDNSNULL, mDNSNULL);
+			if (intf->IPv6Available) mDNSSendDNSMessage(m, &m->omsg, queryptr, intf->InterfaceID, mDNSNULL, &AllDNSLinkGroup_v6, MulticastDNSPort, mDNSNULL, mDNSNULL);
 			if (!m->SuppressSending) m->SuppressSending = NonZeroTime(m->timenow + (mDNSPlatformOneSecond+9)/10);
 			if (++pktcount >= 1000)
 				{ LogMsg("SendQueries exceeded loop limit %d: giving up", pktcount); break; }
@@ -2934,8 +2967,8 @@ mDNSlocal void CacheRecordAdd(mDNS *const m, CacheRecord *rr)
 				if (mDNSOpaque16IsZero(q->TargetQID) && ActiveQuestion(q) && ++q->RecentAnswerPkts >= 10 &&
 					q->ThisQInterval > InitialQuestionInterval * QuestionIntervalStep3 && m->timenow - q->LastQTxTime < mDNSPlatformOneSecond)
 					{
-					LogMsg("CacheRecordAdd: %##s (%s) got immediate answer burst; restarting exponential backoff sequence",
-						q->qname.c, DNSTypeName(q->qtype));
+					LogMsg("CacheRecordAdd: %##s (%s) got immediate answer burst (%d); restarting exponential backoff sequence (%d)",
+						q->qname.c, DNSTypeName(q->qtype), q->RecentAnswerPkts, q->ThisQInterval);
 					q->LastQTime      = m->timenow - InitialQuestionInterval + (mDNSs32)mDNSRandom((mDNSu32)mDNSPlatformOneSecond*4);
 					q->ThisQInterval  = InitialQuestionInterval;
 					SetNextQueryTime(m,q);
@@ -2944,6 +2977,7 @@ mDNSlocal void CacheRecordAdd(mDNS *const m, CacheRecord *rr)
 			verbosedebugf("CacheRecordAdd %p %##s (%s) %lu",
 				rr, rr->resrec.name->c, DNSTypeName(rr->resrec.rrtype), rr->resrec.rroriginalttl);
 			q->CurrentAnswers++;
+			q->unansweredQueries = 0;
 			if (rr->resrec.rdlength > SmallRecordLimit) q->LargeAnswers++;
 			if (rr->resrec.RecordType & kDNSRecordTypePacketUniqueMask) q->UniqueAnswers++;
 			if (q->CurrentAnswers > 4000)
@@ -4400,10 +4434,11 @@ mDNSlocal void mDNSCoreReceiveQuery(mDNS *const m, const DNSMessage *const msg, 
 			m->omsg.h.numAnswers,     m->omsg.h.numAnswers     == 1 ? "" : "s",
 			m->omsg.h.numAdditionals, m->omsg.h.numAdditionals == 1 ? "" : "s",
 			srcaddr, mDNSVal16(srcport), InterfaceID, srcaddr->type);
-		mDNSSendDNSMessage(m, &m->omsg, responseend, InterfaceID, srcaddr, srcport, mDNSNULL, mDNSNULL);
+		mDNSSendDNSMessage(m, &m->omsg, responseend, InterfaceID, mDNSNULL, srcaddr, srcport, mDNSNULL, mDNSNULL);
 		}
 	}
 
+#if 0
 mDNSlocal mDNSBool TrustedSource(const mDNS *const m, const mDNSAddr *const srcaddr)
 	{
 	DNSServer *s;
@@ -4413,12 +4448,19 @@ mDNSlocal mDNSBool TrustedSource(const mDNS *const m, const mDNSAddr *const srca
 		if (mDNSSameAddress(srcaddr, &s->addr)) return(mDNStrue);
 	return(mDNSfalse);
 	}
+#endif
 
-mDNSlocal const DNSQuestion *ExpectingUnicastResponseForQuestion(const mDNS *const m, const mDNSOpaque16 id, const DNSQuestion *const question)
+struct UDPSocket_struct
+	{
+	mDNSIPPort port; // MUST BE FIRST FIELD -- mDNSCoreReceive expects every UDPSocket_struct to begin with mDNSIPPort port
+	};
+
+mDNSlocal const DNSQuestion *ExpectingUnicastResponseForQuestion(const mDNS *const m, const mDNSIPPort port, const mDNSOpaque16 id, const DNSQuestion *const question)
 	{
 	DNSQuestion *q;
 	for (q = m->Questions; q; q=q->next)
-		if (mDNSSameOpaque16(q->TargetQID, id)                 &&
+		if (mDNSSameIPPort(q->LocalSocket ? q->LocalSocket->port : MulticastDNSPort, port) &&
+			mDNSSameOpaque16(q->TargetQID,         id)         &&
 			q->qtype                  == question->qtype       &&
 			q->qclass                 == question->qclass      &&
 			q->qnamehash              == question->qnamehash   &&
@@ -4427,22 +4469,23 @@ mDNSlocal const DNSQuestion *ExpectingUnicastResponseForQuestion(const mDNS *con
 	return(mDNSNULL);
 	}
 
-mDNSlocal mDNSBool ExpectingUnicastResponseForRecord(mDNS *const m, const mDNSAddr *const srcaddr, const mDNSBool SrcLocal, const mDNSOpaque16 id, const CacheRecord *const rr)
+mDNSlocal mDNSBool ExpectingUnicastResponseForRecord(mDNS *const m, const mDNSAddr *const srcaddr, const mDNSBool SrcLocal, const mDNSIPPort port, const mDNSOpaque16 id, const CacheRecord *const rr)
 	{
 	DNSQuestion *q;
 	(void)id;
+	(void)srcaddr;
 	for (q = m->Questions; q; q=q->next)
 		if (ResourceRecordAnswersQuestion(&rr->resrec, q))
 			{
 			if (!mDNSOpaque16IsZero(q->TargetQID))
 				{
-				// For now we don't do this check -- for LLQ updates, the ID doesn't seem to match the ID in the question
-				// if (mDNSSameOpaque16(q->TargetQID, id)
+				debugf("ExpectingUnicastResponseForRecord msg->h.id %d q->TargetQID %d for %s", mDNSVal16(id), mDNSVal16(q->TargetQID), CRDisplayString(m, rr));
+				if (mDNSSameOpaque16(q->TargetQID, id))
 					{
-					if (mDNSSameAddress(srcaddr, &q->Target))                   return(mDNStrue);
-					if (mDNSSameOpaque16(q->TargetQID, id))                     return(mDNStrue);
+					if (mDNSSameIPPort(q->LocalSocket ? q->LocalSocket->port : MulticastDNSPort, port)) return(mDNStrue);
+				//	if (mDNSSameAddress(srcaddr, &q->Target))                   return(mDNStrue);
 				//	if (q->LongLived && mDNSSameAddress(srcaddr, &q->servAddr)) return(mDNStrue); Shouldn't need this now that we have LLQType checking
-					if (TrustedSource(m, srcaddr))                              return(mDNStrue);
+				//	if (TrustedSource(m, srcaddr))                              return(mDNStrue);
 					LogOperation("WARNING: Ignoring suspect uDNS response for %##s (%s) [q->Target %#a] from %#a: %s",
 						q->qname.c, DNSTypeName(q->qtype), &q->Target, srcaddr, CRDisplayString(m, rr));
 					return(mDNSfalse);
@@ -4635,7 +4678,7 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 			{
 			DNSQuestion q;
 			ptr = getQuestion(response, ptr, end, InterfaceID, &q);
-			if (ptr && ExpectingUnicastResponseForQuestion(m, response->h.id, &q))
+			if (ptr && (!dstaddr || ExpectingUnicastResponseForQuestion(m, dstport, response->h.id, &q)))
 				{
 				CacheRecord *rr;
 				const mDNSu32 slot = HashSlot(&q.qname);
@@ -4678,7 +4721,7 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 
 		// If response was not sent via LL multicast,
 		// then see if it answers a recent query of ours, which would also make it acceptable for caching.
-		if (!AcceptableResponse) AcceptableResponse = ExpectingUnicastResponseForRecord(m, srcaddr, ResponseSrcLocal, response->h.id, &m->rec.r);
+		if (!AcceptableResponse) AcceptableResponse = ExpectingUnicastResponseForRecord(m, srcaddr, ResponseSrcLocal, dstport, response->h.id, &m->rec.r);
 
 		// 1. Check that this packet resource record does not conflict with any of ours
 		if (mDNSOpaque16IsZero(response->h.id))
@@ -4964,7 +5007,7 @@ exit:
 		{
 		DNSQuestion q;
 		ptr = getQuestion(response, ptr, end, InterfaceID, &q);
-		if (ptr && ExpectingUnicastResponseForQuestion(m, response->h.id, &q))
+		if (ptr && (!dstaddr || ExpectingUnicastResponseForQuestion(m, dstport, response->h.id, &q)))
 			{
 			CacheRecord *rr, *neg = mDNSNULL;
 			mDNSu32 slot = HashSlot(&q.qname);
@@ -5084,11 +5127,6 @@ mDNSexport void MakeNegativeCacheRecord(mDNS *const m, const domainname *const n
 	m->rec.r.NextInCFList       = mDNSNULL;
 	}
 
-struct UDPSocket_struct
-	{
-	mDNSIPPort port; // MUST BE FIRST FIELD -- mDNSCoreReceive expects every UDPSocket_struct to begin with mDNSIPPort port
-	};
-	
 mDNSexport void mDNSCoreReceive(mDNS *const m, void *const pkt, const mDNSu8 *const end,
 	const mDNSAddr *const srcaddr, const mDNSIPPort srcport, const mDNSAddr *dstaddr, const mDNSIPPort dstport,
 	const mDNSInterfaceID InterfaceID)
@@ -5147,7 +5185,7 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, void *const pkt, const mDNSu8 *co
 			{
 			ifid = mDNSInterface_Any;
 			if (mDNS_LogLevel >= MDNS_LOG_VERBOSE_DEBUG)
-				DumpPacket(m, mDNSfalse, TLS ? "TLS" : !dstaddr ? "TCP" : "UDP", srcaddr, srcport, msg, end);
+				DumpPacket(m, mDNSfalse, TLS ? "TLS" : !dstaddr ? "TCP" : "UDP", srcaddr, srcport, dstaddr, dstport, msg, end);
 			uDNS_ReceiveMsg(m, msg, end, srcaddr, srcport);
 			// Note: mDNSCore also needs to get access to received unicast responses
 			}
@@ -5226,6 +5264,11 @@ mDNSlocal void UpdateQuestionDuplicates(mDNS *const m, DNSQuestion *const questi
 				q->nta               = question->nta;
 				q->servAddr          = question->servAddr;
 				q->servPort          = question->servPort;
+				q->qDNSServer        = question->qDNSServer;
+				q->unansweredQueries = question->unansweredQueries;
+
+				q->TargetQID         = question->TargetQID;
+				q->LocalSocket       = question->LocalSocket;
 
 				q->state             = question->state;
 			//	q->tcp               = question->tcp;
@@ -5234,8 +5277,13 @@ mDNSlocal void UpdateQuestionDuplicates(mDNS *const m, DNSQuestion *const questi
 				q->ntries            = question->ntries;
 				q->id                = question->id;
 
+				question->LocalSocket = mDNSNULL;
 				question->nta        = mDNSNULL;	// If we've got a GetZoneData in progress, transfer it to the newly active question
 			//	question->tcp        = mDNSNULL;
+
+				if (q->LocalSocket)
+					LogOperation("UpdateQuestionDuplicates transferred LocalSocket pointer for %##s (%s)", q->qname.c, DNSTypeName(q->qtype));
+
 				if (q->nta)
 					{
 					LogOperation("UpdateQuestionDuplicates transferred nta pointer for %##s (%s)", q->qname.c, DNSTypeName(q->qtype));
@@ -5256,7 +5304,7 @@ mDNSlocal void UpdateQuestionDuplicates(mDNS *const m, DNSQuestion *const questi
 	}
 
 // Look up a DNS Server, matching by name in split-dns configurations.
-mDNSlocal DNSServer *GetServerForName(mDNS *m, const domainname *name)
+mDNSexport DNSServer *GetServerForName(mDNS *m, const domainname *name)
     {
 	DNSServer *curmatch = mDNSNULL, *p;
 	int curmatchlen = -1, ncount = name ? CountLabels(name) : 0;
@@ -5379,6 +5427,7 @@ mDNSexport mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const qu
 		question->CNAMEReferrals    = 0;
 
 		question->qDNSServer        = mDNSNULL;
+		question->unansweredQueries = 0;
 		question->nta               = mDNSNULL;
 		question->servAddr          = zeroAddr;
 		question->servPort          = zeroIPPort;
@@ -5390,6 +5439,8 @@ mDNSexport mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const qu
 		question->expire            = 0;
 		question->ntries            = 0;
 		question->id                = zeroOpaque64;
+
+		question->LocalSocket       = mDNSNULL;
 
 		if (question->DuplicateOf) question->AuthInfo = question->DuplicateOf->AuthInfo;
 
@@ -5418,6 +5469,18 @@ mDNSexport mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const qu
 			// this routine with the question list data structures in an inconsistent state.
 			if (!mDNSOpaque16IsZero(question->TargetQID))
 				{
+				// We don't want to make a separate UDP socket for LLQs because (when we're using NAT)
+				// they all share a single NAT mapping for receiving inbound add/remove events.
+				if (!question->DuplicateOf && !question->LongLived)
+					{
+					question->LocalSocket = mDNSPlatformUDPSocket(m, zeroIPPort);
+					debugf("mDNS_StartQuery_internal: dup %p %##s (%s) port %d",
+						question->DuplicateOf, question->qname.c, DNSTypeName(question->qtype), question->LocalSocket ? mDNSVal16(question->LocalSocket->port) : -1);
+					// If we fail to get a new on-demand socket (should only happen cases of the most extreme resource exhaustion)
+					// then we don't fail the query; we just let it use our pre-canned permanent socket, which is okay (it should
+					// never happen in normal operation, and even if it does we still have our cryptographically strong transaction ID).
+					}
+
 				question->qDNSServer = GetServerForName(m, &question->qname);
 				ActivateUnicastQuery(m, question, mDNSfalse);
 
@@ -5529,6 +5592,7 @@ mDNSexport mStatus mDNS_StopQuery_internal(mDNS *const m, DNSQuestion *const que
 	// *first*, then they're all ready to be updated a second time if necessary when we cancel our GetZoneData query.
 	if (question->nta) { CancelGetZoneData(m, question->nta); question->nta = mDNSNULL; }
 	if (question->tcp) { DisposeTCPConn(question->tcp); question->tcp = mDNSNULL; }
+	if (question->LocalSocket) { mDNSPlatformUDPClose(question->LocalSocket); question->LocalSocket = mDNSNULL; }
 	if (!mDNSOpaque16IsZero(question->TargetQID) && question->LongLived)
 		{
 		// Scan our list to see if any more wide-area LLQs remain. If not, stop our NAT Traversal.
@@ -6929,13 +6993,21 @@ mDNSexport mStatus mDNS_AdvertiseDomains(mDNS *const m, AuthRecord *rr,
 	return(mDNS_Register(m, rr));
 	}
 	
-mDNSOpaque16 mDNS_NewMessageID(mDNS * const m)
+mDNSexport mDNSOpaque16 mDNS_NewMessageID(mDNS * const m)
 	{
-	static mDNSBool randomized = mDNSfalse;
-
-	if (!randomized) { m->NextMessageID = (mDNSu16)mDNSRandom(0xFFFF); randomized = mDNStrue; }
-	if (m->NextMessageID == 0) m->NextMessageID++;
-	return mDNSOpaque16fromIntVal(m->NextMessageID++);
+	mDNSOpaque16 id;
+	int i;
+	for (i=0; i<10; i++)
+		{
+		AuthRecord *r;
+		DNSQuestion *q;
+		id = mDNSOpaque16fromIntVal(1 + mDNSRandom(0xFFFE));
+		for (r = m->ResourceRecords; r; r=r->next) if (mDNSSameOpaque16(id, r->id       )) continue;
+		for (q = m->Questions;       q; q=q->next) if (mDNSSameOpaque16(id, q->TargetQID)) continue;
+		break;
+		}
+	debugf("mDNS_NewMessageID: %5d", mDNSVal16(id));
+	return id;
 	}
 
 // ***************************************************************************
@@ -7052,7 +7124,6 @@ mDNSexport mStatus mDNS_Init(mDNS *const m, mDNS_PlatformSupport *const p,
 	m->SuppressStdPort53Queries = 0;
 
 	m->ServiceRegistrations     = mDNSNULL;
-	m->NextMessageID            = 0;
 	m->DNSServers               = mDNSNULL;
 
 	m->Router                   = zeroAddr;
@@ -7085,6 +7156,7 @@ mDNSexport mStatus mDNS_Init(mDNS *const m, mDNS_PlatformSupport *const p,
 
 	m->UPnPInterfaceID          = 0;
 	m->SSDPSocket               = mDNSNULL;
+	m->SSDPMulticast            = mDNSfalse;
 	m->UPnPRouterPort           = zeroIPPort;
 	m->UPnPSOAPPort             = zeroIPPort;
 	m->UPnPRouterURL            = mDNSNULL;
@@ -7152,6 +7224,7 @@ mDNSexport mStatus uDNS_SetupDNSConfig(mDNS *const m)
 					s, s ? &s->addr : mDNSNULL, mDNSVal16(s ? s->port : zeroIPPort), s ? s->domain.c : (mDNSu8*)"",
 					q->qname.c, DNSTypeName(q->qtype));
 				q->qDNSServer = s;
+				q->unansweredQueries = 0;
 				ActivateUnicastQuery(m, q, mDNStrue);
 				}
 			}

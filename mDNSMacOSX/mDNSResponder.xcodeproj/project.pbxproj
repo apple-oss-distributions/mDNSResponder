@@ -1838,9 +1838,11 @@
 					"__MigTypeCheck=1",
 					"mDNSResponderVersion=${MVERS}",
 					_LEGACY_NAT_TRAVERSAL_,
+					"_BUILDING_XCODE_PROJECT_=1",
 				);
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
 				MVERS = "\"(Engineering Build)\"";
+				OTHER_CFLAGS = "-DUSE_SYSTEMCONFIGURATION_PRIVATE_HEADERS";
 				PREBINDING = NO;
 				WARNING_CFLAGS = (
 					"-W",

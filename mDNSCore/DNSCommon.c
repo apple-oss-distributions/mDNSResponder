@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: DNSCommon.c,v $
+Revision 1.199.2.1  2008/07/25 07:25:08  mcguire
+merge of <rdar://3988320&6041178> to SUSB for <rdar://problem/5662487&6090114>
+
 Revision 1.199  2008/03/14 19:58:38  mcguire
 <rdar://problem/5500969> BTMM: Need ability to identify version of mDNSResponder client
 Make sure we add the record when sending LLQ refreshes
@@ -586,6 +589,17 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *rr, RDataBody *rd,
 	return(buffer);
 	}
 
+// Long-term we need to make this cross-platform, either by using our own embedded RC4 code
+// to generate the pseudo-random sequence, or by adding another mDNSPlatformXXX() call.
+// The former would be preferable because it makes our code self-contained, so it will run anywhere.
+// The latter is less desirable because it increases the burden on people writing platform support layers
+// to now implement one more function (and an important one at that, that needs to be cryptographically strong).
+// For now, as a temporary fix, if we're building mDNSResponder for OS X we just use arc4random() directly here.
+
+#if _BUILDING_XCODE_PROJECT_
+#include <stdlib.h>
+#endif
+
 mDNSexport mDNSu32 mDNSRandom(mDNSu32 max)		// Returns pseudo-random result from zero to max inclusive
 	{
 	static mDNSu32 seed = 0;
@@ -598,7 +612,14 @@ mDNSexport mDNSu32 mDNSRandom(mDNSu32 max)		// Returns pseudo-random result from
 		for (i=0; i<100; i++) seed = seed * 21 + 1;		// And mix it up a bit
 		}
 	while (mask < max) mask = (mask << 1) | 1;
-	do seed = seed * 21 + 1; while ((seed & mask) > max);
+
+#if _BUILDING_XCODE_PROJECT_
+	do seed = arc4random();
+#else
+	do seed = seed * 21 + 1;
+#endif
+	while ((seed & mask) > max);
+
 	return (seed & mask);
 	}
 
@@ -2525,14 +2546,21 @@ mDNSlocal const mDNSu8 *DumpRecords(mDNS *const m, const DNSMessage *const msg, 
 	(X) == kDNSFlag1_RC_NotZone  ? "NotZone"  : "??" )
 
 // Note: DumpPacket expects the packet header fields in host byte order, not network byte order
-mDNSexport void DumpPacket(mDNS *const m, mDNSBool sent, char *transport, const mDNSAddr *addr, mDNSIPPort port, const DNSMessage *const msg, const mDNSu8 *const end)
+mDNSexport void DumpPacket(mDNS *const m, mDNSBool sent, char *transport,
+	const mDNSAddr *srcaddr, mDNSIPPort srcport,
+	const mDNSAddr *dstaddr, mDNSIPPort dstport, const DNSMessage *const msg, const mDNSu8 *const end)
 	{
 	mDNSBool IsUpdate = ((msg->h.flags.b[0] & kDNSFlag0_OP_Mask) == kDNSFlag0_OP_Update);
 	const mDNSu8 *ptr = msg->data;
 	int i;
 	DNSQuestion q;
+	char sbuffer[64], dbuffer[64] = "";
+	if (sent) sbuffer[mDNS_snprintf(sbuffer, sizeof(sbuffer), "port "        )] = 0;
+	else      sbuffer[mDNS_snprintf(sbuffer, sizeof(sbuffer), "%#a:", srcaddr)] = 0;
+	if (dstaddr || !mDNSIPPortIsZero(dstport))
+		dbuffer[mDNS_snprintf(dbuffer, sizeof(dbuffer), " to %#a:%d", dstaddr, mDNSVal16(dstport))] = 0;
 
-	LogMsg("-- %s %s DNS %s%s (flags %02X%02X) RCODE: %s (%d) %s%s%s%s%s%sID: %d %d bytes %s %#a:%d%s --",
+	LogMsg("-- %s %s DNS %s%s (flags %02X%02X) RCODE: %s (%d) %s%s%s%s%s%sID: %d %d bytes from %s%d%s%s --",
 		sent ? "Sent" : "Received", transport,
 		DNS_OP_Name(msg->h.flags.b[0] & kDNSFlag0_OP_Mask),
 		msg->h.flags.b[0] & kDNSFlag0_QR_Response ? "Response" : "Query",
@@ -2547,7 +2575,7 @@ mDNSexport void DumpPacket(mDNS *const m, mDNSBool sent, char *transport, const 
 		msg->h.flags.b[1] & kDNSFlag1_CD ? "CD " : "",
 		mDNSVal16(msg->h.id),
 		end - msg->data,
-		sent ? "to" : "from", addr, mDNSVal16(port),
+		sbuffer, mDNSVal16(srcport), dbuffer,
 		(msg->h.flags.b[0] & kDNSFlag0_TC) ? " (truncated)" : ""
 		);
 
@@ -2572,10 +2600,15 @@ mDNSexport void DumpPacket(mDNS *const m, mDNSBool sent, char *transport, const 
 // Stub definition of TCPSocket_struct so we can access flags field. (Rest of TCPSocket_struct is platform-dependent.)
 struct TCPSocket_struct { TCPSocketFlags flags; /* ... */ };
 
+struct UDPSocket_struct
+	{
+	mDNSIPPort port; // MUST BE FIRST FIELD -- mDNSCoreReceive expects every UDPSocket_struct to begin with mDNSIPPort port
+	};
+
 // Note: When we sign a DNS message using DNSDigest_SignMessage(), the current real-time clock value is used, which
 // is why we generally defer signing until we send the message, to ensure the signature is as fresh as possible.
 mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNSu8 *end,
-    mDNSInterfaceID InterfaceID, const mDNSAddr *dst, mDNSIPPort dstport, TCPSocket *sock, DomainAuthInfo *authInfo)
+    mDNSInterfaceID InterfaceID, UDPSocket *src, const mDNSAddr *dst, mDNSIPPort dstport, TCPSocket *sock, DomainAuthInfo *authInfo)
 	{
 	mStatus status = mStatus_NoError;
 	const mDNSu16 numQuestions   = msg->h.numQuestions;
@@ -2613,7 +2646,7 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
 			{
 			// Send the packet on the wire
 			if (!sock)
-				status = mDNSPlatformSendUDP(m, msg, end, InterfaceID, dst, dstport);
+				status = mDNSPlatformSendUDP(m, msg, end, InterfaceID, src, dst, dstport);
 			else
 				{
 				mDNSu16 msglen = (mDNSu16)(end - (mDNSu8 *)msg);
@@ -2639,7 +2672,7 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
 		{
 		ptr = (mDNSu8 *)&msg->h.numAdditionals;
 		msg->h.numAdditionals = (mDNSu16)ptr[0] << 8 | (mDNSu16)ptr[1];
-		DumpPacket(m, mDNStrue, sock && (sock->flags & kTCPSocketFlags_UseTLS) ? "TLS" : sock ? "TCP" : "UDP", dst, dstport, msg, end);
+		DumpPacket(m, mDNStrue, sock && (sock->flags & kTCPSocketFlags_UseTLS) ? "TLS" : sock ? "TCP" : "UDP", mDNSNULL, src ? src->port : MulticastDNSPort, dst, dstport, msg, end);
 		}
 
 	// put the final integer value back the way it was

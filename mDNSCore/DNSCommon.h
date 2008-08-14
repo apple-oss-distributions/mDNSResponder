@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: DNSCommon.h,v $
+Revision 1.60  2008/07/24 20:23:03  cheshire
+<rdar://problem/3988320> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+
 Revision 1.59  2008/03/14 19:58:38  mcguire
 <rdar://problem/5500969> BTMM: Need ability to identify version of mDNSResponder client
 Make sure we add the record when sending LLQ refreshes
@@ -321,7 +324,9 @@ extern const mDNSu8 *LocateLLQOptData(const DNSMessage *const msg, const mDNSu8 
 extern const rdataOPT *GetLLQOptData(mDNS *const m, const DNSMessage *const msg, const mDNSu8 *const end);
 extern const mDNSu8 *LocateLeaseOptData(const DNSMessage *const msg, const mDNSu8 *const end);
 extern mDNSu32 GetPktLease(mDNS *m, DNSMessage *msg, const mDNSu8 *end);
-extern void DumpPacket(mDNS *const m, mDNSBool sent, char *type, const mDNSAddr *addr, mDNSIPPort port, const DNSMessage *const msg, const mDNSu8 *const end);
+extern void DumpPacket(mDNS *const m, mDNSBool sent, char *transport,
+	const mDNSAddr *srcaddr, mDNSIPPort srcport,
+	const mDNSAddr *dstaddr, mDNSIPPort dstport, const DNSMessage *const msg, const mDNSu8 *const end);
 
 // ***************************************************************************
 #if COMPILER_LIKES_PRAGMA_MARK
@@ -330,7 +335,7 @@ extern void DumpPacket(mDNS *const m, mDNSBool sent, char *type, const mDNSAddr 
 #endif
 
 extern mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNSu8 *end,
-	mDNSInterfaceID InterfaceID, const mDNSAddr *dst, mDNSIPPort dstport, TCPSocket *sock, DomainAuthInfo *authInfo);
+	mDNSInterfaceID InterfaceID, UDPSocket *src, const mDNSAddr *dst, mDNSIPPort dstport, TCPSocket *sock, DomainAuthInfo *authInfo);
 
 // ***************************************************************************
 #if COMPILER_LIKES_PRAGMA_MARK

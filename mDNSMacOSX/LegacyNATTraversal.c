@@ -17,6 +17,15 @@
     Change History (most recent first):
 
 $Log: LegacyNATTraversal.c,v $
+Revision 1.48  2008/07/24 20:23:04  cheshire
+<rdar://problem/3988320> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+
+Revision 1.47  2008/07/18 21:37:46  mcguire
+<rdar://problem/5736845> BTMM: alternate SSDP queries between multicast & unicast
+
+Revision 1.46  2008/05/13 01:51:12  mcguire
+<rdar://problem/5839161> UPnP compatibility workaround for Netgear WGT624
+
 Revision 1.45  2007/12/06 00:22:27  mcguire
 <rdar://problem/5604567> BTMM: Doesn't work with Linksys WAG300N 1.01.06 (sending from 1026/udp)
 
@@ -206,9 +215,10 @@ mDNSlocal mStatus SendPortMapRequest(mDNS *m, NATTraversalInfo *n);
 // referencing a service we care about (WANIPConnection), look for the "controlURL" header immediately following, and copy the addressing and URL info we need
 mDNSlocal void handleLNTDeviceDescriptionResponse(tcpLNTInfo *tcpInfo)
 	{
-	mDNS    *m   = tcpInfo->m;
-	char    *ptr = (char *)tcpInfo->Reply;
-	char    *end = (char *)tcpInfo->Reply + tcpInfo->nread;
+	mDNS    *m    = tcpInfo->m;
+	char    *ptr  = (char *)tcpInfo->Reply;
+	char    *end  = (char *)tcpInfo->Reply + tcpInfo->nread;
+	char    *stop = mDNSNULL;
 
 	// find the service we care about
 	while (ptr && ptr != end)
@@ -228,7 +238,13 @@ mDNSlocal void handleLNTDeviceDescriptionResponse(tcpLNTInfo *tcpInfo)
 	ptr += 11;							// skip over "controlURL>"
 	if (ptr >= end) { LogOperation("handleLNTDeviceDescriptionResponse: past end of buffer and no body!"); return; } // check ptr again in case we skipped over the end of the buffer
 
-	// is there an address string "http://"? starting from where we left off
+	// find the end of the controlURL element
+	for (stop = ptr; stop != end; stop++) { if (*stop == '<') { end = stop; break; } }
+
+	// fill in default port
+	m->UPnPSOAPPort = m->UPnPRouterPort;
+
+	// is there an address string "http://"?
 	if (strncasecmp(ptr, "http://", 7) == 0)
 		{
 		int  i;
@@ -246,50 +262,41 @@ mDNSlocal void handleLNTDeviceDescriptionResponse(tcpLNTInfo *tcpInfo)
 		
 		strncpy((char *)m->UPnPSOAPAddressString, ptr, i);				// copy the address string
 		m->UPnPSOAPAddressString[i] = '\0';								// terminate the string
+		
+		stop = ptr; // remember where to stop (just after "http://")
+		ptr = addrPtr; // move ptr past the rest of what we just processed
+		
+		// find the port number in the string
+		for (addrPtr--;addrPtr>stop;addrPtr--)
+			{
+			if (*addrPtr == ':')
+				{
+				int port;
+				addrPtr++; // skip over ':'
+				port = (int)strtol(addrPtr, mDNSNULL, 10);
+				m->UPnPSOAPPort = mDNSOpaque16fromIntVal(port);		// store it properly converted
+				break;
+				}
+			}
 		}
-	
+
 	if (m->UPnPSOAPAddressString == mDNSNULL) m->UPnPSOAPAddressString = m->UPnPRouterAddressString; // just copy the pointer, don't allocate more memory
 	LogOperation("handleLNTDeviceDescriptionResponse: SOAP address string [%s]", m->UPnPSOAPAddressString);
 
-	// find port and router URL, starting after the "http://" if it was there
-	while (ptr && ptr != end)
+	// ptr should now point to the first character we haven't yet processed
+	if (ptr != end)
 		{
-		if (*ptr == ':')										// found the port number
-			{
-			int port;
-			ptr++;										// skip over ':'
-			if (ptr == end) { LogOperation("handleLNTDeviceDescriptionResponse: reached end of buffer and no address!"); return; }
-			port = (int)strtol(ptr, (char **)mDNSNULL, 10);				// get the port
-			m->UPnPSOAPPort = mDNSOpaque16fromIntVal(port);		// store it properly converted
-			}
-		else if (*ptr == '/')									// found SOAP URL
-			{
-			int j;
-			char *urlPtr = mDNSNULL;
-			if (mDNSIPPortIsZero(m->UPnPSOAPPort)) m->UPnPSOAPPort = m->UPnPRouterPort;	// fill in default port if we didn't find one before
-
-			urlPtr = ptr;
-			for (j = 0; urlPtr && urlPtr != end; j++, urlPtr++) if (*urlPtr == '<') break;	// first find the next '<' and count the chars
-			if (urlPtr == mDNSNULL || urlPtr == end) { LogOperation("handleLNTDeviceDescriptionResponse: didn't find SOAP URL string"); return; }
-
-			// allocate the buffer (len j+2 because we're copying from the first '/' and so we have space to terminate the string)
-			if (m->UPnPSOAPURL != mDNSNULL) mDNSPlatformMemFree(m->UPnPSOAPURL);
-			if ((m->UPnPSOAPURL = (mDNSu8 *)mDNSPlatformMemAllocate(j+1)) == mDNSNULL) { LogMsg("can't mDNSPlatformMemAllocate SOAP URL"); return; }
-			
-			// now copy
-			strncpy((char *)m->UPnPSOAPURL, ptr, j);			// this URL looks something like "/uuid:0013-108c-4b3f0000f3dc"
-			m->UPnPSOAPURL[j] = '\0';					// terminate the string
-			break;									// we've got everything we need, so get out here
-			}
-		ptr++;	// continue
+		// allocate the buffer
+		if (m->UPnPSOAPURL != mDNSNULL) mDNSPlatformMemFree(m->UPnPSOAPURL);
+		if ((m->UPnPSOAPURL = (mDNSu8 *)mDNSPlatformMemAllocate(end - ptr + 1)) == mDNSNULL) { LogMsg("can't mDNSPlatformMemAllocate SOAP URL"); return; }
+		
+		// now copy
+		strncpy((char *)m->UPnPSOAPURL, ptr, end - ptr); // this URL looks something like "/uuid:0013-108c-4b3f0000f3dc"
+		m->UPnPSOAPURL[end - ptr] = '\0';				 // terminate the string
 		}
 
 	// if we get to the end and haven't found the URL fill in the defaults
-	if (m->UPnPSOAPURL == mDNSNULL)
-		{
-		m->UPnPSOAPURL  = m->UPnPRouterURL;				// just copy the pointer, don't allocate more memory
-		m->UPnPSOAPPort = m->UPnPRouterPort;
-		}
+	if (m->UPnPSOAPURL == mDNSNULL) m->UPnPSOAPURL = m->UPnPRouterURL;	// just copy the pointer, don't allocate more memory
 	
 	LogOperation("handleLNTDeviceDescriptionResponse: SOAP URL [%s] port %d", m->UPnPSOAPURL, mDNSVal16(m->UPnPSOAPPort));
 	}
@@ -825,14 +832,20 @@ mDNSexport void LNT_SendDiscoveryMsg(mDNS *m)
 		"ST:urn:schemas-upnp-org:service:WANIPConnection:1\r\n"
 		"Man:\"ssdp:discover\"\r\n"
 		"MX:3\r\n\r\n";
+	static const mDNSAddr multicastDest = { mDNSAddrType_IPv4, { { { 239, 255, 255, 250 } } } };
+	
+	// Always send the first SSDP packet via unicast
+	if (m->retryIntervalGetAddr <= NATMAP_INIT_RETRY) m->SSDPMulticast = mDNSfalse;
 
 	LogOperation("LNT_SendDiscoveryMsg Router %.4a Current External Address %.4a", &m->Router.ip.v4, &m->ExternalAddress);
 
 	if (!mDNSIPv4AddressIsZero(m->Router.ip.v4) && mDNSIPv4AddressIsZero(m->ExternalAddress))
 		{
 		if (!m->SSDPSocket) { m->SSDPSocket = mDNSPlatformUDPSocket(m, zeroIPPort); LogOperation("LNT_SendDiscoveryMsg created SSDPSocket %p", &m->SSDPSocket); }
-		mDNSPlatformSendUDP(m, msg, msg + sizeof(msg) - 1, 0, &m->Router, SSDPPort);
+		mDNSPlatformSendUDP(m, msg, msg + sizeof(msg) - 1, 0, m->SSDPSocket, m->SSDPMulticast ? &multicastDest : &m->Router, SSDPPort);
 		}
+		
+	m->SSDPMulticast = !m->SSDPMulticast;
 	}
 
 #endif /* _LEGACY_NAT_TRAVERSAL_ */
