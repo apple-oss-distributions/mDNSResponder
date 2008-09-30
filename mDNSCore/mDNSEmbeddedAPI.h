@@ -54,6 +54,9 @@
     Change History (most recent first):
 
 $Log: mDNSEmbeddedAPI.h,v $
+Revision 1.468.2.4  2008/09/30 18:03:02  mcguire
+<rdar://problem/6129039> BTMM: Add support for WANPPPConnection
+
 Revision 1.468.2.3  2008/07/29 20:46:57  mcguire
 <rdar://problem/6090007> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
 merge r1.474 from <rdar://problem/3988320>
@@ -2058,10 +2061,11 @@ struct mDNS_struct
 	tcpLNTInfo       *tcpInfoUnmapList;			// list of pending unmap requests
 	mDNSInterfaceID   UPnPInterfaceID;
 	UDPSocket        *SSDPSocket;               // For SSDP request/response
-	mDNSBool          SSDPMulticast;            // whether we should send the SSDP query via multicast
+	mDNSBool          SSDPWANPPPConnection;     // whether we should send the SSDP query for WANIPConnection or WANPPPConnection
 	mDNSIPPort        UPnPRouterPort;			// port we send discovery messages to
 	mDNSIPPort        UPnPSOAPPort;				// port we send SOAP messages to
 	mDNSu8           *UPnPRouterURL;			// router's URL string
+	mDNSBool          UPnPWANPPPConnection;     // whether we're using WANIPConnection or WANPPPConnection
 	mDNSu8           *UPnPSOAPURL;				// router's SOAP control URL string
 	mDNSu8           *UPnPRouterAddressString;	// holds both the router's address and port
 	mDNSu8           *UPnPSOAPAddressString;	// holds both address and port for SOAP messages

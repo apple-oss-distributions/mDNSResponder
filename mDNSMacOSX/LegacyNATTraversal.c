@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: LegacyNATTraversal.c,v $
+Revision 1.48.2.1  2008/09/30 18:03:03  mcguire
+<rdar://problem/6129039> BTMM: Add support for WANPPPConnection
+
 Revision 1.48  2008/07/24 20:23:04  cheshire
 <rdar://problem/3988320> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
 
@@ -212,7 +215,7 @@ mDNSlocal mStatus SendPortMapRequest(mDNS *m, NATTraversalInfo *n);
 #define RequestedPortNum(n) (mDNSVal16(mDNSIPPortIsZero((n)->RequestedPort) ? (n)->IntPort : (n)->RequestedPort) + (n)->tcpInfo.retries)
 
 // This function parses the xml body of the device description response from the router. Basically, we look to make sure this is a response
-// referencing a service we care about (WANIPConnection), look for the "controlURL" header immediately following, and copy the addressing and URL info we need
+// referencing a service we care about (WANIPConnection or WANPPPConnection), look for the "controlURL" header immediately following, and copy the addressing and URL info we need
 mDNSlocal void handleLNTDeviceDescriptionResponse(tcpLNTInfo *tcpInfo)
 	{
 	mDNS    *m    = tcpInfo->m;
@@ -220,13 +223,29 @@ mDNSlocal void handleLNTDeviceDescriptionResponse(tcpLNTInfo *tcpInfo)
 	char    *end  = (char *)tcpInfo->Reply + tcpInfo->nread;
 	char    *stop = mDNSNULL;
 
-	// find the service we care about
+	// Always reset our flag to use WANIPConnection.  We'll use WANPPPConnection if we find it and don't find WANIPConnection.
+	m->UPnPWANPPPConnection = mDNSfalse;
+
+	// find either service we care about
 	while (ptr && ptr != end)
 		{
-		if (*ptr == 'W' && (strncasecmp(ptr, "WANIPConnection:1", 17) == 0)) break;	// find the first 'W'; is this WANIPConnection? if not, keep looking
+		if (*ptr == 'W' && (strncasecmp(ptr, "WANIPConnection:1", 17) == 0)) break;
 		ptr++;
 		}
-	if (ptr == mDNSNULL || ptr == end) { LogOperation("handleLNTDeviceDescriptionResponse: didn't find WANIPConnection:1 string"); return; }
+	if (ptr == end)
+		{
+		ptr = (char *)tcpInfo->Reply;
+		while (ptr && ptr != end)
+			{
+			if (*ptr == 'W' && (strncasecmp(ptr, "WANPPPConnection:1", 18) == 0))
+				{
+				m->UPnPWANPPPConnection = mDNStrue;
+				break;
+				}
+			ptr++;
+			}
+		}
+	if (ptr == mDNSNULL || ptr == end) { LogOperation("handleLNTDeviceDescriptionResponse: didn't find WANIPConnection:1 or WANPPPConnection:1 string"); return; }
 
 	// find "controlURL", starting from where we left off
 	while (ptr && ptr != end)
@@ -519,7 +538,7 @@ mDNSlocal mStatus SendSOAPMsgControlAction(mDNS *m, tcpLNTInfo *info, char *Acti
 	static const char header[] =
 		"POST %s HTTP/1.1\r\n"
 		"Content-Type: text/xml; charset=\"utf-8\"\r\n"
-		"SOAPAction: \"urn:schemas-upnp-org:service:WANIPConnection:1#%s\"\r\n"
+		"SOAPAction: \"urn:schemas-upnp-org:service:WAN%sConnection:1#%s\"\r\n"
 		"User-Agent: Mozilla/4.0 (compatible; UPnP/1.0; Windows 9x)\r\n"
 		"Host: %s\r\n"
 		"Content-Length: %d\r\n"
@@ -534,7 +553,7 @@ mDNSlocal mStatus SendSOAPMsgControlAction(mDNS *m, tcpLNTInfo *info, char *Acti
 		" xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\""
 		" SOAP-ENV:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
 		"<SOAP-ENV:Body>"
-		"<m:%s xmlns:m=\"urn:schemas-upnp-org:service:WANIPConnection:1\">";
+		"<m:%s xmlns:m=\"urn:schemas-upnp-org:service:WAN%sConnection:1\">";
 
 	static const char body2[] =
 		"</m:%s>"
@@ -549,14 +568,14 @@ mDNSlocal mStatus SendSOAPMsgControlAction(mDNS *m, tcpLNTInfo *info, char *Acti
 		{ LogOperation("SendSOAPMsgControlAction: no SOAP URL or address string"); return mStatus_Invalid; }
 
 	// Create body
-	bodyLen  = mDNS_snprintf   (body,           sizeof(m->omsg),           body1,   Action);
+	bodyLen  = mDNS_snprintf   (body,           sizeof(m->omsg),           body1,   Action,   m->UPnPWANPPPConnection ? "PPP" : "IP");
 	bodyLen += AddSOAPArguments(body + bodyLen, sizeof(m->omsg) - bodyLen, numArgs, Arguments);
 	bodyLen += mDNS_snprintf   (body + bodyLen, sizeof(m->omsg) - bodyLen, body2,   Action);
 
 	// Create info->Request; the header needs to contain the bodyLen in the "Content-Length" field
 	if (!info->Request) info->Request = mDNSPlatformMemAllocate(LNT_MAXBUFSIZE);
 	if (!info->Request) { LogMsg("SendSOAPMsgControlAction: Can't allocate info->Request"); return mStatus_NoMemoryErr; }
-	info->requestLen = mDNS_snprintf((char *)info->Request, LNT_MAXBUFSIZE, header, m->UPnPSOAPURL, Action, m->UPnPSOAPAddressString, bodyLen, body);
+	info->requestLen = mDNS_snprintf((char *)info->Request, LNT_MAXBUFSIZE, header, m->UPnPSOAPURL, m->UPnPWANPPPConnection ? "PPP" : "IP", Action, m->UPnPSOAPAddressString, bodyLen, body);
 
 	err = MakeTCPConnection(m, info, &m->Router, m->UPnPSOAPPort, op);
 	if (err) { mDNSPlatformMemFree(info->Request); info->Request = mDNSNULL; }
@@ -727,7 +746,7 @@ mDNSlocal mStatus GetDeviceDescription(mDNS *m, tcpLNTInfo *info)
 	}
 
 // This function parses the response to our SSDP discovery message. Basically, we look to make sure this is a response
-// referencing a service we care about (WANIPConnection), then look for the "Location:" header and copy the addressing and
+// referencing a service we care about (WANIPConnection or WANPPPConnection), then look for the "Location:" header and copy the addressing and
 // URL info we need.
 mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID InterfaceID, mDNSu8 *data, mDNSu16 len)
 	{
@@ -740,8 +759,17 @@ mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID Interface
 	// figure out if this is a message from a service we care about
 	while (ptr && ptr != end)
 		{
-		if (*ptr == 'W' && (strncasecmp(ptr, "WANIPConnection:1", 17) == 0)) break;	// find the first 'W'; is this WANIPConnection? if not, keep looking
+		if (*ptr == 'W' && (strncasecmp(ptr, "WANIPConnection:1", 17) == 0)) break;
 		ptr++;
+		}
+	if (ptr == end)
+		{
+		ptr = (char *)data;
+		while (ptr && ptr != end)
+			{
+			if (*ptr == 'W' && (strncasecmp(ptr, "WANPPPConnection:1", 18) == 0)) break;
+			ptr++;
+			}
 		}
 	if (ptr == mDNSNULL || ptr == end) return;	// not a message we care about
 
@@ -826,26 +854,33 @@ mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID Interface
 
 mDNSexport void LNT_SendDiscoveryMsg(mDNS *m)
 	{
-	static const mDNSu8 msg[] =
+	static const char msg[] =
 		"M-SEARCH * HTTP/1.1\r\n"
 		"Host:239.255.255.250:1900\r\n"
-		"ST:urn:schemas-upnp-org:service:WANIPConnection:1\r\n"
+		"ST:urn:schemas-upnp-org:service:WAN%sConnection:1\r\n"
 		"Man:\"ssdp:discover\"\r\n"
 		"MX:3\r\n\r\n";
 	static const mDNSAddr multicastDest = { mDNSAddrType_IPv4, { { { 239, 255, 255, 250 } } } };
 	
-	// Always send the first SSDP packet via unicast
-	if (m->retryIntervalGetAddr <= NATMAP_INIT_RETRY) m->SSDPMulticast = mDNSfalse;
+	mDNSu8* buf = (mDNSu8*)&m->omsg; //m->omsg is 8952 bytes, which is plenty
+	unsigned int bufLen;
+
+	// Always query for WANIPConnection in the first SSDP packet
+	if (m->retryIntervalGetAddr <= NATMAP_INIT_RETRY) m->SSDPWANPPPConnection = mDNSfalse;
+
+	// Create message
+	bufLen = mDNS_snprintf((char*)buf, sizeof(m->omsg), msg, m->SSDPWANPPPConnection ? "PPP" : "IP");
 
 	LogOperation("LNT_SendDiscoveryMsg Router %.4a Current External Address %.4a", &m->Router.ip.v4, &m->ExternalAddress);
 
 	if (!mDNSIPv4AddressIsZero(m->Router.ip.v4) && mDNSIPv4AddressIsZero(m->ExternalAddress))
 		{
 		if (!m->SSDPSocket) { m->SSDPSocket = mDNSPlatformUDPSocket(m, zeroIPPort); LogOperation("LNT_SendDiscoveryMsg created SSDPSocket %p", &m->SSDPSocket); }
-		mDNSPlatformSendUDP(m, msg, msg + sizeof(msg) - 1, 0, m->SSDPSocket, m->SSDPMulticast ? &multicastDest : &m->Router, SSDPPort);
+		mDNSPlatformSendUDP(m, buf, buf + bufLen, 0, m->SSDPSocket, &m->Router,     SSDPPort);
+		mDNSPlatformSendUDP(m, buf, buf + bufLen, 0, m->SSDPSocket, &multicastDest, SSDPPort);
 		}
 		
-	m->SSDPMulticast = !m->SSDPMulticast;
+	m->SSDPWANPPPConnection = !m->SSDPWANPPPConnection;
 	}
 
 #endif /* _LEGACY_NAT_TRAVERSAL_ */

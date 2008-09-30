@@ -38,6 +38,9 @@
     Change History (most recent first):
 
 $Log: mDNS.c,v $
+Revision 1.777.4.5  2008/09/30 18:03:01  mcguire
+<rdar://problem/6129039> BTMM: Add support for WANPPPConnection
+
 Revision 1.777.4.4  2008/08/14 20:43:59  cheshire
 <rdar://problem/6143846> Back to My Mac not working with Time Capsule shared volume
 
@@ -7156,10 +7159,11 @@ mDNSexport mStatus mDNS_Init(mDNS *const m, mDNS_PlatformSupport *const p,
 
 	m->UPnPInterfaceID          = 0;
 	m->SSDPSocket               = mDNSNULL;
-	m->SSDPMulticast            = mDNSfalse;
+	m->SSDPWANPPPConnection     = mDNSfalse;
 	m->UPnPRouterPort           = zeroIPPort;
 	m->UPnPSOAPPort             = zeroIPPort;
 	m->UPnPRouterURL            = mDNSNULL;
+	m->UPnPWANPPPConnection     = mDNSfalse;
 	m->UPnPSOAPURL              = mDNSNULL;
 	m->UPnPRouterAddressString  = mDNSNULL;
 	m->UPnPSOAPAddressString    = mDNSNULL;
