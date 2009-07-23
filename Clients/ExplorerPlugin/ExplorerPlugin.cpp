@@ -17,6 +17,10 @@
     Change History (most recent first):
     
 $Log: ExplorerPlugin.cpp,v $
+Revision 1.10  2009/03/30 18:51:04  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
 Revision 1.9  2006/08/14 23:24:00  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -90,16 +94,6 @@ static char THIS_FILE[] = __FILE__;
 //	Prototypes
 //===========================================================================================================================
 
-// DLL Exports
-
-extern "C" BOOL WINAPI	DllMain( HINSTANCE inInstance, DWORD inReason, LPVOID inReserved );
-
-// MFC Support
-
-DEBUG_LOCAL OSStatus	MFCDLLProcessAttach( HINSTANCE inInstance );
-DEBUG_LOCAL void		MFCDLLProcessDetach( HINSTANCE inInstance );
-DEBUG_LOCAL void		MFCDLLThreadDetach( HINSTANCE inInstance );
-
 // Utilities
 
 DEBUG_LOCAL OSStatus	RegisterServer( HINSTANCE inInstance, CLSID inCLSID, LPCTSTR inName );
@@ -141,9 +135,9 @@ DEFINE_GUID(CLSID_CompCatCacheDaemon,
 //	Globals
 //===========================================================================================================================
 
-HINSTANCE		gInstance		= NULL;
-int				gDLLRefCount	= 0;
-CWinApp			gApp;
+HINSTANCE			gInstance		= NULL;
+int					gDLLRefCount	= 0;
+CExplorerPluginApp	gApp;
 
 #if 0
 #pragma mark -
@@ -151,52 +145,82 @@ CWinApp			gApp;
 #endif
 
 //===========================================================================================================================
-//	DllMain
+//	CExplorerPluginApp::CExplorerPluginApp
 //===========================================================================================================================
 
-BOOL WINAPI	DllMain( HINSTANCE inInstance, DWORD inReason, LPVOID inReserved )
+IMPLEMENT_DYNAMIC(CExplorerPluginApp, CWinApp);
+
+CExplorerPluginApp::CExplorerPluginApp()
 {
-	BOOL			ok;
-	OSStatus		err;
-	
-	DEBUG_UNUSED( inReserved );
-	
-	ok = TRUE;
-	switch( inReason )
-	{
-		case DLL_PROCESS_ATTACH:
-			gInstance = inInstance;
-			debug_initialize( kDebugOutputTypeWindowsEventLog, "DNSServices Bar", inInstance );
-			debug_set_property( kDebugPropertyTagPrintLevel, kDebugLevelTrace );
-			dlog( kDebugLevelTrace, "\nDllMain: process attach\n" );
-			
-			err = MFCDLLProcessAttach( inInstance );
-			ok = ( err == kNoErr );
-			require_noerr( err, exit );
-			break;
-		
-		case DLL_PROCESS_DETACH:
-			dlog( kDebugLevelTrace, "DllMain: process detach\n" );
-			MFCDLLProcessDetach( inInstance );
-			break;
-		
-		case DLL_THREAD_ATTACH:
-			dlog( kDebugLevelTrace, "DllMain: thread attach\n" );
-			break;
-		
-		case DLL_THREAD_DETACH:
-			dlog( kDebugLevelTrace, "DllMain: thread detach\n" );
-			MFCDLLThreadDetach( inInstance );
-			break;
-		
-		default:
-			dlog( kDebugLevelTrace, "DllMain: unknown reason code (%d)\n",inReason );
-			break;
-	}
-	
-exit:
-	return( ok );
 }
+
+
+//===========================================================================================================================
+//	CExplorerPluginApp::~CExplorerPluginApp
+//===========================================================================================================================
+
+CExplorerPluginApp::~CExplorerPluginApp()
+{
+}
+
+
+//===========================================================================================================================
+//	CExplorerPluginApp::InitInstance
+//===========================================================================================================================
+
+BOOL
+CExplorerPluginApp::InitInstance()
+{
+	wchar_t					resource[MAX_PATH];
+	OSStatus				err;
+	int						res;
+	HINSTANCE inInstance;
+
+	inInstance = AfxGetInstanceHandle();
+	gInstance = inInstance;
+
+	debug_initialize( kDebugOutputTypeWindowsEventLog, "DNSServices Bar", inInstance );
+	debug_set_property( kDebugPropertyTagPrintLevel, kDebugLevelTrace );
+	dlog( kDebugLevelTrace, "\nCCPApp::InitInstance\n" );
+
+	res = PathForResource( inInstance, L"ExplorerPluginResources.dll", resource, MAX_PATH );
+
+	err = translate_errno( res != 0, kUnknownErr, kUnknownErr );
+	require_noerr( err, exit );
+
+	g_nonLocalizedResources = LoadLibrary( resource );
+	translate_errno( g_nonLocalizedResources, GetLastError(), kUnknownErr );
+	require_noerr( err, exit );
+
+	g_nonLocalizedResourcesName = resource;
+
+	res = PathForResource( inInstance, L"ExplorerPluginLocalized.dll", resource, MAX_PATH );
+	err = translate_errno( res != 0, kUnknownErr, kUnknownErr );
+	require_noerr( err, exit );
+
+	g_localizedResources = LoadLibrary( resource );
+	translate_errno( g_localizedResources, GetLastError(), kUnknownErr );
+	require_noerr( err, exit );
+
+	AfxSetResourceHandle( g_localizedResources );
+
+exit:
+
+	return TRUE;
+}
+
+
+//===========================================================================================================================
+//	CExplorerPluginApp::ExitInstance
+//===========================================================================================================================
+
+int
+CExplorerPluginApp::ExitInstance()
+{
+	return 0;
+}
+
+
 
 //===========================================================================================================================
 //	DllCanUnloadNow
@@ -305,142 +329,6 @@ exit:
 	return( err );
 }
 
-#if 0
-#pragma mark -
-#pragma mark == MFC Support ==
-#endif
-
-//===========================================================================================================================
-//	MFCDLLProcessAttach
-//===========================================================================================================================
-
-DEBUG_LOCAL OSStatus	MFCDLLProcessAttach( HINSTANCE inInstance )
-{
-	wchar_t					resource[MAX_PATH];
-	OSStatus				err;
-	_AFX_THREAD_STATE *		threadState;
-	AFX_MODULE_STATE *		previousModuleState;
-	BOOL					ok;
-	int						res;
-	CWinApp *				app;
-	
-	app = NULL;
-	
-	// Simulate what is done in dllmodul.cpp.
-	
-	threadState = AfxGetThreadState();
-	check( threadState );
-	previousModuleState = threadState->m_pPrevModuleState;
-	
-	ok = AfxWinInit( inInstance, NULL, TEXT( "" ), 0 );
-	require_action( ok, exit, err = kUnknownErr );
-	
-	app = AfxGetApp();
-	require_action( ok, exit, err = kNotInitializedErr );
-	
-	// Before we load the resources, let's load the error string
-
-	// errorMessage.LoadString( IDS_REINSTALL );
-	// errorCaption.LoadString( IDS_REINSTALL_CAPTION );
-
-	// Load Resources
-
-	res = PathForResource( inInstance, L"ExplorerPluginResources.dll", resource, MAX_PATH );
-
-	err = translate_errno( res != 0, kUnknownErr, kUnknownErr );
-	require_noerr( err, exit );
-
-	g_nonLocalizedResources = LoadLibrary( resource );
-	translate_errno( g_nonLocalizedResources, GetLastError(), kUnknownErr );
-	require_noerr( err, exit );
-
-	g_nonLocalizedResourcesName = resource;
-
-	res = PathForResource( inInstance, L"ExplorerPluginLocalized.dll", resource, MAX_PATH );
-	err = translate_errno( res != 0, kUnknownErr, kUnknownErr );
-	require_noerr( err, exit );
-
-	g_localizedResources = LoadLibrary( resource );
-	translate_errno( g_localizedResources, GetLastError(), kUnknownErr );
-	require_noerr( err, exit );
-
-	AfxSetResourceHandle( g_localizedResources );
-
-	ok = app->InitInstance();
-	require_action( ok, exit, err = kUnknownErr );
-	
-	threadState->m_pPrevModuleState = previousModuleState;
-	threadState = NULL;
-	AfxInitLocalData( inInstance );
-	err = kNoErr;
-	
-exit:
-	if( err )
-	{
-		if( app )
-		{
-			app->ExitInstance();
-		}
-		AfxWinTerm();
-	}
-	if( threadState )
-	{
-		threadState->m_pPrevModuleState = previousModuleState;
-	}
-	return( err );
-}
-
-//===========================================================================================================================
-//	MFCDLLProcessDetach
-//===========================================================================================================================
-
-DEBUG_LOCAL void	MFCDLLProcessDetach( HINSTANCE inInstance )
-{
-	CWinApp *		app;
-
-	// Simulate what is done in dllmodul.cpp.
-	
-	app = AfxGetApp();
-	if( app )
-	{
-		app->ExitInstance();
-	}
-
-#if( DEBUG )
-	if( AfxGetModuleThreadState()->m_nTempMapLock != 0 )
-	{
-		dlog( kDebugLevelWarning, "Warning: Temp map lock count non-zero (%ld).\n", AfxGetModuleThreadState()->m_nTempMapLock );
-	}
-#endif
-	
-	AfxLockTempMaps();
-	AfxUnlockTempMaps( -1 );
-
-	// Terminate the library before destructors are called.
-	
-	AfxWinTerm();
-	AfxTermLocalData( inInstance, TRUE );
-}
-
-//===========================================================================================================================
-//	MFCDLLFinalize
-//===========================================================================================================================
-
-DEBUG_LOCAL void	MFCDLLThreadDetach( HINSTANCE inInstance )
-{
-	// Simulate what is done in dllmodul.cpp.
-	
-#if( DEBUG )
-	if( AfxGetModuleThreadState()->m_nTempMapLock != 0 )
-	{
-		dlog( kDebugLevelWarning, "Warning: Temp map lock count non-zero (%ld).\n", AfxGetModuleThreadState()->m_nTempMapLock );
-	}
-#endif
-	
-	AfxLockTempMaps();
-	AfxUnlockTempMaps( -1 );
-	AfxTermThread( inInstance );
-}
 
 #if 0
 #pragma mark -

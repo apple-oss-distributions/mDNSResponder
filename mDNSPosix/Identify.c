@@ -30,6 +30,12 @@
     Change History (most recent first):
 
 $Log: Identify.c,v $
+Revision 1.44  2009/01/13 05:31:34  mkrochma
+<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
+
+Revision 1.43  2008/09/05 22:51:21  cheshire
+Minor cleanup to bring code in sync with TOT, and make "_services" metaquery work again
+
 Revision 1.42  2007/07/27 19:30:41  cheshire
 Changed mDNSQuestionCallback parameter from mDNSBool to QC_result,
 to properly reflect tri-state nature of the possible responses
@@ -134,7 +140,7 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNS
 	__MDNS__mDNSCoreReceive(m, msg, end, srcaddr, srcport, &AllDNSLinkGroup_v4, dstport, InterfaceID);
 	}
 
-static void NameCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
+mDNSlocal void NameCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 	{
 	(void)m;		// Unused
 	(void)question;	// Unused
@@ -148,7 +154,7 @@ static void NameCallback(mDNS *const m, DNSQuestion *question, const ResourceRec
 		}
 	}
 
-static void InfoCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
+mDNSlocal void InfoCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 	{
 	(void)m;		// Unused
 	(void)question;	// Unused
@@ -187,10 +193,10 @@ static void InfoCallback(mDNS *const m, DNSQuestion *question, const ResourceRec
 		}
 
 	// If we've got everything we're looking for, don't need to wait any more
-	if (NumHINFO && (NumAddr || NumAAAA)) StopNow = 1;
+	if (/*NumHINFO && */ (NumAddr || NumAAAA)) StopNow = 1;
 	}
 
-static void ServicesCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
+mDNSlocal void ServicesCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 	{
 	(void)m;		// Unused
 	(void)question;	// Unused
@@ -201,13 +207,11 @@ static void ServicesCallback(mDNS *const m, DNSQuestion *question, const Resourc
 	if (answer->rrtype == kDNSType_PTR && mDNSSameAddress(&lastsrc, &target))
 		{
 		NumAnswers++;
-		NumAddr++;
 		mprintf("%##s %s %##s\n", answer->name->c, DNSTypeName(answer->rrtype), answer->rdata->u.name.c);
-		StopNow = 1;
 		}
 	}
 
-mDNSexport void WaitForAnswer(mDNS *const m, int seconds)
+mDNSlocal void WaitForAnswer(mDNS *const m, int seconds)
 	{
 	struct timeval end;
 	gettimeofday(&end, NULL);
@@ -224,7 +228,11 @@ mDNSexport void WaitForAnswer(mDNS *const m, int seconds)
 		FD_ZERO(&readfds);
 		gettimeofday(&now, NULL);
 		if (remain.tv_usec < now.tv_usec) { remain.tv_usec += 1000000; remain.tv_sec--; }
-		if (remain.tv_sec < now.tv_sec) return;
+		if (remain.tv_sec < now.tv_sec)
+			{
+			if (!NumAnswers) printf("No response after %d seconds\n", seconds);
+			return;
+			}
 		remain.tv_usec -= now.tv_usec;
 		remain.tv_sec  -= now.tv_sec;
 		mDNSPosixGetFDSet(m, &nfds, &readfds, &remain);
@@ -236,15 +244,16 @@ mDNSexport void WaitForAnswer(mDNS *const m, int seconds)
 
 mDNSlocal mStatus StartQuery(DNSQuestion *q, char *qname, mDNSu16 qtype, const mDNSAddr *target, mDNSQuestionCallback callback)
 	{
+	lastsrc = zeroAddr;
 	if (qname) MakeDomainNameFromDNSNameString(&q->qname, qname);
+	q->InterfaceID      = mDNSInterface_Any;
 	q->Target           = target ? *target : zeroAddr;
 	q->TargetPort       = MulticastDNSPort;
 	q->TargetQID        = zeroID;
-	q->InterfaceID      = mDNSInterface_Any;
 	q->qtype            = qtype;
 	q->qclass           = kDNSClass_IN;
 	q->LongLived        = mDNSfalse;
-	q->ExpectUnique     = mDNStrue;
+	q->ExpectUnique     = mDNSfalse;	// Don't want to stop after the first response packet
 	q->ForceMCast       = mDNStrue;		// Query via multicast, even for apparently uDNS names like 1.1.1.17.in-addr.arpa.
 	q->ReturnIntermed   = mDNStrue;
 	q->QuestionCallback = callback;
@@ -269,7 +278,7 @@ mDNSlocal void DoOneQuery(DNSQuestion *q, char *qname, mDNSu16 qtype, const mDNS
 mDNSlocal int DoQuery(DNSQuestion *q, char *qname, mDNSu16 qtype, const mDNSAddr *target, mDNSQuestionCallback callback)
 	{
 	DoOneQuery(q, qname, qtype, target, callback);
-	if (StopNow == 0 && target && target->type)
+	if (StopNow == 0 && NumAnswers == 0 && target && target->type)
 		{
 		mprintf("%##s %s Trying multicast\n", q->qname.c, DNSTypeName(q->qtype));
 		DoOneQuery(q, qname, qtype, NULL, callback);
@@ -350,7 +359,7 @@ mDNSexport int main(int argc, char **argv)
 				}
 			mDNS_snprintf(&buffer[64], sizeof(buffer)-64, "ip6.arpa.");
 			target.type = mDNSAddrType_IPv6;
-			bcopy(&s6, &target.ip.v6, sizeof(target.ip.v6));
+			mDNSPlatformMemCopy(&target.ip.v6, &s6, sizeof(target.ip.v6));
 			DoQuery(&q, buffer, kDNSType_PTR, &target, NameCallback);
 			if (StopNow == 2) break;
 			}
@@ -364,25 +373,24 @@ mDNSexport int main(int argc, char **argv)
 	
 		if (hardware[0] || software[0])
 			{
-			DNSQuestion q1;
 			printf("HINFO Hardware: %s\n", hardware);
 			printf("HINFO Software: %s\n", software);
-			// We need to make sure the services query is targeted
-			if (target.type == 0) target = hostaddr;
-			StartQuery(&q1, "_services._dns-sd._udp.local.", kDNSQType_ANY, &target, ServicesCallback);
-			WaitForAnswer(&mDNSStorage, 4);
-			mDNS_StopQuery(&mDNSStorage, &q1);
+			}
+		else if (NumAnswers) printf("%s has no HINFO record\n", hostname);
+		else printf("Incorrect dot-local hostname, address, or no mDNSResponder running on that machine\n");
+
+		if (NumAnswers)
+			{
+			// Because of the way we use lastsrc in ServicesCallback, we need to clear the cache to make sure we're getting fresh answers
+			mDNS *const m = &mDNSStorage;
+			mDNSu32 slot;
+			CacheGroup *cg;
+			CacheRecord *rr;
+			FORALL_CACHERECORDS(slot, cg, rr) mDNS_PurgeCacheResourceRecord(m, rr);
+			if (target.type == 0) target = hostaddr;		// Make sure the services query is targeted
+			DoQuery(&q, "_services._dns-sd._udp.local.", kDNSType_PTR, &target, ServicesCallback);
 			if (StopNow == 2) break;
 			}
-		else if (NumAnswers)
-			{
-			printf("Host has no HINFO record; Best guess is ");
-			if (id.b[1]) printf("mDNSResponder-%d\n", id.b[1]);
-			else if (NumAAAA) printf("very early Panther build (mDNSResponder-33 or earlier)\n");
-			else printf("Jaguar version of mDNSResponder with no IPv6 support\n");
-			}
-		else
-			printf("Incorrect dot-local hostname, address, or no mDNSResponder running on that machine\n");
 		}
 
 	mDNS_Close(&mDNSStorage);

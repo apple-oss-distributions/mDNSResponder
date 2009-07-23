@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: DNSDigest.c,v $
+Revision 1.26  2008/10/10 23:21:51  mcguire
+fixed typo in original MD5 source reference
+
 Revision 1.25  2007/12/17 23:48:29  cheshire
 DNSDigest_SignMessage doesn't need to return a result -- it already updates the 'end' parameter
 
@@ -153,7 +156,7 @@ mDNSlocal mDNSu32 NToH32(mDNSu8 * bytes)
  * Note: machine archetecure specific conditionals from the original sources are turned off, but are left in the code
  * to aid in platform-specific optimizations and debugging.
  * Sources originally distributed under the following license headers:
- * CommonDigest.c - APSL
+ * CommonDigest.h - APSL
  * 
  * md32_Common.h
  * ====================================================================

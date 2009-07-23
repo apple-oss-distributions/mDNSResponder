@@ -13,6 +13,7 @@
 #define IDB_ABOUT                       119
 #define IDC_COMPONENT                   1001
 #define IDC_LEGAL                       1002
+#define IDC_COMPONENT_VERSION           1003
 #define IDC_LOGIN_USERNAME_TEXT         1182
 #define IDC_LOGIN_PASSWORD_TEXT         1183
 #define ID_Menu                         40001

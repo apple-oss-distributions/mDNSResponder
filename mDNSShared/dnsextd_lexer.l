@@ -17,6 +17,12 @@
     Change History (most recent first):
 
 $Log: dnsextd_lexer.l,v $
+Revision 1.6  2008/07/18 17:40:46  cheshire
+Removed redundant definition of "YY_NO_UNPUT" (not needed now that we use "%option nounput" instead)
+
+Revision 1.5  2008/06/24 18:32:26  mcguire
+<rdar://problem/6024542> flex producing .c files that result in warnings
+
 Revision 1.4  2007/05/25 20:01:43  cheshire
 <rdar://problem/5226767> /usr/bin/flex failures prevent mDNSResponder from building
 Only define "int yylineno" on flex 2.5.4 and earlier
@@ -47,8 +53,6 @@ extern YYSTYPE yylval;
 int yylineno = 1;
 #endif
 
-#define YY_NO_UNPUT
-
 int  yylex(void);
 
 static char*
@@ -69,6 +73,7 @@ StripQuotes
 
 %}
 
+%option nounput
 %%
 
 options								return OPTIONS;

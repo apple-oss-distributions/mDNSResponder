@@ -17,6 +17,18 @@
     Change History (most recent first):
 
 $Log: mDNSUNP.c,v $
+Revision 1.40  2009/01/13 05:31:34  mkrochma
+<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
+
+Revision 1.39  2009/01/11 03:20:06  mkrochma
+<rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
+
+Revision 1.38  2009/01/10 22:54:42  mkrochma
+<rdar://problem/5797544> Fixes from Igor Seleznev to get mdnsd working on Linux
+
+Revision 1.37  2008/10/23 22:33:24  cheshire
+Changed "NOTE:" to "Note:" so that BBEdit 9 stops putting those comment lines into the funtion popup menu
+
 Revision 1.36  2008/04/21 18:21:22  mkrochma
 <rdar://problem/5877307> Need to free ifi_netmask
 Submitted by Igor Seleznev
@@ -145,6 +157,7 @@ First checkin
 #include <stdlib.h>
 #include <sys/uio.h>
 #include <sys/ioctl.h>
+#include <signal.h>
 #include <unistd.h>
 #include <stdio.h>
 
@@ -178,7 +191,7 @@ First checkin
 #if defined(AF_INET6) && HAVE_IPV6 && !HAVE_LINUX
 #include <net/if_var.h>
 #include <netinet/in_var.h>
-// NOTE: netinet/in_var.h implicitly includes netinet6/in6_var.h for us
+// Note: netinet/in_var.h implicitly includes netinet6/in6_var.h for us
 #endif
 
 #if defined(AF_INET6) && HAVE_IPV6 && HAVE_LINUX
@@ -503,7 +516,7 @@ struct ifi_info *get_ifi_info(int family, int doaliases)
 				struct in6_ifreq ifr6;
 				if (sockf6 == -1)
 					sockf6 = socket(AF_INET6, SOCK_DGRAM, 0);
-				bzero(&ifr6, sizeof(ifr6));
+				memset(&ifr6, 0, sizeof(ifr6));
 				memcpy(&ifr6.ifr_name,           &ifr->ifr_name, sizeof(ifr6.ifr_name          ));
 				memcpy(&ifr6.ifr_ifru.ifru_addr, &ifr->ifr_addr, sizeof(ifr6.ifr_ifru.ifru_addr));
 				if (ioctl(sockf6, SIOCGIFNETMASK_IN6, &ifr6) < 0) goto gotError;
@@ -673,6 +686,11 @@ struct in_pktinfo
             strncpy(pktp->ipi_ifname, sdl->sdl_data, nameLen);
 #endif
             pktp->ipi_ifindex = sdl->sdl_index;
+#ifdef HAVE_BROKEN_RECVIF_NAME
+			if (sdl->sdl_index == 0) {
+				pktp->ipi_ifindex = *(uint_t*)sdl;
+			}
+#endif            
             assert(pktp->ipi_ifname[IFI_NAME - 1] == 0);
             // null terminated because of memset above
             continue;

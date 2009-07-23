@@ -17,6 +17,15 @@
     Change History (most recent first):
 
 $Log: Responder.c,v $
+Revision 1.36  2009/01/15 03:39:08  mkrochma
+Fix warning about ignoring return value of daemon
+
+Revision 1.35  2009/01/13 05:31:34  mkrochma
+<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
+
+Revision 1.34  2009/01/11 03:20:06  mkrochma
+<rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
+
 Revision 1.33  2007/04/16 20:49:39  cheshire
 Fix compile errors for mDNSPosix build
 
@@ -126,6 +135,7 @@ First checkin
 
 #include "mDNSEmbeddedAPI.h"// Defines the interface to the client layer above
 #include "mDNSPosix.h"    // Defines the specific types needed to run mDNS on this platform
+#include "mDNSUNP.h"		// For daemon()
 
 #include <assert.h>
 #include <stdio.h>			// For printf()
@@ -404,7 +414,7 @@ static void ParseArguments(int argc, char **argv)
                 	while (optind < argc)
                 		{
                 		gServiceText[gServiceTextLen] = strlen(argv[optind]);
-                		memcpy(gServiceText+gServiceTextLen+1, argv[optind], gServiceText[gServiceTextLen]);
+                		mDNSPlatformMemCopy(gServiceText+gServiceTextLen+1, argv[optind], gServiceText[gServiceTextLen]);
                 		gServiceTextLen += 1 + gServiceText[gServiceTextLen];
                 		optind++;
                 		}
@@ -636,7 +646,7 @@ static mStatus RegisterServicesInFile(const char *filePath)
 						unsigned int newlen = textLen + 1 + len;
 						if (len == 0 || newlen >= sizeof(text)) break;
 						text[textLen] = len;
-						memcpy(text + textLen + 1, rawText, len);
+						mDNSPlatformMemCopy(text + textLen + 1, rawText, len);
 						textLen = newlen;
 						}
 					else
@@ -726,11 +736,12 @@ int main(int argc, char **argv)
     // because printf has no format specified for pid_t.
     
     if (gDaemon) {
+    	int result;
         if (gMDNSPlatformPosixVerboseLevel > 0) {
             fprintf(stderr, "%s: Starting in daemon mode\n", gProgramName);
         }
-        daemon(0,0);
-        {
+        result = daemon(0,0);
+        if (result == 0) {
             FILE *fp;
             int  junk;
             
@@ -740,6 +751,9 @@ int main(int argc, char **argv)
                 junk = fclose(fp);
                 assert(junk == 0);
             }
+        } else {
+            fprintf(stderr, "%s: Could not run as daemon - exiting\n", gProgramName);
+            exit(result);
         }
     } else {
         if (gMDNSPlatformPosixVerboseLevel > 0) {

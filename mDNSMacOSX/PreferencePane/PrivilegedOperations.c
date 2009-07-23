@@ -43,6 +43,9 @@
     Change History (most recent first):
 
 $Log: PrivilegedOperations.c,v $
+Revision 1.9  2008/06/26 17:34:18  mkrochma
+<rdar://problem/6030630> Pref pane destroying shared "system.preferences" authorization right
+
 Revision 1.8  2007/11/30 23:42:33  cheshire
 Fixed compile warning: declaration of 'status' shadows a previous local
 
@@ -159,7 +162,7 @@ OSStatus EnsureToolInstalled(void)
 					err = -1;
 				}
 			}
-			(void) AuthorizationFree(authRef, kAuthorizationFlagDestroyRights);
+			(void) AuthorizationFree(authRef, kAuthorizationFlagDefaults);
 		}
 	}
 

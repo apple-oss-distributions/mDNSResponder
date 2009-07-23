@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: ThirdPage.h,v $
+Revision 1.10  2009/05/29 20:43:37  herscher
+<rdar://problem/6928136> Printer Wizard doesn't work correctly in Windows 7 64 bit
+
 Revision 1.9  2007/04/13 23:42:20  herscher
 <rdar://problem/4580061> mDNS: Printers added using Bonjour should be set as the default printer.
 
@@ -179,7 +182,12 @@ public:
 	afx_msg void OnLvnItemchangedPrinterModel(NMHDR *pNMHDR, LRESULT *pResult);
 	afx_msg void OnBnClickedDefaultPrinter();
 private:
+
+	void
+	Split( const CString & string, TCHAR ch, CStringList & components );
+
 	CButton m_defaultPrinterCtrl;
+
 public:
 	CStatic m_printerSelectionText;
 	CStatic	*	m_printerImage;

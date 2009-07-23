@@ -17,6 +17,10 @@
     Change History (most recent first):
     
 $Log: ExplorerPlugin.h,v $
+Revision 1.5  2009/03/30 18:52:02  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
 Revision 1.4  2006/08/14 23:24:00  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -34,6 +38,8 @@ Explorer Plugin to browse for DNS-SD advertised Web and FTP servers from within 
 
 */
 
+#pragma once
+
 //===========================================================================================================================
 //	Globals
 //===========================================================================================================================
@@ -47,3 +53,18 @@ extern int				gDLLRefCount;
 extern HINSTANCE		GetNonLocalizedResources();
 extern HINSTANCE		GetLocalizedResources();
 
+
+class CExplorerPluginApp : public CWinApp
+{
+public:
+
+	CExplorerPluginApp();
+	virtual ~CExplorerPluginApp();
+
+protected:
+
+	virtual BOOL    InitInstance();
+	virtual int     ExitInstance();
+
+	DECLARE_DYNAMIC(CExplorerPluginApp);
+};

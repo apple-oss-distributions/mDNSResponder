@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: PrinterSetupWizardApp.cpp,v $
+Revision 1.10  2009/05/26 05:38:18  herscher
+<rdar://problem/6123821> use HeapSetInformation(HeapEnableTerminationOnCorruption) in dns-sd.exe and PrinterWizard.exe
+
 Revision 1.9  2006/08/14 23:24:09  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -58,6 +61,11 @@ First checked in
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
+
+#ifndef HeapEnableTerminationOnCorruption
+#	define HeapEnableTerminationOnCorruption (HEAP_INFORMATION_CLASS) 1
+#endif
+
 
 // Stash away pointers to our resource DLLs
 
@@ -109,6 +117,8 @@ BOOL CPrinterSetupWizardApp::InitInstance()
 	wchar_t		resource[MAX_PATH];
 	int			res;
 	OSStatus	err = kNoErr;
+
+	HeapSetInformation( NULL, HeapEnableTerminationOnCorruption, NULL, 0 );
 
 	//
 	// initialize the debugging framework

@@ -26,9 +26,47 @@
 ; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;
 ; $Log: mDNSResponder.sb,v $
-; Revision 1.25.2.1  2008/07/29 20:48:34  mcguire
-; <rdar://problem/6090007> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
-; merge r1.27 from <rdar://problem/3988320>
+; Revision 1.38  2009/04/16 16:03:08  mcguire
+; <rdar://problem/6792024> abort() causes high CPU usage instead of crash & restart
+;
+; Revision 1.37  2009/04/02 22:21:17  mcguire
+; <rdar://problem/6577409> Adopt IOPM APIs
+;
+; Revision 1.36  2009/03/02 01:32:20  mcguire
+; <rdar://problem/6623264> Seatbelt: Add rule to allow raw sockets
+;
+; Revision 1.35  2009/02/07 02:51:10  cheshire
+; <rdar://problem/6084043> Sleep Proxy: Need to adopt IOPMConnection
+; Allow mDNSResponder to access IOPMConnection API
+;
+; Revision 1.34  2008/11/11 00:55:08  mcguire
+; <rdar://problem/6357957> sandbox: need to allow Mach port com.apple.system.DirectoryService.membership_v1
+;
+; Revision 1.33  2008/10/24 02:03:30  cheshire
+; So we can watch for Internet Sharing changes, allow read access to
+; /Library/Preferences/SystemConfiguration/com.apple.nat.plist
+;
+; Revision 1.32  2008/10/07 23:06:58  mcguire
+; <rdar://problem/6276444> Seatbelt: Policy denied Mach service lookup: com.apple.system.logger
+;
+; Revision 1.31  2008/09/24 23:57:27  mcguire
+; <rdar://problem/6227808> need read access to /private/var/db/crls/crlcache.db
+;
+; Revision 1.30  2008/09/11 22:01:51  mcguire
+; re-add accidentally removed log comment
+;
+; Revision 1.29  2008/09/11 20:46:08  mcguire
+; <rdar://problem/6208848> can't write to -Caches-
+;
+; Revision 1.28  2008/09/11 20:04:14  mcguire
+; <rdar://problem/6211355> Instances of \. in regex exprs don't do what is intended
+;
+; Revision 1.27  2008/07/24 21:18:14  cheshire
+; <rdar://problem/3988320> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+; Need to allow access to /dev/urandom
+;
+; Revision 1.26  2008/06/03 01:21:12  mcguire
+; <rdar://problem/5902470> add /var/db/mds to sb profile
 ;
 ; Revision 1.25  2008/03/17 18:04:41  mcguire
 ; <rdar://problem/5800476> SC now reads preference file
@@ -147,45 +185,58 @@
 					"com.apple.bsd.dirhelper"
 					"com.apple.distributed_notifications.2"
 					"com.apple.ocspd"
+					"com.apple.PowerManagement.control"
 					"com.apple.mDNSResponderHelper"
 					"com.apple.SecurityServer"
 					"com.apple.SystemConfiguration.configd"
 					"com.apple.system.DirectoryService.libinfo_v1"
-					"com.apple.system.notification_center"))
+					"com.apple.system.DirectoryService.membership_v1"
+					"com.apple.system.notification_center"
+					"com.apple.system.logger"))
 
 ; Rules to allow the operations mDNSResponder needs start here
 
+(allow signal (target self))
 (allow network*)			; Allow networking, including Unix Domain Sockets
+(if (defined? 'system-socket)
+    (allow system-socket))  ; To create raw sockets
 (allow sysctl-read)			; To get hardware model information
 (allow file-read-metadata)	; Needed for dyld to work
 (allow ipc-posix-shm)		; Needed for POSIX shared memory
 
-(allow file-read-data                 (regex "^/dev/random\$"))
-(allow file-read-data file-write-data (regex "^/dev/console\$"))		; Needed for syslog early in the boot process
-(allow file-read-data                 (regex "^/dev/autofs_nowait\$"))	; Used by CF to circumvent automount triggers
+(allow file-read-data                 (regex #"^/dev/random$"))
+(allow file-read-data file-write-data (regex #"^/dev/console$"))		; Needed for syslog early in the boot process
+(allow file-read-data                 (regex #"^/dev/autofs_nowait$"))	; Used by CF to circumvent automount triggers
 
 ; Allow us to read and write our socket
-(allow file-read*     file-write*     (regex "^/private/var/run/mDNSResponder\$"))
+(allow file-read*     file-write*     (regex #"^/private/var/run/mDNSResponder$"))
 
 ; Allow us to read system version, settings, and other miscellaneous necessary file system accesses
-(allow file-read-data                 (regex "^/dev/urandom$"))
-(allow file-read-data                 (regex "^/usr/sbin(/mDNSResponder)?\$"))		; Needed for CFCopyVersionDictionary()
-(allow file-read-data                 (regex "^/usr/share/icu/.*\$"))
-(allow file-read-data                 (regex "^/usr/share/zoneinfo/.*\$"))
-(allow file-read-data                 (regex "^/Library/Preferences/SystemConfiguration/preferences\.plist\$"))
-(allow file-read-data                 (regex "^/Library/Preferences/(ByHost/)?\.GlobalPreferences.*\.plist\$"))
-(allow file-read-data                 (regex "^/Library/Preferences/com\.apple\.security.*\.plist\$"))
-(allow file-read-data                 (regex "^/Library/Preferences/com\.apple\.crypto\.plist\$"))
-(allow file-read-data                 (regex "^/Library/Security/Trust Settings/Admin\.plist\$"))
-(allow file-read-data                 (regex "^/System/Library/CoreServices/SystemVersion.*\$"))
-(allow file-read-data                 (regex "^/System/Library/Preferences/com\.apple\.security.*\.plist\$"))
-(allow file-read-data                 (regex "^/System/Library/Preferences/com\.apple\.crypto\.plist\$"))
+(allow file-read-data                 (regex #"^/dev/urandom$"))
+(allow file-read-data                 (regex #"^/usr/sbin(/mDNSResponder)?$"))		; Needed for CFCopyVersionDictionary()
+(allow file-read-data                 (regex #"^/usr/share/icu/.*$"))
+(allow file-read-data                 (regex #"^/usr/share/zoneinfo/.*$"))
+(allow file-read-data                 (regex #"^/Library/Preferences/SystemConfiguration/preferences\.plist$"))
+(allow file-read-data                 (regex #"^/Library/Preferences/SystemConfiguration/com\.apple\.nat\.plist$"))
+(allow file-read-data                 (regex #"^/Library/Preferences/(ByHost/)?\.GlobalPreferences.*\.plist$"))
+(allow file-read-data                 (regex #"^/Library/Preferences/com\.apple\.security.*\.plist$"))
+(allow file-read-data                 (regex #"^/Library/Preferences/com\.apple\.crypto\.plist$"))
+(allow file-read-data                 (regex #"^/Library/Security/Trust Settings/Admin\.plist$"))
+(allow file-read-data                 (regex #"^/System/Library/CoreServices/SystemVersion.*$"))
+(allow file-read-data                 (regex #"^/System/Library/Preferences/com\.apple\.security.*\.plist$"))
+(allow file-read-data                 (regex #"^/System/Library/Preferences/com\.apple\.crypto\.plist$"))
+(allow file-read-data                 (regex #"^/System/Library/SystemConfiguration/PowerManagement\.bundle(/|$)"))
+(allow file-read-data                 (regex #"^/Library/Preferences/SystemConfiguration/com\.apple\.PowerManagement\.plist$"))
 
 ; Allow access to System Keychain
-(allow file-read-data                 (regex "^/System/Library/Security\$"))
-(allow file-read-data                 (regex "^/System/Library/Keychains/.*\$"))
-(allow file-read-data                 (regex "^/Library/Keychains/System\.keychain\$"))
+(allow file-read-data                 (regex #"^/System/Library/Security$"))
+(allow file-read-data                 (regex #"^/System/Library/Keychains/.*$"))
+(allow file-read-data                 (regex #"^/Library/Keychains/System\.keychain$"))
 ; Our Module Directory Services cache
-(allow file-read-data                 (regex "^/private/var/tmp/mds/"))
-(allow file-read* file-write*         (regex "^/private/var/tmp/mds/[0-9]+(/|\$)"))
-
+(allow file-read-data                 (regex #"^/private/var/tmp/mds/"))
+(allow file-read* file-write*         (regex #"^/private/var/tmp/mds/[0-9]+(/|$)"))
+(allow file-read-data                 (regex #"^/private/var/db/mds/"))
+(allow file-read* file-write*         (regex #"^/private/var/db/mds/[0-9]+(/|$)"))
+(allow file-read* file-write*         (regex #"^/private/var/folders/[^/]+/[^/]+/-Caches-/mds(/|$)"))
+; CRL Cache for SSL/TLS connections
+(allow file-read-data                 (regex #"^/private/var/db/crls/crlcache\.db$"))

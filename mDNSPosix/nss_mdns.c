@@ -335,7 +335,7 @@ enum
 
 #define DNS_LABEL_MAXLEN 63
 	// Maximum length of a single DNS label
-#define DNS_NAME_MAXLEN 255
+#define DNS_NAME_MAXLEN 256
 	// Maximum length of a DNS name
 
 //----------
@@ -486,7 +486,7 @@ const int MDNS_VERBOSE = 0;
 	// This enables verbose syslog messages
 	// If zero, only "imporant" messages will appear in syslog
 
-#define k_hostname_maxlen 255
+#define k_hostname_maxlen 256
 	// As per RFC1034 and RFC1035
 #define k_aliases_max 15
 #define k_addrs_max 15
@@ -1826,7 +1826,7 @@ init_config ()
 			temp_config = (config_t *) malloc (sizeof (config_t));
 			if (temp_config)
 			{
-				// NOTE: This code will leak memory if initialisation fails
+				// Note: This code will leak memory if initialisation fails
 				// repeatedly.  This should only happen in the case of a memory
 				// error, so I'm not sure if it's a meaningful problem. - AW
 				*temp_config = k_empty_config;

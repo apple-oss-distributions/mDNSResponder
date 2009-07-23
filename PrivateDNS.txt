@@ -76,7 +76,7 @@ would fix this.
 All private LLQ operations are TSIG-enabled and sent over a secure
 encrypted TLS channel. To accommodate service providers who don't want
 to have to keep open a large number of TLS connections to a large number
-of client machines, the server has the option of dropping the TSL
+of client machines, the server has the option of dropping the TLS
 connection after initial LLQ setup and sending subsequent events and
 refreshes using unencrypted UDP packets. This results in less load on
 the server, at the cost of slightly lower security (LLQs can only be set

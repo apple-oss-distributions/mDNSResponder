@@ -21,6 +21,25 @@
 	Change History (most recent first):
 
 $Log: PosixDaemon.c,v $
+Revision 1.49  2009/04/30 20:07:51  mcguire
+<rdar://problem/6822674> Support multiple UDSs from launchd
+
+Revision 1.48  2009/04/11 01:43:28  jessic2
+<rdar://problem/4426780> Daemon: Should be able to turn on LogOperation dynamically
+
+Revision 1.47  2009/01/11 03:20:06  mkrochma
+<rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
+
+Revision 1.46  2008/11/03 23:09:15  cheshire
+Don't need to include mDNSDebug.h as well as mDNSEmbeddedAPI.h
+
+Revision 1.45  2008/10/03 18:25:17  cheshire
+Instead of calling "m->MainCallback" function pointer directly, call mDNSCore routine "mDNS_ConfigChanged(m);"
+
+Revision 1.44  2008/09/15 23:52:30  cheshire
+<rdar://problem/6218902> mDNSResponder-177 fails to compile on Linux with .desc pseudo-op
+Made __crashreporter_info__ symbol conditional, so we only use it for OS X build
+
 Revision 1.43  2007/10/22 20:05:34  cheshire
 Use mDNSPlatformSourceAddrForDest instead of FindSourceAddrForIP
 
@@ -79,8 +98,8 @@ Only use mallocL/freeL debugging routines when building mDNSResponder, not dnsex
 #include <sys/types.h>
 
 #include "mDNSEmbeddedAPI.h"
-#include "mDNSDebug.h"
 #include "mDNSPosix.h"
+#include "mDNSUNP.h"		// For daemon()
 #include "uds_daemon.h"
 #include "PlatformCommon.h"
 
@@ -130,7 +149,7 @@ static void Reconfigure(mDNS *m)
 	mDNSPlatformSourceAddrForDest(&DynDNSIP, &dummy);
 	if (DynDNSHostname.c[0]) mDNS_AddDynDNSHostName(m, &DynDNSHostname, NULL, NULL);
 	if (DynDNSIP.type)       mDNS_SetPrimaryInterfaceInfo(m, &DynDNSIP, NULL, NULL);
-	m->MainCallback(m, mStatus_ConfigChanged);
+	mDNS_ConfigChanged(m);
 	}
 
 // Do appropriate things at startup with command line arguments. Calls exit() if unhappy.
@@ -156,9 +175,9 @@ mDNSlocal void ParseCmdLinArgs(int argc, char **argv)
 mDNSlocal void DumpStateLog(mDNS *const m)
 // Dump a little log of what we've been up to.
 	{
-	LogMsgIdent(mDNSResponderVersionString, "---- BEGIN STATE LOG ----");
+	LogMsg("---- BEGIN STATE LOG ----");
 	udsserver_info(m);
-	LogMsgIdent(mDNSResponderVersionString, "----  END STATE LOG  ----");
+	LogMsg("----  END STATE LOG  ----");
 	}
 
 mDNSlocal mStatus MainLoop(mDNS *m) // Loop until we quit.
@@ -209,13 +228,13 @@ int main(int argc, char **argv)
 
 	ParseCmdLinArgs(argc, argv);
 
-	LogMsgIdent(mDNSResponderVersionString, "starting");
+	LogMsg("%s starting", mDNSResponderVersionString);
 
 	err = mDNS_Init(&mDNSStorage, &PlatformStorage, gRRCache, RR_CACHE_SIZE, mDNS_Init_AdvertiseLocalAddresses, 
 					mDNS_StatusCallback, mDNS_Init_NoInitCallbackContext); 
 
 	if (mStatus_NoError == err)
-		err = udsserver_init(dnssd_InvalidSocket);
+		err = udsserver_init(mDNSNULL, 0);
 		
 	Reconfigure(&mDNSStorage);
 
@@ -232,11 +251,11 @@ int main(int argc, char **argv)
 	if (mStatus_NoError == err)
 		err = MainLoop(&mDNSStorage);
  
-	LogMsgIdent(mDNSResponderVersionString, "stopping");
+	LogMsg("%s stopping", mDNSResponderVersionString);
 
 	mDNS_Close(&mDNSStorage);
 
-	if (udsserver_exit(dnssd_InvalidSocket) < 0)
+	if (udsserver_exit() < 0)
 		LogMsg("ExitCallback: udsserver_exit failed");
  
  #if MDNS_DEBUGMSGS > 0
@@ -269,9 +288,11 @@ mDNSexport void RecordUpdatedNiceLabel(mDNS *const m, mDNSs32 delay)
 	// No-op, for now
 	}
 
+#if _BUILDING_XCODE_PROJECT_
 // If the process crashes, then this string will be magically included in the automatically-generated crash log
 const char *__crashreporter_info__ = mDNSResponderVersionString_SCCS + 5;
 asm(".desc ___crashreporter_info__, 0x10");
+#endif
 
 // For convenience when using the "strings" command, this is the last thing in the file
 #if mDNSResponderVersion > 1

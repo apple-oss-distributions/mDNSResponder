@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: WinServices.cpp,v $
+Revision 1.3  2009/06/22 23:25:04  herscher
+<rdar://problem/5265747> ControlPanel doesn't display key and password in dialog box. Refactor Lsa calls into Secret.h and Secret.c, which is used by both the ControlPanel and mDNSResponder system service.
+
 Revision 1.2  2006/08/14 23:25:20  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -27,6 +30,7 @@ First checked in
 */
 
 #include "WinServices.h"
+#include <DebugServices.h>
 
 
 //===========================================================================================================================
@@ -74,4 +78,30 @@ exit:
 		free( unicode );
 	}
 	return( err );
+}
+
+
+//===========================================================================================================================
+//	UTF8StringToStringObject
+//===========================================================================================================================
+
+OSStatus
+StringObjectToUTF8String( CString &inObject, char* outUTF8, size_t outUTF8Len )
+{
+    OSStatus err = kNoErr;
+
+	memset( outUTF8, 0, outUTF8Len );
+
+	if ( inObject.GetLength() > 0 )
+    {
+		size_t size;
+
+		size = (size_t) WideCharToMultiByte( CP_UTF8, 0, inObject.GetBuffer(), inObject.GetLength(), outUTF8, (int) outUTF8Len, NULL, NULL);
+        err = translate_errno( size != 0, GetLastError(), kUnknownErr );
+        require_noerr( err, exit );
+    }
+
+exit:
+
+	return err;
 }

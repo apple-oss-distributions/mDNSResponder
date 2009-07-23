@@ -136,6 +136,16 @@ BEGIN
     PUSHBUTTON      "Remove",IDC_REMOVE_BROWSE_DOMAIN,205,100,50,14
 END
 
+IDR_APPLET_PAGE4 DIALOGEX 0, 0, 262, 140
+STYLE DS_SETFONT | WS_CHILD | WS_CAPTION
+CAPTION "Power Management"
+FONT 8, "MS Sans Serif", 0, 0, 0x0
+BEGIN
+    CONTROL         "Allow Bonjour to wake this machine on network access.",IDC_POWER_MANAGEMENT,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,13,19,199,8
+    LTEXT           "Warning: Allowing Bonjour to bring the computer out of standby may cause this computer to periodically wakeup to refresh its network state.",IDC_STATIC,13,41,227,20
+END
+
 IDR_ADD_BROWSE_DOMAIN DIALOGEX 0, 0, 230, 95
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | 
     WS_SYSMENU

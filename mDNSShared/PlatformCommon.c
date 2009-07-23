@@ -17,6 +17,18 @@
     Change History (most recent first):
 
 $Log: PlatformCommon.c,v $
+Revision 1.21  2009/04/11 00:20:24  jessic2
+<rdar://problem/4426780> Daemon: Should be able to turn on LogOperation dynamically
+
+Revision 1.20  2008/10/09 22:26:05  cheshire
+Save space by not showing high-resolution timestamp in LogMsgNoIdent() lines
+
+Revision 1.19  2008/07/14 17:43:36  mkrochma
+Fix previous check in so connect still gets called
+
+Revision 1.18  2008/07/12 17:19:41  mkrochma
+<rdar://problem/6068351> mDNSResponder PlatformCommon.c uses sin_len even on non-compliant platforms
+
 Revision 1.17  2008/03/05 00:19:09  cheshire
 Conditionalize LogTimeStamps so it's specific to APPLE_OSX, for now
 
@@ -97,19 +109,26 @@ mDNSexport void mDNSPlatformSourceAddrForDest(mDNSAddr *const src, const mDNSAdd
 	{
 	union { struct sockaddr s; struct sockaddr_in a4; struct sockaddr_in6 a6; } addr;
 	socklen_t len = sizeof(addr);
+	socklen_t inner_len = 0;
 	int sock = socket(AF_INET, SOCK_DGRAM, 0);
 	src->type = mDNSAddrType_None;
 	if (sock == -1) return;
 	if (dst->type == mDNSAddrType_IPv4)
 		{
-		addr.a4.sin_len         = sizeof(addr.a4);
+		inner_len = sizeof(addr.a4);
+		#ifndef NOT_HAVE_SA_LEN
+		addr.a4.sin_len         = inner_len;
+		#endif
 		addr.a4.sin_family      = AF_INET;
 		addr.a4.sin_port        = 1;	// Not important, any port will do
 		addr.a4.sin_addr.s_addr = dst->ip.v4.NotAnInteger;
 		}
 	else if (dst->type == mDNSAddrType_IPv6)
 		{
-		addr.a6.sin6_len      = sizeof(addr.a6);
+		inner_len = sizeof(addr.a6);
+		#ifndef NOT_HAVE_SA_LEN
+		addr.a6.sin6_len      = inner_len;
+		#endif
 		addr.a6.sin6_family   = AF_INET6;
 		addr.a6.sin6_flowinfo = 0;
 		addr.a6.sin6_port     = 1;	// Not important, any port will do
@@ -117,8 +136,8 @@ mDNSexport void mDNSPlatformSourceAddrForDest(mDNSAddr *const src, const mDNSAdd
 		addr.a6.sin6_scope_id = 0;
 		}
 	else return;
-	
-	if ((connect(sock, &addr.s, addr.s.sa_len)) < 0)
+
+	if ((connect(sock, &addr.s, inner_len)) < 0)
 		{ LogMsg("mDNSPlatformSourceAddrForDest: connect %#a failed errno %d (%s)", dst, errno, strerror(errno)); goto exit; }
 
 	if ((getsockname(sock, &addr.s, &len)) < 0)
@@ -202,7 +221,7 @@ mDNSexport void mDNSPlatformWriteDebugMsg(const char *msg)
 	}
 #endif
 
-mDNSexport void mDNSPlatformWriteLogMsg(const char *ident, const char *buffer, int logoptflags)
+mDNSexport void mDNSPlatformWriteLogMsg(const char *ident, const char *buffer, mDNSLogLevel_t loglevel)
 	{
 #if APPLE_OSX_mDNSResponder && LogTimeStamps
 	extern mDNS mDNSStorage;
@@ -214,7 +233,7 @@ mDNSexport void mDNSPlatformWriteLogMsg(const char *ident, const char *buffer, i
 	if (mDNS_DebugMode)	// In debug mode we write to stderr
 		{
 #if APPLE_OSX_mDNSResponder && LogTimeStamps
-		if (mDNSPlatformClockDivisor)
+		if (ident && ident[0] && mDNSPlatformClockDivisor)
 			fprintf(stderr,"%8d.%03d: %s\n", (int)(t/1000), ms, buffer);
 		else
 #endif
@@ -223,13 +242,28 @@ mDNSexport void mDNSPlatformWriteLogMsg(const char *ident, const char *buffer, i
 		}
 	else				// else, in production mode, we write to syslog
 		{
-		openlog(ident, LOG_CONS | logoptflags, LOG_DAEMON);
+		static int log_inited = 0;
+		
+		int syslog_level = LOG_ERR;
+		switch (loglevel) 
+			{
+			case MDNS_LOG_MSG:       syslog_level = LOG_ERR;     break;
+			case MDNS_LOG_OPERATION: syslog_level = LOG_WARNING; break;
+			case MDNS_LOG_SPS:       syslog_level = LOG_NOTICE;  break;
+			case MDNS_LOG_INFO:      syslog_level = LOG_INFO;    break;
+			case MDNS_LOG_DEBUG:     syslog_level = LOG_DEBUG;   break;
+			default:
+			fprintf(stderr, "Unknown loglevel %d, assuming LOG_ERR\n", loglevel);
+			fflush(stderr);
+			}
+		
+		if (!log_inited) { openlog(ident, LOG_CONS, LOG_DAEMON); log_inited++; }
+
 #if APPLE_OSX_mDNSResponder && LogTimeStamps
-		if (mDNSPlatformClockDivisor)
-			syslog(LOG_ERR, "%8d.%03d: %s", (int)(t/1000), ms, buffer);
+		if (ident && ident[0] && mDNSPlatformClockDivisor)
+			syslog(syslog_level, "%8d.%03d: %s", (int)(t/1000), ms, buffer);
 		else
 #endif
-			syslog(LOG_ERR, "%s", buffer);
-		closelog();
+			syslog(syslog_level, "%s", buffer);
 		}
 	}

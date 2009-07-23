@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: DNSSD.java,v $
+Revision 1.16  2008/11/04 20:06:20  cheshire
+<rdar://problem/6186231> Change MAX_DOMAIN_NAME to 256
+
 Revision 1.15  2007/03/13 00:28:03  vazquez
 <rdar://problem/4625928> Java: Rename exported symbols in libjdns_sd.jnilib
 
@@ -126,7 +129,7 @@ abstract public class	DNSSD
 	public static final int		REGISTRATION_DOMAINS = ( 1 << 7 );
 
 	/** Maximum length, in bytes, of a domain name represented as an escaped C-String. */
-    public static final int     MAX_DOMAIN_NAME = 1005;
+    public static final int     MAX_DOMAIN_NAME = 1009;
 
 	/** Pass for ifIndex to specify all available interfaces. */
     public static final int     ALL_INTERFACES = 0;

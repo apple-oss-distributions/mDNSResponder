@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: ChooserDialog.cpp,v $
+Revision 1.5  2008/10/23 22:33:26  cheshire
+Changed "NOTE:" to "Note:" so that BBEdit 9 stops putting those comment lines into the funtion popup menu
+
 Revision 1.4  2006/08/14 23:25:49  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -387,7 +390,7 @@ ChooserDialog::ChooserDialog( CWnd *inParent )
 	: CDialog( ChooserDialog::IDD, inParent)
 {
 	//{{AFX_DATA_INIT(ChooserDialog)
-		// NOTE: the ClassWizard will add member initialization here
+		// Note: the ClassWizard will add member initialization here
 	//}}AFX_DATA_INIT
 	
 	// Load menu accelerator table.

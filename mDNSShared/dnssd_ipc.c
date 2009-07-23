@@ -28,6 +28,15 @@
 	Change History (most recent first):
 
 $Log: dnssd_ipc.c,v $
+Revision 1.23  2009/04/01 21:10:34  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+
+Revision 1.22  2009/02/12 20:28:31  cheshire
+Added some missing "const" declarations
+
+Revision 1.21  2008/10/23 23:21:31  cheshire
+Moved definition of dnssd_strerror() to be with the definition of dnssd_errno, in dnssd_ipc.h
+
 Revision 1.20  2007/07/23 22:12:53  cheshire
 <rdar://problem/5352299> Make mDNSResponder more defensive against malicious local clients
 
@@ -75,6 +84,32 @@ Update to APSL 2.0
 
 #include "dnssd_ipc.h"
 
+#if defined(_WIN32)
+
+char *win32_strerror(int inErrorCode)
+	{
+	static char buffer[1024];
+	DWORD       n;
+	memset(buffer, 0, sizeof(buffer));
+	n = FormatMessageA(
+			FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+			NULL,
+			(DWORD) inErrorCode,
+			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+			buffer,
+			sizeof(buffer),
+			NULL);
+	if (n > 0)
+		{
+		// Remove any trailing CR's or LF's since some messages have them.
+		while ((n > 0) && isspace(((unsigned char *) buffer)[n - 1]))
+			buffer[--n] = '\0';
+		}
+	return buffer;
+	}
+
+#endif
+
 void put_uint32(const uint32_t l, char **ptr)
 	{
 	(*ptr)[0] = (char)((l >> 24) &  0xFF);
@@ -84,7 +119,7 @@ void put_uint32(const uint32_t l, char **ptr)
 	*ptr += sizeof(uint32_t);
 	}
 
-uint32_t get_uint32(char **ptr, char *end)
+uint32_t get_uint32(const char **ptr, const char *end)
 	{
 	if (!*ptr || *ptr + sizeof(uint32_t) > end)
 		{
@@ -106,7 +141,7 @@ void put_uint16(uint16_t s, char **ptr)
 	*ptr += sizeof(uint16_t);
 	}
 
-uint16_t get_uint16(char **ptr, char *end)
+uint16_t get_uint16(const char **ptr, const char *end)
 	{
 	if (!*ptr || *ptr + sizeof(uint16_t) > end)
 		{
@@ -129,7 +164,7 @@ int put_string(const char *str, char **ptr)
 	return 0;
 	}
 
-int get_string(char **ptr, char *end, char *buffer, int buflen)
+int get_string(const char **ptr, const char *const end, char *buffer, int buflen)
 	{
 	if (!*ptr)
 		{
@@ -157,7 +192,7 @@ void put_rdata(const int rdlen, const unsigned char *rdata, char **ptr)
 	*ptr += rdlen;
 	}
 
-char *get_rdata(char **ptr, char *end, int rdlen)
+const char *get_rdata(const char **ptr, const char *end, int rdlen)
 	{
 	if (!*ptr || *ptr + rdlen > end)
 		{
@@ -166,7 +201,7 @@ char *get_rdata(char **ptr, char *end, int rdlen)
 		}
 	else
 		{
-		char *rd = *ptr;
+		const char *rd = *ptr;
 		*ptr += rdlen;
 		return rd;
 		}

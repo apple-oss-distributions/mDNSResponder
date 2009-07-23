@@ -17,6 +17,19 @@
     Change History (most recent first):
     
 $Log: ThirdPage.cpp,v $
+Revision 1.41  2009/06/18 18:05:50  herscher
+<rdar://problem/4694554> Eliminate the first screen of Printer Wizard and maybe combine others ("I'm Feeling Lucky")
+
+Revision 1.40  2009/05/29 20:43:36  herscher
+<rdar://problem/6928136> Printer Wizard doesn't work correctly in Windows 7 64 bit
+
+Revision 1.39  2009/05/27 06:25:49  herscher
+<rdar://problem/4176334> Need error dialog when selecting bad INF file
+
+Revision 1.38  2009/05/27 04:59:57  herscher
+<rdar://problem/4517393> COMPATIBILITY WITH HP CLJ4700
+<rdar://problem/6142138> Compatibility with Samsung print driver files
+
 Revision 1.37  2007/06/08 06:30:26  herscher
 <rdar://problem/5257700> Fix uninitialized pointers when detecting generic PCL and PS drivers
 
@@ -150,6 +163,7 @@ First checked in
 #include <dns_sd.h>
 #include <tcpxcv.h>
 #include <winspool.h>
+#include <setupapi.h>
 
 // local variable is initialize but not referenced
 #pragma warning(disable:4189)
@@ -179,16 +193,6 @@ First checked in
 #define kGenericPCLColorDriver		L"HP Color LaserJet 4550 PCL"
 #define kGenericPCLDriver			L"HP LaserJet 4050 Series PCL"
 
-//
-// states for parsing ntprint.inf
-//
-enum PrinterParsingState
-{
-	Looking,
-	ParsingManufacturers,
-	ParsingModels,
-	ParsingStrings
-};
 
 // CThirdPage dialog
 
@@ -478,24 +482,6 @@ CThirdPage::AutoScroll( CListCtrl & list, int nIndex )
 // ------------------------------------------------------
 // LoadPrintDriverDefsFromFile
 //
-// This function does all the heavy lifting in parsing inf
-// files.  It is called to parse both ntprint.inf, and driver
-// files that might be shipped on a printer's installation
-// disk
-//
-// The inf file is not totally parsed.  I only want to determine
-// the manufacturer and models that are involved. I leave it
-// to printui.dll to actually copy the driver files to the
-// right places.
-//
-// I was aiming to parse as little as I could so as not to
-// duplicate the parsing code that is contained in Windows.  There
-// are no public APIs for parsing inf files.
-//
-// That part of the inf file that we're interested in has a fairly
-// easy format.  Tags are strings that are enclosed in brackets.
-// We are only interested in [MANUFACTURERS] and models.
-//
 // The only potentially opaque thing about this function is the
 // checkForDuplicateModels flag.  The problem here is that ntprint.inf
 // doesn't contain duplicate models, and it has hundreds of models
@@ -508,344 +494,192 @@ CThirdPage::AutoScroll( CListCtrl & list, int nIndex )
 OSStatus
 CThirdPage::LoadPrintDriverDefsFromFile(Manufacturers & manufacturers, const CString & filename, bool checkForDuplicateModels )
 {
-	PrinterParsingState		state		= Looking;
-	Manufacturers::iterator iter		= manufacturers.end();
-	CStdioFileEx			file;
-	CFileException			feError;
-	CString					s;
-	OSStatus				err;
-	BOOL					ok;
-
-	typedef std::map<CString, CString> StringMap;
-
-	StringMap				strings;
- 
-	ok = file.Open( filename,  CFile::modeRead|CFile::typeText, &feError);
-	err = translate_errno( ok, errno_compat(), kUnknownErr );
+	HINF			handle	= INVALID_HANDLE_VALUE;
+	const TCHAR *	section = TEXT( "Manufacturer" );
+	LONG			sectionCount;
+	TCHAR			line[ 1000 ];
+	CString			klass;
+	INFCONTEXT		manufacturerContext;
+	BOOL			ok;
+	OSStatus		err		= 0;
+	
+	// Make sure we can open the file
+	handle = SetupOpenInfFile( filename, NULL, INF_STYLE_WIN4, NULL );
+	translate_errno( handle != INVALID_HANDLE_VALUE, GetLastError(), kUnknownErr );
 	require_noerr( err, exit );
 
-	check ( state == Looking );
-	check ( iter == manufacturers.end() );
+	// Make sure it's a printer file
+	ok = SetupGetLineText( NULL, handle, TEXT( "Version" ), TEXT( "Class" ), line, sizeof( line ), NULL );
+	translate_errno( ok, GetLastError(), kUnknownErr );
+	require_noerr( err, exit );
+	klass = line;
+	require_action( klass == TEXT( "Printer" ), exit, err = kUnknownErr );
 
-	//
-	// first, parse the file looking for string sections
-	//
-	while (file.ReadString(s))
+	sectionCount = SetupGetLineCount( handle, section );
+	translate_errno( sectionCount != -1, GetLastError(), kUnknownErr );
+	require_noerr( err, exit );
+
+	memset( &manufacturerContext, 0, sizeof( manufacturerContext ) );
+			
+	for ( LONG i = 0; i < sectionCount; i++ )
 	{
-		//
-		// check for comment
-		//
-		if (s.Find(';') == 0)
+		Manufacturers::iterator	iter;
+		Manufacturer	*	manufacturer;
+		CString				manufacturerName;
+		CString				temp;
+		CStringList			modelSectionNameDecl;
+		CString				modelSectionName;
+		CString				baseModelName;
+		CString				model;
+		INFCONTEXT			modelContext;
+		LONG				modelCount;
+		POSITION			p;
+
+		if ( i == 0 )
 		{
-			continue;
-		}
-
-		//
-		// check for tag
-		//
-		else if (s.Find('[') == 0)
-		{
-			//
-			// handle any capitalization issues here
-			//
-			CString tag = s;
-
-			tag.MakeLower();
-
-			if (tag == L"[strings]")
-			{
-				state = ParsingStrings;
-			}
-			else
-			{
-				state = Looking;
-			}
+			ok = SetupFindFirstLine( handle, section, NULL, &manufacturerContext );
+			err = translate_errno( ok, GetLastError(), kUnknownErr );
+			require_noerr( err, exit );
 		}
 		else
 		{
-			switch (state)
-			{
-				case ParsingStrings:
-				{
-					int	curPos = 0;
-
-					if (s.GetLength() > 0)
-					{
-						CString key = s.Tokenize(L"=",curPos);
-						CString val = s.Tokenize(L"=",curPos);
-
-						//
-						// get rid of all delimiters
-						//
-						key.Trim();
-						val.Remove('"');
-	
-						//
-						// and store it
-						//
-						strings[key] = val;
-					}
-				}
-				break;
-			}
-		}
-	}
-
-	file.Close();
-
-	ok = file.Open( filename,  CFile::modeRead|CFile::typeText, &feError);
-	err = translate_errno( ok, errno_compat(), kUnknownErr );
-	require_noerr( err, exit );
-
-	state = Looking;
-
-	check ( iter == manufacturers.end() );
-
-	while (file.ReadString(s))
-	{
-		//
-		// check for comment
-		//
-		if (s.Find(';') == 0)
-		{
-			continue;
+			ok = SetupFindNextLine( &manufacturerContext, &manufacturerContext );
+			err = translate_errno( ok, GetLastError(), kUnknownErr );
+			require_noerr( err, exit );
 		}
 
+		ok = SetupGetStringField( &manufacturerContext, 0, line, sizeof( line ), NULL );
+		err = translate_errno( ok, GetLastError(), kUnknownErr );
+		require_noerr( err, exit );
+		manufacturerName = line;
+
+		ok = SetupGetLineText( &manufacturerContext, handle, NULL, NULL, line, sizeof( line ), NULL );
+		err = translate_errno( ok, GetLastError(), kUnknownErr );
+		require_noerr( err, exit );
+
+		// Try to find some model section name that has entries. Explanation of int file structure
+		// can be found at:
 		//
-		// check for tag
-		//
-		else if (s.Find('[') == 0)
+		// <http://msdn.microsoft.com/en-us/library/ms794359.aspx>
+		Split( line, ',', modelSectionNameDecl );
+
+		p					= modelSectionNameDecl.GetHeadPosition();
+		modelSectionName	= modelSectionNameDecl.GetNext( p );
+		modelCount			= SetupGetLineCount( handle, modelSectionName );
+		baseModelName		= modelSectionName;
+		
+		while ( modelCount <= 0 && p )
 		{
-			//
-			// handle any capitalization issues here
-			//
-			CString tag = s;
+			CString targetOSVersion;
 
-			tag.MakeLower();
+			targetOSVersion		= modelSectionNameDecl.GetNext( p );
+			modelSectionName	= baseModelName + TEXT( "." ) + targetOSVersion;
+			modelCount			= SetupGetLineCount( handle, modelSectionName );
+		}
 
-			if (tag == L"[manufacturer]")
+		if ( modelCount > 0 )
+		{
+			manufacturerName = NormalizeManufacturerName( manufacturerName );
+
+			iter = manufacturers.find( manufacturerName );
+
+			if ( iter != manufacturers.end() )
 			{
-				state = ParsingManufacturers;
+				manufacturer = iter->second;
+				require_action( manufacturer, exit, err = kUnknownErr );
 			}
 			else
 			{
-				CString name;
-				int		curPos;
-
-				//
-				// remove the leading and trailing delimiters
-				//
-				s.Remove('[');
-				s.Remove(']');
-
-				//
-				// <rdar://problem/4826126>
-				//
-				// Ignore decorations in model declarations
-				//
-				curPos	= 0;
-				name	= s.Tokenize( L".", curPos );
-
-				//
-				// check to see if this is a printer entry
-				//
-				iter = manufacturers.find( name );
-
-				if (iter != manufacturers.end())
+				try
 				{
-					state = ParsingModels;
+					manufacturer = new Manufacturer;
+				}
+				catch (...)
+				{
+					manufacturer = NULL;
+				}
+
+				require_action( manufacturer, exit, err = kNoMemoryErr );
+
+				manufacturer->name					= manufacturerName;
+				manufacturers[ manufacturerName ]	= manufacturer;
+			}
+
+			memset( &modelContext, 0, sizeof( modelContext ) );
+
+			for ( LONG j = 0; j < modelCount; j++ )
+			{
+				CString modelName;
+				Model * model;
+
+				if ( j == 0 )
+				{
+					ok = SetupFindFirstLine( handle, modelSectionName, NULL, &modelContext );
+					err = translate_errno( ok, GetLastError(), kUnknownErr );
+					require_noerr( err, exit );
 				}
 				else
 				{
-					state = Looking;
+					SetupFindNextLine( &modelContext, &modelContext );
+					err = translate_errno( ok, GetLastError(), kUnknownErr );
+					require_noerr( err, exit );
 				}
-			}
-		}
-		//
-		// only look at this if the line isn't empty, or
-		// if it isn't a comment
-		//
-		else if ((s.GetLength() > 0) && (s.Find(';') != 0))
-		{
-			switch (state)
-			{
-				//
-				// if we're parsing manufacturers, then we will parse
-				// an entry of the form key=val, where key is a delimited
-				// string specifying a manufacturer name, and val is
-				// a tag that is used later in the file.  the key is
-				// delimited by either '"' (quotes) or '%' (percent sign).
-				//
-				// the tag is used further down the file when models are
-				// declared.  this allows multiple manufacturers to exist
-				// in a single inf file.
-				//
-				case ParsingManufacturers:
+
+				ok = SetupGetStringField( &modelContext, 0, line, sizeof( line ), NULL );
+				err = translate_errno( ok, GetLastError(), kUnknownErr );
+				require_noerr( err, exit );
+
+				modelName = line;
+
+				if (checkForDuplicateModels == true)
 				{
-					Manufacturer	*	manufacturer;
-					int					curPos = 0;
-
-					CString key = s.Tokenize(L"=",curPos);
-					CString val = s.Tokenize(L"=",curPos);
-
-					try
-					{
-						manufacturer = new Manufacturer;
-					}
-					catch (...)
-					{
-						manufacturer = NULL;
-					}
-
-					require_action( manufacturer, exit, err = kNoMemoryErr );
-
-					//
-					// if it's a variable, look it up
-					//
-					if (key.Find('%') == 0)
-					{
-						StringMap::iterator it;
-
-						key.Remove('%');
-
-						it = strings.find(key);
-
-						if (it != strings.end())
-						{
-							key = it->second;
-						}
-					}
-					else
-					{
-						key.Remove('"');
-					}
-
-					val.TrimLeft();
-					val.TrimRight();
-
-					//
-					// why is there no consistency in inf files?
-					//
-					if (val.GetLength() == 0)
-					{
-						val = key;
-					}
-
-					//
-					// fix the manufacturer name if necessary
-					//
-					curPos	=	0;
-					val		=	val.Tokenize(L",", curPos);
-
-					for ( ;; )
-					{
-						CString decoration;
-
-						decoration = val.Tokenize( L",", curPos );
-
-						if ( decoration.GetLength() > 0 )
-						{
-							manufacturer->decorations.push_back( decoration );
-						}
-						else
-						{
-							break;
-						}
-					}
-
-					manufacturer->name = NormalizeManufacturerName( key );
-					manufacturer->tag  = val;
-
-					manufacturers[val] = manufacturer;
-				}
-				break;
-
-				case ParsingModels:
-				{
-					check( iter != manufacturers.end() );
-
-					Model	*	model;
-					int			curPos = 0;
-
-					CString name		= s.Tokenize(L"=",curPos);
-					CString description = s.Tokenize(L"=",curPos);
-					
-					if (name.Find('%') == 0)
-					{
-						StringMap::iterator it;
-
-						name.Remove('%');
-
-						it = strings.find(name);
-
-						if (it != strings.end())
-						{
-							name = it->second;
-						}
-					}
-					else
-					{
-						name.Remove('"');
-					}
-
-					name.Trim();
-					description.Trim();
-					
-					//
-					// If true, see if we've seen this guy before
-					//
-					if (checkForDuplicateModels == true)
-					{
-						if ( MatchModel( iter->second, ConvertToModelName( name ) ) != NULL )
-						{
-							continue;
-						}
-					}
-
-					//
-					// Stock Vista printer inf files embed guids in the model
-					// declarations for Epson printers. Let's ignore those.
-					//
-					if ( name.Find( L"{", 0 ) != -1 )
+					if ( MatchModel( manufacturer, ConvertToModelName( modelName ) ) != NULL )
 					{
 						continue;
 					}
-
-					try
-					{
-						model = new Model;
-					}
-					catch (...)
-					{
-						model = NULL;
-					}
-
-					require_action( model, exit, err = kNoMemoryErr );
-
-					model->infFileName		=	filename;
-					model->displayName		=	name;
-					model->name				=	name;
-					model->driverInstalled	=	false;
-
-					iter->second->models.push_back(model);
 				}
-				break;
 
-				default:
+				//
+				// Stock Vista printer inf files embed guids in the model
+				// declarations for Epson printers. Let's ignore those.
+				//
+				if ( modelName.Find( TEXT( "{" ), 0 ) != -1 )
 				{
-					// pay no attention if we are in any other state
+					continue;
 				}
-				break;
+
+				try
+				{
+					model = new Model;
+				}
+				catch (...)
+				{
+					model = NULL;
+				}
+
+				require_action( model, exit, err = kNoMemoryErr );
+
+				model->infFileName		=	filename;
+				model->displayName		=	modelName;
+				model->name				=	modelName;
+				model->driverInstalled	=	false;
+
+				manufacturer->models.push_back(model);
 			}
 		}
 	}
 
 exit:
 
-	file.Close();
+	if ( handle != INVALID_HANDLE_VALUE )
+	{
+		SetupCloseInfFile( handle );
+		handle = NULL;
+	}
 
-	return (err);
+	return err;
 }
+
 
 // -------------------------------------------------------
 // LoadPrintDriverDefs
@@ -1622,9 +1456,14 @@ CThirdPage::OnSetActive()
 	// and try and match the printer
 	//
 
-	if ( psheet->GetLastPage() == psheet->GetPage(1) )
+	if ( psheet->GetLastPage() == psheet->GetPage(0) )
 	{
 		MatchPrinter( m_manufacturers, printer, service, true );
+
+		if ( ( m_manufacturerSelected != NULL ) && ( m_modelSelected != NULL  ) )
+		{
+			GetParent()->PostMessage(PSM_SETCURSEL, 2 );
+		}
 	}
 	else
 	{
@@ -1816,6 +1655,16 @@ void CThirdPage::OnBnClickedHaveDisk()
 
 				break;
 			}
+			else
+			{
+				CString errorMessage;
+				CString errorCaption;
+
+				errorMessage.LoadString( IDS_BAD_INF_FILE );
+				errorCaption.LoadString( IDS_BAD_INF_FILE_CAPTION );
+
+				MessageBox( errorMessage, errorCaption, MB_OK );
+			}
 		}
 		else
 		{
@@ -1826,4 +1675,22 @@ void CThirdPage::OnBnClickedHaveDisk()
 exit:
 
 	return;
+}
+
+
+void
+CThirdPage::Split( const CString & string, TCHAR ch, CStringList & components )
+{
+	CString	temp;
+	int		n;
+
+	temp = string;
+	
+	while ( ( n = temp.Find( ch ) ) != -1 )
+	{
+		components.AddTail( temp.Left( n ) );
+		temp = temp.Right( temp.GetLength() - ( n + 1 ) );
+	}
+
+	components.AddTail( temp );
 }

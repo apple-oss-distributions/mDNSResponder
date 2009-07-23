@@ -15,6 +15,12 @@
 .\" limitations under the License.
 .\"
 .\" $Log: mDNSResponder.8,v $
+.\" Revision 1.10  2009/04/20 16:12:13  mcguire
+.\" <rdar://problem/6807798> manpage: roff errors
+.\"
+.\" Revision 1.9  2009/04/11 00:20:27  jessic2
+.\" <rdar://problem/4426780> Daemon: Should be able to turn on LogOperation dynamically
+.\"
 .\" Revision 1.8  2006/10/06 17:31:33  mkrochma
 .\" <rdar://problem/4769407> Typo in man page for mDNSResponder(8)
 .\"
@@ -47,7 +53,7 @@
 .\"
 .Sh NAME
 .Nm mDNSResponder
-.Nd Multicast DNS daemon    \" Name Description for whatis database
+.Nd Multicast and Unicast DNS daemon    \" Name Description for whatis database
 .\" 
 .Sh SYNOPSIS
 .Nm
@@ -57,31 +63,56 @@
 (also known as
 .Nm mdnsd
 on some systems)
-is a daemon invoked at boot time to implement Multicast DNS
-and DNS Service Discovery.
+is a daemon invoked at boot time to implement Multicast DNS and DNS Service Discovery. On
+Mac OS X 10.6 (Snow Leopard), 
+.Nm 
+is also the system-wide Unicast DNS Resolver.
 .Pp
 .Nm
-listens UDP port 5353 for Multicast DNS Query packets.
+listens on UDP port 5353 for Multicast DNS Query packets.
 When it receives a query for which it knows an answer,
 .Nm
 issues the appropriate Multicast DNS Reply packet.
 .Pp
 .Nm
-also performs Multicast DNS Queries on behalf of client processes,
-and maintains a cache of the replies.
+also performs Unicast and Multicast DNS Queries on behalf of client processes, and 
+maintains a cache of the replies.
 .Pp
 .Nm
 has no user-specifiable command-line argument, and users should not run
 .Nm
 manually.
 .Pp
-To examine
-.Nm Ns 's internal state, for debugging and diagnostic purposes,
-send it a SIGINFO signal, and it will then dump a snapshot summary
-of its internal state to
-.Pa /var/log/system.log Ns , e.g.
+.Ss LOGGING
+There are several methods with which to examine 
+.Nm Ns 's internal state for debugging and diagnostic purposes. The syslog(1)
+logging levels map as follows:
 .Pp
-.Dl sudo killall -INFO mDNSResponder
+.Dl Error - Error messages
+.Dl Warning - Client-initiated operations
+.Dl Notice - Sleep proxy operations
+.Dl Info - Informational messages
+.Pp
+By default, only log level Error is logged.
+.Pp
+A SIGUSR1 signal toggles additional logging, with Warning and Notice
+enabled by default:
+.Pp
+.Dl % sudo killall -USR1 mDNSResponder
+.Pp
+Once this logging is enabled, users can additionally use syslog(1)
+to change the log filter for the process. For example, to enable log levels Emergency - Debug:
+.Pp
+.Dl % sudo syslog -c mDNSResponder -d
+.Pp
+A SIGUSR2 signal toggles packet logging:
+.Pp
+.Dl % sudo killall -USR2 mDNSResponder
+.Pp
+A SIGINFO signal will dump a snapshot summary of the internal state to 
+.Pa /var/log/system.log Ns :
+.Pp
+.Dl % sudo killall -INFO mDNSResponder
 .Sh FILES
 .Pa /usr/sbin/mDNSResponder \" Pathname
 .\"

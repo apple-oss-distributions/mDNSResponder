@@ -17,6 +17,48 @@
     Change History (most recent first):
 
 $Log: helper-main.c,v $
+Revision 1.28  2009/04/11 00:20:08  jessic2
+<rdar://problem/4426780> Daemon: Should be able to turn on LogOperation dynamically
+
+Revision 1.27  2009/03/09 19:00:26  mcguire
+<rdar://problem/6660098> temporarily don't use getpwnam
+
+Revision 1.26  2009/03/05 23:08:12  cheshire
+<rdar://problem/6648751> mDNSResponderHelper deadlocked — Can't use syslog from within a signal handler
+
+Revision 1.25  2009/02/06 03:06:49  mcguire
+<rdar://problem/5858533> Adopt vproc_transaction API in mDNSResponder
+
+Revision 1.24  2009/01/28 17:20:46  mcguire
+changed incorrect notice level log to debug
+
+Revision 1.23  2009/01/28 03:17:19  mcguire
+<rdar://problem/5858535> helper: Adopt vproc_transaction API
+
+Revision 1.22  2008/12/19 01:56:47  mcguire
+<rdar://problem/6181947> crashes in mDNSResponderHelper
+
+Revision 1.21  2008/09/15 23:52:30  cheshire
+<rdar://problem/6218902> mDNSResponder-177 fails to compile on Linux with .desc pseudo-op
+Made __crashreporter_info__ symbol conditional, so we only use it for OS X build
+
+Revision 1.20  2008/08/13 23:11:35  mcguire
+<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
+
+Revision 1.19  2008/08/13 23:04:06  mcguire
+<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
+Preparation: rename message function, as it will no longer be called only on idle exit
+
+Revision 1.18  2008/08/13 22:56:32  mcguire
+<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
+Preparation: store mach port in global variable so we can write to it from a signal handler
+
+Revision 1.17  2008/07/24 01:04:04  mcguire
+<rdar://problem/6003721> helper spawned every 10s
+
+Revision 1.16  2008/07/01 01:40:01  mcguire
+<rdar://problem/5823010> 64-bit fixes
+
 Revision 1.15  2008/03/13 20:55:16  mcguire
 <rdar://problem/5769316> fix deprecated warnings/errors
 Additional cleanup: use a conditional macro instead of lots of #if
@@ -89,6 +131,7 @@ Revision 1.1  2007/08/08 22:34:58  mcguire
 #include "helper-server.h"
 #include "helpermsg.h"
 #include "helpermsgServer.h"
+#include "safe_vproc.h"
 
 #if TARGET_OS_EMBEDDED
 #include <bootstrap_priv.h>
@@ -109,16 +152,28 @@ union max_msg_size
 	union __ReplyUnion__proxy_helper_subsystem rep;
 	};
 
+#ifdef VPROC_HAS_TRANSACTIONS
+typedef struct __transaction_s
+	{
+	struct __transaction_s* next;
+	vproc_transaction_t vt;
+	} transaction_t;
+	
+static transaction_t* transactions = NULL;
+#endif
+
 static const mach_msg_size_t MAX_MSG_SIZE = sizeof(union max_msg_size) + MAX_TRAILER_SIZE;
 static aslclient logclient = NULL;
 static int opt_debug;
 static pthread_t idletimer_thread;
 
-unsigned long maxidle = 10;
+unsigned long maxidle = 15;
 unsigned long actualidle = 3600;
 
 CFRunLoopRef gRunLoop = NULL;
 CFRunLoopTimerRef gTimer = NULL;
+
+mach_port_t gPort = MACH_PORT_NULL;
 
 static void helplogv(int level, const char *fmt, va_list ap)
 	{
@@ -133,6 +188,24 @@ void helplog(int level, const char *fmt, ...)
 	helplogv(level, fmt, ap);
 	va_end(ap);
 	}
+	
+// for safe_vproc
+void LogMsgWithLevel(mDNSLogLevel_t logLevel, const char *fmt, ...)
+	{
+	(void)logLevel;
+	va_list ap;
+	va_start(ap, fmt);
+	// safe_vproc only calls LogMsg, so assume logLevel maps to ASL_LEVEL_ERR
+	helplog(ASL_LEVEL_ERR, fmt, ap);
+	va_end(ap);
+	}	
+
+static void handle_sigterm(int sig)
+	{
+	// debug("entry sig=%d", sig);	Can't use syslog from within a signal handler
+	assert(sig == SIGTERM);
+	(void)proxy_mDNSExit(gPort);
+	}
 
 static void initialize_logging(void)
 	{
@@ -144,7 +217,10 @@ static void initialize_logging(void)
 static void initialize_id(void)
 	{
 	static char login[] = "_mdnsresponder";
-	struct passwd *pwd = getpwnam(login);
+	struct passwd hardcode;
+	struct passwd *pwd = &hardcode; // getpwnam(login);
+	hardcode.pw_uid = 65;
+	hardcode.pw_gid = 65;
 
 	if (!pwd) { helplog(ASL_LEVEL_ERR, "Could not find account name `%s'.  I will only help root.", login); return; }
 	mDNSResponderUID = pwd->pw_uid;
@@ -153,10 +229,10 @@ static void initialize_id(void)
 
 static void diediedie(CFRunLoopTimerRef timer, void *context)
 	{
-	debug("entry");
+	debug("entry %p %p %d", timer, context, maxidle);
 	assert(gTimer == timer);
 	if (maxidle)
-	  (void)proxy_mDNSIdleExit((mach_port_t)context);
+		(void)proxy_mDNSExit(gPort);
 	}
 
 void pause_idle_timer(void)
@@ -199,15 +275,16 @@ static void *idletimer(void *context)
 	return NULL;
 	}
 
-static void initialize_timer(mach_port_t port)
+static int initialize_timer()
 	{
-	CFRunLoopTimerContext cxt = {0, (void *)port, NULL, NULL, NULL};
-	gTimer = CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + actualidle, actualidle, 0, 0, diediedie, &cxt);
+	gTimer = CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + actualidle, actualidle, 0, 0, diediedie, NULL);
 	int err = 0;
 
-	debug("entry port=%p", port);
-	if (0 != (err = pthread_create(&idletimer_thread, NULL, idletimer, (void *)port)))
+	debug("entry");
+	if (0 != (err = pthread_create(&idletimer_thread, NULL, idletimer, NULL)))
 		helplog(ASL_LEVEL_ERR, "Could not start idletimer thread: %s", strerror(err));
+
+	return err;
 	}
 
 static mach_port_t checkin(char *service_name)
@@ -272,9 +349,9 @@ int main(int ac, char *av[])
 	{
 	char *p = NULL;
 	kern_return_t kr = KERN_FAILURE;
-	mach_port_t port = MACH_PORT_NULL;
 	long n;
 	int ch;
+	mach_msg_header_t hdr;
 
 	while ((ch = getopt(ac, av, "dt:")) != -1)
 		switch (ch)
@@ -303,20 +380,44 @@ int main(int ac, char *av[])
 	// Explicitly ensure that our Keychain operations utilize the system domain.
 	SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem);
 #endif
-	port = checkin(kmDNSHelperServiceName);
-	if (!port)
+	gPort = checkin(kmDNSHelperServiceName);
+	if (!gPort)
 		{
 		helplog(ASL_LEVEL_ERR, "Launchd provided no launchdata; will open Mach port explicitly");
-		port = register_service(kmDNSHelperServiceName);
+		gPort = register_service(kmDNSHelperServiceName);
 		}
 
 	if (maxidle) actualidle = maxidle;
-	initialize_timer(port);
 
-	kr = mach_msg_server(helper_server, MAX_MSG_SIZE, port,
-		MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AUDIT) | MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0));
-	if (KERN_SUCCESS != kr)
-		{ helplog(ASL_LEVEL_ERR, "mach_msg_server: %s\n", mach_error_string(kr)); exit(EXIT_FAILURE); }
+	signal(SIGTERM, handle_sigterm);
+
+	if (initialize_timer()) exit(EXIT_FAILURE);
+	for (n=0; n<100000; n++) if (!gRunLoop) usleep(100);
+	if (!gRunLoop)
+		{
+		helplog(ASL_LEVEL_ERR, "gRunLoop not set after waiting");
+		exit(EXIT_FAILURE);
+		}
+
+	for(;;)
+		{
+		hdr.msgh_bits = 0;
+		hdr.msgh_local_port = gPort;
+		hdr.msgh_remote_port = MACH_PORT_NULL;
+		hdr.msgh_size = sizeof(hdr);
+		hdr.msgh_id = 0;
+		kr = mach_msg(&hdr, MACH_RCV_LARGE | MACH_RCV_MSG, 0, hdr.msgh_size, gPort, 0, 0);
+		if (MACH_RCV_TOO_LARGE != kr) helplog(ASL_LEVEL_ERR, "kr: %d: %s", kr, mach_error_string(kr));
+		
+		safe_vproc_transaction_begin();
+		
+		kr = mach_msg_server_once(helper_server, MAX_MSG_SIZE, gPort,
+			MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AUDIT) | MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0));
+		if (KERN_SUCCESS != kr)
+			{ helplog(ASL_LEVEL_ERR, "mach_msg_server: %s\n", mach_error_string(kr)); exit(EXIT_FAILURE); }
+		
+		safe_vproc_transaction_end();
+		}
 	exit(EXIT_SUCCESS);
 	}
 
@@ -330,6 +431,8 @@ int main(int ac, char *av[])
 // The "@(#) " pattern is a special prefix the "what" command looks for
 const char VersionString_SCCS[] = "@(#) mDNSResponderHelper " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
 
+#if _BUILDING_XCODE_PROJECT_
 // If the process crashes, then this string will be magically included in the automatically-generated crash log
 const char *__crashreporter_info__ = VersionString_SCCS + 5;
 asm(".desc ___crashreporter_info__, 0x10");
+#endif

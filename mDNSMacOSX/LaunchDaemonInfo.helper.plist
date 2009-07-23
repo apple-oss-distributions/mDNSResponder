@@ -6,8 +6,6 @@
   <string>com.apple.mDNSResponderHelper</string>
   <key>OnDemand</key>
   <true/>
-  <key>HopefullyExitsLast</key>
-  <true/>
   <key>ProgramArguments</key>
   <array>
     <string>/usr/sbin/mDNSResponderHelper</string>
@@ -17,7 +15,7 @@
     <key>com.apple.mDNSResponderHelper</key>
     <true/>
   </dict>
-  <key>ServiceIPC</key>
+  <key>EnableTransactions</key>
   <true/>
 </dict>
 </plist>

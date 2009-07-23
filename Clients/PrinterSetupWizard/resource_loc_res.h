@@ -2,7 +2,6 @@
 // Microsoft Visual C++ generated include file.
 // Used by PrinterSetupWizardLocRes.rc
 //
-#define IDR_MANIFEST                    1
 #define IDM_ABOUTBOX                    0x0010
 #define IDD_ABOUTBOX                    100
 #define IDS_ABOUTBOX                    101
@@ -51,6 +50,8 @@
 #define IDS_REINSTALL_CAPTION           143
 #define IDC_INFO								 144
 #define IDS_PRINTER_UNAVAILABLE         145
+#define IDS_BAD_INF_FILE				150
+#define IDS_BAD_INF_FILE_CAPTION		151
 #define IDC_BUTTON1                     1000
 #define IDC_LIST1                       1000
 #define IDC_BROWSE_LIST                 1000

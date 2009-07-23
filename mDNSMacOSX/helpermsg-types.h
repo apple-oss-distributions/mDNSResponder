@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: helpermsg-types.h,v $
+Revision 1.3  2009/01/22 02:14:27  cheshire
+<rdar://problem/6515626> Sleep Proxy: Set correct target MAC address, instead of all zeroes
+
 Revision 1.2  2007/08/23 21:52:19  cheshire
 Added License header
 
@@ -28,8 +31,9 @@ Revision 1.1  2007/08/08 22:34:58  mcguire
 #define H_HELPERMSG_TYPES_H
 
 #include <stdint.h>
-typedef uint8_t v6addr_t[16];
-typedef uint8_t v4addr_t[4];
+typedef uint8_t v4addr_t [ 4];
+typedef uint8_t ethaddr_t[ 6];
+typedef uint8_t v6addr_t [16];
 typedef const char *string_t;
 
 #endif /* H_HELPERMSG_TYPES_H */

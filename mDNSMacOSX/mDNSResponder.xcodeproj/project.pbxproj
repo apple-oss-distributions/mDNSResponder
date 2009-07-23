@@ -19,7 +19,6 @@
 				D284BF300ADD81630027CCDF /* PBXTargetDependency */,
 				D284BF260ADD814F0027CCDF /* PBXTargetDependency */,
 				D284BF2A0ADD81530027CCDF /* PBXTargetDependency */,
-				FFD41DDB0664169900F0C438 /* PBXTargetDependency */,
 			);
 			name = "Build More";
 			productName = "Build All";
@@ -97,8 +96,13 @@
 		2EDC5E730C39EA640092701B /* helper-server.h in Headers */ = {isa = PBXBuildFile; fileRef = 2EDC5E720C39EA640092701B /* helper-server.h */; };
 		2EDC5E740C39EA640092701B /* helper-server.h in Headers */ = {isa = PBXBuildFile; fileRef = 2EDC5E720C39EA640092701B /* helper-server.h */; };
 		2EDC5E750C39EA640092701B /* helper-server.h in Headers */ = {isa = PBXBuildFile; fileRef = 2EDC5E720C39EA640092701B /* helper-server.h */; };
-		4A8202650C56C4C900DDFD48 /* pfkey.c in Sources */ = {isa = PBXBuildFile; fileRef = 4A8202530C56C36600DDFD48 /* pfkey.c */; };
 		4AAE0C9A0C68EA81003882A5 /* mDNSResponderHelper.8 in CopyFiles */ = {isa = PBXBuildFile; fileRef = 4AAE0C7A0C68E97F003882A5 /* mDNSResponderHelper.8 */; };
+		4AE9B04B0F39448B0080B59D /* safe_vproc.c in Sources */ = {isa = PBXBuildFile; fileRef = 4AE9B0480F39448B0080B59D /* safe_vproc.c */; };
+		4AE9B04C0F39448B0080B59D /* safe_vproc.h in Headers */ = {isa = PBXBuildFile; fileRef = 4AE9B0490F39448B0080B59D /* safe_vproc.h */; };
+		4AE9B0920F3A52A10080B59D /* safe_vproc.c in Sources */ = {isa = PBXBuildFile; fileRef = 4AE9B0480F39448B0080B59D /* safe_vproc.c */; };
+		4AE9B0930F3A52A20080B59D /* safe_vproc.c in Sources */ = {isa = PBXBuildFile; fileRef = 4AE9B0480F39448B0080B59D /* safe_vproc.c */; };
+		4AE9B0940F3A52AE0080B59D /* safe_vproc.h in Headers */ = {isa = PBXBuildFile; fileRef = 4AE9B0490F39448B0080B59D /* safe_vproc.h */; };
+		4AE9B0950F3A52AE0080B59D /* safe_vproc.h in Headers */ = {isa = PBXBuildFile; fileRef = 4AE9B0490F39448B0080B59D /* safe_vproc.h */; };
 		D284BE530ADD80740027CCDF /* DNSServiceDiscoveryDefines.h in Headers */ = {isa = PBXBuildFile; fileRef = 6575FBFF022EAFBA00000109 /* DNSServiceDiscoveryDefines.h */; };
 		D284BE540ADD80740027CCDF /* dnssd_ipc.h in Headers */ = {isa = PBXBuildFile; fileRef = F5E11B5B04A28126019798ED /* dnssd_ipc.h */; };
 		D284BE560ADD80740027CCDF /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Client, ); }; };
@@ -188,21 +192,6 @@
 		D284BF040ADD80B00027CCDF /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF2609FA07B4433800CE10E5 /* Cocoa.framework */; };
 		D284BF050ADD80B00027CCDF /* PreferencePanes.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF260A1F07B4436900CE10E5 /* PreferencePanes.framework */; };
 		D284BF060ADD80B00027CCDF /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 09AB6884FE841BABC02AAC07 /* CoreFoundation.framework */; };
-		D284C04E0ADD95D30027CCDF /* Info-PreferencePane.plist in Resources */ = {isa = PBXBuildFile; fileRef = D284C04D0ADD95D30027CCDF /* Info-PreferencePane.plist */; };
-		DB2CC4560662DE4500335AB3 /* BaseListener.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC4430662DD1100335AB3 /* BaseListener.java */; };
-		DB2CC4570662DE4600335AB3 /* BrowseListener.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC4440662DD1100335AB3 /* BrowseListener.java */; };
-		DB2CC4580662DE4700335AB3 /* DNSRecord.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC4450662DD1100335AB3 /* DNSRecord.java */; };
-		DB2CC4590662DE4700335AB3 /* DNSSD.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC4460662DD1100335AB3 /* DNSSD.java */; };
-		DB2CC45A0662DE4800335AB3 /* DNSSDException.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC4470662DD1100335AB3 /* DNSSDException.java */; };
-		DB2CC45B0662DE4900335AB3 /* DNSSDRegistration.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC4480662DD1100335AB3 /* DNSSDRegistration.java */; };
-		DB2CC45C0662DE4900335AB3 /* DNSSDService.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC4490662DD1100335AB3 /* DNSSDService.java */; };
-		DB2CC45D0662DE4A00335AB3 /* DomainListener.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC44A0662DD1100335AB3 /* DomainListener.java */; };
-		DB2CC45E0662DE4B00335AB3 /* QueryListener.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC44C0662DD1100335AB3 /* QueryListener.java */; };
-		DB2CC45F0662DE4C00335AB3 /* RegisterListener.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC44D0662DD1100335AB3 /* RegisterListener.java */; };
-		DB2CC4600662DE4C00335AB3 /* ResolveListener.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC44E0662DD1100335AB3 /* ResolveListener.java */; };
-		DB2CC4610662DE4D00335AB3 /* TXTRecord.java in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC44F0662DD1100335AB3 /* TXTRecord.java */; };
-		FF2C5FB10A48B8680066DA11 /* DNSSDRecordRegistrar.java in Sources */ = {isa = PBXBuildFile; fileRef = FF2C5FB00A48B8680066DA11 /* DNSSDRecordRegistrar.java */; };
-		FF2C5FB30A48B86E0066DA11 /* RegisterRecordListener.java in Sources */ = {isa = PBXBuildFile; fileRef = FF2C5FB20A48B86E0066DA11 /* RegisterRecordListener.java */; };
 		FFA572330AF18F1C0055A0F1 /* dnssd_ipc.c in Sources */ = {isa = PBXBuildFile; fileRef = F5E11B5A04A28126019798ED /* dnssd_ipc.c */; };
 		FFA572340AF18F1C0055A0F1 /* dnssd_clientlib.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38620AEEDB090065B80A /* dnssd_clientlib.c */; };
 		FFA572350AF18F1C0055A0F1 /* dnssd_clientstub.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38640AEEDB130065B80A /* dnssd_clientstub.c */; };
@@ -214,12 +203,15 @@
 		FFA5724B0AF18FCC0055A0F1 /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = FFA572480AF18FCC0055A0F1 /* DNSServiceDiscovery.c */; };
 		FFA572610AF190940055A0F1 /* DNSServiceDiscovery.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = FFA572600AF1908D0055A0F1 /* DNSServiceDiscovery.h */; };
 		FFA572640AF190C80055A0F1 /* dns_sd.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = FFA572630AF190C20055A0F1 /* dns_sd.h */; };
+		FFB437150EB165BD00E17C68 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00CA213D02786FC30CCA2C71 /* IOKit.framework */; };
 		FFC22AA20B00F42A00BAB070 /* DNSServiceDiscoveryRequest.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */; };
 		FFC22AA30B00F42B00BAB070 /* DNSServiceDiscoveryRequest.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */; };
 		FFC22AA40B00F42C00BAB070 /* DNSServiceDiscoveryRequest.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */; };
 		FFC22AA50B00F43000BAB070 /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Server, ); }; };
 		FFC22AA60B00F43100BAB070 /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Server, ); }; };
 		FFC22AA70B00F43100BAB070 /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Server, ); }; };
+		FFF589B70E37F66800EF515C /* ClientCommon.c in Sources */ = {isa = PBXBuildFile; fileRef = FF5852100DD27BD300862BDF /* ClientCommon.c */; };
+		FFF589C10E37F67E00EF515C /* ClientCommon.c in Sources */ = {isa = PBXBuildFile; fileRef = FF5852100DD27BD300862BDF /* ClientCommon.c */; };
 		FFFA38630AEEDB090065B80A /* dnssd_clientlib.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38620AEEDB090065B80A /* dnssd_clientlib.c */; };
 		FFFA38650AEEDB130065B80A /* dnssd_clientstub.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38640AEEDB130065B80A /* dnssd_clientstub.c */; };
 		FFFA38660AEEDB2B0065B80A /* dnssd_ipc.c in Sources */ = {isa = PBXBuildFile; fileRef = F5E11B5A04A28126019798ED /* dnssd_ipc.c */; };
@@ -286,18 +278,11 @@
 			remoteGlobalIDString = 03067D640C83A3700022BE1F;
 			remoteInfo = "Build Some";
 		};
-		D284BDEA0ADD77F60027CCDF /* PBXContainerItemProxy */ = {
+		4AE471690EAFF83800A6C5AD /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 08FB7793FE84155DC02AAC07 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = DB2CC4530662DD6800335AB3;
-			remoteInfo = dns_sd.jar;
-		};
-		D284BEB40ADD809A0027CCDF /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 08FB7793FE84155DC02AAC07 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = DB2CC4530662DD6800335AB3;
+			remoteGlobalIDString = 4AE471670EAFF81900A6C5AD;
 			remoteInfo = dns_sd.jar;
 		};
 		D284BF250ADD814F0027CCDF /* PBXContainerItemProxy */ = {
@@ -474,6 +459,8 @@
 		4A8202520C56C36500DDFD48 /* libpfkey.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = libpfkey.h; sourceTree = "<group>"; };
 		4A8202530C56C36600DDFD48 /* pfkey.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = pfkey.c; sourceTree = "<group>"; };
 		4AAE0C7A0C68E97F003882A5 /* mDNSResponderHelper.8 */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = mDNSResponderHelper.8; sourceTree = SOURCE_ROOT; };
+		4AE9B0480F39448B0080B59D /* safe_vproc.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = safe_vproc.c; sourceTree = "<group>"; };
+		4AE9B0490F39448B0080B59D /* safe_vproc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = safe_vproc.h; sourceTree = "<group>"; };
 		654BE64F02B63B93000001D1 /* mDNSEmbeddedAPI.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = mDNSEmbeddedAPI.h; path = ../mDNSCore/mDNSEmbeddedAPI.h; sourceTree = "<group>"; };
 		654BE65002B63B93000001D1 /* mDNSDebug.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = mDNSDebug.h; path = ../mDNSCore/mDNSDebug.h; sourceTree = "<group>"; };
 		65713D46025A293200000109 /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = /System/Library/Frameworks/SystemConfiguration.framework; sourceTree = "<absolute>"; };
@@ -541,6 +528,7 @@
 		FF2C5FB20A48B86E0066DA11 /* RegisterRecordListener.java */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.java; name = RegisterRecordListener.java; path = ../mDNSShared/Java/RegisterRecordListener.java; sourceTree = SOURCE_ROOT; };
 		FF354EB108516C63007C00E1 /* installtool */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.perl; name = installtool; path = PreferencePane/installtool; sourceTree = SOURCE_ROOT; };
 		FF485D5105632E0000130380 /* mDNSResponder.8 */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = mDNSResponder.8; path = ../mDNSShared/mDNSResponder.8; sourceTree = SOURCE_ROOT; };
+		FF5852100DD27BD300862BDF /* ClientCommon.c */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.c; name = ClientCommon.c; path = ../Clients/ClientCommon.c; sourceTree = SOURCE_ROOT; };
 		FF85880B0BD599F40080D89F /* mDNSResponder.sb */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = mDNSResponder.sb; sourceTree = SOURCE_ROOT; };
 		FFA572390AF18F1C0055A0F1 /* libdns_sd_debug.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libdns_sd_debug.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		FFA572450AF18F450055A0F1 /* libdns_sd_profile.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libdns_sd_profile.a; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -549,7 +537,6 @@
 		FFA572630AF190C20055A0F1 /* dns_sd.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dns_sd.h; path = ../mDNSShared/dns_sd.h; sourceTree = SOURCE_ROOT; };
 		FFB765840AEED9C700583A2C /* libdns_sd.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libdns_sd.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		FFCB6D73075D539900B8AF62 /* PlatformCommon.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = PlatformCommon.c; path = ../mDNSShared/PlatformCommon.c; sourceTree = SOURCE_ROOT; };
-		FFD41DDA0664157900F0C438 /* dns_sd.jar */ = {isa = PBXFileReference; explicitFileType = archive.jar; includeInIndex = 0; path = dns_sd.jar; sourceTree = BUILT_PRODUCTS_DIR; };
 		FFE6935007C2CA7F00283007 /* ConfigurationAuthority.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ConfigurationAuthority.h; path = PreferencePane/ConfigurationAuthority.h; sourceTree = SOURCE_ROOT; };
 		FFE6935207C2CAA400283007 /* DNSServiceDiscoveryPref.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = DNSServiceDiscoveryPref.h; path = PreferencePane/DNSServiceDiscoveryPref.h; sourceTree = SOURCE_ROOT; };
 		FFE6935407C2CABD00283007 /* PrivilegedOperations.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = PrivilegedOperations.h; path = PreferencePane/PrivilegedOperations.h; sourceTree = SOURCE_ROOT; };
@@ -569,6 +556,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FFB437150EB165BD00E17C68 /* IOKit.framework in Frameworks */,
 				2E0406150C3197CB00F13B59 /* libbsm.dylib in Frameworks */,
 				2E04070A0C31EEEC00F13B59 /* CoreFoundation.framework in Frameworks */,
 				2E04070B0C31EEEC00F13B59 /* SystemConfiguration.framework in Frameworks */,
@@ -656,13 +644,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		DB2CC4520662DD6800335AB3 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		FFA572360AF18F1C0055A0F1 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -704,6 +685,8 @@
 		08FB7795FE84155DC02AAC07 /* mDNS Server Sources */ = {
 			isa = PBXGroup;
 			children = (
+				4AE9B0480F39448B0080B59D /* safe_vproc.c */,
+				4AE9B0490F39448B0080B59D /* safe_vproc.h */,
 				4AAE0C7A0C68E97F003882A5 /* mDNSResponderHelper.8 */,
 				2ECC11A50C4FEC3800CB1885 /* helpermsg-types.h */,
 				2E35528F0C3A95C100CA1CB7 /* helper-error.h */,
@@ -770,7 +753,6 @@
 			isa = PBXGroup;
 			children = (
 				D284C04D0ADD95D30027CCDF /* Info-PreferencePane.plist */,
-				FFD41DDA0664157900F0C438 /* dns_sd.jar */,
 				D284BE730ADD80740027CCDF /* mDNSResponder */,
 				D284BE950ADD80800027CCDF /* mDNSResponder.debug */,
 				D284BEA30ADD808B0027CCDF /* mDNS */,
@@ -803,6 +785,7 @@
 			children = (
 				6575FC20022EB7AA00000109 /* SamplemDNSClient.c */,
 				FF1C919F07021E3F001048AB /* dns-sd.c */,
+				FF5852100DD27BD300862BDF /* ClientCommon.c */,
 			);
 			name = "Command-Line Clients";
 			sourceTree = "<group>";
@@ -877,6 +860,7 @@
 				2ECC11A80C4FEC3800CB1885 /* helpermsg-types.h in Headers */,
 				2E8165E80C5980E300485EB2 /* libpfkey.h in Headers */,
 				2E8165EA0C5980F700485EB2 /* ipsec_strerror.h in Headers */,
+				4AE9B04C0F39448B0080B59D /* safe_vproc.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -890,6 +874,7 @@
 				2EDC5E750C39EA640092701B /* helper-server.h in Headers */,
 				2E3552900C3A95C100CA1CB7 /* helper-error.h in Headers */,
 				2ECC11A60C4FEC3800CB1885 /* helpermsg-types.h in Headers */,
+				4AE9B0950F3A52AE0080B59D /* safe_vproc.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -906,6 +891,7 @@
 				2EDC5E740C39EA640092701B /* helper-server.h in Headers */,
 				2E3552910C3A95C100CA1CB7 /* helper-error.h in Headers */,
 				2ECC11A70C4FEC3800CB1885 /* helpermsg-types.h in Headers */,
+				4AE9B0940F3A52AE0080B59D /* safe_vproc.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -976,36 +962,23 @@
 		};
 /* End PBXHeadersBuildPhase section */
 
-/* Begin PBXJavaArchiveBuildPhase section */
-		DB2CC4510662DD6800335AB3 /* JavaArchive */ = {
-			isa = PBXJavaArchiveBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXJavaArchiveBuildPhase section */
-
-/* Begin PBXLibraryTarget section */
-		DB2CC4530662DD6800335AB3 /* dns_sd.jar */ = {
-			isa = PBXLibraryTarget;
-			buildConfigurationList = D284BE1C0ADD78180027CCDF /* Build configuration list for PBXLibraryTarget "dns_sd.jar" */;
+/* Begin PBXLegacyTarget section */
+		4AE471670EAFF81900A6C5AD /* dns_sd.jar */ = {
+			isa = PBXLegacyTarget;
+			buildArgumentsString = "-f ${SRCROOT}/../mDNSPosix/Makefile OBJDIR=${CONFIGURATION_TEMP_DIR}/dns_sd.jar.build BUILDDIR=${BUILT_PRODUCTS_DIR} SHAREDDIR=${SRCROOT}/../mDNSShared os=x JavaForXcode_$(ACTION)";
+			buildConfigurationList = 4AE471770EAFF84000A6C5AD /* Build configuration list for PBXLegacyTarget "dns_sd.jar" */;
 			buildPhases = (
-				DB2CC4500662DD6800335AB3 /* Sources */,
-				DB2CC4510662DD6800335AB3 /* JavaArchive */,
-				DB2CC4520662DD6800335AB3 /* Frameworks */,
-				DB2CC4550662DE1700335AB3 /* ShellScript */,
-				FFD41DDD06641B4200F0C438 /* ShellScript */,
 			);
+			buildToolPath = /usr/bin/make;
+			buildWorkingDirectory = "";
 			comments = "Multiplatform .jar file that implements Java interface to DNS-SD";
 			dependencies = (
 			);
 			name = dns_sd.jar;
-			productInstallPath = /System/Library/Java/Extensions;
+			passBuildSettingsInEnvironment = 1;
 			productName = dns_sd.jar;
-			productReference = FFD41DDA0664157900F0C438 /* dns_sd.jar */;
 		};
-/* End PBXLibraryTarget section */
+/* End PBXLegacyTarget section */
 
 /* Begin PBXNativeTarget section */
 		2E0405EF0C31955500F13B59 /* mDNSResponderHelper */ = {
@@ -1122,7 +1095,7 @@
 			);
 			comments = "Platform-specific JNI library that bridges dns_sd.jar to <dns_sd.h>.";
 			dependencies = (
-				D284BEB30ADD809A0027CCDF /* PBXTargetDependency */,
+				4AE4716A0EAFF83800A6C5AD /* PBXTargetDependency */,
 			);
 			name = libjdns_sd.jnilib;
 			productInstallPath = /usr/lib/java;
@@ -1134,7 +1107,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = D284BED60ADD80A20027CCDF /* Build configuration list for PBXNativeTarget "dnsextd" */;
 			buildPhases = (
-				030BBF010CE13A2800472F0C /* ShellScript */,
 				D284BEC20ADD80A20027CCDF /* Headers */,
 				D284BEC40ADD80A20027CCDF /* Sources */,
 				D284BECE0ADD80A20027CCDF /* Frameworks */,
@@ -1267,7 +1239,7 @@
 				2E0405EF0C31955500F13B59 /* mDNSResponderHelper */,
 				D284BE970ADD808B0027CCDF /* mDNS tool */,
 				D284BEA50ADD80920027CCDF /* dns-sd tool */,
-				DB2CC4530662DD6800335AB3 /* dns_sd.jar */,
+				4AE471670EAFF81900A6C5AD /* dns_sd.jar */,
 				D284BEB20ADD809A0027CCDF /* libjdns_sd.jnilib */,
 				D284BEBF0ADD80A20027CCDF /* dnsextd */,
 				D284BEDB0ADD80A70027CCDF /* ddnswriteconfig */,
@@ -1298,7 +1270,6 @@
 				D284BEF90ADD80B00027CCDF /* InfoPlist.strings in Resources */,
 				D284BEFB0ADD80B00027CCDF /* inprogress.tiff in Resources */,
 				D284BEFC0ADD80B00027CCDF /* installtool in Resources */,
-				D284C04E0ADD95D30027CCDF /* Info-PreferencePane.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1377,20 +1348,6 @@
 			shellPath = /bin/sh;
 			shellScript = "if [ -e \"${SDKROOT}/usr/lib/libipsec.dylib\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/ipsec_options.h\"\ntouch \"${CONFIGURATION_TEMP_DIR}/ipsec_options.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libipsec.a\"\nelse\necho \"#define MDNS_NO_IPSEC 1\" > ${CONFIGURATION_TEMP_DIR}/ipsec_options.h\ntouch \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfor i in ${ARCHS}\ndo\nccflags=\"-arch $i $ccflags\"\ndone\ncc ${ccflags} \"${CONFIGURATION_TEMP_DIR}/empty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libipsec.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfi\n";
 		};
-		030BBF010CE13A2800472F0C /* ShellScript */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "rm -f \"${CONFIGURATION_TEMP_DIR}/ipsec_options.h\"\ntouch \"${CONFIGURATION_TEMP_DIR}/ipsec_options.h\"\n";
-			showEnvVarsInLog = 0;
-		};
 		D284BE510ADD80740027CCDF /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -1398,7 +1355,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -e \"${SDKROOT}/usr/local/include/dnsinfo.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/dnsinfo.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nelse\necho \"#define MDNS_NO_DNSINFO 1\" > ${CONFIGURATION_TEMP_DIR}/dnsinfo.h\ntouch \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfor i in ${ARCHS}\ndo\nccflags=\"-arch $i $ccflags\"\ndone\ncc ${ccflags} \"${CONFIGURATION_TEMP_DIR}/empty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfi\n\nif [ -e \"${SDKROOT}/usr/include/sandbox.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nelse\necho \"#define MDNS_NO_SANDBOX 1\" > \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nfi\n";
+			shellScript = "if [ -e \"${SDKROOT}/usr/local/include/dnsinfo.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/dnsinfo.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nelse\necho \"#define MDNS_NO_DNSINFO 1\" > ${CONFIGURATION_TEMP_DIR}/dnsinfo.h\ntouch \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfor i in ${ARCHS}\ndo\nccflags=\"-arch $i $ccflags\"\ndone\ncc ${ccflags} \"${CONFIGURATION_TEMP_DIR}/empty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfi\n\nif [ -e \"${SDKROOT}/usr/include/sandbox.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nelse\necho \"#define MDNS_NO_SANDBOX 1\" > \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nfi\n\nif [ -e \"${SDKROOT}/usr/include/vproc.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/vproc.h\"\nelse\ntouch \"${CONFIGURATION_TEMP_DIR}/vproc.h\"\nfi\n\nif [ -e \"${SDKROOT}/System/Library/Frameworks/IOKit.framework/PrivateHeaders/pwr_mgt/IOPMLibPrivate.h\" ]\nthen\nrm -rf \"${CONFIGURATION_TEMP_DIR}/IOKit\"\nelse\nmkdir -p \"${CONFIGURATION_TEMP_DIR}/IOKit/pwr_mgt\"\ntouch \"${CONFIGURATION_TEMP_DIR}/IOKit/pwr_mgt/IOPMLibPrivate.h\"\nfi\n";
 		};
 		D284BE6C0ADD80740027CCDF /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1417,15 +1374,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "if [ -e \"${SDKROOT}/usr/local/include/dnsinfo.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/dnsinfo.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nelse\necho \"#define MDNS_NO_DNSINFO 1\" > ${CONFIGURATION_TEMP_DIR}/dnsinfo.h\ntouch \"${CONFIGURATION_TEMP_DIR}/empty.c\"\ncc -arch i386 -arch ppc \"${CONFIGURATION_TEMP_DIR}/empty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfi\n\nif [ -e \"${SDKROOT}/usr/include/sandbox.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nelse\necho \"#define MDNS_NO_SANDBOX 1\" > \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nfi\n";
-		};
-		DB2CC4550662DE1700335AB3 /* ShellScript */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 12;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "javah -force -J-Xbootclasspath/p:${CONFIGURATION_TEMP_DIR}/dns_sd.jar.build/JavaClasses -o ${CONFIGURATION_TEMP_DIR}/dns_sd.jar.build/DNSSD.java.h com.apple.dnssd.AppleDNSSD com.apple.dnssd.AppleBrowser com.apple.dnssd.AppleResolver com.apple.dnssd.AppleRegistration com.apple.dnssd.AppleQuery com.apple.dnssd.AppleDomainEnum com.apple.dnssd.AppleService com.apple.dnssd.AppleDNSRecord com.apple.dnssd.AppleRecordRegistrar";
 		};
 		FF045B6A0C7E4AA600448140 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1449,15 +1397,6 @@
 			shellPath = /bin/tcsh;
 			shellScript = "# Install plist to tell launchd how to start dnsextd\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons\ncp ${SRCROOT}/LaunchDaemonInfo.dnsextd.plist ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.dnsextd.plist\n";
 		};
-		FFD41DDD06641B4200F0C438 /* ShellScript */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "rm -f ${CONFIGURATION_BUILD_DIR}/dns_sd";
-		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -1469,6 +1408,7 @@
 				2E0405F60C31961100F13B59 /* helpermsg.defs in Sources */,
 				2E96A51D0C39BDAC0087C4D2 /* helper-main.c in Sources */,
 				2E8165E90C5980EE00485EB2 /* pfkey.c in Sources */,
+				4AE9B04B0F39448B0080B59D /* safe_vproc.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1491,6 +1431,7 @@
 				D284BE630ADD80740027CCDF /* daemon.c in Sources */,
 				2E04061F0C3198B700F13B59 /* helpermsg.defs in Sources */,
 				2E96A5320C39C1A50087C4D2 /* helper-stubs.c in Sources */,
+				4AE9B0930F3A52A20080B59D /* safe_vproc.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1513,6 +1454,7 @@
 				D284BE8B0ADD80800027CCDF /* daemon.c in Sources */,
 				2E0406200C3198B700F13B59 /* helpermsg.defs in Sources */,
 				2E96A5300C39C1A50087C4D2 /* helper-stubs.c in Sources */,
+				4AE9B0920F3A52A10080B59D /* safe_vproc.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1529,6 +1471,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D284BEA80ADD80920027CCDF /* dns-sd.c in Sources */,
+				FFF589B70E37F66800EF515C /* ClientCommon.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1555,7 +1498,6 @@
 				D284BECD0ADD80A20027CCDF /* PlatformCommon.c in Sources */,
 				2EAE955A0C31F4D30021F738 /* helpermsg.defs in Sources */,
 				2E35529E0C3A9E7600CA1CB7 /* helper-stubs.c in Sources */,
-				4A8202650C56C4C900DDFD48 /* pfkey.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1574,27 +1516,7 @@
 				D284BEFE0ADD80B00027CCDF /* DNSServiceDiscoveryPref.m in Sources */,
 				D284BEFF0ADD80B00027CCDF /* PrivilegedOperations.c in Sources */,
 				D284BF000ADD80B00027CCDF /* ConfigurationAuthority.c in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		DB2CC4500662DD6800335AB3 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				DB2CC4560662DE4500335AB3 /* BaseListener.java in Sources */,
-				DB2CC4570662DE4600335AB3 /* BrowseListener.java in Sources */,
-				DB2CC4580662DE4700335AB3 /* DNSRecord.java in Sources */,
-				DB2CC4590662DE4700335AB3 /* DNSSD.java in Sources */,
-				DB2CC45A0662DE4800335AB3 /* DNSSDException.java in Sources */,
-				DB2CC45B0662DE4900335AB3 /* DNSSDRegistration.java in Sources */,
-				DB2CC45C0662DE4900335AB3 /* DNSSDService.java in Sources */,
-				DB2CC45D0662DE4A00335AB3 /* DomainListener.java in Sources */,
-				DB2CC45E0662DE4B00335AB3 /* QueryListener.java in Sources */,
-				DB2CC45F0662DE4C00335AB3 /* RegisterListener.java in Sources */,
-				DB2CC4600662DE4C00335AB3 /* ResolveListener.java in Sources */,
-				DB2CC4610662DE4D00335AB3 /* TXTRecord.java in Sources */,
-				FF2C5FB10A48B8680066DA11 /* DNSSDRecordRegistrar.java in Sources */,
-				FF2C5FB30A48B86E0066DA11 /* RegisterRecordListener.java in Sources */,
+				FFF589C10E37F67E00EF515C /* ClientCommon.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1665,10 +1587,10 @@
 			target = 03067D640C83A3700022BE1F /* Build Some */;
 			targetProxy = 03067D850C849CC30022BE1F /* PBXContainerItemProxy */;
 		};
-		D284BEB30ADD809A0027CCDF /* PBXTargetDependency */ = {
+		4AE4716A0EAFF83800A6C5AD /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = DB2CC4530662DD6800335AB3 /* dns_sd.jar */;
-			targetProxy = D284BEB40ADD809A0027CCDF /* PBXContainerItemProxy */;
+			target = 4AE471670EAFF81900A6C5AD /* dns_sd.jar */;
+			targetProxy = 4AE471690EAFF83800A6C5AD /* PBXContainerItemProxy */;
 		};
 		D284BF260ADD814F0027CCDF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -1720,11 +1642,6 @@
 			target = 00AD62BB032D7A0C0CCA2C71 /* Build More */;
 			targetProxy = FFB7657C0AEED97F00583A2C /* PBXContainerItemProxy */;
 		};
-		FFD41DDB0664169900F0C438 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = DB2CC4530662DD6800335AB3 /* dns_sd.jar */;
-			targetProxy = D284BDEA0ADD77F60027CCDF /* PBXContainerItemProxy */;
-		};
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
@@ -1767,7 +1684,7 @@
 				CONFIGURATION_TEMP_DIR = "$(PROJECT_TEMP_DIR)";
 				COPY_PHASE_STRIP = NO;
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_WARN_CHECK_SWITCH_STATEMENTS = NO;
 				HEADER_SEARCH_PATHS = "${CONFIGURATION_TEMP_DIR}";
 				INSTALL_PATH = /usr/sbin;
@@ -1783,34 +1700,13 @@
 			};
 			name = Development;
 		};
-		D284BE1D0ADD78180027CCDF /* Development */ = {
+		4AE471680EAFF81900A6C5AD /* Development */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				DYLIB_COMPATIBILITY_VERSION = 1;
-				DYLIB_CURRENT_VERSION = 1;
+				COPY_PHASE_STRIP = NO;
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = YES;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				INSTALL_PATH = "${SYSTEM_LIBRARY_DIR}/Java/Extensions";
-				JAVA_ARCHIVE_CLASSES = YES;
-				JAVA_ARCHIVE_COMPRESSION = YES;
-				JAVA_ARCHIVE_TYPE = JAR;
-				JAVA_COMPILER_DEBUGGING_SYMBOLS = NO;
-				JAVA_COMPILER_SOURCE_VERSION = 1.4;
-				JAVA_COMPILER_TARGET_VM_VERSION = 1.4;
-				JAVA_SOURCE_SUBDIR = .;
-				LIBRARY_STYLE = STATIC;
-				OTHER_CFLAGS = "";
-				OTHER_LDFLAGS = "";
-				OTHER_LIBTOOL_FLAGS = "";
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = dns_sd;
-				PURE_JAVA = YES;
-				REZ_EXECUTABLE = YES;
-				SECTORDER_FLAGS = "";
-				STRIPFLAGS = "-S";
+				GCC_OPTIMIZATION_LEVEL = 0;
+				PRODUCT_NAME = dns_sd.jar;
 			};
 			name = Development;
 		};
@@ -1820,7 +1716,7 @@
 				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
 				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "";
@@ -1833,6 +1729,8 @@
 		D284BE2C0ADD78180027CCDF /* Development */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CONFIGURATION_BUILD_DIR = "$(BUILD_DIR)";
+				DEAD_CODE_STRIPPING = YES;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"APPLE_OSX_mDNSResponder=1",
 					"__MigTypeCheck=1",
@@ -1842,8 +1740,12 @@
 				);
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
 				MVERS = "\"(Engineering Build)\"";
-				OTHER_CFLAGS = "-DUSE_SYSTEMCONFIGURATION_PRIVATE_HEADERS";
+				OTHER_CFLAGS = (
+					"-DUSE_SYSTEMCONFIGURATION_PRIVATE_HEADERS",
+					"-fwrapv",
+				);
 				PREBINDING = NO;
+				STRIP_STYLE = debugging;
 				WARNING_CFLAGS = (
 					"-W",
 					"-Wall",
@@ -1863,7 +1765,7 @@
 				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
 				FRAMEWORK_SEARCH_PATHS = "";
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				HEADER_SEARCH_PATHS = (
 					../mDNSShared,
@@ -1874,6 +1776,7 @@
 				INSTALL_PATH = /usr/sbin;
 				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
 				MACOSX_DEPLOYMENT_TARGET = 10.4;
+				ORDER_FILE = "${SRCROOT}/mDNSResponder.order";
 				OTHER_CFLAGS = (
 					"$(inherited)",
 					"-no-cpp-precomp",
@@ -1882,13 +1785,6 @@
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = mDNSResponder;
 				REZ_EXECUTABLE = YES;
-				SECTORDER_FLAGS = (
-					"-sectorder",
-					__TEXT,
-					__text,
-					mDNSResponder.order,
-				);
-				STRIPFLAGS = "-S";
 			};
 			name = Development;
 		};
@@ -1928,7 +1824,6 @@
 					__text,
 					mDNSResponder.order,
 				);
-				STRIPFLAGS = "-S";
 			};
 			name = Development;
 		};
@@ -1938,7 +1833,7 @@
 				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
 				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				INSTALL_PATH = /usr/bin;
 				MACOSX_DEPLOYMENT_TARGET = 10.4;
@@ -1948,7 +1843,6 @@
 				PRODUCT_NAME = mDNS;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
-				STRIPFLAGS = "-S";
 			};
 			name = Development;
 		};
@@ -1958,7 +1852,7 @@
 				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
 				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				HEADER_SEARCH_PATHS = ../mDNSShared;
 				INSTALL_PATH = /usr/bin;
@@ -1969,7 +1863,6 @@
 				PRODUCT_NAME = "dns-sd";
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
-				STRIPFLAGS = "-S";
 			};
 			name = Development;
 		};
@@ -1982,14 +1875,14 @@
 				DYLIB_CURRENT_VERSION = 1;
 				EXECUTABLE_EXTENSION = jnilib;
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
 				HEADER_SEARCH_PATHS = (
 					../mDNSShared,
 					"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/A/Headers",
 					"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/1.3.1/Headers",
-					"${CONFIGURATION_TEMP_DIR}/dns_sd.jar.build",
+					"${PROJECT_DERIVED_FILE_DIR}",
 				);
 				INSTALL_PATH = /usr/lib/java;
 				LIBRARY_STYLE = DYNAMIC;
@@ -2000,7 +1893,6 @@
 				PRODUCT_NAME = libjdns_sd;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
-				STRIPFLAGS = "-S";
 			};
 			name = Development;
 		};
@@ -2011,7 +1903,7 @@
 				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
 				FRAMEWORK_SEARCH_PATHS = "";
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				HEADER_SEARCH_PATHS = (
 					"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers",
@@ -2032,7 +1924,6 @@
 				PRODUCT_NAME = dnsextd;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
-				STRIPFLAGS = "-S";
 				YACC = "/usr/bin/bison -y";
 			};
 			name = Development;
@@ -2043,17 +1934,16 @@
 				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
 				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				INSTALL_PATH = "/Library/Application Support/Bonjour";
-				MACOSX_DEPLOYMENT_TARGET = 10.4;
+				MACOSX_DEPLOYMENT_TARGET = "";
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = ddnswriteconfig;
 				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
-				STRIPFLAGS = "-S";
 			};
 			name = Development;
 		};
@@ -2064,18 +1954,17 @@
 				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
 				EXPORTED_SYMBOLS_FILE = "";
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
 				INFOPLIST_FILE = "PreferencePane/Info-PreferencePane.plist";
 				INSTALL_PATH = /AppleInternal/Library/PreferencePanes;
-				MACOSX_DEPLOYMENT_TARGET = 10.4;
+				MACOSX_DEPLOYMENT_TARGET = "";
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "-twolevel_namespace";
 				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = Bonjour;
 				SECTORDER_FLAGS = "";
-				STRIPFLAGS = "-S";
 				WRAPPER_EXTENSION = prefPane;
 			};
 			name = Development;
@@ -2173,10 +2062,10 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Development;
 		};
-		D284BE1C0ADD78180027CCDF /* Build configuration list for PBXLibraryTarget "dns_sd.jar" */ = {
+		4AE471770EAFF84000A6C5AD /* Build configuration list for PBXLegacyTarget "dns_sd.jar" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D284BE1D0ADD78180027CCDF /* Development */,
+				4AE471680EAFF81900A6C5AD /* Development */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Development;

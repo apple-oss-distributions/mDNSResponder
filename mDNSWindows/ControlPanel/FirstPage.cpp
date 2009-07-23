@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: FirstPage.cpp,v $
+Revision 1.7  2009/06/22 23:25:10  herscher
+<rdar://problem/5265747> ControlPanel doesn't display key and password in dialog box. Refactor Lsa calls into Secret.h and Secret.c, which is used by both the ControlPanel and mDNSResponder system service.
+
 Revision 1.6  2006/08/14 23:25:28  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -132,7 +135,7 @@ void CFirstPage::OnBnClickedSharedSecret()
 
 	CSharedSecret dlg;
 
-	dlg.m_key = name;
+	dlg.Load( name );
 
 	if ( dlg.DoModal() == IDOK )
 	{

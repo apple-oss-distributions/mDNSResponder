@@ -17,6 +17,10 @@
     Change History (most recent first):
     
 $Log: ExplorerBar.h,v $
+Revision 1.4  2009/03/30 18:46:13  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
 Revision 1.3  2006/08/14 23:24:00  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -108,7 +112,7 @@ class	ExplorerBar : public IDeskBand,
 		// IContextMenu methods
    
 		STDMETHOD( QueryContextMenu )( HMENU hContextMenu, UINT iContextMenuFirstItem, UINT idCmdFirst, UINT idCmdLast, UINT uFlags );
-		STDMETHOD( GetCommandString )( UINT idCmd, UINT uType, UINT* pwReserved, LPSTR pszName, UINT cchMax );
+		STDMETHOD( GetCommandString )( UINT_PTR idCmd, UINT uType, UINT* pwReserved, LPSTR pszName, UINT cchMax );
 		STDMETHOD( InvokeCommand )( LPCMINVOKECOMMANDINFO lpici );
 
 		// Other

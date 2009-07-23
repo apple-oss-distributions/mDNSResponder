@@ -15,6 +15,9 @@
 # limitations under the License.
 #
 # $Log: Makefile,v $
+# Revision 1.12  2008/09/05 17:37:08  cheshire
+# Need to include ClientCommon.c when building dns-sd
+#
 # Revision 1.11  2007/05/29 19:57:33  cheshire
 # Use "-Wall" for stricter compiler warnings
 #
@@ -77,10 +80,10 @@ clean:
 build:
 	mkdir build
 
-build/dns-sd: build dns-sd.c
+build/dns-sd: build dns-sd.c ClientCommon.c
 	cc $(filter %.c %.o, $+) $(LIBS) -I../mDNSShared -Wall -o $@
 
-build/dns-sd64: build dns-sd.c
+build/dns-sd64: build dns-sd.c ClientCommon.c
 	cc $(filter %.c %.o, $+) $(LIBS) -I../mDNSShared -Wall -o $@ -m64
 
 # Note, we can make a 'fat' version of dns-sd using 'lipo', as shown below, but we

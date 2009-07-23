@@ -17,6 +17,14 @@
     Change History (most recent first):
     
 $Log: Firewall.cpp,v $
+Revision 1.6  2009/04/24 04:55:26  herscher
+<rdar://problem/3496833> Advertise SMB file sharing via Bonjour
+
+Revision 1.5  2009/03/30 20:39:29  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5712486> Put in extra defensive checks to prevent NULL pointer dereferencing crash
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
 Revision 1.4  2006/08/14 23:26:07  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -38,10 +46,6 @@ Wrapper for Windows Firewall API code
 #	define _WIN32_DCOM 
 #endif
 
-
-#if !defined(_WSPIAPI_COUNTOF)
-#	define _WSPIAPI_COUNTOF(_Array) (sizeof(_Array) / sizeof(_Array[0]))
-#endif
 
 #include "Firewall.h"
 #include <windows.h>
@@ -71,12 +75,12 @@ mDNSFirewallInitialize(OUT INetFwProfile ** fwProfile)
 	// call will fail on anything other than XP SP2
 
 	err = CoCreateInstance( __uuidof(NetFwMgr), NULL, CLSCTX_INPROC_SERVER, __uuidof(INetFwMgr), (void**)&fwMgr );
-	require(SUCCEEDED(err), exit);
+	require(SUCCEEDED(err) && ( fwMgr != NULL ), exit);
 
 	// Use the reference to get the local firewall policy
 
 	err = fwMgr->get_LocalPolicy(&fwPolicy);
-	require(SUCCEEDED(err), exit);
+	require(SUCCEEDED(err) && ( fwPolicy != NULL ), exit);
 
 	// Use the reference to get the extant profile. Empirical evidence
 	// suggests that there is the potential for a race condition when a system
@@ -156,16 +160,16 @@ mDNSFirewallAppIsEnabled
 	// Get the list of authorized applications
 
 	err = fwProfile->get_AuthorizedApplications(&fwApps);
-	require(SUCCEEDED(err), exit);
+	require(SUCCEEDED(err) && ( fwApps != NULL ), exit);
 
     fwBstrProcessImageFileName = SysAllocString(fwProcessImageFileName);
-	require_action(SysStringLen(fwBstrProcessImageFileName) > 0, exit, err = kNoMemoryErr);
+	require_action( ( fwProcessImageFileName != NULL ) && ( SysStringLen(fwBstrProcessImageFileName) > 0 ), exit, err = kNoMemoryErr);
 
 	// Look for us
 
     err = fwApps->Item(fwBstrProcessImageFileName, &fwApp);
 	
-    if (SUCCEEDED(err))
+    if (SUCCEEDED(err) && ( fwApp != NULL ) )
     {
         // It's listed, but is it enabled?
 
@@ -186,7 +190,10 @@ exit:
 
 	// Deallocate the BSTR
 
-    SysFreeString(fwBstrProcessImageFileName);
+	if ( fwBstrProcessImageFileName != NULL )
+	{
+		SysFreeString(fwBstrProcessImageFileName);
+	}
 
 	// Release the COM objects
 
@@ -234,15 +241,15 @@ mDNSFirewallAddApp
 		// Get the list of authorized applications
 
         err = fwProfile->get_AuthorizedApplications(&fwApps);
-		require(SUCCEEDED(err), exit);
+		require(SUCCEEDED(err) && ( fwApps != NULL ), exit);
 
         // Create an instance of an authorized application.
 
 		err = CoCreateInstance( __uuidof(NetFwAuthorizedApplication), NULL, CLSCTX_INPROC_SERVER, __uuidof(INetFwAuthorizedApplication), (void**)&fwApp );
-		require(SUCCEEDED(err), exit);
+		require(SUCCEEDED(err) && ( fwApp != NULL ), exit);
 
         fwBstrProcessImageFileName = SysAllocString(fwProcessImageFileName);
-		require_action(SysStringLen(fwBstrProcessImageFileName) > 0, exit, err = kNoMemoryErr);
+		require_action(( fwProcessImageFileName != NULL ) && ( SysStringLen(fwBstrProcessImageFileName) > 0 ), exit, err = kNoMemoryErr);
 
 		// Set the executable file name
 
@@ -250,7 +257,7 @@ mDNSFirewallAddApp
 		require(SUCCEEDED(err), exit);
 
 		fwBstrName = SysAllocString(fwName);
-		require_action(SysStringLen(fwBstrName) > 0, exit, err = kNoMemoryErr);
+		require_action( ( fwBstrName != NULL ) && ( SysStringLen(fwBstrName) > 0 ), exit, err = kNoMemoryErr);
 
 		// Set the friendly name
 
@@ -269,8 +276,15 @@ exit:
 
 	// Deallocate the BSTR objects
 
-    SysFreeString(fwBstrName);
-    SysFreeString(fwBstrProcessImageFileName);
+	if ( fwBstrName != NULL )
+	{
+		SysFreeString(fwBstrName);
+	}
+
+	if ( fwBstrProcessImageFileName != NULL )
+	{
+		SysFreeString(fwBstrProcessImageFileName);
+	}
 
     // Release the COM objects
 
@@ -282,6 +296,57 @@ exit:
     if (fwApps != NULL)
     {
         fwApps->Release();
+    }
+
+    return err;
+}
+
+
+static OSStatus
+mDNSFirewallIsFileAndPrintSharingEnabled
+	(
+	IN INetFwProfile	* fwProfile,
+	OUT BOOL			* fwServiceEnabled
+	)
+{
+    VARIANT_BOOL fwEnabled;
+    INetFwService* fwService = NULL;
+    INetFwServices* fwServices = NULL;
+	OSStatus err = S_OK;
+
+    _ASSERT(fwProfile != NULL);
+    _ASSERT(fwServiceEnabled != NULL);
+
+    *fwServiceEnabled = FALSE;
+
+    // Retrieve the globally open ports collection.
+    err = fwProfile->get_Services(&fwServices);
+	require( SUCCEEDED( err ), exit );
+
+    // Attempt to retrieve the globally open port.
+    err = fwServices->Item(NET_FW_SERVICE_FILE_AND_PRINT, &fwService);
+	require( SUCCEEDED( err ), exit );
+	
+	// Find out if the globally open port is enabled.
+    err = fwService->get_Enabled(&fwEnabled);
+	require( SUCCEEDED( err ), exit );
+	if (fwEnabled != VARIANT_FALSE)
+	{
+		*fwServiceEnabled = TRUE;
+	}
+
+exit:
+
+    // Release the globally open port.
+    if (fwService != NULL)
+    {
+        fwService->Release();
+    }
+
+    // Release the globally open ports collection.
+    if (fwServices != NULL)
+    {
+        fwServices->Release();
     }
 
     return err;
@@ -315,7 +380,7 @@ mDNSAddToFirewall
 	// Connect to the firewall
 
 	err = mDNSFirewallInitialize(&fwProfile);
-	require_noerr(err, exit);
+	require( SUCCEEDED( err ) && ( fwProfile != NULL ), exit);
 
 	// Add us to the list of exempt programs
 
@@ -326,7 +391,10 @@ exit:
 
 	// Disconnect from the firewall
 
-	mDNSFirewallCleanup(fwProfile);
+	if ( fwProfile != NULL )
+	{
+		mDNSFirewallCleanup(fwProfile);
+	}
 
 	// De-initialize COM
 
@@ -336,4 +404,53 @@ exit:
     }
 
 	return err;
+}
+
+
+BOOL
+mDNSIsFileAndPrintSharingEnabled()
+{
+	INetFwProfile	*	fwProfile					= NULL;
+	HRESULT				comInit						= E_FAIL;
+	BOOL				enabled						= FALSE;
+	OSStatus			err							= kNoErr;
+
+	// Initialize COM.
+
+	comInit = CoInitializeEx( 0, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
+
+	// Ignore this case. RPC_E_CHANGED_MODE means that COM has already been
+	// initialized with a different mode.
+
+	if (comInit != RPC_E_CHANGED_MODE)
+	{
+		err = comInit;
+		require(SUCCEEDED(err), exit);
+	}
+
+	// Connect to the firewall
+
+	err = mDNSFirewallInitialize(&fwProfile);
+	require( SUCCEEDED( err ) && ( fwProfile != NULL ), exit);
+
+	err = mDNSFirewallIsFileAndPrintSharingEnabled( fwProfile, &enabled );
+	require_noerr( err, exit );
+
+exit:
+
+	// Disconnect from the firewall
+
+	if ( fwProfile != NULL )
+	{
+		mDNSFirewallCleanup(fwProfile);
+	}
+
+	// De-initialize COM
+
+	if (SUCCEEDED(comInit))
+    {
+        CoUninitialize();
+    }
+
+	return enabled;
 }

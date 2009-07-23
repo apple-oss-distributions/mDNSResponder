@@ -31,6 +31,29 @@
 # then try typing "gmake os=xxx" instead.
 #
 # $Log: Makefile,v $
+# Revision 1.83  2009/02/02 19:44:06  cheshire
+# Use "-fwrapv" option to tell compiler that the code is written assuming that
+# signed arithmetic is implemented using the twos-complement representation
+# (this is pretty much universally true on today's processors).
+# <http://gcc.gnu.org/onlinedocs/gcc-4.2.1/gcc/Code-Gen-Options.html>
+# Without this option, gcc may decide that because the C language
+# does not require processors to use twos-complement representation, that means
+# gcc is free to do some "creative" optimizations that don't preserve the overflow
+# behaviour of twos-complement arithmetic. See also "-fstrict-overflow":
+# <http://gcc.gnu.org/onlinedocs/gcc-4.2.1/gcc/Optimize-Options.html>
+#
+# Revision 1.82  2009/01/12 22:48:00  cheshire
+# Don't need to include "." in the "#include" search path
+#
+# Revision 1.81  2009/01/11 03:20:06  mkrochma
+# <rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
+#
+# Revision 1.80  2008/11/03 23:27:51  cheshire
+# Defined __MAC_OS_X_VERSION_MIN_REQUIRED=__MAC_OS_X_VERSION_10_4 to stop build failures on Leopard
+#
+# Revision 1.79  2008/10/24 01:59:59  mcguire
+# <rdar://problem/6257159> Build Failure: Need to stop using Jam
+#
 # Revision 1.78  2007/10/22 20:16:49  cheshire
 # Got rid of jaguar and panther from list of target platforms;
 # changed "os=tiger" to "os=x" (which works with both Tiger and Leopard)
@@ -290,7 +313,7 @@
 LIBVERS = 1
 
 COREDIR = ../mDNSCore
-SHAREDDIR = ../mDNSShared
+SHAREDDIR ?= ../mDNSShared
 JDK = /usr/jdk
 
 CC = @cc
@@ -300,7 +323,7 @@ LD = ld -shared
 CP = cp
 RM = rm
 LN = ln -s -f
-CFLAGS_COMMON = -I. -I$(COREDIR) -I$(SHAREDDIR) -I$(OBJDIR) -W -Wall -DPID_FILE=\"/var/run/mdnsd.pid\" -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\"
+CFLAGS_COMMON = -I$(COREDIR) -I$(SHAREDDIR) -I$(OBJDIR) -fwrapv -W -Wall -DPID_FILE=\"/var/run/mdnsd.pid\" -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\"
 CFLAGS_PTHREAD =
 LINKOPTS =
 LINKOPTS_PTHREAD = -lpthread
@@ -319,15 +342,16 @@ else
 # 1. We want to make small binaries, suitable for putting into hardware devices
 # 2. Some of the code analysis warnings only work when some form of optimization is enabled
 CFLAGS_DEBUG = -Os -DMDNS_DEBUGMSGS=0 
-OBJDIR = objects/prod
-BUILDDIR = build/prod
+OBJDIR ?= objects/prod
+BUILDDIR ?= build/prod
 STRIP = strip -S 
 endif
 
 # Configure per-OS peculiarities
 ifeq ($(os),solaris)
+CFLAGS_DEBUG = -O0 -DMDNS_DEBUGMSGS=0
 CFLAGS_OS = -DNOT_HAVE_DAEMON -DNOT_HAVE_SA_LEN -DNOT_HAVE_SOCKLEN_T -DNOT_HAVE_IF_NAMETOINDEX \
-	 -DLOG_PERROR=0 -D_XPG4_2 -D__EXTENSIONS__ -DHAVE_BROKEN_RECVIF_NAME
+	 -DLOG_PERROR=0 -D_XPG4_2 -D__EXTENSIONS__ -DHAVE_BROKEN_RECVIF_NAME -DTARGET_OS_SOLARIS
 CC = gcc
 LD = gcc -shared
 LINKOPTS = -lsocket -lnsl -lresolv
@@ -375,7 +399,10 @@ LDCONFIG = ldconfig
 else
 
 ifeq ($(os),x)
-CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror -Wdeclaration-after-statement #-Wunreachable-code
+# We have to define __MAC_OS_X_VERSION_MIN_REQUIRED=__MAC_OS_X_VERSION_10_4 or on Leopard
+# we get build failures: ‘daemon’ is deprecated (declared at /usr/include/stdlib.h:283)
+CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror -Wdeclaration-after-statement \
+	-D__MAC_OS_X_VERSION_MIN_REQUIRED=__MAC_OS_X_VERSION_10_4 #-Wunreachable-code
 CC = @gcc-4.0
 LD = $(CC) -dynamiclib
 LINKOPTS = -lSystem
@@ -450,10 +477,8 @@ install: setup InstalledDaemon InstalledStartup InstalledLib InstalledManPages I
 
 # 'setup' sets up the build directory structure the way we want
 setup:
-	@if test ! -d objects     ; then mkdir objects     ; fi
-	@if test ! -d build       ; then mkdir build       ; fi
-	@if test ! -d $(OBJDIR)   ; then mkdir $(OBJDIR)   ; fi
-	@if test ! -d $(BUILDDIR) ; then mkdir $(BUILDDIR) ; fi
+	@if test ! -d $(OBJDIR)   ; then mkdir -p $(OBJDIR)   ; fi
+	@if test ! -d $(BUILDDIR) ; then mkdir -p $(BUILDDIR) ; fi
 
 # clean removes targets and objects
 clean:
@@ -593,12 +618,36 @@ $(NSSINSTPATH)/$(NSSLIBFILE): $(BUILDDIR)/$(NSSLIBFILE)
 #############################################################################
 
 # The following targets build Java wrappers for the dns-sd.h API.
+# Note that the JavaForXcode targets are used when building the project for OS X using Xcode
 
 JAVAC = $(JDK)/bin/javac
 JAVAH = $(JDK)/bin/javah
 JAVADOC = $(JDK)/bin/javadoc
 JAR = $(JDK)/bin/jar
 JAVACFLAGS = $(CFLAGS) $(JAVACFLAGS_OS) -I$(JDK)/include
+
+JavaForXcode_: setup $(BUILDDIR)/dns_sd.jar $(PROJECT_DERIVED_FILE_DIR)/DNSSD.java.h
+	@echo $@ done
+	
+$(PROJECT_DERIVED_FILE_DIR)/DNSSD.java.h: $(OBJDIR)/DNSSD.java.h
+	@if test ! -d $(PROJECT_DERIVED_FILE_DIR) ; then mkdir -p $(PROJECT_DERIVED_FILE_DIR) ; fi
+	$(CP) $< $@
+
+JavaForXcode_clean:
+	@if test -d $(OBJDIR) ; then rm -r $(OBJDIR) ; fi
+	@if test -f $(PROJECT_DERIVED_FILE_DIR)/DNSSD.java.h ; then $(RM) $(PROJECT_DERIVED_FILE_DIR)/DNSSD.java.h ; fi
+	@if test -f $(BUILDDIR)/dns_sd.jar ; then $(RM) $(BUILDDIR)/dns_sd.jar ; fi
+	@echo $@ done
+
+JavaForXcode_installhdrs:
+	@echo $@ NOOP
+
+JavaForXcode_install: JavaForXcode_ $(DSTROOT)/$(SYSTEM_LIBRARY_DIR)/Java/Extensions/dns_sd.jar
+	@echo $@ done
+
+$(DSTROOT)/$(SYSTEM_LIBRARY_DIR)/Java/Extensions/dns_sd.jar: $(BUILDDIR)/dns_sd.jar
+	@if test ! -d $(DSTROOT)/$(SYSTEM_LIBRARY_DIR)/Java/Extensions ; then mkdir -p $(DSTROOT)/$(SYSTEM_LIBRARY_DIR)/Java/Extensions ; fi
+	$(CP) $< $@
 
 Java: setup $(BUILDDIR)/dns_sd.jar $(BUILDDIR)/libjdns_sd.$(LDSUFFIX)
 	@echo "Java wrappers done"
@@ -636,7 +685,9 @@ $(OBJDIR)/DNSSD.java.h: $(OBJDIR)/com/apple/dnssd/DNSSD.class
 		com.apple.dnssd.AppleRegistration \
 		com.apple.dnssd.AppleQuery \
 		com.apple.dnssd.AppleDomainEnum \
-		com.apple.dnssd.AppleService 
+		com.apple.dnssd.AppleService \
+		com.apple.dnssd.AppleDNSRecord \
+		com.apple.dnssd.AppleRecordRegistrar
 
 #############################################################################
 

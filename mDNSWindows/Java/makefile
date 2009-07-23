@@ -15,6 +15,11 @@
 # limitations under the License.
 #
 # $Log: makefile,v $
+# Revision 1.10  2009/03/30 20:22:43  herscher
+# <rdar://problem/5925472> Current Bonjour code does not compile on Windows
+# Update LIBDIR to work with new build directory structure
+# Create postbuild rules for new buildtrain
+#
 # Revision 1.9  2006/08/14 23:26:04  cheshire
 # Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 #
@@ -89,13 +94,13 @@ CFLAGS_DEBUG = -Zi -DMDNS_DEBUGMSGS=2
 OBJDIR = objects\debug
 BUILDDIR = build\debug
 INSTALLDIR = root\"Program Files"\Bonjour
-LIBDIR = ..\DLL\Debug
+LIBDIR = ..\DLL\Win32\Debug
 !else
 CFLAGS_DEBUG = -Os -DMDNS_DEBUGMSGS=0 
 OBJDIR = objects\prod
 BUILDDIR = build\prod
 INSTALLDIR = root\"Program Files"\Bonjour
-LIBDIR = ..\DLL\Release
+LIBDIR = ..\DLL\Win32\Release
 !endif
 
 CFLAGS = $(CFLAGS_COMMON) $(CFLAGS_DEBUG)
@@ -113,7 +118,13 @@ setup:
 	@if not exist $(BUILDDIR)	mkdir $(BUILDDIR)
 
 postbuild:
-	@if not exist root						mkdir root
+	@if not "%RC_XBS%"=="YES" GOTO CONT
+	@if not exist "$(DSTROOT)\WINDOWS\system32\Win32"	mkdir "$(DSTROOT)\WINDOWS\system32\Win32"
+	@if not exist "$(DSTROOT)\Program Files\Bonjour\Win32"	mkdir "$(DSTROOT)\Program Files\Bonjour\Win32"
+	@copy $(BUILDDIR)\jdns_sd.dll "$(DSTROOT)\WINDOWS\system32\Win32"
+	@copy $(BUILDDIR)\dns_sd.jar  "$(DSTROOT)\Program Files\Bonjour\Win32"
+	@:CONT
+	@if not exist root					mkdir root
 	@if not exist root\"Program Files"	mkdir root\"Program Files"
 	@if not exist $(INSTALLDIR)			mkdir $(INSTALLDIR)
 	copy $(BUILDDIR)\dns_sd.jar $(INSTALLDIR)
@@ -137,14 +148,14 @@ JARCONTENTS =	$(OBJDIR)\com\apple\dnssd\DNSSDService.class \
 				$(OBJDIR)\com\apple\dnssd\DNSRecord.class \
 				$(OBJDIR)\com\apple\dnssd\TXTRecord.class \
 				$(OBJDIR)\com\apple\dnssd\DNSSDRegistration.class \
+				$(OBJDIR)\com\apple\dnssd\DNSSDRecordRegistrar.class \
 				$(OBJDIR)\com\apple\dnssd\BaseListener.class \
 				$(OBJDIR)\com\apple\dnssd\BrowseListener.class \
 				$(OBJDIR)\com\apple\dnssd\ResolveListener.class \
 				$(OBJDIR)\com\apple\dnssd\RegisterListener.class \
+				$(OBJDIR)\com\apple\dnssd\RegisterRecordListener.class \
 				$(OBJDIR)\com\apple\dnssd\QueryListener.class \
 				$(OBJDIR)\com\apple\dnssd\DomainListener.class \
-				$(OBJDIR)\com\apple\dnssd\DNSSDRecordRegistrar.class \
-				$(OBJDIR)\com\apple\dnssd\RegisterRecordListener.class \
 				$(OBJDIR)\com\apple\dnssd\DNSSD.class
 
 $(BUILDDIR)\dns_sd.jar: $(JARCONTENTS)

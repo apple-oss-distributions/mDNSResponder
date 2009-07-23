@@ -17,6 +17,84 @@
     Change History (most recent first):
 
 $Log: mDNSMacOSX.h,v $
+Revision 1.104  2009/06/25 23:36:56  cheshire
+To facilitate testing, added command-line switch "-OfferSleepProxyService"
+to re-enable the previously-supported mode of operation where we offer
+sleep proxy service on desktop Macs that are set to never sleep.
+
+Revision 1.103  2009/04/11 00:20:13  jessic2
+<rdar://problem/4426780> Daemon: Should be able to turn on LogOperation dynamically
+
+Revision 1.102  2009/04/06 22:14:02  cheshire
+Need to include IOKit/pwr_mgt/IOPM.h to build for AppleTV
+
+Revision 1.101  2009/04/02 22:21:17  mcguire
+<rdar://problem/6577409> Adopt IOPM APIs
+
+Revision 1.100  2009/02/12 20:57:26  cheshire
+Renamed 'LogAllOperation' switch to 'LogClientOperations'; added new 'LogSleepProxyActions' switch
+
+Revision 1.99  2009/02/11 02:31:05  cheshire
+Move SystemWakeForNetworkAccessEnabled into mDNS structure so it's accessible to mDNSCore routines
+
+Revision 1.98  2009/02/07 02:52:19  cheshire
+<rdar://problem/6084043> Sleep Proxy: Need to adopt IOPMConnection
+
+Revision 1.97  2009/02/02 22:13:01  cheshire
+Added SystemWakeForNetworkAccessEnabled setting
+
+Revision 1.96  2009/01/17 04:13:57  cheshire
+Added version symbols for Cheetah and Puma
+
+Revision 1.95  2009/01/16 02:32:55  cheshire
+Added SysEventNotifier and SysEventKQueue in mDNS_PlatformSupport_struct
+
+Revision 1.94  2009/01/15 22:24:53  cheshire
+Removed unused ifa_name field from NetworkInterfaceInfoOSX_struct
+
+Revision 1.93  2008/12/10 19:30:01  cheshire
+Added symbolic names for the various OS X versions
+
+Revision 1.92  2008/10/31 23:49:38  mkrochma
+Increased sizecheck limit
+
+Revision 1.91  2008/10/31 22:48:27  cheshire
+Added SCPreferencesRef to mDNS_PlatformSupport_struct
+
+Revision 1.90  2008/10/30 01:04:35  cheshire
+Added WakeAtUTC and SleepTime fields to mDNS_PlatformSupport_struct
+
+Revision 1.89  2008/10/29 18:38:33  mcguire
+Increase sizecheck limits to account for CFRunLoop added to mDNS_PlatformSupport_struct in 64bit builds
+
+Revision 1.88  2008/10/28 20:33:56  cheshire
+Added CFRunLoopRef in mDNS_PlatformSupport_struct, to hold reference to our main thread's CFRunLoop
+
+Revision 1.87  2008/10/28 18:32:09  cheshire
+Added CFSocketRef and CFRunLoopSourceRef in NetworkInterfaceInfoOSX_struct
+
+Revision 1.86  2008/10/22 23:23:53  cheshire
+Moved definition of OSXVers from daemon.c into mDNSMacOSX.c
+
+Revision 1.85  2008/10/21 00:12:00  cheshire
+Added BPF-related fields in NetworkInterfaceInfoOSX_struct
+
+Revision 1.84  2008/10/14 20:20:44  cheshire
+Increase sizecheck limits to account for DNSQuestions added to NetworkInterfaceInfo_struct
+
+Revision 1.83  2008/10/07 21:41:57  mcguire
+Increase sizecheck limits to account for DNSQuestion added to NetworkInterfaceInfo_struct in 64bit builds
+
+Revision 1.82  2008/10/07 15:56:24  cheshire
+Increase sizecheck limits to account for DNSQuestion added to NetworkInterfaceInfo_struct
+
+Revision 1.81  2008/10/03 00:26:25  cheshire
+Export DictionaryIsEnabled() so it's callable from other files
+
+Revision 1.80  2008/10/02 22:47:01  cheshire
+<rdar://problem/6134215> Sleep Proxy: Mac with Internet Sharing should also offer Sleep Proxy service
+Added SCPreferencesRef so we can track whether Internet Sharing is on or off
+
 Revision 1.79  2008/07/30 00:55:56  mcguire
 <rdar://problem/3988320> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
 Additional fixes so that we know when a socket has been closed while in a loop reading from it
@@ -120,7 +198,9 @@ Revision 1.52  2006/01/05 21:41:49  cheshire
 #endif
 
 #include <SystemConfiguration/SystemConfiguration.h>
+#include <IOKit/pwr_mgt/IOPM.h>
 #include <IOKit/pwr_mgt/IOPMLib.h>
+#include <IOKit/pwr_mgt/IOPMLibPrivate.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include "mDNSEmbeddedAPI.h"  // for domain name structure
@@ -156,21 +236,25 @@ struct NetworkInterfaceInfoOSX_struct
 	{
 	NetworkInterfaceInfo     ifinfo;			// MUST be the first element in this structure
 	NetworkInterfaceInfoOSX *next;
-	mDNSu32                  Exists;			// 1 = currently exists in getifaddrs list; 0 = doesn't
+	mDNS                    *m;
+	mDNSu8                   Exists;			// 1 = currently exists in getifaddrs list; 0 = doesn't
 												// 2 = exists, but McastTxRx state changed
+	mDNSu8                   Flashing;			// Set if interface appeared for less than 60 seconds and then vanished
+	mDNSu8                   Occulting;			// Set if interface vanished for less than 60 seconds and then came back
 	mDNSs32                  AppearanceTime;	// Time this interface appeared most recently in getifaddrs list
 												// i.e. the first time an interface is seen, AppearanceTime is set.
 												// If an interface goes away temporarily and then comes back then
 												// AppearanceTime is updated to the time of the most recent appearance.
 	mDNSs32                  LastSeen;			// If Exists==0, last time this interface appeared in getifaddrs list
-	mDNSBool                 Flashing;			// Set if interface appeared for less than 60 seconds and then vanished
-	mDNSBool                 Occulting;			// Set if interface vanished for less than 60 seconds and then came back
-	char                    *ifa_name;			// Memory for this is allocated using malloc
 	unsigned int             ifa_flags;
 	struct in_addr           ifa_v4addr;
 	mDNSu32                  scope_id;			// interface index / IPv6 scope ID
 	mDNSEthAddr              BSSID;				// BSSID of 802.11 base station, if applicable
 	u_short                  sa_family;
+	int                      BPF_fd;			// -1 uninitialized; -2 requested BPF; -3 failed
+	u_int                    BPF_len;
+	CFSocketRef              BPF_cfs;
+	CFRunLoopSourceRef       BPF_rls;
 	};
 
 struct mDNS_PlatformSupport_struct
@@ -189,18 +273,38 @@ struct mDNS_PlatformSupport_struct
 	// See <rdar://problem/5124399> Not getting Keychain Changed events when enabling BTMM
 	mDNSs32                  KeyChainBugTimer;
 	mDNSs32                  KeyChainBugInterval;
-	
+
+	CFRunLoopRef             CFRunLoop;
 	SCDynamicStoreRef        Store;
 	CFRunLoopSourceRef       StoreRLS;
+	CFRunLoopSourceRef       PMRLS;
+	int                      SysEventNotifier;
+	KQueueEntry              SysEventKQueue;
 	IONotificationPortRef    PowerPortRef;
 	io_connect_t             PowerConnection;
 	io_object_t              PowerNotifier;
-	mDNSs32                  SleepLimit;		// Set when we get kIOMessageSystemWillSleep notification
+#ifdef kIOPMAcknowledgmentOptionSystemCapabilityRequirements
+	IOPMConnection           IOPMConnection;
+#endif
+	SCPreferencesRef         SCPrefs;
 	long                     SleepCookie;		// Cookie we need to pass to IOAllowPowerChange()
+	long                     WakeAtUTC;
+	mDNSs32                  RequestReSleep;
 	pthread_mutex_t          BigMutex;
 	mDNSs32                  BigMutexStartTime;
 	int						 WakeKQueueLoopFD;
 	};
+
+extern int OfferSleepProxyService;
+extern int OSXVers;
+#define OSXVers_Base              4
+#define OSXVers_10_0_Cheetah      4
+#define OSXVers_10_1_Puma         5
+#define OSXVers_10_2_Jaguar       6
+#define OSXVers_10_3_Panther      7
+#define OSXVers_10_4_Tiger        8
+#define OSXVers_10_5_Leopard      9
+#define OSXVers_10_6_SnowLeopard 10
 
 extern int KQueueFD;
 
@@ -215,6 +319,8 @@ extern int KQueueSet(int fd, u_short flags, short filter, const KQueueEntry *con
 // Interface changes, Keychain changes, etc.) they must use KQueueLock/KQueueUnlock to lock out the kqueue thread
 extern void KQueueLock(mDNS *const m);
 extern void KQueueUnlock(mDNS *const m, const char const *task);
+
+extern mDNSBool DictionaryIsEnabled(CFDictionaryRef dict);
 
 // If any event takes more than WatchDogReportingThreshold milliseconds to be processed, we log a warning message
 // General event categories are:
@@ -232,19 +338,15 @@ extern void KQueueUnlock(mDNS *const m, const char const *task);
 // what's causing the problem, we may need to subdivide some categories into finer-grained
 // sub-categories (e.g. "Idle task processing" covers a pretty broad range of sub-tasks).
 
-#if LogAllOperations
-#define WatchDogReportingThreshold 50
-#else
-#define WatchDogReportingThreshold 250
-#endif
+extern int WatchDogReportingThreshold;
 
 struct CompileTimeAssertionChecks_mDNSMacOSX
 	{
 	// Check our structures are reasonable sizes. Including overly-large buffers, or embedding
 	// other overly-large structures instead of having a pointer to them, can inadvertently
 	// cause structure sizes (and therefore memory usage) to balloon unreasonably.
-	char sizecheck_NetworkInterfaceInfoOSX[(sizeof(NetworkInterfaceInfoOSX) <=  4456) ? 1 : -1];
-	char sizecheck_mDNS_PlatformSupport   [(sizeof(mDNS_PlatformSupport)    <=   368) ? 1 : -1];
+	char sizecheck_NetworkInterfaceInfoOSX[(sizeof(NetworkInterfaceInfoOSX) <=  7000) ? 1 : -1];
+	char sizecheck_mDNS_PlatformSupport   [(sizeof(mDNS_PlatformSupport)    <=   476) ? 1 : -1];
 	};
 
 #ifdef  __cplusplus

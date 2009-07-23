@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: SharedSecret.h,v $
+Revision 1.5  2009/06/22 23:25:11  herscher
+<rdar://problem/5265747> ControlPanel doesn't display key and password in dialog box. Refactor Lsa calls into Secret.h and Secret.c, which is used by both the ControlPanel and mDNSResponder system service.
+
 Revision 1.4  2006/08/14 23:25:28  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -49,6 +52,9 @@ public:
 
 // Dialog Data
 	enum { IDD = IDR_SECRET };
+
+	void
+	Load( CString zone );
 
 	void
 	Commit( CString zone );

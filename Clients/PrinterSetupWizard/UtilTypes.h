@@ -17,6 +17,13 @@
     Change History (most recent first):
     
 $Log: UtilTypes.h,v $
+Revision 1.18  2009/05/29 20:43:37  herscher
+<rdar://problem/6928136> Printer Wizard doesn't work correctly in Windows 7 64 bit
+
+Revision 1.17  2009/05/27 04:59:57  herscher
+<rdar://problem/4517393> COMPATIBILITY WITH HP CLJ4700
+<rdar://problem/6142138> Compatibility with Samsung print driver files
+
 Revision 1.16  2007/04/20 22:58:10  herscher
 <rdar://problem/4826126> mDNS: Printer Wizard doesn't offer generic HP printers or generic PS support on Vista RC2
 
@@ -97,7 +104,6 @@ namespace PrinterSetupWizard
 	typedef std::list<Printer*>	Printers;
 	typedef std::list<Service*>	Services;
 	typedef std::list<Model*>	Models;
-	typedef std::list<CString>	Decorations;
 
 	struct Printer
 	{
@@ -218,9 +224,7 @@ namespace PrinterSetupWizard
 	struct Manufacturer
 	{
 		CString		name;
-		CString		tag;
 		Models		models;
-		Decorations	decorations;
 
 		Model*
 		find( const CString & name );

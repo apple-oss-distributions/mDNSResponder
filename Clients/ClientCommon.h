@@ -1,6 +1,6 @@
-/* -*- Mode: Java; tab-width: 4 -*-
+/* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
  *
  * Disclaimer: IMPORTANT:  This Apple software is supplied to you by Apple Computer, Inc.
  * ("Apple") in consideration of your agreement to the following terms, and your
@@ -36,71 +36,14 @@
  * OF THE APPLE SOFTWARE, HOWEVER CAUSED AND WHETHER UNDER THEORY OF CONTRACT, TORT
  * (INCLUDING NEGLIGENCE), STRICT LIABILITY OR OTHERWISE, EVEN IF APPLE HAS BEEN
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+
+    Change History (most recent first):
+
+$Log: ClientCommon.h,v $
+Revision 1.1  2008/05/08 00:25:48  cheshire
+<rdar://problem/5919272> GetNextLabel insufficiently defensive
 
 
-import javax.swing.*;
-import com.apple.dnssd.*;
+*/
 
-
-/**	Use this to schedule ResolveListener callbacks via SwingUtilities.invokeAndWait(). */
-
-public class SwingResolveListener implements Runnable, ResolveListener
-{
-	/** Create a listener for DNSSD that will call your listener on the Swing/AWT event thread. */
-	public	SwingResolveListener( ResolveListener listener)
-	{ fListener = listener; }
-
-	public void	operationFailed( DNSSDService service, int errorCode)
-	{
-		fResolver = service;
-		fErrorCode = errorCode;
-		this.schedule();
-	}
-
-	/** (Clients should not call this method directly.) */
-	public void	serviceResolved( DNSSDService resolver, int flags, int ifIndex, String fullName, 
-								String hostName, int port, TXTRecord txtRecord)
-	{
-		fResolver = resolver;
-		fFlags = flags;
-		fIndex = ifIndex;
-		fFullName = fullName;
-		fHostName = hostName;
-		fPort = port;
-		fTXTRecord = txtRecord;
-		this.schedule();
-	}
-
-	/** (Clients should not call this method directly.) */
-	public void		run()
-	{
-		if ( fErrorCode != 0)
-			fListener.operationFailed( fResolver, fErrorCode);
-		else
-			fListener.serviceResolved( fResolver, fFlags, fIndex, fFullName, fHostName, fPort, fTXTRecord);
-	}
-
-	protected void	schedule()
-	{
-		try {
-			SwingUtilities.invokeAndWait( this);
-		}
-		catch ( Exception e)
-		{
-			e.printStackTrace();
-		}
-	}
-
-	protected ResolveListener	fListener;
-
-	protected DNSSDService		fResolver;
-	protected int				fFlags;
-	protected int				fIndex;
-	protected int				fErrorCode;
-	protected String			fFullName;
-	protected String			fHostName;
-	protected int				fPort;
-	protected TXTRecord			fTXTRecord;
-}
-
+extern const char *GetNextLabel(const char *cstr, char label[64]);

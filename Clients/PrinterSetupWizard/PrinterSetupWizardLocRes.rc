@@ -171,8 +171,8 @@ BEGIN
     LTEXT           "",IDC_PRINTER_MODEL,172,104,113,8
     LTEXT           "",IDC_PRINTER_PROTOCOL,172,117,113,8
     LTEXT           "",IDC_PRINTER_DEFAULT,172,130,113,8
-    LTEXT           "To complete the installation, click Finish.",IDC_STATIC,116,187,
-                    171,8
+    LTEXT           "To complete the installation, click Finish.",IDC_STATIC,116,180,171,8
+    LTEXT           "To change these settings, click Back.",IDC_STATIC,116,190,171,8
 END
 
 IDD_DIALOG1 DIALOGEX 0, 0, 265, 130
@@ -256,6 +256,8 @@ BEGIN
     IDS_INSTALL_ERROR_CAPTION "Error"
     IDS_INSTALL_ERROR_MESSAGE 
                             "You do not have sufficient access to your computer to connect to the selected printer."
+	IDS_BAD_INF_FILE		"The specified location does not contain information about your printer"
+	IDS_BAD_INF_FILE_CAPTION "Select Device"
     IDS_MANUFACTURER_HEADING "Manufacturer"
     IDS_MODEL_HEADING       "Model"
     IDS_NO_PRINTERS         "No Bonjour Printers are available"

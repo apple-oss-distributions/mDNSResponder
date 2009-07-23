@@ -17,6 +17,13 @@
     Change History (most recent first):
 
 $Log: ConfigPropertySheet.h,v $
+Revision 1.7  2009/07/01 19:20:37  herscher
+<rdar://problem/6713286> UI changes for configuring sleep proxy settings.
+
+Revision 1.6  2009/03/30 19:58:47  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
 Revision 1.5  2006/08/14 23:25:28  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -33,6 +40,7 @@ Revision 1.4  2005/03/03 19:55:21  shersche
 #include "FirstPage.h"
 #include "SecondPage.h"
 #include "ThirdPage.h"
+#include "FourthPage.h"
 
 #include <RegNames.h>
 #include <dns_sd.h>
@@ -60,6 +68,7 @@ protected:
 	CFirstPage	m_firstPage;
 	CSecondPage	m_secondPage;
 	CThirdPage m_thirdPage;
+	CFourthPage m_fourthPage;
 
 	//{{AFX_VIRTUAL(CConfigPropertySheet)
 	//}}AFX_VIRTUAL
@@ -72,11 +81,8 @@ protected:
 
 	afx_msg BOOL	OnInitDialog();
 	afx_msg BOOL	OnCommand( WPARAM wParam, LPARAM lParam );
-
-	afx_msg LONG	OnDataReady( WPARAM inWParam, LPARAM inLParam );
-
-	afx_msg LONG	OnRegistryChanged( WPARAM inWParam, LPARAM inLParam );
-
+	afx_msg LRESULT	OnDataReady( WPARAM inWParam, LPARAM inLParam );
+	afx_msg LRESULT	OnRegistryChanged( WPARAM inWParam, LPARAM inLParam );
 	void			OnEndDialog();
 
 private:

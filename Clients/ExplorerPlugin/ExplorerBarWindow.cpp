@@ -17,6 +17,10 @@
     Change History (most recent first):
     
 $Log: ExplorerBarWindow.cpp,v $
+Revision 1.23  2009/03/30 18:47:40  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
 Revision 1.22  2006/08/14 23:24:00  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -381,7 +385,7 @@ exit:
 //	OnServiceEvent
 //===========================================================================================================================
 
-LONG
+LRESULT
 ExplorerBarWindow::OnServiceEvent(WPARAM inWParam, LPARAM inLParam)
 {
 	if (WSAGETSELECTERROR(inLParam) && !(HIWORD(inLParam)))
@@ -472,13 +476,13 @@ void DNSSD_API
 		err = UTF8StringToStringObject( inName, service->displayName );
 		check_noerr( err );
 
-		service->name = strdup( inName );
+		service->name = _strdup( inName );
 		require_action( service->name, exit, err = kNoMemoryErr );
 		
-		service->type = strdup( inType );
+		service->type = _strdup( inType );
 		require_action( service->type, exit, err = kNoMemoryErr );
 		
-		service->domain = strdup( inDomain );
+		service->domain = _strdup( inDomain );
 		require_action( service->domain, exit, err = kNoMemoryErr );
 		
 		service->ifi 		= inInterfaceIndex;

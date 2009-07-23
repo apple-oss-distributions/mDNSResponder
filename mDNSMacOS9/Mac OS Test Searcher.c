@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: Mac\040OS\040Test\040Searcher.c,v $
+Revision 1.24  2008/11/04 19:43:35  cheshire
+Updated comment about MAX_ESCAPED_DOMAIN_NAME size (should be 1009, not 1005)
+
 Revision 1.23  2007/07/27 19:30:40  cheshire
 Changed mDNSQuestionCallback parameter from mDNSBool to QC_result,
 to properly reflect tri-state nature of the possible responses
@@ -53,7 +56,7 @@ Change to use mDNSOpaque16fromIntVal/mDNSVal16 instead of shifting and masking
 
 Revision 1.14  2003/11/14 21:27:09  cheshire
 <rdar://problem/3484766>: Security: Crashing bug in mDNSResponder
-Fix code that should use buffer size MAX_ESCAPED_DOMAIN_NAME (1005) instead of 256-byte buffers.
+Fix code that should use buffer size MAX_ESCAPED_DOMAIN_NAME (1009) instead of 256-byte buffers.
 
 Revision 1.13  2003/08/14 02:19:54  cheshire
 <rdar://problem/3375491> Split generic ResourceRecord type into two separate types: AuthRecord and CacheRecord

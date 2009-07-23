@@ -126,9 +126,11 @@ FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     CONTROL         "",IDC_ABOUT_BACKGROUND,"Static",SS_BITMAP | SS_REALSIZEIMAGE,0,0,
                     220,86
-    CONTROL         MASTER_PROD_VERS_STR3,IDC_COMPONENT,"Static",
+    CONTROL         "Explorer Plugin",IDC_COMPONENT,"Static",
                     SS_SIMPLE | WS_GROUP,92,10,122,8
-    LTEXT           "Copyright (c) 2004-2005 Apple Computer, Inc. All rights reserved. Apple and the Apple logo are trademarks of Apple Computer, Inc., registered in the U.S. and other countries.",
+    CONTROL         "",IDC_COMPONENT_VERSION,"Static",
+                    SS_SIMPLE | WS_GROUP,142,10,122,8
+    LTEXT           "Copyright (c) 2004-2007 Apple Inc. All rights reserved. Apple and the Apple logo are trademarks of Apple Inc., registered in the U.S. and other countries.",
                     IDC_LEGAL,92,31,123,50,0,WS_EX_RTLREADING
 END
 
@@ -181,7 +183,7 @@ BEGIN
     IDS_NAME                "Bonjour"
     IDS_WEB_SITES           "Web Sites"
     IDS_PRINTERS            "Printers"
-    IDS_MDNSRESPONDER_NOT_AVAILABLE "Bonjour Service Not Available"
+    IDS_MDNSRESPONDER_NOT_AVAILABLE "Bonjour Service is not available."
     IDS_FIREWALL            "Check firewall settings"
 END
 

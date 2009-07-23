@@ -55,7 +55,7 @@ BAOBJ = $(OBJDIR)\BrowserApp
 
 #############################################################################
 
-all: setup Java
+all: setup Java postbuild
 
 # 'setup' sets up the build directory structure the way we want
 setup:
@@ -65,6 +65,16 @@ setup:
 	@if not exist $(SCOBJ)		mkdir $(SCOBJ)
 	@if not exist $(BAOBJ)		mkdir $(BAOBJ)
 	@if not exist $(BUILDDIR)	mkdir $(BUILDDIR)
+
+postbuild:
+	@if not "%RC_XBS%"=="YES" GOTO END
+	@if not exist "$(DSTROOT)\Program Files\Bonjour SDK\Samples\Java" mkdir "$(DSTROOT)\Program Files\Bonjour SDK\Samples\Java"
+	@copy "nmakefile"			"$(DSTROOT)\Program Files\Bonjour SDK\Samples\Java"
+	@copy "BrowserApp.java"		"$(DSTROOT)\Program Files\Bonjour SDK\Samples\Java"
+	@copy "SimpleChat.java"		"$(DSTROOT)\Program Files\Bonjour SDK\Samples\Java"
+	@copy "Swing*.java"			"$(DSTROOT)\Program Files\Bonjour SDK\Samples\Java"
+	@copy "$(BUILDDIR)\*.jar"	"$(DSTROOT)\Program Files\Bonjour SDK\Samples\Java"
+	@:END
 
 # clean removes targets and objects
 clean:
@@ -84,8 +94,7 @@ SIMPLECHATMAN = SimpleChat.manifest
 $(BUILDDIR)\SimpleChat.jar: $(SIMPLECHATOBJ) $(SIMPLECHATMAN)
 	$(JAR) -cfm $@ $(SIMPLECHATMAN) -C $(SCOBJ) .
 
-BROWSERAPPOBJ =	$(BAOBJ)\SwingResolveListener.class \
-				$(BAOBJ)\BrowserApp.class 
+BROWSERAPPOBJ =	$(BAOBJ)\BrowserApp.class 
 BROWSERAPPMAN = BrowserApp.manifest
 
 $(BUILDDIR)\BrowserApp.jar: $(BROWSERAPPOBJ) $(BROWSERAPPMAN)

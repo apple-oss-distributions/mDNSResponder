@@ -17,6 +17,26 @@
     Change History (most recent first):
     
 $Log: Service.c,v $
+Revision 1.46  2009/06/05 18:28:24  herscher
+<rdar://problem/6125087> mDNSResponder should be able to identify VPN adapters generically
+<rdar://problem/6885843> WIN7: Bonjour removes the default gateway entry and thereby breaks network connectivity
+
+Revision 1.45  2009/04/30 20:07:51  mcguire
+<rdar://problem/6822674> Support multiple UDSs from launchd
+
+Revision 1.44  2009/03/30 20:41:36  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/6330821> Bonjour for Windows incompatible w/Juniper Network Connect. Do a substring search for "Juniper" in the description field
+ of the network adapter.
+<rdar://problem/6122028> Bonjour for Windows incompatible w/Cisco AnyConnect VPN Client
+<rdar://problem/5652098> Bonjour for Windows incompatible w/Juniper Network Connect. Update the adapter name per info received from Juniper
+<rdar://problem/5781566> Core: Default Gateway set to 0.0.0.0 on Vista causes ARP flood
+<rdar://problem/5991983> Change the registry values from Apple Computer, Inc. to Apple Inc.
+<rdar://problem/5301328> wchar/sizeof mismatch in CheckFirewall()
+
+Revision 1.43  2009/01/13 05:31:35  mkrochma
+<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
+
 Revision 1.42  2007/02/14 01:58:19  cheshire
 <rdar://problem/4995831> Don't delete Unix Domain Socket on exit if we didn't create it on startup
 
@@ -168,6 +188,8 @@ mDNSResponder Windows Service. Provides global Bonjour support with an IPC inter
 
 #include	<stdio.h>
 #include	<stdlib.h>
+#include	<stdarg.h>
+#include	<stddef.h>
 
 
 #include	"CommonServices.h"
@@ -188,8 +210,15 @@ mDNSResponder Windows Service. Provides global Bonjour support with an IPC inter
 	#include	<mswsock.h>
 	#include	<process.h>
 	#include	<ipExport.h>
+	#include	<ws2def.h>
+	#include	<ws2ipdef.h>
 	#include	<iphlpapi.h>
+	#include	<netioapi.h>
 	#include	<iptypes.h>
+#endif
+
+#ifndef HeapEnableTerminationOnCorruption
+#	define HeapEnableTerminationOnCorruption (HEAP_INFORMATION_CLASS)1
 #endif
 
 #if 0
@@ -205,6 +234,9 @@ mDNSResponder Windows Service. Provides global Bonjour support with an IPC inter
 #define	kServiceDependencies				TEXT("Tcpip\0\0")
 #define	kDNSServiceCacheEntryCountDefault	512
 #define kRetryFirewallPeriod				30 * 1000
+#define kDefValueSize						MAX_PATH + 1
+#define kZeroIndex							0
+#define kDefaultRouteMetric					399
 
 #define RR_CACHE_SIZE 500
 static CacheEntity gRRCache[RR_CACHE_SIZE];
@@ -292,8 +324,12 @@ static void			CoreCallback(mDNS * const inMDNS, mStatus result);
 static void			HostDescriptionChanged(mDNS * const inMDNS);
 static OSStatus		GetRouteDestination(DWORD * ifIndex, DWORD * address);
 static OSStatus		SetLLRoute( mDNS * const inMDNS );
-static bool			HaveRoute( PMIB_IPFORWARDROW rowExtant, unsigned long addr );
+static bool			HaveRoute( PMIB_IPFORWARDROW rowExtant, unsigned long addr, unsigned long metric );
 static bool			IsValidAddress( const char * addr );
+static bool			IsNortelVPN( IP_ADAPTER_INFO * pAdapter );
+static bool			IsJuniperVPN( IP_ADAPTER_INFO * pAdapter );
+static bool			IsCiscoVPN( IP_ADAPTER_INFO * pAdapter );
+static const char * strnistr( const char * string, const char * subString, size_t max );
 
 #if defined(UNICODE)
 #	define StrLen(X)	wcslen(X)
@@ -337,6 +373,12 @@ DEBUG_LOCAL HANDLE						gStopEvent				= NULL;
 DEBUG_LOCAL CRITICAL_SECTION			gEventSourceLock;
 DEBUG_LOCAL GenLinkedList				gEventSources;
 DEBUG_LOCAL BOOL						gRetryFirewall			= FALSE;
+DEBUG_LOCAL DWORD						gOSMajorVersion;
+DEBUG_LOCAL DWORD						gOSMinorVersion;
+
+typedef DWORD ( WINAPI * GetIpInterfaceEntryFunctionPtr )( PMIB_IPINTERFACE_ROW );
+mDNSlocal HMODULE								gIPHelperLibraryInstance		= NULL;
+mDNSlocal GetIpInterfaceEntryFunctionPtr		gGetIpInterfaceEntryFunctionPtr	= NULL;
 
 
 #if 0
@@ -356,6 +398,8 @@ int	__cdecl main( int argc, char *argv[] )
 	BOOL			ok;
 	BOOL			start;
 	int				i;
+
+	HeapSetInformation( NULL, HeapEnableTerminationOnCorruption, NULL, 0 );
 	
 	debug_initialize( kDebugOutputTypeMetaConsole );
 	debug_set_property( kDebugPropertyTagPrintLevel, kDebugLevelVerbose );
@@ -798,7 +842,7 @@ static OSStatus CheckFirewall()
 
 		// Get a full path to the executable
 
-		size = GetModuleFileNameW( NULL, fullPath, sizeof( fullPath ) );
+		size = GetModuleFileNameW( NULL, fullPath, MAX_PATH );
 		err = translate_errno( size > 0, (OSStatus) GetLastError(), kPathErr );
 		require_noerr( err, exit );
 
@@ -1164,15 +1208,21 @@ static OSStatus	ServiceRun( int argc, LPTSTR argv[] )
 	
 	initialized = FALSE;
 	
-	// Initialize the service-specific stuff and mark the service as running.
+	// <rdar://problem/5727548> Make the service as running before we call ServiceSpecificInitialize. We've
+	// had reports that some machines with McAfee firewall installed cause a problem with iTunes installation.
+	// We think that the firewall product is interferring with code in ServiceSpecificInitialize. So as a
+	// simple workaround, we'll mark us as running *before* we call ServiceSpecificInitialize. This will unblock
+	// any installers that are waiting for our state to change.
+
+	gServiceStatus.dwCurrentState = SERVICE_RUNNING;
+	ok = SetServiceStatus( gServiceStatusHandle, &gServiceStatus );
+	check_translated_errno( ok, GetLastError(), kParamErr );
+
+	// Initialize the service-specific stuff
 	
 	err = ServiceSpecificInitialize( argc, argv );
 	require_noerr( err, exit );
 	initialized = TRUE;
-	
-	gServiceStatus.dwCurrentState = SERVICE_RUNNING;
-	ok = SetServiceStatus( gServiceStatusHandle, &gServiceStatus );
-	check_translated_errno( ok, GetLastError(), kParamErr );
 	
 	err = CheckFirewall();
 	check_noerr( err );
@@ -1232,13 +1282,15 @@ static void	ServiceStop( void )
 
 static OSStatus	ServiceSpecificInitialize( int argc, LPTSTR argv[] )
 {
-	OSStatus						err;
+	OSVERSIONINFO osInfo;
+	OSStatus err;
+	BOOL ok;
 	
 	DEBUG_UNUSED( argc );
 	DEBUG_UNUSED( argv );
 	
-	memset( &gMDNSRecord, 0, sizeof gMDNSRecord);
-	memset( &gPlatformStorage, 0, sizeof gPlatformStorage);
+	mDNSPlatformMemZero( &gMDNSRecord, sizeof gMDNSRecord);
+	mDNSPlatformMemZero( &gPlatformStorage, sizeof gPlatformStorage);
 
 	gPlatformStorage.idleThreadCallback = udsIdle;
 	gPlatformStorage.hostDescriptionChangedCallback = HostDescriptionChanged;
@@ -1252,19 +1304,20 @@ static OSStatus	ServiceSpecificInitialize( int argc, LPTSTR argv[] )
 	err = mDNS_Init( &gMDNSRecord, &gPlatformStorage, gRRCache, RR_CACHE_SIZE, mDNS_Init_AdvertiseLocalAddresses, CoreCallback, mDNS_Init_NoInitCallbackContext); 
 	require_noerr( err, exit);
 
-	err = udsserver_init(dnssd_InvalidSocket);
+	err = udsserver_init(mDNSNULL, 0);
 	require_noerr( err, exit);
 
 	//
-	// <rdar://problem/4096464> Don't call SetLLRoute on loopback
-	// 
-	// Otherwise, set a route to link local addresses (169.254.0.0)
+	// Get the version of Windows that we're running on
 	//
+	osInfo.dwOSVersionInfoSize = sizeof( OSVERSIONINFO );
+	ok = GetVersionEx( &osInfo );
+	err = translate_errno( ok, (OSStatus) GetLastError(), kUnknownErr );
+	require_noerr( err, exit );
+	gOSMajorVersion = osInfo.dwMajorVersion;
+	gOSMinorVersion = osInfo.dwMinorVersion;
 
-	if ( gServiceManageLLRouting && !gPlatformStorage.registeredLoopback4 )
-	{
-		SetLLRoute( &gMDNSRecord );
-	}
+	SetLLRoute( &gMDNSRecord );
 
 exit:
 	if( err != kNoErr )
@@ -1346,7 +1399,7 @@ static void	ServiceSpecificFinalize( int argc, LPTSTR argv[] )
 	//
 	// give a chance for the udsserver code to clean up
 	//
-	udsserver_exit(dnssd_InvalidSocket);
+	udsserver_exit();
 
 	//
 	// and finally close down the mDNSCore
@@ -1357,6 +1410,18 @@ static void	ServiceSpecificFinalize( int argc, LPTSTR argv[] )
 	// clean up the event sources mutex...no one should be using it now
 	//
 	DeleteCriticalSection(&gEventSourceLock);
+
+	//
+	// clean up loaded library
+	//
+
+	if( gIPHelperLibraryInstance )
+	{
+		gGetIpInterfaceEntryFunctionPtr = NULL;
+		
+		FreeLibrary( gIPHelperLibraryInstance );
+		gIPHelperLibraryInstance = NULL;
+	}
 }
 
 
@@ -1365,16 +1430,7 @@ CoreCallback(mDNS * const inMDNS, mStatus status)
 {
 	if (status == mStatus_ConfigChanged)
 	{
-		//
-		// <rdar://problem/4096464> Don't call SetLLRoute on loopback
-		// 
-		// Otherwise, set a route to link local addresses (169.254.0.0)
-		//
-
-		if ( gServiceManageLLRouting && !inMDNS->p->registeredLoopback4 )
-		{
-			SetLLRoute( inMDNS );
-		}
+		SetLLRoute( inMDNS );
 	}
 }
 
@@ -1465,7 +1521,7 @@ udsSocketThread(LPVOID inParam)
 		//
 		if (result == WAIT_OBJECT_0)
 		{
-			source->callback(source->context);
+			source->callback( (int) source->sock, 0, source->context);
 		}
 		//
 		// close event
@@ -1477,7 +1533,7 @@ udsSocketThread(LPVOID inParam)
 			// so we'll go in here and it will clean up for us
 			//
 			shutdown(source->sock, 2);
-			source->callback(source->context);
+			source->callback( (int) source->sock, 0, source->context);
 
 			break;
 		}
@@ -1525,7 +1581,7 @@ udsSupportAddFDToEventLoop( SocketRef fd, udsEventCallback callback, void *conte
 
 	newSource = malloc(sizeof(Win32EventSource));
 	require_action( newSource, exit, err = mStatus_NoMemoryErr );
-	memset(newSource, 0, sizeof(Win32EventSource));
+	mDNSPlatformMemZero(newSource, sizeof(Win32EventSource));
 
 	newSource->flags	= 0;
 	newSource->sock		= (SOCKET) fd;
@@ -1783,7 +1839,7 @@ EventSourceUnlock()
 //===========================================================================================================================
 
 static bool
-HaveRoute( PMIB_IPFORWARDROW rowExtant, unsigned long addr )
+HaveRoute( PMIB_IPFORWARDROW rowExtant, unsigned long addr, unsigned long metric )
 {
 	PMIB_IPFORWARDTABLE	pIpForwardTable	= NULL;
 	DWORD				dwSize			= 0;
@@ -1815,7 +1871,7 @@ HaveRoute( PMIB_IPFORWARDROW rowExtant, unsigned long addr )
 	//
 	for ( i = 0; i < pIpForwardTable->dwNumEntries; i++)
 	{
-		if ( pIpForwardTable->table[i].dwForwardDest == addr )
+		if ( ( pIpForwardTable->table[i].dwForwardDest == addr ) && ( !metric || ( pIpForwardTable->table[i].dwForwardMetric1 == metric ) ) )
 		{
 			memcpy( rowExtant, &(pIpForwardTable->table[i]), sizeof(*rowExtant) );
 			found = true;
@@ -1846,124 +1902,128 @@ IsValidAddress( const char * addr )
 
 
 //===========================================================================================================================
+//	GetAdditionalMetric
+//===========================================================================================================================
+
+static ULONG
+GetAdditionalMetric( DWORD ifIndex )
+{
+	ULONG metric = 0;
+
+	if( !gIPHelperLibraryInstance )
+	{
+		gIPHelperLibraryInstance = LoadLibrary( TEXT( "Iphlpapi" ) );
+
+		gGetIpInterfaceEntryFunctionPtr = 
+				(GetIpInterfaceEntryFunctionPtr) GetProcAddress( gIPHelperLibraryInstance, "GetIpInterfaceEntry" );
+
+		if( !gGetIpInterfaceEntryFunctionPtr )
+		{		
+			BOOL ok;
+				
+			ok = FreeLibrary( gIPHelperLibraryInstance );
+			check_translated_errno( ok, GetLastError(), kUnknownErr );
+			gIPHelperLibraryInstance = NULL;
+		}
+	}
+
+	if ( gGetIpInterfaceEntryFunctionPtr )
+	{
+		MIB_IPINTERFACE_ROW row;
+		DWORD err;
+
+		ZeroMemory( &row, sizeof( MIB_IPINTERFACE_ROW ) );
+		row.Family = AF_INET;
+		row.InterfaceIndex = ifIndex;
+		err = gGetIpInterfaceEntryFunctionPtr( &row );
+		require_noerr( err, exit );
+		metric = row.Metric + 256;
+	}
+
+exit:
+
+	return metric;
+}
+
+
+//===========================================================================================================================
 //	SetLLRoute
 //===========================================================================================================================
 
 static OSStatus
 SetLLRoute( mDNS * const inMDNS )
 {
-	DWORD				ifIndex;
-	MIB_IPFORWARDROW	rowExtant;
-	bool				addRoute;
-	MIB_IPFORWARDROW	row;
-	OSStatus			err;
+	OSStatus err = kNoErr;
 
-	ZeroMemory(&row, sizeof(row));
-
-	err = GetRouteDestination(&ifIndex, &row.dwForwardNextHop);
-	require_noerr( err, exit );
-	row.dwForwardDest		= inet_addr(kLLNetworkAddr);
-	row.dwForwardIfIndex	= ifIndex;
-	row.dwForwardMask		= inet_addr(kLLNetworkAddrMask);
-	row.dwForwardType		= 3;
-	row.dwForwardProto		= MIB_IPPROTO_NETMGMT;
-	row.dwForwardAge		= 0;
-	row.dwForwardPolicy		= 0;
-	row.dwForwardMetric1	= 30;
-	row.dwForwardMetric2	= (DWORD) - 1;
-	row.dwForwardMetric3	= (DWORD) - 1;
-	row.dwForwardMetric4	= (DWORD) - 1;
-	row.dwForwardMetric5	= (DWORD) - 1;
-
-	addRoute = true;
+	DEBUG_UNUSED( inMDNS );
 
 	//
-	// check to make sure we don't already have a route
+	// <rdar://problem/4096464> Don't call SetLLRoute on loopback
+	// <rdar://problem/6885843> Default route on Windows 7 breaks network connectivity
+	// 
+	// Don't mess w/ the routing table on Vista and later OSes, as 
+	// they have a permanent route to link-local addresses. Otherwise,
+	// set a route to link local addresses (169.254.0.0)
 	//
-	if ( HaveRoute( &rowExtant, inet_addr( kLLNetworkAddr ) ) )
+	if ( ( gOSMajorVersion < 6 ) && gServiceManageLLRouting && !gPlatformStorage.registeredLoopback4 )
 	{
-		//
-		// set the age to 0 so that we can do a memcmp.
-		//
-		rowExtant.dwForwardAge = 0;
+		DWORD				ifIndex;
+		MIB_IPFORWARDROW	rowExtant;
+		bool				addRoute;
+		MIB_IPFORWARDROW	row;
 
-		//
-		// check to see if this route is the same as our route
-		//
-		if (memcmp(&row, &rowExtant, sizeof(row)) != 0)
-		{
-			//
-			// if it isn't then delete this entry
-			//
-			DeleteIpForwardEntry(&rowExtant);
-		}
-		else
-		{
-			//
-			// else it is, so we don't want to create another route
-			//
-			addRoute = false;
-		}
-	}
+		ZeroMemory(&row, sizeof(row));
 
-	if (addRoute && row.dwForwardNextHop)
-	{
-		err = CreateIpForwardEntry(&row);
-
+		err = GetRouteDestination(&ifIndex, &row.dwForwardNextHop);
 		require_noerr( err, exit );
-	}
-
-	//
-	// Now we want to see if we should install a default route for this interface.
-	// We want to do this if the following are true:
-	//
-	// 1. This interface has a link-local address
-	// 2. This is the only IPv4 interface
-	//
-
-	if ( ( row.dwForwardNextHop & 0xFFFF ) == row.dwForwardDest )
-	{
-		mDNSInterfaceData	*	ifd;
-		int						numLinkLocalInterfaces	= 0;
-		int						numInterfaces			= 0;
-	
-		for ( ifd = inMDNS->p->interfaceList; ifd; ifd = ifd->next )
-		{
-			if ( ifd->defaultAddr.type == mDNSAddrType_IPv4 )
-			{
-				numInterfaces++;
-
-				if ( ( ifd->interfaceInfo.ip.ip.v4.b[0] == 169 ) && ( ifd->interfaceInfo.ip.ip.v4.b[1] == 254 ) )
-				{
-					numLinkLocalInterfaces++;
-				}
-			}
-		}
-
-		row.dwForwardDest		= 0;
+		row.dwForwardDest		= inet_addr(kLLNetworkAddr);
 		row.dwForwardIfIndex	= ifIndex;
-		row.dwForwardMask		= 0;
+		row.dwForwardMask		= inet_addr(kLLNetworkAddrMask);
 		row.dwForwardType		= 3;
 		row.dwForwardProto		= MIB_IPPROTO_NETMGMT;
 		row.dwForwardAge		= 0;
 		row.dwForwardPolicy		= 0;
-		row.dwForwardMetric1	= 20;
+		row.dwForwardMetric1	= 20 + GetAdditionalMetric( ifIndex );
 		row.dwForwardMetric2	= (DWORD) - 1;
 		row.dwForwardMetric3	= (DWORD) - 1;
 		row.dwForwardMetric4	= (DWORD) - 1;
 		row.dwForwardMetric5	= (DWORD) - 1;
-		
-		if ( numInterfaces == numLinkLocalInterfaces )
+
+		addRoute = true;
+
+		//
+		// check to make sure we don't already have a route
+		//
+		if ( HaveRoute( &rowExtant, inet_addr( kLLNetworkAddr ), 0 ) )
 		{
-			if ( !HaveRoute( &row, 0 ) )
+			//
+			// set the age to 0 so that we can do a memcmp.
+			//
+			rowExtant.dwForwardAge = 0;
+
+			//
+			// check to see if this route is the same as our route
+			//
+			if (memcmp(&row, &rowExtant, sizeof(row)) != 0)
 			{
-				err = CreateIpForwardEntry(&row);
-				require_noerr( err, exit );
+				//
+				// if it isn't then delete this entry
+				//
+				DeleteIpForwardEntry(&rowExtant);
+			}
+			else
+			{
+				//
+				// else it is, so we don't want to create another route
+				//
+				addRoute = false;
 			}
 		}
-		else
+
+		if (addRoute && row.dwForwardNextHop)
 		{
-			DeleteIpForwardEntry( &row );
+			err = CreateIpForwardEntry(&row);
+			check_noerr( err );
 		}
 	}
 
@@ -2019,25 +2079,19 @@ GetRouteDestination(DWORD * ifIndex, DWORD * address)
 	err			=	kUnknownErr;
 			
 	// <rdar://problem/3718122>
+	// <rdar://problem/5652098>
 	//
-	// Look for the Nortel VPN virtual interface.  This interface
-	// is identified by it's unique MAC address: 44-45-53-54-42-00
+	// Look for the Nortel VPN virtual interface, along with Juniper virtual interface.
 	//
-	// If the interface is active (i.e., has a non-zero IP Address),
+	// If these interfaces are active (i.e., has a non-zero IP Address),
 	// then we want to disable routing table modifications.
 
 	while (pAdapter)
 	{
-		if ((pAdapter->Type == MIB_IF_TYPE_ETHERNET) &&
-		    (pAdapter->AddressLength == 6) &&
-		    (pAdapter->Address[0] == 0x44) &&
-		    (pAdapter->Address[1] == 0x45) &&
-		    (pAdapter->Address[2] == 0x53) &&
-		    (pAdapter->Address[3] == 0x54) &&
-		    (pAdapter->Address[4] == 0x42) &&
-		    (pAdapter->Address[5] == 0x00) &&
-			(inet_addr( pAdapter->IpAddressList.IpAddress.String ) != 0))
+		if ( ( IsNortelVPN( pAdapter ) || IsJuniperVPN( pAdapter ) || IsCiscoVPN( pAdapter ) ) &&
+			 ( inet_addr( pAdapter->IpAddressList.IpAddress.String ) != 0 ) )
 		{
+			dlog( kDebugLevelTrace, DEBUG_NAME "disabling routing table management due to VPN incompatibility" );
 			goto exit;
 		}
 
@@ -2089,3 +2143,89 @@ exit:
 
 	return( err );
 }
+
+
+static bool
+IsNortelVPN( IP_ADAPTER_INFO * pAdapter )
+{
+	return ((pAdapter->Type == MIB_IF_TYPE_ETHERNET) &&
+		    (pAdapter->AddressLength == 6) &&
+		    (pAdapter->Address[0] == 0x44) &&
+		    (pAdapter->Address[1] == 0x45) &&
+		    (pAdapter->Address[2] == 0x53) &&
+		    (pAdapter->Address[3] == 0x54) &&
+		    (pAdapter->Address[4] == 0x42) &&
+			(pAdapter->Address[5] == 0x00)) ? true : false;
+}
+
+
+static bool
+IsJuniperVPN( IP_ADAPTER_INFO * pAdapter )
+{	
+	return ( strnistr( pAdapter->Description, "Juniper", sizeof( pAdapter->Description  ) ) != NULL ) ? true : false;
+}
+
+
+static bool
+IsCiscoVPN( IP_ADAPTER_INFO * pAdapter )
+{
+	return ((pAdapter->Type == MIB_IF_TYPE_ETHERNET) &&
+		    (pAdapter->AddressLength == 6) &&
+		    (pAdapter->Address[0] == 0x00) &&
+		    (pAdapter->Address[1] == 0x05) &&
+		    (pAdapter->Address[2] == 0x9a) &&
+		    (pAdapter->Address[3] == 0x3c) &&
+		    (pAdapter->Address[4] == 0x7a) &&
+			(pAdapter->Address[5] == 0x00)) ? true : false;
+}
+
+
+static const char *
+strnistr( const char * string, const char * subString, size_t max )
+{
+	size_t       subStringLen;
+	size_t       offset;
+	size_t       maxOffset;
+	size_t       stringLen;
+	const char * pPos;
+
+	if ( ( string == NULL ) || ( subString == NULL ) )
+	{
+		return string;
+	}
+
+	stringLen = ( max > strlen( string ) ) ? strlen( string ) : max;
+
+	if ( stringLen == 0 )
+	{
+		return NULL;
+	}
+	
+	subStringLen = strlen( subString );
+
+	if ( subStringLen == 0 )
+	{
+		return string;
+	}
+
+	if ( subStringLen > stringLen )
+	{
+		return NULL;
+	}
+
+	maxOffset = stringLen - subStringLen;
+	pPos      = string;
+
+	for ( offset = 0; offset <= maxOffset; offset++ )
+	{
+		if ( _strnicmp( pPos, subString, subStringLen ) == 0 )
+		{
+			return pPos;
+		}
+
+		pPos++;
+	}
+
+	return NULL;
+}
+

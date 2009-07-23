@@ -17,6 +17,145 @@
     Change History (most recent first):
 
 $Log: helper.c,v $
+Revision 1.66  2009/04/20 20:40:14  cheshire
+<rdar://problem/6786150> uDNS: Running location cycling caused configd and mDNSResponder to deadlock
+Changed mDNSPreferencesSetName (and similar) routines from MIG "routine" to MIG "simpleroutine"
+so we don't deadlock waiting for a result that we're just going to ignore anyway
+
+Revision 1.65  2009/03/20 22:12:28  mcguire
+<rdar://problem/6703952> Support CFUserNotificationDisplayNotice in mDNSResponderHelper
+Make the call to the helper a simpleroutine: don't wait for an unused return value
+
+Revision 1.64  2009/03/20 21:52:39  cheshire
+<rdar://problem/6703952> Support CFUserNotificationDisplayNotice in mDNSResponderHelper
+Need to CFRelease strings in do_mDNSNotify
+
+Revision 1.63  2009/03/20 21:21:15  cheshire
+<rdar://problem/6703952> Support CFUserNotificationDisplayNotice in mDNSResponderHelper
+Need to set error code correctly in do_mDNSNotify
+
+Revision 1.62  2009/03/20 20:52:22  cheshire
+<rdar://problem/6703952> Support CFUserNotificationDisplayNotice in mDNSResponderHelper
+
+Revision 1.61  2009/03/14 01:42:56  mcguire
+<rdar://problem/5457116> BTMM: Fix issues with multiple .Mac accounts on the same machine
+
+Revision 1.60  2009/02/18 02:09:10  cheshire
+<rdar://problem/6514947> Sleep Proxy: PF_ROUTE command to set ARP entry returns errno 17 (EEXIST)
+Also need to set rtmsg.hdr.rtm_index
+
+Revision 1.59  2009/02/17 23:33:45  cheshire
+<rdar://problem/6514947> Sleep Proxy: PF_ROUTE command to set ARP entry returns errno 17 (EEXIST)
+
+Revision 1.58  2009/02/04 22:23:04  cheshire
+Simplified do_mDNSPowerRequest --
+code was checking for CFAbsoluteTimeGetCurrent() returning NULL, which makes no sense
+
+Revision 1.57  2009/01/22 02:14:27  cheshire
+<rdar://problem/6515626> Sleep Proxy: Set correct target MAC address, instead of all zeroes
+
+Revision 1.56  2009/01/20 21:03:22  cheshire
+Improved debugging messages
+
+Revision 1.55  2009/01/20 02:37:26  mcguire
+revert previous erroneous commit
+
+Revision 1.54  2009/01/20 02:35:15  mcguire
+mDNSMacOSX/mDNSMacOSX.c
+
+Revision 1.53  2009/01/14 01:38:42  mcguire
+<rdar://problem/6492710> Write out DynamicStore per-interface SleepProxyServer info
+
+Revision 1.52  2009/01/13 05:31:34  mkrochma
+<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
+
+Revision 1.51  2009/01/12 22:26:12  mkrochma
+Change DynamicStore location from BonjourSleepProxy/DiscoveredServers to SleepProxyServers
+
+Revision 1.50  2008/12/15 18:40:41  mcguire
+<rdar://problem/6444440> Socket leak in helper's doTunnelPolicy
+
+Revision 1.49  2008/12/12 00:37:42  mcguire
+<rdar://problem/6417648> BTMM outbound fails if /var/run/racoon doesn't exist
+
+Revision 1.48  2008/12/05 02:35:24  mcguire
+<rdar://problem/6107390> Write to the DynamicStore when a Sleep Proxy server is available on the network
+
+Revision 1.47  2008/11/21 02:28:55  mcguire
+<rdar://problem/6354979> send racoon a SIGUSR1 instead of SIGHUP
+
+Revision 1.46  2008/11/11 02:09:42  cheshire
+Removed some unnecessary log messages
+
+Revision 1.45  2008/11/06 23:35:38  cheshire
+Refinements to the do_mDNSSetARP() routine
+
+Revision 1.44  2008/11/05 18:41:14  cheshire
+Log errors from read() call in do_mDNSSetARP()
+
+Revision 1.43  2008/11/04 23:54:09  cheshire
+Added routine mDNSSetARP(), used to replace an SPS client's entry in our ARP cache with
+a dummy one, so that IP traffic to the SPS client initiated by the SPS machine can be
+captured by our BPF filters, and used as a trigger to wake the sleeping machine.
+
+Revision 1.42  2008/10/31 23:35:31  cheshire
+When scheduling new power event make sure all old events are deleted;
+mDNSPowerRequest(-1,-1); just clears old events without scheduling a new one
+
+Revision 1.41  2008/10/31 18:41:55  cheshire
+Do update_idle_timer() before returning from do_mDNSRequestBPF()
+
+Revision 1.40  2008/10/30 01:05:27  cheshire
+mDNSPowerRequest(0, 0) means "sleep now"
+
+Revision 1.39  2008/10/29 21:26:50  cheshire
+Only log IOPMSchedulePowerEvent calls when there's an error
+
+Revision 1.38  2008/10/24 01:42:36  cheshire
+Added mDNSPowerRequest helper routine to request a scheduled wakeup some time in the future
+
+Revision 1.37  2008/10/24 00:17:22  mcguire
+Add compatibility for older racoon behavior
+
+Revision 1.36  2008/10/22 17:22:31  cheshire
+Remove SO_NOSIGPIPE bug workaround
+
+Revision 1.35  2008/10/20 22:01:28  cheshire
+Made new Mach simpleroutine "mDNSRequestBPF"
+
+Revision 1.34  2008/10/02 23:50:07  mcguire
+<rdar://problem/6136442> shutdown time issues
+improve log messages when SCDynamicStoreCreate() fails
+
+Revision 1.33  2008/09/30 01:00:45  cheshire
+Added workaround to avoid SO_NOSIGPIPE bug
+
+Revision 1.32  2008/09/27 01:11:46  cheshire
+Added handler to respond to kmDNSSendBPF message
+
+Revision 1.31  2008/09/08 17:42:40  mcguire
+<rdar://problem/5536811> change location of racoon files
+cleanup, handle stat failure cases, reduce log messages
+
+Revision 1.30  2008/09/05 21:51:26  mcguire
+<rdar://problem/6077707> BTMM: Need to launch racoon by opening VPN control socket
+
+Revision 1.29  2008/09/05 18:26:53  mcguire
+<rdar://problem/6077707> BTMM: Need to launch racoon by opening VPN control socket
+
+Revision 1.28  2008/09/04 22:49:28  mcguire
+<rdar://problem/5536811> change location of racoon files
+
+Revision 1.27  2008/08/28 23:11:12  mcguire
+<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
+
+Revision 1.26  2008/08/19 00:35:02  mcguire
+<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
+
+Revision 1.25  2008/08/13 23:04:06  mcguire
+<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
+Preparation: rename message function, as it will no longer be called only on idle exit
+
 Revision 1.24  2008/01/30 19:01:51  mcguire
 <rdar://problem/5703989> Crash in mDNSResponderHelper
 
@@ -97,7 +236,10 @@ Revision 1.1  2007/08/08 22:34:58  mcguire
 #include <bsm/libbsm.h>
 #include <net/if.h>
 #include <net/route.h>
+#include <net/if_dl.h>
+#include <net/if_types.h>
 #include <netinet/in.h>
+#include <netinet/if_ether.h>
 #include <netinet6/in6_var.h>
 #include <netinet6/nd6.h>
 #include <netinet6/ipsec.h>
@@ -113,10 +255,13 @@ Revision 1.1  2007/08/08 22:34:58  mcguire
 #include <string.h>
 #include <unistd.h>
 #include <Security/Security.h>
+#include <SystemConfiguration/SystemConfiguration.h>
 #include <SystemConfiguration/SCDynamicStore.h>
 #include <SystemConfiguration/SCPreferencesSetSpecific.h>
 #include <SystemConfiguration/SCDynamicStoreCopySpecific.h>
 #include <TargetConditionals.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
+
 #include "mDNSEmbeddedAPI.h"
 #include "dns_sd.h"
 #include "dnssd_ipc.h"
@@ -126,10 +271,18 @@ Revision 1.1  2007/08/08 22:34:58  mcguire
 #include "helper-server.h"
 #include "ipsec_options.h"
 
+#ifndef RTF_IFSCOPE
+#define RTF_IFSCOPE 0x1000000
+#endif
+
 #if TARGET_OS_EMBEDDED
 #define NO_CFUSERNOTIFICATION 1
 #define NO_SECURITYFRAMEWORK 1
 #endif
+
+// Embed the client stub code here, so we can access private functions like ConnectToServer, create_hdr, deliver_request
+#include "../mDNSShared/dnssd_ipc.c"
+#include "../mDNSShared/dnssd_clientstub.c"
 
 typedef struct sadb_x_policy *ipsec_policy_t;
 
@@ -166,38 +319,13 @@ authorized(audit_token_t *token)
 	return ok;
 	}
 
-#ifndef MDNS_NO_IPSEC
-static void
-closefds(int from)
-	{
-	int fd = 0;
-	struct dirent entry, *entryp = NULL;
-	DIR *dirp = opendir("/dev/fd");
-
-	if (dirp == NULL)
-		{
-		/* fall back to the erroneous getdtablesize method */
-		for (fd = from; fd < getdtablesize(); ++fd)
-			close(fd);
-		return;
-		}
-	while (0 == readdir_r(dirp, &entry, &entryp) && NULL != entryp)
-		{
-		fd = atoi(entryp->d_name);
-		if (fd >= from && fd != dirfd(dirp))
-			close(fd);
-		}
-	closedir(dirp);
-	}
-#endif
-
 kern_return_t
-do_mDNSIdleExit(__unused mach_port_t port, audit_token_t token)
+do_mDNSExit(__unused mach_port_t port, audit_token_t token)
 	{
 	debug("entry");
 	if (!authorized(&token))
 		goto fin;
-	helplog(ASL_LEVEL_INFO, "Idle exit");
+	helplog(ASL_LEVEL_INFO, "exit");
 	exit(0);
 
 fin:
@@ -205,54 +333,221 @@ fin:
 	return KERN_SUCCESS;
 	}
 
+kern_return_t do_mDNSRequestBPF(__unused mach_port_t port, audit_token_t token)
+	{
+	if (!authorized(&token)) return KERN_SUCCESS;
+	DNSServiceRef ref;
+	DNSServiceErrorType err = ConnectToServer(&ref, 0, send_bpf, NULL, NULL, NULL);
+	if (err) { helplog(ASL_LEVEL_ERR, "do_mDNSRequestBPF: ConnectToServer %d", err); return err; }
+	
+	char *ptr;
+	size_t len = sizeof(DNSServiceFlags);
+	ipc_msg_hdr *hdr = create_hdr(send_bpf, &len, &ptr, 0, ref);
+	if (!hdr) { DNSServiceRefDeallocate(ref); return kDNSServiceErr_NoMemory; }
+	put_flags(0, &ptr);
+	deliver_request(hdr, ref);		// Will free hdr for us
+	DNSServiceRefDeallocate(ref);
+	update_idle_timer();
+	return KERN_SUCCESS;
+	}
+
+kern_return_t do_mDNSPowerRequest(__unused mach_port_t port, int key, int interval, int *err, audit_token_t token)
+	{
+	*err = -1;
+	if (!authorized(&token)) { *err = kmDNSHelperNotAuthorized; goto fin; }
+
+	CFArrayRef events = IOPMCopyScheduledPowerEvents();
+	if (events)
+		{
+		int i;
+		CFIndex count = CFArrayGetCount(events);
+		for (i=0; i<count; i++)
+			{
+			CFDictionaryRef dict = CFArrayGetValueAtIndex(events, i);
+			CFStringRef id = CFDictionaryGetValue(dict, CFSTR(kIOPMPowerEventAppNameKey));
+			if (CFEqual(id, CFSTR("mDNSResponderHelper")))
+				{
+				CFDateRef   EventTime = CFDictionaryGetValue(dict, CFSTR(kIOPMPowerEventTimeKey));
+				CFStringRef EventType = CFDictionaryGetValue(dict, CFSTR(kIOPMPowerEventTypeKey));
+				IOReturn result = IOPMCancelScheduledPowerEvent(EventTime, id, EventType);
+				//helplog(ASL_LEVEL_ERR, "Deleting old event %s");
+				if (result) helplog(ASL_LEVEL_ERR, "IOPMCancelScheduledPowerEvent %d failed %d", i, result);
+				}
+			}
+		CFRelease(events);
+		}
+
+	if (key < 0)			// mDNSPowerRequest(-1,-1) means "clear any stale schedules" (see above)
+		*err = 0;
+	else if (key == 0)		// mDNSPowerRequest(0, 0) means "sleep now"
+		{
+		IOReturn r = IOPMSleepSystem(IOPMFindPowerManagement(MACH_PORT_NULL));
+		if (r) { usleep(100000); helplog(ASL_LEVEL_ERR, "IOPMSleepSystem %d", r); }
+		*err = r;
+		}
+	else if (key > 0)
+		{
+		CFDateRef w = CFDateCreate(NULL, CFAbsoluteTimeGetCurrent() + interval);
+		if (w)
+			{
+			IOReturn r = IOPMSchedulePowerEvent(w, CFSTR("mDNSResponderHelper"), key ? CFSTR(kIOPMAutoWake) : CFSTR(kIOPMAutoSleep));
+			if (r) { usleep(100000); helplog(ASL_LEVEL_ERR, "IOPMSchedulePowerEvent(%d) %d %x", interval, r, r); }
+			*err = r;
+			CFRelease(w);
+			}
+		}
+fin:
+	update_idle_timer();
+	return KERN_SUCCESS;
+	}
+
+kern_return_t do_mDNSSetARP(__unused mach_port_t port, int ifindex, v4addr_t v4, ethaddr_t eth, int *err, audit_token_t token)
+	{
+	//helplog(ASL_LEVEL_ERR, "do_mDNSSetARP %d %d.%d.%d.%d %02X:%02X:%02X:%02X:%02X:%02X",
+	//	ifindex, v4[0], v4[1], v4[2], v4[3], eth[0], eth[1], eth[2], eth[3], eth[4], eth[5]);
+
+	*err = -1;
+	if (!authorized(&token)) { *err = kmDNSHelperNotAuthorized; goto fin; }
+
+	static int s = -1, seq = 0;
+	if (s < 0)
+		{
+		s = socket(PF_ROUTE, SOCK_RAW, 0);
+		if (s < 0) helplog(ASL_LEVEL_ERR, "do_mDNSSetARP: socket(PF_ROUTE, SOCK_RAW, 0) failed %d (%s)", errno, strerror(errno));
+		}
+
+	if (s >= 0)
+		{
+		struct timeval tv;
+		gettimeofday(&tv, 0);
+
+		struct { struct rt_msghdr hdr; struct sockaddr_inarp dst; struct sockaddr_dl sdl; } rtmsg;
+		memset(&rtmsg, 0, sizeof(rtmsg));
+
+		rtmsg.hdr.rtm_msglen         = sizeof(rtmsg);
+		rtmsg.hdr.rtm_version        = RTM_VERSION;
+		rtmsg.hdr.rtm_type           = RTM_ADD;
+		rtmsg.hdr.rtm_index          = ifindex;
+		rtmsg.hdr.rtm_flags          = RTF_HOST | RTF_STATIC | RTF_IFSCOPE;
+		rtmsg.hdr.rtm_addrs          = RTA_DST | RTA_GATEWAY;
+		rtmsg.hdr.rtm_pid            = 0;
+		rtmsg.hdr.rtm_seq            = seq++;
+		rtmsg.hdr.rtm_errno          = 0;
+		rtmsg.hdr.rtm_use            = 0;
+		rtmsg.hdr.rtm_inits          = RTV_EXPIRE;
+		rtmsg.hdr.rtm_rmx.rmx_expire = tv.tv_sec + 30;
+
+		rtmsg.dst.sin_len            = sizeof(struct sockaddr_inarp);
+		rtmsg.dst.sin_family         = AF_INET;
+		rtmsg.dst.sin_port           = 0;
+		rtmsg.dst.sin_addr.s_addr    = *(in_addr_t*)v4;
+		rtmsg.dst.sin_srcaddr.s_addr = 0;
+		rtmsg.dst.sin_tos            = 0;
+		rtmsg.dst.sin_other          = 0;
+
+		rtmsg.sdl.sdl_len            = sizeof(struct sockaddr_dl);
+		rtmsg.sdl.sdl_family         = AF_LINK;
+		rtmsg.sdl.sdl_index          = ifindex;
+		rtmsg.sdl.sdl_type           = IFT_ETHER;
+		rtmsg.sdl.sdl_nlen           = 0;
+		rtmsg.sdl.sdl_alen           = ETHER_ADDR_LEN;
+		rtmsg.sdl.sdl_slen           = 0;
+
+		// Target MAC address goes in rtmsg.sdl.sdl_data[0..5]; (See LLADDR() in /usr/include/net/if_dl.h)
+		memcpy(rtmsg.sdl.sdl_data, eth, sizeof(ethaddr_t));
+
+		int len = write(s, (char *)&rtmsg, sizeof(rtmsg));
+		if (len < 0)
+			helplog(ASL_LEVEL_ERR, "do_mDNSSetARP: write(%d) interface %d address %d.%d.%d.%d seq %d result %d errno %d (%s)",
+				sizeof(rtmsg), ifindex, v4[0], v4[1], v4[2], v4[3], rtmsg.hdr.rtm_seq, len, errno, strerror(errno));
+		len = read(s, (char *)&rtmsg, sizeof(rtmsg));
+		if (len < 0)
+			helplog(ASL_LEVEL_ERR, "do_mDNSSetARP: read (%d) interface %d address %d.%d.%d.%d seq %d result %d errno %d (%s)",
+				sizeof(rtmsg), ifindex, v4[0], v4[1], v4[2], v4[3], rtmsg.hdr.rtm_seq, len, errno, strerror(errno));
+
+		*err = 0;
+		}
+
+fin:
+	update_idle_timer();
+	return KERN_SUCCESS;
+	}
+
+kern_return_t do_mDNSNotify(__unused mach_port_t port, const char *title, const char *msg, audit_token_t token)
+	{
+	if (!authorized(&token)) return KERN_SUCCESS;
+
+#ifndef NO_CFUSERNOTIFICATION
+	static const char footer[] = "(Note: This message only appears on machines with 17.x.x.x IP addresses — i.e. at Apple — not on customer machines.)";
+	CFStringRef alertHeader  = CFStringCreateWithCString(NULL, title,  kCFStringEncodingUTF8);
+	CFStringRef alertBody    = CFStringCreateWithCString(NULL, msg,    kCFStringEncodingUTF8);
+	CFStringRef alertFooter  = CFStringCreateWithCString(NULL, footer, kCFStringEncodingUTF8);
+	CFStringRef alertMessage = CFStringCreateWithFormat(NULL, NULL, CFSTR("%@\r\r%@"), alertBody, alertFooter);
+	CFRelease(alertBody);
+	CFRelease(alertFooter);
+	int err = CFUserNotificationDisplayNotice(0.0, kCFUserNotificationStopAlertLevel, NULL, NULL, NULL, alertHeader, alertMessage, NULL);
+	if (err) helplog(ASL_LEVEL_ERR, "CFUserNotificationDisplayNotice returned %d", err);
+	CFRelease(alertHeader);
+	CFRelease(alertMessage);
+#endif /* NO_CFUSERNOTIFICATION */
+
+	update_idle_timer();
+	return KERN_SUCCESS;
+	}
+
 kern_return_t
 do_mDNSDynamicStoreSetConfig(__unused mach_port_t port, int key,
-    vm_offset_t value, mach_msg_type_number_t valueCnt, int *err,
+    const char* subkey, vm_offset_t value, mach_msg_type_number_t valueCnt,
     audit_token_t token)
 	{
 	CFStringRef sckey = NULL;
+	Boolean release_sckey = FALSE;
 	CFDataRef bytes = NULL;
 	CFPropertyListRef plist = NULL;
 	SCDynamicStoreRef store = NULL;
 
 	debug("entry");
-	*err = 0;
-	if (!authorized(&token))
-		{
-		*err = kmDNSHelperNotAuthorized;
-		goto fin;
-		}
+	if (!authorized(&token)) goto fin;
+
 	switch ((enum mDNSDynamicStoreSetConfigKey)key)
-	{
-	case kmDNSMulticastConfig:
-		sckey = CFSTR("State:/Network/" kDNSServiceCompMulticastDNS);
-		break;
-	case kmDNSDynamicConfig:
-		sckey = CFSTR("State:/Network/DynamicDNS");
-		break;
-	case kmDNSPrivateConfig:
-		sckey = CFSTR("State:/Network/" kDNSServiceCompPrivateDNS);
-		break;
-	case kmDNSBackToMyMacConfig:
-		sckey = CFSTR("State:/Network/BackToMyMac");
-		break;
-	default:
-		debug("unrecognized key %d", key);
-		*err = kmDNSHelperInvalidConfigKey;
-		goto fin;
+		{
+		case kmDNSMulticastConfig:
+			sckey = CFSTR("State:/Network/" kDNSServiceCompMulticastDNS);
+			break;
+		case kmDNSDynamicConfig:
+			sckey = CFSTR("State:/Network/DynamicDNS");
+			break;
+		case kmDNSPrivateConfig:
+			sckey = CFSTR("State:/Network/" kDNSServiceCompPrivateDNS);
+			break;
+		case kmDNSBackToMyMacConfig:
+			sckey = CFSTR("State:/Network/BackToMyMac");
+			break;
+		case kmDNSSleepProxyServersState:
+			{
+			CFMutableStringRef tmp = CFStringCreateMutable(kCFAllocatorDefault, 0);
+			CFStringAppend(tmp, CFSTR("State:/Network/Interface/"));
+			CFStringAppendCString(tmp, subkey, kCFStringEncodingUTF8);
+			CFStringAppend(tmp, CFSTR("/SleepProxyServers"));
+			sckey = CFStringCreateCopy(kCFAllocatorDefault, tmp);
+			release_sckey = TRUE;
+			CFRelease(tmp);
+			break;
+			}
+		default:
+			debug("unrecognized key %d", key);
+			goto fin;
 		}
 	if (NULL == (bytes = CFDataCreateWithBytesNoCopy(NULL, (void *)value,
 	    valueCnt, kCFAllocatorNull)))
 		{
 		debug("CFDataCreateWithBytesNoCopy of value failed");
-		*err = kmDNSHelperCreationFailed;
 		goto fin;
 		}
 	if (NULL == (plist = CFPropertyListCreateFromXMLData(NULL, bytes,
 	    kCFPropertyListImmutable, NULL)))
 		{
 		debug("CFPropertyListCreateFromXMLData of bytes failed");
-		*err = kmDNSHelperInvalidPList;
 		goto fin;
 		}
 	CFRelease(bytes);
@@ -260,23 +555,21 @@ do_mDNSDynamicStoreSetConfig(__unused mach_port_t port, int key,
 	if (NULL == (store = SCDynamicStoreCreate(NULL,
 	    CFSTR(kmDNSHelperServiceName), NULL, NULL)))
 		{
-		debug("SCDynamicStoreCreate failed");
-		*err = kmDNSHelperDynamicStoreFailed;
+		debug("SCDynamicStoreCreate failed: %s", SCErrorString(SCError()));
 		goto fin;
 		}
 	SCDynamicStoreSetValue(store, sckey, plist);
-	*err = 0;
 	debug("succeeded");
 
 fin:
-	if (0 != *err)
-		debug("failed err=%d", *err);
 	if (NULL != bytes)
 		CFRelease(bytes);
 	if (NULL != plist)
 		CFRelease(plist);
 	if (NULL != store)
 		CFRelease(store);
+	if (release_sckey && sckey)
+		CFRelease(sckey);
 	vm_deallocate(mach_task_self(), value, valueCnt);
 	update_idle_timer();
 	return KERN_SUCCESS;
@@ -475,7 +768,7 @@ static void update_notification(void)
 	}
 
 kern_return_t
-do_mDNSPreferencesSetName(__unused mach_port_t port, int key, const char* old, const char* new, int *err, audit_token_t token)
+do_mDNSPreferencesSetName(__unused mach_port_t port, int key, const char* old, const char* new, audit_token_t token)
 	{
 	SCPreferencesRef session = NULL;
 	Boolean ok = FALSE;
@@ -486,12 +779,8 @@ do_mDNSPreferencesSetName(__unused mach_port_t port, int key, const char* old, c
 	Boolean needUpdate = FALSE;
 
 	debug("entry %s old=%s new=%s", key==kmDNSComputerName ? "ComputerName" : (key==kmDNSLocalHostName ? "LocalHostName" : "UNKNOWN"), old, new);
-	*err = 0;
-	if (!authorized(&token))
-		{
-		*err = kmDNSHelperNotAuthorized;
-		goto fin;
-		}
+	if (!authorized(&token)) goto fin;
+
 	switch ((enum mDNSPreferencesSetNameKey)key)
 		{
 		case kmDNSComputerName:
@@ -504,7 +793,6 @@ do_mDNSPreferencesSetName(__unused mach_port_t port, int key, const char* old, c
 			break;
 		default:
 			debug("unrecognized key: %d", key);
-			*err = kmDNSHelperInvalidNameKey;
 			goto fin;
 		}
 
@@ -556,13 +844,11 @@ do_mDNSPreferencesSetName(__unused mach_port_t port, int key, const char* old, c
 	if (cfstr == NULL || session == NULL)
 		{
 		debug("SCPreferencesCreate failed");
-		*err = kmDNSHelperPreferencesFailed;
 		goto fin;
 		}
 	if (!SCPreferencesLock(session, 0))
 		{
 		debug("lock failed");
-		*err = kmDNSHelperPreferencesLockFailed;
 		goto fin;
 		}
 	locked = TRUE;
@@ -594,15 +880,11 @@ do_mDNSPreferencesSetName(__unused mach_port_t port, int key, const char* old, c
 	    !SCPreferencesApplyChanges(session))
 		{
 		debug("SCPreferences update failed");
-		*err = kmDNSHelperPreferencesSetFailed;
 		goto fin;
 		}
-	*err = 0;
 	debug("succeeded");
 
 fin:
-	if (0 != *err)
-		debug("failed err=%d", *err);
 	if (NULL != cfstr)
 		CFRelease(cfstr);
 	if (NULL != session)
@@ -925,7 +1207,7 @@ aliasTunnelAddress(v6addr_t address)
 		err = kmDNSHelperDatagramSocketCreationFailed;
 		goto fin;
 		}
-	bzero(&ifra_in6, sizeof(ifra_in6));
+	memset(&ifra_in6, 0, sizeof(ifra_in6));
 	strlcpy(ifra_in6.ifra_name, kTunnelAddressInterface,
 	    sizeof(ifra_in6.ifra_name));
 	ifra_in6.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
@@ -975,7 +1257,7 @@ unaliasTunnelAddress(v6addr_t address)
 		err = kmDNSHelperDatagramSocketCreationFailed;
 		goto fin;
 		}
-	bzero(&ifr, sizeof(ifr));
+	memset(&ifr, 0, sizeof(ifr));
 	strlcpy(ifr.ifr_name, kTunnelAddressInterface, sizeof(ifr.ifr_name));
 	ifr.ifr_ifru.ifru_addr.sin6_family = AF_INET6;
 	ifr.ifr_ifru.ifru_addr.sin6_len = sizeof(struct sockaddr_in6);
@@ -1005,27 +1287,22 @@ fin:
 
 int
 do_mDNSAutoTunnelInterfaceUpDown(__unused mach_port_t port, int updown,
-    v6addr_t address, int *err, audit_token_t token)
+    v6addr_t address, audit_token_t token)
 	{
 #ifndef MDNS_NO_IPSEC
 	debug("entry");
-	*err = 0;
-	if (!authorized(&token))
-		{
-		*err = kmDNSHelperNotAuthorized;
-		goto fin;
-		}
+	if (!authorized(&token)) goto fin;
+
 	switch ((enum mDNSUpDown)updown)
-	{
-	case kmDNSUp:
-		*err = aliasTunnelAddress(address);
-		break;
-	case kmDNSDown:
-		*err = unaliasTunnelAddress(address);
-		break;
-	default:
-		*err = kmDNSHelperInvalidInterfaceState;
-		goto fin;
+		{
+		case kmDNSUp:
+			aliasTunnelAddress(address);
+			break;
+		case kmDNSDown:
+			unaliasTunnelAddress(address);
+			break;
+		default:
+			goto fin;
 		}
 	debug("succeeded");
 
@@ -1039,15 +1316,85 @@ fin:
 	}
 
 #ifndef MDNS_NO_IPSEC
-static const char racoon_config_path[] = "/etc/racoon/remote/anonymous.conf";
-static const char racoon_config_path_orig[] = "/etc/racoon/remote/anonymous.conf.orig";
+
+static const char g_racoon_config_dir[] = "/var/run/racoon/";
+static const char g_racoon_config_dir_old[] = "/etc/racoon/remote/";
+
+CF_EXPORT CFDictionaryRef _CFCopySystemVersionDictionary(void);
+CF_EXPORT const CFStringRef _kCFSystemVersionBuildVersionKey;
+
+// Major version  6 is 10.2.x (Jaguar)
+// Major version  7 is 10.3.x (Panther)
+// Major version  8 is 10.4.x (Tiger)
+// Major version  9 is 10.5.x (Leopard)
+// Major version 10 is 10.6.x (SnowLeopard)
+static int MacOSXSystemBuildNumber(char* letter_out, int* minor_out)
+	{
+	int major = 0, minor = 0;
+	char letter = 0, buildver[256]="<Unknown>";
+	CFDictionaryRef vers = _CFCopySystemVersionDictionary();
+	if (vers)
+		{
+		CFStringRef cfbuildver = CFDictionaryGetValue(vers, _kCFSystemVersionBuildVersionKey);
+		if (cfbuildver) CFStringGetCString(cfbuildver, buildver, sizeof(buildver), kCFStringEncodingUTF8);
+		sscanf(buildver, "%d%c%d", &major, &letter, &minor);
+		CFRelease(vers);
+		}
+	else
+		helplog(ASL_LEVEL_NOTICE, "_CFCopySystemVersionDictionary failed");
+	
+	if (!major) { major=10; letter = 'A'; minor = 190; helplog(ASL_LEVEL_NOTICE, "Note: No Major Build Version number found; assuming 10A190"); }
+	if (letter_out) *letter_out = letter;
+	if (minor_out) *minor_out = minor;
+	return(major);
+	}
+	
+static int g_oldRacoon = -1;
+static int g_racoonSignal = SIGUSR1;
+
+static void DetermineRacoonVersion()
+	{
+	if (g_oldRacoon == -1)
+		{
+		char letter = 0;
+		int minor = 0;
+		g_oldRacoon = (MacOSXSystemBuildNumber(&letter, &minor) < 10);
+		if (g_oldRacoon || (letter == 'A' && minor < 218)) g_racoonSignal = SIGHUP;
+		debug("%s, signal=%d", g_oldRacoon?"old":"new", g_racoonSignal);
+		}
+	}
+
+static int UseOldRacoon()
+	{
+	DetermineRacoonVersion();
+	return g_oldRacoon;
+	}
+	
+static int RacoonSignal()
+	{
+	DetermineRacoonVersion();
+	return g_racoonSignal;
+	}
+	
+static const char* GetRacoonConfigDir()
+	{
+	return UseOldRacoon() ? g_racoon_config_dir_old : g_racoon_config_dir;
+	}
+	
+static const char* GetOldRacoonConfigDir()
+	{
+	return UseOldRacoon() ? NULL : g_racoon_config_dir_old;
+	}
+	
+static const char racoon_config_file[] = "anonymous.conf";
+static const char racoon_config_file_orig[] = "anonymous.conf.orig";
 
 static const char configHeader[] = "# BackToMyMac\n";
 
-static int IsFamiliarRacoonConfiguration()
+static int IsFamiliarRacoonConfiguration(const char* racoon_config_path)
 	{
 	int fd = open(racoon_config_path, O_RDONLY);
-	debug("entry");
+	debug("entry %s", racoon_config_path);
 	if (0 > fd)
 		{
 		helplog(ASL_LEVEL_NOTICE, "open \"%s\" failed: %s", racoon_config_path, strerror(errno));
@@ -1064,25 +1411,134 @@ static int IsFamiliarRacoonConfiguration()
 	}
 
 static void
-revertAnonymousRacoonConfiguration()
+revertAnonymousRacoonConfiguration(const char* dir)
 	{
-	debug("entry");
-	if (!IsFamiliarRacoonConfiguration())
+	if (!dir) return;
+	
+	debug("entry %s", dir);
+
+	char racoon_config_path[64];
+	strlcpy(racoon_config_path, dir, sizeof(racoon_config_path));
+	strlcat(racoon_config_path, racoon_config_file, sizeof(racoon_config_path));
+
+	struct stat s;
+	int ret = stat(racoon_config_path, &s);
+	debug("stat(%s): %d errno=%d", racoon_config_path, ret, errno);
+	if (ret == 0)
 		{
-		helplog(ASL_LEVEL_NOTICE, "\"%s\" does not look familiar, leaving in place", racoon_config_path);
+		if (IsFamiliarRacoonConfiguration(racoon_config_path))
+			{
+			helplog(ASL_LEVEL_INFO, "\"%s\" looks familiar, unlinking", racoon_config_path);
+			unlink(racoon_config_path);
+			}
+		else
+			{
+			helplog(ASL_LEVEL_NOTICE, "\"%s\" does not look familiar, leaving in place", racoon_config_path);
+			return;
+			}
+		}
+	else if (errno != ENOENT)
+		{
+		helplog(ASL_LEVEL_NOTICE, "stat failed for \"%s\", leaving in place: %s", racoon_config_path, strerror(errno));
 		return;
 		}
 
-	if (0 > rename(racoon_config_path_orig, racoon_config_path))
+	char racoon_config_path_orig[64];
+	strlcpy(racoon_config_path_orig, dir, sizeof(racoon_config_path_orig));
+	strlcat(racoon_config_path_orig, racoon_config_file_orig, sizeof(racoon_config_path_orig));
+
+	ret = stat(racoon_config_path_orig, &s);
+	debug("stat(%s): %d errno=%d", racoon_config_path_orig, ret, errno);
+	if (ret == 0)
 		{
-		helplog(ASL_LEVEL_NOTICE, "rename \"%s\" \"%s\" failed: %s", racoon_config_path_orig, racoon_config_path, strerror(errno));
-		helplog(ASL_LEVEL_NOTICE, "\"%s\" looks familiar, unlinking", racoon_config_path);
-		unlink(racoon_config_path);
+		if (0 > rename(racoon_config_path_orig, racoon_config_path))
+			helplog(ASL_LEVEL_NOTICE, "rename \"%s\" \"%s\" failed: %s", racoon_config_path_orig, racoon_config_path, strerror(errno));
+		else
+			debug("reverted \"%s\" to \"%s\"", racoon_config_path_orig, racoon_config_path);
+		}
+	else if (errno != ENOENT)
+		{
+		helplog(ASL_LEVEL_NOTICE, "stat failed for \"%s\", leaving in place: %s", racoon_config_path_orig, strerror(errno));
+		return;
+		}
+	}
+
+static void
+moveAsideAnonymousRacoonConfiguration(const char* dir)
+	{
+	if (!dir) return;
+	
+	debug("entry %s", dir);
+	
+	char racoon_config_path[64];
+	strlcpy(racoon_config_path, dir, sizeof(racoon_config_path));
+	strlcat(racoon_config_path, racoon_config_file, sizeof(racoon_config_path));
+	
+	struct stat s;
+	int ret = stat(racoon_config_path, &s);
+	if (ret == 0)
+		{
+		if (IsFamiliarRacoonConfiguration(racoon_config_path))
+			{
+			helplog(ASL_LEVEL_INFO, "\"%s\" looks familiar, unlinking", racoon_config_path);
+			unlink(racoon_config_path);
+			}
+		else
+			{
+			char racoon_config_path_orig[64];
+			strlcpy(racoon_config_path_orig, dir, sizeof(racoon_config_path_orig));
+			strlcat(racoon_config_path_orig, racoon_config_file_orig, sizeof(racoon_config_path_orig));
+			if (0 > rename(racoon_config_path, racoon_config_path_orig)) // If we didn't write it, move it to the side so it can be reverted later
+				helplog(ASL_LEVEL_NOTICE, "rename \"%s\" to \"%s\" failed: %s", racoon_config_path, racoon_config_path_orig, strerror(errno));
+			else
+				debug("successfully renamed \"%s\" to \"%s\"", racoon_config_path, racoon_config_path_orig);
+			}
+		}
+	else if (errno != ENOENT)
+		{
+		helplog(ASL_LEVEL_NOTICE, "stat failed for \"%s\", leaving in place: %s", racoon_config_path, strerror(errno));
+		return;
 		}
 	}
 
 static int
-createAnonymousRacoonConfiguration(const char *keydata)
+ensureExistenceOfRacoonConfigDir(const char* const racoon_config_dir)
+	{
+	struct stat s;
+	int ret = stat(racoon_config_dir, &s);
+	if (ret != 0)
+		{
+		if (errno != ENOENT)
+			{
+			helplog(ASL_LEVEL_ERR, "stat of \"%s\" failed (%d): %s",
+				racoon_config_dir, ret, strerror(errno));
+			return -1;
+			}
+		else
+			{
+			ret = mkdir(racoon_config_dir, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+			if (ret != 0)
+				{
+				helplog(ASL_LEVEL_ERR, "mkdir \"%s\" failed: %s",
+					racoon_config_dir, strerror(errno));
+				return -1;
+				}
+			else
+				helplog(ASL_LEVEL_INFO, "created directory \"%s\"", racoon_config_dir);
+			}
+		}
+	else if (!(s.st_mode & S_IFDIR))
+		{
+		helplog(ASL_LEVEL_ERR, "\"%s\" is not a directory!",
+			racoon_config_dir);
+		return -1;
+		}
+	
+	return 0;
+	}
+
+static int
+createAnonymousRacoonConfiguration(const char *fqdn)
 	{
 	static const char config1[] =
 	  "remote anonymous {\n"
@@ -1091,7 +1547,7 @@ createAnonymousRacoonConfiguration(const char *keydata)
 	  "  situation identity_only;\n"
 	  "  verify_identifier off;\n"
 	  "  generate_policy on;\n"
-	  "  shared_secret use \"";
+	  "  shared_secret keychain_by_id \"dns:";
 	static const char config2[] =
 	  "\";\n"
 	  "  nonce_size 16;\n"
@@ -1115,11 +1571,21 @@ createAnonymousRacoonConfiguration(const char *keydata)
 	  "  authentication_algorithm hmac_sha1;\n"
 	  "  compression_algorithm deflate;\n"
 	  "}\n";
-	char tmp_config_path[] =
-	    "/etc/racoon/remote/tmp.XXXXXX";
-	int fd = mkstemp(tmp_config_path);
-
+	char tmp_config_path[64];
+	char racoon_config_path[64];
+	const char* const racoon_config_dir = GetRacoonConfigDir();
+	const char* const racoon_config_dir_old = GetOldRacoonConfigDir();
+	int fd = -1;
+	
 	debug("entry");
+	
+	if (0 > ensureExistenceOfRacoonConfigDir(racoon_config_dir))
+		return -1;
+
+	strlcpy(tmp_config_path, racoon_config_dir, sizeof(tmp_config_path));
+	strlcat(tmp_config_path, "tmp.XXXXXX", sizeof(tmp_config_path));
+
+	fd = mkstemp(tmp_config_path);
 
 	if (0 > fd)
 		{
@@ -1129,23 +1595,23 @@ createAnonymousRacoonConfiguration(const char *keydata)
 		}
 	write(fd, configHeader, sizeof(configHeader)-1);
 	write(fd, config1, sizeof(config1)-1);
-	write(fd, keydata, strlen(keydata));
+	write(fd, fqdn, strlen(fqdn));
 	write(fd, config2, sizeof(config2)-1);
 	close(fd);
 
-	if (IsFamiliarRacoonConfiguration())
-		helplog(ASL_LEVEL_NOTICE, "\"%s\" looks familiar, will overwrite", racoon_config_path);
-	else if (0 > rename(racoon_config_path, racoon_config_path_orig)) // If we didn't write it, move it to the side so it can be reverted later
-		helplog(ASL_LEVEL_NOTICE, "rename \"%s\" \"%s\" failed: %s", racoon_config_path, racoon_config_path_orig, strerror(errno));
-	else
-		debug("successfully renamed \"%s\" \"%s\"", racoon_config_path, racoon_config_path_orig);
+	strlcpy(racoon_config_path, racoon_config_dir, sizeof(racoon_config_path));
+	strlcat(racoon_config_path, racoon_config_file, sizeof(racoon_config_path));
+
+	moveAsideAnonymousRacoonConfiguration(racoon_config_dir_old);
+	moveAsideAnonymousRacoonConfiguration(racoon_config_dir);
 
 	if (0 > rename(tmp_config_path, racoon_config_path))
 		{
 		unlink(tmp_config_path);
 		helplog(ASL_LEVEL_ERR, "rename \"%s\" \"%s\" failed: %s",
 		    tmp_config_path, racoon_config_path, strerror(errno));
-		revertAnonymousRacoonConfiguration();
+		revertAnonymousRacoonConfiguration(racoon_config_dir_old);
+		revertAnonymousRacoonConfiguration(racoon_config_dir);
 		return -1;
 		}
 
@@ -1190,17 +1656,40 @@ notifyRacoon(void)
 		debug("refusing to kill PID %lu", m);
 		return kmDNSHelperRacoonNotificationFailed;
 		}
-	if (0 != kill(m, SIGHUP))
+	if (0 != kill(m, RacoonSignal()))
 		{
 		debug("Could not signal racoon (%lu): %s", m, strerror(errno));
 		return kmDNSHelperRacoonNotificationFailed;
 		}
-	debug("Sent SIGHUP to racoon (%lu)", m);
+	debug("Sent racoon (%lu) signal %d", m, RacoonSignal());
 	return 0;
 	}
 
+static void
+closefds(int from)
+	{
+	int fd = 0;
+	struct dirent entry, *entryp = NULL;
+	DIR *dirp = opendir("/dev/fd");
+
+	if (dirp == NULL)
+		{
+		/* fall back to the erroneous getdtablesize method */
+		for (fd = from; fd < getdtablesize(); ++fd)
+			close(fd);
+		return;
+		}
+	while (0 == readdir_r(dirp, &entry, &entryp) && NULL != entryp)
+		{
+		fd = atoi(entryp->d_name);
+		if (fd >= from && fd != dirfd(dirp))
+			close(fd);
+		}
+	closedir(dirp);
+	}
+
 static int
-startRacoon(void)
+startRacoonOld(void)
 	{
 	debug("entry");
 	char * const racoon_args[] = { "/usr/sbin/racoon", "-e", NULL 	};
@@ -1256,53 +1745,147 @@ startRacoon(void)
 	return 0;
 	}
 
+// constant and structure for the racoon control socket
+#define VPNCTL_CMD_PING 0x0004
+typedef struct vpnctl_hdr_struct
+	{
+	u_int16_t msg_type;
+	u_int16_t flags;
+	u_int32_t cookie;
+	u_int32_t reserved;
+	u_int16_t result;
+	u_int16_t len;
+	} vpnctl_hdr;
+
+static int
+startRacoon(void)
+	{
+	debug("entry");
+	int fd = socket(PF_UNIX, SOCK_STREAM, 0);
+	if (0 > fd)
+		{
+		helplog(ASL_LEVEL_ERR, "Could not create endpoint for racoon control socket: %d %s",
+			errno, strerror(errno));
+		return kmDNSHelperRacoonStartFailed;
+		}
+
+	struct sockaddr_un saddr;
+	memset(&saddr, 0, sizeof(saddr));
+	saddr.sun_family = AF_UNIX;
+	saddr.sun_len = sizeof(saddr);
+	static const char racoon_control_sock_path[] = "/var/run/vpncontrol.sock";
+	strcpy(saddr.sun_path, racoon_control_sock_path);
+	int result = connect(fd, (struct sockaddr*) &saddr, saddr.sun_len);
+	if (0 > result)
+		{
+		helplog(ASL_LEVEL_ERR, "Could not connect racoon control socket %s: %d %s",
+			racoon_control_sock_path, errno, strerror(errno));
+		return kmDNSHelperRacoonStartFailed;
+		}
+	
+	u_int32_t btmm_cookie = 0x4d4d5442;
+	vpnctl_hdr h = { VPNCTL_CMD_PING, 0, btmm_cookie, 0, 0, 0 };
+	size_t bytes = 0;
+	ssize_t ret = 0;
+	
+	while (bytes < sizeof(vpnctl_hdr))
+		{
+		ret = write(fd, ((unsigned char*)&h)+bytes, sizeof(vpnctl_hdr) - bytes);
+		if (ret == -1)
+			{
+			helplog(ASL_LEVEL_ERR, "Could not write to racoon control socket: %d %s",
+				errno, strerror(errno));
+			return kmDNSHelperRacoonStartFailed;
+			}
+		bytes += ret;
+		}
+	
+	int nfds = fd + 1;
+	fd_set fds;
+	int counter = 0;
+	struct timeval tv;
+	bytes = 0;
+	h.cookie = 0;
+	
+	while (counter < 100)
+		{
+		FD_ZERO(&fds);
+		FD_SET(fd, &fds);
+		tv = (struct timeval){ 0, 10000 }; // 10 milliseconds * 100 iterations = 1 second max wait time
+
+		result = select(nfds, &fds, (fd_set*)NULL, (fd_set*)NULL, &tv);
+		if (result > 0)
+			{
+			if (FD_ISSET(fd, &fds))
+				{
+				ret = read(fd, ((unsigned char*)&h)+bytes, sizeof(vpnctl_hdr) - bytes);
+				
+				if (ret == -1)
+					{
+					helplog(ASL_LEVEL_ERR, "Could not read from racoon control socket: %d %s",
+						strerror(errno));
+					break;
+					}
+				bytes += ret;
+				if (bytes >= sizeof(vpnctl_hdr)) break;
+				}
+			else
+				{
+				debug("select returned but fd_isset not on expected fd\n");
+				}
+			}
+		else if (result < 0)
+			{
+			debug("select returned %d errno %d %s\n", result, errno, strerror(errno));
+			if (errno != EINTR) break;
+			}
+		}
+	
+	close(fd);
+	
+	if (bytes < sizeof(vpnctl_hdr) || h.cookie != btmm_cookie) return kmDNSHelperRacoonStartFailed;
+
+	debug("racoon started");
+	return 0;
+	}
+
 static int
 kickRacoon(void)
 	{
 	if ( 0 == notifyRacoon() )
 		return 0;
-	return startRacoon();
+	return UseOldRacoon() ? startRacoonOld() : startRacoon();
 	}
 
 #endif /* ndef MDNS_NO_IPSEC */
 
 int
-do_mDNSConfigureServer(__unused mach_port_t port, int updown, const char *keydata, int *err, audit_token_t token)
+do_mDNSConfigureServer(__unused mach_port_t port, int updown, const char *fqdn, audit_token_t token)
 	{
 #ifndef MDNS_NO_IPSEC
 	debug("entry");
-	*err = 0;
-
-	if (!authorized(&token))
-		{
-		*err = kmDNSHelperNotAuthorized;
-		goto fin;
-		}
+	if (!authorized(&token)) goto fin;
 
 	switch ((enum mDNSUpDown)updown)
 		{
 		case kmDNSUp:
-			if (0 != createAnonymousRacoonConfiguration(keydata))
-				{
-				*err = kmDNSHelperRacoonConfigCreationFailed;
-				goto fin;
-				}
+			if (0 != createAnonymousRacoonConfiguration(fqdn)) goto fin;
 			break;
 		case kmDNSDown:
-			revertAnonymousRacoonConfiguration();
+			revertAnonymousRacoonConfiguration(GetOldRacoonConfigDir());
+			revertAnonymousRacoonConfiguration(GetRacoonConfigDir());
 			break;
 		default:
-			*err = kmDNSHelperInvalidServerState;
 			goto fin;
 		}
 
-	if (0 != (*err = kickRacoon()))
+	if (0 != kickRacoon())
 		goto fin;
 	debug("succeeded");
 
 fin:
 #else
-	(void)port; (void)updown; (void)keydata; (void)token;
+	(void)port; (void)updown; (void)fqdn; (void)token;
 	*err = kmDNSHelperIPsecDisabled;
 #endif
 	update_idle_timer();
@@ -1649,8 +2232,8 @@ doTunnelPolicy(mDNSTunnelPolicyWhich which,
 	debug("succeeded");
 
 fin:
-	if (0 >= s)
-		close(s);
+	if (s >= 0)
+		pfkey_close(s);
 	if (NULL != policy)
 		free(policy);
 	return err;
@@ -1662,7 +2245,7 @@ int
 do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
     v6addr_t loc_inner, v4addr_t loc_outer, uint16_t loc_port,
     v6addr_t rmt_inner, v4addr_t rmt_outer, uint16_t rmt_port,
-    const char *keydata, int *err, audit_token_t token)
+    const char *fqdn, int *err, audit_token_t token)
 	{
 #ifndef MDNS_NO_IPSEC
 	static const char config[] =
@@ -1673,7 +2256,8 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 	  "  situation identity_only;\n"
 	  "  verify_identifier off;\n"
 	  "  generate_policy on;\n"
-	  "  shared_secret use \"%s\";\n"
+	  "  my_identifier user_fqdn \"dns:%s\";\n"
+	  "  shared_secret keychain \"dns:%s\";\n"
 	  "  nonce_size 16;\n"
 	  "  lifetime time 5 min;\n"
 	  "  initial_contact on;\n"
@@ -1738,7 +2322,7 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 	    lo, loc_port, ro, rmt_port);
 
 	if ((int)sizeof(path) <= snprintf(path, sizeof(path),
-	    "/etc/racoon/remote/%s.%u.conf", ro,
+	    "%s%s.%u.conf", GetRacoonConfigDir(), ro,
 	    rmt_port))
 		{
 		*err = kmDNSHelperResultTooLarge;
@@ -1746,6 +2330,11 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 		}
 	if (kmDNSAutoTunnelSetKeysReplace == replacedelete)
 		{
+		if (0 > ensureExistenceOfRacoonConfigDir(GetRacoonConfigDir()))
+			{
+			*err = kmDNSHelperRacoonConfigCreationFailed;
+			goto fin;
+			}
 		if ((int)sizeof(tmp_path) <=
 		    snprintf(tmp_path, sizeof(tmp_path), "%s.XXXXXX", path))
 			{
@@ -1754,7 +2343,7 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 			}       
 		if (0 > (fd = mkstemp(tmp_path)))
 			{
-			helplog(ASL_LEVEL_ERR, "mktemp \"%s\" failed: %s",
+			helplog(ASL_LEVEL_ERR, "mkstemp \"%s\" failed: %s",
 			    tmp_path, strerror(errno));
 			*err = kmDNSHelperRacoonConfigCreationFailed;
 			goto fin;
@@ -1767,7 +2356,7 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 			goto fin;
 			}
 		fd = -1;
-		fprintf(fp, config, configHeader, ro, rmt_port, keydata, ri, li, li, ri);
+		fprintf(fp, config, configHeader, ro, rmt_port, fqdn, fqdn, ri, li, li, ri);
 		fclose(fp);
 		fp = NULL;
 		if (0 > rename(tmp_path, path))

@@ -17,6 +17,60 @@
     Change History (most recent first):
 
 $Log: LegacyNATTraversal.c,v $
+Revision 1.65  2009/07/03 03:16:07  jessic2
+<rdar://problem/7026146> BTMM: UPnP works in Leopard but doesn't work in SnowLeopard (URLBase is empty) Made changes to support the case where the URLBase tag exists but there isn't a valid URL
+
+Revision 1.64  2009/06/25 21:07:44  herscher
+<rdar://problem/4147784> B4W should support UPnP
+
+Revision 1.63  2009/03/26 03:59:00  jessic2
+Changes for <rdar://problem/6492552&6492593&6492609&6492613&6492628&6492640&6492699>
+
+Revision 1.62  2009/02/13 06:31:09  cheshire
+Converted LogOperation messages to LogInfo
+
+Revision 1.61  2009/01/23 19:25:43  mcguire
+<rdar://problem/6514439> UPnP: Should not use NATErr_Refused when too many conflict retries
+
+Revision 1.60  2009/01/23 00:38:36  mcguire
+<rdar://problem/5570906> BTMM: Doesn't work with Linksys WRT54GS firmware 4.71.1
+
+Revision 1.59  2009/01/22 20:32:17  mcguire
+<rdar://problem/6446934> BTMM: pref pane reports enabled but negotiation failed
+Make sure we push the pointer out past the LF if we read it.
+
+Revision 1.58  2009/01/22 01:15:58  mcguire
+<rdar://problem/6446934> BTMM: pref pane reports enabled but negotiation failed
+
+Revision 1.57  2008/12/19 21:09:22  mcguire
+<rdar://problem/6431147> UPnP: error messages when canceling seemingly unrelated browse
+
+Revision 1.56  2008/12/06 01:42:57  mcguire
+<rdar://problem/6418958> Need to exponentially back-off after failure to get public address
+
+Revision 1.55  2008/12/01 19:43:48  mcguire
+<rdar://problem/6404766> UPnP: Handle errorCode 718 as a conflict when requesting a port mapping
+
+Revision 1.54  2008/11/26 20:57:37  cheshire
+For consistency with other similar macros, renamed mdnsIsDigit/mdnsIsLetter/mdnsValidHostChar
+to mDNSIsDigit/mDNSIsLetter/mDNSValidHostChar
+
+Revision 1.53  2008/11/26 20:34:04  cheshire
+Changed "destroying SSDPSocket" LogOperation debugging messages to debugf
+
+Revision 1.52  2008/11/26 19:54:03  cheshire
+Changed some "LogOperation" debugging messages to "debugf"
+
+Revision 1.51  2008/11/20 02:23:38  mcguire
+<rdar://problem/6041208> need to handle URLBase
+
+Revision 1.50  2008/09/20 00:34:22  mcguire
+<rdar://problem/6129039> BTMM: Add support for WANPPPConnection
+
+Revision 1.49  2008/08/07 21:51:13  mcguire
+<rdar://problem/5904423> UPnP: Possible memory corruption bug
+<rdar://problem/5930173> UPnP: Combine URL parsing code
+
 Revision 1.48  2008/07/24 20:23:04  cheshire
 <rdar://problem/3988320> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
 
@@ -180,7 +234,34 @@ Revision 1.1  2004/08/18 17:35:41  ksekar
 
 #include "stdlib.h"			// For strtol()
 #include "string.h"			// For strlcpy(), For strncpy(), strncasecmp()
-#include <arpa/inet.h>		// For inet_pton()
+
+#if defined( WIN32 )
+#	include <winsock2.h>
+#	include <ws2tcpip.h>
+#	define strcasecmp	_stricmp
+#	define strncasecmp	_strnicmp
+#	define mDNSASLLog( UUID, SUBDOMAIN, RESULT, SIGNATURE, FORMAT, ... ) ;
+
+static int
+inet_pton( int family, const char * addr, void * dst )
+	{
+	struct sockaddr_storage ss;
+	int sslen = sizeof( ss );
+
+	ZeroMemory( &ss, sizeof( ss ) );
+	ss.ss_family = family;
+
+	if ( WSAStringToAddressA( addr, family, NULL, ( struct sockaddr* ) &ss, &sslen ) == 0 )
+		{
+		if ( family == AF_INET ) { memcpy( dst, &( ( struct sockaddr_in* ) &ss)->sin_addr, sizeof( IN_ADDR ) ); return 1; }
+		else if ( family == AF_INET6 ) { memcpy( dst, &( ( struct sockaddr_in6* ) &ss)->sin6_addr, sizeof( IN6_ADDR ) ); return 1; }
+		else return 0;
+		}
+	else return 0;
+	}
+#else
+#	include <arpa/inet.h>		// For inet_pton()
+#endif
 
 #include "mDNSEmbeddedAPI.h"
 #include "uDNS.h"			// For natTraversalHandleAddressReply() etc.
@@ -211,94 +292,221 @@ mDNSlocal mStatus SendPortMapRequest(mDNS *m, NATTraversalInfo *n);
 
 #define RequestedPortNum(n) (mDNSVal16(mDNSIPPortIsZero((n)->RequestedPort) ? (n)->IntPort : (n)->RequestedPort) + (n)->tcpInfo.retries)
 
+// Note that this function assumes src is already NULL terminated
+mDNSlocal void AllocAndCopy(mDNSu8** dst, mDNSu8* src)
+	{
+	if (src == mDNSNULL) return;
+	if ((*dst = (mDNSu8 *) mDNSPlatformMemAllocate(strlen((char*)src) + 1)) == mDNSNULL) { LogMsg("AllocAndCopy: can't allocate string"); return; }
+	strcpy((char *)*dst, (char*)src);
+	}
+
+// This function does a simple parse of an HTTP URL that may include a hostname, port, and path
+// If found in the URL, addressAndPort and path out params will point to newly allocated space (and will leak if they were previously pointing at allocated space)
+mDNSlocal mStatus ParseHttpUrl(char* ptr, char* end, mDNSu8** addressAndPort, mDNSIPPort* port, mDNSu8** path)
+	{
+	// if the data begins with "http://", we assume there is a hostname and possibly a port number
+	if (end - ptr >= 7 && strncasecmp(ptr, "http://", 7) == 0)
+		{
+		int  i;
+		char* stop = end;
+		char* addrPtr = mDNSNULL;
+		
+		ptr += 7; //skip over "http://"
+		if (ptr >= end) { LogInfo("ParseHttpUrl: past end of buffer parsing host:port"); return mStatus_BadParamErr; }
+		
+		// find the end of the host:port
+		addrPtr = ptr;
+		for (i = 0; addrPtr && addrPtr != end; i++, addrPtr++) if (*addrPtr == '/') break;
+
+		// allocate the buffer (len i+1 so we have space to terminate the string)
+		if ((*addressAndPort = (mDNSu8 *) mDNSPlatformMemAllocate(i+1)) == mDNSNULL) { LogMsg("ParseHttpUrl: can't allocate address string"); return mStatus_NoMemoryErr; }
+		strncpy((char *)*addressAndPort, ptr, i);
+		(*addressAndPort)[i] = '\0';
+
+		// find the port number in the string, by looking backwards for the ':'
+		stop = ptr;    // can't go back farther than the original start
+		ptr = addrPtr; // move ptr to the path part
+		
+		for (addrPtr--;addrPtr>stop;addrPtr--)
+			{
+			if (*addrPtr == ':')
+				{
+				int tmpport;
+				addrPtr++; // skip over ':'
+				tmpport = (int)strtol(addrPtr, mDNSNULL, 10);
+				*port = mDNSOpaque16fromIntVal(tmpport); // store it properly converted
+				break;
+				}
+			}
+		}
+		
+	// ptr should now point to the first character we haven't yet processed
+	// everything that remains is the path
+	if (path && ptr < end)
+		{
+		if ((*path = (mDNSu8 *)mDNSPlatformMemAllocate(end - ptr + 1)) == mDNSNULL) { LogMsg("ParseHttpUrl: can't mDNSPlatformMemAllocate path"); return mStatus_NoMemoryErr; }
+		strncpy((char *)*path, ptr, end - ptr);
+		(*path)[end - ptr] = '\0';
+		}
+		
+	return mStatus_NoError;
+	}
+
+enum
+	{
+	HTTPCode_NeedMoreData = -1, // No code found in stream
+	HTTPCode_Other        = -2, // Valid code other than those below found in stream
+	HTTPCode_Bad          = -3,
+	HTTPCode_200          = 200,
+	HTTPCode_404          = 404,
+	HTTPCode_500          = 500,
+	};
+	
+mDNSlocal mDNSs16 ParseHTTPResponseCode(mDNSu8** data, mDNSu8* end)
+	{
+	mDNSu8* ptr = *data;
+	char * code;
+	
+	if (end - ptr < 5) return HTTPCode_NeedMoreData;
+	if (strncasecmp((char*)ptr, "HTTP/", 5) != 0) return HTTPCode_Bad;
+	ptr += 5;
+	// should we care about the HTTP protocol version?
+	
+	// look for first space, which must come before first LF
+	while (ptr && ptr != end)
+		{
+		if (*ptr == '\n') return HTTPCode_Bad;
+		if (*ptr == ' ') break;
+		ptr++;
+		}
+	if (ptr == end) return HTTPCode_NeedMoreData;
+	ptr++;
+	
+	if (end - ptr < 3) return HTTPCode_NeedMoreData;
+
+	code = (char*)ptr;
+	ptr += 3;
+	while (ptr && ptr != end)
+		{
+		if (*ptr == '\n') break;
+		ptr++;
+		}
+	if (ptr == end) return HTTPCode_NeedMoreData;
+	*data = ++ptr;
+	
+	if (memcmp(code, "200", 3) == 0) return HTTPCode_200;
+	if (memcmp(code, "404", 3) == 0) return HTTPCode_404;
+	if (memcmp(code, "500", 3) == 0) return HTTPCode_500;
+	
+	LogInfo("ParseHTTPResponseCode found unexpected result code: %c%c%c", code[0], code[1], code[2]);
+	return HTTPCode_Other;
+	}
+
 // This function parses the xml body of the device description response from the router. Basically, we look to make sure this is a response
-// referencing a service we care about (WANIPConnection), look for the "controlURL" header immediately following, and copy the addressing and URL info we need
+// referencing a service we care about (WANIPConnection or WANPPPConnection), look for the "controlURL" header immediately following, and copy the addressing and URL info we need
 mDNSlocal void handleLNTDeviceDescriptionResponse(tcpLNTInfo *tcpInfo)
 	{
 	mDNS    *m    = tcpInfo->m;
 	char    *ptr  = (char *)tcpInfo->Reply;
 	char    *end  = (char *)tcpInfo->Reply + tcpInfo->nread;
 	char    *stop = mDNSNULL;
+	mDNSs16 http_result;
+	
+	if (!mDNSIPPortIsZero(m->UPnPSOAPPort)) return; // already have the info we need
 
-	// find the service we care about
-	while (ptr && ptr != end)
+	http_result = ParseHTTPResponseCode((mDNSu8**)&ptr, (mDNSu8*)end); // Note: modifies ptr
+	if (http_result == HTTPCode_404) LNT_ClearState(m);
+	if (http_result != HTTPCode_200) 
 		{
-		if (*ptr == 'W' && (strncasecmp(ptr, "WANIPConnection:1", 17) == 0)) break;	// find the first 'W'; is this WANIPConnection? if not, keep looking
+		mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.DeviceDescription", "noop", "HTTP Result", "HTTP code: %d", http_result);
+		return;
+		}
+
+	// Always reset our flag to use WANIPConnection.  We'll use WANPPPConnection if we find it and don't find WANIPConnection.
+	m->UPnPWANPPPConnection = mDNSfalse;
+
+	// find either service we care about
+	while (ptr && ptr < end)
+		{
+		if (*ptr == 'W' && (strncasecmp(ptr, "WANIPConnection:1", 17) == 0)) break;
 		ptr++;
 		}
-	if (ptr == mDNSNULL || ptr == end) { LogOperation("handleLNTDeviceDescriptionResponse: didn't find WANIPConnection:1 string"); return; }
+	if (ptr == end)
+		{
+		ptr = (char *)tcpInfo->Reply;
+		while (ptr && ptr < end)
+			{
+			if (*ptr == 'W' && (strncasecmp(ptr, "WANPPPConnection:1", 18) == 0))
+				{
+				m->UPnPWANPPPConnection = mDNStrue;
+				break;
+				}
+			ptr++;
+			}
+		}
+	if (ptr == mDNSNULL || ptr == end) { LogInfo("handleLNTDeviceDescriptionResponse: didn't find WANIPConnection:1 or WANPPPConnection:1 string"); return; }
 
 	// find "controlURL", starting from where we left off
-	while (ptr && ptr != end)
+	while (ptr && ptr < end)
 		{
 		if (*ptr == 'c' && (strncasecmp(ptr, "controlURL", 10) == 0)) break;			// find the first 'c'; is this controlURL? if not, keep looking
 		ptr++;
 		}
-	if (ptr == mDNSNULL || ptr == end) { LogOperation("handleLNTDeviceDescriptionResponse: didn't find controlURL string"); return; }
+	if (ptr == mDNSNULL || ptr == end) { LogInfo("handleLNTDeviceDescriptionResponse: didn't find controlURL string"); return; }
 	ptr += 11;							// skip over "controlURL>"
-	if (ptr >= end) { LogOperation("handleLNTDeviceDescriptionResponse: past end of buffer and no body!"); return; } // check ptr again in case we skipped over the end of the buffer
+	if (ptr >= end) { LogInfo("handleLNTDeviceDescriptionResponse: past end of buffer and no body!"); return; } // check ptr again in case we skipped over the end of the buffer
 
 	// find the end of the controlURL element
-	for (stop = ptr; stop != end; stop++) { if (*stop == '<') { end = stop; break; } }
+	for (stop = ptr; stop < end; stop++) { if (*stop == '<') { end = stop; break; } }
 
 	// fill in default port
 	m->UPnPSOAPPort = m->UPnPRouterPort;
 
-	// is there an address string "http://"?
-	if (strncasecmp(ptr, "http://", 7) == 0)
+	// free string pointers and set to NULL	
+	if (m->UPnPSOAPAddressString != mDNSNULL)
 		{
-		int  i;
-		char *addrPtr = mDNSNULL;
-		
-		ptr += 7;						//skip over "http://"
-		if (ptr >= end) { LogOperation("handleLNTDeviceDescriptionResponse: past end of buffer and no URL!"); return; }
-		addrPtr = ptr;
-		for (i = 0; addrPtr && addrPtr != end; i++, addrPtr++) if (*addrPtr == '/') break; // first find the beginning of the URL and count the chars
-		if (addrPtr == mDNSNULL || addrPtr == end) { LogOperation("handleLNTDeviceDescriptionResponse: didn't find SOAP address string"); return; }
+		mDNSPlatformMemFree(m->UPnPSOAPAddressString);
+		m->UPnPSOAPAddressString = mDNSNULL;
+		}
+	if (m->UPnPSOAPURL != mDNSNULL)
+		{
+		mDNSPlatformMemFree(m->UPnPSOAPURL);
+		m->UPnPSOAPURL = mDNSNULL; 
+		}
+	
+	if (ParseHttpUrl(ptr, end, &m->UPnPSOAPAddressString, &m->UPnPSOAPPort, &m->UPnPSOAPURL) != mStatus_NoError) return;
+	// the SOAPURL should look something like "/uuid:0013-108c-4b3f0000f3dc"
 
-		// allocate the buffer (len i+1 so we have space to terminate the string)
-		if (m->UPnPSOAPAddressString != mDNSNULL)  mDNSPlatformMemFree(m->UPnPSOAPAddressString);
-		if ((m->UPnPSOAPAddressString = (mDNSu8 *) mDNSPlatformMemAllocate(i+1)) == mDNSNULL) { LogMsg("can't allocate SOAP address string"); return; }
-		
-		strncpy((char *)m->UPnPSOAPAddressString, ptr, i);				// copy the address string
-		m->UPnPSOAPAddressString[i] = '\0';								// terminate the string
-		
-		stop = ptr; // remember where to stop (just after "http://")
-		ptr = addrPtr; // move ptr past the rest of what we just processed
-		
-		// find the port number in the string
-		for (addrPtr--;addrPtr>stop;addrPtr--)
+	if (m->UPnPSOAPAddressString == mDNSNULL)
+		{
+		ptr = (char *)tcpInfo->Reply;
+		while (ptr && ptr < end)
 			{
-			if (*addrPtr == ':')
+			if (*ptr == 'U' && (strncasecmp(ptr, "URLBase", 7) == 0))		break;
+			ptr++;
+			}
+
+		if (ptr < end)		// found URLBase
+			{
+			LogInfo("handleLNTDeviceDescriptionResponse: found URLBase");			
+			ptr += 8; // skip over "URLBase>"
+			// find the end of the URLBase element
+			for (stop = ptr; stop < end; stop++) { if (*stop == '<') { end = stop; break; } }
+			if (ParseHttpUrl(ptr, end, &m->UPnPSOAPAddressString, &m->UPnPSOAPPort, mDNSNULL) != mStatus_NoError)
 				{
-				int port;
-				addrPtr++; // skip over ':'
-				port = (int)strtol(addrPtr, mDNSNULL, 10);
-				m->UPnPSOAPPort = mDNSOpaque16fromIntVal(port);		// store it properly converted
-				break;
+				LogInfo("handleLNTDeviceDescriptionResponse: failed to parse URLBase");
 				}
 			}
-		}
-
-	if (m->UPnPSOAPAddressString == mDNSNULL) m->UPnPSOAPAddressString = m->UPnPRouterAddressString; // just copy the pointer, don't allocate more memory
-	LogOperation("handleLNTDeviceDescriptionResponse: SOAP address string [%s]", m->UPnPSOAPAddressString);
-
-	// ptr should now point to the first character we haven't yet processed
-	if (ptr != end)
-		{
-		// allocate the buffer
-		if (m->UPnPSOAPURL != mDNSNULL) mDNSPlatformMemFree(m->UPnPSOAPURL);
-		if ((m->UPnPSOAPURL = (mDNSu8 *)mDNSPlatformMemAllocate(end - ptr + 1)) == mDNSNULL) { LogMsg("can't mDNSPlatformMemAllocate SOAP URL"); return; }
 		
-		// now copy
-		strncpy((char *)m->UPnPSOAPURL, ptr, end - ptr); // this URL looks something like "/uuid:0013-108c-4b3f0000f3dc"
-		m->UPnPSOAPURL[end - ptr] = '\0';				 // terminate the string
+		// if all else fails, use the router address string
+		if (m->UPnPSOAPAddressString == mDNSNULL)  AllocAndCopy(&m->UPnPSOAPAddressString, m->UPnPRouterAddressString);
 		}
+	if (m->UPnPSOAPAddressString == mDNSNULL) LogMsg("handleLNTDeviceDescriptionResponse: UPnPSOAPAddressString is NULL");
+	else LogInfo("handleLNTDeviceDescriptionResponse: SOAP address string [%s]", m->UPnPSOAPAddressString);
 
-	// if we get to the end and haven't found the URL fill in the defaults
-	if (m->UPnPSOAPURL == mDNSNULL) m->UPnPSOAPURL = m->UPnPRouterURL;	// just copy the pointer, don't allocate more memory
-	
-	LogOperation("handleLNTDeviceDescriptionResponse: SOAP URL [%s] port %d", m->UPnPSOAPURL, mDNSVal16(m->UPnPSOAPPort));
+	if (m->UPnPSOAPURL == mDNSNULL) AllocAndCopy(&m->UPnPSOAPURL, m->UPnPRouterURL);
+	if (m->UPnPSOAPURL == mDNSNULL) LogMsg("handleLNTDeviceDescriptionResponse: UPnPSOAPURL is NULL");
+	else LogInfo("handleLNTDeviceDescriptionResponse: SOAP URL [%s]", m->UPnPSOAPURL);
 	}
 
 mDNSlocal void handleLNTGetExternalAddressResponse(tcpLNTInfo *tcpInfo)
@@ -306,26 +514,40 @@ mDNSlocal void handleLNTGetExternalAddressResponse(tcpLNTInfo *tcpInfo)
 	mDNS       *m = tcpInfo->m;
 	mDNSu16     err = NATErr_None;
 	mDNSv4Addr  ExtAddr;
-	char       *ptr = (char *)tcpInfo->Reply;
-	char       *end = (char *)tcpInfo->Reply + tcpInfo->nread;
-	char       *addrend;
+	mDNSu8     *ptr = (mDNSu8*)tcpInfo->Reply;
+	mDNSu8     *end = (mDNSu8*)tcpInfo->Reply + tcpInfo->nread;
+	mDNSu8     *addrend;
 	static char tagname[20] = "NewExternalIPAddress";		// Array NOT including a terminating nul
 
-//	LogOperation("handleLNTGetExternalAddressResponse: %s", ptr);
+//	LogInfo("handleLNTGetExternalAddressResponse: %s", ptr);
 
-	while (ptr < end && strncasecmp(ptr, tagname, sizeof(tagname))) ptr++;
+	mDNSs16 http_result = ParseHTTPResponseCode(&ptr, end); // Note: modifies ptr
+	if (http_result == HTTPCode_404) LNT_ClearState(m);
+	if (http_result != HTTPCode_200)
+		{
+		mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.AddressRequest", "noop", "HTTP Result", "HTTP code: %d", http_result);
+		return;
+		}
+
+	
+	while (ptr < end && strncasecmp((char*)ptr, tagname, sizeof(tagname))) ptr++;
 	ptr += sizeof(tagname);						// Skip over "NewExternalIPAddress"
 	while (ptr < end && *ptr != '>') ptr++;
 	ptr += 1;									// Skip over ">"
 	// Find the end of the address and terminate the string so inet_pton() can convert it
 	addrend = ptr;
-	while (addrend < end && (mdnsIsDigit(*addrend) || *addrend == '.')) addrend++;
+	while (addrend < end && (mDNSIsDigit(*addrend) || *addrend == '.')) addrend++;
 	if (addrend >= end) return;
 	*addrend = 0;
 
-	if (inet_pton(AF_INET, ptr, &ExtAddr) <= 0)
-		{ LogMsg("handleLNTGetExternalAddressResponse: Router returned bad address %s", ptr); err = NATErr_NetFail; }
-	if (!err) LogOperation("handleLNTGetExternalAddressResponse: External IP address is %.4a", &ExtAddr);
+	if (inet_pton(AF_INET, (char*)ptr, &ExtAddr) <= 0)
+		{
+		mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.AddressRequest", "noop", "inet_pton", "");
+		LogMsg("handleLNTGetExternalAddressResponse: Router returned bad address %s", ptr);
+		err = NATErr_NetFail;
+		ExtAddr = zerov4Addr;
+		}
+	if (!err) LogInfo("handleLNTGetExternalAddressResponse: External IP address is %.4a", &ExtAddr);
 
 	natTraversalHandleAddressReply(m, err, ExtAddr);
 	}
@@ -334,56 +556,53 @@ mDNSlocal void handleLNTPortMappingResponse(tcpLNTInfo *tcpInfo)
 	{
 	mDNS             *m       = tcpInfo->m;
 	mDNSIPPort        extport = zeroIPPort;
-	char             *ptr     = (char *)tcpInfo->Reply;
-	char             *end     = (char *)tcpInfo->Reply + tcpInfo->nread;
+	mDNSu8           *ptr     = (mDNSu8*)tcpInfo->Reply;
+	mDNSu8           *end     = (mDNSu8*)tcpInfo->Reply + tcpInfo->nread;
 	NATTraversalInfo *natInfo;
+	mDNSs16 http_result;
 
 	for (natInfo = m->NATTraversals; natInfo; natInfo=natInfo->next) { if (natInfo == tcpInfo->parentNATInfo) break; }
 
-	if (!natInfo) { LogOperation("handleLNTPortMappingResponse: can't find matching tcpInfo in NATTraversals!"); return; }
+	if (!natInfo) { LogInfo("handleLNTPortMappingResponse: can't find matching tcpInfo in NATTraversals!"); return; }
 
-	// start from the beginning of the HTTP header; find "200 OK" status message; if the first characters after the
-	// space are not "200" then this is an error message or invalid in some other way
-	// if the error is "500" this is an internal server error
-	while (ptr && ptr != end)
+	http_result = ParseHTTPResponseCode(&ptr, end); // Note: modifies ptr
+	if (http_result == HTTPCode_200)
 		{
-		if (*ptr == ' ')
-			{
-			ptr++;
-			if (ptr == end) { LogOperation("handleLNTPortMappingResponse: past end of buffer!"); return; }
-			if      (strncasecmp(ptr, "200", 3) == 0) break;
-			else if (strncasecmp(ptr, "500", 3) == 0)
-				{
-				// now check to see if this was a port mapping conflict
-				while (ptr && ptr != end)
-					{
-					if ((*ptr == 'c' || *ptr == 'C') && strncasecmp(ptr, "Conflict", 8) == 0)
-						{
-						if (tcpInfo->retries < 100)
-							{ tcpInfo->retries++; SendPortMapRequest(tcpInfo->m, natInfo); }
-						else
-							{
-							LogMsg("handleLNTPortMappingResponse too many conflict retries %d %d", mDNSVal16(natInfo->IntPort), mDNSVal16(natInfo->RequestedPort));
-							natTraversalHandlePortMapReply(m, natInfo, m->UPnPInterfaceID, NATErr_Refused, zeroIPPort, 0);
-							}
-						return;
-						}
-					ptr++;
-					}
-				break;	// out of HTTP status search
-				}
-			}
-		ptr++;
-		}
-	if (ptr == mDNSNULL || ptr == end) return;
+		LogInfo("handleLNTPortMappingResponse: got a valid response, sending reply to natTraversalHandlePortMapReply(internal %d external %d retries %d)",
+			mDNSVal16(natInfo->IntPort), RequestedPortNum(natInfo), tcpInfo->retries);
 	
-	LogOperation("handleLNTPortMappingResponse: got a valid response, sending reply to natTraversalHandlePortMapReply(internal %d external %d retries %d)",
-		mDNSVal16(natInfo->IntPort), RequestedPortNum(natInfo), tcpInfo->retries);
-
-	// Make sure to compute extport *before* we zero tcpInfo->retries
-	extport = mDNSOpaque16fromIntVal(RequestedPortNum(natInfo));
-	tcpInfo->retries = 0;
-	natTraversalHandlePortMapReply(m, natInfo, m->UPnPInterfaceID, mStatus_NoError, extport, NATMAP_DEFAULT_LEASE);
+		// Make sure to compute extport *before* we zero tcpInfo->retries
+		extport = mDNSOpaque16fromIntVal(RequestedPortNum(natInfo));
+		tcpInfo->retries = 0;
+		natTraversalHandlePortMapReply(m, natInfo, m->UPnPInterfaceID, mStatus_NoError, extport, NATMAP_DEFAULT_LEASE);
+		}
+	else if (http_result == HTTPCode_500)
+		{
+		while (ptr && ptr != end)
+			{
+			if (((*ptr == 'c' || *ptr == 'C') && end - ptr >= 8 && strncasecmp((char*)ptr, "Conflict", 8) == 0) || (*ptr == '>' && end - ptr >= 15 && strncasecmp((char*)ptr, ">718</errorCode", 15) == 0))
+				{
+				if (tcpInfo->retries < 100)
+					{ 
+					tcpInfo->retries++; SendPortMapRequest(tcpInfo->m, natInfo); 
+					mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.PortMapRequest", "noop", "Conflict", "Retry %d", tcpInfo->retries);
+					}
+				else
+					{
+					LogMsg("handleLNTPortMappingResponse too many conflict retries %d %d", mDNSVal16(natInfo->IntPort), mDNSVal16(natInfo->RequestedPort));
+					mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.PortMapRequest", "noop", "Conflict - too many retries", "Retries: %d", tcpInfo->retries);
+					natTraversalHandlePortMapReply(m, natInfo, m->UPnPInterfaceID, NATErr_Res, zeroIPPort, 0);
+					}
+				return;
+				}
+			ptr++;
+			}
+		}
+	else if (http_result == HTTPCode_Bad) LogMsg("handleLNTPortMappingResponse got data that was not a valid HTTP response");
+	else if (http_result == HTTPCode_Other) LogMsg("handleLNTPortMappingResponse got unexpected response code");
+	else if (http_result == HTTPCode_404) LNT_ClearState(m);
+	if (http_result != HTTPCode_200 && http_result != HTTPCode_500)
+		mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.PortMapRequest", "noop", "HTTP Result", "HTTP code: %d", http_result);
 	}
 
 mDNSlocal void DisposeInfoFromUnmapList(mDNS *m, tcpLNTInfo *tcpInfo)
@@ -401,32 +620,32 @@ mDNSlocal void tcpConnectionCallback(TCPSocket *sock, void *context, mDNSBool Co
 	long        n       = 0;
 	long        nsent   = 0;
 
-	if (tcpInfo == mDNSNULL) { LogOperation("tcpConnectionCallback: no tcpInfo context"); status = mStatus_Invalid; goto exit; }
+	if (tcpInfo == mDNSNULL) { LogInfo("tcpConnectionCallback: no tcpInfo context"); status = mStatus_Invalid; goto exit; }
 
 	// The handlers below expect to be called with the lock held
 	mDNS_Lock(tcpInfo->m);
 	
-	if (err) { LogOperation("tcpConnectionCallback: received error"); goto exit; }
+	if (err) { LogInfo("tcpConnectionCallback: received error"); goto exit; }
 
 	if (ConnectionEstablished)		// connection is established - send the message
 		{
-		LogOperation("tcpConnectionCallback: connection established, sending message");
+		LogInfo("tcpConnectionCallback: connection established, sending message");
 		nsent = mDNSPlatformWriteTCP(sock, (char *)tcpInfo->Request, tcpInfo->requestLen);
 		if (nsent != (long)tcpInfo->requestLen) { LogMsg("tcpConnectionCallback: error writing"); status = mStatus_UnknownErr; goto exit; }
 		}
 	else
 		{
 		n = mDNSPlatformReadTCP(sock, (char *)tcpInfo->Reply + tcpInfo->nread, tcpInfo->replyLen - tcpInfo->nread, &closed);
-		LogOperation("tcpConnectionCallback: mDNSPlatformReadTCP read %d bytes", n);
+		LogInfo("tcpConnectionCallback: mDNSPlatformReadTCP read %d bytes", n);
 
-		if      (n < 0)  { LogOperation("tcpConnectionCallback - read returned %d", n);                           status = mStatus_ConnFailed; goto exit; }
-		else if (closed) { LogOperation("tcpConnectionCallback: socket closed by remote end %d", tcpInfo->nread); status = mStatus_ConnFailed; goto exit; }
+		if      (n < 0)  { LogInfo("tcpConnectionCallback - read returned %d", n);                           status = mStatus_ConnFailed; goto exit; }
+		else if (closed) { LogInfo("tcpConnectionCallback: socket closed by remote end %d", tcpInfo->nread); status = mStatus_ConnFailed; goto exit; }
 
 		tcpInfo->nread += n;
-		LogOperation("tcpConnectionCallback tcpInfo->nread %d", tcpInfo->nread);
+		LogInfo("tcpConnectionCallback tcpInfo->nread %d", tcpInfo->nread);
 		if (tcpInfo->nread > LNT_MAXBUFSIZE)
 			{
-			LogOperation("result truncated...");
+			LogInfo("result truncated...");
 			tcpInfo->nread = LNT_MAXBUFSIZE;
 			}
 
@@ -442,6 +661,26 @@ mDNSlocal void tcpConnectionCallback(TCPSocket *sock, void *context, mDNSBool Co
 exit:
 	if (err || status)
 		{
+		mDNS   *m = tcpInfo->m;
+		switch (tcpInfo->op)
+			{
+			case LNTDiscoveryOp:     if (m->UPnPSOAPAddressString == mDNSNULL)
+										mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.DeviceDescription", "failure", "SOAP Address", "");
+									 if (m->UPnPSOAPURL == mDNSNULL)
+										mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.DeviceDescription", "failure", "SOAP path", "");
+									 if (m->UPnPSOAPAddressString && m->UPnPSOAPURL)
+										mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.DeviceDescription", "success", "success", "");
+									 break;
+			case LNTExternalAddrOp:	 mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.AddressRequest", mDNSIPv4AddressIsZero(m->ExternalAddress) ? "failure" : "success", mDNSIPv4AddressIsZero(m->ExternalAddress) ? "failure" : "success", "");
+									 break;
+			case LNTPortMapOp:       if (tcpInfo->parentNATInfo)	
+										mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.PortMapRequest", (tcpInfo->parentNATInfo->Result) ? "failure" : "success", 
+											(tcpInfo->parentNATInfo->Result) ? "failure" : "success", "Result: %d", tcpInfo->parentNATInfo->Result);
+									 break;
+			case LNTPortMapDeleteOp: break;
+			default:				 break;
+			}
+
 		mDNSPlatformTCPCloseConnection(tcpInfo->sock);
 		tcpInfo->sock = mDNSNULL;
 		if (tcpInfo->Request) { mDNSPlatformMemFree(tcpInfo->Request); tcpInfo->Request = mDNSNULL; }
@@ -467,12 +706,12 @@ mDNSlocal mStatus MakeTCPConnection(mDNS *const m, tcpLNTInfo *info, const mDNSA
 	info->nread     = 0;
 	info->replyLen  = LNT_MAXBUFSIZE;
 	if      (info->Reply != mDNSNULL)  mDNSPlatformMemZero(info->Reply, LNT_MAXBUFSIZE);   // reuse previously allocated buffer
-	else if ((info->Reply = (mDNSs8 *) mDNSPlatformMemAllocate(LNT_MAXBUFSIZE)) == mDNSNULL) { LogOperation("can't allocate reply buffer"); return (mStatus_NoMemoryErr); }
+	else if ((info->Reply = (mDNSs8 *) mDNSPlatformMemAllocate(LNT_MAXBUFSIZE)) == mDNSNULL) { LogInfo("can't allocate reply buffer"); return (mStatus_NoMemoryErr); }
 
-	if (info->sock) { LogOperation("MakeTCPConnection: closing previous open connection"); mDNSPlatformTCPCloseConnection(info->sock); info->sock = mDNSNULL; }
+	if (info->sock) { LogInfo("MakeTCPConnection: closing previous open connection"); mDNSPlatformTCPCloseConnection(info->sock); info->sock = mDNSNULL; }
 	info->sock = mDNSPlatformTCPSocket(m, kTCPSocketFlags_Zero, &srcport);
 	if (!info->sock) { LogMsg("LNT MakeTCPConnection: unable to create TCP socket"); mDNSPlatformMemFree(info->Reply); info->Reply = mDNSNULL; return(mStatus_NoMemoryErr); }
-	LogOperation("MakeTCPConnection: connecting to %#a:%d", &info->Address, mDNSVal16(info->Port));
+	LogInfo("MakeTCPConnection: connecting to %#a:%d", &info->Address, mDNSVal16(info->Port));
 	err = mDNSPlatformTCPConnect(info->sock, Addr, Port, 0, tcpConnectionCallback, info);
 
 	if      (err == mStatus_ConnPending) err = mStatus_NoError;
@@ -486,7 +725,7 @@ mDNSlocal mStatus MakeTCPConnection(mDNS *const m, tcpLNTInfo *info, const mDNSA
 	else
 		{
 		// Don't need to log this in customer builds -- it happens quite often during sleep, wake, configuration changes, etc.
-		LogOperation("LNT MakeTCPConnection: connection failed");
+		LogInfo("LNT MakeTCPConnection: connection failed");
 		mDNSPlatformTCPCloseConnection(info->sock);	// Dispose the socket we created with mDNSPlatformTCPSocket() above
 		info->sock = mDNSNULL;
 		mDNSPlatformMemFree(info->Reply);
@@ -519,7 +758,7 @@ mDNSlocal mStatus SendSOAPMsgControlAction(mDNS *m, tcpLNTInfo *info, char *Acti
 	static const char header[] =
 		"POST %s HTTP/1.1\r\n"
 		"Content-Type: text/xml; charset=\"utf-8\"\r\n"
-		"SOAPAction: \"urn:schemas-upnp-org:service:WANIPConnection:1#%s\"\r\n"
+		"SOAPAction: \"urn:schemas-upnp-org:service:WAN%sConnection:1#%s\"\r\n"
 		"User-Agent: Mozilla/4.0 (compatible; UPnP/1.0; Windows 9x)\r\n"
 		"Host: %s\r\n"
 		"Content-Length: %d\r\n"
@@ -534,7 +773,7 @@ mDNSlocal mStatus SendSOAPMsgControlAction(mDNS *m, tcpLNTInfo *info, char *Acti
 		" xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\""
 		" SOAP-ENV:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
 		"<SOAP-ENV:Body>"
-		"<m:%s xmlns:m=\"urn:schemas-upnp-org:service:WANIPConnection:1\">";
+		"<m:%s xmlns:m=\"urn:schemas-upnp-org:service:WAN%sConnection:1\">";
 
 	static const char body2[] =
 		"</m:%s>"
@@ -545,18 +784,18 @@ mDNSlocal mStatus SendSOAPMsgControlAction(mDNS *m, tcpLNTInfo *info, char *Acti
 	char   *body = (char *)&m->omsg;			// Typically requires 1110-1122 bytes; m->omsg is 8952 bytes, which is plenty
 	int     bodyLen;
 
-	if (m->UPnPSOAPURL == mDNSNULL || m->UPnPSOAPAddressString == mDNSNULL)	// if no SOAP URL or address exists get out here
-		{ LogOperation("SendSOAPMsgControlAction: no SOAP URL or address string"); return mStatus_Invalid; }
+	if (mDNSIPPortIsZero(m->UPnPSOAPPort) || m->UPnPSOAPURL == mDNSNULL || m->UPnPSOAPAddressString == mDNSNULL)	// if no SOAP URL or address exists get out here
+		{ LogInfo("SendSOAPMsgControlAction: no SOAP port, URL or address string"); return mStatus_Invalid; }
 
 	// Create body
-	bodyLen  = mDNS_snprintf   (body,           sizeof(m->omsg),           body1,   Action);
+	bodyLen  = mDNS_snprintf   (body,           sizeof(m->omsg),           body1,   Action,   m->UPnPWANPPPConnection ? "PPP" : "IP");
 	bodyLen += AddSOAPArguments(body + bodyLen, sizeof(m->omsg) - bodyLen, numArgs, Arguments);
 	bodyLen += mDNS_snprintf   (body + bodyLen, sizeof(m->omsg) - bodyLen, body2,   Action);
 
 	// Create info->Request; the header needs to contain the bodyLen in the "Content-Length" field
 	if (!info->Request) info->Request = mDNSPlatformMemAllocate(LNT_MAXBUFSIZE);
 	if (!info->Request) { LogMsg("SendSOAPMsgControlAction: Can't allocate info->Request"); return mStatus_NoMemoryErr; }
-	info->requestLen = mDNS_snprintf((char *)info->Request, LNT_MAXBUFSIZE, header, m->UPnPSOAPURL, Action, m->UPnPSOAPAddressString, bodyLen, body);
+	info->requestLen = mDNS_snprintf((char *)info->Request, LNT_MAXBUFSIZE, header, m->UPnPSOAPURL, m->UPnPWANPPPConnection ? "PPP" : "IP", Action, m->UPnPSOAPAddressString, bodyLen, body);
 
 	err = MakeTCPConnection(m, info, &m->Router, m->UPnPSOAPPort, op);
 	if (err) { mDNSPlatformMemFree(info->Request); info->Request = mDNSNULL; }
@@ -600,7 +839,7 @@ mDNSlocal mStatus SendPortMapRequest(mDNS *m, NATTraversalInfo *n)
 				}
 			else
 				{
-				natTraversalHandlePortMapReply(m, n, m->UPnPInterfaceID, NATErr_Refused, zeroIPPort, 0);
+				natTraversalHandlePortMapReply(m, n, m->UPnPInterfaceID, NATErr_Res, zeroIPPort, 0);
 				return mStatus_NoError;
 				}
 			}
@@ -640,13 +879,13 @@ mDNSlocal mStatus SendPortMapRequest(mDNS *m, NATTraversalInfo *n)
 	propArgs[7].type  = "ui4";
 	propArgs[7].value = "0";
 
-	LogOperation("SendPortMapRequest: internal %u external %u", mDNSVal16(n->IntPort), ReqPortNum);
+	LogInfo("SendPortMapRequest: internal %u external %u", mDNSVal16(n->IntPort), ReqPortNum);
 	return SendSOAPMsgControlAction(m, &n->tcpInfo, "AddPortMapping", 8, propArgs, LNTPortMapOp);
 	}
 
 mDNSexport mStatus LNT_MapPort(mDNS *m, NATTraversalInfo *n)
 	{
-	LogOperation("LNT_MapPort");
+	LogInfo("LNT_MapPort");
 	if (n->tcpInfo.sock) return(mStatus_NoError);	// If we already have a connection up don't make another request for the same thing
 	n->tcpInfo.parentNATInfo = n;
 	n->tcpInfo.retries       = 0;
@@ -662,7 +901,7 @@ mDNSexport mStatus LNT_UnmapPort(mDNS *m, NATTraversalInfo *n)
 	mStatus     err;
 
 	// If no NAT gateway to talk to, no need to do all this work for nothing
-	if (!m->UPnPSOAPURL || !m->UPnPSOAPAddressString) return mStatus_NoError;
+	if (mDNSIPPortIsZero(m->UPnPSOAPPort) || !m->UPnPSOAPURL || !m->UPnPSOAPAddressString) return mStatus_NoError;
 
 	mDNS_snprintf(externalPort, sizeof(externalPort), "%u", mDNSVal16(mDNSIPPortIsZero(n->RequestedPort) ? n->IntPort : n->RequestedPort));
 
@@ -680,14 +919,14 @@ mDNSexport mStatus LNT_UnmapPort(mDNS *m, NATTraversalInfo *n)
 	n->tcpInfo.parentNATInfo = n;
 
 	// clean up previous port mapping requests and allocations
-	if (n->tcpInfo.sock) LogOperation("LNT_UnmapPort: closing previous open connection");
+	if (n->tcpInfo.sock) LogInfo("LNT_UnmapPort: closing previous open connection");
 	if (n->tcpInfo.sock   ) { mDNSPlatformTCPCloseConnection(n->tcpInfo.sock); n->tcpInfo.sock    = mDNSNULL; }
 	if (n->tcpInfo.Request) { mDNSPlatformMemFree(n->tcpInfo.Request);         n->tcpInfo.Request = mDNSNULL; }
 	if (n->tcpInfo.Reply  ) { mDNSPlatformMemFree(n->tcpInfo.Reply);           n->tcpInfo.Reply   = mDNSNULL; }
 	
 	// make a copy of the tcpInfo that we can clean up later (the one passed in will be destroyed by the client as soon as this returns)
 	if ((info = mDNSPlatformMemAllocate(sizeof(tcpLNTInfo))) == mDNSNULL)
-		{ LogOperation("LNT_UnmapPort: can't allocate tcpInfo"); return(mStatus_NoMemoryErr); }
+		{ LogInfo("LNT_UnmapPort: can't allocate tcpInfo"); return(mStatus_NoMemoryErr); }
 	*info = n->tcpInfo;
 	
 	while (*infoPtr) infoPtr = &(*infoPtr)->next;	// find the end of the list
@@ -716,23 +955,28 @@ mDNSlocal mStatus GetDeviceDescription(mDNS *m, tcpLNTInfo *info)
 		"Connection: close\r\n"
 		"\r\n";
 
-	if (m->UPnPRouterURL == mDNSNULL || m->UPnPRouterAddressString == mDNSNULL)     { LogOperation("GetDeviceDescription: no router URL or address string!"); return (mStatus_Invalid); }
+	if (!mDNSIPPortIsZero(m->UPnPSOAPPort)) return mStatus_NoError; // already have the info we need
+	
+	if (m->UPnPRouterURL == mDNSNULL || m->UPnPRouterAddressString == mDNSNULL)     { LogInfo("GetDeviceDescription: no router URL or address string!"); return (mStatus_Invalid); }
 
 	// build message
 	if      (info->Request != mDNSNULL)  mDNSPlatformMemZero(info->Request, LNT_MAXBUFSIZE); // reuse previously allocated buffer
-	else if ((info->Request = (mDNSs8 *) mDNSPlatformMemAllocate(LNT_MAXBUFSIZE)) == mDNSNULL) { LogOperation("can't allocate send buffer for discovery"); return (mStatus_NoMemoryErr); }
+	else if ((info->Request = (mDNSs8 *) mDNSPlatformMemAllocate(LNT_MAXBUFSIZE)) == mDNSNULL) { LogInfo("can't allocate send buffer for discovery"); return (mStatus_NoMemoryErr); }
 	info->requestLen = mDNS_snprintf((char *)info->Request, LNT_MAXBUFSIZE, szSSDPMsgDescribeDeviceFMT, m->UPnPRouterURL, m->UPnPRouterAddressString);
-	LogOperation("Describe Device: [%s]", info->Request);
+	LogInfo("Describe Device: [%s]", info->Request);
 	return MakeTCPConnection(m, info, &m->Router, m->UPnPRouterPort, LNTDiscoveryOp);
 	}
 
 // This function parses the response to our SSDP discovery message. Basically, we look to make sure this is a response
-// referencing a service we care about (WANIPConnection), then look for the "Location:" header and copy the addressing and
+// referencing a service we care about (WANIPConnection or WANPPPConnection), then look for the "Location:" header and copy the addressing and
 // URL info we need.
 mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID InterfaceID, mDNSu8 *data, mDNSu16 len)
 	{
 	char *ptr = (char *)data;
 	char *end = (char *)data + len;
+	char *stop = ptr;
+	
+	if (!mDNSIPPortIsZero(m->UPnPRouterPort)) return; // already have the info we need
 
 	// The formatting of the HTTP header is not always the same when it comes to the placement of
 	// the service and location strings, so we just look for each of them from the beginning for every response
@@ -740,8 +984,17 @@ mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID Interface
 	// figure out if this is a message from a service we care about
 	while (ptr && ptr != end)
 		{
-		if (*ptr == 'W' && (strncasecmp(ptr, "WANIPConnection:1", 17) == 0)) break;	// find the first 'W'; is this WANIPConnection? if not, keep looking
+		if (*ptr == 'W' && (strncasecmp(ptr, "WANIPConnection:1", 17) == 0)) break;
 		ptr++;
+		}
+	if (ptr == end)
+		{
+		ptr = (char *)data;
+		while (ptr && ptr != end)
+			{
+			if (*ptr == 'W' && (strncasecmp(ptr, "WANPPPConnection:1", 18) == 0)) break;
+			ptr++;
+			}
 		}
 	if (ptr == mDNSNULL || ptr == end) return;	// not a message we care about
 
@@ -749,103 +1002,113 @@ mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID Interface
 	ptr = (char *)data;
 	while (ptr && ptr != end)
 		{
-		if (*ptr == 'L' && (strncasecmp(ptr, "Location", 8) == 0)) break;			// find the first 'L'; is this Location? if not, keep looking
+		if (*ptr == 'L' && (strncasecmp(ptr, "Location:", 9) == 0)) break;			// find the first 'L'; is this Location? if not, keep looking
 		ptr++;
 		}
-	if (ptr == mDNSNULL || ptr == end) return;	// not a message we care about
-	
-	// find "http://", starting from where we left off
-	while (ptr && ptr != end)
+	if (ptr == mDNSNULL || ptr == end) 
 		{
-		if (*ptr == 'h' && (strncasecmp(ptr, "http://", 7) == 0))					// find the first 'h'; is this a URL? if not, keep looking
-			{
-			int i;
-			char *addrPtr = mDNSNULL;
-			
-			ptr += 7;							//skip over "http://"
-			if (ptr >= end) { LogOperation("LNT_ConfigureRouterInfo: past end of buffer and no URL!"); return; }
-			addrPtr = ptr;
-			for (i = 0; addrPtr && addrPtr != end; i++, addrPtr++) if (*addrPtr == '/') break;	// first find the beginning of the URL and count the chars
-			if (addrPtr == mDNSNULL || addrPtr == end) return; // not a valid message
+		mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.ssdp", "failure", "Location", "");
+		return;	// not a message we care about
+		}
+	ptr += 9; //Skip over 'Location:'
+	while (*ptr == ' ' && ptr < end) ptr++; // skip over spaces
+	if (ptr >= end) return;
 	
-			// allocate the buffer (len i+1 so we have space to terminate the string)
-			if (m->UPnPRouterAddressString != mDNSNULL)  mDNSPlatformMemFree(m->UPnPRouterAddressString);
-			if ((m->UPnPRouterAddressString = (mDNSu8 *) mDNSPlatformMemAllocate(i+1)) == mDNSNULL) { LogMsg("can't mDNSPlatformMemAllocate router address string"); return; }
-			
-			strncpy((char *)m->UPnPRouterAddressString, ptr, i);	// copy the address string
-			m->UPnPRouterAddressString[i] = '\0';					// terminate the string
-			LogOperation("LNT_ConfigureRouterInfo: router address string [%s]", m->UPnPRouterAddressString);
-			break;
-			}
-		ptr++;	// continue
+	// find the end of the line
+	for (stop = ptr; stop != end; stop++) { if (*stop == '\r') { end = stop; break; } }
+	
+	// fill in default port
+	m->UPnPRouterPort = mDNSOpaque16fromIntVal(80);
+
+	// free string pointers and set to NULL	
+	if (m->UPnPRouterAddressString != mDNSNULL)
+		{
+		mDNSPlatformMemFree(m->UPnPRouterAddressString);
+		m->UPnPRouterAddressString = mDNSNULL;
+		}
+	if (m->UPnPRouterURL != mDNSNULL)
+		{
+		mDNSPlatformMemFree(m->UPnPRouterURL);
+		m->UPnPRouterURL = mDNSNULL; 
+		}
+	
+	// the Router URL should look something like "/dyndev/uuid:0013-108c-4b3f0000f3dc"
+	if (ParseHttpUrl(ptr, end, &m->UPnPRouterAddressString, &m->UPnPRouterPort, &m->UPnPRouterURL) != mStatus_NoError)
+		{
+		mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.ssdp", "failure", "Parse URL", "");
+		return;
 		}
 
-	// find port and router URL, starting after the "http://" if it was there
-	while (ptr && ptr != end)
-		{
-		if (*ptr == ':')										// found the port number
-			{
-			int port;
-			ptr++;										// skip over ':'
-			if (ptr == end) { LogOperation("LNT_ConfigureRouterInfo: reached end of buffer and no address!"); return; }
-			port = (int)strtol(ptr, (char **)mDNSNULL, 10);			// get the port
-			m->UPnPRouterPort = mDNSOpaque16fromIntVal(port);	// store it properly converted
-			}
-		else if (*ptr == '/')									// found router URL
-			{
-			int j;
-			char *urlPtr;
-			m->UPnPInterfaceID = InterfaceID;
-			if (mDNSIPPortIsZero(m->UPnPRouterPort)) m->UPnPRouterPort = mDNSOpaque16fromIntVal(80);		// fill in default port if we didn't find one before
-			
-			urlPtr = ptr;
-			for (j = 0; urlPtr && urlPtr != end; j++, urlPtr++) if (*urlPtr == '\r') break;	// first find the end of the line and count the chars
-			if (urlPtr == mDNSNULL || urlPtr == end) return; // not a valid message
-			
-			// allocate the buffer (len j+1 so we have space to terminate the string)
-			if (m->UPnPRouterURL != mDNSNULL) mDNSPlatformMemFree(m->UPnPRouterURL);
-			if ((m->UPnPRouterURL = (mDNSu8 *) mDNSPlatformMemAllocate(j+1)) == mDNSNULL) { LogMsg("can't allocate router URL"); return; }
-			
-			// now copy everything to the end of the line
-			strncpy((char *)m->UPnPRouterURL, ptr, j);			// this URL looks something like "/dyndev/uuid:0013-108c-4b3f0000f3dc"
-			m->UPnPRouterURL[j] = '\0';					// terminate the string
-			break;									// we've got everything we need, so get out here
-			}
-		ptr++;	// continue
-		}
+	m->UPnPInterfaceID = InterfaceID;
 
-	if (ptr == mDNSNULL || ptr == end) return;	// not a valid message
-	LogOperation("Router port %d, URL set to [%s]...", mDNSVal16(m->UPnPRouterPort), m->UPnPRouterURL);
-	
+	if (m->UPnPRouterAddressString == mDNSNULL) 
+		{
+		mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.ssdp", "failure", "Router address", "");
+		LogMsg("LNT_ConfigureRouterInfo: UPnPRouterAddressString is NULL");
+		}
+	else LogInfo("LNT_ConfigureRouterInfo: Router address string [%s]", m->UPnPRouterAddressString);
+
+	if (m->UPnPRouterURL == mDNSNULL) 
+		{
+		mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.ssdp", "failure", "Router path", "");
+		LogMsg("LNT_ConfigureRouterInfo: UPnPRouterURL is NULL");
+		}
+	else LogInfo("LNT_ConfigureRouterInfo: Router URL [%s]", m->UPnPRouterURL);
+
+	LogInfo("LNT_ConfigureRouterInfo: Router port %d", mDNSVal16(m->UPnPRouterPort));
+	LogInfo("LNT_ConfigureRouterInfo: Router interface %d", m->UPnPInterfaceID);
+
 	// Don't need the SSDP socket anymore
-	if (m->SSDPSocket) { LogOperation("LNT_ConfigureRouterInfo destroying SSDPSocket %p", &m->SSDPSocket); mDNSPlatformUDPClose(m->SSDPSocket); m->SSDPSocket = mDNSNULL; }
+	if (m->SSDPSocket) { debugf("LNT_ConfigureRouterInfo destroying SSDPSocket %p", &m->SSDPSocket); mDNSPlatformUDPClose(m->SSDPSocket); m->SSDPSocket = mDNSNULL; }
 
+	mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.ssdp", "success", "success", "");
 	// now send message to get the device description
 	GetDeviceDescription(m, &m->tcpDeviceInfo);
 	}
 
 mDNSexport void LNT_SendDiscoveryMsg(mDNS *m)
 	{
-	static const mDNSu8 msg[] =
+	static const char msg[] =
 		"M-SEARCH * HTTP/1.1\r\n"
 		"Host:239.255.255.250:1900\r\n"
-		"ST:urn:schemas-upnp-org:service:WANIPConnection:1\r\n"
+		"ST:urn:schemas-upnp-org:service:WAN%sConnection:1\r\n"
 		"Man:\"ssdp:discover\"\r\n"
 		"MX:3\r\n\r\n";
 	static const mDNSAddr multicastDest = { mDNSAddrType_IPv4, { { { 239, 255, 255, 250 } } } };
 	
-	// Always send the first SSDP packet via unicast
-	if (m->retryIntervalGetAddr <= NATMAP_INIT_RETRY) m->SSDPMulticast = mDNSfalse;
-
-	LogOperation("LNT_SendDiscoveryMsg Router %.4a Current External Address %.4a", &m->Router.ip.v4, &m->ExternalAddress);
-
-	if (!mDNSIPv4AddressIsZero(m->Router.ip.v4) && mDNSIPv4AddressIsZero(m->ExternalAddress))
+	mDNSu8* buf = (mDNSu8*)&m->omsg; //m->omsg is 8952 bytes, which is plenty
+	unsigned int bufLen;
+	
+	if (!mDNSIPPortIsZero(m->UPnPRouterPort))
 		{
-		if (!m->SSDPSocket) { m->SSDPSocket = mDNSPlatformUDPSocket(m, zeroIPPort); LogOperation("LNT_SendDiscoveryMsg created SSDPSocket %p", &m->SSDPSocket); }
-		mDNSPlatformSendUDP(m, msg, msg + sizeof(msg) - 1, 0, m->SSDPSocket, m->SSDPMulticast ? &multicastDest : &m->Router, SSDPPort);
+		if (m->SSDPSocket) { debugf("LNT_SendDiscoveryMsg destroying SSDPSocket %p", &m->SSDPSocket); mDNSPlatformUDPClose(m->SSDPSocket); m->SSDPSocket = mDNSNULL; }
+		if (mDNSIPPortIsZero(m->UPnPSOAPPort) && !m->tcpDeviceInfo.sock) GetDeviceDescription(m, &m->tcpDeviceInfo);
+		return;
+		}
+
+	// Always query for WANIPConnection in the first SSDP packet
+	if (m->retryIntervalGetAddr <= NATMAP_INIT_RETRY) m->SSDPWANPPPConnection = mDNSfalse;
+
+	// Create message
+	bufLen = mDNS_snprintf((char*)buf, sizeof(m->omsg), msg, m->SSDPWANPPPConnection ? "PPP" : "IP");
+
+	debugf("LNT_SendDiscoveryMsg Router %.4a Current External Address %.4a", &m->Router.ip.v4, &m->ExternalAddress);
+
+	if (!mDNSIPv4AddressIsZero(m->Router.ip.v4))
+		{
+		if (!m->SSDPSocket) { m->SSDPSocket = mDNSPlatformUDPSocket(m, zeroIPPort); debugf("LNT_SendDiscoveryMsg created SSDPSocket %p", &m->SSDPSocket); }
+		mDNSPlatformSendUDP(m, buf, buf + bufLen, 0, m->SSDPSocket, &m->Router,     SSDPPort);
+		mDNSPlatformSendUDP(m, buf, buf + bufLen, 0, m->SSDPSocket, &multicastDest, SSDPPort);
 		}
 		
-	m->SSDPMulticast = !m->SSDPMulticast;
+	m->SSDPWANPPPConnection = !m->SSDPWANPPPConnection;
+	}
+
+mDNSexport void LNT_ClearState(mDNS *const m)
+	{
+	if (m->tcpAddrInfo.sock)   { mDNSPlatformTCPCloseConnection(m->tcpAddrInfo.sock);   m->tcpAddrInfo.sock   = mDNSNULL; }
+	if (m->tcpDeviceInfo.sock) { mDNSPlatformTCPCloseConnection(m->tcpDeviceInfo.sock); m->tcpDeviceInfo.sock = mDNSNULL; }
+	m->UPnPSOAPPort = m->UPnPRouterPort = zeroIPPort;	// Reset UPnP ports
 	}
 
 #endif /* _LEGACY_NAT_TRAVERSAL_ */

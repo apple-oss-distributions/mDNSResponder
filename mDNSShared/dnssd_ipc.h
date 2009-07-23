@@ -28,6 +28,24 @@
     Change History (most recent first):
 
 $Log: dnssd_ipc.h,v $
+Revision 1.46  2009/05/27 22:20:44  cheshire
+Removed unused dnssd_errno_assign() (we have no business writing to errno -- we should only read it)
+
+Revision 1.45  2009/05/26 21:31:07  herscher
+Fix compile errors on Windows
+
+Revision 1.44  2009/02/12 20:28:31  cheshire
+Added some missing "const" declarations
+
+Revision 1.43  2008/10/23 23:21:31  cheshire
+Moved definition of dnssd_strerror() to be with the definition of dnssd_errno, in dnssd_ipc.h
+
+Revision 1.42  2008/10/23 23:06:17  cheshire
+Removed () from dnssd_errno macro definition -- it's not a function and doesn't need any arguments
+
+Revision 1.41  2008/09/27 01:04:09  cheshire
+Added "send_bpf" to list of request_op_t operation codes
+
 Revision 1.40  2007/09/07 20:56:03  cheshire
 Renamed uint32_t field in client_context_t from "ptr64" to more accurate name "u32"
 
@@ -157,7 +175,8 @@ Update to APSL 2.0
 #	define dnssd_sock_t			SOCKET
 #	define dnssd_socklen_t		int
 #	define dnssd_close(sock)	closesocket(sock)
-#	define dnssd_errno()		WSAGetLastError()
+#	define dnssd_errno			WSAGetLastError()
+#	define dnssd_strerror(X)	win32_strerror(X)
 #	define ssize_t				int
 #	define getpid				_getpid
 #else
@@ -178,7 +197,8 @@ Update to APSL 2.0
 #	define dnssd_sock_t			int
 #	define dnssd_socklen_t		unsigned int
 #	define dnssd_close(sock)	close(sock)
-#	define dnssd_errno()		errno
+#	define dnssd_errno			errno
+#	define dnssd_strerror(X)	strerror(X)
 #endif
 
 #if defined(USE_TCP_LOOPBACK)
@@ -241,6 +261,7 @@ typedef enum
 	getproperty_request,	// New in B4W 1.0.4
     port_mapping_request,	// New in Leopard and B4W 2.0
 	addrinfo_request,
+	send_bpf,				// New in SL
 
 	cancel_request = 63
     } request_op_t;
@@ -289,10 +310,10 @@ typedef packedstruct
 // it is advanced to point to the next field, or the end of the message
 
 void put_uint32(const uint32_t l, char **ptr);
-uint32_t get_uint32(char **ptr, char *end);
+uint32_t get_uint32(const char **ptr, const char *end);
 
 void put_uint16(uint16_t s, char **ptr);
-uint16_t get_uint16(char **ptr, char *end);
+uint16_t get_uint16(const char **ptr, const char *end);
 
 #define put_flags put_uint32
 #define get_flags get_uint32
@@ -301,10 +322,10 @@ uint16_t get_uint16(char **ptr, char *end);
 #define get_error_code get_uint32
 
 int put_string(const char *str, char **ptr);
-int get_string(char **ptr, char *end, char *buffer, int buflen);
+int get_string(const char **ptr, const char *const end, char *buffer, int buflen);
 
 void put_rdata(const int rdlen, const unsigned char *rdata, char **ptr);
-char *get_rdata(char **ptr, char *end, int rdlen);  // return value is rdata pointed to by *ptr -
+const char *get_rdata(const char **ptr, const char *end, int rdlen);  // return value is rdata pointed to by *ptr -
                                          // rdata is not copied from buffer.
 
 void ConvertHeaderBytes(ipc_msg_hdr *hdr);

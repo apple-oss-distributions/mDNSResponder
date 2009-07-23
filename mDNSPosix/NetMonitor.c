@@ -30,6 +30,23 @@
     Change History (most recent first):
 
 $Log: NetMonitor.c,v $
+Revision 1.94  2009/04/24 00:31:56  cheshire
+<rdar://problem/3476350> Return negative answers when host knows authoritatively that no answer exists
+Added code to display NSEC records
+
+Revision 1.93  2009/01/13 05:31:34  mkrochma
+<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
+
+Revision 1.92  2009/01/11 03:20:06  mkrochma
+<rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
+
+Revision 1.91  2008/11/13 22:08:07  cheshire
+Show additional records in Query packets
+
+Revision 1.90  2008/09/05 22:20:26  cheshire
+<rdar://problem/3988320> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+Add "UDPSocket *src" parameter in mDNSPlatformSendUDP call
+
 Revision 1.89  2007/05/17 19:12:42  cheshire
 Tidy up code layout
 
@@ -95,7 +112,7 @@ Use IFNAMSIZ (more portable) instead of IF_NAMESIZE
 
 #include <stdio.h>			// For printf()
 #include <stdlib.h>			// For malloc()
-#include <string.h>			// For bcopy()
+#include <string.h>			// For strrchr(), strcmp()
 #include <time.h>			// For "struct tm" etc.
 #include <signal.h>			// For SIGINT, SIGTERM
 #include <netdb.h>			// For gethostbyname()
@@ -361,7 +378,7 @@ mDNSlocal void SendUnicastQuery(mDNS *const m, HostEntry *entry, domainname *nam
 		InterfaceID = mDNSInterface_Any;	// Send query from our unicast reply socket
 		}
 
-	mDNSSendDNSMessage(&mDNSStorage, &query, qptr, InterfaceID, target, MulticastDNSPort, mDNSNULL, mDNSNULL);
+	mDNSSendDNSMessage(&mDNSStorage, &query, qptr, InterfaceID, mDNSNULL, target, MulticastDNSPort, mDNSNULL, mDNSNULL);
 	}
 
 mDNSlocal void AnalyseHost(mDNS *const m, HostEntry *entry, const mDNSInterfaceID InterfaceID)
@@ -583,6 +600,12 @@ mDNSlocal void DisplayResourceRecord(const mDNSAddr *const srcaddr, const char *
 							} break;
 		case kDNSType_AAAA:	n += mprintf("%.16a", &rd->ipv6); break;
 		case kDNSType_SRV:	n += mprintf("%##s:%d", rd->srv.target.c, mDNSVal16(rd->srv.port)); break;
+		case kDNSType_NSEC:	{
+							int i;
+							for (i=0; i<255; i++)
+								if (rd->nsec.bitmap[i>>3] & (128 >> (i&7)))
+									n += mprintf("%s ", DNSTypeName(i));
+							} break;
 		default:			{
 							mDNSu8 *s = rd->data;
 							while (s < rdend && p < buffer+MaxWidth)
@@ -691,6 +714,14 @@ mDNSlocal void DisplayQuery(mDNS *const m, const DNSMessage *const msg, const mD
 		const mDNSu8 *ep = ptr;
 		ptr = skipResourceRecord(msg, ptr, end);
 		if (!ptr) { DisplayError(srcaddr, ep, end, "AUTHORITY"); return; }
+		}
+
+	for (i=0; i<msg->h.numAdditionals; i++)
+		{
+		const mDNSu8 *ep = ptr;
+		ptr = GetLargeResourceRecord(m, msg, ptr, end, InterfaceID, kDNSRecordTypePacketAns, &pkt);
+		if (!ptr) { DisplayError(srcaddr, ep, end, "ADDITIONAL"); return; }
+		DisplayResourceRecord(srcaddr, "    ", &pkt.r.resrec);
 		}
 
 	if (entry) AnalyseHost(m, entry, InterfaceID);
@@ -943,7 +974,7 @@ mDNSexport int main(int argc, char **argv)
 			else if (inet_pton(AF_INET6, argv[i], &s6) == 1)
 				{
 				a.type = mDNSAddrType_IPv6;
-				bcopy(&s6, &a.ip.v6, sizeof(a.ip.v6));
+				mDNSPlatformMemCopy(&a.ip.v6, &s6, sizeof(a.ip.v6));
 				}
 			else
 				{

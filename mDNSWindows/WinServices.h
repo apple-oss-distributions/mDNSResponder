@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: WinServices.h,v $
+Revision 1.3  2009/06/22 23:25:05  herscher
+<rdar://problem/5265747> ControlPanel doesn't display key and password in dialog box. Refactor Lsa calls into Secret.h and Secret.c, which is used by both the ControlPanel and mDNSResponder system service.
+
 Revision 1.2  2006/08/14 23:25:21  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -41,4 +44,5 @@ First checked in
 #include "CommonServices.h"
 
 
-OSStatus	UTF8StringToStringObject( const char *inUTF8, CString &inObject );
+OSStatus	UTF8StringToStringObject( const char *inUTF8, CString &outObject );
+OSStatus	StringObjectToUTF8String( CString &inObject, char* outUTF8, size_t outUTF8Len );

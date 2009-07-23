@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: SecondPage.cpp,v $
+Revision 1.20  2009/06/18 18:05:50  herscher
+<rdar://problem/4694554> Eliminate the first screen of Printer Wizard and maybe combine others ("I'm Feeling Lucky")
+
 Revision 1.19  2006/08/14 23:24:09  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -225,12 +228,20 @@ CSecondPage::OnSetActive()
 		OnAddPrinter( *it, false );
 	}
 
-	// And if we hit 'Back' from page 3, then re-select printer
-
-	if ( ( psheet->GetLastPage() == psheet->GetPage( 2 ) ) && printer )
+	if ( ( !printer && ( psheet->m_printers.size() > 0 ) ) || ( printer != psheet->GetSelectedPrinter() ) )
 	{
+		if ( !printer )
+		{
+			printer = psheet->m_printers.front();
+		}
+
 		psheet->SetSelectedPrinter( printer );
-		m_browseList.Select( printer->item, TVGN_FIRSTVISIBLE );
+	}
+	
+	if ( printer )
+	{
+		m_browseList.SelectItem( printer->item );
+		::SetFocus( m_browseList );
 	}
 
 exit:
@@ -270,6 +281,7 @@ CSecondPage::OnAddPrinter(
 					bool		moreComing )
 {
 	CPrinterSetupWizardSheet	*	psheet;
+	Printer						*	selectedPrinter;
 	OSStatus						err = kNoErr;
 
 	check( IsWindow( m_hWnd ) );
@@ -278,6 +290,8 @@ CSecondPage::OnAddPrinter(
 
 	psheet = reinterpret_cast<CPrinterSetupWizardSheet*>(GetParent());
 	require_quiet( psheet, exit );
+	
+	selectedPrinter = psheet->GetSelectedPrinter();
 
 	printer->item = m_browseList.InsertItem(printer->displayName);
 
@@ -299,6 +313,13 @@ CSecondPage::OnAddPrinter(
 		m_browseList.DeleteItem(m_emptyListItem);
 		m_emptyListItem = NULL;
 		m_browseList.EnableWindow(TRUE);
+	}
+
+	if ( !selectedPrinter )
+	{
+		psheet->SetSelectedPrinter( printer );
+		m_browseList.SelectItem( printer->item );
+		::SetFocus( m_browseList );
 	}
 
 exit:

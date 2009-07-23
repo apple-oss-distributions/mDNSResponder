@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: AboutDialog.h,v $
+Revision 1.4  2008/10/23 22:33:26  cheshire
+Changed "NOTE:" to "Note:" so that BBEdit 9 stops putting those comment lines into the funtion popup menu
+
 Revision 1.3  2006/08/14 23:25:49  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -69,7 +72,7 @@ class	AboutDialog : public CDialog
 		
 		//{{AFX_DATA(AboutDialog)
 		enum { IDD = IDD_ABOUT_DIALOG };
-			// NOTE: the ClassWizard will add data members here
+			// Note: the ClassWizard will add data members here
 		//}}AFX_DATA
 		
 		// ClassWizard generated virtual function overrides

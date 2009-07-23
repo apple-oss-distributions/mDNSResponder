@@ -17,6 +17,10 @@
     Change History (most recent first):
 
 $Log: AssemblyInfo.cpp,v $
+Revision 1.6  2009/03/30 20:16:27  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
 Revision 1.5  2006/08/14 23:25:43  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -38,8 +42,11 @@ Initial revision
 #include "stdafx.h"
 #include "WinVersRes.h"
 
+using namespace System;
 using namespace System::Reflection;
 using namespace System::Runtime::CompilerServices;
+using namespace System::Runtime::InteropServices;
+using namespace System::Security::Permissions;
 
 //
 // General Information about an assembly is controlled through the following 
@@ -49,9 +56,9 @@ using namespace System::Runtime::CompilerServices;
 [assembly:AssemblyTitleAttribute("dnssd.NET")];
 [assembly:AssemblyDescriptionAttribute(".NET wrapper for DNS-SD services")];
 [assembly:AssemblyConfigurationAttribute("")];
-[assembly:AssemblyCompanyAttribute("Apple Computer, Inc.")];
+[assembly:AssemblyCompanyAttribute("Apple Inc.")];
 [assembly:AssemblyProductAttribute("")];
-[assembly:AssemblyCopyrightAttribute("Apple Computer, Inc.")];
+[assembly:AssemblyCopyrightAttribute("Apple Inc.")];
 [assembly:AssemblyTrademarkAttribute("")];
 [assembly:AssemblyCultureAttribute("")];		
 
@@ -95,3 +102,7 @@ using namespace System::Runtime::CompilerServices;
 [assembly:AssemblyDelaySignAttribute(false)];
 [assembly:AssemblyKeyFileAttribute("dnssd_NET.snk")];
 [assembly:AssemblyKeyNameAttribute("")];
+
+[assembly:ComVisible(false)];
+[assembly:CLSCompliantAttribute(true)];
+[assembly:SecurityPermission(SecurityAction::RequestMinimum, UnmanagedCode = true)];

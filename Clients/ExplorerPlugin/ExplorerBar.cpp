@@ -17,6 +17,10 @@
     Change History (most recent first):
     
 $Log: ExplorerBar.cpp,v $
+Revision 1.5  2009/03/30 18:44:53  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
 Revision 1.4  2006/08/14 23:24:00  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -588,7 +592,7 @@ STDMETHODIMP  ExplorerBar::QueryContextMenu(HMENU hShellContextMenu, UINT iConte
 //===========================================================================================================================
 
 // Not called for explorer bars
-STDMETHODIMP ExplorerBar::GetCommandString(UINT idCmd, UINT uType, UINT* pwReserved, LPSTR pszName, UINT cchMax)
+STDMETHODIMP ExplorerBar::GetCommandString(UINT_PTR idCmd, UINT uType, UINT* pwReserved, LPSTR pszName, UINT cchMax)
 {
 	DEBUG_UNUSED( idCmd );
 	DEBUG_UNUSED( uType );

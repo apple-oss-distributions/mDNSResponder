@@ -30,6 +30,240 @@
     Change History (most recent first):
 
 $Log: daemon.c,v $
+Revision 1.434  2009/06/27 00:55:27  cheshire
+Added code for displaying the size of various structures like CacheRecord and CacheGroup
+
+Revision 1.433  2009/06/25 23:36:57  cheshire
+To facilitate testing, added command-line switch "-OfferSleepProxyService"
+to re-enable the previously-supported mode of operation where we offer
+sleep proxy service on desktop Macs that are set to never sleep.
+
+Revision 1.432  2009/05/13 17:25:33  mkrochma
+<rdar://problem/6879926> Should not schedule maintenance wake when machine has no advertised services
+Sleep proxy client should only look for services being advertised via Multicast
+
+Revision 1.431  2009/05/12 23:21:18  cheshire
+<rdar://problem/6879926> Should not schedule maintenance wake when machine has no advertised services
+Use mDNSCoreHaveAdvertisedServices routine to determine whether we should schedule a maintenance wake
+
+Revision 1.430  2009/05/01 19:17:36  cheshire
+<rdar://problem/6501561> Sleep Proxy: Reduce the frequency of maintenance wakes: ODD, fans, power
+
+Revision 1.429  2009/04/30 20:07:50  mcguire
+<rdar://problem/6822674> Support multiple UDSs from launchd
+
+Revision 1.428  2009/04/22 19:43:37  cheshire
+To facilitate debugging, added -DebugLogging and -UnicastPacketLogging switches
+as launch-time alternatives to sending SIGUSR1 and SIGUSR2 signals later
+
+Revision 1.427  2009/04/22 01:19:57  jessic2
+<rdar://problem/6814585> Daemon: mDNSResponder is logging garbage for error codes because it's using %ld for int 32
+
+Revision 1.426  2009/04/20 19:25:26  cheshire
+For readability, changed "nomulticastadvertisements" to "NoMulticastAdvertisements"
+
+Revision 1.425  2009/04/20 19:17:19  cheshire
+Added a comment explaining why we don't need our CatchABRT handler on 10.5 and later
+
+Revision 1.424  2009/04/17 19:10:27  mcguire
+<rdar://problem/6802833> May still ping-pong with kernel when a framework calls abort()
+
+Revision 1.423  2009/04/16 16:03:08  mcguire
+<rdar://problem/6792024> abort() causes high CPU usage instead of crash & restart
+
+Revision 1.422  2009/04/11 01:43:28  jessic2
+<rdar://problem/4426780> Daemon: Should be able to turn on LogOperation dynamically
+
+Revision 1.421  2009/04/11 00:20:06  jessic2
+<rdar://problem/4426780> Daemon: Should be able to turn on LogOperation dynamically
+
+Revision 1.420  2009/03/20 23:53:03  jessic2
+<rdar://problem/6646228> SIGHUP should restart all in-progress queries
+
+Revision 1.419  2009/03/20 21:30:04  cheshire
+<rdar://problem/6705866> Crash passing invalid parameters to DNSServiceBrowserCreate()
+Do not append a new question to the browser list until *after* we verify that mDNS_StartBrowse() succeeded
+
+Revision 1.418  2009/03/17 21:32:15  cheshire
+Improved "DHCPWakeTime: SCDynamicStoreCopyDHCPInfo failed" error message
+
+Revision 1.417  2009/03/17 01:25:39  cheshire
+<rdar://problem/6601427> Sleep Proxy: Retransmit and retry Sleep Proxy Server requests
+In SIGINFO output, show three best Sleep Proxies
+
+Revision 1.416  2009/02/21 01:47:36  cheshire
+<rdar://problem/6600825> Race condition when sleep initiated and then immediately canceled
+
+Revision 1.415  2009/02/21 01:45:33  cheshire
+Move declaration of "mDNSs32 interval"
+
+Revision 1.414  2009/02/14 00:05:32  cheshire
+Left-justify interface names
+
+Revision 1.413  2009/02/13 18:16:05  cheshire
+Fixed some compile warnings
+
+Revision 1.412  2009/02/13 06:34:41  cheshire
+Converted LogOperation messages to LogInfo or LogSPS
+
+Revision 1.411  2009/02/12 20:57:26  cheshire
+Renamed 'LogAllOperation' switch to 'LogClientOperations'; added new 'LogSleepProxyActions' switch
+
+Revision 1.410  2009/02/11 02:32:18  cheshire
+m->p->SystemWakeForNetworkAccessEnabled renamed to m->SystemWakeOnLANEnabled
+
+Revision 1.409  2009/02/09 21:16:14  cheshire
+Improved debugging messages
+
+Revision 1.408  2009/02/07 06:08:44  cheshire
+Commented out testing code
+
+Revision 1.407  2009/02/07 02:57:31  cheshire
+<rdar://problem/6084043> Sleep Proxy: Need to adopt IOPMConnection
+
+Revision 1.406  2009/02/06 03:06:49  mcguire
+<rdar://problem/5858533> Adopt vproc_transaction API in mDNSResponder
+
+Revision 1.405  2009/02/04 23:00:28  cheshire
+Move logic for deciding when to next wake up into a subroutine called AllowSleepNow
+
+Revision 1.404  2009/02/02 22:18:32  cheshire
+If we wake up and find no wireless network, don't just give up and go back to sleep and never try again
+
+Revision 1.403  2009/01/15 21:58:18  cheshire
+Stop using ifa_name field of NetworkInterfaceInfoOSX structure, because it will be going away
+
+Revision 1.402  2009/01/07 23:08:18  cheshire
+Updated debugging messages and comments
+
+Revision 1.401  2008/12/17 05:05:26  cheshire
+Fixed alignment of NAT mapping syslog messages
+
+Revision 1.400  2008/12/10 19:30:57  cheshire
+Use symbolic name OSXVers_10_3_Panther in version check instead of literal integer "7"
+
+Revision 1.399  2008/12/10 02:13:04  cheshire
+Fix alignment of SIGINFO output for longer interface names like "bridge0"
+
+Revision 1.398  2008/12/04 21:08:51  mcguire
+<rdar://problem/6116863> mDNS: Provide mechanism to disable Multicast advertisements
+
+Revision 1.397  2008/12/04 02:18:50  cheshire
+Improved sleep/wake debugging messages
+
+Revision 1.396  2008/11/26 23:37:44  cheshire
+Use SCDynamicStoreCopyDHCPInfo to compute desired wakeup time for our next DHCP lease renewal
+
+Revision 1.395  2008/11/14 21:56:31  cheshire
+Moved debugging routine ShowTaskSchedulingError() from daemon.c into DNSCommon.c
+
+Revision 1.394  2008/11/14 02:20:03  cheshire
+Include m->NextScheduledSPS in task scheduling calculations
+
+Revision 1.393  2008/11/14 01:22:38  cheshire
+Include SPS-registered records when computing the next required wakeup time
+
+Revision 1.392  2008/11/11 01:55:16  cheshire
+Improved comments; minium requested sleep is 60 seconds
+
+Revision 1.391  2008/11/04 02:29:55  cheshire
+Clear interface list before sleeping
+
+Revision 1.390  2008/11/02 21:22:05  cheshire
+Changed mallocL size parameter back to "unsigned int"
+
+Revision 1.389  2008/11/02 21:14:58  cheshire
+Fixes to make mallocL/freeL debugging checks work on 64-bit
+
+Revision 1.388  2008/10/31 23:05:30  cheshire
+Move logic to decide when to at as Sleep Proxy Server from daemon.c to mDNSMacOSX.c
+
+Revision 1.387  2008/10/30 01:08:18  cheshire
+After waking for network maintenance operations go back to sleep again
+
+Revision 1.386  2008/10/29 22:03:39  cheshire
+Compute correct required wakeup time for NAT traversals and uDNS-registered records
+
+Revision 1.385  2008/10/28 20:40:13  cheshire
+Now that the BPF code in mDNSMacOSX.c makes its own CFSocketCreateWithNative directly, the
+udsSupportAddFDToEventLoop/udsSupportRemoveFDFromEventLoop routines can go back to using kqueue
+
+Revision 1.384  2008/10/27 22:22:59  cheshire
+Extra sanity checking in udsSupportAddFDToEventLoop/udsSupportRemoveFDFromEventLoop
+
+Revision 1.383  2008/10/27 07:24:53  cheshire
+Need a "usleep(1000)" (workaround for <rdar://problem/3585273>) to avoid crashes
+
+Revision 1.382  2008/10/24 01:51:48  cheshire
+Before going to sleep, request a future wakeup to renew NAT-PMP mappings, SPS registrations, etc.
+
+Revision 1.381  2008/10/23 22:25:58  cheshire
+Renamed field "id" to more descriptive "updateid"
+
+Revision 1.380  2008/10/23 02:25:08  cheshire
+Added locking in InternetSharingChanged()
+
+Revision 1.379  2008/10/22 23:23:59  cheshire
+Moved definition of OSXVers from daemon.c into mDNSMacOSX.c
+
+Revision 1.378  2008/10/22 19:55:35  cheshire
+Miscellaneous fixes; renamed FindFirstAnswerInCache to FindSPSInCache
+
+Revision 1.377  2008/10/22 17:17:22  cheshire
+Need to open and close BPF fds when turning Sleep Proxy Server on and off
+
+Revision 1.376  2008/10/22 01:42:39  cheshire
+Before allowing sleep, delay until NetWakeResolve queries have completed
+
+Revision 1.375  2008/10/20 22:31:31  cheshire
+Instead of requesting a single BPF descriptor via mDNSRequestBPF(), call mDNSMacOSXNetworkChanged()
+to signal that UDS is now available to handle BPF requests, and let it work out what it needs
+
+Revision 1.374  2008/10/16 22:40:48  cheshire
+Removed "usleep(100000);" from CFSCallBack()
+
+Revision 1.373  2008/10/16 20:49:30  cheshire
+When kevent/kqueue fails, fall back to using old CFSocket RunLoopSource instead
+
+Revision 1.372  2008/10/15 00:03:21  cheshire
+When finally going to sleep, update m->SleepState from SleepState_Transferring to SleepState_Sleeping
+
+Revision 1.371  2008/10/14 19:09:53  cheshire
+When going to sleep, delay sleep until we've got our acknowledgment from the SPS
+
+Revision 1.370  2008/10/09 22:32:27  cheshire
+Include MAC address in interface listing in SIGINFO output
+
+Revision 1.369  2008/10/09 19:32:39  cheshire
+Updated SIGINFO output to indicate whether we've found a sleep proxy server on a given interface
+Hollow sun with rays "☼" indicates we're still looking; solid sun with rays "☀" indicates we found one
+
+Revision 1.368  2008/10/03 21:23:17  mkrochma
+Fix crash by not passing NULL to CFGetTypeID
+
+Revision 1.367  2008/10/03 18:25:17  cheshire
+Instead of calling "m->MainCallback" function pointer directly, call mDNSCore routine "mDNS_ConfigChanged(m);"
+
+Revision 1.366  2008/10/03 00:34:55  cheshire
+<rdar://problem/6134215> Mac with Internet Sharing should also offer Sleep Proxy service
+Start and stop Sleep Proxy service when user starts and stops Internet Sharing
+
+Revision 1.365  2008/10/02 22:23:13  cheshire
+Additional debugging message giving explanation if shutdown is delayed
+
+Revision 1.364  2008/10/01 21:23:40  cheshire
+In SIGINFO interface listing, indicate whether NetWake is set
+
+Revision 1.363  2008/09/27 01:29:15  cheshire
+Call mDNSRequestBPF() to request the helper to send us the BPF fd
+
+Revision 1.362  2008/09/26 19:47:42  cheshire
+Fixed locking error: lock is supposed to be held when calling mDNS_PurgeCacheResourceRecord
+
+Revision 1.361  2008/09/15 23:52:30  cheshire
+<rdar://problem/6218902> mDNSResponder-177 fails to compile on Linux with .desc pseudo-op
+Made __crashreporter_info__ symbol conditional, so we only use it for OS X build
+
 Revision 1.360  2008/03/13 20:55:16  mcguire
 <rdar://problem/5769316> fix deprecated warnings/errors
 Additional cleanup: use a conditional macro instead of lots of #if
@@ -102,7 +336,7 @@ Revision 1.340  2007/09/07 22:44:03  mcguire
 <rdar://problem/5448420> Move CFUserNotification code to mDNSResponderHelper
 
 Revision 1.339  2007/09/06 19:08:29  cheshire
-LogAllOperations check needs to be "#if LogAllOperations || MDNS_DEBUGMSGS"
+LogClientOperations check needs to be "#if LogClientOperations || MDNS_DEBUGMSGS"
 
 Revision 1.338  2007/09/05 23:34:27  mcguire
 Revert logging change
@@ -378,6 +612,7 @@ Revision 1.261  2006/01/06 01:22:28  cheshire
 #include <pthread.h>
 #include <sandbox.h>
 #include <SystemConfiguration/SCPreferencesSetSpecific.h>
+#include <SystemConfiguration/SCDynamicStoreCopyDHCPInfo.h>
 
 #if TARGET_OS_EMBEDDED
 #include <bootstrap_priv.h>
@@ -396,9 +631,12 @@ Revision 1.261  2006/01/06 01:22:28  cheshire
 
 #include <DNSServiceDiscovery/DNSServiceDiscovery.h>
 #include "helper.h"
+#include "safe_vproc.h"
 
 //*************************************************************************************************************
-// Globals
+#if COMPILER_LIKES_PRAGMA_MARK
+#pragma mark - Globals
+#endif
 
 static mDNS_PlatformSupport PlatformStorage;
 
@@ -415,7 +653,8 @@ static mach_port_t client_death_port = MACH_PORT_NULL;
 static mach_port_t signal_port       = MACH_PORT_NULL;
 static mach_port_t server_priv_port  = MACH_PORT_NULL;
 
-static dnssd_sock_t launchd_fd = dnssd_InvalidSocket;
+static dnssd_sock_t *launchd_fds = mDNSNULL;
+static mDNSu32 launchd_fds_count = 0;
 
 // mDNS Mach Message Timeout, in milliseconds.
 // We need this to be short enough that we don't deadlock the mDNSResponder if a client
@@ -427,13 +666,13 @@ static dnssd_sock_t launchd_fd = dnssd_InvalidSocket;
 
 static int restarting_via_mach_init = 0;	// Used on Jaguar/Panther when daemon is started via mach_init mechanism
 static int started_via_launchdaemon = 0;	// Indicates we're running on Tiger or later, where daemon is managed by launchd
-
-static int OSXVers;
-
-static CFRunLoopRef CFRunLoop;
+static mDNSBool advertise = mDNS_Init_AdvertiseLocalAddresses; // By default, advertise addresses (& other records) via multicast
 
 //*************************************************************************************************************
-// Active client list structures
+#if COMPILER_LIKES_PRAGMA_MARK
+#pragma mark -
+#pragma mark - Active client list structures
+#endif
 
 typedef struct DNSServiceDomainEnumeration_struct DNSServiceDomainEnumeration;
 struct DNSServiceDomainEnumeration_struct
@@ -469,7 +708,7 @@ struct DNSServiceBrowser_struct
 	DNSServiceBrowserResult *results;
 	mDNSs32 lastsuccess;
     mDNSBool DefaultDomain;                // was the browse started on an explicit domain?
-    domainname type;                       //  registration type 
+    domainname type;                       // registration type
 	};
 
 typedef struct DNSServiceResolver_struct DNSServiceResolver;
@@ -509,7 +748,7 @@ typedef struct DNSServiceRegistration
     size_t rdsize;
     int NumSubTypes;
     char regtype[MAX_ESCAPED_DOMAIN_NAME]; // for use in AllocateSubtypes
-    domainlabel name;  // used only if autoname is false 
+    domainlabel name;  // used only if autoname is false
     domainname type;
     mDNSIPPort port;
     unsigned char txtinfo[1024];
@@ -534,7 +773,10 @@ typedef struct KQSocketEventSource
 static KQSocketEventSource *gEventSources;
 
 //*************************************************************************************************************
-// General Utility Functions
+#if COMPILER_LIKES_PRAGMA_MARK
+#pragma mark -
+#pragma mark - General Utility Functions
+#endif
 
 #if APPLE_OSX_mDNSResponder && MACOSX_MDNS_MALLOC_DEBUGGING
 
@@ -636,8 +878,8 @@ mDNSlocal void validatelists(mDNS *const m)
 	// Check platform-layer lists
 	NetworkInterfaceInfoOSX     *i;
 	for (i = m->p->InterfaceList; i; i = i->next)
-		if (i->next == (NetworkInterfaceInfoOSX *)~0 || !i->ifa_name || i->ifa_name == (char *)~0)
-			LogMemCorruption("m->p->InterfaceList: %p is garbage (%p)", i, i->ifa_name);
+		if (i->next == (NetworkInterfaceInfoOSX *)~0 || !i->m || i->m == (mDNS *)~0)
+			LogMemCorruption("m->p->InterfaceList: %p is garbage (%p)", i, i->ifinfo.ifname);
 
 	ClientTunnel *t;
 	for (t = m->TunnelClients; t; t=t->next)
@@ -645,14 +887,12 @@ mDNSlocal void validatelists(mDNS *const m)
 			LogMemCorruption("m->TunnelClients: %p is garbage (%d)", t, t->dstname.c[0]);
 	}
 
-void *mallocL(char *msg, unsigned int size)
+mDNSexport void *mallocL(char *msg, unsigned int size)
 	{
-	unsigned long *mem = malloc(size+8);
+	// Allocate space for two words of sanity checking data before the requested block
+	mDNSu32 *mem = malloc(sizeof(mDNSu32) * 2 + size);
 	if (!mem)
-		{
-		LogMsg("malloc( %s : %d ) failed", msg, size);
-		return(NULL);
-		}
+		{ LogMsg("malloc( %s : %d ) failed", msg, size); return(NULL); }
 	else
 		{
 		if      (size > 24000)                      LogMsg("malloc( %s : %lu ) = %p suspiciously large", msg, size, &mem[2]);
@@ -666,23 +906,29 @@ void *mallocL(char *msg, unsigned int size)
 		}
 	}
 
-void freeL(char *msg, void *x)
+mDNSexport void freeL(char *msg, void *x)
 	{
 	if (!x)
 		LogMsg("free( %s @ NULL )!", msg);
 	else
 		{
-		unsigned long *mem = ((unsigned long *)x) - 2;
-		if (mem[0] != 0xDEAD1234) { LogMsg("free( %s @ %p ) !!!! NOT ALLOCATED !!!!", msg, &mem[2]); return; }
+		mDNSu32 *mem = ((mDNSu32 *)x) - 2;
+		if      (mem[0] != 0xDEAD1234)            { LogMsg("free( %s @ %p ) !!!! NOT ALLOCATED !!!!", msg, &mem[2]); return; }
 		if      (mem[1] > 24000)                    LogMsg("free( %s : %ld @ %p) suspiciously large", msg, mem[1], &mem[2]);
 		else if (MACOSX_MDNS_MALLOC_DEBUGGING >= 2) LogMsg("free( %s : %ld @ %p)",                    msg, mem[1], &mem[2]);
-		//mDNSPlatformMemZero(mem, mem[1]+8);
-		memset(mem, 0xFF, mem[1]+8);
+		//mDNSPlatformMemZero(mem, sizeof(mDNSu32) * 2 + mem[1]);
+		memset(mem, 0xFF, sizeof(mDNSu32) * 2 + mem[1]);
 		validatelists(&mDNSStorage);
 		free(mem);
 		}
 	}
 
+#endif
+
+//*************************************************************************************************************
+#if COMPILER_LIKES_PRAGMA_MARK
+#pragma mark -
+#pragma mark - Mach client request handlers
 #endif
 
 //*************************************************************************************************************
@@ -784,7 +1030,7 @@ mDNSlocal void AbortClient(mach_port_t ClientMachPort, void *m)
 		while (si)
 			{
 			ServiceInstance *instance = si;
-			si = si->next;                 
+			si = si->next;
 			instance->renameonmemfree = mDNSfalse;
 			if (m && m != x) LogMsg("%5d: DNSServiceRegistration(%##s, %u) STOP; WARNING m %p != x %p", ClientMachPort, instance->srs.RR_SRV.resrec.name->c, SRS_PORT(&instance->srs), m, x);
 			else LogOperation("%5d: DNSServiceRegistration(%##s, %u) STOP", ClientMachPort, instance->srs.RR_SRV.resrec.name->c, SRS_PORT(&instance->srs));
@@ -959,7 +1205,7 @@ mDNSexport kern_return_t provide_DNSServiceDomainEnumerationCreate_rpc(mach_port
 	return(mStatus_NoError);
 
 fail:
-	LogMsg("%5d: DNSServiceDomainEnumeration(%d) failed: %s (%ld)", client, regDom, errormsg, err);
+	LogMsg("%5d: DNSServiceDomainEnumeration(%d) failed: %s (%d)", client, regDom, errormsg, err);
 	return(err);
 	}
 
@@ -1016,10 +1262,15 @@ mDNSlocal mStatus AddDomainToBrowser(DNSServiceBrowser *browser, const domainnam
 	if (!question) { LogMsg("Error: malloc"); return mStatus_NoMemoryErr; }
 	AssignDomainName(&question->domain, d);
 	question->next = browser->qlist;
-	browser->qlist = question;
 	LogOperation("%5d: DNSServiceBrowse(%##s%##s) START", browser->ClientMachPort, browser->type.c, d->c);
 	err = mDNS_StartBrowse(&mDNSStorage, &question->q, &browser->type, d, mDNSInterface_Any, mDNSfalse, FoundInstance, browser);
-	if (err) LogMsg("Error: AddDomainToBrowser: mDNS_StartBrowse %d", err);
+	if (!err)
+		browser->qlist = question;
+	else
+		{
+		LogMsg("Error: AddDomainToBrowser: mDNS_StartBrowse %d", err);
+		freeL("DNSServiceBrowserQuestion", question);
+		}
 	return err;
 	}
 
@@ -1126,7 +1377,7 @@ mDNSexport kern_return_t provide_DNSServiceBrowserCreate_rpc(mach_port_t unuseds
 	badparam:
 	err = mStatus_BadParamErr;
 fail:
-	LogMsg("%5d: DNSServiceBrowse(\"%s\", \"%s\") failed: %s (%ld)", client, regtype, domain, errormsg, err);
+	LogMsg("%5d: DNSServiceBrowse(\"%s\", \"%s\") failed: %s (%d)", client, regtype, domain, errormsg, err);
 	return(err);
 	}
 
@@ -1257,7 +1508,7 @@ mDNSexport kern_return_t provide_DNSServiceResolverResolve_rpc(mach_port_t unuse
 badparam:
 	err = mStatus_BadParamErr;
 fail:
-	LogMsg("%5d: DNSServiceResolve(\"%s\", \"%s\", \"%s\") failed: %s (%ld)", client, name, regtype, domain, errormsg, err);
+	LogMsg("%5d: DNSServiceResolve(\"%s\", \"%s\", \"%s\") failed: %s (%d)", client, name, regtype, domain, errormsg, err);
 	return(err);
 	}
 
@@ -1293,7 +1544,7 @@ mDNSlocal void RegCallback(mDNS *const m, ServiceRecordSet *const srs, mStatus r
 			{
 			// On conflict for an autoname service, rename and reregister *all* autoname services
 			IncrementLabelSuffix(&m->nicelabel, mDNStrue);
-			m->MainCallback(m, mStatus_ConfigChanged);
+			mDNS_ConfigChanged(m);
 			}
 		else if (si->autoname)
 			{
@@ -1339,7 +1590,7 @@ mDNSlocal void RegCallback(mDNS *const m, ServiceRecordSet *const srs, mStatus r
 		}
 
 	else if (result != mStatus_NATTraversal)
-		LogMsg("%5d: DNSServiceRegistration(%##s, %u) Unknown Result %ld", si->ClientMachPort, srs->RR_SRV.resrec.name->c, SRS_PORT(srs), result);
+		LogMsg("%5d: DNSServiceRegistration(%##s, %u) Unknown Result %d", si->ClientMachPort, srs->RR_SRV.resrec.name->c, SRS_PORT(srs), result);
 	}
 
 mDNSlocal mStatus AddServiceInstance(DNSServiceRegistration *x, const domainname *domain)
@@ -1531,7 +1782,7 @@ badtxt:
 badparam:
 	err = mStatus_BadParamErr;
 fail:
-	LogMsg("%5d: DNSServiceRegister(\"%s\", \"%s\", \"%s\", %d) failed: %s (%ld)",
+	LogMsg("%5d: DNSServiceRegister(\"%s\", \"%s\", \"%s\", %d) failed: %s (%d)",
 		   client, name, regtype, domain, mDNSVal16(port), errormsg, err);
 	return(err);
 	}
@@ -1542,13 +1793,13 @@ mDNSlocal void mDNS_StatusCallback(mDNS *const m, mStatus result)
 	if (result == mStatus_NoError)
 		{
 		if (!SameDomainLabelCS(m->p->userhostlabel.c, m->hostlabel.c))
-			LogOperation("Local Hostname changed from \"%#s.local\" to \"%#s.local\"", m->p->userhostlabel.c, m->hostlabel.c);
+			LogInfo("Local Hostname changed from \"%#s.local\" to \"%#s.local\"", m->p->userhostlabel.c, m->hostlabel.c);
 		// One second pause in case we get a Computer Name update too -- don't want to alert the user twice
 		RecordUpdatedNiceLabel(m, mDNSPlatformOneSecond);
 		}
 	else if (result == mStatus_NameConflict)
 		{
-		LogOperation("Local Hostname conflict for \"%#s.local\"", m->hostlabel.c);
+		LogInfo("Local Hostname conflict for \"%#s.local\"", m->hostlabel.c);
 		if (!m->p->HostNameConflict) m->p->HostNameConflict = NonZeroTime(m->timenow);
 		else if (m->timenow - m->p->HostNameConflict > 60 * mDNSPlatformOneSecond)
 			{
@@ -1560,7 +1811,7 @@ mDNSlocal void mDNS_StatusCallback(mDNS *const m, mStatus result)
 		{
 		// Allocate another chunk of cache storage
 		CacheEntity *storage = mallocL("mStatus_GrowCache", sizeof(CacheEntity) * RR_CACHE_SIZE);
-		//LogOperation("GrowCache %d * %d = %d", sizeof(CacheEntity), RR_CACHE_SIZE, sizeof(CacheEntity) * RR_CACHE_SIZE);
+		//LogInfo("GrowCache %d * %d = %d", sizeof(CacheEntity), RR_CACHE_SIZE, sizeof(CacheEntity) * RR_CACHE_SIZE);
 		if (storage) mDNS_GrowCache(m, storage, RR_CACHE_SIZE);
 		}
 	else if (result == mStatus_ConfigChanged)
@@ -1647,7 +1898,7 @@ mDNSexport kern_return_t provide_DNSServiceRegistrationAddRecord_rpc(mach_port_t
 	return mStatus_NoError;
 
 fail:
-	LogMsg("%5d: DNSServiceRegistrationAddRecord(%##s, type %d, length %d) failed: %s (%ld)", client, x ? x->name.c : (mDNSu8*)"\x8""«NULL»", type, data_len, errormsg, err);
+	LogMsg("%5d: DNSServiceRegistrationAddRecord(%##s, type %d, length %d) failed: %s (%d)", client, x ? x->name.c : (mDNSu8*)"\x8""«NULL»", type, data_len, errormsg, err);
 	return mStatus_UnknownErr;
 	}
 
@@ -1698,7 +1949,7 @@ mDNSlocal mStatus UpdateRecord(ServiceRecordSet *srs, mach_port_t client, AuthRe
 	return(mStatus_NoError);
 
 fail:
-	LogMsg("%5d: DNSServiceRegistrationUpdateRecord(%##s, %d) failed: %s (%ld)", client, name->c, data_len, errormsg, err);
+	LogMsg("%5d: DNSServiceRegistrationUpdateRecord(%##s, %d) failed: %s (%d)", client, name->c, data_len, errormsg, err);
 	return(err);
 	}
 
@@ -1743,7 +1994,7 @@ mDNSexport kern_return_t provide_DNSServiceRegistrationUpdateRecord_rpc(mach_por
 	return mStatus_NoError;
 
 fail:
-	LogMsg("%5d: DNSServiceRegistrationUpdateRecord(%##s, %X, %d) failed: %s (%ld)", client, name->c, reference, data_len, errormsg, err);
+	LogMsg("%5d: DNSServiceRegistrationUpdateRecord(%##s, %X, %d) failed: %s (%d)", client, name->c, reference, data_len, errormsg, err);
 	return(err);
 	}
 
@@ -1792,12 +2043,15 @@ mDNSexport kern_return_t provide_DNSServiceRegistrationRemoveRecord_rpc(mach_por
 	return mStatus_NoError;
 
 fail:
-	LogMsg("%5d: DNSServiceRegistrationRemoveRecord(%X) failed: %s (%ld)", client, reference, errormsg, err);
+	LogMsg("%5d: DNSServiceRegistrationRemoveRecord(%X) failed: %s (%d)", client, reference, errormsg, err);
 	return(err);
 	}
 
 //*************************************************************************************************************
-// Support Code
+#if COMPILER_LIKES_PRAGMA_MARK
+#pragma mark -
+#pragma mark - Startup, shutdown, and supporting code
+#endif
 
 mDNSlocal void DNSserverCallback(CFMachPortRef port, void *msg, CFIndex size, void *info)
 	{
@@ -1955,7 +2209,7 @@ mDNSlocal kern_return_t destroyBootstrapService()
 mDNSlocal void ExitCallback(int sig)
 	{
 	(void)sig; // Unused
-	LogMsgIdent(mDNSResponderVersionString, "stopping");
+	LogMsg("%s stopping", mDNSResponderVersionString);
 
 	debugf("ExitCallback");
 	if (!mDNS_DebugMode && !started_via_launchdaemon)
@@ -1971,7 +2225,7 @@ mDNSlocal void ExitCallback(int sig)
 	while (DNSServiceRegistrationList)
 		AbortClient(DNSServiceRegistrationList     ->ClientMachPort, DNSServiceRegistrationList);
 
-	if (udsserver_exit(launchd_fd) < 0) LogMsg("ExitCallback: udsserver_exit failed");
+	if (udsserver_exit() < 0) LogMsg("ExitCallback: udsserver_exit failed");
 
 	debugf("ExitCallback: mDNS_StartExit");
 	mDNS_StartExit(&mDNSStorage);
@@ -1980,8 +2234,7 @@ mDNSlocal void ExitCallback(int sig)
 // Send a mach_msg to ourselves (since that is signal safe) telling us to cleanup and exit
 mDNSlocal void HandleSIG(int sig)
 	{
-	debugf(" ");
-	debugf("HandleSIG %d", sig);
+	// WARNING: can't call syslog or fprintf from signal handler
 	mach_msg_header_t header;
 	header.msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_MAKE_SEND, 0);
 	header.msgh_remote_port = signal_port;
@@ -1989,17 +2242,19 @@ mDNSlocal void HandleSIG(int sig)
 	header.msgh_size = sizeof(header);
 	header.msgh_id = sig;
 	if (mach_msg_send(&header) != MACH_MSG_SUCCESS)
-		{
-		LogMsg("HandleSIG %d: mach_msg_send failed", sig);
 		if (sig == SIGTERM || sig == SIGINT) exit(-1);
-		}
 	}
 
 mDNSlocal void CatchABRT(int sig)
 	{
-	LogMsg("Received SIGABRT %d", sig);
-	sleep(1);					// Pause to make sure syslog gets the message
-	while(1) *(long*)0 = 0;		// Generate a CrashReporter stack trace so we can find out what library called abort();
+	// WARNING: can't call syslog or fprintf from signal handler
+	// We want a CrashReporter stack trace so we can find out what library called abort()
+	// So that we will crash, unblock all signals (that abort() may have blocked)
+	sigset_t mask;
+	sigfillset(&mask);
+	sigprocmask(SIG_UNBLOCK, &mask, NULL);
+	(void)sig;
+	while(1) *(long*)0 = 0;
 	}
 
 mDNSlocal void INFOCallback(void)
@@ -2012,7 +2267,7 @@ mDNSlocal void INFOCallback(void)
 	NetworkInterfaceInfoOSX     *i;
 	DNSServer *s;
 
-	LogMsgIdent(mDNSResponderVersionString, "---- BEGIN STATE LOG ----");
+	LogMsg("---- BEGIN STATE LOG ----");
 	
 	udsserver_info(&mDNSStorage);
 
@@ -2056,21 +2311,32 @@ mDNSlocal void INFOCallback(void)
 		{
 		for (i = mDNSStorage.p->InterfaceList; i; i = i->next)
 			{
+			// Allow six characters for interface name, for names like "vmnet8"
 			if (!i->Exists)
-				LogMsgNoIdent("Interface: %s %5s(%lu) %.6a %#a dormant for %d seconds",
-					i->sa_family == AF_INET ? "v4" : i->sa_family == AF_INET6 ? "v6" : "??", i->ifa_name, i->scope_id, &i->BSSID,
+				LogMsgNoIdent("%p %s %-6s(%lu) %.6a %.6a %#-14a dormant for %d seconds",
+					i->ifinfo.InterfaceID,
+					i->sa_family == AF_INET ? "v4" : i->sa_family == AF_INET6 ? "v6" : "??", i->ifinfo.ifname, i->scope_id, &i->ifinfo.MAC, &i->BSSID,
 					&i->ifinfo.ip, utc - i->LastSeen);
 			else
-				LogMsgNoIdent("Interface: %s %5s(%lu) %.6a %s %s %-15.4a %s InterfaceID %p %s %s %#a",
-					i->sa_family == AF_INET ? "v4" : i->sa_family == AF_INET6 ? "v6" : "??", i->ifa_name, i->scope_id, &i->BSSID,
+				{
+				const CacheRecord *sps[3];
+				FindSPSInCache(&mDNSStorage, &i->ifinfo.NetWakeBrowse, sps);
+				LogMsgNoIdent("%p %s %-6s(%lu) %.6a %.6a %s %s %-15.4a %s %s %s %s %#a",
+					i->ifinfo.InterfaceID,
+					i->sa_family == AF_INET ? "v4" : i->sa_family == AF_INET6 ? "v6" : "??", i->ifinfo.ifname, i->scope_id, &i->ifinfo.MAC, &i->BSSID,
 					i->ifinfo.InterfaceActive ? "Active" : "      ",
 					i->ifinfo.IPv4Available ? "v4" : "  ",
 					i->ifinfo.IPv4Available ? (mDNSv4Addr*)&i->ifa_v4addr : &zerov4Addr,
 					i->ifinfo.IPv6Available ? "v6" : "  ",
-					i->ifinfo.InterfaceID,
-					i->ifinfo.Advertise ? "Adv"  : "   ",
-					i->ifinfo.McastTxRx ? "TxRx" : "    ",
+					i->ifinfo.Advertise ? "⊙" : " ",
+					i->ifinfo.McastTxRx ? "⇆" : " ",
+					!(i->ifinfo.InterfaceActive && i->ifinfo.NetWake) ? " " : !sps[0] ? "☼" : "☀",
 					&i->ifinfo.ip);
+
+				if (sps[0]) LogMsgNoIdent("  %13d %#s", SPSMetric(sps[0]->resrec.rdata->u.name.c), sps[0]->resrec.rdata->u.name.c);
+				if (sps[1]) LogMsgNoIdent("  %13d %#s", SPSMetric(sps[1]->resrec.rdata->u.name.c), sps[1]->resrec.rdata->u.name.c);
+				if (sps[2]) LogMsgNoIdent("  %13d %#s", SPSMetric(sps[2]->resrec.rdata->u.name.c), sps[2]->resrec.rdata->u.name.c);
+				}
 			}
 		}
 
@@ -2082,7 +2348,7 @@ mDNSlocal void INFOCallback(void)
 			{
 			NetworkInterfaceInfoOSX *ifx = (NetworkInterfaceInfoOSX *)s->interface;
 			LogMsgNoIdent("DNS Server %##s %s%s%#a:%d %s",
-				s->domain.c, ifx ? ifx->ifa_name : "", ifx ? " " : "", &s->addr, mDNSVal16(s->port),
+				s->domain.c, ifx ? ifx->ifinfo.ifname : "", ifx ? " " : "", &s->addr, mDNSVal16(s->port),
 				s->teststate == DNSServer_Untested ? "(Untested)" :
 				s->teststate == DNSServer_Passed   ? ""           :
 				s->teststate == DNSServer_Failed   ? "(Failed)"   :
@@ -2091,9 +2357,9 @@ mDNSlocal void INFOCallback(void)
 		}
 
 	mDNSs32 now = mDNS_TimeNow(&mDNSStorage);
-	LogMsgNoIdent("Timenow 0x%08lX (%ld)", (mDNSu32)now, now);
+	LogMsgNoIdent("Timenow 0x%08lX (%d)", (mDNSu32)now, now);
 
-	LogMsgIdent(mDNSResponderVersionString, "----  END STATE LOG  ----");
+	LogMsg("----  END STATE LOG  ----");
 	}
 
 mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void *info)
@@ -2113,22 +2379,22 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
 						CacheGroup *cg;
 						CacheRecord *rr;
 						LogMsg("SIGHUP: Purge cache");
+						mDNS_Lock(m);
 						FORALL_CACHERECORDS(slot, cg, rr) mDNS_PurgeCacheResourceRecord(m, rr);
+						// Restart unicast and multicast queries
+						mDNSCoreRestartQueries(m);
+						mDNS_Unlock(m);
 						} break;
 		case SIGINT:
 		case SIGTERM:	ExitCallback(msg_header->msgh_id); break;
 		case SIGINFO:	INFOCallback(); break;
-		case SIGUSR1:	// mDNSCoreMachineSleep(m, !m->SleepState); break;
-						LogMsg("SIGUSR1: Simulate Network Configuration Change Event");
-						mDNSMacOSXNetworkChanged(m);
-
-						// Simulate KeychainChanged
-						mDNS_Lock(m);
-						SetDomainSecrets(m);
-						mDNS_Unlock(m);
-
+		case SIGUSR1:	mDNS_LoggingEnabled = mDNS_LoggingEnabled ? 0 : 1;
+						LogMsg("SIGUSR1: Logging %s", mDNS_LoggingEnabled ? "Enabled" : "Disabled");
+						WatchDogReportingThreshold = mDNS_LoggingEnabled ? 50 : 250;
 						break;
-		case SIGUSR2:	SigLogLevel(); break;
+		case SIGUSR2:	mDNS_PacketLoggingEnabled = mDNS_PacketLoggingEnabled ? 0 : 1;
+						LogMsg("SIGUSR2: Packet Logging %s", mDNS_PacketLoggingEnabled ? "Enabled" : "Disabled");
+						break;
 		default: LogMsg("SignalCallback: Unknown signal %d", msg_header->msgh_id); break;
 		}
 	KQueueUnlock(m, "Unix Signal");
@@ -2149,7 +2415,7 @@ mDNSlocal kern_return_t mDNSDaemonInitialize(void)
 		{
 		s_port = CFMachPortCreate(NULL, DNSserverCallback, NULL, NULL);
 		m_port = CFMachPortGetPort(s_port);
-		char *MachServerName = OSXVers < 7 ? "DNSServiceDiscoveryServer" : "com.apple.mDNSResponder";
+		char *MachServerName = OSXVers < OSXVers_10_3_Panther ? "DNSServiceDiscoveryServer" : "com.apple.mDNSResponder";
 		kern_return_t status = bootstrap_register(bootstrap_port, MachServerName, m_port);
 	
 		if (status)
@@ -2170,18 +2436,17 @@ mDNSlocal kern_return_t mDNSDaemonInitialize(void)
 
 	err = mDNS_Init(&mDNSStorage, &PlatformStorage,
 		rrcachestorage, RR_CACHE_SIZE,
-		mDNS_Init_AdvertiseLocalAddresses,
+		advertise,
 		mDNS_StatusCallback, mDNS_Init_NoInitCallbackContext);
 
-	if (err) { LogMsg("Daemon start: mDNS_Init failed %ld", err); return(err); }
+	if (err) { LogMsg("Daemon start: mDNS_Init failed %d", err); return(err); }
 
 	client_death_port = CFMachPortGetPort(d_port);
 	signal_port       = CFMachPortGetPort(i_port);
 
-	CFRunLoop = CFRunLoopGetCurrent();
-	CFRunLoopAddSource(CFRunLoop, d_rls, kCFRunLoopDefaultMode);
-	CFRunLoopAddSource(CFRunLoop, s_rls, kCFRunLoopDefaultMode);
-	CFRunLoopAddSource(CFRunLoop, i_rls, kCFRunLoopDefaultMode);
+	CFRunLoopAddSource(PlatformStorage.CFRunLoop, d_rls, kCFRunLoopDefaultMode);
+	CFRunLoopAddSource(PlatformStorage.CFRunLoop, s_rls, kCFRunLoopDefaultMode);
+	CFRunLoopAddSource(PlatformStorage.CFRunLoop, i_rls, kCFRunLoopDefaultMode);
 	CFRelease(d_rls);
 	CFRelease(s_rls);
 	CFRelease(i_rls);
@@ -2200,6 +2465,8 @@ mDNSlocal mDNSs32 mDNSDaemonIdle(mDNS *const m)
 	// If we call mDNS_Execute() first, and generate packets, and then call mDNSMacOSXNetworkChanged() immediately afterwards
 	// we then systematically lose our own looped-back packets.
 	if (m->p->NetworkChanged && now - m->p->NetworkChanged >= 0) mDNSMacOSXNetworkChanged(m);
+
+	if (m->p->RequestReSleep && now - m->p->RequestReSleep >= 0) { m->p->RequestReSleep = 0; mDNSPowerRequest(0, 0); }
 
 	// KeyChain frequently fails to notify clients of change events. To work around this
 	// we set a timer and periodically poll to detect if any changes have occurred.
@@ -2226,12 +2493,16 @@ mDNSlocal mDNSs32 mDNSDaemonIdle(mDNS *const m)
 		if (nextevent - m->p->KeyChainBugTimer > 0)
 			nextevent = m->p->KeyChainBugTimer;
 
+	if (m->p->RequestReSleep)
+		if (nextevent - m->p->RequestReSleep > 0)
+			nextevent = m->p->RequestReSleep;
+
 	// 3. Deliver any waiting browse messages to clients
 	DNSServiceBrowser *b = DNSServiceBrowserList;
 
 	while (b)
 		{
-		// NOTE: Need to advance b to the next element BEFORE we call DeliverInstance(), because in the
+		// Note: Need to advance b to the next element BEFORE we call DeliverInstance(), because in the
 		// event that the client Mach queue overflows, DeliverInstance() will call AbortBlockedClient()
 		// and that will cause the DNSServiceBrowser object's memory to be freed before it returns
 		DNSServiceBrowser *x = b;
@@ -2308,61 +2579,202 @@ mDNSlocal mDNSs32 mDNSDaemonIdle(mDNS *const m)
 	return(nextevent);
 	}
 
-mDNSlocal void ShowTaskSchedulingError(mDNS *const m)
+// Right now we consider *ALL* of our DHCP leases
+// It might make sense to be a bit more selective and only consider the leases on interfaces
+// (a) that are capable and enabled for wake-on-LAN, and
+// (b) where we have found (and successfully registered with) a Sleep Proxy
+// If we can't be woken for traffic on a given interface, then why keep waking to renew its lease?
+mDNSlocal mDNSu32 DHCPWakeTime(void)
 	{
-	mDNS_Lock(m);
-
-	LogMsg("Task Scheduling Error: Continuously busy for more than a second");
-	
-	// NOTE: To accurately diagnose *why* we're busy, the debugging code here needs to mirror the logic in GetNextScheduledEvent
-
-	if (m->NewQuestions && (!m->NewQuestions->DelayAnswering || m->timenow - m->NewQuestions->DelayAnswering >= 0))
-		LogMsg("Task Scheduling Error: NewQuestion %##s (%s)",
-			m->NewQuestions->qname.c, DNSTypeName(m->NewQuestions->qtype));
-	if (m->NewLocalOnlyQuestions)
-		LogMsg("Task Scheduling Error: NewLocalOnlyQuestions %##s (%s)",
-			m->NewLocalOnlyQuestions->qname.c, DNSTypeName(m->NewLocalOnlyQuestions->qtype));
-	if (m->NewLocalRecords && LocalRecordReady(m->NewLocalRecords))
-		LogMsg("Task Scheduling Error: NewLocalRecords %s", ARDisplayString(m, m->NewLocalRecords));
-	if (m->SuppressSending && m->timenow - m->SuppressSending >= 0)
-		LogMsg("Task Scheduling Error: m->SuppressSending %d",       m->timenow - m->SuppressSending);
-#ifndef UNICAST_DISABLED
-	if (m->timenow - m->NextuDNSEvent         >= 0)
-		LogMsg("Task Scheduling Error: NextuDNSEvent %d",            m->timenow - m->NextuDNSEvent);
-#endif
-	if (m->timenow - m->NextCacheCheck        >= 0)
-		LogMsg("Task Scheduling Error: m->NextCacheCheck %d",        m->timenow - m->NextCacheCheck);
-	if (m->timenow - m->NextScheduledQuery    >= 0)
-		LogMsg("Task Scheduling Error: m->NextScheduledQuery %d",    m->timenow - m->NextScheduledQuery);
-	if (m->timenow - m->NextScheduledProbe    >= 0)
-		LogMsg("Task Scheduling Error: m->NextScheduledProbe %d",    m->timenow - m->NextScheduledProbe);
-	if (m->timenow - m->NextScheduledResponse >= 0)
-		LogMsg("Task Scheduling Error: m->NextScheduledResponse %d", m->timenow - m->NextScheduledResponse);
-	if (m->timenow - m->NextScheduledNATOp >= 0)
-		LogMsg("Task Scheduling Error: m->NextScheduledNATOp %d",    m->timenow - m->NextScheduledNATOp);
-
-	mDNS_Unlock(&mDNSStorage);
+	mDNSu32 e = 24 * 3600;		// Maximum maintenance wake interval is 24 hours
+	const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+	if (!now) LogMsg("DHCPWakeTime: CFAbsoluteTimeGetCurrent failed");
+	else
+		{
+		const SCPreferencesRef prefs = SCPreferencesCreate(NULL, CFSTR("mDNSResponder:DHCPWakeTime"), NULL);
+		if (!prefs) LogMsg("DHCPWakeTime: SCPreferencesCreate failed");
+		else
+			{
+			const SCNetworkSetRef currentset = SCNetworkSetCopyCurrent(prefs);
+			if (!currentset) LogMsg("DHCPWakeTime: SCNetworkSetCopyCurrent failed");
+			else
+				{
+				const CFArrayRef services = SCNetworkSetCopyServices(currentset);
+				if (!services) LogMsg("DHCPWakeTime: SCNetworkSetCopyServices failed");
+				else
+					{
+					int i;
+					for (i = 0; i < CFArrayGetCount(services); i++)
+						{
+						const SCNetworkServiceRef service = CFArrayGetValueAtIndex(services, i);
+						if (!service) LogMsg("DHCPWakeTime: CFArrayGetValueAtIndex %d failed", i);
+						else
+							{
+							const CFStringRef serviceid = SCNetworkServiceGetServiceID(service);
+							if (!serviceid) LogMsg("DHCPWakeTime: SCNetworkServiceGetServiceID %d failed", i);
+							else
+								{
+								// Note: It's normal for this call to return NULL, for interfaces not using DHCP
+								const CFDictionaryRef dhcp = SCDynamicStoreCopyDHCPInfo(NULL, serviceid);
+								if (dhcp)
+									{
+									const CFDateRef start = DHCPInfoGetLeaseStartTime(dhcp);
+									const CFDataRef lease = DHCPInfoGetOptionData(dhcp, 51);	// Option 51 = IP Address Lease Time
+									if (!start || !lease || CFDataGetLength(lease) < 4)
+										LogMsg("DHCPWakeTime: SCDynamicStoreCopyDHCPInfo index %d failed "
+											"CFDateRef start %p CFDataRef lease %p CFDataGetLength(lease) %d",
+											i, start, lease, lease ? CFDataGetLength(lease) : 0);
+									else
+										{
+										const UInt8 *d = CFDataGetBytePtr(lease);
+										if (!d) LogMsg("DHCPWakeTime: CFDataGetBytePtr %d failed", i);
+										else
+											{
+											const mDNSu32 elapsed   = now - CFDateGetAbsoluteTime(start);
+											const mDNSu32 lifetime  = (mDNSs32) ((mDNSs32)d[0] << 24 | (mDNSs32)d[1] << 16 | (mDNSs32)d[2] << 8 | d[3]);
+											const mDNSu32 remaining = lifetime - elapsed;
+											const mDNSu32 wake      = remaining > 60 ? remaining - remaining/10 : 54;	// Wake at 90% of the lease time
+											LogSPS("DHCP Address Lease Elapsed %6u Lifetime %6u Remaining %6u Wake %6u", elapsed, lifetime, remaining, wake);
+											if (e > wake) e = wake;
+											}
+										}
+									CFRelease(dhcp);
+									}
+								}
+							}
+						}
+					CFRelease(services);
+					}
+				CFRelease(currentset);
+				}
+			CFRelease(prefs);
+			}
+		}
+	return(e);
 	}
 
-mDNSlocal mDNSBool ReadyForSleep(mDNS *m)
+// We deliberately schedule our wakeup for halfway between when we'd *like* it and when we *need* it.
+// For example, if our DHCP lease expires in two hours, we'll typically renew it at the halfway point, after one hour.
+// If we scheduled our wakeup for the one-hour renewal time, that might be just seconds from now, and sleeping
+// for a few seconds and then waking again is silly and annoying.
+// If we scheduled our wakeup for the two-hour expiry time, and we were slow to wake, we might lose our lease.
+// Scheduling our wakeup for halfway in between -- 90 minutes -- avoids short wakeups while still
+// allowing us an adequate safety margin to renew our lease before we lose it.
+
+mDNSlocal mDNSBool AllowSleepNow(mDNS *const m, mDNSs32 now)
 	{
-	(void)m;
+	mDNSBool ready = mDNSCoreReadyForSleep(m);
+	if (m->SleepState && !ready && now - m->SleepLimit < 0) return(mDNSfalse);
 
-	// 1. Scan list of private LLQs, and make sure they've all completed their handshake with the server
-	DNSQuestion *q;
-	for (q = m->Questions; q; q = q->next)
-		if (!mDNSOpaque16IsZero(q->TargetQID) && q->LongLived && q->ReqLease == 0 && q->tcp) return(mDNSfalse);
+	m->p->WakeAtUTC = 0;
+	int result = kIOReturnSuccess;
+	CFDictionaryRef opts = NULL;
 
-	// 2. Scan list of registered records
-	AuthRecord *rr;
-	for (rr = m->ResourceRecords; rr; rr = rr->next)
-		if (rr->state == regState_Refresh && rr->tcp) return(mDNSfalse);
+	// If the sleep request was cancelled, and we're no longer planning to sleep, don't need to
+	// do the stuff below, but we *DO* still need to acknowledge the sleep message we received.
+	if (!m->SleepState)
+		LogMsg("AllowSleepNow: Sleep request was canceled with %d ticks remaining", m->SleepLimit - now);
+	else
+		{
+		if (!m->SystemWakeOnLANEnabled || !mDNSCoreHaveAdvertisedMulticastServices(m))
+			LogSPS("AllowSleepNow: Not scheduling wakeup: SystemWakeOnLAN %s enabled; %s advertised services",
+				m->SystemWakeOnLANEnabled                  ? "is" : "not",
+				mDNSCoreHaveAdvertisedMulticastServices(m) ? "have" : "no");
+		else
+			{
+			mDNSs32 dhcp = DHCPWakeTime();
+			LogSPS("ComputeWakeTime: DHCP Wake %d", dhcp);
+			mDNSs32 interval = mDNSCoreIntervalToNextWake(m, now) / mDNSPlatformOneSecond;
+			if (interval > dhcp) interval = dhcp;
+	
+			// If we're not ready to sleep (failed to register with Sleep Proxy, maybe because of
+			// transient network problem) then schedule a wakeup in one hour to try again. Otherwise,
+			// a single SPS failure could result in a remote machine falling permanently asleep, requiring
+			// someone to go to the machine in person to wake it up again, which would be unacceptable.
+			if (!ready && interval > 3600) interval = 3600;
+	
+			//interval = 48; // For testing
+	
+#ifdef kIOPMAcknowledgmentOptionSystemCapabilityRequirements
+			if (m->p->IOPMConnection)	// If lightweight-wake capability is available, use that
+				{
+				const CFDateRef WakeDate = CFDateCreate(NULL, CFAbsoluteTimeGetCurrent() + interval);
+				if (!WakeDate) LogMsg("ScheduleNextWake: CFDateCreate failed");
+				else
+					{
+					const mDNSs32     reqs         = kIOPMSystemPowerStateCapabilityNetwork;
+					const CFNumberRef Requirements = CFNumberCreate(NULL, kCFNumberSInt32Type, &reqs);
+					if (!Requirements) LogMsg("ScheduleNextWake: CFNumberCreate failed");
+					else
+						{
+						const void *OptionKeys[2] = { CFSTR("WakeDate"), CFSTR("Requirements") };
+						const void *OptionVals[2] = {        WakeDate,          Requirements   };
+						opts = CFDictionaryCreate(NULL, (void*)OptionKeys, (void*)OptionVals, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+						if (!opts) LogMsg("ScheduleNextWake: CFDictionaryCreate failed");
+						CFRelease(Requirements);
+						}
+					CFRelease(WakeDate);
+					}
+				LogSPS("AllowSleepNow: Will request lightweight wakeup in %d seconds", interval);
+				}
+			else 						// else schedule the wakeup using the old API instead to
+#endif
+				{
+				// If we wake within +/- 30 seconds of our requested time we'll assume the system woke for us,
+				// so we should put it back to sleep. To avoid frustrating the user, we always request at least
+				// 60 seconds sleep, so if they immediately re-wake the system within seconds of it going to sleep,
+				// we then shouldn't hit our 30-second window, and we won't attempt to re-sleep the machine.
+				if (interval < 60) interval = 60;
+	
+				result = mDNSPowerRequest(1, interval);
+	
+				if (result == kIOReturnNotReady)
+					{
+					LogMsg("Requested wakeup in %d seconds unsuccessful; retrying with longer intervals", interval);
+					// IOPMSchedulePowerEvent fails with kIOReturnNotReady (-536870184/0xe00002d8) if the
+					// requested wake time is "too soon", but there's no API to find out what constitutes
+					// "too soon" on any given OS/hardware combination, so if we get kIOReturnNotReady
+					// we just have to iterate with successively longer intervals until it doesn't fail.
+					// Additionally, if our power request is deemed "too soon" for the machine to get to
+					// sleep and wake back up again, we attempt to cancel the sleep request, since the
+					// implication is that the system won't manage to be awake again at the time we need it.
+					do
+						{
+						interval += (interval < 20) ? 1 : ((interval+3) / 4);
+						result = mDNSPowerRequest(1, interval);
+						}
+					while (result == kIOReturnNotReady);
+					}
+	
+				if (result) LogMsg("AllowSleepNow: Requested wakeup in %d seconds unsuccessful: %d %X", interval, result, result);
+				else LogSPS("AllowSleepNow: Requested wakeup in %d seconds", interval);
+				m->p->WakeAtUTC = mDNSPlatformUTC() + interval;
+				}
+			}
+	
+		// Clear our interface list to empty state, ready to go to sleep
+		// As a side effect of doing this, we'll also cancel any outstanding SPS Resolve calls that didn't complete
+		m->SleepState = SleepState_Sleeping;
+		mDNSMacOSXNetworkChanged(m);
+		}
 
-	// 2. Scan list of registered services
-	ServiceRecordSet *srs;
-	for (srs = m->ServiceRegistrations; srs; srs = srs->uDNS_next)
-		if (srs->state == regState_NoTarget && srs->tcp) return(mDNSfalse);
+	LogSPS("AllowSleepNow: %s(%lX) %s at %ld (%d ticks remaining)",
+#ifdef kIOPMAcknowledgmentOptionSystemCapabilityRequirements
+		(m->p->IOPMConnection) ? "IOPMConnectionAcknowledgeEventWithOptions" :
+#endif
+		(result == kIOReturnSuccess) ? "IOAllowPowerChange" : "IOCancelPowerChange",
+		m->p->SleepCookie, ready ? "ready for sleep" : "giving up", now, m->SleepLimit - now);
 
+	m->SleepLimit = 0;	// Don't clear m->SleepLimit until after we've logged it above
+
+#ifdef kIOPMAcknowledgmentOptionSystemCapabilityRequirements
+	if (m->p->IOPMConnection) IOPMConnectionAcknowledgeEventWithOptions(m->p->IOPMConnection, m->p->SleepCookie, opts);
+	else
+#endif
+	if (result == kIOReturnSuccess) IOAllowPowerChange (m->p->PowerConnection, m->p->SleepCookie);
+	else                            IOCancelPowerChange(m->p->PowerConnection, m->p->SleepCookie);
+
+	if (opts) CFRelease(opts);
 	return(mDNStrue);
 	}
 
@@ -2387,7 +2799,7 @@ mDNSlocal void * KQueueLoop(void *m_param)
 #endif
 	
 	pthread_mutex_lock(&PlatformStorage.BigMutex);
-	LogOperation("Starting time value 0x%08lX (%ld)", (mDNSu32)mDNSStorage.timenow_last, mDNSStorage.timenow_last);
+	LogInfo("Starting time value 0x%08lX (%ld)", (mDNSu32)mDNSStorage.timenow_last, mDNSStorage.timenow_last);
 	
 	// This is the main work loop:
 	// (1) First we give mDNSCore a chance to finish off any of its deferred work and calculate the next sleep time
@@ -2405,15 +2817,24 @@ mDNSlocal void * KQueueLoop(void *m_param)
 		mDNSs32 nextTimerEvent = udsserver_idle(mDNSDaemonIdle(m));
 		mDNSs32 end            = mDNSPlatformRawTime();
 		if (end - start >= WatchDogReportingThreshold)
-			LogOperation("WARNING: Idle task took %dms to complete", end - start);
+			LogInfo("WARNING: Idle task took %dms to complete", end - start);
 
 		mDNSs32 now = mDNS_TimeNow(m);
 
 		if (m->ShutdownTime)
 			{
+			if (mDNSStorage.ResourceRecords)
+				{
+				LogInfo("Cannot exit yet; Resource Record still exists: %s", ARDisplayString(m, mDNSStorage.ResourceRecords));
+				if (mDNS_LoggingEnabled) usleep(10000);		// Sleep 10ms so that we don't flood syslog with too many messages
+				}
+			if (mDNSStorage.ServiceRegistrations)
+				LogInfo("Cannot exit yet; ServiceRegistrations still exists: %s", ARDisplayString(m, &mDNSStorage.ServiceRegistrations->RR_SRV));
 			if (mDNS_ExitNow(m, now))
 				{
-				LogOperation("mDNS_FinalExit");
+				if (!mDNSStorage.ResourceRecords && !mDNSStorage.ServiceRegistrations)
+					safe_vproc_transaction_end();
+				LogInfo("mDNS_FinalExit");
 				mDNS_FinalExit(&mDNSStorage);
 				usleep(1000);		// Little 1ms pause before exiting, so we don't lose our final syslog messages
 				exit(0);
@@ -2422,20 +2843,10 @@ mDNSlocal void * KQueueLoop(void *m_param)
 				nextTimerEvent = m->ShutdownTime;
 			}
 
-		if (m->p->SleepLimit)
-			{
-			mDNSBool ready = ReadyForSleep(m);
-			if (ready || now - m->p->SleepLimit >= 0)
-				{
-				LogOperation("IOAllowPowerChange(%lX) %s at %ld (%d ticks remaining)", m->p->SleepCookie,
-					ready ? "ready for sleep" : "giving up", now, m->p->SleepLimit - now);
-				m->p->SleepLimit = 0;
-				IOAllowPowerChange(m->p->PowerConnection, m->p->SleepCookie);
-				}
-			else
-				if (nextTimerEvent - m->p->SleepLimit >= 0)
-					nextTimerEvent = m->p->SleepLimit;
-			}
+		if (m->SleepLimit)
+			if (!AllowSleepNow(m, now))
+				if (nextTimerEvent - m->SleepLimit >= 0)
+					nextTimerEvent = m->SleepLimit;
 
 		// Convert absolute wakeup time to a relative time from now
 		mDNSs32 ticks = nextTimerEvent - now;
@@ -2504,13 +2915,11 @@ mDNSlocal void * KQueueLoop(void *m_param)
 				{
 				const KQueueEntry *const kqentry = new_events[i].udata;
 				mDNSs32 stime = mDNSPlatformRawTime();
-#if LogAllOperations || MDNS_DEBUGMSGS
 				const char *const KQtask = kqentry->KQtask;	// Grab a copy in case KQcallback deletes the task
-#endif
 				kqentry->KQcallback(new_events[i].ident, new_events[i].filter, kqentry->KQcontext);
 				mDNSs32 etime = mDNSPlatformRawTime();
 				if (etime - stime >= WatchDogReportingThreshold)
-					LogOperation("WARNING: %s took %dms to complete", KQtask, etime - stime);
+					LogInfo("WARNING: %s took %dms to complete", KQtask, etime - stime);
 				}
 			}
 		}
@@ -2530,7 +2939,7 @@ mDNSlocal void LaunchdCheckin(void)
 		int err = launch_data_get_errno(resp);
 		// When running on Tiger with "ServiceIPC = false", we get "err == EACCES" to tell us there's no launchdata to fetch
 		if (err != EACCES) LogMsg("launch_msg returned %d", err);
-		else LogOperation("Launchd provided no launchdata; will open Mach port and Unix Domain Socket explicitly...", err);
+		else LogInfo("Launchd provided no launchdata; will open Mach port and Unix Domain Socket explicitly...", err);
 		}
 	else
 		{
@@ -2542,12 +2951,30 @@ mDNSlocal void LaunchdCheckin(void)
 			if (!skt) LogMsg("launch_data_dict_lookup Listeners returned NULL");
 			else
 				{
-				launch_data_t s = launch_data_array_get_index(skt, 0);
-				if (!s) LogMsg("launch_data_array_get_index(skt, 0) returned NULL");
+				launchd_fds_count = launch_data_array_get_count(skt);
+				if (launchd_fds_count == 0) LogMsg("launch_data_array_get_count(skt) returned 0");
 				else
 					{
-					launchd_fd = launch_data_get_fd(s);
-					LogOperation("Launchd Unix Domain Socket: %d", launchd_fd);
+					launchd_fds = mallocL("LaunchdCheckin", sizeof(dnssd_sock_t) * launchd_fds_count);
+					if (!launchd_fds) LogMsg("LaunchdCheckin: malloc failed");
+					else
+						{
+						size_t i;
+						for(i = 0; i < launchd_fds_count; i++)
+							{						
+							launch_data_t s = launch_data_array_get_index(skt, i);
+							if (!s)
+								{
+								launchd_fds[i] = dnssd_InvalidSocket;
+								LogMsg("launch_data_array_get_index(skt, %d) returned NULL", i);
+								}
+							else
+								{
+								launchd_fds[i] = launch_data_get_fd(s);
+								LogInfo("Launchd Unix Domain Socket [%d]: %d", i, launchd_fds[i]);
+								}
+							}
+						}
 					// In some early versions of 10.4.x, the permissions on the UDS were not set correctly, so we fix them here
 					chmod(MDNS_UDS_SERVERPATH, S_IRUSR|S_IWUSR | S_IRGRP|S_IWGRP | S_IROTH|S_IWOTH);
 					}
@@ -2559,11 +2986,11 @@ mDNSlocal void LaunchdCheckin(void)
 		else
 			{
 			launch_data_t p = launch_data_dict_lookup(ports, "com.apple.mDNSResponder");
-			if (!p) LogOperation("launch_data_array_get_index(ports, 0) returned NULL");
+			if (!p) LogInfo("launch_data_dict_lookup(ports, \"com.apple.mDNSResponder\") returned NULL");
 			else
 				{
 				m_port = launch_data_get_fd(p);
-				LogOperation("Launchd Mach Port: %d", m_port);
+				LogInfo("Launchd Mach Port: %d", m_port);
 				if (m_port == ~0U) m_port = MACH_PORT_NULL;
 				}
 			}
@@ -2597,7 +3024,7 @@ mDNSlocal void DropPrivileges(void)
 				*p = '/';
 				if (unlink(path) < 0 && errno != ENOENT) LogMsg("DropPrivileges: Could not unlink \"%s\": (%d) %s", path, errno, strerror(errno));
 				else if (symlink(path, MDNS_UDS_SERVERPATH) < 0) LogMsg("DropPrivileges: Could not symlink \"%s\" -> \"%s\": (%d) %s", MDNS_UDS_SERVERPATH, path, errno, strerror(errno));
-				else LogOperation("DropPrivileges: Created subdirectory and symlink");
+				else LogInfo("DropPrivileges: Created subdirectory and symlink");
 				}
 			}
 
@@ -2615,25 +3042,54 @@ mDNSexport int main(int argc, char **argv)
 	kern_return_t status;
 	pthread_t KQueueThread;
 
-	LogMsgIdent(mDNSResponderVersionString, "starting");
+	LogMsg("%s starting", mDNSResponderVersionString);
+	
+#if 0
+	LogMsg("CacheRecord %d", sizeof(CacheRecord));
+	LogMsg("CacheGroup  %d", sizeof(CacheGroup));
+	LogMsg("ResourceRecord  %d", sizeof(ResourceRecord));
+	LogMsg("RData_small     %d", sizeof(RData_small));
+
+	LogMsg("sizeof(CacheEntity) %d", sizeof(CacheEntity));
+	LogMsg("RR_CACHE_SIZE       %d", RR_CACHE_SIZE);
+	LogMsg("block usage         %d", sizeof(CacheEntity) * RR_CACHE_SIZE);
+	LogMsg("block wastage       %d", 16*1024 - sizeof(CacheEntity) * RR_CACHE_SIZE);
+#endif
+
+	safe_vproc_transaction_begin();
 
 	if (0 == geteuid()) DropPrivileges();
 
 	for (i=1; i<argc; i++)
 		{
-		if (!strcasecmp(argv[i], "-d"           )) mDNS_DebugMode = mDNStrue;
-		if (!strcasecmp(argv[i], "-launchd"     )) started_via_launchdaemon = mDNStrue;
-		if (!strcasecmp(argv[i], "-launchdaemon")) started_via_launchdaemon = mDNStrue;
+		if (!strcasecmp(argv[i], "-d"                        )) mDNS_DebugMode            = mDNStrue;
+		if (!strcasecmp(argv[i], "-launchd"                  )) started_via_launchdaemon  = mDNStrue;
+		if (!strcasecmp(argv[i], "-launchdaemon"             )) started_via_launchdaemon  = mDNStrue;
+		if (!strcasecmp(argv[i], "-NoMulticastAdvertisements")) advertise                 = mDNS_Init_DontAdvertiseLocalAddresses;
+		if (!strcasecmp(argv[i], "-DebugLogging"             )) mDNS_LoggingEnabled       = mDNStrue;
+		if (!strcasecmp(argv[i], "-UnicastPacketLogging"     )) mDNS_PacketLoggingEnabled = mDNStrue;
+		if (!strcasecmp(argv[i], "-OfferSleepProxyService"   ))
+			OfferSleepProxyService = (i+1<argc && mDNSIsDigit(argv[i+1][0]) && mDNSIsDigit(argv[i+1][1]) && argv[i+1][2]==0) ? atoi(argv[++i]) : 80;
 		}
+	
+	// Note that mDNSPlatformInit will set DivertMulticastAdvertisements in the mDNS structure
+	if (!advertise) LogMsg("Administratively prohibiting multicast advertisements");
+
+	OSXVers = mDNSMacOSXSystemBuildNumber(NULL);
 
 	signal(SIGHUP,  HandleSIG);		// (Debugging) Purge the cache to check for cache handling bugs
 	signal(SIGINT,  HandleSIG);		// Ctrl-C: Detach from Mach BootstrapService and exit cleanly
-	signal(SIGABRT, CatchABRT);		// For debugging -- SIGABRT should never happen
+	// On 10.5 and later, the default action for SIGABRT is to generate a crash report, so we only need our CatchABRT handler on 10.4
+	if (OSXVers <= OSXVers_10_4_Tiger)
+		{
+		LogInfo("Adding SIGABRT handler");
+		signal(SIGABRT, CatchABRT); // For debugging -- SIGABRT should never happen
+		}
 	signal(SIGPIPE, SIG_IGN  );		// Don't want SIGPIPE signals -- we'll handle EPIPE errors directly
 	signal(SIGTERM, HandleSIG);		// Machine shutting down: Detach from and exit cleanly like Ctrl-C
 	signal(SIGINFO, HandleSIG);		// (Debugging) Write state snapshot to syslog
-	signal(SIGUSR1, HandleSIG);		// (Debugging) Simulate network change notification from System Configuration Framework
-	signal(SIGUSR2, HandleSIG);		// (Debugging) Change log level
+	signal(SIGUSR1, HandleSIG);		// (Debugging) Enable Logging
+	signal(SIGUSR2, HandleSIG);		// (Debugging) Enable Packet Logging
 
 	mDNSStorage.p = &PlatformStorage;	// Make sure mDNSStorage.p is set up, because validatelists uses it
 	LaunchdCheckin();
@@ -2684,16 +3140,18 @@ mDNSexport int main(int argc, char **argv)
 		char *sandbox_msg;
 		int sandbox_err = sandbox_init("mDNSResponder", SANDBOX_NAMED, &sandbox_msg);
 		if (sandbox_err) { LogMsg("WARNING: sandbox_init error %s", sandbox_msg); sandbox_free_error(sandbox_msg); }
-		else LogOperation("Now running under Apple Sandbox restrictions");
+		else LogInfo("Now running under Apple Sandbox restrictions");
 		}
 #endif
 
-	OSXVers = mDNSMacOSXSystemBuildNumber(NULL);
 	status = mDNSDaemonInitialize();
 	if (status) { LogMsg("Daemon start: mDNSDaemonInitialize failed"); goto exit; }
-	status = udsserver_init(launchd_fd);
+
+	status = udsserver_init(launchd_fds, launchd_fds_count);
 	if (status) { LogMsg("Daemon start: udsserver_init failed"); goto exit; }
-	
+
+	mDNSMacOSXNetworkChanged(&mDNSStorage);
+
 	// Start the kqueue thread
 	i = pthread_create(&KQueueThread, NULL, KQueueLoop, &mDNSStorage);
 	if (i == -1) { LogMsg("pthread_create() failed errno %d (%s)", errno, strerror(errno)); status = errno; goto exit; }
@@ -2705,7 +3163,7 @@ mDNSexport int main(int argc, char **argv)
 		mDNS_Close(&mDNSStorage);
 		}
 
-	LogMsgIdent(mDNSResponderVersionString, "exiting");
+	LogMsg("%s exiting", mDNSResponderVersionString);
 
 exit:
 	if (!mDNS_DebugMode && !started_via_launchdaemon) destroyBootstrapService();
@@ -2714,38 +3172,38 @@ exit:
 
 // uds_daemon.c support routines /////////////////////////////////////////////
 
-// Arrange things so that callback is called with context when data appears on fd
-mStatus udsSupportAddFDToEventLoop(int fd, udsEventCallback callback, void *context)
+// Arrange things so that when data appears on fd, callback is called with context
+mDNSexport mStatus udsSupportAddFDToEventLoop(int fd, udsEventCallback callback, void *context)
 	{
+	KQSocketEventSource **p = &gEventSources;
+	while (*p && (*p)->fd != fd) p = &(*p)->next;
+	if (*p) { LogMsg("udsSupportAddFDToEventLoop: ERROR fd %d already has EventLoop source entry", fd); return mStatus_AlreadyRegistered; }
+
 	KQSocketEventSource *newSource = (KQSocketEventSource*) mallocL("KQSocketEventSource", sizeof *newSource);
 	if (!newSource) return mStatus_NoMemoryErr;
 
-	mDNSPlatformMemZero(newSource, sizeof(*newSource));
-	newSource->fd = fd;
+	newSource->next           = mDNSNULL;
+	newSource->fd             = fd;
 	newSource->kqs.KQcallback = callback;
 	newSource->kqs.KQcontext  = context;
 	newSource->kqs.KQtask     = "UDS client";
 
 	if (KQueueSet(fd, EV_ADD, EVFILT_READ, &newSource->kqs) == 0)
 		{
-		KQSocketEventSource **p = &gEventSources;
-		while (*p) p = &(*p)->next;
 		*p = newSource;
 		return mStatus_NoError;
 		}
-	else
-		{
-		close(fd);
-		free(newSource);
-		return mStatus_NoMemoryErr;
-		}
+
+	LogMsg("KQueueSet failed for fd %d errno %d (%s)", fd, errno, strerror(errno));
+	freeL("KQSocketEventSource", newSource);
+	return mStatus_BadParamErr;
 	}
 
-mStatus udsSupportRemoveFDFromEventLoop(int fd)		// Note: This also CLOSES the file descriptor
+mDNSexport mStatus udsSupportRemoveFDFromEventLoop(int fd)		// Note: This also CLOSES the file descriptor
 	{
 	KQSocketEventSource **p = &gEventSources;
 	while (*p && (*p)->fd != fd) p = &(*p)->next;
-	if (*p) 
+	if (*p)
 		{
 		KQSocketEventSource *s = *p;
 		*p = (*p)->next;
@@ -2755,12 +3213,15 @@ mStatus udsSupportRemoveFDFromEventLoop(int fd)		// Note: This also CLOSES the f
 		freeL("KQSocketEventSource", s);
 		return mStatus_NoError;
 		}
+	LogMsg("udsSupportRemoveFDFromEventLoop: ERROR fd %d not found in EventLoop source list", fd);
 	return mStatus_NoSuchNameErr;
 	}
 
+#if _BUILDING_XCODE_PROJECT_
 // If mDNSResponder crashes, then this string will be magically included in the automatically-generated crash log
 const char *__crashreporter_info__ = mDNSResponderVersionString;
 asm(".desc ___crashreporter_info__, 0x10");
+#endif
 
 // For convenience when using the "strings" command, this is the last thing in the file
 // The "@(#) " pattern is a special prefix the "what" command looks for

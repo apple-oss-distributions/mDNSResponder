@@ -17,6 +17,36 @@
     Change History (most recent first):
 
 $Log: dnsextd.c,v $
+Revision 1.97  2009/01/13 05:31:34  mkrochma
+<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
+
+Revision 1.96  2009/01/13 00:45:41  cheshire
+Uncommented "#ifdef NOT_HAVE_DAEMON" check
+
+Revision 1.95  2009/01/12 22:47:13  cheshire
+Only include "mDNSUNP.h" when building on a system that requires the "daemon()" definition (currently only Solaris)
+
+Revision 1.94  2009/01/11 03:20:06  mkrochma
+<rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
+
+Revision 1.93  2008/12/17 05:06:53  cheshire
+Increased maximum DNS Update lifetime from 20 minutes to 2 hours -- now that we have Sleep Proxy,
+having clients wake every fifteen minutes to renew their record registrations is no longer reasonable.
+
+Revision 1.92  2008/11/13 19:09:36  cheshire
+Updated rdataOPT code
+
+Revision 1.91  2008/11/04 23:06:51  cheshire
+Split RDataBody union definition into RDataBody and RDataBody2, and removed
+SOA from the normal RDataBody union definition, saving 270 bytes per AuthRecord
+
+Revision 1.90  2008/10/03 18:18:57  cheshire
+Define dummy "mDNS_ConfigChanged(mDNS *const m)" routine to avoid link errors
+
+Revision 1.89  2008/09/15 23:52:30  cheshire
+<rdar://problem/6218902> mDNSResponder-177 fails to compile on Linux with .desc pseudo-op
+Made __crashreporter_info__ symbol conditional, so we only use it for OS X build
+
 Revision 1.88  2008/03/06 21:26:11  cheshire
 Moved duplicated STRINGIFY macro from individual C files to DNSCommon.h
 
@@ -190,6 +220,11 @@ Revision 1.42  2006/07/05 22:48:19  cheshire
 #include <sys/resource.h>
 #include <time.h>
 #include <errno.h>
+
+// Solaris doesn't have daemon(), so we define it here
+#ifdef NOT_HAVE_DAEMON
+#include "../mDNSPosix/mDNSUNP.h"		// For daemon()
+#endif // NOT_HAVE_DAEMON
 
 // Compatibility workaround
 #ifndef AF_LOCAL
@@ -591,7 +626,7 @@ RecvPacket
 
 		pkt = malloc(allocsize);
 		require_action_quiet( pkt, exit, err = mStatus_NoMemoryErr; LogErr( "RecvPacket", "malloc" ) );
-		bzero( pkt, sizeof( *pkt ) );
+		mDNSPlatformMemZero( pkt, sizeof( *pkt ) );
 		}
 	
 	pkt->len = msglen;
@@ -600,7 +635,7 @@ RecvPacket
 	if ( getpeername( fd, ( struct sockaddr* ) &pkt->src, &srclen ) || ( srclen != sizeof( pkt->src ) ) )
 		{
 		LogErr("RecvPacket", "getpeername");
-		bzero(&pkt->src, sizeof(pkt->src));
+		mDNSPlatformMemZero(&pkt->src, sizeof(pkt->src));
 		}
 
 	nread = my_recv(sock, &pkt->msg, msglen, closed );
@@ -703,7 +738,7 @@ mDNSlocal mDNSBool IsLLQRequest(PktMsg *pkt)
 		if (!ptr) { Log("Unable to read additional record"); goto end; }
 		}
 
-	if ( lcr.r.resrec.rrtype == kDNSType_OPT && lcr.r.resrec.rdlength >= LLQ_OPT_RDLEN && lcr.r.resrec.rdata->u.opt.opt == kDNSOpt_LLQ )
+	if ( lcr.r.resrec.rrtype == kDNSType_OPT && lcr.r.resrec.rdlength >= DNSOpt_LLQData_Space && lcr.r.resrec.rdata->u.opt[0].opt == kDNSOpt_LLQ )
 		{
 		result = mDNStrue;
 		}
@@ -926,7 +961,7 @@ mDNSlocal CacheRecord *CopyCacheRecord(const CacheRecord *orig, domainname *name
 	cr = malloc(size);
 	if (!cr) { LogErr("CopyCacheRecord", "malloc"); return NULL; }
 	memcpy(cr, orig, size);
-	cr->resrec.rdata = (RData*)&cr->rdatastorage;
+	cr->resrec.rdata = (RData*)&cr->smallrdatastorage;
 	cr->resrec.name = name;
 	
 	return cr;
@@ -947,7 +982,7 @@ mDNSlocal void RehashTable(DaemonInfo *d)
 	VLog("Rehashing lease table (new size %d buckets)", newnbuckets);
 	new = malloc(sizeof(RRTableElem *) * newnbuckets);
 	if (!new) { LogErr("RehashTable", "malloc");  return; }
-	bzero(new, newnbuckets * sizeof(RRTableElem *));
+	mDNSPlatformMemZero(new, newnbuckets * sizeof(RRTableElem *));
 
 	for (i = 0; i < d->nbuckets; i++)
 		{
@@ -1008,7 +1043,7 @@ mDNSlocal mDNSu8 *putRRSetDeletion(DNSMessage *msg, mDNSu8 *ptr, mDNSu8 *limit, 
 	ptr[1] = (mDNSu8)(rr->rrtype  &  0xFF);
 	ptr[2] = (mDNSu8)((mDNSu16)kDNSQClass_ANY >> 8);
 	ptr[3] = (mDNSu8)((mDNSu16)kDNSQClass_ANY &  0xFF);
-	bzero(ptr+4, sizeof(rr->rroriginalttl) + sizeof(rr->rdlength)); // zero ttl/rdata
+	mDNSPlatformMemZero(ptr+4, sizeof(rr->rroriginalttl) + sizeof(rr->rdlength)); // zero ttl/rdata
 	msg->h.mDNS_numUpdates++;
 	return ptr + 10;
 	}
@@ -1208,7 +1243,7 @@ mDNSlocal int ProcessArgs(int argc, char *argv[], DaemonInfo *d)
 
 	// setup our sockaddr
 
-	bzero( &d->addr, sizeof( d->addr ) );
+	mDNSPlatformMemZero( &d->addr, sizeof( d->addr ) );
 	d->addr.sin_addr.s_addr	= zerov4Addr.NotAnInteger;
 	d->addr.sin_port		= UnicastDNSPort.NotAnInteger;
 	d->addr.sin_family		= AF_INET;
@@ -1218,7 +1253,7 @@ mDNSlocal int ProcessArgs(int argc, char *argv[], DaemonInfo *d)
 
 	// setup nameserver's sockaddr
 
-	bzero(&d->ns_addr, sizeof(d->ns_addr));
+	mDNSPlatformMemZero(&d->ns_addr, sizeof(d->ns_addr));
 	d->ns_addr.sin_family	= AF_INET;
 	inet_pton( AF_INET, LOOPBACK, &d->ns_addr.sin_addr );
 	d->ns_addr.sin_port		= NSIPCPort.NotAnInteger;
@@ -1281,7 +1316,7 @@ mDNSlocal int InitLeaseTable(DaemonInfo *d)
 	d->nelems = 0;
 	d->table = malloc(sizeof(RRTableElem *) * LEASETABLE_INIT_NBUCKETS);
 	if (!d->table) { LogErr("InitLeaseTable", "malloc"); return -1; }
-	bzero(d->table, sizeof(RRTableElem *) * LEASETABLE_INIT_NBUCKETS);
+	mDNSPlatformMemZero(d->table, sizeof(RRTableElem *) * LEASETABLE_INIT_NBUCKETS);
 	return 0;
 	}
 
@@ -1328,7 +1363,7 @@ SetupSockets
 
 	// set up sockets on which we receive llq requests
 
-	bzero(&self->llq_addr, sizeof(self->llq_addr));
+	mDNSPlatformMemZero(&self->llq_addr, sizeof(self->llq_addr));
 	self->llq_addr.sin_family		= AF_INET;
 	self->llq_addr.sin_addr.s_addr	= zerov4Addr.NotAnInteger;
 	self->llq_addr.sin_port			= ( self->llq_port.NotAnInteger ) ? self->llq_port.NotAnInteger : DNSEXTPort.NotAnInteger;
@@ -1370,7 +1405,7 @@ SetupSockets
 
 	self->llq_tcpsd = socket( AF_INET, SOCK_STREAM, 0 );
 	require_action( dnssd_SocketValid(self->tlssd), exit, err = mStatus_UnknownErr; LogErr( "SetupSockets", "socket" ) );
-	bzero(&daddr, sizeof(daddr));
+	mDNSPlatformMemZero(&daddr, sizeof(daddr));
 	daddr.sin_family		= AF_INET;
 	daddr.sin_addr.s_addr	= zerov4Addr.NotAnInteger;
 	daddr.sin_port			= ( self->private_port.NotAnInteger ) ? self->private_port.NotAnInteger : PrivateDNSPort.NotAnInteger;
@@ -1580,7 +1615,7 @@ mDNSlocal void UpdateLeaseTable(PktMsg *pkt, DaemonInfo *d, mDNSs32 lease)
 				tmp = malloc(allocsize);
 				if (!tmp) { LogErr("UpdateLeaseTable", "malloc"); goto cleanup; }
 				memcpy(&tmp->rr, &lcr.r, sizeof(CacheRecord) + rr->rdlength - InlineCacheRDSize);
-				tmp->rr.resrec.rdata = (RData *)&tmp->rr.rdatastorage;
+				tmp->rr.resrec.rdata = (RData *)&tmp->rr.smallrdatastorage;
 				AssignDomainName(&tmp->name, rr->name);
 				tmp->rr.resrec.name = &tmp->name;
 				tmp->expire = tv.tv_sec + (unsigned)lease;
@@ -1661,15 +1696,15 @@ HandleRequest
 			static const mDNSOpaque16 UpdateRefused = { { kDNSFlag0_QR_Response | kDNSFlag0_OP_Update, kDNSFlag1_RC_Refused } };
 			Log("Rejecting Update Request with %d additions but no lease", adds);
 			reply = malloc(sizeof(*reply));
-			bzero(&reply->src, sizeof(reply->src));
+			mDNSPlatformMemZero(&reply->src, sizeof(reply->src));
 			reply->len = sizeof(DNSMessageHeader);
 			reply->zone = NULL;
 			reply->isZonePublic = 0;
 			InitializeDNSMessage(&reply->msg.h, request->msg.h.id, UpdateRefused);
 			return(reply);
 			}
-		if (lease > 1200)	// Don't allow lease greater than 20 minutes
-			lease = 1200;
+		if (lease > 7200)	// Don't allow lease greater than two hours; typically 90-minute renewal period
+			lease = 7200;
 		}
 	// Send msg to server, read reply
 
@@ -1772,18 +1807,17 @@ exit:
 // Set fields of an LLQ OPT Resource Record
 mDNSlocal void FormatLLQOpt(AuthRecord *opt, int opcode, const mDNSOpaque64 *const id, mDNSs32 lease)
 	{
-	bzero(opt, sizeof(*opt));
+	mDNSPlatformMemZero(opt, sizeof(*opt));
 	mDNS_SetupResourceRecord(opt, mDNSNULL, mDNSInterface_Any, kDNSType_OPT, kStandardTTL, kDNSRecordTypeKnownUnique, mDNSNULL, mDNSNULL);
 	opt->resrec.rrclass = NormalMaxDNSMessageData;
-	opt->resrec.rdlength = LLQ_OPT_RDLEN;
-	opt->resrec.rdestimate = LLQ_OPT_RDLEN;
-	opt->resrec.rdata->u.opt.opt = kDNSOpt_LLQ;
-	opt->resrec.rdata->u.opt.optlen = sizeof(LLQOptData);
-	opt->resrec.rdata->u.opt.OptData.llq.vers  = kLLQ_Vers;
-	opt->resrec.rdata->u.opt.OptData.llq.llqOp = opcode;
-	opt->resrec.rdata->u.opt.OptData.llq.err   = LLQErr_NoError;
-	opt->resrec.rdata->u.opt.OptData.llq.id    = *id;
-	opt->resrec.rdata->u.opt.OptData.llq.llqlease = lease;
+	opt->resrec.rdlength   = sizeof(rdataOPT);	// One option in this OPT record
+	opt->resrec.rdestimate = sizeof(rdataOPT);
+	opt->resrec.rdata->u.opt[0].opt = kDNSOpt_LLQ;
+	opt->resrec.rdata->u.opt[0].u.llq.vers  = kLLQ_Vers;
+	opt->resrec.rdata->u.opt[0].u.llq.llqOp = opcode;
+	opt->resrec.rdata->u.opt[0].u.llq.err   = LLQErr_NoError;
+	opt->resrec.rdata->u.opt[0].u.llq.id    = *id;
+	opt->resrec.rdata->u.opt[0].u.llq.llqlease = lease;
 	}
 
 // Calculate effective remaining lease of an LLQ
@@ -2481,14 +2515,14 @@ mDNSlocal int RecvLLQ( DaemonInfo *d, PktMsg *pkt, TCPSocket *sock )
 
 	// validate OPT
 	if (opt.r.resrec.rrtype != kDNSType_OPT) { Log("Malformatted LLQ from %s: last Additional not an OPT RR", addr); goto end; }
-	if (opt.r.resrec.rdlength < pkt->msg.h.numQuestions * LLQ_OPT_RDLEN) { Log("Malformatted LLQ from %s: OPT RR to small (%d bytes for %d questions)", addr, opt.r.resrec.rdlength, pkt->msg.h.numQuestions); }
+	if (opt.r.resrec.rdlength < pkt->msg.h.numQuestions * DNSOpt_LLQData_Space) { Log("Malformatted LLQ from %s: OPT RR to small (%d bytes for %d questions)", addr, opt.r.resrec.rdlength, pkt->msg.h.numQuestions); }
 	
 	// dispatch each question
 	for (i = 0; i < pkt->msg.h.numQuestions; i++)
 		{
 		qptr = getQuestion(&pkt->msg, qptr, end, 0, &q);
 		if (!qptr) { Log("Malformatted LLQ from %s: cannot read question %d", addr, i); goto end; }
-		llq = (LLQOptData *)&opt.r.resrec.rdata->u.opt.OptData.llq + i; // point into OptData at index i
+		llq = (LLQOptData *)&opt.r.resrec.rdata->u.opt[0].u.llq + i; // point into OptData at index i
 		if (llq->vers != kLLQ_Vers) { Log("LLQ from %s contains bad version %d (expected %d)", addr, llq->vers, kLLQ_Vers); goto end; }
 		
 		e = LookupLLQ(d, pkt->src, &q.qname, q.qtype, &llq->id);
@@ -2702,7 +2736,7 @@ RecvUDPMessage
 	context = malloc( sizeof( UDPContext ) );
 	require_action( context, exit, err = mStatus_NoMemoryErr ; LogErr( "RecvUDPMessage", "malloc" ) );
 
-	bzero( context, sizeof( *context ) );
+	mDNSPlatformMemZero( context, sizeof( *context ) );
 	context->d = self;
 	context->sd = sd;
 
@@ -2940,7 +2974,7 @@ AcceptTCPConnection
 	
 	context = ( TCPContext* ) malloc( sizeof( TCPContext ) );
 	require_action( context, exit, err = mStatus_NoMemoryErr; LogErr( "AcceptTCPConnection", "malloc" ) );
-	bzero( context, sizeof( sizeof( TCPContext ) ) );
+	mDNSPlatformMemZero( context, sizeof( sizeof( TCPContext ) ) );
 	context->d		 = self;
 	newSock = accept( sd, ( struct sockaddr* ) &context->cliaddr, &clilen );
 	require_action( newSock != -1, exit, err = mStatus_UnknownErr; LogErr( "AcceptTCPConnection", "accept" ) );
@@ -3158,7 +3192,7 @@ int main(int argc, char *argv[])
 
 	d = malloc(sizeof(*d));
 	if (!d) { LogErr("main", "malloc"); exit(1); }
-	bzero(d, sizeof(DaemonInfo));
+	mDNSPlatformMemZero(d, sizeof(DaemonInfo));
 
 	// Setup the public SRV record names
 
@@ -3224,6 +3258,7 @@ int main(int argc, char *argv[])
 // It's an error for these routines to actually be called, so perhaps we should log any call
 // to them.
 void mDNSCoreInitComplete( mDNS * const m, mStatus result) { ( void ) m; ( void ) result; }
+void mDNS_ConfigChanged(mDNS *const m)  { ( void ) m; }
 void mDNSCoreMachineSleep(mDNS * const m, mDNSBool wake) { ( void ) m; ( void ) wake; }
 void mDNSCoreReceive(mDNS *const m, void *const msg, const mDNSu8 *const end,
                                 const mDNSAddr *const srcaddr, const mDNSIPPort srcport,
@@ -3262,6 +3297,8 @@ mDNS mDNSStorage;
 // The "@(#) " pattern is a special prefix the "what" command looks for
 const char mDNSResponderVersionString_SCCS[] = "@(#) dnsextd " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
 
+#if _BUILDING_XCODE_PROJECT_
 // If the process crashes, then this string will be magically included in the automatically-generated crash log
 const char *__crashreporter_info__ = mDNSResponderVersionString_SCCS + 5;
 asm(".desc ___crashreporter_info__, 0x10");
+#endif

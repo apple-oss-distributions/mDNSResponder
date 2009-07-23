@@ -17,6 +17,10 @@
     Change History (most recent first):
     
 $Log: ExplorerBarWindow.h,v $
+Revision 1.9  2009/03/30 18:49:15  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
 Revision 1.8  2006/08/14 23:24:00  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -242,7 +246,7 @@ class	ExplorerBarWindow : public CWnd
 		afx_msg void	OnDestroy( void );
 		afx_msg void	OnSize( UINT inType, int inX, int inY );
 		afx_msg void	OnDoubleClick( NMHDR *inNMHDR, LRESULT *outResult );
-		afx_msg LONG	OnServiceEvent( WPARAM inWParam, LPARAM inLParam );
+		afx_msg LRESULT	OnServiceEvent( WPARAM inWParam, LPARAM inLParam );
 		
 		// Browsing
 		

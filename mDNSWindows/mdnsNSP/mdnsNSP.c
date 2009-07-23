@@ -17,6 +17,13 @@
     Change History (most recent first):
     
 $Log: mdnsNSP.c,v $
+Revision 1.22  2009/03/30 20:34:51  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5914160> Eliminate use of GetNextLabel in mdnsNSP
+
+Revision 1.21  2008/07/16 01:25:10  cheshire
+<rdar://problem/5914160> Eliminate use of GetNextLabel in mdnsNSP
+
 Revision 1.20  2006/08/14 23:26:10  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -96,6 +103,7 @@ mDNS NameSpace Provider (NSP). Hooks into the Windows name resolution system to 
 #include	<stdlib.h>
 #include	<string.h>
 
+#include	"ClientCommon.h"
 #include	"CommonServices.h"
 #include	"DebugServices.h"
 
@@ -114,6 +122,8 @@ mDNS NameSpace Provider (NSP). Hooks into the Windows name resolution system to 
 #define swprintf _snwprintf
 #define snprintf _snprintf
 #endif
+
+#define MAX_LABELS 128
 
 #if 0
 #pragma mark == Structures ==
@@ -284,7 +294,6 @@ DEBUG_LOCAL OSStatus	HostsFileOpen( HostsFile ** self, const char * fname );
 DEBUG_LOCAL OSStatus	HostsFileClose( HostsFile * self );
 DEBUG_LOCAL void		HostsFileInfoFree( HostsFileInfo * info );
 DEBUG_LOCAL OSStatus	HostsFileNext( HostsFile * self, HostsFileInfo ** hInfo );
-DEBUG_LOCAL const char * GetNextLabel( const char *cstr, char label[64] );
 DEBUG_LOCAL DWORD		GetScopeId( DWORD ifIndex );
 
 #ifdef ENABLE_REVERSE_LOOKUP
@@ -391,7 +400,7 @@ STDAPI	DllRegisterServer( void )
 
 	WSCUnInstallNameSpace( &gNSPGUID );
 
-	err = GetModuleFileNameW( gInstance, path, sizeof( path ) );
+	err = GetModuleFileNameW( gInstance, path, MAX_PATH );
 	err = translate_errno( err != 0, errno_compat(), kUnknownErr );
 	require_noerr( err, exit );
 
@@ -654,7 +663,7 @@ DEBUG_LOCAL int WSPAPI
 		char			translated[ kDNSServiceMaxDomainName ];
 		int				n;
 		int				labels		= 0;
-		const char	*	label[128];
+		const char	*	label[MAX_LABELS];
 		char			text[64];
 
 		n = WideCharToMultiByte( CP_UTF8, 0, name, -1, translated, sizeof( translated ), NULL, NULL );
@@ -664,9 +673,12 @@ DEBUG_LOCAL int WSPAPI
 
 		// Don't resolve multi-label name
 
+		// <rdar://problem/5914160> Eliminate use of GetNextLabel in mdnsNSP
+		// Add checks for GetNextLabel returning NULL, individual labels being greater than
+		// 64 bytes, and the number of labels being greater than MAX_LABELS
 		replyDomain = translated;
 
-		while ( *replyDomain )
+		while (replyDomain && *replyDomain && labels < MAX_LABELS)
 		{
 			label[labels++]	= replyDomain;
 			replyDomain		= GetNextLabel(replyDomain, text);
@@ -682,7 +694,7 @@ DEBUG_LOCAL int WSPAPI
 		require_action( InHostsTable( translated ) == FALSE, exit, err = WSASERVICE_NOT_FOUND );
 	}
 
-	// The name ends in .local ( and isn't in the hosts table ), {8,9,A,B}.E.F.ip6.arpa, or .254.169.in-addr.arpa so start the resolve operation. Lazy initialize DNS-SD if needed.
+	// The name ends in .local ( and isn't in the hosts table ), .0.8.e.f.ip6.arpa, or .254.169.in-addr.arpa so start the resolve operation. Lazy initialize DNS-SD if needed.
 		
 	NSPLock();
 	
@@ -2319,37 +2331,6 @@ exit:
 }
 
 
-//===========================================================================================================================
-//	GetNextLabel
-//===========================================================================================================================
-DEBUG_LOCAL const char*
-GetNextLabel(const char *cstr, char label[64])
-{
-	char *ptr = label;
-	while (*cstr && *cstr != '.')								// While we have characters in the label...
-		{
-		char c = *cstr++;
-		if (c == '\\')
-			{
-			c = *cstr++;
-			if (isdigit(cstr[-1]) && isdigit(cstr[0]) && isdigit(cstr[1]))
-				{
-				int v0 = cstr[-1] - '0';						// then interpret as three-digit decimal
-				int v1 = cstr[ 0] - '0';
-				int v2 = cstr[ 1] - '0';
-				int val = v0 * 100 + v1 * 10 + v2;
-				if (val <= 255) { c = (char)val; cstr += 2; }	// If valid three-digit decimal value, use it
-				}
-			}
-		*ptr++ = c;
-		if (ptr >= label+64) return(NULL);
-		}
-	if (*cstr) cstr++;											// Skip over the trailing dot (if present)
-	*ptr++ = 0;
-	return(cstr);
-}
-
-
 #ifdef ENABLE_REVERSE_LOOKUP
 //===========================================================================================================================
 //	IsReverseLookup
@@ -2361,6 +2342,7 @@ IsReverseLookup( LPCWSTR name, size_t size )
 	LPCWSTR		p;
 	OSStatus	err = kNoErr;
 
+	// IPv6LL Reverse-mapping domains are {8,9,A,B}.E.F.ip6.arpa
 	require_action_quiet( size > sizeof_string( ".0.8.e.f.ip6.arpa" ), exit, err = WSASERVICE_NOT_FOUND );
  
 	p = name + ( size - 1 );

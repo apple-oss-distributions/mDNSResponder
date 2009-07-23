@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: SharedSecret.cpp,v $
+Revision 1.7  2009/06/22 23:25:11  herscher
+<rdar://problem/5265747> ControlPanel doesn't display key and password in dialog box. Refactor Lsa calls into Secret.h and Secret.c, which is used by both the ControlPanel and mDNSResponder system service.
+
 Revision 1.6  2007/06/12 20:06:06  herscher
 <rdar://problem/5263387> ControlPanel was inadvertently adding a trailing dot to all key names.
 
@@ -39,22 +42,14 @@ Revision 1.2  2005/03/03 19:55:22  shersche
 // SharedSecret.cpp : implementation file
 //
 
+
+#include <Secret.h>
 #include "stdafx.h"
 #include "SharedSecret.h"
+#include <WinServices.h>
 
 #include <DebugServices.h>
-#include <ntsecapi.h>
 
-//---------------------------------------------------------------------------------------------------------------------------
-//	Private declarations
-//---------------------------------------------------------------------------------------------------------------------------
-
-static BOOL
-InitLsaString
-			(
-			PLSA_UNICODE_STRING	pLsaString,
-			LPCWSTR				pwszString
-			);
 
 // SharedSecret dialog
 
@@ -98,6 +93,31 @@ BEGIN_MESSAGE_MAP(CSharedSecret, CDialog)
 END_MESSAGE_MAP()
 
 
+//---------------------------------------------------------------------------------------------------------------------------
+//	CSharedSecret::Load
+//---------------------------------------------------------------------------------------------------------------------------
+
+void
+CSharedSecret::Load( CString zone )
+{
+	char	zoneUTF8[ 256 ];
+	char	outDomain[ 256 ];
+	char	outKey[ 256 ];
+	char	outSecret[ 256 ];
+
+	StringObjectToUTF8String( zone, zoneUTF8, sizeof( zoneUTF8 ) );
+
+	if ( LsaGetSecret( zoneUTF8, outDomain, sizeof( outDomain ) / sizeof( TCHAR ), outKey, sizeof( outKey ) / sizeof( TCHAR ), outSecret, sizeof( outSecret ) / sizeof( TCHAR ) ) )
+	{
+		m_key		= outKey;
+		m_secret	= outSecret;
+	}
+	else
+	{
+		m_key = zone;
+	}
+}
+
 
 //---------------------------------------------------------------------------------------------------------------------------
 //	CSharedSecret::Commit
@@ -106,121 +126,13 @@ END_MESSAGE_MAP()
 void
 CSharedSecret::Commit( CString zone )
 {
-	LSA_OBJECT_ATTRIBUTES	attrs;
-	LSA_HANDLE				handle = NULL;
-	NTSTATUS				res;
-	LSA_UNICODE_STRING		lucZoneName;
-	LSA_UNICODE_STRING		lucKeyName;
-	LSA_UNICODE_STRING		lucSecretName;
-	BOOL					ok;
-	OSStatus				err;
+	char	zoneUTF8[ 256 ];
+	char	keyUTF8[ 256 ];
+	char	secretUTF8[ 256 ];
 
-	// If there isn't a trailing dot, add one because the mDNSResponder
-	// presents names with the trailing dot.
+	StringObjectToUTF8String( zone, zoneUTF8, sizeof( zoneUTF8 ) );
+	StringObjectToUTF8String( m_key, keyUTF8, sizeof( keyUTF8 ) );
+	StringObjectToUTF8String( m_secret, secretUTF8, sizeof( secretUTF8 ) );
 
-	if ( zone.ReverseFind( '.' ) != ( zone.GetLength() - 1 ) )
-	{
-		zone += '.';
-	}
-
-	if ( m_key.ReverseFind( '.' ) != ( m_key.GetLength() - 1 ) )
-	{
-		m_key += '.';
-	}
-
-	// <rdar://problem/4192119>
-	//
-	// Prepend "$" to the key name, so that there will
-	// be no conflict between the zone name and the key
-	// name
-
-	m_key.Insert( 0, L"$" );
-
-	// attrs are reserved, so initialize to zeroes.
-
-	ZeroMemory( &attrs, sizeof( attrs ) );
-
-	// Get a handle to the Policy object on the local system
-
-	res = LsaOpenPolicy( NULL, &attrs, POLICY_ALL_ACCESS, &handle );
-	err = translate_errno( res == 0, LsaNtStatusToWinError( res ), kUnknownErr );
-	require_noerr( err, exit );
-
-	// Intializing PLSA_UNICODE_STRING structures
-
-	ok = InitLsaString( &lucZoneName, zone );
-	err = translate_errno( ok, errno_compat(), kUnknownErr );
-	require_noerr( err, exit );
- 
-	ok = InitLsaString( &lucKeyName, m_key );
-	err = translate_errno( ok, errno_compat(), kUnknownErr );
-	require_noerr( err, exit );
-
-	ok = InitLsaString( &lucSecretName, m_secret );
-	err = translate_errno( ok, errno_compat(), kUnknownErr );
-	require_noerr( err, exit );
-
-	// Store the private data.
-
-	res = LsaStorePrivateData( handle, &lucZoneName, &lucKeyName );
-	err = translate_errno( res == 0, LsaNtStatusToWinError( res ), kUnknownErr );
-	require_noerr( err, exit );
-
-	res = LsaStorePrivateData( handle, &lucKeyName, &lucSecretName );
-	err = translate_errno( res == 0, LsaNtStatusToWinError( res ), kUnknownErr );
-	require_noerr( err, exit );
-
-exit:
-
-	if ( handle )
-	{
-		LsaClose( handle );
-		handle = NULL;
-	}
-
-	return;
-}
-
-
-//---------------------------------------------------------------------------------------------------------------------------
-//	InitLsaString
-//---------------------------------------------------------------------------------------------------------------------------
-
-static BOOL
-InitLsaString
-		(
-		PLSA_UNICODE_STRING	pLsaString,
-		LPCWSTR				pwszString
-		)
-{
-	size_t	dwLen	= 0;
-	BOOL	ret		= FALSE;
-	
-	if ( pLsaString == NULL )
-	{
-		goto exit;
-	}
-
-	if ( pwszString != NULL ) 
-	{
-		dwLen = wcslen(pwszString);
-
-		// String is too large
-		if (dwLen > 0x7ffe)
-		{
-			goto exit;
-		}
-	}
-
-	// Store the string.
-  
-	pLsaString->Buffer			= (WCHAR *) pwszString;
-	pLsaString->Length			= (USHORT) dwLen * sizeof(WCHAR);
-	pLsaString->MaximumLength	= (USHORT)(dwLen+1) * sizeof(WCHAR);
-
-	ret = TRUE;
-
-exit:
-
-	return ret;
+	LsaSetSecret( zoneUTF8, keyUTF8, secretUTF8 );
 }

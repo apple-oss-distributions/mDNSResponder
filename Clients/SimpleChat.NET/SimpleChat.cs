@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: SimpleChat.cs,v $
+Revision 1.7  2009/06/04 20:21:19  herscher
+<rdar://problem/3948252> Update code to work with DNSSD COM component
+
 Revision 1.6  2006/08/14 23:24:21  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -48,7 +51,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Data;
 using System.Text;
-using Apple.DNSSD;
+using Bonjour;
 
 namespace SimpleChat.NET
 {
@@ -57,426 +60,226 @@ namespace SimpleChat.NET
 	/// </summary>
 	/// 
 
-	//
-	// PeerData
-	//
-	// Holds onto the information associated with a peer on the network
-	//
-	public class PeerData
+	public class SimpleChat : System.Windows.Forms.Form
 	{
-		public int			InterfaceIndex;
-		public String		Name;
-		public String		Type;
-		public String		Domain;
-		public IPAddress	Address;
-		public int			Port;
-
-		public override String
-		ToString()
-		{
-			return Name;
-		}
-
-		public override bool
-		Equals(object other)
-		{
-			bool result = false;
-
-			if (other != null)
-			{
-				if ((object) this == other)
-				{
-					result = true;
-				}
-				else if (other is PeerData)
-				{
-					PeerData otherPeerData = (PeerData) other;
-
-					result = (this.Name == otherPeerData.Name);
-				}
-			}
-
-			return result;
-		}
-	
-		public override int
-		GetHashCode()
-		{
-			return Name.GetHashCode();
-		}
-	};
-
-	//
-	// ResolveData
-	//
-	// Holds onto the information associated with the resolution
-	// of a DNSService
-	//
-	public class ResolveData
-	{
-		public int		InterfaceIndex;
-		public String	FullName;
-		public String	HostName;
-		public int		Port;
-		public Byte[]	TxtRecord;
-
-		public override String
-		ToString()
-		{
-			return FullName;
-		}
-	};
-
-
-	//
-	// SocketStateObject
-	//
-	// Holds onto the data associated with an asynchronous
-	// socket operation
-	//
-	class SocketStateObject
-	{
-		public const int		BUFFER_SIZE = 1024;
-		private Socket			m_socket;
-		public byte[]			m_buffer;
-		public bool				m_complete;
-		public StringBuilder	m_sb = new StringBuilder();
-
-		public SocketStateObject(Socket socket)
-		{
-			m_buffer	= new byte[BUFFER_SIZE];
-			m_complete	= false;
-			m_socket	= socket;
-		}
-
-		public Socket
-		WorkSocket
-		{
-			get
-			{
-				return m_socket;
-			}
-		}
-	}
-	public class Form1 : System.Windows.Forms.Form
-	{
-		private System.Windows.Forms.ComboBox comboBox1;
-		private System.Windows.Forms.TextBox textBox2;
-		private System.Windows.Forms.Button button1;
-		private System.Windows.Forms.Label label1;
-		private ServiceRef registrar = null;
-		private ServiceRef browser = null;
-		private ServiceRef resolver = null;
-		private String					myName;
+		private System.Windows.Forms.ComboBox   comboBox1;
+		private System.Windows.Forms.TextBox    textBox2;
+		private System.Windows.Forms.Button     button1;
+		private System.Windows.Forms.Label      label1;
+        private Bonjour.DNSSDEventManager       m_eventManager = null;
+        private Bonjour.DNSSDService            m_service = null;
+        private Bonjour.DNSSDService            m_registrar = null;
+        private Bonjour.DNSSDService            m_browser = null;
+        private Bonjour.DNSSDService            m_resolver = null;
+		private String					        m_name;
+        private Socket                          m_socket = null;
+        private const int                       BUFFER_SIZE = 1024;
+        public byte[]                           m_buffer = new byte[BUFFER_SIZE];
+        public bool                             m_complete = false;
+        public StringBuilder                    m_sb = new StringBuilder();
+        delegate void                           ReadMessageCallback(String data);
+        ReadMessageCallback                     m_readMessageCallback;
 		/// <summary>
 		/// Required designer variable.
 		/// </summary>
 		private System.ComponentModel.Container components = null;
-		
-		//
-		// These all of our callbacks.  These are invoked in the context
-		// of the main (GUI) thread.  The DNSService callbacks Invoke()
-		// them
-		delegate void RegisterServiceCallback(String name);
-		delegate void AddPeerCallback(PeerData data);
-		delegate void RemovePeerCallback(PeerData data);
-		delegate void ResolveServiceCallback(ResolveData data);
-		delegate void ResolveAddressCallback(System.Net.IPAddress address);
-		delegate void ReadMessageCallback(String data);
-
-		RegisterServiceCallback	registerServiceCallback;
-		AddPeerCallback			addPeerCallback;
-		RemovePeerCallback		removePeerCallback;
-		ResolveServiceCallback  resolveServiceCallback;
-		ResolveAddressCallback	resolveAddressCallback;
-		ReadMessageCallback		readMessageCallback;
 		private System.Windows.Forms.RichTextBox richTextBox1;
 
+		// ServiceRegistered
 		//
-		// The socket that we will be reading data from
-		//
-		Socket socket = null;
-
-		//
-		// OnRegisterService
-		//
-		// The name that we are passed might be different than the
-		// name we called Register with.  So we hold onto this name
-		// rather than the name we Register with.
-		//
-		// This is called (indirectly) from OnRegisterReply().
-		//
-		private void
-		OnRegisterService
-				(
-				String name
-				)
-		{
-			myName = name;
-		}
-
-		//
-		// OnAddPeer
-		//
-		// Called when DNSServices detects a new P2P Chat peer has
-		// joined.
-		//
-		// This is called (indirectly) from OnBrowseReply()
-		//
-		private void
-		OnAddPeer
-				(
-				PeerData  peer
-				)
-		{
-			comboBox1.Items.Add(peer);
-
-			if (comboBox1.Items.Count == 1)
-			{
-				comboBox1.SelectedIndex = 0;
-			}
-		}
-
-		//
-		// OnRemovePeer
-		//
-		// Called when DNSServices detects a P2P peer has left
-		// the network
-		//
-		// This is called (indirectly) from OnBrowseReply()
-		//
-		private void
-		OnRemovePeer
-				(
-				PeerData  peer
-				)
-		{
-			comboBox1.Items.Remove(peer);
-		}
-
-		//
-		// OnResolveService
-		//
-		// Called when DNSServices has resolved a service.
-		//
-		// This is called (indirectly) from OnResolveService()
-		//
-		private void
-		OnResolveService
-				(
-				ResolveData data
-				)
-		{
-			resolver.Dispose();
-
-			PeerData peer = (PeerData) comboBox1.SelectedItem;
-
-			peer.Port = data.Port;
-
-			try
-			{
-				resolver = DNSService.QueryRecord(0, 0, data.HostName, /* ns_t_a */ 1, /* ns_t_c */ 1, new DNSService.QueryRecordReply(OnQueryRecordReply));
-			}
-			catch
-			{
-				MessageBox.Show("QueryRecord Failed", "Error");
-				Application.Exit();
-			}
-		}
-
-		//
-		// OnResolveAddress
-		//
-		// Called when DNSServices has finished a query operation
-		//
-		// This is called (indirectly) from OnQueryRecordReply()
-		//
-		private void
-		OnResolveAddress
-				(
-				System.Net.IPAddress address
-				)
-		{
-			resolver.Dispose();
-
-			PeerData peer = (PeerData) comboBox1.SelectedItem;
-
-			peer.Address = address;
-		}
-
-		//
-		// OnReadMessage
-		//
-		// Called when there is data to be read on a socket
-		//
-		// This is called (indirectly) from OnReadSocket()
-		//
-		private void
-		OnReadMessage
-				(
-				String msg
-				)
-		{
-			int rgb = 0;
-
-			for (int i = 0; i < msg.Length && msg[i] != ':'; i++)
-			{
-				rgb = rgb ^ ((int) msg[i] << (i % 3 + 2) * 8);
-			}
-
-			Color color = Color.FromArgb(rgb & 0x007F7FFF);
-
-			richTextBox1.SelectionColor = color;
-			
-			richTextBox1.AppendText(msg + "\n");
-		}
-
-		//
-		// OnRegisterReply
-		//
-		// Called by DNSServices core as a result of DNSService.Register()
+		// Called by DNSServices core as a result of Register()
 		// call
 		//
-		// This is called from a worker thread by DNSService core.
+
+        public void
+        ServiceRegistered
+                    (
+                    DNSSDService service,
+                    DNSSDFlags flags,
+                    String name,
+                    String regType,
+                    String domain
+                    )
+        {
+            m_name = name;
+
+            try
+            {
+                m_browser = m_service.Browse(0, 0, "_p2pchat._udp", null, m_eventManager);
+            }
+            catch
+            {
+                MessageBox.Show("Browse Failed", "Error");
+                Application.Exit();
+            }
+        }
+
 		//
-		private void
-		OnRegisterReply
-					(
-					ServiceRef		sdRef,
-					ServiceFlags	flags,
-					ErrorCode		errorCode,
-					String			name,
-					String			regtype,
-					String			domain)
+		// ServiceFound
+		//
+		// Called by DNSServices core as a result of a Browse call
+		//
+
+		public void
+        ServiceFound
+				    (
+				    DNSSDService    sref,
+				    DNSSDFlags  	flags,
+				    uint			ifIndex,
+                    String          serviceName,
+                    String          regType,
+                    String          domain
+				    )
 		{
-			if (errorCode == ErrorCode.NoError)
-			{
-				Invoke(registerServiceCallback, new Object[]{name});
-			}
-			else
-			{
-				MessageBox.Show("OnRegisterReply returned an error code " + errorCode, "Error");
-			}
+            if (serviceName != m_name)
+            {
+                PeerData peer = new PeerData();
+
+                peer.InterfaceIndex = ifIndex;
+                peer.Name = serviceName;
+                peer.Type = regType;
+                peer.Domain = domain;
+                peer.Address = null;
+
+                comboBox1.Items.Add(peer);
+
+                if (comboBox1.Items.Count == 1)
+                {
+                    comboBox1.SelectedIndex = 0;
+                }
+            }
 		}
 
+        //
+        // ServiceLost
+        //
+        // Called by DNSServices core as a result of a Browse call
+        //
+
+        public void
+        ServiceLost
+                    (
+                    DNSSDService sref,
+                    DNSSDFlags flags,
+                    uint ifIndex,
+                    String serviceName,
+                    String regType,
+                    String domain
+                    )
+        {
+            PeerData peer = new PeerData();
+
+            peer.InterfaceIndex = ifIndex;
+            peer.Name = serviceName;
+            peer.Type = regType;
+            peer.Domain = domain;
+            peer.Address = null;
+
+            comboBox1.Items.Remove(peer);
+        }
 
 		//
-		// OnBrowseReply
-		//
-		// Called by DNSServices core as a result of DNSService.Browse()
-		// call
-		//
-		// This is called from a worker thread by DNSService core.
-		//
-		private void
-		OnBrowseReply
-					(
-					ServiceRef		sdRef,
-					ServiceFlags	flags,
-					int				interfaceIndex,
-					ErrorCode		errorCode,
-					String			name,
-					String			type,
-					String			domain)
-		{
-			if (errorCode == ErrorCode.NoError)
-			{
-				PeerData peer = new PeerData();
-
-				peer.InterfaceIndex = interfaceIndex;
-				peer.Name = name;
-				peer.Type = type;
-				peer.Domain = domain;
-				peer.Address = null;
-
-				if ((flags & ServiceFlags.Add) != 0)
-				{
-					Invoke(addPeerCallback, new Object[]{peer});
-				}
-				else if ((flags == 0) || ((flags & ServiceFlags.MoreComing) != 0))
-				{
-					Invoke(removePeerCallback, new Object[]{peer});
-				}
-			}
-			else
-			{
-				MessageBox.Show("OnBrowseReply returned an error code " + errorCode, "Error");
-			}
-		}
-
-		//
-		// OnResolveReply
+		// ServiceResolved
 		//
 		// Called by DNSServices core as a result of DNSService.Resolve()
 		// call
 		//
-		// This is called from a worker thread by DNSService core.
-		//
-		private void
-		OnResolveReply
-			(
-			ServiceRef		sdRef,
-			ServiceFlags	flags,
-			int				interfaceIndex,
-			ErrorCode		errorCode,
-			String			fullName,
-			String			hostName,
-			int				port,
-			Byte[]			txtRecord
-			)
+
+        public void
+        ServiceResolved
+                    (
+                    DNSSDService sref,
+                    DNSSDFlags flags,
+                    uint ifIndex,
+                    String fullName,
+                    String hostName,
+                    ushort port,
+                    TXTRecord txtRecord
+                    )
 		{
-			if (errorCode == ErrorCode.NoError)
-			{
-				ResolveData data = new ResolveData();
+            m_resolver.Stop();
+            m_resolver = null;
 
-				data.InterfaceIndex = interfaceIndex;
-				data.FullName		= fullName;
-				data.HostName		= hostName;
-				data.Port			= port;
-				data.TxtRecord		= txtRecord;
+            PeerData peer = (PeerData)comboBox1.SelectedItem;
 
-				Invoke(resolveServiceCallback, new Object[]{data});
-			}
-			else
-			{
-				MessageBox.Show("OnResolveReply returned an error code: " + errorCode, "Error");
-			}
+            peer.Port = port;
+
+            try
+            {
+                m_resolver = m_service.QueryRecord(0, ifIndex, hostName, DNSSDRRType.kDNSSDType_A, DNSSDRRClass.kDNSSDClass_IN, m_eventManager );
+            }
+            catch
+            {
+                MessageBox.Show("QueryRecord Failed", "Error");
+                Application.Exit();
+            }
 		}
 
 		//
-		// OnQueryRecordReply
+		// QueryAnswered
 		//
 		// Called by DNSServices core as a result of DNSService.QueryRecord()
 		// call
 		//
-		// This is called from a worker thread by DNSService core.
-		//
-		private void
-		OnQueryRecordReply
+
+		public void
+		QueryAnswered
 			(
-			ServiceRef		sdRef,
-			ServiceFlags	flags,
-			int				interfaceIndex,
-			ErrorCode		errorCode,	
-			String			fullName,
-			int				rrtype,
-			int				rrclass,
-			Byte[]			rdata,
-			int				ttl
-			)
-		{
-			if (errorCode == ErrorCode.NoError)
-			{
-				uint bits					= BitConverter.ToUInt32(rdata, 0);
-				System.Net.IPAddress data	= new System.Net.IPAddress(bits);
-		
-				Invoke(resolveAddressCallback, new Object[]{data});
-			}
-			else
-			{
-				MessageBox.Show("OnQueryRecordReply returned an error code: " + errorCode, "Error");
-			}
+            DNSSDService    service, 
+            DNSSDFlags      flags,
+            uint            ifIndex,
+            String          fullName,
+            DNSSDRRType     rrtype,
+            DNSSDRRClass    rrclass,
+            Object          rdata,
+            uint            ttl
+            )
+        {
+            m_resolver.Stop();
+            m_resolver = null;
+
+            PeerData peer = (PeerData) comboBox1.SelectedItem;
+
+			uint bits = BitConverter.ToUInt32( (Byte[])rdata, 0);
+			System.Net.IPAddress address = new System.Net.IPAddress(bits);
+
+            peer.Address = address;
 		}
+
+        public void
+        OperationFailed
+                    (
+                    DNSSDService service,
+                    DNSSDError error
+                    )
+        {
+            MessageBox.Show("Operation returned an error code " + error, "Error");
+        }
+
+        //
+        // OnReadMessage
+        //
+        // Called when there is data to be read on a socket
+        //
+        // This is called (indirectly) from OnReadSocket()
+        //
+        private void
+        OnReadMessage
+                (
+                String msg
+                )
+        {
+            int rgb = 0;
+
+            for (int i = 0; i < msg.Length && msg[i] != ':'; i++)
+            {
+                rgb = rgb ^ ((int)msg[i] << (i % 3 + 2) * 8);
+            }
+
+            Color color = Color.FromArgb(rgb & 0x007F7FFF);
+            richTextBox1.SelectionColor = color;
+            richTextBox1.AppendText(msg + Environment.NewLine);
+        }
 
 		//
 		// OnReadSocket
@@ -491,26 +294,17 @@ namespace SimpleChat.NET
 				IAsyncResult ar
 				)
 		{
-			SocketStateObject so = (SocketStateObject) ar.AsyncState;
-			Socket s = so.WorkSocket;
-
 			try
 			{
-				if (s == null)
-				{
-					return;
-				}
-
-				int read = s.EndReceive(ar);
+				int read = m_socket.EndReceive(ar);
 
 				if (read > 0)
 				{
-					String msg = Encoding.UTF8.GetString(so.m_buffer, 0, read);
-					
-					Invoke(readMessageCallback, new Object[]{msg});
+					String msg = Encoding.UTF8.GetString(m_buffer, 0, read);
+					Invoke(m_readMessageCallback, new Object[]{msg});
 				}
 
-				s.BeginReceive(so.m_buffer, 0, SocketStateObject.BUFFER_SIZE, 0, new AsyncCallback(OnReadSocket), so);
+				m_socket.BeginReceive(m_buffer, 0, BUFFER_SIZE, 0, new AsyncCallback(OnReadSocket), this);
 			}
 			catch
 			{
@@ -518,19 +312,32 @@ namespace SimpleChat.NET
 		}
 
 
-		public Form1()
+		public SimpleChat()
 		{
 			//
 			// Required for Windows Form Designer support
 			//
 			InitializeComponent();
 
-			registerServiceCallback	= new RegisterServiceCallback(OnRegisterService);
-			addPeerCallback			= new AddPeerCallback(OnAddPeer);
-			removePeerCallback		= new RemovePeerCallback(OnRemovePeer);
-			resolveServiceCallback	= new ResolveServiceCallback(OnResolveService);
-			resolveAddressCallback	= new ResolveAddressCallback(OnResolveAddress);
-			readMessageCallback		= new ReadMessageCallback(OnReadMessage);
+            try
+            {
+                m_service = new DNSSDService();
+            }
+            catch
+            {
+                MessageBox.Show("Bonjour Service is not available", "Error");
+                Application.Exit();
+            }
+
+            m_eventManager = new DNSSDEventManager();
+            m_eventManager.ServiceRegistered += new _IDNSSDEvents_ServiceRegisteredEventHandler(this.ServiceRegistered);
+            m_eventManager.ServiceFound += new _IDNSSDEvents_ServiceFoundEventHandler(this.ServiceFound);
+            m_eventManager.ServiceLost += new _IDNSSDEvents_ServiceLostEventHandler(this.ServiceLost);
+            m_eventManager.ServiceResolved += new _IDNSSDEvents_ServiceResolvedEventHandler(this.ServiceResolved);
+            m_eventManager.QueryRecordAnswered += new _IDNSSDEvents_QueryRecordAnsweredEventHandler(this.QueryAnswered);
+            m_eventManager.OperationFailed += new _IDNSSDEvents_OperationFailedEventHandler(this.OperationFailed);
+
+			m_readMessageCallback = new ReadMessageCallback(OnReadMessage);
 
 			this.Load += new System.EventHandler(this.Form1_Load);
 
@@ -550,15 +357,26 @@ namespace SimpleChat.NET
 					components.Dispose();
 				}
 
-				if (registrar != null)
+				if (m_registrar != null)
 				{
-					registrar.Dispose();
+					m_registrar.Stop();
 				}
 
-				if (browser != null)
+				if (m_browser != null)
 				{
-					browser.Dispose();
+					m_browser.Stop();
 				}
+
+                if (m_resolver != null)
+                {
+                    m_resolver.Stop();
+                }
+
+                m_eventManager.ServiceFound -= new _IDNSSDEvents_ServiceFoundEventHandler(this.ServiceFound);
+                m_eventManager.ServiceLost -= new _IDNSSDEvents_ServiceLostEventHandler(this.ServiceLost);
+                m_eventManager.ServiceResolved -= new _IDNSSDEvents_ServiceResolvedEventHandler(this.ServiceResolved);
+                m_eventManager.QueryRecordAnswered -= new _IDNSSDEvents_QueryRecordAnsweredEventHandler(this.QueryAnswered);
+                m_eventManager.OperationFailed -= new _IDNSSDEvents_OperationFailedEventHandler(this.OperationFailed);
 			}
 			base.Dispose( disposing );
 		}
@@ -656,27 +474,25 @@ namespace SimpleChat.NET
 			//
 			// create the socket and bind to INADDR_ANY
 			//
-			socket	= new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-			socket.Bind(localEP);
-			localEP = (IPEndPoint) socket.LocalEndPoint;
+			m_socket	= new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+			m_socket.Bind(localEP);
+			localEP = (IPEndPoint) m_socket.LocalEndPoint;
 
 			//
 			// start asynchronous read
 			//
-			SocketStateObject so = new SocketStateObject(socket);
-			socket.BeginReceive(so.m_buffer, 0, SocketStateObject.BUFFER_SIZE, 0, new AsyncCallback(this.OnReadSocket), so);   
+			m_socket.BeginReceive(m_buffer, 0, BUFFER_SIZE, 0, new AsyncCallback(this.OnReadSocket), this);   
 
 			try
 			{
 				//
 				// start the register and browse operations
 				//
-				registrar	=	DNSService.Register(0, 0, System.Environment.UserName, "_p2pchat._udp", null, null, localEP.Port, null, new DNSService.RegisterReply(OnRegisterReply));
-				browser		=	DNSService.Browse(0, 0, "_p2pchat._udp", null, new DNSService.BrowseReply(OnBrowseReply));			
+				m_registrar	=	m_service.Register( 0, 0, System.Environment.UserName, "_p2pchat._udp", null, null, ( ushort ) localEP.Port, null, m_eventManager );	
 			}
 			catch
 			{
-				MessageBox.Show("DNSServices Not Available", "Error");
+				MessageBox.Show("Bonjour service is not available", "Error");
 				Application.Exit();
 			}
 		}
@@ -687,7 +503,7 @@ namespace SimpleChat.NET
 		[STAThread]
 		static void Main() 
 		{
-			Application.Run(new Form1());
+			Application.Run(new SimpleChat());
 		}
 
 		//
@@ -697,13 +513,13 @@ namespace SimpleChat.NET
 		{
 			PeerData peer = (PeerData) comboBox1.SelectedItem;
 
-			String message = myName + ": " + textBox2.Text;
+			String message = m_name + ": " + textBox2.Text;
 
 			Byte[] bytes = Encoding.UTF8.GetBytes(message);
-			
-			UdpClient udpSocket = new UdpClient(peer.Address.ToString(), peer.Port);
 
-			udpSocket.Send(bytes, bytes.Length);
+            IPEndPoint endPoint = new IPEndPoint( peer.Address, peer.Port );
+
+            m_socket.SendTo(bytes, endPoint);
 
 			richTextBox1.SelectionColor = Color.Black;
 
@@ -718,15 +534,7 @@ namespace SimpleChat.NET
 		private void textBox2_TextChanged(object sender, System.EventArgs e)
 		{
 			PeerData peer = (PeerData) comboBox1.SelectedItem;
-
-			if ((peer.Address != null) && (textBox2.Text.Length > 0))
-			{
-				button1.Enabled = true;
-			}
-			else
-			{
-				button1.Enabled = false;
-			}
+            button1.Enabled = ((peer.Address != null) && (textBox2.Text.Length > 0));
 		}
 
 		//
@@ -742,7 +550,7 @@ namespace SimpleChat.NET
 
 			try
 			{
-				resolver = DNSService.Resolve(0, 0, peer.Name, peer.Type, peer.Domain, new DNSService.ResolveReply(OnResolveReply));
+				m_resolver = m_service.Resolve(0, peer.InterfaceIndex, peer.Name, peer.Type, peer.Domain, m_eventManager);
 			}
 			catch
 			{
@@ -751,4 +559,53 @@ namespace SimpleChat.NET
 			}
 		}
 	}
+
+    //
+    // PeerData
+    //
+    // Holds onto the information associated with a peer on the network
+    //
+    public class PeerData
+    {
+        public uint InterfaceIndex;
+        public String Name;
+        public String Type;
+        public String Domain;
+        public IPAddress Address;
+        public int Port;
+
+        public override String
+        ToString()
+        {
+            return Name;
+        }
+
+        public override bool
+        Equals(object other)
+        {
+            bool result = false;
+
+            if (other != null)
+            {
+                if ((object)this == other)
+                {
+                    result = true;
+                }
+                else if (other is PeerData)
+                {
+                    PeerData otherPeerData = (PeerData)other;
+
+                    result = (this.Name == otherPeerData.Name);
+                }
+            }
+
+            return result;
+        }
+
+        public override int
+        GetHashCode()
+        {
+            return Name.GetHashCode();
+        }
+    };
 }

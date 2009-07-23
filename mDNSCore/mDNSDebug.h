@@ -17,6 +17,45 @@
     Change History (most recent first):
 
 $Log: mDNSDebug.h,v $
+Revision 1.51  2009/06/25 23:36:59  cheshire
+To facilitate testing, added command-line switch "-OfferSleepProxyService"
+to re-enable the previously-supported mode of operation where we offer
+sleep proxy service on desktop Macs that are set to never sleep.
+
+Revision 1.50  2009/05/19 23:34:06  cheshire
+Updated comment to show correct metric of 80 for a low-priority sleep proxy
+
+Revision 1.49  2009/04/24 23:32:28  cheshire
+To facilitate testing, put back code to be a sleep proxy when set to never sleep, compiled out by compile-time switch
+
+Revision 1.48  2009/04/11 01:43:27  jessic2
+<rdar://problem/4426780> Daemon: Should be able to turn on LogOperation dynamically
+
+Revision 1.47  2009/04/11 00:19:41  jessic2
+<rdar://problem/4426780> Daemon: Should be able to turn on LogOperation dynamically
+
+Revision 1.46  2009/02/13 06:36:50  cheshire
+Update LogSPS definition
+
+Revision 1.45  2009/02/13 06:03:12  cheshire
+Added LogInfo for informational message logging
+
+Revision 1.44  2009/02/12 20:57:25  cheshire
+Renamed 'LogAllOperation' switch to 'LogClientOperations'; added new 'LogSleepProxyActions' switch
+
+Revision 1.43  2008/12/10 02:27:14  cheshire
+Commented out definitions of LogClientOperations, LogTimeStamps, ForceAlerts and MACOSX_MDNS_MALLOC_DEBUGGING
+to allow overriding values to be easily defined in a Makefile or similar build environment
+
+Revision 1.42  2008/11/02 21:22:05  cheshire
+Changed mallocL size parameter back to "unsigned int"
+
+Revision 1.41  2008/11/02 21:14:58  cheshire
+Fixes to make mallocL/freeL debugging checks work on 64-bit
+
+Revision 1.40  2008/10/24 20:53:37  cheshire
+For now, define USE_SEPARATE_UDNS_SERVICE_LIST, so that we use the old service list code for this submission
+
 Revision 1.39  2008/02/26 21:17:11  cheshire
 Grouped all user settings together near the start of the file; added LogTimeStamps option
 
@@ -142,26 +181,24 @@ Merge in license terms from Quinn's copy, in preparation for Darwin release
 
 typedef enum
 	{
-	MDNS_LOG_NONE,
-//	MDNS_LOG_ERROR,
-//	MDNS_LOG_WARN,
-//	MDNS_LOG_INFO,
-//	MDNS_LOG_DEBUG,
-	MDNS_LOG_VERBOSE_DEBUG
-	} LogLevel_t;
-
-#define MDNS_LOG_INITIAL_LEVEL MDNS_LOG_NONE
+	MDNS_LOG_MSG,
+	MDNS_LOG_OPERATION,
+	MDNS_LOG_SPS,
+	MDNS_LOG_INFO,
+	MDNS_LOG_DEBUG,
+	} mDNSLogLevel_t;
 
 // Set this symbol to 1 to answer remote queries for our Address, reverse mapping PTR, and HINFO records
 #define ANSWER_REMOTE_HOSTNAME_QUERIES 0
 
 // Set this symbol to 1 to do extra debug checks on malloc() and free()
 // Set this symbol to 2 to write a log message for every malloc() and free()
-#define MACOSX_MDNS_MALLOC_DEBUGGING 0
+//#define MACOSX_MDNS_MALLOC_DEBUGGING 1
 
-#define LogAllOperations 0
-#define LogTimeStamps 0
-#define ForceAlerts 0
+//#define ForceAlerts 1
+//#define LogTimeStamps 1
+
+#define USE_SEPARATE_UDNS_SERVICE_LIST 1
 
 // Developer-settings section ends here
 
@@ -171,7 +208,7 @@ typedef enum
 #define IS_A_PRINTF_STYLE_FUNCTION(F,A)
 #endif
 
-#ifdef	__cplusplus
+#ifdef __cplusplus
 	extern "C" {
 #endif
 
@@ -179,62 +216,78 @@ typedef enum
 
 #if (defined(__GNUC__))
 	#if ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 2)))
-		#define	MDNS_C99_VA_ARGS		1
-		#define	MDNS_GNU_VA_ARGS		0
+		#define MDNS_C99_VA_ARGS        1
+		#define MDNS_GNU_VA_ARGS        0
 	#else
-		#define	MDNS_C99_VA_ARGS		0
-		#define	MDNS_GNU_VA_ARGS		1
+		#define MDNS_C99_VA_ARGS        0
+		#define MDNS_GNU_VA_ARGS        1
 	#endif
-	#define	MDNS_HAS_VA_ARG_MACROS		1
+	#define MDNS_HAS_VA_ARG_MACROS      1
 #elif (_MSC_VER >= 1400) // Visual Studio 2005 and later
-	#define	MDNS_C99_VA_ARGS			1
-	#define	MDNS_GNU_VA_ARGS			0
-	#define	MDNS_HAS_VA_ARG_MACROS		1
+	#define MDNS_C99_VA_ARGS            1
+	#define MDNS_GNU_VA_ARGS            0
+	#define MDNS_HAS_VA_ARG_MACROS      1
 #elif (defined(__MWERKS__))
-	#define	MDNS_C99_VA_ARGS			1
-	#define	MDNS_GNU_VA_ARGS			0
-	#define	MDNS_HAS_VA_ARG_MACROS		1
+	#define MDNS_C99_VA_ARGS            1
+	#define MDNS_GNU_VA_ARGS            0
+	#define MDNS_HAS_VA_ARG_MACROS      1
 #else
-	#define	MDNS_C99_VA_ARGS			0
-	#define	MDNS_GNU_VA_ARGS			0
-	#define	MDNS_HAS_VA_ARG_MACROS		0
+	#define MDNS_C99_VA_ARGS            0
+	#define MDNS_GNU_VA_ARGS            0
+	#define MDNS_HAS_VA_ARG_MACROS      0
+#endif
+
+#if (MDNS_HAS_VA_ARG_MACROS)
+	#if (MDNS_C99_VA_ARGS)
+		#define debug_noop( ... ) ((void)0)
+		#define LogMsg( ... ) LogMsgWithLevel(MDNS_LOG_MSG, __VA_ARGS__)
+		#define LogOperation( ... ) do { if (mDNS_LoggingEnabled) LogMsgWithLevel(MDNS_LOG_OPERATION, __VA_ARGS__); } while (0)
+		#define LogSPS( ... ) do { if (mDNS_LoggingEnabled) LogMsgWithLevel(MDNS_LOG_SPS, __VA_ARGS__); } while (0)
+		#define LogInfo( ... ) do { if (mDNS_LoggingEnabled) LogMsgWithLevel(MDNS_LOG_INFO, __VA_ARGS__); } while (0)
+	#elif (MDNS_GNU_VA_ARGS)
+		#define	debug_noop( ARGS... ) ((void)0)
+		#define	LogMsg( ARGS... ) LogMsgWithLevel(MDNS_LOG_MSG, ARGS)
+		#define	LogOperation( ARGS... ) do { if (mDNS_LoggingEnabled) LogMsgWithLevel(MDNS_LOG_OPERATION, ARGS); } while (0)
+		#define	LogSPS( ARGS... ) do { if (mDNS_LoggingEnabled) LogMsgWithLevel(MDNS_LOG_SPS, ARGS); } while (0)
+		#define	LogInfo( ARGS... ) do { if (mDNS_LoggingEnabled) LogMsgWithLevel(MDNS_LOG_INFO, ARGS); } while (0)
+	#else
+		#error Unknown variadic macros
+	#endif
+#else
+	// If your platform does not support variadic macros, you need to define the following variadic functions.
+	// See mDNSShared/mDNSDebug.c for sample implementation
+	extern void debug_noop(const char *format, ...);
+	#define LogMsg LogMsg_
+	#define LogOperation mDNS_LoggingEnabled == 0 ? ((void)0) : LogOperation_
+	#define LogSPS mDNS_LoggingEnabled == 0 ? ((void)0) : LogSPS_
+	#define LogInfo mDNS_LoggingEnabled == 0 ? ((void)0) : LogInfo_
+	extern void LogMsg_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
+	extern void LogOperation_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
+	extern void LogSPS_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
+	extern void LogInfo_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
 #endif
 
 #if MDNS_DEBUGMSGS
 #define debugf debugf_
 extern void debugf_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
-#else // If debug breaks are off, use a preprocessor trick to optimize those calls out of the code
-	#if (MDNS_C99_VA_ARGS)
-		#define	debugf( ... ) ((void)0)
-	#elif (MDNS_GNU_VA_ARGS)
-		#define	debugf( ARGS... ) ((void)0)
-	#else
-		#define debugf 1 ? ((void)0) : (void)
-	#endif
+#else
+#define debugf debug_noop
 #endif
 
 #if MDNS_DEBUGMSGS > 1
 #define verbosedebugf verbosedebugf_
 extern void verbosedebugf_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
 #else
-	#if (MDNS_C99_VA_ARGS)
-		#define	verbosedebugf( ... ) ((void)0)
-	#elif (MDNS_GNU_VA_ARGS)
-		#define	verbosedebugf( ARGS... ) ((void)0)
-	#else
-		#define verbosedebugf 1 ? ((void)0) : (void)
-	#endif
+#define verbosedebugf debug_noop
 #endif
 
-// LogMsg is used even in shipping code, to write truly serious error messages to syslog (or equivalent)
-extern LogLevel_t mDNS_LogLevel;
+extern int	      mDNS_LoggingEnabled;
+extern int	      mDNS_PacketLoggingEnabled;
 extern int        mDNS_DebugMode;	// If non-zero, LogMsg() writes to stderr instead of syslog
-extern const char ProgramName[];	// Program Name for use with LogMsgIdent
+extern const char ProgramName[];
 
-extern void LogMsg(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
-extern void LogMsgIdent(const char *ident, const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(2,3);
-extern void LogMsgNoIdent(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1,2);
-extern void SigLogLevel(void);
+extern void LogMsgWithLevel(mDNSLogLevel_t logLevel, const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(2,3);
+#define LogMsgNoIdent LogMsg
 
 #if APPLE_OSX_mDNSResponder && MACOSX_MDNS_MALLOC_DEBUGGING >= 1
 extern void *mallocL(char *msg, unsigned int size);
@@ -247,13 +300,7 @@ extern void udns_validatelists(void *const v);
 #define freeL(X,Y) free(Y)
 #endif
 
-#if LogAllOperations
-#define LogOperation LogMsg
-#else
-#define	LogOperation debugf
-#endif
-
-#ifdef	__cplusplus
+#ifdef __cplusplus
 	}
 #endif
 

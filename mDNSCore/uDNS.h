@@ -17,6 +17,10 @@
     Change History (most recent first):
 
 $Log: uDNS.h,v $
+Revision 1.93  2008/09/24 23:48:05  cheshire
+Don't need to pass whole ServiceRecordSet reference to GetServiceTarget;
+it only needs to access the embedded SRV member of the set
+
 Revision 1.92  2008/06/19 23:42:03  mcguire
 <rdar://problem/4206534> Use all configured DNS servers
 
@@ -274,7 +278,7 @@ extern void RecordRegistrationGotZoneData(mDNS *const m, mStatus err, const Zone
 extern mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr);
 
 extern void ServiceRegistrationGotZoneData(mDNS *const m, mStatus err, const ZoneData *result);
-extern const domainname *GetServiceTarget(mDNS *m, ServiceRecordSet *srs);
+extern const domainname *GetServiceTarget(mDNS *m, AuthRecord *const rr);
 extern mStatus uDNS_DeregisterService(mDNS *const m, ServiceRecordSet *srs);
 
 extern void uDNS_CheckCurrentQuestion(mDNS *const m);

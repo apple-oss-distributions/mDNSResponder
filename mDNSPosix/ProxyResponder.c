@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: ProxyResponder.c,v $
+Revision 1.45  2008/11/04 19:46:01  cheshire
+Updated comment about MAX_ESCAPED_DOMAIN_NAME size (should be 1009, not 1005)
+
 Revision 1.44  2007/04/22 20:16:25  cheshire
 Fix compiler errors (const parameter declarations)
 
@@ -84,7 +87,7 @@ Add support for mDNSResponder on Linux.
 
 Revision 1.24  2003/11/14 21:27:09  cheshire
 <rdar://problem/3484766>: Security: Crashing bug in mDNSResponder
-Fix code that should use buffer size MAX_ESCAPED_DOMAIN_NAME (1005) instead of 256-byte buffers.
+Fix code that should use buffer size MAX_ESCAPED_DOMAIN_NAME (1009) instead of 256-byte buffers.
 
 Revision 1.23  2003/10/30 19:39:28  cheshire
 Fix warnings on certain compilers

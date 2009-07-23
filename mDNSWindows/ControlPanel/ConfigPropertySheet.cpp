@@ -17,6 +17,13 @@
     Change History (most recent first):
 
 $Log: ConfigPropertySheet.cpp,v $
+Revision 1.7  2009/07/01 19:20:37  herscher
+<rdar://problem/6713286> UI changes for configuring sleep proxy settings.
+
+Revision 1.6  2009/03/30 19:57:45  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
 Revision 1.5  2006/08/14 23:25:28  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -57,6 +64,7 @@ CConfigPropertySheet::CConfigPropertySheet()
 	AddPage(&m_firstPage);
 	AddPage(&m_secondPage);
 	AddPage(&m_thirdPage);
+	AddPage(&m_fourthPage );
 
 	InitializeCriticalSection( &m_lock );
 }
@@ -125,7 +133,7 @@ CConfigPropertySheet::OnCommand(WPARAM wParam, LPARAM lParam)
 //	CConfigPropertySheet::OnDataReady
 //---------------------------------------------------------------------------------------------------------------------------
 
-LONG
+LRESULT
 CConfigPropertySheet::OnDataReady(WPARAM inWParam, LPARAM inLParam)
 {
 	if (WSAGETSELECTERROR(inLParam) && !(HIWORD(inLParam)))
@@ -154,7 +162,7 @@ CConfigPropertySheet::OnDataReady(WPARAM inWParam, LPARAM inLParam)
 //	CConfigPropertySheet::OnRegistryChanged
 //---------------------------------------------------------------------------------------------------------------------------
 
-afx_msg LONG
+afx_msg LRESULT
 CConfigPropertySheet::OnRegistryChanged( WPARAM inWParam, LPARAM inLParam )
 {
 	DEBUG_UNUSED( inWParam );

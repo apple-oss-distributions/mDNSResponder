@@ -17,6 +17,9 @@
     Change History (most recent first):
 
 $Log: dnsextd_parser.y,v $
+Revision 1.9  2009/01/11 03:20:06  mkrochma
+<rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
+
 Revision 1.8  2007/03/21 19:47:50  cheshire
 <rdar://problem/4789463> Leak: On error path in ParseConfig
 
@@ -49,8 +52,8 @@ Revision 1.1  2006/07/06 00:09:05  cheshire
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <mDNSEmbeddedAPI.h>
-#include <DebugServices.h>
+#include "mDNSEmbeddedAPI.h"
+#include "DebugServices.h"
 #include "dnsextd.h"
 
 void yyerror( const char* error );

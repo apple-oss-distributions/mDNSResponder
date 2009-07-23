@@ -30,6 +30,22 @@
 	Change History (most recent first):
 
 $Log: mDNSPosix.c,v $
+Revision 1.108  2009/01/25 03:16:46  mkrochma
+Added skeleton definition of mDNSPlatformSetLocalARP
+
+Revision 1.107  2009/01/07 08:25:03  mkrochma
+Added skeleton definition of mDNSPlatformUpdateProxyList
+
+Revision 1.106  2008/10/22 17:19:57  cheshire
+Don't need to define BPF_fd any more (it's now per-interface, not global)
+
+Revision 1.105  2008/10/03 23:34:08  cheshire
+Added skeleton definition of mDNSPlatformSendRawPacket
+
+Revision 1.104  2008/09/05 22:16:48  cheshire
+<rdar://problem/3988320> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
+Add "UDPSocket *src" parameter in mDNSPlatformSendUDP
+
 Revision 1.103  2007/10/02 19:31:17  cheshire
 In ParseDNSServers, should use strncasecmp for case-insensitive compare
 
@@ -246,12 +262,14 @@ mDNSlocal void SockAddrTomDNSAddr(const struct sockaddr *const sa, mDNSAddr *ipA
 
 // mDNS core calls this routine when it needs to send a packet.
 mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const msg, const mDNSu8 *const end,
-	mDNSInterfaceID InterfaceID, const mDNSAddr *dst, mDNSIPPort dstPort)
+	mDNSInterfaceID InterfaceID, UDPSocket *src, const mDNSAddr *dst, mDNSIPPort dstPort)
 	{
 	int                     err = 0;
 	struct sockaddr_storage to;
 	PosixNetworkInterface * thisIntf = (PosixNetworkInterface *)(InterfaceID);
 	int sendingsocket = -1;
+
+	(void)src;	// Will need to use this parameter once we implement mDNSPlatformUDPSocket/mDNSPlatformUDPClose
 
 	assert(m != NULL);
 	assert(msg != NULL);
@@ -477,6 +495,26 @@ mDNSexport void           mDNSPlatformUDPClose(UDPSocket *sock)
 	{
 	(void)sock;			// Unused
 	}
+	
+mDNSexport void mDNSPlatformUpdateProxyList(mDNS *const m, const mDNSInterfaceID InterfaceID)
+	{
+	(void)m;			// Unused
+	(void)InterfaceID;			// Unused
+	}
+
+mDNSexport void mDNSPlatformSendRawPacket(const void *const msg, const mDNSu8 *const end, mDNSInterfaceID InterfaceID)
+	{
+	(void)msg;			// Unused
+	(void)end;			// Unused
+	(void)InterfaceID;			// Unused
+	}
+	
+mDNSexport void mDNSPlatformSetLocalARP(const mDNSv4Addr *const tpa, const mDNSEthAddr *const tha, mDNSInterfaceID InterfaceID)
+	{
+	(void)tpa;			// Unused
+	(void)tha;			// Unused
+	(void)InterfaceID;			// Unused
+	}	
 
 mDNSexport mStatus mDNSPlatformTLSSetupCerts(void)
 	{

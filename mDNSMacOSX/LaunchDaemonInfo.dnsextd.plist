@@ -13,7 +13,5 @@
 		<string>/usr/sbin/dnsextd</string>
 		<string>-launchd</string>
 	</array>
-	<key>ServiceIPC</key>
-	<false/>
 </dict>
 </plist>

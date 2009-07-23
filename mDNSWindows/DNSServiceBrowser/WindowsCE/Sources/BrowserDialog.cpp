@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: BrowserDialog.cpp,v $
+Revision 1.4  2008/10/23 22:33:26  cheshire
+Changed "NOTE:" to "Note:" so that BBEdit 9 stops putting those comment lines into the funtion popup menu
+
 Revision 1.3  2006/08/14 23:25:55  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -87,7 +90,7 @@ BrowserDialog::BrowserDialog( CWnd *inParent )
 	: CDialog( BrowserDialog::IDD, inParent )
 {
 	//{{AFX_DATA_INIT(BrowserDialog)
-		// NOTE: the ClassWizard will add member initialization here
+		// Note: the ClassWizard will add member initialization here
 	//}}AFX_DATA_INIT
 	
 	// Note that LoadIcon does not require a subsequent DestroyIcon in Win32.

@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: RegNames.h,v $
+Revision 1.5  2009/03/30 21:47:35  herscher
+Fix file corruption during previous checkin
+
 Revision 1.3  2006/08/14 23:25:20  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -35,7 +38,10 @@ Consolidates all registry key names and can safely be included in any component 
 
 #if defined(UNICODE)
 
-#	define kServiceParametersNode				L"SOFTWARE\\Apple Computer, Inc.\\Bonjour"
+#	define kServiceParametersSoftware			L"SOFTWARE"
+#	define kServiceParametersAppleComputer		L"Apple Computer, Inc."
+#	define kServiceParametersBonjour			L"Bonjour"
+#	define kServiceParametersNode				L"SOFTWARE\\Apple Inc.\\Bonjour"
 #	define kServiceName							L"Bonjour Service"
 #	define kServiceDynDNSBrowseDomains			L"BrowseDomains"
 #	define kServiceDynDNSHostNames				L"HostNames"
@@ -49,7 +55,10 @@ Consolidates all registry key names and can safely be included in any component 
 
 # else
 
-#	define kServiceParametersNode				"SOFTWARE\\Apple Computer, Inc.\\Bonjour"
+#	define kServiceParametersSoftware			"SOFTWARE"
+#	define kServiceParametersAppleComputer		"Apple Computer, Inc."
+#	define kServiceParametersBonjour			"Bonjour"
+#	define kServiceParametersNode				"SOFTWARE\\Apple Inc.\\Bonjour"
 #	define kServiceName							"Bonjour Service"
 #	define kServiceDynDNSBrowseDomains			"BrowseDomains"
 #	define kServiceDynDNSHostNames				"HostNames"

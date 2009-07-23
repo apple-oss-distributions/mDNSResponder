@@ -6,8 +6,6 @@
 	<string>com.apple.mDNSResponder</string>
 	<key>OnDemand</key>
 	<false/>
-	<key>HopefullyExitsFirst</key>
-	<true/>
 	<key>UserName</key>
 	<string>_mdnsresponder</string>
 	<key>GroupName</key>
@@ -34,7 +32,7 @@
 			<integer>438</integer>
 		</dict>
 	</dict>
-	<key>ServiceIPC</key>
+	<key>EnableTransactions</key>
 	<true/>
 </dict>
 </plist>

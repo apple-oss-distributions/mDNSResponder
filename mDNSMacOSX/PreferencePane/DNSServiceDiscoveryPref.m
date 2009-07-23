@@ -43,6 +43,24 @@
     Change History (most recent first):
 
 $Log: DNSServiceDiscoveryPref.m,v $
+Revision 1.16  2008/09/15 23:52:30  cheshire
+<rdar://problem/6218902> mDNSResponder-177 fails to compile on Linux with .desc pseudo-op
+Made __crashreporter_info__ symbol conditional, so we only use it for OS X build
+
+Revision 1.15  2008/08/18 17:57:04  mcguire
+<rdar://problem/6156209> build error
+
+Revision 1.14  2008/07/18 17:39:14  cheshire
+If NSInteger is not defined (indicated by lack of definition for NSINTEGER_DEFINED)
+then #define "NSInteger" to be "int" like it used to be
+
+Revision 1.13  2008/07/01 01:40:01  mcguire
+<rdar://problem/5823010> 64-bit fixes
+
+Revision 1.12  2008/05/08 00:46:38  cheshire
+<rdar://problem/5919272> GetNextLabel insufficiently defensive
+User shared copy of GetNextLabel in ClientCommon.c instead of having a local copy here
+
 Revision 1.11  2007/11/30 23:42:09  cheshire
 Fixed compile warning: declaration of 'index' shadows a global declaration
 
@@ -84,9 +102,15 @@ Add Preference Pane to facilitate testing of DDNS & wide-area features
 #import "PrivilegedOperations.h"
 #import <unistd.h>
 
+#include "../../Clients/ClientCommon.h"
+
+#ifndef NSINTEGER_DEFINED
+#define NSInteger int
+#endif
+
 @implementation DNSServiceDiscoveryPref
 
-static int
+static NSComparisonResult
 MyArrayCompareFunction(id val1, id val2, void *context)
 {
 	(void)context; // Unused
@@ -94,41 +118,13 @@ MyArrayCompareFunction(id val1, id val2, void *context)
 }
 
 
-static int
+static NSComparisonResult
 MyDomainArrayCompareFunction(id val1, id val2, void *context)
 {
 	(void)context; // Unused
 	NSString *domain1 = [val1 objectForKey:(NSString *)SC_DYNDNS_DOMAIN_KEY];
 	NSString *domain2 = [val2 objectForKey:(NSString *)SC_DYNDNS_DOMAIN_KEY];
     return CFStringCompare((CFStringRef)domain1, (CFStringRef)domain2, kCFCompareCaseInsensitive);
-}
-
-
-static const char *
-GetNextLabel(const char *cstr, char label[64])
-{
-	char *ptr = label;
-	while (*cstr && *cstr != '.')								// While we have characters in the label...
-		{
-		char c = *cstr++;
-		if (c == '\\')
-			{
-			c = *cstr++;
-			if (isdigit(cstr[-1]) && isdigit(cstr[0]) && isdigit(cstr[1]))
-				{
-				int v0 = cstr[-1] - '0';						// then interpret as three-digit decimal
-				int v1 = cstr[ 0] - '0';
-				int v2 = cstr[ 1] - '0';
-				int val = v0 * 100 + v1 * 10 + v2;
-				if (val <= 255) { c = (char)val; cstr += 2; }	// If valid three-digit decimal value, use it
-				}
-			}
-		*ptr++ = c;
-		if (ptr >= label+64) return(NULL);
-		}
-	if (*cstr) cstr++;											// Skip over the trailing dot (if present)
-	*ptr++ = 0;
-	return(cstr);
 }
 
 
@@ -459,7 +455,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 
 
 
-- (int)numberOfRowsInTableView:(NSTableView *)tableView;
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView;
 {
 	(void)tableView; // Unused
 	int numberOfRows = 0;
@@ -480,7 +476,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 }
  
 
-- (id)tableView:(NSTableView *)tableView objectValueForTableColumn:(NSTableColumn *)tableColumn row:(int)row;
+- (id)tableView:(NSTableView *)tableView objectValueForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row;
 {
 	(void)tableView; // Unused
 	NSDictionary *browseDomainDict;
@@ -594,12 +590,10 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
     [self startDomainBrowsing];
     [self watchForPreferenceChanges];
 	
-	[tabView setDelegate:self];    
-    
     InitConfigAuthority();
     err = EnsureToolInstalled();
     if (err == noErr) toolInstalled = YES;
-    else fprintf(stderr, "EnsureToolInstalled returned %ld\n", err);
+    else { long int tmp = err; fprintf(stderr, "EnsureToolInstalled returned %ld\n", tmp); }
     
 }
 
@@ -1195,7 +1189,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 }
 
 
-- (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(int)row;
+- (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(NSInteger)row;
 {
 	(void)row; // Unused
 	(void)tableView; // Unused
@@ -1250,6 +1244,8 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 // The "@(#) " pattern is a special prefix the "what" command looks for
 const char VersionString_SCCS[] = "@(#) Bonjour Preference Pane " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
 
+#if _BUILDING_XCODE_PROJECT_
 // If the process crashes, then this string will be magically included in the automatically-generated crash log
 const char *__crashreporter_info__ = VersionString_SCCS + 5;
 asm(".desc ___crashreporter_info__, 0x10");
+#endif

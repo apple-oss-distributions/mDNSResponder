@@ -635,13 +635,13 @@ kern_return_t internal_DNSServiceResolverReply_rpc
     if (interface) {
         int len = ((struct sockaddr *)interface)->sa_len;
         interface_storage = (struct sockaddr *)malloc(len);
-        bcopy(interface, interface_storage,len);
+        memcpy(interface_storage, interface, len);
     }
 
     if (address) {
         int len = ((struct sockaddr *)address)->sa_len;
         address_storage = (struct sockaddr *)malloc(len);
-        bcopy(address, address_storage, len);
+        memcpy(address_storage, address, len);
     }
 
     pthread_mutex_lock(&a_requests_lock);

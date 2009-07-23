@@ -44,6 +44,9 @@
     Change History (most recent first):
 
 $Log: ConfigurationAuthority.c,v $
+Revision 1.3  2008/06/26 17:34:18  mkrochma
+<rdar://problem/6030630> Pref pane destroying shared "system.preferences" authorization right
+
 Revision 1.2  2005/08/07 22:48:05  mkrochma
 <rdar://problem/4204003> Bonjour Pref Pane returns -927 when "system.preferences" is not shared
 
@@ -170,7 +173,7 @@ OSStatus	AttemptAcquireAuthority( Boolean allowUI)
 OSStatus ReleaseAuthority(void)
 /* Discard authority to perform operations */
 {
-	(void) AuthorizationFree( gAuthRef, kAuthorizationFlagDestroyRights);
+	(void) AuthorizationFree( gAuthRef, kAuthorizationFlagDefaults);
 	gAuthRef = 0;
 	return AuthorizationCreate( (AuthorizationRights*) NULL, (AuthorizationEnvironment*) NULL,
 								(AuthorizationFlags) 0, &gAuthRef);

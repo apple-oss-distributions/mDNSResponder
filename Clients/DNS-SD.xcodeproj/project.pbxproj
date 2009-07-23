@@ -27,6 +27,7 @@
 		FF1B6915067114AF002304DD /* DNSServiceBrowser.m in Sources */ = {isa = PBXBuildFile; fileRef = FF1B6914067114AF002304DD /* DNSServiceBrowser.m */; };
 		FF1E351C06711BCF003DD5BC /* DNSServiceReg.m in Sources */ = {isa = PBXBuildFile; fileRef = FF1E351B06711BCF003DD5BC /* DNSServiceReg.m */; };
 		FF1E352606711BD6003DD5BC /* DNSServiceReg.nib in Resources */ = {isa = PBXBuildFile; fileRef = FF1E352506711BD6003DD5BC /* DNSServiceReg.nib */; };
+		FF2704F90F12A60900299571 /* ClientCommon.c in Sources */ = {isa = PBXBuildFile; fileRef = FF2704F80F12A60900299571 /* ClientCommon.c */; };
 		FF964AA10671153B0099215A /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF964AA00671153B0099215A /* Foundation.framework */; };
 		FF964CAA0671155C0099215A /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF964CA90671155C0099215A /* AppKit.framework */; };
 		FF964DAC067115710099215A /* DNSServiceBrowser.nib in Resources */ = {isa = PBXBuildFile; fileRef = FF964DAB067115710099215A /* DNSServiceBrowser.nib */; };
@@ -70,12 +71,13 @@
 
 /* Begin PBXFileReference section */
 		08FB7796FE84155DC02AAC07 /* dns-sd.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = "dns-sd.c"; sourceTree = "<group>"; };
-		8DD76F7E0486A8DE00D96B5E /* dns-sd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "dns-sd"; sourceTree = BUILT_PRODUCTS_DIR; };
+		8DD76F7E0486A8DE00D96B5E /* dns-sd */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "dns-sd"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF1B691106711383002304DD /* DNS Service Browser.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "DNS Service Browser.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF1B6914067114AF002304DD /* DNSServiceBrowser.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = DNSServiceBrowser.m; sourceTree = "<group>"; };
 		FF1E351306711B5C003DD5BC /* DNS Service Registration.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "DNS Service Registration.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF1E351B06711BCF003DD5BC /* DNSServiceReg.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = DNSServiceReg.m; sourceTree = "<group>"; };
 		FF1E352506711BD6003DD5BC /* DNSServiceReg.nib */ = {isa = PBXFileReference; lastKnownFileType = wrapper.nib; path = DNSServiceReg.nib; sourceTree = "<group>"; };
+		FF2704F80F12A60900299571 /* ClientCommon.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = ClientCommon.c; sourceTree = "<group>"; };
 		FF964AA00671153B0099215A /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = /System/Library/Frameworks/Foundation.framework; sourceTree = "<absolute>"; };
 		FF964CA90671155C0099215A /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = /System/Library/Frameworks/AppKit.framework; sourceTree = "<absolute>"; };
 		FF964DAB067115710099215A /* DNSServiceBrowser.nib */ = {isa = PBXFileReference; lastKnownFileType = wrapper.nib; path = DNSServiceBrowser.nib; sourceTree = "<group>"; };
@@ -123,6 +125,7 @@
 			isa = PBXGroup;
 			children = (
 				08FB7796FE84155DC02AAC07 /* dns-sd.c */,
+				FF2704F80F12A60900299571 /* ClientCommon.c */,
 				FF1B6914067114AF002304DD /* DNSServiceBrowser.m */,
 				FF1E351B06711BCF003DD5BC /* DNSServiceReg.m */,
 			);
@@ -293,6 +296,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				8DD76F770486A8DE00D96B5E /* dns-sd.c in Sources */,
+				FF2704F90F12A60900299571 /* ClientCommon.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

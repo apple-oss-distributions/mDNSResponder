@@ -17,6 +17,10 @@
     Change History (most recent first):
 
 $Log: ControlPanel.cpp,v $
+Revision 1.5  2009/03/30 20:00:19  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
 Revision 1.4  2007/04/27 20:42:11  herscher
 <rdar://problem/5078828> mDNS: Bonjour Control Panel for Windows doesn't work on Vista
 
@@ -304,7 +308,7 @@ CCPApp::OnExit()
 //---------------------------------------------------------------------------------------------------------------------------
 
 LRESULT
-CCPApp::OnCplMsg(HWND hWndCPl, UINT uMsg, LONG lParam1, LONG lParam2)
+CCPApp::OnCplMsg(HWND hWndCPl, UINT uMsg, LPARAM lParam1, LPARAM lParam2)
 {
 	LRESULT lResult = 1;
 

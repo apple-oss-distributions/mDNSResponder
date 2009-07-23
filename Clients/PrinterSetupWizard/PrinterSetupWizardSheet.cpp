@@ -17,6 +17,24 @@
     Change History (most recent first):
     
 $Log: PrinterSetupWizardSheet.cpp,v $
+Revision 1.40  2009/06/18 18:05:50  herscher
+<rdar://problem/4694554> Eliminate the first screen of Printer Wizard and maybe combine others ("I'm Feeling Lucky")
+
+Revision 1.39  2009/06/11 22:27:16  herscher
+<rdar://problem/4458913> Add comprehensive logging during printer installation process.
+
+Revision 1.38  2009/05/27 04:49:02  herscher
+<rdar://problem/4417884> Consider setting DoubleSpool for LPR queues to improve compatibility
+
+Revision 1.37  2009/03/30 19:17:37  herscher
+<rdar://problem/5925472> Current Bonjour code does not compile on Windows
+<rdar://problem/6141389> Printer Wizard crashes on launch when Bonjour Service isn't running
+<rdar://problem/5258789> Buffer overflow in PrinterWizard when printer dns hostname is too long
+<rdar://problem/5187308> Move build train to Visual Studio 2005
+
+Revision 1.36  2008/10/23 22:33:23  cheshire
+Changed "NOTE:" to "Note:" so that BBEdit 9 stops putting those comment lines into the funtion popup menu
+
 Revision 1.35  2006/08/14 23:24:09  cheshire
 Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
 
@@ -279,7 +297,7 @@ exit:
 //
 // Installs a printer with Windows.
 //
-// NOTE: this works one of two ways, depending on whether
+// Note: this works one of two ways, depending on whether
 // there are drivers already installed for this printer.
 // If there are, then we can just create a port with XcvData,
 // and then call AddPrinter.  If not, we use the printui.dll
@@ -292,9 +310,10 @@ exit:
 OSStatus
 CPrinterSetupWizardSheet::InstallPrinter(Printer * printer)
 {
+	Logger		log;
 	Service	*	service;
 	BOOL		ok;
-	OSStatus	err;
+	OSStatus	err = 0;
 
 	service = printer->services.front();
 	check( service );
@@ -316,7 +335,7 @@ CPrinterSetupWizardSheet::InstallPrinter(Printer * printer)
 		//
 		hThread = (HANDLE) _beginthreadex_compat( NULL, 0, InstallDriverThread, printer, 0, &threadID );
 		err = translate_errno( hThread, (OSStatus) GetLastError(), kUnknownErr );
-		require_noerr( err, exit );
+		require_noerr_with_log( log, "_beginthreadex_compat()", err, exit );
 			
 		//
 		// go modal
@@ -329,18 +348,18 @@ CPrinterSetupWizardSheet::InstallPrinter(Printer * printer)
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
-	
+
 		//
 		// Wait until child process exits.
 		//
 		dwResult = WaitForSingleObject( hThread, INFINITE );
 		err = translate_errno( dwResult == WAIT_OBJECT_0, errno_compat(), err = kUnknownErr );
-		require_noerr( err, exit );
+		require_noerr_with_log( log, "WaitForSingleObject()", err, exit );
 
 		//
 		// check the return value of thread
 		//
-		require_noerr( m_driverThreadExitCode, exit );
+		require_noerr_with_log( log, "thread exit code", m_driverThreadExitCode, exit );
 
 		//
 		// now we know that the driver was successfully installed
@@ -350,23 +369,22 @@ CPrinterSetupWizardSheet::InstallPrinter(Printer * printer)
 
 	if ( service->type == kPDLServiceType )
 	{
-		err = InstallPrinterPDLAndLPR( printer, service, PROTOCOL_RAWTCP_TYPE );
-		require_noerr( err, exit );
+		err = InstallPrinterPDLAndLPR( printer, service, PROTOCOL_RAWTCP_TYPE, log );
+		require_noerr_with_log( log, "InstallPrinterPDLAndLPR()", err, exit );
 	}
 	else if ( service->type == kLPRServiceType )
 	{
-		err = InstallPrinterPDLAndLPR( printer, service, PROTOCOL_LPR_TYPE );
-		require_noerr( err, exit );
+		err = InstallPrinterPDLAndLPR( printer, service, PROTOCOL_LPR_TYPE, log );
+		require_noerr_with_log( log, "InstallPrinterPDLAndLPR()", err, exit );
 	}
 	else if ( service->type == kIPPServiceType )
 	{
-		err = InstallPrinterIPP( printer, service );
-		require_noerr( err, exit );
+		err = InstallPrinterIPP( printer, service, log );
+		require_noerr_with_log( log, "InstallPrinterIPP()", err, exit );
 	}
 	else
 	{
-		err = kUnknownErr;
-		require_noerr( err, exit );
+		require_action_with_log( log, ( service->type == kPDLServiceType ) || ( service->type == kLPRServiceType ) || ( service->type == kIPPServiceType ), exit, err = kUnknownErr );
 	}
 
 	printer->installed = true;
@@ -378,7 +396,7 @@ CPrinterSetupWizardSheet::InstallPrinter(Printer * printer)
 	{
 		ok = SetDefaultPrinter( printer->actualName );
 		err = translate_errno( ok, errno_compat(), err = kUnknownErr );
-		require_noerr( err, exit );
+		require_noerr_with_log( log, "SetDefaultPrinter()", err, exit );
 	}
 
 exit:
@@ -388,7 +406,7 @@ exit:
 
 
 OSStatus
-CPrinterSetupWizardSheet::InstallPrinterPDLAndLPR(Printer * printer, Service * service, DWORD protocol )
+CPrinterSetupWizardSheet::InstallPrinterPDLAndLPR(Printer * printer, Service * service, DWORD protocol, Logger & log )
 {
 	PRINTER_DEFAULTS	printerDefaults =	{ NULL,  NULL, SERVER_ACCESS_ADMINISTER };
 	DWORD				dwStatus;
@@ -411,7 +429,7 @@ CPrinterSetupWizardSheet::InstallPrinterPDLAndLPR(Printer * printer, Service * s
 
 	ok = OpenPrinter(L",XcvMonitor Standard TCP/IP Port", &hXcv, &printerDefaults);
 	err = translate_errno( ok, errno_compat(), kUnknownErr );
-	require_noerr( err, exit );
+	require_noerr_with_log( log, "OpenPrinter()", err, exit );
 
 	//
 	// BUGBUG: MSDN said this is not required, but my experience shows it is required
@@ -425,28 +443,33 @@ CPrinterSetupWizardSheet::InstallPrinterPDLAndLPR(Printer * printer, Service * s
 		pOutputData = NULL;
 	}
 
-	require_action( pOutputData, exit, err = kNoMemoryErr );
+	require_action_with_log( log, pOutputData, exit, err = kNoMemoryErr );
 	
 	//
 	// setup the port
 	//
 	ZeroMemory(&portData, sizeof(PORT_DATA_1));
-	wcscpy(portData.sztPortName, printer->portName);
+
+	require_action_with_log( log, wcslen(printer->portName) < sizeof_array(portData.sztPortName), exit, err = kSizeErr );
+	wcscpy_s(portData.sztPortName, printer->portName);
     	
 	portData.dwPortNumber	=	service->portNumber;
 	portData.dwVersion		=	1;
+	portData.dwDoubleSpool	=	1;
     	
 	portData.dwProtocol	= protocol;
 	portData.cbSize		= sizeof PORT_DATA_1;
 	portData.dwReserved	= 0L;
     	
-	wcscpy(portData.sztQueue, q->name);
-	wcscpy(portData.sztIPAddress, service->hostname); 
-	wcscpy(portData.sztHostAddress, service->hostname);
+	require_action_with_log( log, wcslen(q->name) < sizeof_array(portData.sztQueue), exit, err = kSizeErr );
+	wcscpy_s(portData.sztQueue, q->name);
+
+	require_action_with_log( log, wcslen( service->hostname ) < sizeof_array(portData.sztHostAddress), exit, err = kSizeErr );
+	wcscpy_s( portData.sztHostAddress, service->hostname );
 
 	ok = XcvData(hXcv, L"AddPort", (PBYTE) &portData, sizeof(PORT_DATA_1), pOutputData, cbInputData,  &cbOutputNeeded, &dwStatus);
 	err = translate_errno( ok, errno_compat(), kUnknownErr );
-	require_noerr( err, exit );
+	require_noerr_with_log( log, "XcvData()", err, exit );
 
 	//
 	// add the printer
@@ -475,7 +498,7 @@ CPrinterSetupWizardSheet::InstallPrinterPDLAndLPR(Printer * printer, Service * s
 
 	hPrinter = AddPrinter(NULL, 2, (LPBYTE) &pInfo);
 	err = translate_errno( hPrinter, errno_compat(), kUnknownErr );
-	require_noerr( err, exit );
+	require_noerr_with_log( log, "AddPrinter()", err, exit );
 
 exit:
 
@@ -499,7 +522,7 @@ exit:
 
 
 OSStatus
-CPrinterSetupWizardSheet::InstallPrinterIPP(Printer * printer, Service * service)
+CPrinterSetupWizardSheet::InstallPrinterIPP(Printer * printer, Service * service, Logger & log)
 {
 	DEBUG_UNUSED( service );
 
@@ -525,7 +548,7 @@ CPrinterSetupWizardSheet::InstallPrinterIPP(Printer * printer, Service * service
 	
 	hPrinter = AddPrinter(NULL, 2, (LPBYTE)&pInfo);
 	err = translate_errno( hPrinter, errno_compat(), kUnknownErr );
-	require_noerr( err, exit );
+	require_noerr_with_log( log, "AddPrinter()", err, exit );
 
 exit:
 
@@ -596,12 +619,14 @@ exit:
 		}
 		else
 		{
-			CPrinterSetupWizardSheet::WizardException exc;
-			
-			exc.text.LoadString( IDS_NO_MDNSRESPONDER_SERVICE_TEXT );
-			exc.caption.LoadString( IDS_ERROR_CAPTION );
-			
-			throw(exc);
+			CString text, caption;
+
+			text.LoadString( IDS_NO_MDNSRESPONDER_SERVICE_TEXT );
+			caption.LoadString( IDS_ERROR_CAPTION );
+
+			MessageBox(text, caption, MB_OK|MB_ICONEXCLAMATION);
+
+			_exit( 0 );
 		}
 	}
 
@@ -676,7 +701,6 @@ CPrinterSetupWizardSheet::OnOK()
 
 void CPrinterSetupWizardSheet::Init(void)
 {
-	AddPage(&m_pgFirst);
 	AddPage(&m_pgSecond);
 	AddPage(&m_pgThird);
 	AddPage(&m_pgFourth);
@@ -693,7 +717,7 @@ void CPrinterSetupWizardSheet::Init(void)
 }
 
 
-LONG
+LRESULT
 CPrinterSetupWizardSheet::OnSocketEvent(WPARAM inWParam, LPARAM inLParam)
 {
 	if (WSAGETSELECTERROR(inLParam) && !(HIWORD(inLParam)))
@@ -726,7 +750,7 @@ CPrinterSetupWizardSheet::OnSocketEvent(WPARAM inWParam, LPARAM inLParam)
 }
 
 
-LONG
+LRESULT
 CPrinterSetupWizardSheet::OnProcessEvent(WPARAM inWParam, LPARAM inLParam)
 {
 	DEBUG_UNUSED(inLParam);

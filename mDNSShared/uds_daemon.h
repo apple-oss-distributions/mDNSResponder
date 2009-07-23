@@ -23,6 +23,15 @@
     Change History (most recent first):
 
 $Log: uds_daemon.h,v $
+Revision 1.27  2009/04/30 20:07:51  mcguire
+<rdar://problem/6822674> Support multiple UDSs from launchd
+
+Revision 1.26  2008/10/02 22:26:21  cheshire
+Moved declaration of BPF_fd from uds_daemon.c to mDNSMacOSX.c, where it really belongs
+
+Revision 1.25  2008/09/27 01:08:25  cheshire
+Added external declaration of "dnssd_sock_t BPF_fd"
+
 Revision 1.24  2007/09/19 20:25:17  cheshire
 Deleted outdated comment
 
@@ -109,11 +118,11 @@ Changes necessary to support mDNSResponder on Linux.
 
 #define SRS_PORT(S) mDNSVal16((S)->RR_SRV.resrec.rdata->u.srv.port)
 
-extern int udsserver_init(dnssd_sock_t skt);
+extern int udsserver_init(dnssd_sock_t skts[], mDNSu32 count);
 extern mDNSs32 udsserver_idle(mDNSs32 nextevent);
 extern void udsserver_info(mDNS *const m);	// print out info about current state
 extern void udsserver_handle_configchange(mDNS *const m);
-extern int udsserver_exit(dnssd_sock_t skt);	// should be called prior to app exit
+extern int udsserver_exit(void);	// should be called prior to app exit
 
 /* Routines that uds_daemon expects to link against: */
 

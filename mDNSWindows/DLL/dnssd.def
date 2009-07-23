@@ -17,6 +17,9 @@
 ;	Change History (most recent first):
 ;    
 ; $Log: dnssd.def,v $
+; Revision 1.5  2009/03/30 20:14:27  herscher
+; <rdar://problem/5925472> Current Bonjour code does not compile on Windows
+;
 ; Revision 1.4  2006/09/27 00:46:18  herscher
 ; <rdar://problem/4249761> API: Need DNSServiceGetAddrInfo()
 ;
@@ -58,6 +61,7 @@ EXPORTS
 	DNSServiceReconfirmRecord
 	DNSServiceNATPortMappingCreate
 	DNSServiceGetAddrInfo
+	DNSServiceGetProperty
 	TXTRecordCreate
 	TXTRecordDeallocate
 	TXTRecordSetValue

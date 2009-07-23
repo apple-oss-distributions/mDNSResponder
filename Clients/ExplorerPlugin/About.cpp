@@ -4,6 +4,7 @@
 #include "stdafx.h"
 #include "ExplorerPlugin.h"
 #include "About.h"
+#include "WinVersRes.h"
 #include <DebugServices.h>
 
 
@@ -46,6 +47,14 @@ CAbout::OnInitDialog()
 	if ( control )
 	{
 		control->SetBitmap( ::LoadBitmap( GetNonLocalizedResources(), MAKEINTRESOURCE( IDB_ABOUT ) ) );
+	}
+
+	control = ( CStatic* ) GetDlgItem( IDC_COMPONENT_VERSION );
+	check( control );
+
+	if ( control )
+	{
+		control->SetWindowText( TEXT( MASTER_PROD_VERS_STR2 ) );
 	}
 
 	return b;

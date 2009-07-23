@@ -45,6 +45,16 @@
     Change History (most recent first):
 
 $Log: ddnswriteconfig.m,v $
+Revision 1.13  2008/11/04 20:08:44  cheshire
+Use constant kDNSServiceMaxDomainName instead of literal value "1005"
+
+Revision 1.12  2008/09/15 23:52:30  cheshire
+<rdar://problem/6218902> mDNSResponder-177 fails to compile on Linux with .desc pseudo-op
+Made __crashreporter_info__ symbol conditional, so we only use it for OS X build
+
+Revision 1.11  2008/06/26 17:34:18  mkrochma
+<rdar://problem/6030630> Pref pane destroying shared "system.preferences" authorization right
+
 Revision 1.10  2007/11/30 23:43:04  cheshire
 Fixed compile warning: declaration of 'access' shadows a global declaration
 
@@ -93,6 +103,7 @@ Add Preference Pane to facilitate testing of DDNS & wide-area features
 #import <sys/stat.h>
 #import <sys/mman.h>
 #import <mach-o/dyld.h>
+#import <dns_sd.h>
 #import <AssertMacros.h>
 #import <Security/Security.h>
 #import <CoreServices/CoreServices.h>
@@ -202,7 +213,7 @@ SetAuthInfo( int fd)
 	require( len == kAuthorizationExternalFormLength, ReadParamsFailed);
 
 	if (gAuthRef != 0) {
-		(void) AuthorizationFree(gAuthRef, kAuthorizationFlagDestroyRights);
+		(void) AuthorizationFree(gAuthRef, kAuthorizationFlagDefaults);
 		gAuthRef = 0;
 	}
 
@@ -361,9 +372,9 @@ SetKeychainEntry(int fd)
 	int					result = 0;
 	u_int32_t			tag, len;
 	char				*p;
-	char                keyname[1005];
-	char                domain[1005];
-	char                secret[1005];
+	char                keyname[kDNSServiceMaxDomainName];
+	char                domain[kDNSServiceMaxDomainName];
+	char                secret[kDNSServiceMaxDomainName];
 
 	AuthorizationItem	kcAuth = { EDIT_SYS_KEYCHAIN_RIGHT, 0, NULL, 0 };
 	AuthorizationRights	authSet = { 1, &kcAuth };
@@ -386,9 +397,9 @@ SetKeychainEntry(int fd)
 	secretString  = (CFStringRef)CFDictionaryGetValue(secretDictionary, SC_DYNDNS_SECRET_KEY);
 	assert(secretString != NULL);
 			
-	CFStringGetCString(keyNameString, keyname, 1005, kCFStringEncodingUTF8);
-	CFStringGetCString(domainString,   domain, 1005, kCFStringEncodingUTF8);
-	CFStringGetCString(secretString,   secret, 1005, kCFStringEncodingUTF8);
+	CFStringGetCString(keyNameString, keyname, kDNSServiceMaxDomainName, kCFStringEncodingUTF8);
+	CFStringGetCString(domainString,   domain, kDNSServiceMaxDomainName, kCFStringEncodingUTF8);
+	CFStringGetCString(secretString,   secret, kDNSServiceMaxDomainName, kCFStringEncodingUTF8);
 
 	result = SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem);
 	if (result == noErr) {
@@ -470,6 +481,8 @@ int	main( int argc, char **argv)
 // The "@(#) " pattern is a special prefix the "what" command looks for
 const char VersionString_SCCS[] = "@(#) ddnswriteconfig " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
 
+#if _BUILDING_XCODE_PROJECT_
 // If the process crashes, then this string will be magically included in the automatically-generated crash log
 const char *__crashreporter_info__ = VersionString_SCCS + 5;
 asm(".desc ___crashreporter_info__, 0x10");
+#endif
