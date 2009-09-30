@@ -30,6 +30,12 @@
     Change History (most recent first):
 
 $Log: NetMonitor.c,v $
+Revision 1.96  2009/07/16 00:08:57  cheshire
+Display any stray Update (Authority) records in query packets
+
+Revision 1.95  2009/07/09 22:24:52  herscher
+<rdar://problem/3775717> SDK: Port mDNSNetMonitor to Windows
+
 Revision 1.94  2009/04/24 00:31:56  cheshire
 <rdar://problem/3476350> Return negative answers when host knows authoritatively that no answer exists
 Added code to display NSEC records
@@ -115,13 +121,28 @@ Use IFNAMSIZ (more portable) instead of IF_NAMESIZE
 #include <string.h>			// For strrchr(), strcmp()
 #include <time.h>			// For "struct tm" etc.
 #include <signal.h>			// For SIGINT, SIGTERM
-#include <netdb.h>			// For gethostbyname()
-#include <sys/socket.h>		// For AF_INET, AF_INET6, etc.
-#include <net/if.h>			// For IF_NAMESIZE
-#include <netinet/in.h>		// For INADDR_NONE
-#include <arpa/inet.h>		// For inet_addr()
+#if defined(WIN32)
+#	include <mDNSEmbeddedAPI.h>
+#	include <mDNSWin32.h>
+#	include <uds_daemon.h>
+#	include <PosixCompat.h>
+#	include <Service.h>
+#	define IFNAMSIZ 256
 
-#include "mDNSPosix.h"      // Defines the specific types needed to run mDNS on this platform
+// Stub these functions out
+mDNSexport int udsserver_init(dnssd_sock_t skts[], mDNSu32 count) { return 0; }
+mDNSexport mDNSs32 udsserver_idle(mDNSs32 nextevent) { return 0; }
+mDNSexport void udsserver_handle_configchange(mDNS *const m) {}
+mDNSexport int udsserver_exit(void) { return 0; }
+void setlinebuf( FILE * fp ) {}
+#else
+#	include <netdb.h>			// For gethostbyname()
+#	include <sys/socket.h>		// For AF_INET, AF_INET6, etc.
+#	include <net/if.h>			// For IF_NAMESIZE
+#	include <netinet/in.h>		// For INADDR_NONE
+#	include <arpa/inet.h>		// For inet_addr()
+#	include "mDNSPosix.h"      // Defines the specific types needed to run mDNS on this platform
+#endif
 #include "ExampleClientApp.h"
 
 //*************************************************************************************************************
@@ -179,7 +200,7 @@ struct FilterList_struct
 //*************************************************************************************************************
 // Globals
 
-static mDNS mDNSStorage;						// mDNS core uses this to store its globals
+mDNS mDNSStorage;						// mDNS core uses this to store its globals
 static mDNS_PlatformSupport PlatformStorage;	// Stores this platform's globals
 mDNSexport const char ProgramName[] = "mDNSNetMonitor";
 
@@ -712,16 +733,19 @@ mDNSlocal void DisplayQuery(mDNS *const m, const DNSMessage *const msg, const mD
 	for (i=0; i<msg->h.numAuthorities; i++)
 		{
 		const mDNSu8 *ep = ptr;
-		ptr = skipResourceRecord(msg, ptr, end);
+		ptr = GetLargeResourceRecord(m, msg, ptr, end, InterfaceID, kDNSRecordTypePacketAuth, &pkt);
 		if (!ptr) { DisplayError(srcaddr, ep, end, "AUTHORITY"); return; }
+		// After we display an Update record with its matching question (above) we zero out its type and class
+		// If any remain that haven't been zero'd out, display them here
+		if (pkt.r.resrec.rrtype || pkt.r.resrec.rrclass) DisplayResourceRecord(srcaddr, "(AU)", &pkt.r.resrec);
 		}
 
 	for (i=0; i<msg->h.numAdditionals; i++)
 		{
 		const mDNSu8 *ep = ptr;
-		ptr = GetLargeResourceRecord(m, msg, ptr, end, InterfaceID, kDNSRecordTypePacketAns, &pkt);
+		ptr = GetLargeResourceRecord(m, msg, ptr, end, InterfaceID, kDNSRecordTypePacketAdd, &pkt);
 		if (!ptr) { DisplayError(srcaddr, ep, end, "ADDITIONAL"); return; }
-		DisplayResourceRecord(srcaddr, "    ", &pkt.r.resrec);
+		DisplayResourceRecord(srcaddr, pkt.r.resrec.rrtype == kDNSType_OPT ? "(OP)" : "(AD)", &pkt.r.resrec);
 		}
 
 	if (entry) AnalyseHost(m, entry, InterfaceID);
@@ -785,7 +809,9 @@ mDNSlocal void DisplayResponse(mDNS *const m, const DNSMessage *const msg, const
 		ptr = GetLargeResourceRecord(m, msg, ptr, end, InterfaceID, kDNSRecordTypePacketAdd, &pkt);
 		if (!ptr) { DisplayError(srcaddr, ep, end, "ADDITIONAL"); return; }
 		NumAdditionals++;
-		DisplayResourceRecord(srcaddr, (pkt.r.resrec.RecordType & kDNSRecordTypePacketUniqueMask) ? "(AD)" : "(AD+)", &pkt.r.resrec);
+		DisplayResourceRecord(srcaddr,
+			pkt.r.resrec.rrtype == kDNSType_OPT ? "(OP)" : (pkt.r.resrec.RecordType & kDNSRecordTypePacketUniqueMask) ? "(AD)" : "(AD+)",
+			&pkt.r.resrec);
 		if (entry) RecordHostInfo(entry, &pkt.r.resrec);
 		}
 	
@@ -863,7 +889,9 @@ mDNSlocal mStatus mDNSNetMonitor(void)
 	{
 	struct tm tm;
 	int h, m, s, mul, div, TotPkt;
+#if !defined(WIN32)
 	sigset_t signals;
+#endif
 	
 	mStatus status = mDNS_Init(&mDNSStorage, &PlatformStorage,
 		mDNS_Init_NoCache, mDNS_Init_ZeroCacheSize,
@@ -872,6 +900,10 @@ mDNSlocal mStatus mDNSNetMonitor(void)
 	if (status) return(status);
 
 	gettimeofday(&tv_start, NULL);
+
+#if defined( WIN32 )
+	RunDirect( 0, NULL );
+#else
 	mDNSPosixListenForSignalInEventLoop(SIGINT);
 	mDNSPosixListenForSignalInEventLoop(SIGTERM);
 
@@ -882,6 +914,7 @@ mDNSlocal mStatus mDNSNetMonitor(void)
 		mDNSPosixRunEventLoopOnce(&mDNSStorage, &timeout, &signals, &gotSomething);
 		}
 	while ( !( sigismember( &signals, SIGINT) || sigismember( &signals, SIGTERM)));
+#endif
 	
 	// Now display final summary
 	TotPkt = NumPktQ + NumPktL + NumPktR;

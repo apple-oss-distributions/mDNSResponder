@@ -17,6 +17,12 @@
     Change History (most recent first):
 
 $Log: WinVersRes.h,v $
+Revision 1.63  2009/07/21 05:10:55  herscher
+Bump version to 2.0.0.7
+
+Revision 1.62  2009/07/13 18:47:58  herscher
+Bump to version 2.0.0.6
+
 Revision 1.61  2009/06/30 17:37:32  herscher
 Bump to 2.0.0.5
 
@@ -211,10 +217,10 @@ First checked in.
 #define MASTER_COMPANY_NAME   "Apple Inc."
 
 // Define the product version for mDNSResponder on Windows
-#define MASTER_PROD_VERS		2,0,0,5
-#define MASTER_PROD_VERS_STR	"2,0,0,5"
-#define MASTER_PROD_VERS_STR2	"2.0.0.5"
-#define MASTER_PROD_VERS_STR3 "Explorer Plugin 2.0.0.5"
+#define MASTER_PROD_VERS		2,0,0,7
+#define MASTER_PROD_VERS_STR	"2,0,0,7"
+#define MASTER_PROD_VERS_STR2	"2.0.0.7"
+#define MASTER_PROD_VERS_STR3 "Explorer Plugin 2.0.0.7"
 
 // Define the legal copyright
 #define MASTER_LEGAL_COPYRIGHT "Copyright (C) 2003-2009 Apple Inc."

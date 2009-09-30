@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: ThirdPage.cpp,v $
+Revision 1.42  2009/07/07 22:04:55  herscher
+<rdar://problem/4176343> LOC Impact: Need custom text when selecting the wrong printer driver
+
 Revision 1.41  2009/06/18 18:05:50  herscher
 <rdar://problem/4694554> Eliminate the first screen of Printer Wizard and maybe combine others ("I'm Feeling Lucky")
 
@@ -1136,6 +1139,7 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 	if (found)
 	{
 		text.LoadString(IDS_PRINTER_MATCH_GOOD);
+		err = kNoErr;
 	}
 	else if ( MatchGeneric( manufacturers, printer, service, &genericManufacturer, &genericModel ) )
 	{
@@ -1157,6 +1161,8 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 			SelectMatch( manufacturers, printer, service, genericManufacturer, genericModel );
 			text.LoadString(IDS_PRINTER_MATCH_MAYBE);
 		}
+
+		err = kNoErr;
 	}
 	else
 	{
@@ -1193,6 +1199,8 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 				AutoScroll(m_manufacturerListCtrl, nIndex);
 			}
 		}
+
+		err = kUnknownErr;
 	}
 
 	m_printerSelectionText.SetWindowText(text);
@@ -1651,7 +1659,16 @@ void CThirdPage::OnBnClickedHaveDisk()
 			{
 				PopulateUI( manufacturers );
 
-				MatchPrinter( manufacturers, printer, service, false );
+				if ( MatchPrinter( manufacturers, printer, service, false ) != kNoErr )
+				{
+					CString errorMessage;
+					CString errorCaption;
+					
+					errorMessage.LoadString( IDS_NO_MATCH_INF_FILE );
+					errorCaption.LoadString( IDS_NO_MATCH_INF_FILE_CAPTION );
+
+					MessageBox( errorMessage, errorCaption, MB_OK );
+				}
 
 				break;
 			}

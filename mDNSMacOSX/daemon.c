@@ -2663,7 +2663,7 @@ mDNSlocal mDNSu32 DHCPWakeTime(void)
 
 mDNSlocal mDNSBool AllowSleepNow(mDNS *const m, mDNSs32 now)
 	{
-	mDNSBool ready = mDNSCoreReadyForSleep(m);
+	mDNSBool ready = mDNSCoreReadyForSleep(m, now);
 	if (m->SleepState && !ready && now - m->SleepLimit < 0) return(mDNSfalse);
 
 	m->p->WakeAtUTC = 0;

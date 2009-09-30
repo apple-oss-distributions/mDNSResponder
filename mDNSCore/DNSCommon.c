@@ -606,6 +606,7 @@ mDNSexport const mDNSInterfaceID mDNSInterface_Unicast   = (mDNSInterfaceID)2;
 #define   SSHPortAsNumber                  22
 #define   UnicastDNSPortAsNumber           53
 #define   SSDPPortAsNumber               1900
+#define   IPSECPortAsNumber              4500
 #define   NSIPCPortAsNumber              5030		// Port used for dnsextd to talk to local nameserver bound to loopback
 #define   NATPMPAnnouncementPortAsNumber 5350
 #define   NATPMPPortAsNumber             5351
@@ -619,6 +620,7 @@ mDNSexport const mDNSIPPort DiscardPort            = { { DiscardPortAsNumber    
 mDNSexport const mDNSIPPort SSHPort                = { { SSHPortAsNumber                >> 8, SSHPortAsNumber                & 0xFF } };
 mDNSexport const mDNSIPPort UnicastDNSPort         = { { UnicastDNSPortAsNumber         >> 8, UnicastDNSPortAsNumber         & 0xFF } };
 mDNSexport const mDNSIPPort SSDPPort               = { { SSDPPortAsNumber               >> 8, SSDPPortAsNumber               & 0xFF } };
+mDNSexport const mDNSIPPort IPSECPort              = { { IPSECPortAsNumber              >> 8, IPSECPortAsNumber              & 0xFF } };
 mDNSexport const mDNSIPPort NSIPCPort              = { { NSIPCPortAsNumber              >> 8, NSIPCPortAsNumber              & 0xFF } };
 mDNSexport const mDNSIPPort NATPMPAnnouncementPort = { { NATPMPAnnouncementPortAsNumber >> 8, NATPMPAnnouncementPortAsNumber & 0xFF } };
 mDNSexport const mDNSIPPort NATPMPPort             = { { NATPMPPortAsNumber             >> 8, NATPMPPortAsNumber             & 0xFF } };
@@ -2833,7 +2835,7 @@ mDNSlocal const mDNSu8 *DumpRecords(mDNS *const m, const DNSMessage *const msg, 
 		// embedded systems) putting a 9kB object on the stack isn't a big problem.
 		LargeCacheRecord largecr;
 		ptr = GetLargeResourceRecord(m, msg, ptr, end, mDNSInterface_Any, kDNSRecordTypePacketAns, &largecr);
-		if (ptr) LogMsg("%2d TTL%7d %s", i, largecr.r.resrec.rroriginalttl, CRDisplayString(m, &largecr.r));
+		if (ptr) LogMsg("%2d TTL%8d %s", i, largecr.r.resrec.rroriginalttl, CRDisplayString(m, &largecr.r));
 		}
 	if (!ptr) LogMsg("ERROR: Premature end of packet data");
 	return(ptr);
@@ -3048,7 +3050,8 @@ mDNSlocal mDNSs32 GetNextScheduledEvent(const mDNS *const m)
 #endif
 	if (e - m->NextCacheCheck        > 0) e = m->NextCacheCheck;
 	if (e - m->NextScheduledSPS      > 0) e = m->NextScheduledSPS;
-	if (m->SleepLimit && e - m->NextScheduledSPRetry > 0) e = m->NextScheduledSPRetry;
+	// NextScheduledSPRetry only valid when DelaySleep not set
+	if (!m->DelaySleep && m->SleepLimit && e - m->NextScheduledSPRetry > 0) e = m->NextScheduledSPRetry;
 	if (m->DelaySleep && e - m->DelaySleep           > 0) e = m->DelaySleep;
 
 	if (m->SuppressSending)
@@ -3100,7 +3103,7 @@ mDNSexport void ShowTaskSchedulingError(mDNS *const m)
 		LogMsg("Task Scheduling Error: m->NextScheduledNATOp %d",    m->timenow - m->NextScheduledNATOp);
 	if (m->timenow - m->NextScheduledSPS      >= 0)
 		LogMsg("Task Scheduling Error: m->NextScheduledSPS %d",      m->timenow - m->NextScheduledSPS);
-	if (m->SleepLimit && m->timenow - m->NextScheduledSPRetry >= 0)
+	if (!m->DelaySleep && m->SleepLimit && m->timenow - m->NextScheduledSPRetry >= 0)
 		LogMsg("Task Scheduling Error: m->NextScheduledSPRetry %d",  m->timenow - m->NextScheduledSPRetry);
 	if (m->DelaySleep && m->timenow - m->DelaySleep >= 0)
 		LogMsg("Task Scheduling Error: m->DelaySleep %d",            m->timenow - m->DelaySleep);

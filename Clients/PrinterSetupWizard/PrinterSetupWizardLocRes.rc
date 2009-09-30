@@ -256,6 +256,8 @@ BEGIN
     IDS_INSTALL_ERROR_CAPTION "Error"
     IDS_INSTALL_ERROR_MESSAGE 
                             "You do not have sufficient access to your computer to connect to the selected printer."
+	IDS_NO_MATCH_INF_FILE	"The software that you chose does not match the selected printer."
+	IDS_NO_MATCH_INF_FILE_CAPTION "Select Device"
 	IDS_BAD_INF_FILE		"The specified location does not contain information about your printer"
 	IDS_BAD_INF_FILE_CAPTION "Select Device"
     IDS_MANUFACTURER_HEADING "Manufacturer"

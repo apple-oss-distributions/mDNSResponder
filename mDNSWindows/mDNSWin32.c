@@ -17,6 +17,15 @@
     Change History (most recent first):
     
 $Log: mDNSWin32.c,v $
+Revision 1.145  2009/07/20 04:07:41  herscher
+<rdar://problem/6145339> Bonjour does not list IPv6 loopback address when all network adapters are disabled
+
+Revision 1.144  2009/07/17 19:59:46  herscher
+<rdar://problem/7062660> Update the womp settings for each network adapter immediately preceding the call to mDNSCoreMachineSleep().
+
+Revision 1.143  2009/07/07 21:34:58  herscher
+<rdar://problem/6713286> windows platform changes to support use as sleep proxy client
+
 Revision 1.142  2009/06/25 21:11:02  herscher
 <rdar://problem/7003607> Platform layer doesn't correctly initialize the port field of TCP and UDP socket structures.
 
@@ -169,6 +178,8 @@ Revision 1.106  2006/02/26 19:31:05  herscher
 	#include	<process.h>
 	#include	<ntsecapi.h>
 	#include	<lm.h>
+	#include	<winioctl.h>
+	#include	<ntddndis.h>        // This defines the IOCTL constants.
 #endif
 
 #include	"mDNSEmbeddedAPI.h"
@@ -215,6 +226,7 @@ Revision 1.106  2006/02/26 19:31:05  herscher
 
 #define kIPv6IfIndexBase							(10000000L)
 #define SMBPortAsNumber								445
+#define DEVICE_PREFIX								"\\\\.\\"
 
 
 #if 0
@@ -335,6 +347,7 @@ mDNSlocal void				GetDDNSDomains( DNameListElem ** domains, LPCSTR lpSubKey );
 mDNSlocal void				SetDomainSecrets( mDNS * const m );
 mDNSlocal void				SetDomainSecret( mDNS * const m, const domainname * inDomain );
 mDNSlocal void				CheckFileShares( mDNS * const m );
+mDNSlocal mDNSu8			IsWOMPEnabled( const char * adapterName );
 
 #ifdef	__cplusplus
 	}
@@ -1350,7 +1363,7 @@ mDNSexport UDPSocket* mDNSPlatformUDPSocket(mDNS *const m, const mDNSIPPort requ
 
         if (mDNSIPPortIsZero(requestedport))
 		{
-			port = mDNSOpaque16fromIntVal(0xC000 + mDNSRandom(0x3FFF));
+			port = mDNSOpaque16fromIntVal( ( mDNSu16 ) ( 0xC000 + mDNSRandom(0x3FFF) ) );
 		}
 
 		saddr.sin_port = port.NotAnInteger;
@@ -2362,6 +2375,8 @@ mDNSlocal mStatus	SetupInterfaceList( mDNS * const inMDNS )
 	check( inMDNS->p );
 	
 	inMDNS->p->registeredLoopback4	= mDNSfalse;
+	inMDNS->p->nextDHCPLeaseExpires = 0xFFFFFFFF;
+	inMDNS->p->womp					= mDNSfalse;
 	addrs							= NULL;
 	foundv4							= mDNSfalse;
 	foundv6							= mDNSfalse;
@@ -2423,6 +2438,11 @@ mDNSlocal mStatus	SetupInterfaceList( mDNS * const inMDNS )
 		if ( ifd->interfaceInfo.McastTxRx == mDNStrue )
 		{
 			foundv4 = mDNStrue;
+		}
+
+		if ( p->ifa_dhcpEnabled && ( p->ifa_dhcpLeaseExpires < inMDNS->p->nextDHCPLeaseExpires ) )
+		{
+			inMDNS->p->nextDHCPLeaseExpires = p->ifa_dhcpLeaseExpires;
 		}
 
 		// If we're on a platform that doesn't have WSARecvMsg(), there's no way
@@ -2519,7 +2539,7 @@ mDNSlocal mStatus	SetupInterfaceList( mDNS * const inMDNS )
 	
 	if ( !foundv4 && loopbackv4 )
 	{
-		dlog( kDebugLevelVerbose, DEBUG_NAME "Interface %40s (0x%08X) %##a\n", 
+		dlog( kDebugLevelInfo, DEBUG_NAME "Interface %40s (0x%08X) %##a\n", 
 			loopbackv4->ifa_name ? loopbackv4->ifa_name : "<null>", loopbackv4->ifa_extra.index, loopbackv4->ifa_addr );
 		
 		err = SetupInterface( inMDNS, loopbackv4, &ifd );
@@ -2539,6 +2559,34 @@ mDNSlocal mStatus	SetupInterfaceList( mDNS * const inMDNS )
 		{
 			inMDNS->p->unicastSock4DestAddr = ifd->defaultAddr;
 			foundUnicastSock4DestAddr = TRUE;
+		}
+#endif
+
+		*next = ifd;
+		next  = &ifd->next;
+		++inMDNS->p->interfaceCount;
+	}
+
+	if ( !foundv6 && loopbackv6 )
+	{
+		dlog( kDebugLevelInfo, DEBUG_NAME "Interface %40s (0x%08X) %##a\n", 
+			loopbackv6->ifa_name ? loopbackv6->ifa_name : "<null>", loopbackv6->ifa_extra.index, loopbackv6->ifa_addr );
+		
+		err = SetupInterface( inMDNS, loopbackv6, &ifd );
+		require_noerr( err, exit );
+		
+#if( MDNS_WINDOWS_ENABLE_IPV6 )
+
+		// If we're on a platform that doesn't have WSARecvMsg(), there's no way
+		// of determing the destination address of a packet that is sent to us.
+		// For multicast packets, that's easy to determine.  But for the unicast
+		// sockets, we'll fake it by taking the address of the first interface
+		// that is successfully setup.
+
+		if ( !foundUnicastSock6DestAddr )
+		{
+			inMDNS->p->unicastSock6DestAddr = ifd->defaultAddr;
+			foundUnicastSock6DestAddr = TRUE;
 		}
 #endif
 
@@ -2723,7 +2771,19 @@ mDNSlocal mStatus	SetupInterface( mDNS * const inMDNS, const struct ifaddrs *inI
 		err = translate_errno( ifd->readPendingEvent, (mStatus) GetLastError(), kUnknownErr );
 		require_noerr( err, exit );
 	}
-	
+
+	if ( inIFA->ifa_dhcpEnabled && ( inIFA->ifa_dhcpLeaseExpires < inMDNS->p->nextDHCPLeaseExpires ) )
+	{
+		inMDNS->p->nextDHCPLeaseExpires = inIFA->ifa_dhcpLeaseExpires;
+	}
+
+	ifd->interfaceInfo.NetWake = inIFA->ifa_womp;
+
+	if ( ifd->interfaceInfo.NetWake )
+	{
+		inMDNS->p->womp = TRUE;
+	}
+
 	// Register this interface with mDNS.
 	
 	err = SockAddrToMDNSAddr( inIFA->ifa_addr, &ifd->interfaceInfo.ip, NULL );
@@ -2746,6 +2806,7 @@ mDNSlocal mStatus	SetupInterface( mDNS * const inMDNS, const struct ifaddrs *inI
 	ifd = NULL;
 	
 exit:
+
 	if( ifd )
 	{
 		TearDownInterface( inMDNS, ifd );
@@ -4138,9 +4199,9 @@ mDNSlocal int	getifaddrs_ipv6( struct ifaddrs **outAddrs )
 			firstPrefix = NULL;
 		}
 
-		// Skip psuedo and tunnel interfaces.
+		// Skip pseudo and tunnel interfaces.
 		
-		if( ( ipv6IfIndex == 1 ) || ( iaa->IfType == IF_TYPE_TUNNEL ) )
+		if( ( ( ipv6IfIndex == 1 ) && ( iaa->IfType != IF_TYPE_SOFTWARE_LOOPBACK ) ) || ( iaa->IfType == IF_TYPE_TUNNEL ) )
 		{
 			continue;
 		}
@@ -4155,7 +4216,7 @@ mDNSlocal int	getifaddrs_ipv6( struct ifaddrs **outAddrs )
 			ULONG					prefixLength;
 			uint32_t				ipv4Index;
 			struct sockaddr_in		ipv4Netmask;
-			
+
 			family = addr->Address.lpSockaddr->sa_family;
 			if( ( family != AF_INET ) && ( family != AF_INET6 ) ) continue;
 			
@@ -4220,6 +4281,26 @@ mDNSlocal int	getifaddrs_ipv6( struct ifaddrs **outAddrs )
 				case AF_INET:  ifa->ifa_extra.index = iaa->IfIndex; break;
 				case AF_INET6: ifa->ifa_extra.index = ipv6IfIndex + kIPv6IfIndexBase;	 break;
 				default: break;
+			}
+
+			// Get lease lifetime
+
+			if ( ( iaa->IfType != IF_TYPE_SOFTWARE_LOOPBACK ) && ( addr->LeaseLifetime != 0 ) && ( addr->LeaseLifetime != 0xFFFFFFFF ) )
+			{
+				ifa->ifa_dhcpEnabled		= TRUE;
+				ifa->ifa_dhcpLeaseExpires	= time( NULL ) + addr->LeaseLifetime;
+			}
+			else
+			{
+				ifa->ifa_dhcpEnabled		= FALSE;
+				ifa->ifa_dhcpLeaseExpires	= 0;
+			}
+
+			// Get WakeOnLAN settings
+
+			if ( iaa->IfType == IF_TYPE_ETHERNET_CSMACD )
+			{
+				ifa->ifa_womp = IsWOMPEnabled( iaa->AdapterName );
 			}
 			
 			// Get address.
@@ -4338,6 +4419,9 @@ mDNSlocal int	getifaddrs_ipv4( struct ifaddrs **outAddrs )
 	INTERFACE_INFO *		buffer;
 	INTERFACE_INFO *		tempBuffer;
 	INTERFACE_INFO *		ifInfo;
+	IP_ADAPTER_INFO *		pAdapterInfo;
+	IP_ADAPTER_INFO *		pAdapter;
+	ULONG					bufLen;
 	int						n;
 	int						i;
 	struct ifaddrs *		head;
@@ -4348,6 +4432,7 @@ mDNSlocal int	getifaddrs_ipv4( struct ifaddrs **outAddrs )
 	buffer	= NULL;
 	head	= NULL;
 	next	= &head;
+	pAdapterInfo = NULL;
 	
 	// Get the interface list. WSAIoctl is called with SIO_GET_INTERFACE_LIST, but since this does not provide a 
 	// way to determine the size of the interface list beforehand, we have to start with an initial size guess and
@@ -4379,6 +4464,28 @@ mDNSlocal int	getifaddrs_ipv4( struct ifaddrs **outAddrs )
 	check( actualSize <= size );
 	check( ( actualSize % sizeof( INTERFACE_INFO ) ) == 0 );
 	n = (int)( actualSize / sizeof( INTERFACE_INFO ) );
+
+	// Now call GetAdaptersInfo so we can get DHCP information for each interface
+
+	pAdapterInfo	= NULL;
+	bufLen			= 0;
+	
+	for ( i = 0; i < 100; i++ )
+	{
+		err = GetAdaptersInfo( pAdapterInfo, &bufLen);
+
+		if ( err != ERROR_BUFFER_OVERFLOW )
+		{
+			break;
+		}
+
+		pAdapterInfo = (IP_ADAPTER_INFO*) realloc( pAdapterInfo, bufLen );
+
+		if ( !pAdapterInfo )
+		{
+			break;
+		}
+	}
 	
 	// Process the raw interface list and build a linked list of IPv4 interfaces.
 	
@@ -4448,6 +4555,19 @@ mDNSlocal int	getifaddrs_ipv4( struct ifaddrs **outAddrs )
 		
 			ifa->ifa_extra.index = (uint32_t)( i + 1 );
 		}
+
+		// Now get DHCP configuration information
+
+		for ( pAdapter = pAdapterInfo; pAdapter; pAdapter = pAdapter->Next )
+		{
+			if ( strcmp( inet_ntoa( ifInfo->iiAddress.AddressIn.sin_addr ), pAdapter->IpAddressList.IpAddress.String ) == 0 )
+			{
+				ifa->ifa_dhcpEnabled		= pAdapter->DhcpEnabled;
+				ifa->ifa_dhcpLeaseExpires	= pAdapter->LeaseExpires;
+				ifa->ifa_womp				= IsWOMPEnabled( pAdapter->AdapterName );
+				break;
+			}
+		}
 	}
 	
 	// Success!
@@ -4460,6 +4580,11 @@ mDNSlocal int	getifaddrs_ipv4( struct ifaddrs **outAddrs )
 	err = 0;
 	
 exit:
+
+	if ( pAdapterInfo )
+	{
+		free( pAdapterInfo );
+	}
 	if( head )
 	{
 		freeifaddrs( head );
@@ -5439,4 +5564,71 @@ CheckFileShares( mDNS * const m )
 exit:
 
 	return;
+}
+
+
+void
+UpdateWOMPConfig( mDNS * const m )
+{
+	mDNSInterfaceData * ifd;
+
+	mDNSPlatformLock( m );
+
+	m->p->womp = mDNSfalse;
+
+	for( ifd = m->p->interfaceList; ifd; ifd = ifd->next )
+	{
+		ifd->interfaceInfo.NetWake = IsWOMPEnabled( ifd->name );
+
+		if ( ifd->interfaceInfo.NetWake )
+		{
+			m->p->womp = mDNStrue;
+		}
+	}
+
+	mDNSPlatformUnlock( m );
+}
+
+
+mDNSlocal mDNSu8
+IsWOMPEnabled( const char * adapterName )
+{
+	char						fileName[80];
+	NDIS_OID					oid;
+    DWORD						count;
+    HANDLE						handle	= INVALID_HANDLE_VALUE;
+	NDIS_PNP_CAPABILITIES	*	pNPC	= NULL;
+	int							err;
+	mDNSu8						ok		= TRUE;
+	
+    // Construct a device name to pass to CreateFile
+
+	strncpy_s( fileName, sizeof( fileName ), DEVICE_PREFIX, strlen( DEVICE_PREFIX ) );
+	strcat_s( fileName, sizeof( fileName ), adapterName );
+    handle = CreateFileA( fileName, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, INVALID_HANDLE_VALUE );
+	require_action ( handle != INVALID_HANDLE_VALUE, exit, ok = FALSE );
+
+	// We successfully opened the driver, format the IOCTL to pass the driver.
+		
+	oid = OID_PNP_CAPABILITIES;
+	pNPC = ( NDIS_PNP_CAPABILITIES * ) malloc( sizeof( NDIS_PNP_CAPABILITIES ) );
+	require_action( pNPC != NULL, exit, ok = FALSE );
+	ok = ( mDNSu8 ) DeviceIoControl( handle, IOCTL_NDIS_QUERY_GLOBAL_STATS, &oid, sizeof( oid ), pNPC, sizeof( NDIS_PNP_CAPABILITIES ), &count, NULL );
+	err = translate_errno( ok, GetLastError(), kUnknownErr );
+	require_action( !err, exit, ok = FALSE );
+	ok = ( mDNSu8 ) ( ( count == sizeof( NDIS_PNP_CAPABILITIES ) ) && ( pNPC->Flags & NDIS_DEVICE_WAKE_ON_MAGIC_PACKET_ENABLE ) );
+       
+exit:
+
+	if ( pNPC != NULL )
+	{
+		free( pNPC );
+	}
+
+    if ( handle != INVALID_HANDLE_VALUE )
+    {
+		CloseHandle( handle );
+    }
+
+	return ( mDNSu8 ) ok;
 }

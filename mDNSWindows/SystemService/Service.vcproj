@@ -44,7 +44,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories=".;../;../../mDNSCore;../../mDNSShared;&quot;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include&quot;"
-				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE;_WIN32_WINNT=0x0501;DEBUG=1;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=&quot;&quot;&quot;&quot;;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_LEGACY_NAT_TRAVERSAL_"
+				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE;_WIN32_WINNT=0x0501;DEBUG=1;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=&quot;&quot;&quot;&quot;;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_LEGACY_NAT_TRAVERSAL_;_USE_32BIT_TIME_T"
 				StringPooling="true"
 				MinimalRebuild="true"
 				ExceptionHandling="0"
@@ -58,7 +58,7 @@
 				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
 				CallingConvention="2"
-				DisableSpecificWarnings="4127"
+				DisableSpecificWarnings="4127;4201"
 				ShowIncludes="false"
 			/>
 			<Tool
@@ -74,7 +74,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/NXCOMPAT /DYNAMICBASE /SAFESEH"
-				AdditionalDependencies="ws2_32.lib iphlpapi.lib crypt32.lib netapi32.lib"
+				AdditionalDependencies="ws2_32.lib iphlpapi.lib crypt32.lib netapi32.lib powrprof.lib"
 				OutputFile="$(OutDir)/mDNSResponder.exe"
 				LinkIncremental="2"
 				IgnoreAllDefaultLibraries="false"
@@ -151,7 +151,7 @@
 				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
 				CallingConvention="2"
-				DisableSpecificWarnings="4127"
+				DisableSpecificWarnings="4127;4201"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -227,14 +227,14 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				AdditionalIncludeDirectories=".;../;../../mDNSCore;../../mDNSShared;&quot;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include&quot;"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_WIN32_WINNT=0x0501;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=&quot;&quot;&quot;&quot;;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_LEGACY_NAT_TRAVERSAL_"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_WIN32_WINNT=0x0501;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=&quot;&quot;&quot;&quot;;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_LEGACY_NAT_TRAVERSAL_;_USE_32BIT_TIME_T"
 				RuntimeLibrary="0"
 				UsePrecompiledHeader="0"
 				AssemblerListingLocation="$(IntDir)\"
 				WarningLevel="4"
 				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
-				DisableSpecificWarnings="4127"
+				DisableSpecificWarnings="4127;4201"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -249,7 +249,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/NXCOMPAT /DYNAMICBASE /SAFESEH"
-				AdditionalDependencies="ws2_32.lib iphlpapi.lib netapi32.lib"
+				AdditionalDependencies="ws2_32.lib iphlpapi.lib crypt32.lib netapi32.lib powrprof.lib"
 				OutputFile="$(OutDir)/mDNSResponder.exe"
 				LinkIncremental="1"
 				GenerateDebugInformation="true"
@@ -320,7 +320,7 @@
 				WarningLevel="4"
 				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
-				DisableSpecificWarnings="4127"
+				DisableSpecificWarnings="4127;4201"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -335,7 +335,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/NXCOMPAT /DYNAMICBASE"
-				AdditionalDependencies="ws2_32.lib iphlpapi.lib netapi32.lib"
+				AdditionalDependencies="ws2_32.lib iphlpapi.lib netapi32.lib powrprof.lib"
 				OutputFile="$(OutDir)/mDNSResponder.exe"
 				LinkIncremental="1"
 				GenerateDebugInformation="true"
@@ -410,6 +410,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\main.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\mDNSCore\mDNS.c"
 				>
 			</File>
@@ -481,6 +485,10 @@
 			</File>
 			<File
 				RelativePath="..\Secret.h"
+				>
+			</File>
+			<File
+				RelativePath=".\Service.h"
 				>
 			</File>
 			<File

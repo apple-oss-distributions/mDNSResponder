@@ -1002,7 +1002,7 @@ mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID Interface
 	ptr = (char *)data;
 	while (ptr && ptr != end)
 		{
-		if (*ptr == 'L' && (strncasecmp(ptr, "Location:", 9) == 0)) break;			// find the first 'L'; is this Location? if not, keep looking
+		if ((*ptr & 0xDF) == 'L' && (strncasecmp(ptr, "Location:", 9) == 0)) break;			// find the first 'L'; is this Location? if not, keep looking
 		ptr++;
 		}
 	if (ptr == mDNSNULL || ptr == end) 

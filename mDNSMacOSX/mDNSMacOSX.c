@@ -17,6 +17,21 @@
     Change History (most recent first):
 
 $Log: mDNSMacOSX.c,v $
+Revision 1.691  2009/07/30 20:28:15  mkrochma
+<rdar://problem/7100784> Sleep Proxy: Structure changes to data passed to userclient
+
+Revision 1.690  2009/07/15 22:34:25  cheshire
+<rdar://problem/6613674> Sleep Proxy: Add support for using sleep proxy in local network interface hardware
+Fixes to make the code still compile with old headers and libraries (pre 10.5) that don't include IOConnectCallStructMethod
+
+Revision 1.689  2009/07/15 22:09:19  cheshire
+<rdar://problem/6613674> Sleep Proxy: Add support for using sleep proxy in local network interface hardware
+Removed unnecessary sleep(1) and syslog message
+
+Revision 1.688  2009/07/11 01:58:17  cheshire
+<rdar://problem/6613674> Sleep Proxy: Add support for using sleep proxy in local network interface hardware
+Added ActivateLocalProxy routine for transferring mDNS records to local proxy
+
 Revision 1.687  2009/06/30 21:16:09  cheshire
 <rdar://problem/7020041> Plugging and unplugging the power cable shouldn't cause a network change event
 Additional fix: Only start and stop NetWake browses for active interfaces that are currently registered with mDNSCore
@@ -1515,7 +1530,7 @@ mDNSexport void mDNSASLLog(uuid_t *uuid, const char *subdomain, const char *resu
 	asl_set_filter(NULL, old_filter);
 	asl_free(asl_msg);
 	}
-#endif
+#endif // APPLE_OSX_mDNSResponder
 
 #if COMPILER_LIKES_PRAGMA_MARK
 #pragma mark -
@@ -5321,6 +5336,207 @@ mDNSlocal mStatus WatchForInternetSharingChanges(mDNS *const m)
 
 	m->p->SCPrefs = SCPrefs;
 	return(mStatus_NoError);
+	}
+
+// The definitions below should eventually come from some externally-supplied header file.
+// However, since these definitions can't really be changed without breaking binary compatibility,
+// they should never change, so in practice it should not be a big problem to have them defined here.
+
+#define mDNS_IOREG_KEY               "mDNS_KEY"
+#define mDNS_IOREG_VALUE             "2009-07-30"
+#define mDNS_USER_CLIENT_CREATE_TYPE 'mDNS'
+
+enum
+	{							// commands from the daemon to the driver
+    cmd_mDNSOffloadRR = 21,		// give the mdns update buffer to the driver
+	};
+
+typedef union { void *ptr; mDNSOpaque64 sixtyfourbits; } FatPtr;
+
+typedef struct
+	{                                   // cmd_mDNSOffloadRR structure
+    uint32_t  command;                // set to OffloadRR
+    uint32_t  rrBufferSize;           // number of bytes of RR records
+    uint32_t  numUDPPorts;            // number of SRV UDP ports
+    uint32_t  numTCPPorts;            // number of SRV TCP ports 
+    uint32_t  numRRRecords;           // number of RR records
+    uint32_t  compression;            // rrRecords - compression is base for compressed strings
+    FatPtr    rrRecords;              // address of array of pointers to the rr records
+    FatPtr    udpPorts;               // address of udp port list (SRV)
+    FatPtr    tcpPorts;               // address of tcp port list (SRV)
+	} mDNSOffloadCmd;
+
+#include <IOKit/IOKitLib.h>
+#include <dns_util.h>
+
+mDNSlocal mDNSu16 GetPortArray(mDNS *const m, int trans, mDNSIPPort *portarray)
+	{
+	const domainlabel *const tp = (trans == mDNSTransport_UDP) ? (const domainlabel *)"\x4_udp" : (const domainlabel *)"\x4_tcp";
+	int count = 0;
+	AuthRecord *rr;
+	for (rr = m->ResourceRecords; rr; rr=rr->next)
+		if (rr->resrec.rrtype == kDNSType_SRV && SameDomainLabel(ThirdLabel(rr->resrec.name)->c, tp->c))
+			{
+			if (portarray) portarray[count] = rr->resrec.rdata->u.srv.port;
+			count++;
+			}
+
+	// If Back to My Mac is on, also wake for packets to the IPSEC UDP port (4500)
+	if (trans == mDNSTransport_UDP && TunnelServers(m))	
+		{
+		LogSPS("GetPortArray Back to My Mac at %d", count);
+		if (portarray) portarray[count] = IPSECPort;
+		count++;
+		}
+	return(count);
+	}
+
+#define TfrRecordToNIC(RR) \
+	(((RR)->resrec.InterfaceID && (RR)->resrec.InterfaceID != mDNSInterface_LocalOnly) || \
+	(!(RR)->resrec.InterfaceID && ((RR)->ForceMCast || IsLocalDomain((RR)->resrec.name))))
+
+mDNSlocal mDNSu32 CountProxyRecords(mDNS *const m, uint32_t *numbytes)
+	{
+	*numbytes = 0;
+	int count = 0;
+	AuthRecord *rr;
+	for (rr = m->ResourceRecords; rr; rr=rr->next)
+		if (rr->resrec.RecordType > kDNSRecordTypeDeregistering)
+			if (TfrRecordToNIC(rr))
+				{
+				*numbytes += DomainNameLength(rr->resrec.name) + 10 + rr->resrec.rdestimate;
+				LogSPS("CountProxyRecords: %3d %5d %5d %s", count, DomainNameLength(rr->resrec.name) + 10 + rr->resrec.rdestimate, *numbytes, ARDisplayString(m,rr));
+				count++;
+				}
+	return(count);
+	}
+
+mDNSlocal mDNSu16 GetProxyRecords(mDNS *const m, DNSMessage *msg, uint16_t numbytes, FatPtr *records)
+	{
+	mDNSu8 *p = msg->data;
+	const mDNSu8 *const limit = p + numbytes;
+	InitializeDNSMessage(&msg->h, zeroID, zeroID);
+
+	int count = 0;
+	AuthRecord *rr;
+	for (rr = m->ResourceRecords; rr; rr=rr->next)
+		if (rr->resrec.RecordType > kDNSRecordTypeDeregistering)
+			if (TfrRecordToNIC(rr))
+				{
+				records[count].sixtyfourbits = zeroOpaque64;
+				records[count].ptr = p;
+				if (rr->resrec.RecordType & kDNSRecordTypeUniqueMask)
+					rr->resrec.rrclass |= kDNSClass_UniqueRRSet;	// Temporarily set the 'unique' bit so PutResourceRecord will set it
+				p = PutResourceRecordTTLWithLimit(msg, p, &msg->h.mDNS_numUpdates, &rr->resrec, rr->resrec.rroriginalttl, limit);
+				rr->resrec.rrclass &= ~kDNSClass_UniqueRRSet;		// Make sure to clear 'unique' bit back to normal state
+				LogSPS("GetProxyRecords: %3d %p %p %s", count, records[count].ptr, p, ARDisplayString(m,rr));
+				count++;
+				}
+	return(count);
+	}
+
+// If compiling with old headers and libraries (pre 10.5) that don't include IOConnectCallStructMethod
+// then we declare a dummy version here so that the code at least compiles
+#ifndef AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER
+static kern_return_t
+IOConnectCallStructMethod(
+	mach_port_t	 connection,		// In
+	uint32_t	 selector,		// In
+	const void	*inputStruct,		// In
+	size_t		 inputStructCnt,	// In
+	void		*outputStruct,		// Out
+	size_t		*outputStructCnt)	// In/Out
+	{
+	(void)connection;
+	(void)selector;
+	(void)inputStruct;
+	(void)inputStructCnt;
+	(void)outputStruct;
+	(void)outputStructCnt;
+	LogMsg("Compiled without IOConnectCallStructMethod");
+	return(KERN_FAILURE);
+	}
+#endif
+
+mDNSexport mStatus ActivateLocalProxy(mDNS *const m, char *ifname)
+	{
+	mStatus result = mStatus_UnknownErr;
+	io_service_t service = IOServiceGetMatchingService(kIOMasterPortDefault, IOBSDNameMatching(kIOMasterPortDefault, 0, ifname));
+	if (!service) { LogMsg("ActivateLocalProxy: No service for interface %s", ifname); return(mStatus_UnknownErr); }
+
+	io_name_t n1, n2;
+	IOObjectGetClass(service, n1);
+	io_object_t parent;
+	kern_return_t kr = IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent);
+	if (kr != KERN_SUCCESS) LogMsg("ActivateLocalProxy: IORegistryEntryGetParentEntry for %s/%s failed %d", ifname, n1, kr);
+	else
+		{
+		IOObjectGetClass(parent, n2);
+		LogSPS("ActivateLocalProxy: Interface %s service %s parent %s", ifname, n1, n2);
+		const CFTypeRef ref = IORegistryEntryCreateCFProperty(parent, CFSTR(mDNS_IOREG_KEY), kCFAllocatorDefault, mDNSNULL);
+		if (!ref) LogSPS("ActivateLocalProxy: No mDNS_IOREG_KEY for interface %s/%s/%s", ifname, n1, n2);
+		else
+			{
+			if (CFGetTypeID(ref) != CFStringGetTypeID() || !CFEqual(ref, CFSTR(mDNS_IOREG_VALUE)))
+				LogMsg("ActivateLocalProxy: mDNS_IOREG_KEY for interface %s/%s/%s value %s != %s",
+					ifname, n1, n2, CFStringGetCStringPtr(ref, mDNSNULL), mDNS_IOREG_VALUE);
+			else
+				{
+				io_connect_t conObj;
+				kr = IOServiceOpen(parent, mach_task_self(), mDNS_USER_CLIENT_CREATE_TYPE, &conObj);
+				if (kr != KERN_SUCCESS) LogMsg("ActivateLocalProxy: IOServiceOpen for %s/%s/%s failed %d", ifname, n1, n2, kr);
+				else
+					{
+					mDNSOffloadCmd cmd;
+					mDNSPlatformMemZero(&cmd, sizeof(cmd)); // When compiling 32-bit, make sure top 32 bits of 64-bit pointers get initialized to zero
+					cmd.command       = cmd_mDNSOffloadRR;
+					cmd.numUDPPorts   = GetPortArray(m, mDNSTransport_UDP, mDNSNULL);
+					cmd.numTCPPorts   = GetPortArray(m, mDNSTransport_TCP, mDNSNULL);
+					cmd.numRRRecords  = CountProxyRecords(m, &cmd.rrBufferSize);
+					cmd.compression   = sizeof(DNSMessageHeader);
+
+					DNSMessage *msg = (DNSMessage *)mallocL("mDNSOffloadCmd msg", sizeof(DNSMessageHeader) + cmd.rrBufferSize);
+					cmd.rrRecords.ptr = mallocL("mDNSOffloadCmd rrRecords", cmd.numRRRecords * sizeof(FatPtr));
+					cmd.udpPorts .ptr = mallocL("mDNSOffloadCmd udpPorts",  cmd.numUDPPorts  * sizeof(mDNSIPPort));
+					cmd.tcpPorts .ptr = mallocL("mDNSOffloadCmd tcpPorts",  cmd.numTCPPorts  * sizeof(mDNSIPPort));
+
+					LogSPS("ActivateLocalProxy: msg %p %d RR %p %d, UDP %p %d, TCP %p %d",
+						msg, cmd.rrBufferSize,
+						cmd.rrRecords.ptr, cmd.numRRRecords,
+						cmd.udpPorts .ptr, cmd.numUDPPorts,
+						cmd.tcpPorts .ptr, cmd.numTCPPorts);
+
+					if (!msg || !cmd.rrRecords.ptr || !cmd.udpPorts.ptr || !cmd.tcpPorts.ptr)
+						LogMsg("ActivateLocalProxy: Failed to allocate memory: msg %p %d RR %p %d, UDP %p %d, TCP %p %d",
+						msg, cmd.rrBufferSize,
+						cmd.rrRecords.ptr, cmd.numRRRecords,
+						cmd.udpPorts .ptr, cmd.numUDPPorts,
+						cmd.tcpPorts .ptr, cmd.numTCPPorts);
+					else
+						{
+						GetProxyRecords(m, msg, cmd.rrBufferSize, cmd.rrRecords.ptr);
+						GetPortArray(m, mDNSTransport_UDP, cmd.udpPorts.ptr);
+						GetPortArray(m, mDNSTransport_TCP, cmd.tcpPorts.ptr);
+						char outputData[2];
+						size_t outputDataSize = sizeof(outputData);
+						kr = IOConnectCallStructMethod(conObj, 0, &cmd, sizeof(cmd), outputData, &outputDataSize);
+						LogSPS("ActivateLocalProxy: IOConnectCallStructMethod for %s/%s/%s %d", ifname, n1, n2, kr);
+						if (kr == KERN_SUCCESS) result = mStatus_NoError;
+						}
+
+				 	if (cmd.tcpPorts. ptr) freeL("mDNSOffloadCmd udpPorts",  cmd.tcpPorts .ptr);
+					if (cmd.udpPorts. ptr) freeL("mDNSOffloadCmd tcpPorts",  cmd.udpPorts .ptr);
+					if (cmd.rrRecords.ptr) freeL("mDNSOffloadCmd rrRecords", cmd.rrRecords.ptr);
+					if (msg)               freeL("mDNSOffloadCmd msg",       msg);
+					IOServiceClose(conObj);
+					}
+				}
+			CFRelease(ref);
+			}
+		IOObjectRelease(parent);
+		}
+	IOObjectRelease(service);
+	return result;
 	}
 
 #endif // APPLE_OSX_mDNSResponder

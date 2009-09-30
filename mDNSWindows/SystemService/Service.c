@@ -17,6 +17,15 @@
     Change History (most recent first):
     
 $Log: Service.c,v $
+Revision 1.49  2009/07/17 19:59:46  herscher
+<rdar://problem/7062660> Update the womp settings for each network adapter immediately preceding the call to mDNSCoreMachineSleep().
+
+Revision 1.48  2009/07/09 21:34:14  herscher
+<rdar://problem/3775717> SDK: Port mDNSNetMonitor to Windows. Refactor the system service slightly by removing the main() function from Service.c so that mDNSNetMonitor can link to functions defined in Service.c
+
+Revision 1.47  2009/07/07 21:35:06  herscher
+<rdar://problem/6713286> windows platform changes to support use as sleep proxy client
+
 Revision 1.46  2009/06/05 18:28:24  herscher
 <rdar://problem/6125087> mDNSResponder should be able to identify VPN adapters generically
 <rdar://problem/6885843> WIN7: Bonjour removes the default gateway entry and thereby breaks network connectivity
@@ -198,6 +207,7 @@ mDNSResponder Windows Service. Provides global Bonjour support with an IPC inter
 
 #include	"uds_daemon.h"
 #include	"GenLinkedList.h"
+#include	"Service.h"
 
 #include	"Resource.h"
 
@@ -215,6 +225,7 @@ mDNSResponder Windows Service. Provides global Bonjour support with an IPC inter
 	#include	<iphlpapi.h>
 	#include	<netioapi.h>
 	#include	<iptypes.h>
+	#include	<powrprof.h>
 #endif
 
 #ifndef HeapEnableTerminationOnCorruption
@@ -289,11 +300,6 @@ typedef struct Win32EventSource
 //===========================================================================================================================
 //	Prototypes
 //===========================================================================================================================
-#if defined(UNICODE)
-int __cdecl			wmain( int argc, LPTSTR argv[] );
-#else
-int __cdecl 		main( int argc, char *argv[] );
-#endif
 static void			Usage( void );
 static BOOL WINAPI	ConsoleControlHandler( DWORD inControlEvent );
 static OSStatus		InstallService( LPCTSTR inName, LPCTSTR inDisplayName, LPCTSTR inDescription, LPCTSTR inPath );
@@ -303,7 +309,6 @@ static OSStatus		GetServiceParameters();
 static OSStatus		CheckFirewall();
 static OSStatus		SetServiceInfo( SC_HANDLE inSCM, LPCTSTR inServiceName, LPCTSTR inDescription );
 static void			ReportStatus( int inType, const char *inFormat, ... );
-static OSStatus		RunDirect( int argc, LPTSTR argv[] );
 
 static void WINAPI	ServiceMain( DWORD argc, LPTSTR argv[] );
 static OSStatus		ServiceSetupEventLogging( void );
@@ -322,6 +327,7 @@ static void			EventSourceUnlock();
 static mDNSs32		udsIdle(mDNS * const inMDNS, mDNSs32 interval);
 static void			CoreCallback(mDNS * const inMDNS, mStatus result);
 static void			HostDescriptionChanged(mDNS * const inMDNS);
+static mDNSu8		SystemWakeForNetworkAccess( LARGE_INTEGER * timeout );
 static OSStatus		GetRouteDestination(DWORD * ifIndex, DWORD * address);
 static OSStatus		SetLLRoute( mDNS * const inMDNS );
 static bool			HaveRoute( PMIB_IPFORWARDROW rowExtant, unsigned long addr, unsigned long metric );
@@ -370,6 +376,8 @@ DEBUG_LOCAL bool						gServiceManageLLRouting = true;
 DEBUG_LOCAL int							gWaitCount				= 0;
 DEBUG_LOCAL HANDLE					*	gWaitList				= NULL;
 DEBUG_LOCAL HANDLE						gStopEvent				= NULL;
+DEBUG_LOCAL HANDLE						gSPSWakeupEvent			= NULL;
+DEBUG_LOCAL HANDLE						gSPSSleepEvent			= NULL;
 DEBUG_LOCAL CRITICAL_SECTION			gEventSourceLock;
 DEBUG_LOCAL GenLinkedList				gEventSources;
 DEBUG_LOCAL BOOL						gRetryFirewall			= FALSE;
@@ -386,13 +394,9 @@ mDNSlocal GetIpInterfaceEntryFunctionPtr		gGetIpInterfaceEntryFunctionPtr	= NULL
 #endif
 
 //===========================================================================================================================
-//	main
+//	Main
 //===========================================================================================================================
-#if defined(UNICODE)
-int __cdecl wmain( int argc, wchar_t * argv[] )
-#else
-int	__cdecl main( int argc, char *argv[] )
-#endif
+int	Main( int argc, LPTSTR argv[] )
 {
 	OSStatus		err;
 	BOOL			ok;
@@ -987,7 +991,7 @@ static void	ReportStatus( int inType, const char *inFormat, ... )
 //	RunDirect
 //===========================================================================================================================
 
-static OSStatus	RunDirect( int argc, LPTSTR argv[] )
+int	RunDirect( int argc, LPTSTR argv[] )
 {
 	OSStatus		err;
 	BOOL			initialized;
@@ -1160,7 +1164,7 @@ static DWORD WINAPI	ServiceControlHandler( DWORD inControl, DWORD inEventType, L
 	switch( inControl )
 	{
 		case SERVICE_CONTROL_STOP:
-			dlog( kDebugLevelNotice, DEBUG_NAME "ServiceControlHandler: SERVICE_CONTROL_STOP\n" );
+			dlog( kDebugLevelInfo, DEBUG_NAME "ServiceControlHandler: SERVICE_CONTROL_STOP\n" );
 			
 			ServiceStop();
 			setStatus = FALSE;
@@ -1170,10 +1174,42 @@ static DWORD WINAPI	ServiceControlHandler( DWORD inControl, DWORD inEventType, L
 
 			if (inEventType == PBT_APMSUSPEND)
 			{
+				LARGE_INTEGER timeout;
+
+				dlog( kDebugLevelInfo, DEBUG_NAME "ServiceControlHandler: PBT_APMSUSPEND\n" );
+
+				mDNSPlatformLock( &gMDNSRecord );
+				
+				gMDNSRecord.SystemWakeOnLANEnabled = SystemWakeForNetworkAccess( &timeout );
+				
+				if ( gMDNSRecord.SystemWakeOnLANEnabled )
+				{
+					ok = SetWaitableTimer( gSPSWakeupEvent, &timeout, 0, NULL, NULL, TRUE );
+					check( ok );
+				}
+
+				mDNSPlatformUnlock( &gMDNSRecord );
+
 				mDNSCoreMachineSleep(&gMDNSRecord, TRUE);
 			}
 			else if (inEventType == PBT_APMRESUMESUSPEND)
 			{
+				dlog( kDebugLevelInfo, DEBUG_NAME "ServiceControlHandler: PBT_APMRESUMESUSPEND\n" );
+
+				mDNSPlatformLock( &gMDNSRecord );
+
+				if ( gSPSWakeupEvent )
+				{
+					CancelWaitableTimer( gSPSWakeupEvent );
+				}
+
+				if ( gSPSSleepEvent )
+				{
+					CancelWaitableTimer( gSPSSleepEvent );
+				}
+
+				mDNSPlatformUnlock( &gMDNSRecord );
+
 				mDNSCoreMachineSleep(&gMDNSRecord, FALSE);
 			}
 		
@@ -1301,6 +1337,14 @@ static OSStatus	ServiceSpecificInitialize( int argc, LPTSTR argv[] )
 	err = translate_errno( gStopEvent, errno_compat(), kNoResourcesErr );
 	require_noerr( err, exit );
 
+	gSPSWakeupEvent = CreateWaitableTimer( NULL, FALSE, NULL );
+	err = translate_errno( gSPSWakeupEvent, (mStatus) GetLastError(), kUnknownErr );
+	require_noerr( err, exit );
+
+	gSPSSleepEvent = CreateWaitableTimer( NULL, FALSE, NULL );
+	err = translate_errno( gSPSSleepEvent, (mStatus) GetLastError(), kUnknownErr );
+	require_noerr( err, exit );
+
 	err = mDNS_Init( &gMDNSRecord, &gPlatformStorage, gRRCache, RR_CACHE_SIZE, mDNS_Init_AdvertiseLocalAddresses, CoreCallback, mDNS_Init_NoInitCallbackContext); 
 	require_noerr( err, exit);
 
@@ -1343,9 +1387,41 @@ static OSStatus	ServiceSpecificRun( int argc, LPTSTR argv[] )
 
 	timeout = ( gRetryFirewall ) ? kRetryFirewallPeriod : INFINITE;
 
-	while( (result = WaitForSingleObject( gStopEvent, timeout ) ) != WAIT_OBJECT_0 )
+	for ( ;; )
 	{
-		if ( result == WAIT_TIMEOUT )
+		HANDLE	waitList[ 3 ];
+
+		waitList[ 0 ] = gStopEvent;
+		waitList[ 1 ] = gSPSWakeupEvent;
+		waitList[ 2 ] = gSPSSleepEvent;
+
+		result = WaitForMultipleObjects( 3, waitList, FALSE, timeout );
+
+		if ( result == WAIT_OBJECT_0 )
+		{
+			break;
+		}
+		else if ( result == WAIT_OBJECT_0 + 1 )
+		{
+			__int64			temp;
+			LARGE_INTEGER	timeout;
+
+			dlog( kDebugLevelInfo, DEBUG_NAME "setting suspend event\n" );
+
+			// Stay awake for 60 seconds
+
+			temp				= -60 * 10000000;
+			timeout.LowPart		= (DWORD) ( temp & 0xFFFFFFFF );
+			timeout.HighPart	= (LONG)  ( temp >> 32 );
+
+			SetWaitableTimer( gSPSSleepEvent, &timeout, 0, NULL, NULL, TRUE );
+		}
+		else if ( result == WAIT_OBJECT_0 + 2 )
+		{
+			dlog( kDebugLevelInfo, DEBUG_NAME "suspending machine\n" );
+			SetSuspendState( FALSE, FALSE, FALSE );
+		}
+		else if ( result == WAIT_TIMEOUT )
 		{
 			OSStatus err;
 
@@ -1410,6 +1486,24 @@ static void	ServiceSpecificFinalize( int argc, LPTSTR argv[] )
 	// clean up the event sources mutex...no one should be using it now
 	//
 	DeleteCriticalSection(&gEventSourceLock);
+
+	if ( gSPSWakeupEvent )
+	{
+		CloseHandle( gSPSWakeupEvent );
+		gSPSWakeupEvent = NULL;
+	}
+
+	if ( gSPSSleepEvent )
+	{
+		CloseHandle( gSPSSleepEvent );
+		gSPSSleepEvent = NULL;
+	}
+
+	if ( gStopEvent )
+	{
+		CloseHandle( gStopEvent );
+		gStopEvent = NULL;
+	}
 
 	//
 	// clean up loaded library
@@ -1831,6 +1925,83 @@ static void
 EventSourceUnlock()
 {
 	LeaveCriticalSection(&gEventSourceLock);
+}
+
+
+//===========================================================================================================================
+//	SystemWakeForNetworkAccess
+//===========================================================================================================================
+
+mDNSu8
+SystemWakeForNetworkAccess( LARGE_INTEGER * timeout )
+{
+	HKEY					key = NULL;
+	DWORD					dwSize;
+	DWORD					enabled;
+	mDNSu8					ok;
+	SYSTEM_POWER_STATUS		powerStatus;
+	time_t					startTime;
+	time_t					nextWakeupTime;
+	time_t					delta;
+	__int64					delta64;
+	DWORD					err;
+
+	dlog( kDebugLevelInfo, DEBUG_NAME "SystemWakeForNetworkAccess\n" );
+
+	// Make sure we have a timer
+
+	require_action( gSPSWakeupEvent != NULL, exit, ok = FALSE );
+	require_action( gSPSSleepEvent != NULL, exit, ok = FALSE );
+
+	// Make sure the user enabled bonjour sleep proxy client 
+	
+	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\Power Management", &key );
+	require_action( !err, exit, ok = FALSE );
+	dwSize = sizeof( DWORD );
+	err = RegQueryValueEx( key, L"Enabled", NULL, NULL, (LPBYTE) &enabled, &dwSize );
+	require_action( !err, exit, ok = FALSE );
+	require_action( enabled, exit, ok = FALSE );
+	
+	// Make sure machine is on AC power
+	
+	ok = ( mDNSu8 ) GetSystemPowerStatus( &powerStatus );
+	require_action( ok, exit, ok = FALSE );
+	require_action( powerStatus.ACLineStatus == AC_LINE_ONLINE, exit, ok = FALSE );
+
+	// Now make sure we have a network interface that does wake-on-lan
+
+	UpdateWOMPConfig( &gMDNSRecord );
+	require_action( gMDNSRecord.p->womp, exit, ok = FALSE );
+
+	// Calculate next wake up time
+
+	startTime		= time( NULL );
+	nextWakeupTime	= startTime + ( 120 * 60 );
+	
+	if ( gMDNSRecord.p->nextDHCPLeaseExpires < nextWakeupTime )
+	{
+		nextWakeupTime = gMDNSRecord.p->nextDHCPLeaseExpires;
+	}
+
+	// Finally calculate the next relative wakeup time
+
+	delta = ( time_t ) ( ( ( double )( nextWakeupTime - startTime ) ) * 0.9 );
+	delta64 = -delta * 10000000;
+	timeout->LowPart  = (DWORD) ( delta64 & 0xFFFFFFFF );
+	timeout->HighPart = (LONG)  ( delta64 >> 32 );
+
+	dlog( kDebugLevelInfo, DEBUG_NAME "enabling sleep proxy client with next wakeup time %d seconds from now\n", delta );
+
+	ok = TRUE;
+
+exit:
+
+	if ( key )
+	{
+		RegCloseKey( key );
+	}
+
+	return ok;
 }
 
 

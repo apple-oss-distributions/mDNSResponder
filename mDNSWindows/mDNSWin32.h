@@ -17,6 +17,12 @@
     Change History (most recent first):
     
 $Log: mDNSWin32.h,v $
+Revision 1.30  2009/07/17 19:59:46  herscher
+<rdar://problem/7062660> Update the womp settings for each network adapter immediately preceding the call to mDNSCoreMachineSleep().
+
+Revision 1.29  2009/07/07 21:34:58  herscher
+<rdar://problem/6713286> windows platform changes to support use as sleep proxy client
+
 Revision 1.28  2009/04/24 04:55:26  herscher
 <rdar://problem/3496833> Advertise SMB file sharing via Bonjour
 
@@ -211,6 +217,8 @@ struct	mDNS_PlatformSupport_struct
 	HANDLE						firewallEvent;		// Firewall changed
 	HANDLE						wakeupEvent;
 	HANDLE						initEvent;
+	time_t						nextDHCPLeaseExpires;
+	mDNSBool					womp;				// Does any interface support wake-on-magic-packet
 	HKEY						descKey;
 	HKEY						tcpipKey;
 	HKEY						ddnsKey;
@@ -257,6 +265,9 @@ struct ifaddrs
 	struct sockaddr	*	ifa_netmask;
 	struct sockaddr	*	ifa_broadaddr;
 	struct sockaddr	*	ifa_dstaddr;
+	BOOL				ifa_dhcpEnabled;
+	time_t				ifa_dhcpLeaseExpires;
+	mDNSu8				ifa_womp;
 	void *				ifa_data;
 	
 	struct
@@ -265,6 +276,9 @@ struct ifaddrs
 	
 	}	ifa_extra;
 };
+
+
+extern void UpdateWOMPConfig();
 
 
 #ifdef	__cplusplus

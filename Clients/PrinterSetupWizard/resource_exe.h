@@ -51,6 +51,8 @@
 #define IDS_PRINTER_UNAVAILABLE         145
 #define IDS_BAD_INF_FILE				150
 #define IDS_BAD_INF_FILE_CAPTION		151
+#define IDS_NO_MATCH_INF_FILE			152
+#define IDS_NO_MATCH_INF_FILE_CAPTION	153
 #define IDC_BUTTON1                     1000
 #define IDC_LIST1                       1000
 #define IDC_BROWSE_LIST                 1000

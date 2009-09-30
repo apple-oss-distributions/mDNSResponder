@@ -54,6 +54,13 @@
     Change History (most recent first):
 
 $Log: mDNSEmbeddedAPI.h,v $
+Revision 1.575  2009/07/11 01:57:00  cheshire
+<rdar://problem/6613674> Sleep Proxy: Add support for using sleep proxy in local network interface hardware
+Added declaration of ActivateLocalProxy
+
+Revision 1.574  2009/07/10 23:03:17  cheshire
+Made SecondLabel(X) more defensive, to guard against the case where the name doesn't have a second label
+
 Revision 1.573  2009/06/30 18:17:45  herscher
 Add to 64 bit macro check for 64 bit Windows OSes
 
@@ -1210,6 +1217,13 @@ enum
 	mDNSAddrType_IPv4    = 4,
 	mDNSAddrType_IPv6    = 6,
 	mDNSAddrType_Unknown = ~0	// Special marker value used in known answer list recording
+	};
+
+enum
+	{
+	mDNSTransport_None = 0,
+	mDNSTransport_UDP  = 1,
+	mDNSTransport_TCP  = 2
 	};
 
 typedef struct
@@ -2562,7 +2576,8 @@ struct mDNS_struct
 	mDNSs32  DelaySleep;				// To inhibit re-sleeping too quickly right after wake
 	mDNSs32  SleepLimit;				// Time window to allow deregistrations, etc.,
 										// during which underying platform layer should inhibit system sleep
-	mDNSs32  NextScheduledSPRetry;		// Time next sleep proxy registration action is required. Only valid if SleepLimit is nonzero.
+	mDNSs32  NextScheduledSPRetry;		// Time next sleep proxy registration action is required.
+										// Only valid if SleepLimit is nonzero and DelaySleep is zero.
 
 	// These fields only required for mDNS Searcher...
 	DNSQuestion *Questions;				// List of all registered questions, active and inactive
@@ -2700,6 +2715,7 @@ extern const mDNSIPPort   DiscardPort;
 extern const mDNSIPPort   SSHPort;
 extern const mDNSIPPort   UnicastDNSPort;
 extern const mDNSIPPort   SSDPPort;
+extern const mDNSIPPort   IPSECPort;
 extern const mDNSIPPort   NSIPCPort;
 extern const mDNSIPPort   NATPMPAnnouncementPort;
 extern const mDNSIPPort   NATPMPPort;
@@ -2979,8 +2995,12 @@ extern mDNSBool SameDomainName(const domainname *const d1, const domainname *con
 extern mDNSBool SameDomainNameCS(const domainname *const d1, const domainname *const d2);
 extern mDNSBool IsLocalDomain(const domainname *d);     // returns true for domains that by default should be looked up using link-local multicast
 
+#define StripFirstLabel(X) ((const domainname *)&(X)->c[(X)->c[0] ? 1 + (X)->c[0] : 0])
+
 #define FirstLabel(X)  ((const domainlabel *)(X))
-#define SecondLabel(X) ((const domainlabel *)&(X)->c[1 + (X)->c[0]])
+#define SecondLabel(X) ((const domainlabel *)StripFirstLabel(X))
+#define ThirdLabel(X)  ((const domainlabel *)StripFirstLabel(StripFirstLabel(X)))
+
 extern const mDNSu8 *LastLabel(const domainname *d);
 
 // Get total length of domain name, in native DNS format, including terminal root label
@@ -3377,7 +3397,7 @@ extern void     mDNSCoreReceive(mDNS *const m, void *const msg, const mDNSu8 *co
 extern void 	mDNSCoreRestartQueries(mDNS *const m);
 extern mDNSBool mDNSCoreHaveAdvertisedMulticastServices(mDNS *const m);
 extern void     mDNSCoreMachineSleep(mDNS *const m, mDNSBool wake);
-extern mDNSBool mDNSCoreReadyForSleep(mDNS *m);
+extern mDNSBool mDNSCoreReadyForSleep(mDNS *m, mDNSs32 now);
 extern mDNSs32  mDNSCoreIntervalToNextWake(mDNS *const m, mDNSs32 now);
 
 extern void     mDNSCoreBeSleepProxyServer(mDNS *const m, mDNSu8 sps, mDNSu8 port, mDNSu8 marginalpower, mDNSu8 totpower);
@@ -3406,6 +3426,7 @@ extern void AutoTunnelCallback(mDNS *const m, DNSQuestion *question, const Resou
 extern void AddNewClientTunnel(mDNS *const m, DNSQuestion *const q);
 extern void SetupLocalAutoTunnelInterface_internal(mDNS *const m);
 extern void UpdateAutoTunnelDomainStatuses(const mDNS *const m);
+extern mStatus ActivateLocalProxy(mDNS *const m, char *ifname);
 #endif
 
 // ***************************************************************************

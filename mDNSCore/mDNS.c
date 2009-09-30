@@ -38,8 +38,12 @@
     Change History (most recent first):
 
 $Log: mDNS.c,v $
-Revision 1.969.2.1  2009/07/23 23:41:25  cheshire
+Revision 1.970.2.1  2009/07/23 23:36:04  cheshire
 <rdar://problem/7086623> Sleep Proxy: Ten-second maintenance wake not long enough to reliably get network connectivity
+
+Revision 1.970  2009/07/11 01:59:27  cheshire
+<rdar://problem/6613674> Sleep Proxy: Add support for using sleep proxy in local network interface hardware
+When going to sleep, try calling ActivateLocalProxy before registering with remote sleep proxy
 
 Revision 1.969  2009/06/30 21:18:19  cheshire
 <rdar://problem/7020041> Plugging and unplugging the power cable shouldn't cause a network change event
@@ -3886,6 +3890,21 @@ mDNSexport void AnswerCurrentQuestionWithResourceRecord(mDNS *const m, CacheReco
 		// which we would subsequently cancel and retract if the CNAME referral record were removed.
 		// In reality this is such a corner case we'll ignore it until someone actually needs it.
 		LogInfo("AnswerCurrentQuestionWithResourceRecord: following CNAME referral for %s", CRDisplayString(m, rr));
+		
+		// If this query is a duplicate of another query, UpdateQuestionDuplicates called from
+		// mDNS_StopQuery_internal copies the value of CNAMEReferrals from this query to the other
+		// query on the Questions list. By setting the new value before calling mDNS_StopQuery_internal,
+		// we ensure that the duplicate question gets a hgigher value and eventually the check for 10 above
+		// would be true. Otherwise, the two queries would end up as active questions
+		// sending mDNSResponder in an infinite loop e.g., Two queries starting off unique but receives
+		// a CNAME response that refers to itself (test IN CNAME test) which makes it a duplicate of
+		// one another. This fix now will make sure that stop at the 10th iteration. 
+		//
+		// Though CNAME records that refer to itself are not added anymore in mDNSCoreReceiveResponse, this fix is
+		// still needed to catch the cases where the CNAME referral spans across multiple records with a potential
+		// cycle in it which in turn can make multiple queries duplicate of each other
+		
+		q->CNAMEReferrals = c;	
 		mDNS_StopQuery_internal(m, q);								// Stop old query
 		AssignDomainName(&q->qname, &rr->resrec.rdata->u.name);		// Update qname
 		q->qnamehash = DomainNameHashValue(&q->qname);				// and namehash
@@ -4130,7 +4149,7 @@ mDNSlocal void CheckCacheExpiration(mDNS *const m, CacheGroup *const cg)
 		if (m->timenow - event >= 0)	// If expired, delete it
 			{
 			*rp = rr->next;				// Cut it from the list
-			verbosedebugf("CheckCacheExpiration: Deleting%7d %4d %p %s",
+			verbosedebugf("CheckCacheExpiration: Deleting%7d %7d %p %s",
 				m->timenow - rr->TimeRcvd, rr->resrec.rroriginalttl, rr->CRActiveQuestion, CRDisplayString(m, rr));
 			if (rr->CRActiveQuestion)	// If this record has one or more active questions, tell them it's going away
 				{
@@ -4877,6 +4896,8 @@ mDNSlocal void NetWakeResolve(mDNS *const m, DNSQuestion *question, const Resour
 	if (!AddRecord) return;												// Don't care about REMOVE events
 	if (answer->rrtype != question->qtype) return;						// Don't care about CNAMEs
 
+	// if (answer->rrtype == kDNSType_AAAA) return;	// To test failing to resolve sleep proxy's address
+
 	mDNS_StopQuery(m, question);
 	question->ThisQInterval = -1;
 
@@ -4920,9 +4941,27 @@ mDNSexport mDNSBool mDNSCoreHaveAdvertisedMulticastServices(mDNS *const m)
 	return mDNSfalse;
 	}
 
+mDNSlocal void SendSleepGoodbyes(mDNS *const m)
+	{
+	AuthRecord *rr;
+	m->SleepState = SleepState_Sleeping;
+
+#ifndef UNICAST_DISABLED
+	SleepServiceRegistrations(m);
+	SleepRecordRegistrations(m);	// If we have no SPS, need to deregister our uDNS records
+#endif
+
+	// Mark all the records we need to deregister and send them
+	for (rr = m->ResourceRecords; rr; rr=rr->next)
+		if (rr->resrec.RecordType == kDNSRecordTypeShared && rr->RequireGoodbye)
+			rr->ImmedAnswer = mDNSInterfaceMark;
+	SendResponses(m);
+	}
+
 // BeginSleepProcessing is called, with the lock held, from either mDNS_Execute or mDNSCoreMachineSleep
 mDNSlocal void BeginSleepProcessing(mDNS *const m)
 	{
+	mDNSBool SendGoodbyes = mDNStrue;
 	const CacheRecord *sps[3] = { mDNSNULL };
 
 	m->NextScheduledSPRetry = m->timenow;
@@ -4935,6 +4974,16 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
 		for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
 			{
 			if (!intf->NetWake) LogSPS("BeginSleepProcessing: %-6s not capable of magic packet wakeup", intf->ifname);
+#if APPLE_OSX_mDNSResponder
+			else if (ActivateLocalProxy(m, intf->ifname) == mStatus_NoError)
+				{
+				SendGoodbyes = mDNSfalse;
+				LogSPS("BeginSleepProcessing: %-6s using local proxy", intf->ifname);
+				// This will leave m->SleepState set to SleepState_Transferring,
+				// which is okay because with no outstanding resolves, or updates in flight,
+				// mDNSCoreReadyForSleep() will conclude correctly that all the updates have already completed
+				}
+#endif // APPLE_OSX_mDNSResponder
 			else
 				{
 				FindSPSInCache(m, &intf->NetWakeBrowse, sps);
@@ -4942,6 +4991,7 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
 				else
 					{
 					int i;
+					SendGoodbyes = mDNSfalse;
 					intf->NextSPSAttempt = 0;
 					intf->NextSPSAttemptTime = m->timenow + mDNSPlatformOneSecond;
 					// Don't need to set m->NextScheduledSPRetry here because we already set "m->NextScheduledSPRetry = m->timenow" above
@@ -4969,22 +5019,10 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
 			}
 		}
 
-	if (!sps[0])	// If we didn't find even one Sleep Proxy
+	if (SendGoodbyes)	// If we didn't find even one Sleep Proxy
 		{
-		AuthRecord *rr;
 		LogSPS("BeginSleepProcessing: Not registering with Sleep Proxy Server");
-		m->SleepState = SleepState_Sleeping;
-
-#ifndef UNICAST_DISABLED
-		SleepServiceRegistrations(m);
-		SleepRecordRegistrations(m);	// If we have no SPS, need to deregister our uDNS records
-#endif
-
-		// Mark all the records we need to deregister and send them
-		for (rr = m->ResourceRecords; rr; rr=rr->next)
-			if (rr->resrec.RecordType == kDNSRecordTypeShared && rr->RequireGoodbye)
-				rr->ImmedAnswer = mDNSInterfaceMark;
-		SendResponses(m);
+		SendSleepGoodbyes(m);
 		}
 	}
 
@@ -5103,7 +5141,7 @@ mDNSexport void mDNSCoreMachineSleep(mDNS *const m, mDNSBool sleep)
 	mDNS_Unlock(m);
 	}
 
-mDNSexport mDNSBool mDNSCoreReadyForSleep(mDNS *m)
+mDNSexport mDNSBool mDNSCoreReadyForSleep(mDNS *m, mDNSs32 now)
 	{
 	DNSQuestion *q;
 	AuthRecord *rr;
@@ -5112,25 +5150,42 @@ mDNSexport mDNSBool mDNSCoreReadyForSleep(mDNS *m)
 
 	mDNS_Lock(m);
 
-	if (m->NextScheduledSPRetry - m->timenow > 0) goto notready;
-
-	m->NextScheduledSPRetry = m->timenow + 0x40000000UL;
-
 	if (m->DelaySleep) goto notready;
+
+	// If we've not hit the sleep limit time, and it's not time for our next retry, we can skip these checks
+	if (m->SleepLimit - now > 0 && m->NextScheduledSPRetry - now > 0) goto notready;
+
+	m->NextScheduledSPRetry = now + 0x40000000UL;
 
 	// See if we might need to retransmit any lost Sleep Proxy Registrations
 	for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
 		if (intf->NextSPSAttempt >= 0)
 			{
-			if (m->timenow - intf->NextSPSAttemptTime >= 0)
+			if (now - intf->NextSPSAttemptTime >= 0)
 				{
 				LogSPS("ReadyForSleep retrying SPS %s %d", intf->ifname, intf->NextSPSAttempt);
 				SendSPSRegistration(m, intf, zeroID);
+				// Don't need to "goto notready" here, becase if we do still have record registrations
+				// that have not been acknowledged yet, we'll catch that in the record list scan below.
 				}
 			else
 				if (m->NextScheduledSPRetry - intf->NextSPSAttemptTime > 0)
 					m->NextScheduledSPRetry = intf->NextSPSAttemptTime;
 			}
+
+	// Scan list of interfaces, and see if we're still waiting for any sleep proxy resolves to complete
+	for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
+		if (intf->NetWakeResolve[0].ThisQInterval >= 0)
+			{
+			LogSPS("ReadyForSleep waiting for SPS Resolve %s %##s (%s)", intf->ifname, intf->NetWakeResolve[0].qname.c, DNSTypeName(intf->NetWakeResolve[0].qtype));
+			goto spsnotready;
+			}
+
+	// Scan list of registered records
+	for (rr = m->ResourceRecords; rr; rr = rr->next)
+		if (!AuthRecord_uDNS(rr))
+			if (!mDNSOpaque16IsZero(rr->updateid))
+				{ LogSPS("ReadyForSleep waiting for SPS Update ID %d %s", mDNSVal16(rr->updateid), ARDisplayString(m,rr)); goto spsnotready; }
 
 	// Scan list of private LLQs, and make sure they've all completed their handshake with the server
 	for (q = m->Questions; q; q = q->next)
@@ -5140,28 +5195,11 @@ mDNSexport mDNSBool mDNSCoreReadyForSleep(mDNS *m)
 			goto notready;
 			}
 
-	// Scan list of interfaces
-	for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
-		if (intf->NetWakeResolve[0].ThisQInterval >= 0)
-			{
-			LogSPS("ReadyForSleep waiting for SPS Resolve %s %##s (%s)", intf->ifname, intf->NetWakeResolve[0].qname.c, DNSTypeName(intf->NetWakeResolve[0].qtype));
-			goto notready;
-			}
-
 	// Scan list of registered records
 	for (rr = m->ResourceRecords; rr; rr = rr->next)
-		{
 		if (AuthRecord_uDNS(rr))
-			{
 			if (rr->state == regState_Refresh && rr->tcp)
 				{ LogSPS("ReadyForSleep waiting for Record Update ID %d %s", mDNSVal16(rr->updateid), ARDisplayString(m,rr)); goto notready; }
-			}
-		else
-			{
-			if (!mDNSOpaque16IsZero(rr->updateid))
-				{ LogSPS("ReadyForSleep waiting for SPS Update ID %d %s", mDNSVal16(rr->updateid), ARDisplayString(m,rr)); goto notready; }
-			}
-		}
 
 	// Scan list of registered services
 	for (srs = m->ServiceRegistrations; srs; srs = srs->uDNS_next)
@@ -5169,6 +5207,40 @@ mDNSexport mDNSBool mDNSCoreReadyForSleep(mDNS *m)
 
 	mDNS_Unlock(m);
 	return mDNStrue;
+
+spsnotready:
+
+	// If we failed to complete sleep proxy registration within ten seconds, we give up on that
+	// and allow up to ten seconds more to complete wide-area deregistration instead
+	if (now - m->SleepLimit >= 0)
+		{
+		LogMsg("Failed to register with SPS, now sending goodbyes");
+
+		for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
+			if (intf->NetWakeBrowse.ThisQInterval >= 0)
+				{
+				LogSPS("ReadyForSleep mDNS_DeactivateNetWake %s %##s (%s)", intf->ifname, intf->NetWakeResolve[0].qname.c, DNSTypeName(intf->NetWakeResolve[0].qtype));
+				mDNS_DeactivateNetWake_internal(m, intf);
+				}
+
+		for (rr = m->ResourceRecords; rr; rr = rr->next)
+			if (!AuthRecord_uDNS(rr))
+				if (!mDNSOpaque16IsZero(rr->updateid))
+					{
+					LogSPS("ReadyForSleep clearing updateid for %s", ARDisplayString(m, rr));
+					rr->updateid = zeroID;
+					}
+
+		// We'd really like to allow up to ten seconds more here,
+		// but if we don't respond to the sleep notification within 30 seconds
+		// we'll be put back to sleep forcibly without the chance to schedule the next maintenance wake.
+		// Right now we wait 16 sec after wake for all the interfaces to come up, then we wait up to 10 seconds
+		// more for SPS resolves and record registrations to complete, which puts us at 26 seconds.
+		// If we allow just one more second to send our goodbyes, that puts us at 27 seconds.
+		m->SleepLimit = now + mDNSPlatformOneSecond * 1;
+
+		SendSleepGoodbyes(m);
+		}
 
 notready:
 	mDNS_Unlock(m);
@@ -6177,8 +6249,8 @@ mDNSlocal mDNSu32 GetEffectiveTTL(const uDNS_LLQType LLQType, mDNSu32 ttl)		// T
 	else	// else not LLQ (standard uDNS response)
 		{
 		// The TTL is already capped to a maximum value in GetLargeResourceRecord, but just to be extra safe we
-		// also do this check here to make sure we can't get integer overflow below
-		if (ttl > 0x8000000UL) ttl = 0x8000000UL;
+		// also do this check here to make sure we can't get overflow below when we add a quarter to the TTL
+		if (ttl > 0x60000000UL / mDNSPlatformOneSecond) ttl = 0x60000000UL / mDNSPlatformOneSecond;
 
 		// Adjustment factor to avoid race condition:
 		// Suppose real record as TTL of 3600, and our local caching server has held it for 3500 seconds, so it returns an aged TTL of 100.
@@ -6338,6 +6410,14 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 		// Don't want to cache OPT or TSIG pseudo-RRs
 		if (m->rec.r.resrec.rrtype == kDNSType_OPT || m->rec.r.resrec.rrtype == kDNSType_TSIG)
 			{ m->rec.r.resrec.RecordType = 0; continue; }
+			
+		// if a CNAME record points to itself, then don't add it to the cache
+		if ((m->rec.r.resrec.rrtype == kDNSType_CNAME) && SameDomainName(m->rec.r.resrec.name, &m->rec.r.resrec.rdata->u.name))
+			{ 
+			LogInfo("mDNSCoreReceiveResponse: CNAME loop domain name %##s", m->rec.r.resrec.name->c);
+			m->rec.r.resrec.RecordType = 0; 
+			continue; 
+			}
 		
 		// When we receive uDNS LLQ responses, we assume a long cache lifetime --
 		// In the case of active LLQs, we'll get remove events when the records actually do go away
@@ -8327,7 +8407,7 @@ mDNSexport mStatus mDNS_RegisterInterface(mDNS *const m, NetworkInterfaceInfo *s
 		
 		if (flapping)
 			{
-			LogMsg("Note: RegisterInterface: Frequent transitions for interface %s (%#a); network traffic reduction measures in effect",
+			LogMsg("RegisterInterface: Frequent transitions for interface %s (%#a)",
 				set->ifname, &set->ip);
 			if (!m->SuppressProbes ||
 				m->SuppressProbes - (m->timenow + delay) < 0)
@@ -8438,7 +8518,7 @@ mDNSexport void mDNS_DeregisterInterface(mDNS *const m, NetworkInterfaceInfo *se
 				" marking questions etc. dormant", set->InterfaceID, set->ifname, &set->ip);
 
 			if (flapping)
-				LogMsg("Note: DeregisterInterface: Frequent transitions for interface %s (%#a); network traffic reduction measures in effect",
+				LogMsg("DeregisterInterface: Frequent transitions for interface %s (%#a)",
 					set->ifname, &set->ip);
 
 			// 1. Deactivate any questions specific to this interface, and tag appropriate questions
@@ -9165,11 +9245,11 @@ mDNSexport void mDNSCoreReceiveRawPacket(mDNS *const m, const mDNSu8 *const p, c
 					if (rr->resrec.InterfaceID == InterfaceID &&
 						rr->AddressProxy.type == mDNSAddrType_IPv4 && mDNSSameIPv4Address(rr->AddressProxy.ip.v4, v4->dst))
 						{
-						const mDNSu8 *const tp = (v4->protocol == 6) ? (mDNSu8 *)"\x4_tcp" : (mDNSu8 *)"\x4_udp";
+						const mDNSu8 *const tp = (v4->protocol == 6) ? (const mDNSu8 *)"\x4_tcp" : (const mDNSu8 *)"\x4_udp";
 						for (r2 = m->ResourceRecords; r2; r2=r2->next)
 							if (r2->resrec.InterfaceID == InterfaceID && mDNSSameEthAddress(&r2->WakeUp.HMAC, &rr->WakeUp.HMAC) &&
 								r2->resrec.rrtype == kDNSType_SRV && mDNSSameIPPort(r2->resrec.rdata->u.srv.port, port) &&
-								SameDomainLabel(SkipLeadingLabels(r2->resrec.name, 2)->c, tp))
+								SameDomainLabel(ThirdLabel(r2->resrec.name)->c, tp))
 								break;
 						if (!r2 && mDNSSameIPPort(port, IPSEC)) r2 = rr;	// So that we wake for BTMM IPSEC packets, even without a matching SRV record
 						if (r2)

@@ -17,6 +17,9 @@
     Change History (most recent first):
     
 $Log: Secret.c,v $
+Revision 1.3  2009/07/17 19:50:25  herscher
+<rdar://problem/5265747> ControlPanel doesn't display key and password in dialog box
+
 Revision 1.2  2009/06/25 21:11:52  herscher
 Fix compilation error when building Control Panel.
 
@@ -46,7 +49,7 @@ mDNSlocal OSStatus MakeUTF8StringFromLsaString( char * output, size_t len, PLSA_
 
 
 BOOL
-LsaGetSecret( const char * inDomain, char * outDomain, unsigned outDomainLength, char * outKey, unsigned outKeyLength, char * outSecret, unsigned outSecretLength )
+LsaGetSecret( const char * inDomain, char * outDomain, unsigned outDomainSize, char * outKey, unsigned outKeySize, char * outSecret, unsigned outSecretSize )
 {
 	PLSA_UNICODE_STRING		domainLSA;
 	PLSA_UNICODE_STRING		keyLSA;
@@ -69,21 +72,23 @@ LsaGetSecret( const char * inDomain, char * outDomain, unsigned outDomainLength,
 	keyLSA		= NULL;
 	secretLSA	= NULL;
 
+	// Make sure we have enough space to add trailing dot
+
+	dlen = strlen( inDomain );
+	err = strcpy_s( outDomain, outDomainSize - 2, inDomain );
+	require_noerr( err, exit );
+
 	// If there isn't a trailing dot, add one because the mDNSResponder
 	// presents names with the trailing dot.
 
-	strcpy_s( outDomain, outDomainLength, inDomain );
-	dlen = strlen( outDomain );
-	
 	if ( outDomain[ dlen - 1 ] != '.' )
 	{
-		outDomain[ dlen ] = '.';
-		outDomain[ dlen + 1 ] = '\0';
+		outDomain[ dlen++ ] = '.';
+		outDomain[ dlen ] = '\0';
 	}
 
 	// Canonicalize name by converting to lower case (keychain and some name servers are case sensitive)
 
-	dlen = strlen( outDomain );
 	for ( i = 0; i < dlen; i++ )
 	{
 		outDomain[i] = (char) tolower( outDomain[i] );  // canonicalize -> lower case
@@ -113,11 +118,10 @@ LsaGetSecret( const char * inDomain, char * outDomain, unsigned outDomainLength,
 	require_noerr_quiet( err, exit );
 
 	// <rdar://problem/4192119> Lsa secrets use a flat naming space.  Therefore, we will prepend "$" to the keyname to
-	// make sure it doesn't conflict with a zone name.
-	
+	// make sure it doesn't conflict with a zone name.	
 	// Strip off the "$" prefix.
 
-	err = MakeUTF8StringFromLsaString( outKey, outKeyLength, keyLSA );
+	err = MakeUTF8StringFromLsaString( outKey, outKeySize, keyLSA );
 	require_noerr( err, exit );
 	require_action( outKey[0] == '$', exit, err = kUnknownErr );
 	memcpy( outKey, outKey + 1, strlen( outKey ) );
@@ -130,7 +134,7 @@ LsaGetSecret( const char * inDomain, char * outDomain, unsigned outDomainLength,
 
 	// Convert the secret to UTF8 string
 
-	err = MakeUTF8StringFromLsaString( outSecret, outSecretLength, secretLSA );
+	err = MakeUTF8StringFromLsaString( outSecret, outSecretSize, secretLSA );
 	require_noerr( err, exit );
 
 exit:
@@ -185,21 +189,19 @@ LsaSetSecret( const char * inDomain, const char * inKey, const char * inSecret )
 	require_action( inKey != NULL, exit, ok = FALSE );
 	require_action( inSecret != NULL, exit, ok = FALSE );
 
-	inDomainLength = strlen( inDomain );
-	require_action( ( inDomainLength > 0 ) && ( inDomainLength < sizeof( domain ) ), exit, ok = FALSE );
-
-	inKeyLength = strlen( inKey );
-	require_action( ( inKeyLength > 0 ) && ( inKeyLength < ( sizeof( key ) - 1 ) ), exit, ok = FALSE );
-
 	// If there isn't a trailing dot, add one because the mDNSResponder
 	// presents names with the trailing dot.
 
 	ZeroMemory( domain, sizeof( domain ) );
-	strcpy_s( domain, sizeof( domain ), inDomain );
+	inDomainLength = strlen( inDomain );
+	require_action( inDomainLength > 0, exit, ok = FALSE );
+	err = strcpy_s( domain, sizeof( domain ) - 2, inDomain );
+	require_action( !err, exit, ok = FALSE );
 
-	if ( domain[ strlen( domain ) - 1 ] != '.' )
+	if ( domain[ inDomainLength - 1 ] != '.' )
 	{
-		domain[ strlen( domain ) - 1 ] = '.';
+		domain[ inDomainLength++ ] = '.';
+		domain[ inDomainLength ] = '\0';
 	}
 
 	// <rdar://problem/4192119>
@@ -209,12 +211,17 @@ LsaSetSecret( const char * inDomain, const char * inKey, const char * inSecret )
 	// name
 
 	ZeroMemory( key, sizeof( key ) );
+	inKeyLength = strlen( inKey );
+	require_action( inKeyLength > 0 , exit, ok = FALSE );
 	key[ 0 ] = '$';
-	strcpy_s( key + 1, sizeof( key ) - 1, inKey );
+	err = strcpy_s( key + 1, sizeof( key ) - 3, inKey );
+	require_action( !err, exit, ok = FALSE );
+	inKeyLength++;
 
-	if ( key[ strlen( key ) - 1 ] != '.' )
+	if ( key[ inKeyLength - 1 ] != '.' )
 	{
-		key[ strlen( key ) - 1 ] = '.';
+		key[ inKeyLength++ ] = '.';
+		key[ inKeyLength ] = '\0';
 	}
 
 	// attrs are reserved, so initialize to zeroes.
@@ -229,16 +236,13 @@ LsaSetSecret( const char * inDomain, const char * inKey, const char * inSecret )
 
 	// Intializing PLSA_UNICODE_STRING structures
 
-	ok = MakeLsaStringFromUTF8String( &lucZoneName, domain );
-	err = translate_errno( ok, errno_compat(), kUnknownErr );
-	require_noerr( err, exit );
- 
-	ok = MakeLsaStringFromUTF8String( &lucKeyName, key );
-	err = translate_errno( ok, errno_compat(), kUnknownErr );
+	err = MakeLsaStringFromUTF8String( &lucZoneName, domain );
 	require_noerr( err, exit );
 
-	ok = MakeLsaStringFromUTF8String( &lucSecretName, inSecret );
-	err = translate_errno( ok, errno_compat(), kUnknownErr );
+	err = MakeLsaStringFromUTF8String( &lucKeyName, key );
+	require_noerr( err, exit );
+
+	err = MakeLsaStringFromUTF8String( &lucSecretName, inSecret );
 	require_noerr( err, exit );
 
 	// Store the private data.
