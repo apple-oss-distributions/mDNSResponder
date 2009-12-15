@@ -70,6 +70,14 @@ cl dns-sd.c -I../mDNSShared -DNOT_HAVE_GETOPT ws2_32.lib ..\mDNSWindows\DLL\Rele
 // aren't in the system's /usr/lib/libSystem.dylib.
 //#define TEST_NEW_CLIENTSTUB 1
 
+// When building mDNSResponder for Mac OS X 10.4 and earlier, /usr/lib/libSystem.dylib is built using its own private
+// copy of dnssd_clientstub.c, which is old and doesn't have all the entry points defined in the latest version, so
+// when we're building dns-sd.c on Mac OS X 10.4 or earlier, we automatically set TEST_NEW_CLIENTSTUB so that we'll
+// embed a copy of the latest dnssd_clientstub.c instead of trying to link to the incomplete version in libSystem.dylib
+#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ <= 1040
+#define TEST_NEW_CLIENTSTUB 1
+#endif
+
 #include <ctype.h>
 #include <stdio.h>			// For stdout, stderr
 #include <stdlib.h>			// For exit()

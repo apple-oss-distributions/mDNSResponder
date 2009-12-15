@@ -255,6 +255,7 @@ struct NetworkInterfaceInfoOSX_struct
 	u_int                    BPF_len;
 	CFSocketRef              BPF_cfs;
 	CFRunLoopSourceRef       BPF_rls;
+	NetworkInterfaceInfoOSX	*Registered;		// non-NULL means registered with mDNS Core
 	};
 
 struct mDNS_PlatformSupport_struct
@@ -312,6 +313,7 @@ extern void NotifyOfElusiveBug(const char *title, const char *msg);	// Both stri
 extern void SetDomainSecrets(mDNS *m);
 extern void mDNSMacOSXNetworkChanged(mDNS *const m);
 extern int mDNSMacOSXSystemBuildNumber(char *HINFO_SWstring);
+extern NetworkInterfaceInfoOSX *IfindexToInterfaceInfoOSX(const mDNS *const m, mDNSInterfaceID ifindex);
 
 extern int KQueueSet(int fd, u_short flags, short filter, const KQueueEntry *const entryRef);
 

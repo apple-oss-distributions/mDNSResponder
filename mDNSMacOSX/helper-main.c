@@ -378,7 +378,7 @@ int main(int ac, char *av[])
 #ifndef NO_SECURITYFRAMEWORK
 	// We should normally be running as a system daemon.  However, that might not be the case in some scenarios (e.g. debugging).
 	// Explicitly ensure that our Keychain operations utilize the system domain.
-	SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem);
+	if (opt_debug) SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem);
 #endif
 	gPort = checkin(kmDNSHelperServiceName);
 	if (!gPort)

@@ -4138,7 +4138,7 @@ mDNSlocal void LogAuthRecords(mDNS *const m, const mDNSs32 now, AuthRecord *Reso
 		LogMsgNoIdent("    Int    Next  Expire   State");
 		for (ar = ResourceRecords; ar; ar=ar->next)
 			{
-			NetworkInterfaceInfo *info = (NetworkInterfaceInfo *)ar->resrec.InterfaceID;
+			char *ifname = InterfaceNameForID(m, ar->resrec.InterfaceID);
 			if (ar->WakeUp.HMAC.l[0]) (*proxy)++;
 			if (!mDNSSameEthAddress(&owner, &ar->WakeUp.HMAC))
 				{
@@ -4161,7 +4161,7 @@ mDNSlocal void LogAuthRecords(mDNS *const m, const mDNSs32 now, AuthRecord *Reso
 					ar->ThisAPInterval / mDNSPlatformOneSecond,
 					ar->AnnounceCount ? (ar->LastAPTime + ar->ThisAPInterval - now) / mDNSPlatformOneSecond : 0,
 					ar->TimeExpire    ? (ar->TimeExpire                      - now) / mDNSPlatformOneSecond : 0,
-					info ? info->ifname : "ALL",
+					ifname ? ifname : "ALL",
 					ARDisplayString(m, ar));
 			else
 				LogMsgNoIdent("                             LO %s", ARDisplayString(m, ar));
@@ -4191,14 +4191,14 @@ mDNSexport void udsserver_info(mDNS *const m)
 			for (cr = cg->members; cr; cr=cr->next)
 				{
 				mDNSs32 remain = cr->resrec.rroriginalttl - (now - cr->TimeRcvd) / mDNSPlatformOneSecond;
-				NetworkInterfaceInfo *info = (NetworkInterfaceInfo *)cr->resrec.InterfaceID;
+				char *ifname = InterfaceNameForID(m, cr->resrec.InterfaceID);
 				CacheUsed++;
 				if (cr->CRActiveQuestion) CacheActive++;
 				LogMsgNoIdent("%3d %s%8ld %-7s%s %-6s%s",
 					slot,
 					cr->CRActiveQuestion ? "*" : " ",
 					remain,
-					info ? info->ifname : "-U-",
+					ifname ? ifname : "-U-",
 					(cr->resrec.RecordType == kDNSRecordTypePacketNegative)  ? "-" :
 					(cr->resrec.RecordType & kDNSRecordTypePacketUniqueMask) ? " " : "+",
 					DNSTypeName(cr->resrec.rrtype),
@@ -4244,12 +4244,12 @@ mDNSexport void udsserver_info(mDNS *const m)
 			{
 			mDNSs32 i = q->ThisQInterval / mDNSPlatformOneSecond;
 			mDNSs32 n = (q->LastQTime + q->ThisQInterval - now) / mDNSPlatformOneSecond;
-			NetworkInterfaceInfo *info = (NetworkInterfaceInfo *)q->InterfaceID;
+			char *ifname = InterfaceNameForID(m, q->InterfaceID);
 			CacheUsed++;
 			if (q->ThisQInterval) CacheActive++;
 			LogMsgNoIdent("%6d%6d %-7s%s%s %5d  %-6s%##s%s",
 				i, n,
-				info ? info->ifname : mDNSOpaque16IsZero(q->TargetQID) ? "" : "-U-",
+				ifname ? ifname : mDNSOpaque16IsZero(q->TargetQID) ? "" : "-U-",
 				mDNSOpaque16IsZero(q->TargetQID) ? (q->LongLived ? "l" : " ") : (q->LongLived ? "L" : "O"),
 				q->AuthInfo    ? "P" : " ",
 				q->CurrentAnswers,

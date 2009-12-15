@@ -592,8 +592,9 @@ mDNSexport const mDNSEthAddr     onesEthAddr       = { { 255, 255, 255, 255, 255
 mDNSexport const OwnerOptData    zeroOwner         = { 0, 0, { { 0 } }, { { 0 } }, { { 0 } } };
 
 mDNSexport const mDNSInterfaceID mDNSInterface_Any       = 0;
-mDNSexport const mDNSInterfaceID mDNSInterface_LocalOnly = (mDNSInterfaceID)1;
-mDNSexport const mDNSInterfaceID mDNSInterface_Unicast   = (mDNSInterfaceID)2;
+mDNSexport const mDNSInterfaceID mDNSInterfaceMark = (mDNSInterfaceID)-1;
+mDNSexport const mDNSInterfaceID mDNSInterface_LocalOnly = (mDNSInterfaceID)-2;
+mDNSexport const mDNSInterfaceID mDNSInterface_Unicast   = (mDNSInterfaceID)-3;
 
 // Note: Microsoft's proposed "Link Local Multicast Name Resolution Protocol" (LLMNR) is essentially a limited version of
 // Multicast DNS, using the same packet formats, naming syntax, and record types as Multicast DNS, but on a different UDP

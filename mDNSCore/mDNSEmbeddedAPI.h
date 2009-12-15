@@ -54,6 +54,14 @@
     Change History (most recent first):
 
 $Log: mDNSEmbeddedAPI.h,v $
+Revision 1.577  2009/07/16 00:34:18  cheshire
+<rdar://problem/6434656> Sleep Proxy: Put owner OPT records in multicast announcements to avoid conflicts
+Additional refinement: If we didn't register with a Sleep Proxy when going to sleep,
+we don't need to include our OWNER option in our packets when we re-awaken
+
+Revision 1.576  2009/07/15 23:35:37  cheshire
+<rdar://problem/6434656> Sleep Proxy: Put owner OPT records in multicast announcements to avoid conflicts
+
 Revision 1.575  2009/07/11 01:57:00  cheshire
 <rdar://problem/6613674> Sleep Proxy: Add support for using sleep proxy in local network interface hardware
 Added declaration of ActivateLocalProxy
@@ -1468,6 +1476,18 @@ typedef packedstruct
 
 typedef packedstruct
 	{
+	mDNSOpaque64 InitiatorCookie;
+	mDNSOpaque64 ResponderCookie;
+	mDNSu8       NextPayload;
+	mDNSu8       Version;
+	mDNSu8       ExchangeType;
+	mDNSu8       Flags;
+	mDNSOpaque32 MessageID;
+	mDNSu32      Length;
+	} IKEHeader;			// 28 bytes
+
+typedef packedstruct
+	{
 	mDNSIPPort   src;
 	mDNSIPPort   dst;
 	mDNSu32      seq;
@@ -1640,12 +1660,12 @@ typedef packedstruct
 						((O)->opt == kDNSOpt_Lease && (O)->optlen == DNSOpt_LeaseData_Space - 4) || \
 						((O)->opt == kDNSOpt_Owner && ValidOwnerLength((O)->optlen)            )    )
 
-#define DNSOpt_Owner_Space(O) (mDNSSameEthAddress(&(O)->u.owner.HMAC, &(O)->u.owner.IMAC) ? DNSOpt_OwnerData_ID_Space : DNSOpt_OwnerData_ID_Wake_Space)
+#define DNSOpt_Owner_Space(A,B) (mDNSSameEthAddress((A),(B)) ? DNSOpt_OwnerData_ID_Space : DNSOpt_OwnerData_ID_Wake_Space)
 
 #define DNSOpt_Data_Space(O) (                                  \
 	(O)->opt == kDNSOpt_LLQ   ? DNSOpt_LLQData_Space   :        \
 	(O)->opt == kDNSOpt_Lease ? DNSOpt_LeaseData_Space :        \
-	(O)->opt == kDNSOpt_Owner ? DNSOpt_Owner_Space(O)  : 0x10000)
+	(O)->opt == kDNSOpt_Owner ? DNSOpt_Owner_Space(&(O)->u.owner.HMAC, &(O)->u.owner.IMAC) : 0x10000)
 
 // A maximal NSEC record is:
 //   256 bytes domainname 'nextname'
@@ -2132,6 +2152,7 @@ typedef struct DNSServer
 	mDNSu32         teststate;	// Have we sent bug-detection query to this server?
 	mDNSs32         lasttest;	// Time we sent last bug-detection query to this server
 	domainname      domain;		// name->server matching for "split dns"
+	mDNSs32			penaltyTime; // amount of time this server is penalized			
 	} DNSServer;
 
 typedef struct ExtraResourceRecord_struct ExtraResourceRecord;
@@ -2332,7 +2353,10 @@ struct DNSQuestion_struct
 	LLQ_State             state;
 	mDNSu32               ReqLease;			// seconds (relative)
 	mDNSs32               expire;			// ticks (absolute)
-	mDNSs16               ntries;
+	mDNSs16               ntries;           // for UDP: the number of packets sent for this LLQ state
+	                                       // for TCP: there is some ambiguity in the use of this variable, but in general, it is
+	                                       //          the number of TCP/TLS connection attempts for this LLQ state, or
+	                                       //          the number of packets sent for this TCP/TLS connection
 	mDNSOpaque64          id;
 
 	// Client API fields: The client must set up these fields *before* calling mDNS_StartQuery()
@@ -2573,6 +2597,8 @@ struct mDNS_struct
 	mDNSu8   SleepState;				// Set if we're sleeping
 	mDNSu8   SleepSeqNum;				// "Epoch number" of our current period of wakefulness
 	mDNSu8   SystemWakeOnLANEnabled;	// Set if we want to register with a Sleep Proxy before going to sleep
+	mDNSu8   SentSleepProxyRegistration;// Set if we registered (or tried to register) with a Sleep Proxy
+	mDNSs32  AnnounceOwner;				// After waking from sleep, include OWNER option in packets until this time
 	mDNSs32  DelaySleep;				// To inhibit re-sleeping too quickly right after wake
 	mDNSs32  SleepLimit;				// Time window to allow deregistrations, etc.,
 										// during which underying platform layer should inhibit system sleep
@@ -2710,6 +2736,7 @@ extern const OwnerOptData    zeroOwner;
 extern const mDNSInterfaceID mDNSInterface_Any;				// Zero
 extern const mDNSInterfaceID mDNSInterface_LocalOnly;		// Special value
 extern const mDNSInterfaceID mDNSInterface_Unicast;			// Special value
+extern const mDNSInterfaceID mDNSInterfaceMark;				// Special value
 
 extern const mDNSIPPort   DiscardPort;
 extern const mDNSIPPort   SSHPort;
@@ -2738,6 +2765,8 @@ extern const mDNSOpaque16 UpdateReqFlags;
 extern const mDNSOpaque16 UpdateRespFlags;
 
 extern const mDNSOpaque64 zeroOpaque64;
+
+extern mDNSBool StrictUnicastOrdering;
 
 #define localdomain           (*(const domainname *)"\x5" "local")
 #define DeviceInfoName        (*(const domainname *)"\xC" "_device-info" "\x4" "_tcp")
@@ -2968,7 +2997,7 @@ extern mStatus mDNS_AdvertiseDomains(mDNS *const m, AuthRecord *rr, mDNS_DomainT
 
 extern mDNSOpaque16 mDNS_NewMessageID(mDNS *const m);
 		
-extern DNSServer *GetServerForName(mDNS *m, const domainname *name);
+extern DNSServer *GetServerForName(mDNS *m, const domainname *name, DNSServer *current);
 
 // ***************************************************************************
 #if 0
@@ -3167,7 +3196,7 @@ extern void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCa
 extern void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn);
 extern void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const mDNSAddr *v6addr, const mDNSAddr *router);
 extern DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSAddr *addr, const mDNSIPPort port);
-extern void PushDNSServerToEnd(mDNS *const m, DNSQuestion *q);
+extern void PenalizeDNSServer(mDNS *const m, DNSQuestion *q, mDNSBool QueryFail);
 extern void mDNS_AddSearchDomain(const domainname *const domain);
 
 // We use ((void *)0) here instead of mDNSNULL to avoid compile warnings on gcc 4.2
@@ -3418,6 +3447,7 @@ extern void FindSPSInCache(mDNS *const m, const DNSQuestion *const q, const Cach
 #define SPSMetric(X) (!ValidSPSName(X) || PrototypeSPSName(X) ? 1000000 : \
 	((X)[1]-'0') * 100000 + ((X)[2]-'0') * 10000 + ((X)[4]-'0') * 1000 + ((X)[5]-'0') * 100 + ((X)[7]-'0') * 10 + ((X)[8]-'0'))
 extern void AnswerCurrentQuestionWithResourceRecord(mDNS *const m, CacheRecord *const rr, const QC_result AddRecord);
+extern char *InterfaceNameForID(mDNS *const m, const mDNSInterfaceID InterfaceID);
 
 // For now this AutoTunnel stuff is specific to Mac OS X.
 // In the future, if there's demand, we may see if we can abstract it out cleanly into the platform layer
@@ -3466,7 +3496,8 @@ struct CompileTimeAssertionChecks_mDNS
 	char assertI[(sizeof(IPv6Header    )   ==   40                         ) ? 1 : -1];
 	char assertJ[(sizeof(IPv6ND        )   ==   24                         ) ? 1 : -1];
 	char assertK[(sizeof(UDPHeader     )   ==    8                         ) ? 1 : -1];
-	char assertL[(sizeof(TCPHeader     )   ==   20                         ) ? 1 : -1];
+	char assertL[(sizeof(IKEHeader     )   ==   28                         ) ? 1 : -1];
+	char assertM[(sizeof(TCPHeader     )   ==   20                         ) ? 1 : -1];
 
 	// Check our structures are reasonable sizes. Including overly-large buffers, or embedding
 	// other overly-large structures instead of having a pointer to them, can inadvertently

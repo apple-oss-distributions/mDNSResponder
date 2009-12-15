@@ -1345,6 +1345,9 @@ mDNSexport SearchListElem *SearchList = mDNSNULL;
 // would avoid the perils of modifying that list cleanly while some other piece of code is iterating through it.
 ServiceRecordSet *CurrentServiceRecordSet = mDNSNULL;
 
+// The value can be set to true by the Platform code e.g., MacOSX uses the plist mechanism
+mDNSBool StrictUnicastOrdering = mDNSfalse;
+
 // ***************************************************************************
 #if COMPILER_LIKES_PRAGMA_MARK
 #pragma mark - General Utility Functions
@@ -1486,44 +1489,110 @@ mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, cons
 			(*p)->next = mDNSNULL;
 			}
 		}
+	(*p)->penaltyTime = 0;
 	return(*p);
 	}
 
-mDNSexport void PushDNSServerToEnd(mDNS *const m, DNSQuestion *q)
+// PenalizeDNSServer is called when the number of queries to the unicast
+// DNS server exceeds MAX_UCAST_UNANSWERED_QUERIES or when we receive an
+// error e.g., SERV_FAIL from DNS server. QueryFail is TRUE if this function
+// is called when we exceed MAX_UCAST_UNANSWERED_QUERIES
+
+mDNSexport void PenalizeDNSServer(mDNS *const m, DNSQuestion *q, mDNSBool QueryFail)
 	{
 	DNSServer *orig = q->qDNSServer;
-	DNSServer **p = &m->DNSServers;
 	
 	if (m->mDNS_busy != m->mDNS_reentrancy+1)
-		LogMsg("PushDNSServerToEnd: Lock not held! mDNS_busy (%ld) mDNS_reentrancy (%ld)", m->mDNS_busy, m->mDNS_reentrancy);
+		LogMsg("PenalizeDNSServer: Lock not held! mDNS_busy (%ld) mDNS_reentrancy (%ld)", m->mDNS_busy, m->mDNS_reentrancy);
 
 	if (!q->qDNSServer)
 		{
-		LogMsg("PushDNSServerToEnd: Null DNS server for %##s (%s) %d", q->qname.c, DNSTypeName(q->qtype), q->unansweredQueries);
+		LogMsg("PenalizeDNSServer: Null DNS server for %##s (%s) %d", q->qname.c, DNSTypeName(q->qtype), q->unansweredQueries);
 		goto end;
 		}
 
-	LogInfo("PushDNSServerToEnd: Pushing DNS server %#a:%d (%##s) due to %d unanswered queries for %##s (%s)",
-		&q->qDNSServer->addr, mDNSVal16(q->qDNSServer->port), q->qDNSServer->domain.c, q->unansweredQueries, q->qname.c, DNSTypeName(q->qtype));
-
-	while (*p)
+	if (QueryFail)
 		{
-		if (*p == q->qDNSServer) *p = q->qDNSServer->next;
-		else p=&(*p)->next;
+			LogInfo("PenalizeDNSServer: DNS server %#a:%d (%##s) %d unanswered queries for %##s (%s)",
+		&q->qDNSServer->addr, mDNSVal16(q->qDNSServer->port), q->qDNSServer->domain.c, q->unansweredQueries, q->qname.c, DNSTypeName(q->qtype));
+		}
+	else
+		{
+			LogInfo("PenalizeDNSServer: DNS server %#a:%d (%##s) Server Error for %##s (%s)",
+		&q->qDNSServer->addr, mDNSVal16(q->qDNSServer->port), q->qDNSServer->domain.c, q->qname.c, DNSTypeName(q->qtype));
 		}
 
-	*p = q->qDNSServer;
-	q->qDNSServer->next = mDNSNULL;
+
+	// If strict ordering of unicast servers needs to be preserved, we just lookup
+	// the next best match server below
+	//
+	// If strict ordering is not required which is the default behavior, we penalize the server
+	// for DNSSERVER_PENALTY_TIME. We may also use additional logic e.g., don't penalize for PTR
+	// in the future.
+
+	if (!StrictUnicastOrdering)
+		{
+		LogInfo("PenalizeDNSServer: Strict Unicast Ordering is FALSE");
+		// We penalize the server so that new queries don't pick this server for DNSSERVER_PENALTY_TIME
+		// XXX Include other logic here to see if this server should really be penalized
+		//
+		if (q->qtype == kDNSType_PTR)
+			{
+			LogInfo("PenalizeDNSServer: Not Penalizing PTR question");
+			}
+		else
+			{
+			LogInfo("PenalizeDNSServer: Penalizing question type %d", q->qtype);
+			q->qDNSServer->penaltyTime = NonZeroTime(m->timenow + DNSSERVER_PENALTY_TIME);
+			}
+		}
+	else
+		{
+		LogInfo("PenalizeDNSServer: Strict Unicast Ordering is TRUE");
+		}
 
 end:
-	q->qDNSServer = GetServerForName(m, &q->qname);
+	q->qDNSServer = GetServerForName(m, &q->qname, q->qDNSServer);
 
-	if (q->qDNSServer != orig)
+	if ((q->qDNSServer != orig) && (QueryFail))
 		{
-		if (q->qDNSServer) LogInfo("PushDNSServerToEnd: Server for %##s (%s) changed to %#a:%d (%##s)", q->qname.c, DNSTypeName(q->qtype), &q->qDNSServer->addr, mDNSVal16(q->qDNSServer->port), q->qDNSServer->domain.c);
-		else               LogInfo("PushDNSServerToEnd: Server for %##s (%s) changed to <null>",        q->qname.c, DNSTypeName(q->qtype));
-		q->ThisQInterval = q->ThisQInterval / QuestionIntervalStep; // Decrease interval one step so we don't quickly bounce between servers for queries that will not be answered.
+		// We picked a new server. In the case where QueryFail is true, the code has already incremented the interval
+		// and to compensate that we decrease it here.  When two queries are sent, the QuestionIntervalStep is at 9. We just
+		// move it back to 3 here when we pick a new server. We can't start at 1 because if we have two servers failing, we will never
+		// backoff 
+		//
+		q->ThisQInterval = q->ThisQInterval / QuestionIntervalStep;
+		if (q->qDNSServer) LogInfo("PenalizeDNSServer: Server for %##s (%s) changed to %#a:%d (%##s), Question Interval %u", q->qname.c, DNSTypeName(q->qtype), &q->qDNSServer->addr, mDNSVal16(q->qDNSServer->port), q->qDNSServer->domain.c, q->ThisQInterval);
+		else               LogInfo("PenalizeDNSServer: Server for %##s (%s) changed to <null>, Question Interval %u",        q->qname.c, DNSTypeName(q->qtype), q->ThisQInterval);
+
 		}
+	else 
+		{
+		// if we are here it means,
+		//
+		// 1) We picked the same server, QueryFail = false
+		// 2) We picked the same server, QueryFail = true 
+		// 3) We picked a different server, QueryFail = false
+		//
+		// For all these three cases, ThisQInterval is already set properly
+
+		if (q->qDNSServer) 
+			{
+			if (q->qDNSServer != orig)
+				{
+				LogInfo("PenalizeDNSServer: Server for %##s (%s) changed to %#a:%d (%##s)", q->qname.c, DNSTypeName(q->qtype), &q->qDNSServer->addr, mDNSVal16(q->qDNSServer->port), q->qDNSServer->domain.c);
+				}
+				else
+				{
+				LogInfo("PenalizeDNSServer: Server for %##s (%s) remains the same at %#a:%d (%##s)", q->qname.c, DNSTypeName(q->qtype), &q->qDNSServer->addr, mDNSVal16(q->qDNSServer->port), q->qDNSServer->domain.c);
+				}
+			}
+		else
+			{ 
+			LogInfo("PenalizeDNSServer: Server for %##s (%s) changed to <null>",        q->qname.c, DNSTypeName(q->qtype));
+			}
+		}
+	q->unansweredQueries = 0;
 	}
 
 // ***************************************************************************
@@ -2213,6 +2282,7 @@ mDNSlocal void tcpCallback(TCPSocket *sock, void *context, mDNSBool ConnectionEs
 		// connection is established - send the message
 		if (q && q->LongLived && q->state == LLQ_Established)
 			{
+			// Lease renewal over TCP, resulting from opening a TCP connection in sendLLQRefresh
 			end = ((mDNSu8*) &tcpInfo->request) + tcpInfo->requestLen;
 			}
 		else if (q && q->LongLived && q->state != LLQ_Poll && !mDNSIPPortIsZero(m->LLQNAT.ExternalPort) && !mDNSIPPortIsZero(q->servPort))
@@ -2232,9 +2302,11 @@ mDNSlocal void tcpCallback(TCPSocket *sock, void *context, mDNSBool ConnectionEs
 			end = putLLQ(&tcpInfo->request, tcpInfo->request.data, q, &llqData);
 			if (!end) { LogMsg("ERROR: tcpCallback - putLLQ"); err = mStatus_UnknownErr; goto exit; }
 			AuthInfo = q->AuthInfo;		// Need to add TSIG to this message
+			q->ntries = 0; // Reset ntries so that tcp/tls connection failures don't affect sendChallengeResponse failures
 			}
 		else if (q)
 			{
+			// LLQ Polling mode or non-LLQ uDNS over TCP
 			InitializeDNSMessage(&tcpInfo->request.h, q->TargetQID, uQueryFlags);
 			end = putQuestion(&tcpInfo->request, tcpInfo->request.data, tcpInfo->request.data + AbsoluteMaxDNSMessageData, &q->qname, q->qtype, q->qclass);
 			AuthInfo = q->AuthInfo;		// Need to add TSIG to this message
@@ -2261,16 +2333,33 @@ mDNSlocal void tcpCallback(TCPSocket *sock, void *context, mDNSBool ConnectionEs
 			{
 			mDNSu8 *lenptr = (mDNSu8 *)&tcpInfo->replylen;
 			n = mDNSPlatformReadTCP(sock, lenptr + tcpInfo->nread, 2 - tcpInfo->nread, &closed);
-			if (n < 0) { LogMsg("ERROR: tcpCallback - attempt to read message length failed (%d)", n); err = mStatus_ConnFailed; goto exit; }
+			if (n < 0)
+				{
+				LogMsg("ERROR: tcpCallback - attempt to read message length failed (%d)", n);
+				err = mStatus_ConnFailed;
+				goto exit;
+				}
 			else if (closed)
 				{
 				// It's perfectly fine for this socket to close after the first reply. The server might
 				// be sending gratuitous replies using UDP and doesn't have a need to leave the TCP socket open.
 				// We'll only log this event if we've never received a reply before.
 				// BIND 9 appears to close an idle connection after 30 seconds.
-				if (tcpInfo->numReplies == 0) LogMsg("ERROR: socket closed prematurely tcpInfo->nread = %d", tcpInfo->nread);
-				err = mStatus_ConnFailed;
-				goto exit;
+				if (tcpInfo->numReplies == 0)
+					{
+					LogMsg("ERROR: socket closed prematurely tcpInfo->nread = %d", tcpInfo->nread);
+					err = mStatus_ConnFailed;
+					goto exit;
+					}
+				else
+					{
+					// Note that we may not be doing the best thing if an error occurs after we've sent a second request
+					// over this tcp connection.  That is, we only track whether we've received at least one response
+					// which may have been to a previous request sent over this tcp connection.
+					if (backpointer) *backpointer = mDNSNULL; // Clear client backpointer FIRST so we don't risk double-disposing our tcpInfo_t 
+					DisposeTCPConn(tcpInfo);
+					return;
+					}
 				}
 
 			tcpInfo->nread += n;
@@ -2286,8 +2375,30 @@ mDNSlocal void tcpCallback(TCPSocket *sock, void *context, mDNSBool ConnectionEs
 
 		n = mDNSPlatformReadTCP(sock, ((char *)tcpInfo->reply) + (tcpInfo->nread - 2), tcpInfo->replylen - (tcpInfo->nread - 2), &closed);
 
-		if      (n < 0)  { LogMsg("ERROR: tcpCallback - read returned %d", n);            err = mStatus_ConnFailed; goto exit; }
-		else if (closed) { LogMsg("ERROR: socket closed prematurely %d", tcpInfo->nread); err = mStatus_ConnFailed; goto exit; }
+		if (n < 0)
+			{
+			LogMsg("ERROR: tcpCallback - read returned %d", n);
+			err = mStatus_ConnFailed;
+			goto exit;
+			}
+		else if (closed)
+			{
+			if (tcpInfo->numReplies == 0)
+				{
+				LogMsg("ERROR: socket closed prematurely tcpInfo->nread = %d", tcpInfo->nread);
+				err = mStatus_ConnFailed;
+				goto exit;
+				}
+			else
+				{
+				// Note that we may not be doing the best thing if an error occurs after we've sent a second request
+				// over this tcp connection.  That is, we only track whether we've received at least one response
+				// which may have been to a previous request sent over this tcp connection.
+				if (backpointer) *backpointer = mDNSNULL; // Clear client backpointer FIRST so we don't risk double-disposing our tcpInfo_t 
+				DisposeTCPConn(tcpInfo);
+				return;
+				}
+			}
 
 		tcpInfo->nread += n;
 
@@ -2338,14 +2449,58 @@ exit:
 
 		if (q)
 			{
-			if (q->ThisQInterval == 0 || q->LastQTime + q->ThisQInterval - m->timenow > MAX_UCAST_POLL_INTERVAL)
+			if (q->ThisQInterval == 0)
 				{
-				q->LastQTime     = m->timenow;
-				q->ThisQInterval = MAX_UCAST_POLL_INTERVAL;
+				// We get here when we fail to establish a new TCP/TLS connection that would have been used for a new LLQ request or an LLQ renewal.
+				// Note that ThisQInterval is also zero when sendChallengeResponse resends the LLQ request on an extant TCP/TLS connection.
+				q->LastQTime = m->timenow;
+				if (q->LongLived)
+					{
+					// We didn't get the chance to send our request packet before the TCP/TLS connection failed.
+					// We want to retry quickly, but want to back off exponentially in case the server is having issues.
+					// Since ThisQInterval was 0, we can't just multiply by QuestionIntervalStep, we must track the number
+					// of TCP/TLS connection failures using ntries.
+					mDNSu32 count = q->ntries + 1; // want to wait at least 1 second before retrying
+
+					q->ThisQInterval = InitialQuestionInterval;
+
+					for (;count;count--)
+						q->ThisQInterval *= QuestionIntervalStep;
+
+					if (q->ThisQInterval > LLQ_POLL_INTERVAL)
+						q->ThisQInterval = LLQ_POLL_INTERVAL;
+					else
+						q->ntries++;
+						
+					LogMsg("tcpCallback: stream connection for LLQ %##s (%s) failed %d times, retrying in %d ms", q->qname.c, DNSTypeName(q->qtype), q->ntries, q->ThisQInterval);
+					}
+				else
+					{
+					q->ThisQInterval = MAX_UCAST_POLL_INTERVAL;
+					LogMsg("tcpCallback: stream connection for %##s (%s) failed, retrying in %d ms", q->qname.c, DNSTypeName(q->qtype), q->ThisQInterval);
+					}
 				SetNextQueryTime(m, q);
 				}
-			// ConnFailed may be actually okay. It just means that the server closed the connection but the LLQ may still be okay.
-			// If the error isn't ConnFailed, then the LLQ is in bad shape.
+			else if (q->LastQTime + q->ThisQInterval - m->timenow > (q->LongLived ? LLQ_POLL_INTERVAL : MAX_UCAST_POLL_INTERVAL))
+				{
+				// If we get an error and our next scheduled query for this question is more than the max interval from now,
+				// reset the next query to ensure we wait no longer the maximum interval from now before trying again.
+				q->LastQTime     = m->timenow;
+				q->ThisQInterval = q->LongLived ? LLQ_POLL_INTERVAL : MAX_UCAST_POLL_INTERVAL;
+				SetNextQueryTime(m, q);
+				LogMsg("tcpCallback: stream connection for %##s (%s) failed, retrying in %d ms", q->qname.c, DNSTypeName(q->qtype), q->ThisQInterval);
+				}
+			
+			// We're about to dispose of the TCP connection, so we must reset the state to retry over TCP/TLS
+			// because sendChallengeResponse will send the query via UDP if we don't have a tcp pointer.
+			// Resetting to LLQ_InitialRequest will cause uDNS_CheckCurrentQuestion to call startLLQHandshake, which
+			// will attempt to establish a new tcp connection.
+			if (q->LongLived && q->state == LLQ_SecondaryRequest)
+				q->state = LLQ_InitialRequest;
+			
+			// ConnFailed may happen if the server sends a TCP reset or TLS fails, in which case we want to retry establishing the LLQ
+			// quickly rather than switching to polling mode.  This case is handled by the above code to set q->ThisQInterval just above.
+			// If the error isn't ConnFailed, then the LLQ is in bad shape, so we switch to polling mode.
 			if (err != mStatus_ConnFailed)
 				{
 				if (q->LongLived && q->state != LLQ_Poll) StartLLQPolling(m, q);
@@ -3451,14 +3606,21 @@ mDNSexport void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr, co
 
 		if (v4Changed || RouterChanged)
 			{
+			// If we have a non-zero IPv4 address, we should try immediately to see if we have a NAT gateway
+			// If we have no IPv4 address, we don't want to be in quite such a hurry to report failures to our clients
+			// <rdar://problem/6935929> Sleeping server sometimes briefly disappears over Back to My Mac after it wakes up
 			m->ExternalAddress      = zerov4Addr;
 			m->retryIntervalGetAddr = NATMAP_INIT_RETRY;
-			m->retryGetAddr         = m->timenow;
+			m->retryGetAddr         = m->timenow + (v4addr ? 0 : mDNSPlatformOneSecond * 5);
 			m->NextScheduledNATOp   = m->timenow;
 			m->LastNATMapResultCode = NATErr_None;
 #ifdef _LEGACY_NAT_TRAVERSAL_
 			LNT_ClearState(m);
 #endif // _LEGACY_NAT_TRAVERSAL_
+			LogInfo("mDNS_SetPrimaryInterfaceInfo:%s%s: retryGetAddr in %d %d",
+				v4Changed     ? " v4Changed"     : "",
+				RouterChanged ? " RouterChanged" : "",
+				m->retryGetAddr - m->timenow, m->timenow);
 			}
 
 		if (m->ReverseMap.ThisQInterval != -1) mDNS_StopQuery_internal(m, &m->ReverseMap);
@@ -4707,8 +4869,7 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
 			DNSServer *orig = q->qDNSServer;
 			if (orig) LogInfo("Sent %d unanswered queries for %##s (%s) to %#a:%d (%##s)", q->unansweredQueries, q->qname.c, DNSTypeName(q->qtype), &orig->addr, mDNSVal16(orig->port), orig->domain.c);
 
-			PushDNSServerToEnd(m, q);
-			q->unansweredQueries = 0;
+			PenalizeDNSServer(m, q, mDNStrue);
 			}
 
 		if (q->qDNSServer && q->qDNSServer->teststate != DNSServer_Disabled)
@@ -4740,7 +4901,7 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
 					{
 					if (q->nta) CancelGetZoneData(m, q->nta);
 					q->nta = StartGetZoneData(m, &q->qname, q->LongLived ? ZoneServiceLLQ : ZoneServiceQuery, PrivateQueryGotZoneData, q);
-					q->ThisQInterval = (LLQ_POLL_INTERVAL + mDNSRandom(LLQ_POLL_INTERVAL/10)) / QuestionIntervalStep;
+					if (q->state == LLQ_Poll) q->ThisQInterval = (LLQ_POLL_INTERVAL + mDNSRandom(LLQ_POLL_INTERVAL/10)) / QuestionIntervalStep;
 					}
 				else
 					{
@@ -4758,6 +4919,16 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
 				q->unansweredQueries++;
 				if (q->ThisQInterval > MAX_UCAST_POLL_INTERVAL)
 					q->ThisQInterval = MAX_UCAST_POLL_INTERVAL;
+				if (private && q->state != LLQ_Poll)
+					{
+					// We don't want to retransmit too soon. Hence, we always schedule our first
+					// retransmisson at 3 seconds rather than one second
+					if (q->ThisQInterval < (3 * mDNSPlatformOneSecond))
+						q->ThisQInterval = q->ThisQInterval * QuestionIntervalStep;
+					if (q->ThisQInterval > LLQ_POLL_INTERVAL)
+						q->ThisQInterval = LLQ_POLL_INTERVAL;
+					LogInfo("uDNS_CheckCurrentQuestion: private non polling question for %##s (%s) will be retried in %d ms", q->qname.c, DNSTypeName(q->qtype), q->ThisQInterval);
+					}
 				debugf("Increased ThisQInterval to %d for %##s (%s)", q->ThisQInterval, q->qname.c, DNSTypeName(q->qtype));
 				}
 			q->LastQTime = m->timenow;
@@ -4781,7 +4952,7 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
 				for (rr = cg->members; rr; rr=rr->next)
 					if (SameNameRecordAnswersQuestion(&rr->resrec, q)) mDNS_PurgeCacheResourceRecord(m, rr);
 
-			if (!q->qDNSServer) debugf("uDNS_CheckCurrentQuestion no DNS server for %##s (%s)", q->qname.c, DNSTypeName(q->qtype));
+			if (!q->qDNSServer) LogInfo("uDNS_CheckCurrentQuestion no DNS server for %##s (%s)", q->qname.c, DNSTypeName(q->qtype));
 			else LogMsg("uDNS_CheckCurrentQuestion DNS server %#a:%d for %##s is disabled", &q->qDNSServer->addr, mDNSVal16(q->qDNSServer->port), q->qname.c);
 
 			MakeNegativeCacheRecord(m, &m->rec.r, &q->qname, q->qnamehash, q->qtype, q->qclass, 60, mDNSInterface_Any);
@@ -4840,6 +5011,8 @@ mDNSlocal void CheckNATMappings(mDNS *m)
 				else if (m->retryIntervalGetAddr < NATMAP_MAX_RETRY_INTERVAL / 2) m->retryIntervalGetAddr *= 2;
 				else                                                              m->retryIntervalGetAddr = NATMAP_MAX_RETRY_INTERVAL;
 				}
+			LogInfo("CheckNATMappings retryGetAddr sent address request err %d interval %d", err, m->retryIntervalGetAddr);
+
 			// Always update m->retryGetAddr, even if we fail to send the packet. Otherwise in cases where we can't send the packet
 			// (like when we have no active interfaces) we'll spin in an infinite loop repeatedly failing to send the packet
 			m->retryGetAddr = m->timenow + m->retryIntervalGetAddr;
@@ -4996,6 +5169,40 @@ mDNSlocal mDNSs32 CheckServiceRegistrations(mDNS *m)
 	return nextevent;
 	}
 
+// This function is called early on in mDNS_Execute before any uDNS questions are
+// dispatched so that if there are some good servers, the uDNS questions can now
+// use it
+mDNSexport void ResetDNSServerPenalties(mDNS *m)
+	{
+	DNSServer *d;
+	for (d = m->DNSServers; d; d=d->next)
+		{
+		if (d->penaltyTime != 0)
+			{
+			if (d->penaltyTime - m->timenow <= 0)
+				{
+				LogInfo("ResetDNSServerPenalties: DNS server %#a:%d out of penalty box", &d->addr, mDNSVal16(d->port));
+				d->penaltyTime = 0;
+				}
+			}
+		}
+	}
+
+mDNSlocal mDNSs32 CheckDNSServerPenalties(mDNS *m)
+	{
+	mDNSs32 nextevent = m->timenow + 0x3FFFFFFF;
+	DNSServer *d;
+	for (d = m->DNSServers; d; d=d->next)
+		{
+		if (d->penaltyTime != 0)
+			{
+			if ((nextevent - d->penaltyTime) > 0)
+				nextevent = d->penaltyTime;
+			}
+		}
+	return nextevent;
+	}
+
 mDNSexport void uDNS_Execute(mDNS *const m)
 	{
 	mDNSs32 nexte;
@@ -5014,6 +5221,9 @@ mDNSexport void uDNS_Execute(mDNS *const m)
 	if (nexte - m->NextuDNSEvent < 0) m->NextuDNSEvent = nexte;
 
 	nexte = CheckServiceRegistrations(m);
+	if (nexte - m->NextuDNSEvent < 0) m->NextuDNSEvent = nexte;
+
+	nexte = CheckDNSServerPenalties(m);
 	if (nexte - m->NextuDNSEvent < 0) m->NextuDNSEvent = nexte;
 	}
 

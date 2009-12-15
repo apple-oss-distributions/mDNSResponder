@@ -162,7 +162,6 @@ First checked in
 #include "PrinterSetupWizardApp.h"
 #include "PrinterSetupWizardSheet.h"
 #include "ThirdPage.h"
-#include "StdioFileEx.h"
 #include <dns_sd.h>
 #include <tcpxcv.h>
 #include <winspool.h>

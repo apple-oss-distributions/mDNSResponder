@@ -27,6 +27,7 @@
 			isa = PBXAggregateTarget;
 			buildConfigurationList = 03067D730C83A3CB0022BE1F /* Build configuration list for PBXAggregateTarget "Build Some" */;
 			buildPhases = (
+				FF045B6A0C7E4AA600448140 /* ShellScript */,
 			);
 			dependencies = (
 				03067D680C83A3830022BE1F /* PBXTargetDependency */,
@@ -990,7 +991,6 @@
 				2E0405ED0C31955500F13B59 /* Sources */,
 				2E0405EE0C31955500F13B59 /* Frameworks */,
 				4AAE0C5A0C68E6EC003882A5 /* CopyFiles */,
-				FF045B6A0C7E4AA600448140 /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -1346,7 +1346,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -e \"${SDKROOT}/usr/lib/libipsec.dylib\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/ipsec_options.h\"\ntouch \"${CONFIGURATION_TEMP_DIR}/ipsec_options.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libipsec.a\"\nelse\necho \"#define MDNS_NO_IPSEC 1\" > ${CONFIGURATION_TEMP_DIR}/ipsec_options.h\ntouch \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfor i in ${ARCHS}\ndo\nccflags=\"-arch $i $ccflags\"\ndone\ncc ${ccflags} \"${CONFIGURATION_TEMP_DIR}/empty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libipsec.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfi\n";
+			shellScript = "if [ -e \"${SDKROOT}/usr/include/vproc.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/vproc.h\"\nelse\ntouch \"${CONFIGURATION_TEMP_DIR}/vproc.h\"\nfi\n\nif [ -e \"${SDKROOT}/usr/lib/libipsec.dylib\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/ipsec_options.h\"\ntouch \"${CONFIGURATION_TEMP_DIR}/ipsec_options.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libipsec.a\"\nelse\necho \"#define MDNS_NO_IPSEC 1\" > ${CONFIGURATION_TEMP_DIR}/ipsec_options.h\ntouch \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfor i in ${ARCHS}\ndo\nccflags=\"-arch $i $ccflags\"\ndone\ncc ${ccflags} \"${CONFIGURATION_TEMP_DIR}/empty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libipsec.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfi\n";
 		};
 		D284BE510ADD80740027CCDF /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1364,7 +1364,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/tcsh;
-			shellScript = "# Install plist to tell launchd to start mDNSResponder\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons\ncp ${SRCROOT}/LaunchDaemonInfo.plist ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponder.plist\n\n# Install mDNSResponder.bundle containing language localizations\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices\ncp -R ${SRCROOT}/mDNSResponder-bundle ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle\n\n# Remove unwanted CVS directories\nfind ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -depth -name CVS -exec rm -rf {} \\;\n\n# Expand UTF-8 files to UTF-16 (at one time this appeared to be necessary, but it's not, so we don't do it any more)\n#foreach file (`find ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -name Localizable.strings`)\n#iconv -f utf-8 -t utf-16 ${file} > ${file}.new\n#mv -f ${file}.new ${file}\n#end\n\n# Remove French localization (not wanted for Apple B&I builds)\nrm -rf ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle/Resources/French.lproj\n\n# Copy Sandbox profile, stripping initial license header to make the file fit in the ~16kB Sandbox profile limit\n(umask 022; mkdir -p -m 0755 ${DSTROOT}/usr/share/sandbox)\n(umask 222; awk '/^\\(version 1\\)$/,EOF' ${SRCROOT}/mDNSResponder.sb > ${DSTROOT}/usr/share/sandbox/mDNSResponder.sb)\n";
+			shellScript = "# Install mDNSResponder.bundle containing language localizations\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices\ncp -R ${SRCROOT}/mDNSResponder-bundle ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle\n\n# Remove unwanted CVS directories\nfind ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -depth -name CVS -exec rm -rf {} \\;\n\n# Expand UTF-8 files to UTF-16 (at one time this appeared to be necessary, but it's not, so we don't do it any more)\n#foreach file (`find ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -name Localizable.strings`)\n#iconv -f utf-8 -t utf-16 ${file} > ${file}.new\n#mv -f ${file}.new ${file}\n#end\n\n# Remove French localization (not wanted for Apple B&I builds)\nrm -rf ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle/Resources/French.lproj\n\n# Copy Sandbox profile, stripping initial license header to make the file fit in the ~16kB Sandbox profile limit\n(umask 022; mkdir -p -m 0755 ${DSTROOT}/usr/share/sandbox)\n(umask 222; awk '/^\\(version 1\\)$/,EOF' ${SRCROOT}/mDNSResponder.sb > ${DSTROOT}/usr/share/sandbox/mDNSResponder.sb)\n";
 		};
 		D284BE760ADD80800027CCDF /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1373,7 +1373,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -e \"${SDKROOT}/usr/local/include/dnsinfo.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/dnsinfo.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nelse\necho \"#define MDNS_NO_DNSINFO 1\" > ${CONFIGURATION_TEMP_DIR}/dnsinfo.h\ntouch \"${CONFIGURATION_TEMP_DIR}/empty.c\"\ncc -arch i386 -arch ppc \"${CONFIGURATION_TEMP_DIR}/empty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfi\n\nif [ -e \"${SDKROOT}/usr/include/sandbox.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nelse\necho \"#define MDNS_NO_SANDBOX 1\" > \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nfi\n";
+			shellScript = "if [ -e \"${SDKROOT}/usr/local/include/dnsinfo.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/dnsinfo.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nelse\necho \"#define MDNS_NO_DNSINFO 1\" > ${CONFIGURATION_TEMP_DIR}/dnsinfo.h\ntouch \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfor i in ${ARCHS}\ndo\nccflags=\"-arch $i $ccflags\"\ndone\ncc ${ccflags} \"${CONFIGURATION_TEMP_DIR}/empty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfi\n\nif [ -e \"${SDKROOT}/usr/include/sandbox.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nelse\necho \"#define MDNS_NO_SANDBOX 1\" > \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nfi\n\nif [ -e \"${SDKROOT}/usr/include/vproc.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/vproc.h\"\nelse\ntouch \"${CONFIGURATION_TEMP_DIR}/vproc.h\"\nfi\n\nif [ -e \"${SDKROOT}/System/Library/Frameworks/IOKit.framework/PrivateHeaders/pwr_mgt/IOPMLibPrivate.h\" ]\nthen\nrm -rf \"${CONFIGURATION_TEMP_DIR}/IOKit\"\nelse\nmkdir -p \"${CONFIGURATION_TEMP_DIR}/IOKit/pwr_mgt\"\ntouch \"${CONFIGURATION_TEMP_DIR}/IOKit/pwr_mgt/IOPMLibPrivate.h\"\nfi\n";
 		};
 		FF045B6A0C7E4AA600448140 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1386,7 +1386,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/tcsh;
-			shellScript = "# Install plist to tell launchd how to start mDNSResponderHelper\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons\ncp ${SRCROOT}/LaunchDaemonInfo.helper.plist ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponderHelper.plist\n";
+			shellScript = "# Install plists to tell launchd how to start mDNSResponder and mDNSResponderHelper\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons\n\nif (${MACOSX_DEPLOYMENT_TARGET} == \"10.4\") then\ncp ${SRCROOT}/LaunchDaemonInfo-Tiger.plist        ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponder.plist\ncp ${SRCROOT}/LaunchDaemonInfo-Tiger.helper.plist ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponderHelper.plist\nelse\ncp ${SRCROOT}/LaunchDaemonInfo.plist              ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponder.plist\ncp ${SRCROOT}/LaunchDaemonInfo.helper.plist       ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponderHelper.plist\nendif\n";
 		};
 		FF37FAAD0BC581780044A5CF /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1856,7 +1856,6 @@
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				HEADER_SEARCH_PATHS = ../mDNSShared;
 				INSTALL_PATH = /usr/bin;
-				MACOSX_DEPLOYMENT_TARGET = 10.4;
 				OTHER_CFLAGS = "-no-cpp-precomp";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";

@@ -1459,24 +1459,37 @@ mDNSlocal int myIfIndexToName(u_short ifindex, char *name)
 	return -1;
 	}
 
+mDNSexport NetworkInterfaceInfoOSX *IfindexToInterfaceInfoOSX(const mDNS *const m, mDNSInterfaceID ifindex)
+{
+	mDNSu32 scope_id = (mDNSu32)(uintptr_t)ifindex;
+	NetworkInterfaceInfoOSX *i;
+
+	// Don't get tricked by inactive interfaces
+	for (i = m->p->InterfaceList; i; i = i->next)
+		if (i->Registered && i->scope_id == scope_id) return(i);
+
+	return mDNSNULL;
+}
+
 mDNSexport mDNSInterfaceID mDNSPlatformInterfaceIDfromInterfaceIndex(mDNS *const m, mDNSu32 ifindex)
 	{
-	NetworkInterfaceInfoOSX *i;
 	if (ifindex == kDNSServiceInterfaceIndexLocalOnly) return(mDNSInterface_LocalOnly);
 	if (ifindex == kDNSServiceInterfaceIndexAny      ) return(mDNSNULL);
 
-	// Don't get tricked by inactive interfaces with no InterfaceID set
-	for (i = m->p->InterfaceList; i; i = i->next)
-		if (i->ifinfo.InterfaceID && i->scope_id == ifindex) return(i->ifinfo.InterfaceID);
+	NetworkInterfaceInfoOSX* ifi = IfindexToInterfaceInfoOSX(m, (mDNSInterfaceID)(uintptr_t)ifindex);
+	if (!ifi)
+		{
+		// Not found. Make sure our interface list is up to date, then try again.
+		LogInfo("mDNSPlatformInterfaceIDfromInterfaceIndex: InterfaceID for interface index %d not found; Updating interface list", ifindex);
+		mDNSMacOSXNetworkChanged(m);
+		ifi = IfindexToInterfaceInfoOSX(m, (mDNSInterfaceID)(uintptr_t)ifindex);
+		}
 
-	// Not found. Make sure our interface list is up to date, then try again.
-	LogInfo("InterfaceID for interface index %d not found; Updating interface list", ifindex);
-	mDNSMacOSXNetworkChanged(m);
-	for (i = m->p->InterfaceList; i; i = i->next)
-		if (i->ifinfo.InterfaceID && i->scope_id == ifindex) return(i->ifinfo.InterfaceID);
-
-	return(mDNSNULL);
+	if (!ifi) return(mDNSNULL);	
+	
+	return(ifi->ifinfo.InterfaceID);
 	}
+
 
 mDNSexport mDNSu32 mDNSPlatformInterfaceIndexfromInterfaceID(mDNS *const m, mDNSInterfaceID id)
 	{
@@ -1484,15 +1497,17 @@ mDNSexport mDNSu32 mDNSPlatformInterfaceIndexfromInterfaceID(mDNS *const m, mDNS
 	if (id == mDNSInterface_LocalOnly) return(kDNSServiceInterfaceIndexLocalOnly);
 	if (id == mDNSInterface_Any      ) return(0);
 
-	// Don't use i->ifinfo.InterfaceID here, because we DO want to find inactive interfaces, which have no InterfaceID set
+	mDNSu32 scope_id = (mDNSu32)(uintptr_t)id;
+
+	// Don't use i->Registered here, because we DO want to find inactive interfaces, which have no Registered set
 	for (i = m->p->InterfaceList; i; i = i->next)
-		if ((mDNSInterfaceID)i == id) return(i->scope_id);
+		if (i->scope_id == scope_id) return(i->scope_id);
 
 	// Not found. Make sure our interface list is up to date, then try again.
 	LogInfo("Interface index for InterfaceID %p not found; Updating interface list", id);
 	mDNSMacOSXNetworkChanged(m);
 	for (i = m->p->InterfaceList; i; i = i->next)
-		if ((mDNSInterfaceID)i == id) return(i->scope_id);
+		if (i->scope_id == scope_id) return(i->scope_id);
 
 	return(0);
 	}
@@ -1508,7 +1523,7 @@ mDNSexport void mDNSASLLog(uuid_t *uuid, const char *subdomain, const char *resu
 	if (!asl_msg)	{ LogMsg("mDNSASLLog: asl_new failed"); return; }
 	if (uuid)
 		{
-		char		uuidStr[36];
+		char		uuidStr[37];
 		uuid_unparse(*uuid, uuidStr);
 		asl_set		(asl_msg, "com.apple.message.uuid", uuidStr);
 		}
@@ -1560,14 +1575,22 @@ mDNSlocal mDNSBool AddrRequiresPPPConnection(const struct sockaddr *addr)
 mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const msg, const mDNSu8 *const end,
 	mDNSInterfaceID InterfaceID, UDPSocket *src, const mDNSAddr *dst, mDNSIPPort dstPort)
 	{
-	// Note: For this platform we've adopted the convention that InterfaceIDs are secretly pointers
-	// to the NetworkInterfaceInfoOSX structure that holds the active sockets. The mDNSCore code
-	// doesn't know that and doesn't need to know that -- it just treats InterfaceIDs as opaque identifiers.
-	NetworkInterfaceInfoOSX *info = (NetworkInterfaceInfoOSX *)InterfaceID;
-	char *ifa_name = info ? info->ifinfo.ifname : "unicast";
+	NetworkInterfaceInfoOSX *info = mDNSNULL;
 	struct sockaddr_storage to;
 	int s = -1, err;
 	mStatus result = mStatus_NoError;
+
+	if (InterfaceID)
+		{
+		info = IfindexToInterfaceInfoOSX(m, InterfaceID);
+		if (info == NULL)
+			{
+			LogMsg("mDNSPlatformSendUDP: Invalid interface index %p", InterfaceID);
+			return mStatus_BadParamErr;
+			}
+		}
+
+	char *ifa_name = InterfaceID ? info->ifinfo.ifname : "unicast";
 
 	if (dst->type == mDNSAddrType_IPv4)
 		{
@@ -1809,14 +1832,18 @@ mDNSlocal void myKQSocketCallBack(int s1, short filter, void *context)
 
 		// Note: When handling multiple packets in a batch, MUST reset InterfaceID before handling each packet
 		mDNSInterfaceID InterfaceID = mDNSNULL;
-		NetworkInterfaceInfo *intf = m->HostInterfaces;
-		while (intf && strcmp(intf->ifname, packetifname)) intf = intf->next;
+		//NetworkInterfaceInfo *intf = m->HostInterfaces;
+		//while (intf && strcmp(intf->ifname, packetifname)) intf = intf->next;
+
+		NetworkInterfaceInfoOSX *intf = m->p->InterfaceList;
+		while (intf && strcmp(intf->ifinfo.ifname, packetifname)) intf = intf->next;
+
 		// When going to sleep we deregister all our interfaces, but if the machine
 		// takes a few seconds to sleep we may continue to receive multicasts
 		// during that time, which would confuse mDNSCoreReceive, because as far
 		// as it's concerned, we should have no active interfaces any more.
 		// Hence we ignore multicasts for which we can find no matching InterfaceID.
-		if (intf) InterfaceID = intf->InterfaceID;
+		if (intf) InterfaceID = intf->ifinfo.InterfaceID;
 		else if (mDNSAddrIsDNSMulticast(&destAddr)) continue;
 
 //		LogMsg("myKQSocketCallBack got packet from %#a to %#a on interface %#a/%s",
@@ -1963,7 +1990,7 @@ mDNSlocal void *doSSLHandshake(void *ctx)
 	mStatus err = SSLHandshake(sock->tlsContext);
 	
 	KQueueLock(m);
-	LogInfo("doSSLHandshake %p: got lock", sock); // Log *after* we get the lock
+	debugf("doSSLHandshake %p: got lock", sock); // Log *after* we get the lock
 
 	if (sock->handshake == handshake_to_be_closed)
 		{
@@ -1981,27 +2008,27 @@ mDNSlocal void *doSSLHandshake(void *ctx)
 			{
 			if (err)
 				{
-				LogMsg("SSLHandshake failed: %d", err);
+				LogMsg("SSLHandshake failed: %d%s", err, err == errSSLPeerInternalError ? " (server busy)" : "");
 				SSLDisposeContext(sock->tlsContext);
 				sock->tlsContext = NULL;
 				}
 			
-			sock->err = err;
+			sock->err = err ? mStatus_ConnFailed : 0;
 			sock->handshake = handshake_completed;
 			
-			LogInfo("doSSLHandshake: %p calling doTcpSocketCallback", sock);
+			debugf("doSSLHandshake: %p calling doTcpSocketCallback", sock);
 			doTcpSocketCallback(sock);
 			}
 		}
 	
-	LogInfo("SSLHandshake %p: dropping lock", sock);
+	debugf("SSLHandshake %p: dropping lock", sock);
 	KQueueUnlock(m, "doSSLHandshake");
 	return NULL;
 	}
 
 mDNSlocal mStatus spawnSSLHandshake(TCPSocket* sock)
 	{
-	LogInfo("spawnSSLHandshake %p: entry", sock);
+	debugf("spawnSSLHandshake %p: entry", sock);
 	if (sock->handshake != handshake_required) LogMsg("spawnSSLHandshake: handshake status not required: %d", sock->handshake);
 	sock->handshake = handshake_in_progress;
 	KQueueSet(sock->fd, EV_DELETE, EVFILT_READ, &sock->kqEntry);
@@ -2017,7 +2044,7 @@ mDNSlocal mStatus spawnSSLHandshake(TCPSocket* sock)
 		sock->err = err;
 		KQueueSet(sock->fd, EV_ADD, EVFILT_READ, &sock->kqEntry);
 		}
-	LogInfo("spawnSSLHandshake %p: done", sock);
+	debugf("spawnSSLHandshake %p: done", sock);
 	return err;
 	}
 
@@ -2568,7 +2595,15 @@ mDNSexport void mDNSPlatformUDPClose(UDPSocket *sock)
 mDNSexport void mDNSPlatformSendRawPacket(const void *const msg, const mDNSu8 *const end, mDNSInterfaceID InterfaceID)
 	{
 	if (!InterfaceID) { LogMsg("mDNSPlatformSendRawPacket: No InterfaceID specified"); return; }
-	NetworkInterfaceInfoOSX *info = (NetworkInterfaceInfoOSX *)InterfaceID;
+	NetworkInterfaceInfoOSX *info;
+
+	extern mDNS mDNSStorage;
+	info = IfindexToInterfaceInfoOSX(&mDNSStorage, InterfaceID);
+	if (info == NULL)
+		{
+		LogMsg("mDNSPlatformSendUDP: Invalid interface index %p", InterfaceID);
+		return;
+		}
 	if (info->BPF_fd < 0)
 		LogMsg("mDNSPlatformSendRawPacket: %s BPF_fd %d not ready", info->ifinfo.ifname, info->BPF_fd);
 	else
@@ -2582,7 +2617,14 @@ mDNSexport void mDNSPlatformSendRawPacket(const void *const msg, const mDNSu8 *c
 mDNSexport void mDNSPlatformSetLocalARP(const mDNSv4Addr *const tpa, const mDNSEthAddr *const tha, mDNSInterfaceID InterfaceID)
 	{
 	if (!InterfaceID) { LogMsg("mDNSPlatformSetLocalARP: No InterfaceID specified"); return; }
-	NetworkInterfaceInfoOSX *info = (NetworkInterfaceInfoOSX *)InterfaceID;
+	NetworkInterfaceInfoOSX *info;
+	extern mDNS mDNSStorage;
+	info = IfindexToInterfaceInfoOSX(&mDNSStorage, InterfaceID);
+	if (info == NULL)
+		{
+		LogMsg("mDNSPlatformSendUDP: Invalid interface index %p", InterfaceID);
+		return;
+		}
 	// Manually inject an entry into our local ARP cache.
 	// (We can't do this by sending an ARP broadcast, because the kernel only pays attention to incoming ARP packets, not outgoing.)
 	mDNSBool makearp = mDNSv4AddressIsLinkLocal(tpa);
@@ -2663,16 +2705,16 @@ mDNSlocal int CountProxyTargets(mDNS *const m, NetworkInterfaceInfoOSX *x, int *
 	AuthRecord *rr;
 
 	for (rr = m->ResourceRecords; rr; rr=rr->next)
-		if (rr->resrec.InterfaceID == (mDNSInterfaceID)x && rr->AddressProxy.type == mDNSAddrType_IPv4)
+		if (rr->resrec.InterfaceID == x->ifinfo.InterfaceID && rr->AddressProxy.type == mDNSAddrType_IPv4)
 			{
-			if (p4) LogSPS("mDNSPlatformUpdateProxyList: fd %d %-7s IP%2d %.4a", x->BPF_fd, x->ifinfo.ifname, numv4, &rr->AddressProxy.ip.v4);
+			if (p4) LogSPS("CountProxyTargets: fd %d %-7s IP%2d %.4a", x->BPF_fd, x->ifinfo.ifname, numv4, &rr->AddressProxy.ip.v4);
 			numv4++;
 			}
 
 	for (rr = m->ResourceRecords; rr; rr=rr->next)
-		if (rr->resrec.InterfaceID == (mDNSInterfaceID)x && rr->AddressProxy.type == mDNSAddrType_IPv6)
+		if (rr->resrec.InterfaceID == x->ifinfo.InterfaceID && rr->AddressProxy.type == mDNSAddrType_IPv6)
 			{
-			if (p6) LogSPS("mDNSPlatformUpdateProxyList: fd %d %-7s IP%2d %.16a", x->BPF_fd, x->ifinfo.ifname, numv6, &rr->AddressProxy.ip.v6);
+			if (p6) LogSPS("CountProxyTargets: fd %d %-7s IP%2d %.16a", x->BPF_fd, x->ifinfo.ifname, numv6, &rr->AddressProxy.ip.v6);
 			numv6++;
 			}
 
@@ -2684,7 +2726,10 @@ mDNSlocal int CountProxyTargets(mDNS *const m, NetworkInterfaceInfoOSX *x, int *
 mDNSexport void mDNSPlatformUpdateProxyList(mDNS *const m, const mDNSInterfaceID InterfaceID)
 	{
 	NetworkInterfaceInfoOSX *x;
-	for (x = m->p->InterfaceList; x; x = x->next) if (x == (NetworkInterfaceInfoOSX *)InterfaceID) break;
+
+	//NOTE: We can't use IfIndexToInterfaceInfoOSX because that looks for Registered also.
+	for (x = m->p->InterfaceList; x; x = x->next) if (x->ifinfo.InterfaceID == InterfaceID) break;
+
 	if (!x) { LogMsg("mDNSPlatformUpdateProxyList: ERROR InterfaceID %p not found", InterfaceID); return; }
 
 	#define MAX_BPF_ADDRS 250
@@ -2730,9 +2775,9 @@ mDNSexport void mDNSPlatformUpdateProxyList(mDNS *const m, const mDNSInterfaceID
 	static const struct bpf_insn g6  = BPF_STMT(BPF_LD  + BPF_W   + BPF_ABS, 50);	// Read IPv6 Dst LSW (bytes 50,51,52,53)
 
 	static const struct bpf_insn r4a = BPF_STMT(BPF_LDX + BPF_B   + BPF_MSH, 14);	// Get IP Header length (normally 20)
-	static const struct bpf_insn r4b = BPF_STMT(BPF_LD  + BPF_IMM,           34);	// A = 34 (14-byte Ethernet plus 20-byte TCP)
+	static const struct bpf_insn r4b = BPF_STMT(BPF_LD  + BPF_IMM,           54);	// A = 54 (14-byte Ethernet plus 20-byte TCP + 20 bytes spare)
 	static const struct bpf_insn r4c = BPF_STMT(BPF_ALU + BPF_ADD + BPF_X,    0);	// A += IP Header length
-	static const struct bpf_insn r4d = BPF_STMT(BPF_RET + BPF_A, 0);				// Success: Return Ethernet + IP + TCP
+	static const struct bpf_insn r4d = BPF_STMT(BPF_RET + BPF_A, 0);				// Success: Return Ethernet + IP + TCP + 20 bytes spare (normally 74)
 
 	static const struct bpf_insn r6a = BPF_STMT(BPF_RET + BPF_K, 94);				// Success: Return Eth + IPv6 + TCP + 20 bytes spare
 
@@ -2750,6 +2795,13 @@ mDNSexport void mDNSPlatformUpdateProxyList(mDNS *const m, const mDNSInterfaceID
 	// so that when the BPF API goes through and swaps them all, they end up back as they should be.
 	// In summary, if we byte-swap all the non-numeric fields that shouldn't be swapped, and we *don't*
 	// swap any of the numeric values that *should* be byte-swapped, then the filter will work correctly.
+
+	// IPSEC capture size notes:
+	//  8 bytes UDP header
+	//  4 bytes Non-ESP Marker
+	// 28 bytes IKE Header
+	// --
+	// 40 Total. Capturing TCP Header + 20 gets us enough bytes to receive the IKE Header in a UDP-encapsulated IKE packet.
 
 	AuthRecord *rr;
 	for (rr = m->ResourceRecords; rr; rr=rr->next)
@@ -2857,7 +2909,7 @@ mDNSexport void mDNSPlatformReceiveBPF_fd(mDNS *const m, int fd)
 			i->BPF_cfs = CFSocketCreateWithNative(kCFAllocatorDefault, fd, kCFSocketReadCallBack, bpf_callback, &myCFSocketContext);
 			i->BPF_rls = CFSocketCreateRunLoopSource(kCFAllocatorDefault, i->BPF_cfs, 0);
 			CFRunLoopAddSource(i->m->p->CFRunLoop, i->BPF_rls, kCFRunLoopDefaultMode);
-			mDNSPlatformUpdateProxyList(m, (mDNSInterfaceID)i);
+			mDNSPlatformUpdateProxyList(m, i->ifinfo.InterfaceID);
 			}
 		}
 
@@ -3166,7 +3218,7 @@ mDNSlocal NetworkInterfaceInfoOSX *AddInterfaceToList(mDNS *const m, struct ifad
 				// If this interface is not already registered (i.e. it's a dormant interface we had in our list
 				// from when we previously saw it) then we mustn't do that, because mDNSCore doesn't know about it yet.
 				// In this case, the mDNS_RegisterInterface() call will take care of starting the NetWake browse if necessary.
-				if ((*p)->ifinfo.InterfaceID)
+				if ((*p)->Registered)
 					{
 					mDNS_Lock(m);
 					if (NetWake) mDNS_ActivateNetWake_internal  (m, &(*p)->ifinfo);
@@ -3182,7 +3234,7 @@ mDNSlocal NetworkInterfaceInfoOSX *AddInterfaceToList(mDNS *const m, struct ifad
 	debugf("AddInterfaceToList: Making   new   interface %lu %.6a with address %#a at %p", scope_id, &bssid, &ip, i);
 	if (!i) return(mDNSNULL);
 	mDNSPlatformMemZero(i, sizeof(NetworkInterfaceInfoOSX));
-	i->ifinfo.InterfaceID = mDNSNULL;
+	i->ifinfo.InterfaceID = (mDNSInterfaceID)(uintptr_t)scope_id;
 	i->ifinfo.ip          = ip;
 	i->ifinfo.mask        = mask;
 	strlcpy(i->ifinfo.ifname, ifa->ifa_name, sizeof(i->ifinfo.ifname));
@@ -3205,6 +3257,7 @@ mDNSlocal NetworkInterfaceInfoOSX *AddInterfaceToList(mDNS *const m, struct ifad
 	i->sa_family       = ifa->ifa_addr->sa_family;
 	i->BPF_fd          = -1;
 	i->BPF_len         = 0;
+	i->Registered	   = mDNSNULL;
 
 	// Do this AFTER i->BSSID has been set up
 	i->ifinfo.NetWake  = NetWakeInterface(i);
@@ -3990,6 +4043,11 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 					LogMsg("getifaddrs ifa_netmask for %5s(%d) Flags %04X Family %2d %#a has different family: %d",
 						ifa->ifa_name, if_nametoindex(ifa->ifa_name), ifa->ifa_flags, ifa->ifa_addr->sa_family, &ip, ifa->ifa_netmask->sa_family);
 					}
+					// Currently we use a few internal ones like mDNSInterfaceID_LocalOnly etc. that are negative values (0, -1, -2).
+				else if ((int)if_nametoindex(ifa->ifa_name) <= 0)
+					{
+					LogMsg("UpdateInterfaceList: if_nametoindex returned zero/negative value for %5s(%d)", ifa->ifa_name, if_nametoindex(ifa->ifa_name));
+					}
 				else
 					{
 					// Make sure ifa_netmask->sa_family is set correctly
@@ -4171,18 +4229,20 @@ mDNSlocal int SetupActiveInterfaces(mDNS *const m, mDNSs32 utc)
 			NetworkInterfaceInfoOSX *primary = SearchForInterfaceByName(m, i->ifinfo.ifname, AAAA_OVER_V4 ? AF_UNSPEC : i->sa_family);
 			if (!primary) LogMsg("SetupActiveInterfaces ERROR! SearchForInterfaceByName didn't find %s", i->ifinfo.ifname);
 
-			if (n->InterfaceID && n->InterfaceID != (mDNSInterfaceID)primary)	// Sanity check
+			if (i->Registered && i->Registered != primary)	// Sanity check
 				{
-				LogMsg("SetupActiveInterfaces ERROR! n->InterfaceID %p != primary %p", n->InterfaceID, primary);
-				n->InterfaceID = mDNSNULL;
+				LogMsg("SetupActiveInterfaces ERROR! n->Registered %p != primary %p", i->Registered, primary);
+				i->Registered = mDNSNULL;
 				}
 
-			if (!n->InterfaceID)
+			if (!i->Registered)
 				{
-				// Note: If n->InterfaceID is set, that means we've called mDNS_RegisterInterface() for this interface,
+				// Note: If i->Registered is set, that means we've called mDNS_RegisterInterface() for this interface,
 				// so we need to make sure we call mDNS_DeregisterInterface() before disposing it.
-				// If n->InterfaceID is NOT set, then we haven't registered it and we should not try to deregister it
-				n->InterfaceID = (mDNSInterfaceID)primary;
+				// If i->Registered is NOT set, then we haven't registered it and we should not try to deregister it
+				//
+
+				i->Registered = primary;
 
 				// If i->LastSeen == utc, then this is a brand-new interface, just created, or an interface that never went away.
 				// If i->LastSeen != utc, then this is an old interface, previously seen, that went away for (utc - i->LastSeen) seconds.
@@ -4190,15 +4250,16 @@ mDNSlocal int SetupActiveInterfaces(mDNS *const m, mDNSs32 utc)
 				i->Occulting = !(i->ifa_flags & IFF_LOOPBACK) && (utc - i->LastSeen > 0 && utc - i->LastSeen < 60);
 
 				mDNS_RegisterInterface(m, n, i->Flashing && i->Occulting);
+
 				if (!mDNSAddressIsLinkLocal(&n->ip)) count++;
-				LogInfo("SetupActiveInterfaces:   Registered    %5s(%lu) %.6a InterfaceID %p %#a/%d%s%s%s",
-					i->ifinfo.ifname, i->scope_id, &i->BSSID, primary, &n->ip, CountMaskBits(&n->mask),
+				LogInfo("SetupActiveInterfaces:   Registered    %5s(%lu) %.6a InterfaceID %p(%p), primary %p, %#a/%d%s%s%s",
+					i->ifinfo.ifname, i->scope_id, &i->BSSID, i->ifinfo.InterfaceID, i, primary, &n->ip, CountMaskBits(&n->mask),
 					i->Flashing        ? " (Flashing)"  : "",
 					i->Occulting       ? " (Occulting)" : "",
 					n->InterfaceActive ? " (Primary)"   : "");
 
 				if (!n->McastTxRx)
-					debugf("SetupActiveInterfaces:   No Tx/Rx on   %5s(%lu) %.6a InterfaceID %p %#a", i->ifinfo.ifname, i->scope_id, &i->BSSID, primary, &n->ip);
+					debugf("SetupActiveInterfaces:   No Tx/Rx on   %5s(%lu) %.6a InterfaceID %p %#a", i->ifinfo.ifname, i->scope_id, &i->BSSID, i->ifinfo.InterfaceID, &n->ip);
 				else
 					{
 					if (i->sa_family == AF_INET)
@@ -4285,22 +4346,22 @@ mDNSlocal int ClearInactiveInterfaces(mDNS *const m, mDNSs32 utc)
 		{
 		// If this interface is no longer active, or its InterfaceID is changing, deregister it
 		NetworkInterfaceInfoOSX *primary = SearchForInterfaceByName(m, i->ifinfo.ifname, AAAA_OVER_V4 ? AF_UNSPEC : i->sa_family);
-		if (i->ifinfo.InterfaceID)
-			if (i->Exists == 0 || i->Exists == 2 || i->ifinfo.InterfaceID != (mDNSInterfaceID)primary)
+		if (i->Registered)
+			if (i->Exists == 0 || i->Exists == 2 || i->Registered != primary)
 				{
 				i->Flashing = !(i->ifa_flags & IFF_LOOPBACK) && (utc - i->AppearanceTime < 60);
-				LogInfo("ClearInactiveInterfaces: Deregistering %5s(%lu) %.6a InterfaceID %p %#a/%d%s%s%s",
-					i->ifinfo.ifname, i->scope_id, &i->BSSID, i->ifinfo.InterfaceID,
+				LogInfo("ClearInactiveInterfaces: Deregistering %5s(%lu) %.6a InterfaceID %p(%p), primary %p, %#a/%d%s%s%s",
+					i->ifinfo.ifname, i->scope_id, &i->BSSID, i->ifinfo.InterfaceID, i, primary,
 					&i->ifinfo.ip, CountMaskBits(&i->ifinfo.mask),
 					i->Flashing               ? " (Flashing)"  : "",
 					i->Occulting              ? " (Occulting)" : "",
 					i->ifinfo.InterfaceActive ? " (Primary)"   : "");
 				mDNS_DeregisterInterface(m, &i->ifinfo, i->Flashing && i->Occulting);
 				if (!mDNSAddressIsLinkLocal(&i->ifinfo.ip)) count++;
-				i->ifinfo.InterfaceID = mDNSNULL;
-				// Note: If i->ifinfo.InterfaceID is set, that means we've called mDNS_RegisterInterface() for this interface,
+				i->Registered = mDNSNULL;
+				// Note: If i->Registered is set, that means we've called mDNS_RegisterInterface() for this interface,
 				// so we need to make sure we call mDNS_DeregisterInterface() before disposing it.
-				// If i->ifinfo.InterfaceID is NOT set, then it's not registered and we should not call mDNS_DeregisterInterface() on it.
+				// If i->Registered is NOT set, then it's not registered and we should not call mDNS_DeregisterInterface() on it.
 
 				// Caution: If we ever decide to add code here to leave the multicast group, we need to make sure that this
 				// is the LAST representative of this physical interface, or we'll unsubscribe from the group prematurely.
@@ -4317,9 +4378,9 @@ mDNSlocal int ClearInactiveInterfaces(mDNS *const m, mDNSs32 utc)
 		if (!i->Exists)
 			{
 			if (i->LastSeen == utc) i->LastSeen = utc - 1;
-			mDNSBool delete = (NumCacheRecordsForInterfaceID(m, (mDNSInterfaceID)i) == 0) && (utc - i->LastSeen >= 60);
-			LogInfo("ClearInactiveInterfaces: %-13s %5s(%lu) %.6a InterfaceID %p %#a/%d Age %d%s", delete ? "Deleting" : "Holding",
-				i->ifinfo.ifname, i->scope_id, &i->BSSID, i->ifinfo.InterfaceID,
+			mDNSBool delete = (NumCacheRecordsForInterfaceID(m, i->ifinfo.InterfaceID) == 0) && (utc - i->LastSeen >= 60);
+			LogInfo("ClearInactiveInterfaces: %-13s %5s(%lu) %.6a InterfaceID %p(%p) %#a/%d Age %d%s", delete ? "Deleting" : "Holding",
+				i->ifinfo.ifname, i->scope_id, &i->BSSID, i->ifinfo.InterfaceID, i,
 				&i->ifinfo.ip, CountMaskBits(&i->ifinfo.mask), utc - i->LastSeen,
 				i->ifinfo.InterfaceActive ? " (Primary)" : "");
 #if APPLE_OSX_mDNSResponder
@@ -5626,7 +5687,7 @@ mDNSexport void mDNSMacOSXNetworkChanged(mDNS *const m)
 			}
 		else								// else, we're Sleep Proxy Server; open BPF fds
 			{
-			if (i->Exists && i->ifinfo.InterfaceID == (mDNSInterfaceID)i && !(i->ifa_flags & IFF_LOOPBACK) && i->BPF_fd == -1)
+			if (i->Exists && i->Registered == i && !(i->ifa_flags & IFF_LOOPBACK) && i->BPF_fd == -1)
 				{ LogSPS("%s requesting BPF", i->ifinfo.ifname); i->BPF_fd = -2; mDNSRequestBPF(); }
 			}
 		}

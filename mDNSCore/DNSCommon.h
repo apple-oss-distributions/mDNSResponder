@@ -17,6 +17,10 @@
     Change History (most recent first):
 
 $Log: DNSCommon.h,v $
+svn merge: Revision 1.75  2009/07/21 23:35:01  cheshire
+<rdar://problem/6434656> Sleep Proxy: Put owner OPT records in multicast announcements to avoid conflicts
+Added PutRR_OS macros to put a ResourceRecord while taking into account the space needed to add an OWNER option at the end
+
 Revision 1.73  2009/04/24 00:28:05  cheshire
 <rdar://problem/3476350> Return negative answers when host knows authoritatively that no answer exists
 Added definitions for RRTypeAnswersQuestionType/RRAssertsNonexistence/AnyTypeRecordAnswersQuestion
@@ -326,20 +330,31 @@ extern mDNSu8 *putRData(const DNSMessage *const msg, mDNSu8 *ptr, const mDNSu8 *
 
 // If we have a single large record to put in the packet, then we allow the packet to be up to 9K bytes,
 // but in the normal case we try to keep the packets below 1500 to avoid IP fragmentation on standard Ethernet
+
+#define AllowedRRSpace(msg) (((msg)->h.numAnswers || (msg)->h.numAuthorities || (msg)->h.numAdditionals) ? NormalMaxDNSMessageData : AbsoluteMaxDNSMessageData)
+
 extern mDNSu8 *PutResourceRecordTTLWithLimit(DNSMessage *const msg, mDNSu8 *ptr, mDNSu16 *count, ResourceRecord *rr, mDNSu32 ttl, const mDNSu8 *limit);
 
 #define PutResourceRecordTTL(msg, ptr, count, rr, ttl) \
-	PutResourceRecordTTLWithLimit((msg), (ptr), (count), (rr), (ttl), \
-	((msg)->h.numAnswers || (msg)->h.numAuthorities || (msg)->h.numAdditionals) ? (msg)->data + NormalMaxDNSMessageData : (msg)->data + AbsoluteMaxDNSMessageData)
+	PutResourceRecordTTLWithLimit((msg), (ptr), (count), (rr), (ttl), (msg)->data + AllowedRRSpace(msg))
+
 #define PutResourceRecordTTLJumbo(msg, ptr, count, rr, ttl) \
 	PutResourceRecordTTLWithLimit((msg), (ptr), (count), (rr), (ttl), (msg)->data + AbsoluteMaxDNSMessageData)
+
 #define PutResourceRecord(MSG, P, C, RR) PutResourceRecordTTL((MSG), (P), (C), (RR), (RR)->rroriginalttl)
+
+// The PutRR_OS variants assume a local variable 'm', put build the packet at m->omsg,
+// and assume a local variable 'OwnerRecordSpace' indicating how many bytes (if any) to reserve to add an OWNER option at the end
+#define PutRR_OS_TTL(ptr, count, rr, ttl) \
+	PutResourceRecordTTLWithLimit(&m->omsg, (ptr), (count), (rr), (ttl), m->omsg.data + AllowedRRSpace(&m->omsg) - OwnerRecordSpace)
+
+#define PutRR_OS(P, C, RR) PutRR_OS_TTL((P), (C), (RR), (RR)->rroriginalttl)
 
 extern mDNSu8 *putQuestion(DNSMessage *const msg, mDNSu8 *ptr, const mDNSu8 *const limit, const domainname *const name, mDNSu16 rrtype, mDNSu16 rrclass);
 extern mDNSu8 *putZone(DNSMessage *const msg, mDNSu8 *ptr, mDNSu8 *limit, const domainname *zone, mDNSOpaque16 zoneClass);
 extern mDNSu8 *putPrereqNameNotInUse(const domainname *const name, DNSMessage *msg, mDNSu8 *ptr, mDNSu8 *end);
 extern mDNSu8 *putDeletionRecord(DNSMessage *msg, mDNSu8 *ptr, ResourceRecord *rr);
-extern  mDNSu8 *putDeleteRRSet(DNSMessage *msg, mDNSu8 *ptr, const domainname *name, mDNSu16 rrtype);
+extern mDNSu8 *putDeleteRRSet(DNSMessage *msg, mDNSu8 *ptr, const domainname *name, mDNSu16 rrtype);
 extern mDNSu8 *putDeleteAllRRSets(DNSMessage *msg, mDNSu8 *ptr, const domainname *name);
 extern mDNSu8 *putUpdateLease(DNSMessage *msg, mDNSu8 *end, mDNSu32 lease);
 
