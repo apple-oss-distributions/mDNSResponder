@@ -5456,7 +5456,7 @@ mDNSlocal mDNSu16 GetPortArray(mDNS *const m, int trans, mDNSIPPort *portarray)
 	(((RR)->resrec.InterfaceID && (RR)->resrec.InterfaceID != mDNSInterface_LocalOnly) || \
 	(!(RR)->resrec.InterfaceID && ((RR)->ForceMCast || IsLocalDomain((RR)->resrec.name))))
 
-mDNSlocal mDNSu32 CountProxyRecords(mDNS *const m, uint32_t *numbytes)
+mDNSlocal mDNSu32 CountProxyRecords(mDNS *const m, uint32_t *const numbytes)
 	{
 	*numbytes = 0;
 	int count = 0;
@@ -5466,16 +5466,17 @@ mDNSlocal mDNSu32 CountProxyRecords(mDNS *const m, uint32_t *numbytes)
 			if (TfrRecordToNIC(rr))
 				{
 				*numbytes += DomainNameLength(rr->resrec.name) + 10 + rr->resrec.rdestimate;
-				LogSPS("CountProxyRecords: %3d %5d %5d %s", count, DomainNameLength(rr->resrec.name) + 10 + rr->resrec.rdestimate, *numbytes, ARDisplayString(m,rr));
+				LogSPS("CountProxyRecords: %3d size %5d total %5d %s",
+					count, DomainNameLength(rr->resrec.name) + 10 + rr->resrec.rdestimate, *numbytes, ARDisplayString(m,rr));
 				count++;
 				}
 	return(count);
 	}
 
-mDNSlocal mDNSu16 GetProxyRecords(mDNS *const m, DNSMessage *msg, uint16_t numbytes, FatPtr *records)
+mDNSlocal void GetProxyRecords(mDNS *const m, DNSMessage *const msg, uint32_t *const numbytes, FatPtr *const records)
 	{
 	mDNSu8 *p = msg->data;
-	const mDNSu8 *const limit = p + numbytes;
+	const mDNSu8 *const limit = p + *numbytes;
 	InitializeDNSMessage(&msg->h, zeroID, zeroID);
 
 	int count = 0;
@@ -5490,10 +5491,11 @@ mDNSlocal mDNSu16 GetProxyRecords(mDNS *const m, DNSMessage *msg, uint16_t numby
 					rr->resrec.rrclass |= kDNSClass_UniqueRRSet;	// Temporarily set the 'unique' bit so PutResourceRecord will set it
 				p = PutResourceRecordTTLWithLimit(msg, p, &msg->h.mDNS_numUpdates, &rr->resrec, rr->resrec.rroriginalttl, limit);
 				rr->resrec.rrclass &= ~kDNSClass_UniqueRRSet;		// Make sure to clear 'unique' bit back to normal state
-				LogSPS("GetProxyRecords: %3d %p %p %s", count, records[count].ptr, p, ARDisplayString(m,rr));
+				LogSPS("GetProxyRecords: %3d start %p end %p size %5d total %5d %s",
+					count, records[count].ptr, p, p - (mDNSu8 *)records[count].ptr, p - msg->data, ARDisplayString(m,rr));
 				count++;
 				}
-	return(count);
+	*numbytes = p - msg->data;
 	}
 
 // If compiling with old headers and libraries (pre 10.5) that don't include IOConnectCallStructMethod
@@ -5502,7 +5504,7 @@ mDNSlocal mDNSu16 GetProxyRecords(mDNS *const m, DNSMessage *msg, uint16_t numby
 static kern_return_t
 IOConnectCallStructMethod(
 	mach_port_t	 connection,		// In
-	uint32_t	 selector,		// In
+	uint32_t	 selector,			// In
 	const void	*inputStruct,		// In
 	size_t		 inputStructCnt,	// In
 	void		*outputStruct,		// Out
@@ -5575,7 +5577,7 @@ mDNSexport mStatus ActivateLocalProxy(mDNS *const m, char *ifname)
 						cmd.tcpPorts .ptr, cmd.numTCPPorts);
 					else
 						{
-						GetProxyRecords(m, msg, cmd.rrBufferSize, cmd.rrRecords.ptr);
+						GetProxyRecords(m, msg, &cmd.rrBufferSize, cmd.rrRecords.ptr);
 						GetPortArray(m, mDNSTransport_UDP, cmd.udpPorts.ptr);
 						GetPortArray(m, mDNSTransport_TCP, cmd.tcpPorts.ptr);
 						char outputData[2];
