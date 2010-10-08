@@ -14,33 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
 
-    Change History (most recent first):
-
-$Log: TXTRecord.java,v $
-Revision 1.8  2007/03/16 23:39:40  vazquez
-<rdar://problem/4612778> Java: Coding error in java wrappers, limited TXTRecord length
-
-Revision 1.7  2006/12/13 07:13:23  mkrochma
-<rdar://problem/4612778> Java: Coding error in java wrappers, limited TXTRecord length
-
-Revision 1.6  2006/08/14 23:25:08  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.5  2004/08/25 21:54:36  rpantos
-<rdar://problem/3773973> Fix getValue() for values containing '='.
-
-Revision 1.4  2004/08/04 01:04:50  rpantos
-<rdar://problems/3731579&3731582> Fix set(); add remove() & toString().
-
-Revision 1.3  2004/07/13 21:24:25  rpantos
-Fix for <rdar://problem/3701120>.
-
-Revision 1.2  2004/04/30 21:48:27  rpantos
-Change line endings for CVS.
-
-Revision 1.1  2004/04/30 16:29:35  rpantos
-First checked in.
-
 	To do:
 	- implement remove()
 	- fix set() to replace existing values

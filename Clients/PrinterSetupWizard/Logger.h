@@ -13,14 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: Logger.h,v $
-Revision 1.1  2009/06/11 22:27:15  herscher
-<rdar://problem/4458913> Add comprehensive logging during printer installation process.
-
-
  */
 
 #ifndef _Logger_h

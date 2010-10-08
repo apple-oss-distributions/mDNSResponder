@@ -14,79 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
 
-    Change History (most recent first):
-
-$Log: JNISupport.c,v $
-Revision 1.22  2007/11/30 23:38:53  cheshire
-Fix compiler warning:
-/System/Library/Frameworks/JavaVM.framework/Versions/A/Headers/jni.h:609: warning: declaration of 'index' shadows a global declaration
-
-Revision 1.21  2007/09/18 19:09:02  cheshire
-<rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
-
-Revision 1.20  2007/03/13 01:41:46  cheshire
-Fixed compile warnings when building 32-bit
-
-Revision 1.19  2007/03/13 00:28:03  vazquez
-<rdar://problem/4625928> Java: Rename exported symbols in libjdns_sd.jnilib
-
-Revision 1.18  2007/03/13 00:10:14  vazquez
-<rdar://problem/4455206> Java: 64 bit JNI patch
-
-Revision 1.17  2006/08/14 23:25:08  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.16  2006/07/14 02:35:47  cheshire
-Added (commented out) syslog debugging messages
-
-Revision 1.15  2006/06/27 19:34:43  cheshire
-<rdar://problem/4430023> txtRecord parameter of DNSServiceResolveReply() should be unsigned char *
-
-Revision 1.14  2006/06/20 23:03:35  rpantos
-<rdar://problem/3839132> Java needs to implement DNSServiceRegisterRecord equivalent
-
-Revision 1.13  2005/10/26 01:52:24  cheshire
-<rdar://problem/4316286> Race condition in Java code (doesn't work at all on Linux)
-
-Revision 1.12  2005/07/13 19:20:32  cheshire
-<rdar://problem/4175511> Race condition in Java API
-Additional cleanup suggested by Roger -- NewContext() doesn't need ownerClass parameter any more
-
-Revision 1.11  2005/07/11 01:55:21  cheshire
-<rdar://problem/4175511> Race condition in Java API
-
-Revision 1.10  2005/07/05 13:01:52  cheshire
-<rdar://problem/4169791> If mDNSResponder daemon is stopped, Java API spins, burning CPU time
-
-Revision 1.9  2004/12/11 03:01:00  rpantos
-<rdar://problem/3907498> Java DNSRecord API should be cleaned up
-
-Revision 1.8  2004/11/30 23:51:05  cheshire
-Remove double semicolons
-
-Revision 1.7  2004/11/23 08:12:04  shersche
-Implement if_nametoindex and if_indextoname for Win32 platforms
-
-Revision 1.6  2004/11/23 03:41:14  cheshire
-Change JNISupport.c to call if_indextoname & if_nametoindex directly.
-(May require some additional glue code to work on Windows.)
-
-Revision 1.5  2004/11/17 17:07:44  cheshire
-Updated comment about AUTO_CALLBACKS
-
-Revision 1.4  2004/11/12 03:23:09  rpantos
-rdar://problem/3809541 implement getIfIndexForName, getNameForIfIndex.
-
-Revision 1.3  2004/06/18 04:44:17  rpantos
-Adapt to API unification on Windows
-
-Revision 1.2  2004/05/28 23:34:42  ksekar
-<rdar://problem/3672903>: Java project build errors
-
-Revision 1.1  2004/04/30 16:29:35  rpantos
-First checked in.
-
-
 	This file contains the platform support for DNSSD and related Java classes.
 	It is used to shim through to the underlying <dns_sd.h> API.
  */
@@ -988,13 +915,16 @@ JNIEXPORT void JNICALL Java_com_apple_dnssd_AppleDNSSD_ReconfirmRecord( JNIEnv *
 }
 
 #define LOCAL_ONLY_NAME "loo"
+#define P2P_NAME "p2p"
 
 JNIEXPORT jstring JNICALL Java_com_apple_dnssd_AppleDNSSD_GetNameForIfIndex( JNIEnv *pEnv, jobject pThis _UNUSED,
 							jint ifIndex)
 {
 	char					*p = LOCAL_ONLY_NAME, nameBuff[IF_NAMESIZE];
 
-	if (ifIndex != (jint) kDNSServiceInterfaceIndexLocalOnly)
+	if (ifIndex == (jint) kDNSServiceInterfaceIndexP2P)
+		p = P2P_NAME;
+	else if (ifIndex != (jint) kDNSServiceInterfaceIndexLocalOnly)
 		p = if_indextoname( ifIndex, nameBuff );
 
 	return (*pEnv)->NewStringUTF( pEnv, p);
@@ -1007,7 +937,9 @@ JNIEXPORT jint JNICALL Java_com_apple_dnssd_AppleDNSSD_GetIfIndexForName( JNIEnv
 	uint32_t				ifIndex = kDNSServiceInterfaceIndexLocalOnly;
 	const char				*nameStr = SafeGetUTFChars( pEnv, ifName);
 
-	if (strcmp(nameStr, LOCAL_ONLY_NAME))
+	if (strcmp(nameStr, P2P_NAME) == 0)
+		ifIndex = kDNSServiceInterfaceIndexP2P;
+	else if (strcmp(nameStr, LOCAL_ONLY_NAME))
 		ifIndex = if_nametoindex( nameStr);
 
 	SafeReleaseUTFChars( pEnv, ifName, nameStr);

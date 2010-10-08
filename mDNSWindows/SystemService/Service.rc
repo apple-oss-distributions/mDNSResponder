@@ -9,6 +9,7 @@
 //
 #include "winres.h"
 #include "WinVersRes.h"
+#include "EventLog.rc"
 /////////////////////////////////////////////////////////////////////////////
 #undef APSTUDIO_READONLY_SYMBOLS
 

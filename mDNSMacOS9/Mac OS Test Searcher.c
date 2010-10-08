@@ -13,57 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: Mac\040OS\040Test\040Searcher.c,v $
-Revision 1.24  2008/11/04 19:43:35  cheshire
-Updated comment about MAX_ESCAPED_DOMAIN_NAME size (should be 1009, not 1005)
-
-Revision 1.23  2007/07/27 19:30:40  cheshire
-Changed mDNSQuestionCallback parameter from mDNSBool to QC_result,
-to properly reflect tri-state nature of the possible responses
-
-Revision 1.22  2006/08/14 23:24:29  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.21  2004/12/16 20:49:34  cheshire
-<rdar://problem/3324626> Cache memory management improvements
-
-Revision 1.20  2004/10/19 21:33:18  cheshire
-<rdar://problem/3844991> Cannot resolve non-local registrations using the mach API
-Added flag 'kDNSServiceFlagsForceMulticast'. Passing through an interface id for a unicast name
-doesn't force multicast unless you set this flag to indicate explicitly that this is what you want
-
-Revision 1.19  2004/09/17 01:08:50  cheshire
-Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
-  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
-  declared in that file are ONLY appropriate to single-address-space embedded applications.
-  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
-
-Revision 1.18  2004/09/16 21:59:16  cheshire
-For consistency with zerov6Addr, rename zeroIPAddr to zerov4Addr
-
-Revision 1.17  2004/06/10 04:37:27  cheshire
-Add new parameter in mDNS_GetDomains()
-
-Revision 1.16  2004/03/12 21:30:25  cheshire
-Build a System-Context Shared Library from mDNSCore, for the benefit of developers
-like Muse Research who want to be able to use mDNS/DNS-SD from GPL-licensed code.
-
-Revision 1.15  2004/01/24 23:55:15  cheshire
-Change to use mDNSOpaque16fromIntVal/mDNSVal16 instead of shifting and masking
-
-Revision 1.14  2003/11/14 21:27:09  cheshire
-<rdar://problem/3484766>: Security: Crashing bug in mDNSResponder
-Fix code that should use buffer size MAX_ESCAPED_DOMAIN_NAME (1009) instead of 256-byte buffers.
-
-Revision 1.13  2003/08/14 02:19:54  cheshire
-<rdar://problem/3375491> Split generic ResourceRecord type into two separate types: AuthRecord and CacheRecord
-
-Revision 1.12  2003/08/12 19:56:24  cheshire
-Update to APSL 2.0
-
  */
 
 #include <stdio.h>						// For printf()

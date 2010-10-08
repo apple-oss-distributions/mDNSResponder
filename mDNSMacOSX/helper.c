@@ -13,222 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: helper.c,v $
-Revision 1.66  2009/04/20 20:40:14  cheshire
-<rdar://problem/6786150> uDNS: Running location cycling caused configd and mDNSResponder to deadlock
-Changed mDNSPreferencesSetName (and similar) routines from MIG "routine" to MIG "simpleroutine"
-so we don't deadlock waiting for a result that we're just going to ignore anyway
-
-Revision 1.65  2009/03/20 22:12:28  mcguire
-<rdar://problem/6703952> Support CFUserNotificationDisplayNotice in mDNSResponderHelper
-Make the call to the helper a simpleroutine: don't wait for an unused return value
-
-Revision 1.64  2009/03/20 21:52:39  cheshire
-<rdar://problem/6703952> Support CFUserNotificationDisplayNotice in mDNSResponderHelper
-Need to CFRelease strings in do_mDNSNotify
-
-Revision 1.63  2009/03/20 21:21:15  cheshire
-<rdar://problem/6703952> Support CFUserNotificationDisplayNotice in mDNSResponderHelper
-Need to set error code correctly in do_mDNSNotify
-
-Revision 1.62  2009/03/20 20:52:22  cheshire
-<rdar://problem/6703952> Support CFUserNotificationDisplayNotice in mDNSResponderHelper
-
-Revision 1.61  2009/03/14 01:42:56  mcguire
-<rdar://problem/5457116> BTMM: Fix issues with multiple .Mac accounts on the same machine
-
-Revision 1.60  2009/02/18 02:09:10  cheshire
-<rdar://problem/6514947> Sleep Proxy: PF_ROUTE command to set ARP entry returns errno 17 (EEXIST)
-Also need to set rtmsg.hdr.rtm_index
-
-Revision 1.59  2009/02/17 23:33:45  cheshire
-<rdar://problem/6514947> Sleep Proxy: PF_ROUTE command to set ARP entry returns errno 17 (EEXIST)
-
-Revision 1.58  2009/02/04 22:23:04  cheshire
-Simplified do_mDNSPowerRequest --
-code was checking for CFAbsoluteTimeGetCurrent() returning NULL, which makes no sense
-
-Revision 1.57  2009/01/22 02:14:27  cheshire
-<rdar://problem/6515626> Sleep Proxy: Set correct target MAC address, instead of all zeroes
-
-Revision 1.56  2009/01/20 21:03:22  cheshire
-Improved debugging messages
-
-Revision 1.55  2009/01/20 02:37:26  mcguire
-revert previous erroneous commit
-
-Revision 1.54  2009/01/20 02:35:15  mcguire
-mDNSMacOSX/mDNSMacOSX.c
-
-Revision 1.53  2009/01/14 01:38:42  mcguire
-<rdar://problem/6492710> Write out DynamicStore per-interface SleepProxyServer info
-
-Revision 1.52  2009/01/13 05:31:34  mkrochma
-<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
-
-Revision 1.51  2009/01/12 22:26:12  mkrochma
-Change DynamicStore location from BonjourSleepProxy/DiscoveredServers to SleepProxyServers
-
-Revision 1.50  2008/12/15 18:40:41  mcguire
-<rdar://problem/6444440> Socket leak in helper's doTunnelPolicy
-
-Revision 1.49  2008/12/12 00:37:42  mcguire
-<rdar://problem/6417648> BTMM outbound fails if /var/run/racoon doesn't exist
-
-Revision 1.48  2008/12/05 02:35:24  mcguire
-<rdar://problem/6107390> Write to the DynamicStore when a Sleep Proxy server is available on the network
-
-Revision 1.47  2008/11/21 02:28:55  mcguire
-<rdar://problem/6354979> send racoon a SIGUSR1 instead of SIGHUP
-
-Revision 1.46  2008/11/11 02:09:42  cheshire
-Removed some unnecessary log messages
-
-Revision 1.45  2008/11/06 23:35:38  cheshire
-Refinements to the do_mDNSSetARP() routine
-
-Revision 1.44  2008/11/05 18:41:14  cheshire
-Log errors from read() call in do_mDNSSetARP()
-
-Revision 1.43  2008/11/04 23:54:09  cheshire
-Added routine mDNSSetARP(), used to replace an SPS client's entry in our ARP cache with
-a dummy one, so that IP traffic to the SPS client initiated by the SPS machine can be
-captured by our BPF filters, and used as a trigger to wake the sleeping machine.
-
-Revision 1.42  2008/10/31 23:35:31  cheshire
-When scheduling new power event make sure all old events are deleted;
-mDNSPowerRequest(-1,-1); just clears old events without scheduling a new one
-
-Revision 1.41  2008/10/31 18:41:55  cheshire
-Do update_idle_timer() before returning from do_mDNSRequestBPF()
-
-Revision 1.40  2008/10/30 01:05:27  cheshire
-mDNSPowerRequest(0, 0) means "sleep now"
-
-Revision 1.39  2008/10/29 21:26:50  cheshire
-Only log IOPMSchedulePowerEvent calls when there's an error
-
-Revision 1.38  2008/10/24 01:42:36  cheshire
-Added mDNSPowerRequest helper routine to request a scheduled wakeup some time in the future
-
-Revision 1.37  2008/10/24 00:17:22  mcguire
-Add compatibility for older racoon behavior
-
-Revision 1.36  2008/10/22 17:22:31  cheshire
-Remove SO_NOSIGPIPE bug workaround
-
-Revision 1.35  2008/10/20 22:01:28  cheshire
-Made new Mach simpleroutine "mDNSRequestBPF"
-
-Revision 1.34  2008/10/02 23:50:07  mcguire
-<rdar://problem/6136442> shutdown time issues
-improve log messages when SCDynamicStoreCreate() fails
-
-Revision 1.33  2008/09/30 01:00:45  cheshire
-Added workaround to avoid SO_NOSIGPIPE bug
-
-Revision 1.32  2008/09/27 01:11:46  cheshire
-Added handler to respond to kmDNSSendBPF message
-
-Revision 1.31  2008/09/08 17:42:40  mcguire
-<rdar://problem/5536811> change location of racoon files
-cleanup, handle stat failure cases, reduce log messages
-
-Revision 1.30  2008/09/05 21:51:26  mcguire
-<rdar://problem/6077707> BTMM: Need to launch racoon by opening VPN control socket
-
-Revision 1.29  2008/09/05 18:26:53  mcguire
-<rdar://problem/6077707> BTMM: Need to launch racoon by opening VPN control socket
-
-Revision 1.28  2008/09/04 22:49:28  mcguire
-<rdar://problem/5536811> change location of racoon files
-
-Revision 1.27  2008/08/28 23:11:12  mcguire
-<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
-
-Revision 1.26  2008/08/19 00:35:02  mcguire
-<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
-
-Revision 1.25  2008/08/13 23:04:06  mcguire
-<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
-Preparation: rename message function, as it will no longer be called only on idle exit
-
-Revision 1.24  2008/01/30 19:01:51  mcguire
-<rdar://problem/5703989> Crash in mDNSResponderHelper
-
-Revision 1.23  2007/11/30 23:21:51  cheshire
-Rename variables to eliminate "declaration of 'sin_loc' shadows a previous local" warning
-
-Revision 1.22  2007/11/27 00:08:49  jgraessley
-<rdar://problem/5613538> Interface specific resolvers not setup correctly
-
-Revision 1.21  2007/11/07 00:22:30  jgraessley
-Bug #: <rdar://problem/5573573> mDNSResponder doesn't build without IPSec
-Reviewed by: Stuart Cheshire
-
-Revision 1.20  2007/09/12 18:07:44  cheshire
-Fix compile errors ("passing argument from incompatible pointer type")
-
-Revision 1.19  2007/09/12 00:42:47  mcguire
-<rdar://problem/5468236> BTMM: Need to clean up security associations
-
-Revision 1.18  2007/09/12 00:40:16  mcguire
-<rdar://problem/5469660> 9A547: Computer Name had incorrectly encoded unicode
-
-Revision 1.17  2007/09/09 02:21:17  mcguire
-<rdar://problem/5469345> Leopard Server9A547(Insatll):mDNSResponderHelper crashing
-
-Revision 1.16  2007/09/07 22:44:03  mcguire
-<rdar://problem/5448420> Move CFUserNotification code to mDNSResponderHelper
-
-Revision 1.15  2007/09/07 22:24:36  vazquez
-<rdar://problem/5466301> Need to stop spewing mDNSResponderHelper logs
-
-Revision 1.14  2007/09/06 20:39:05  cheshire
-Added comment explaining why we allow both "ddns" and "sndd" as valid item types
-The Keychain APIs on Intel appear to store the four-character item type backwards (at least some of the time)
-
-Revision 1.13  2007/09/04 22:32:58  mcguire
-<rdar://problem/5453633> BTMM: BTMM overwrites /etc/racoon/remote/anonymous.conf
-
-Revision 1.12  2007/08/29 21:42:12  mcguire
-<rdar://problem/5431192> BTMM: Duplicate Private DNS names are being added to DynamicStore
-
-Revision 1.11  2007/08/28 00:33:04  jgraessley
-<rdar://problem/5423932> Selective compilation options
-
-Revision 1.10  2007/08/27 22:16:38  mcguire
-<rdar://problem/5437362> BTMM: MTU should be set to 1280
-
-Revision 1.9  2007/08/27 22:13:59  mcguire
-<rdar://problem/5437373> BTMM: IPSec security associations should have a shorter timeout
-
-Revision 1.8  2007/08/23 21:49:51  cheshire
-Made code layout style consistent with existing project style; added $Log header
-
-Revision 1.7  2007/08/23 00:29:05  mcguire
-<rdar://problem/5425800> BTMM: IPSec policy not installed in some situations - connections fail
-
-Revision 1.6  2007/08/18 01:02:03  mcguire
-<rdar://problem/5415593> No Bonjour services are getting registered at boot
-
-Revision 1.5  2007/08/18 00:59:55  mcguire
-<rdar://problem/5392568> Blocked: BTMM: Start racoon with '-e' parameter
-
-Revision 1.4  2007/08/16 01:00:06  mcguire
-<rdar://problem/5392548> BTMM: Install generate IPsec policies to block non-BTMM traffic
-
-Revision 1.3  2007/08/15 23:20:28  mcguire
-<rdar://problem/5408105> BTMM: racoon files can get corrupted if autotunnel is listening on port > 32767
-
-Revision 1.2  2007/08/10 22:30:39  mcguire
-<rdar://problem/5400259> BTMM: racoon config files are not always the correct mode
-
-Revision 1.1  2007/08/08 22:34:58  mcguire
-<rdar://problem/5197869> Security: Run mDNSResponder as user id mdnsresponder instead of root
  */
 
 #include <sys/cdefs.h>
@@ -244,12 +28,14 @@ Revision 1.1  2007/08/08 22:34:58  mcguire
 #include <netinet6/nd6.h>
 #include <netinet6/ipsec.h>
 #include <sys/ioctl.h>
+#include <sys/param.h>
 #include <sys/socket.h>
 #include <asl.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <string.h>
@@ -276,6 +62,9 @@ Revision 1.1  2007/08/08 22:34:58  mcguire
 #endif
 
 #if TARGET_OS_EMBEDDED
+#ifndef MDNS_NO_IPSEC
+#define MDNS_NO_IPSEC 1
+#endif
 #define NO_CFUSERNOTIFICATION 1
 #define NO_SECURITYFRAMEWORK 1
 #endif
@@ -401,10 +190,18 @@ fin:
 	return KERN_SUCCESS;
 	}
 
-kern_return_t do_mDNSSetARP(__unused mach_port_t port, int ifindex, v4addr_t v4, ethaddr_t eth, int *err, audit_token_t token)
+kern_return_t do_mDNSSetLocalAddressCacheEntry(__unused mach_port_t port, int ifindex, int family, v6addr_t ip, ethaddr_t eth, int *err, audit_token_t token)
 	{
-	//helplog(ASL_LEVEL_ERR, "do_mDNSSetARP %d %d.%d.%d.%d %02X:%02X:%02X:%02X:%02X:%02X",
-	//	ifindex, v4[0], v4[1], v4[2], v4[3], eth[0], eth[1], eth[2], eth[3], eth[4], eth[5]);
+	#define IPv6FMTSTRING "%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X"
+	#define IPv6FMTARGS  ip[0], ip[1], ip[2], ip[3], ip[4], ip[5], ip[6], ip[7], ip[8], ip[9], ip[10], ip[11], ip[12], ip[13], ip[14], ip[15] 
+	#if 0
+	if (family == 4)
+		helplog(ASL_LEVEL_ERR, "do_mDNSSetLocalAddressCacheEntry %d IPv%d %d.%d.%d.%d %02X:%02X:%02X:%02X:%02X:%02X",
+			ifindex, family, ip[0], ip[1], ip[2], ip[3], eth[0], eth[1], eth[2], eth[3], eth[4], eth[5]);
+	else
+		helplog(ASL_LEVEL_ERR, "do_mDNSSetLocalAddressCacheEntry %d IPv%d " IPv6FMTSTRING " %02X:%02X:%02X:%02X:%02X:%02X",
+			ifindex, family, IPv6FMTARGS, eth[0], eth[1], eth[2], eth[3], eth[4], eth[5]);
+	#endif
 
 	*err = -1;
 	if (!authorized(&token)) { *err = kmDNSHelperNotAuthorized; goto fin; }
@@ -413,59 +210,109 @@ kern_return_t do_mDNSSetARP(__unused mach_port_t port, int ifindex, v4addr_t v4,
 	if (s < 0)
 		{
 		s = socket(PF_ROUTE, SOCK_RAW, 0);
-		if (s < 0) helplog(ASL_LEVEL_ERR, "do_mDNSSetARP: socket(PF_ROUTE, SOCK_RAW, 0) failed %d (%s)", errno, strerror(errno));
+		if (s < 0) helplog(ASL_LEVEL_ERR, "do_mDNSSetLocalAddressCacheEntry: socket(PF_ROUTE, SOCK_RAW, 0) failed %d (%s)", errno, strerror(errno));
 		}
 
 	if (s >= 0)
 		{
 		struct timeval tv;
 		gettimeofday(&tv, 0);
+		if (family == 4)
+			{
+			struct { struct rt_msghdr hdr; struct sockaddr_inarp dst; struct sockaddr_dl sdl; } rtmsg;
+			memset(&rtmsg, 0, sizeof(rtmsg));
 
-		struct { struct rt_msghdr hdr; struct sockaddr_inarp dst; struct sockaddr_dl sdl; } rtmsg;
-		memset(&rtmsg, 0, sizeof(rtmsg));
+			rtmsg.hdr.rtm_msglen         = sizeof(rtmsg);
+			rtmsg.hdr.rtm_version        = RTM_VERSION;
+			rtmsg.hdr.rtm_type           = RTM_ADD;
+			rtmsg.hdr.rtm_index          = ifindex;
+			rtmsg.hdr.rtm_flags          = RTF_HOST | RTF_STATIC | RTF_IFSCOPE;
+			rtmsg.hdr.rtm_addrs          = RTA_DST | RTA_GATEWAY;
+			rtmsg.hdr.rtm_pid            = 0;
+			rtmsg.hdr.rtm_seq            = seq++;
+			rtmsg.hdr.rtm_errno          = 0;
+			rtmsg.hdr.rtm_use            = 0;
+			rtmsg.hdr.rtm_inits          = RTV_EXPIRE;
+			rtmsg.hdr.rtm_rmx.rmx_expire = tv.tv_sec + 30;
 
-		rtmsg.hdr.rtm_msglen         = sizeof(rtmsg);
-		rtmsg.hdr.rtm_version        = RTM_VERSION;
-		rtmsg.hdr.rtm_type           = RTM_ADD;
-		rtmsg.hdr.rtm_index          = ifindex;
-		rtmsg.hdr.rtm_flags          = RTF_HOST | RTF_STATIC | RTF_IFSCOPE;
-		rtmsg.hdr.rtm_addrs          = RTA_DST | RTA_GATEWAY;
-		rtmsg.hdr.rtm_pid            = 0;
-		rtmsg.hdr.rtm_seq            = seq++;
-		rtmsg.hdr.rtm_errno          = 0;
-		rtmsg.hdr.rtm_use            = 0;
-		rtmsg.hdr.rtm_inits          = RTV_EXPIRE;
-		rtmsg.hdr.rtm_rmx.rmx_expire = tv.tv_sec + 30;
+			rtmsg.dst.sin_len            = sizeof(rtmsg.dst);
+			rtmsg.dst.sin_family         = AF_INET;
+			rtmsg.dst.sin_port           = 0;
+			rtmsg.dst.sin_addr.s_addr    = *(in_addr_t*)ip;
+			rtmsg.dst.sin_srcaddr.s_addr = 0;
+			rtmsg.dst.sin_tos            = 0;
+			rtmsg.dst.sin_other          = 0;
 
-		rtmsg.dst.sin_len            = sizeof(struct sockaddr_inarp);
-		rtmsg.dst.sin_family         = AF_INET;
-		rtmsg.dst.sin_port           = 0;
-		rtmsg.dst.sin_addr.s_addr    = *(in_addr_t*)v4;
-		rtmsg.dst.sin_srcaddr.s_addr = 0;
-		rtmsg.dst.sin_tos            = 0;
-		rtmsg.dst.sin_other          = 0;
+			rtmsg.sdl.sdl_len            = sizeof(rtmsg.sdl);
+			rtmsg.sdl.sdl_family         = AF_LINK;
+			rtmsg.sdl.sdl_index          = ifindex;
+			rtmsg.sdl.sdl_type           = IFT_ETHER;
+			rtmsg.sdl.sdl_nlen           = 0;
+			rtmsg.sdl.sdl_alen           = ETHER_ADDR_LEN;
+			rtmsg.sdl.sdl_slen           = 0;
 
-		rtmsg.sdl.sdl_len            = sizeof(struct sockaddr_dl);
-		rtmsg.sdl.sdl_family         = AF_LINK;
-		rtmsg.sdl.sdl_index          = ifindex;
-		rtmsg.sdl.sdl_type           = IFT_ETHER;
-		rtmsg.sdl.sdl_nlen           = 0;
-		rtmsg.sdl.sdl_alen           = ETHER_ADDR_LEN;
-		rtmsg.sdl.sdl_slen           = 0;
+			// Target MAC address goes in rtmsg.sdl.sdl_data[0..5]; (See LLADDR() in /usr/include/net/if_dl.h)
+			memcpy(rtmsg.sdl.sdl_data, eth, sizeof(ethaddr_t));
 
-		// Target MAC address goes in rtmsg.sdl.sdl_data[0..5]; (See LLADDR() in /usr/include/net/if_dl.h)
-		memcpy(rtmsg.sdl.sdl_data, eth, sizeof(ethaddr_t));
+			int len = write(s, (char *)&rtmsg, sizeof(rtmsg));
+			if (len < 0)
+				helplog(ASL_LEVEL_ERR, "do_mDNSSetLocalAddressCacheEntry: write(%d) interface %d address %d.%d.%d.%d seq %d result %d errno %d (%s)",
+					sizeof(rtmsg), ifindex, ip[0], ip[1], ip[2], ip[3], rtmsg.hdr.rtm_seq, len, errno, strerror(errno));
+			len = read(s, (char *)&rtmsg, sizeof(rtmsg));
+			if (len < 0 || rtmsg.hdr.rtm_errno)
+				helplog(ASL_LEVEL_ERR, "do_mDNSSetLocalAddressCacheEntry: read (%d) interface %d address %d.%d.%d.%d seq %d result %d errno %d (%s) %d",
+					sizeof(rtmsg), ifindex, ip[0], ip[1], ip[2], ip[3], rtmsg.hdr.rtm_seq, len, errno, strerror(errno), rtmsg.hdr.rtm_errno);
 
-		int len = write(s, (char *)&rtmsg, sizeof(rtmsg));
-		if (len < 0)
-			helplog(ASL_LEVEL_ERR, "do_mDNSSetARP: write(%d) interface %d address %d.%d.%d.%d seq %d result %d errno %d (%s)",
-				sizeof(rtmsg), ifindex, v4[0], v4[1], v4[2], v4[3], rtmsg.hdr.rtm_seq, len, errno, strerror(errno));
-		len = read(s, (char *)&rtmsg, sizeof(rtmsg));
-		if (len < 0)
-			helplog(ASL_LEVEL_ERR, "do_mDNSSetARP: read (%d) interface %d address %d.%d.%d.%d seq %d result %d errno %d (%s)",
-				sizeof(rtmsg), ifindex, v4[0], v4[1], v4[2], v4[3], rtmsg.hdr.rtm_seq, len, errno, strerror(errno));
+			*err = 0;
+			}
+		else
+			{
+			struct { struct rt_msghdr hdr; struct sockaddr_in6 dst; struct sockaddr_dl sdl; } rtmsg;
+			memset(&rtmsg, 0, sizeof(rtmsg));
 
-		*err = 0;
+			rtmsg.hdr.rtm_msglen         = sizeof(rtmsg);
+			rtmsg.hdr.rtm_version        = RTM_VERSION;
+			rtmsg.hdr.rtm_type           = RTM_ADD;
+			rtmsg.hdr.rtm_index          = ifindex;
+			rtmsg.hdr.rtm_flags          = RTF_HOST | RTF_STATIC | RTF_IFSCOPE;
+			rtmsg.hdr.rtm_addrs          = RTA_DST | RTA_GATEWAY;
+			rtmsg.hdr.rtm_pid            = 0;
+			rtmsg.hdr.rtm_seq            = seq++;
+			rtmsg.hdr.rtm_errno          = 0;
+			rtmsg.hdr.rtm_use            = 0;
+			rtmsg.hdr.rtm_inits          = RTV_EXPIRE;
+			rtmsg.hdr.rtm_rmx.rmx_expire = tv.tv_sec + 30;
+
+			rtmsg.dst.sin6_len           = sizeof(rtmsg.dst);
+			rtmsg.dst.sin6_family        = AF_INET6;
+			rtmsg.dst.sin6_port          = 0;
+			rtmsg.dst.sin6_flowinfo      = 0;
+			rtmsg.dst.sin6_addr          = *(struct in6_addr*)ip;
+			rtmsg.dst.sin6_scope_id      = ifindex;
+
+			rtmsg.sdl.sdl_len            = sizeof(rtmsg.sdl);
+			rtmsg.sdl.sdl_family         = AF_LINK;
+			rtmsg.sdl.sdl_index          = ifindex;
+			rtmsg.sdl.sdl_type           = IFT_ETHER;
+			rtmsg.sdl.sdl_nlen           = 0;
+			rtmsg.sdl.sdl_alen           = ETHER_ADDR_LEN;
+			rtmsg.sdl.sdl_slen           = 0;
+
+			// Target MAC address goes in rtmsg.sdl.sdl_data[0..5]; (See LLADDR() in /usr/include/net/if_dl.h)
+			memcpy(rtmsg.sdl.sdl_data, eth, sizeof(ethaddr_t));
+
+			int len = write(s, (char *)&rtmsg, sizeof(rtmsg));
+			if (len < 0)
+				helplog(ASL_LEVEL_ERR, "do_mDNSSetLocalAddressCacheEntry: write(%d) interface %d address " IPv6FMTSTRING " seq %d result %d errno %d (%s)",
+					sizeof(rtmsg), ifindex, IPv6FMTARGS, rtmsg.hdr.rtm_seq, len, errno, strerror(errno));
+			len = read(s, (char *)&rtmsg, sizeof(rtmsg));
+			if (len < 0 || rtmsg.hdr.rtm_errno)
+				helplog(ASL_LEVEL_ERR, "do_mDNSSetLocalAddressCacheEntry: read (%d) interface %d address " IPv6FMTSTRING " seq %d result %d errno %d (%s) %d",
+					sizeof(rtmsg), ifindex, IPv6FMTARGS, rtmsg.hdr.rtm_seq, len, errno, strerror(errno), rtmsg.hdr.rtm_errno);
+
+			*err = 0;
+			}
+
 		}
 
 fin:
@@ -489,6 +336,9 @@ kern_return_t do_mDNSNotify(__unused mach_port_t port, const char *title, const 
 	if (err) helplog(ASL_LEVEL_ERR, "CFUserNotificationDisplayNotice returned %d", err);
 	CFRelease(alertHeader);
 	CFRelease(alertMessage);
+#else
+	(void)title;
+	(void)msg;
 #endif /* NO_CFUSERNOTIFICATION */
 
 	update_idle_timer();
@@ -810,7 +660,8 @@ do_mDNSPreferencesSetName(__unused mach_port_t port, int key, const char* old, c
 
 	if (0 == strncmp(old, new, MAX_DOMAIN_LABEL+1))
 		{
-		// if we've changed the name, but now someone else has set it to something different, we no longer need the notification
+		// old and new are same means the config changed i.e, the user has set something in the preferences pane.
+		// This means the conflict has been resolved. We need to dismiss the dialogue.
 		if (last[0] && 0 != strncmp(last, new, MAX_DOMAIN_LABEL+1))
 			{
 			last[0] = 0;
@@ -821,6 +672,10 @@ do_mDNSPreferencesSetName(__unused mach_port_t port, int key, const char* old, c
 		}
 	else
 		{
+		// old and new are not same, this means there is a conflict. For the first conflict, we show
+		// the old value and the new value. For all subsequent conflicts, while the dialogue is still
+		// up, we do a real time update of the "new" value in the dialogue. That's why we update just
+		// "last" here and not "user".
 		if (strncmp(last, new, MAX_DOMAIN_LABEL+1))
 			{
 			strncpy(last, new, MAX_DOMAIN_LABEL);
@@ -828,6 +683,9 @@ do_mDNSPreferencesSetName(__unused mach_port_t port, int key, const char* old, c
 			}
 		}
 
+	// If we are not showing the dialogue, we need to remember the first "old" value so that
+	// we maintain the same through the lifetime of the dialogue. Subsequence conflicts don't
+	// update the "old" value.
 	if (!user[0])
 		{
 		strncpy(user, old, MAX_DOMAIN_LABEL);
@@ -1183,15 +1041,25 @@ typedef enum _mDNSTunnelPolicyWhich
 	kmDNSTunnelPolicyGenerate
 	} mDNSTunnelPolicyWhich;
 
+// For kmDNSTunnelPolicySetup, you can setup IPv6-in-IPv6 tunnel or IPv6-in-IPv4 tunnel
+// kmDNSNoTunnel is used for other Policy types
+typedef enum _mDNSTunnelType
+	{
+	kmDNSNoTunnel,
+	kmDNSIPv6IPv4Tunnel,
+	kmDNSIPv6IPv6Tunnel
+	} mDNSTunnelType;
+
 static const uint8_t kWholeV6Mask = 128;
 static const uint8_t kZeroV6Mask  = 0;
 
 static int
-doTunnelPolicy(mDNSTunnelPolicyWhich which,
+doTunnelPolicy(mDNSTunnelPolicyWhich which, mDNSTunnelType type,
 	       v6addr_t loc_inner, uint8_t loc_bits,
 	       v4addr_t loc_outer, uint16_t loc_port, 
 	       v6addr_t rmt_inner, uint8_t rmt_bits,
-	       v4addr_t rmt_outer, uint16_t rmt_port);
+	       v4addr_t rmt_outer, uint16_t rmt_port,
+		   v6addr_t loc_outer6, v6addr_t rmt_outer6);
 
 static int
 aliasTunnelAddress(v6addr_t address)
@@ -1233,9 +1101,9 @@ aliasTunnelAddress(v6addr_t address)
 		}
 
 	v6addr_t zero = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	};
-	err = doTunnelPolicy(kmDNSTunnelPolicyGenerate,
+	err = doTunnelPolicy(kmDNSTunnelPolicyGenerate, kmDNSNoTunnel,
 	    address, kWholeV6Mask, NULL, 0,
-	    zero, kZeroV6Mask, NULL, 0);
+	    zero, kZeroV6Mask, NULL, 0, NULL, NULL);
 
 fin:
 	if (0 <= s)
@@ -1274,9 +1142,9 @@ unaliasTunnelAddress(v6addr_t address)
 		}
 
 	v6addr_t zero = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-	err = doTunnelPolicy(kmDNSTunnelPolicyTeardown,
+	err = doTunnelPolicy(kmDNSTunnelPolicyTeardown, kmDNSNoTunnel,
 	    address, kWholeV6Mask, NULL, 0,
-	    zero, kZeroV6Mask, NULL, 0);
+	    zero, kZeroV6Mask, NULL, 0, NULL, NULL);
 
 fin:
 	if (0 <= s)
@@ -1309,7 +1177,6 @@ do_mDNSAutoTunnelInterfaceUpDown(__unused mach_port_t port, int updown,
 fin:
 #else
 	(void)port; (void)updown; (void)address; (void)token;
-	*err = kmDNSHelperIPsecDisabled;
 #endif
 	update_idle_timer();
 	return KERN_SUCCESS;
@@ -1349,31 +1216,24 @@ static int MacOSXSystemBuildNumber(char* letter_out, int* minor_out)
 	return(major);
 	}
 	
-static int g_oldRacoon = -1;
-static int g_racoonSignal = SIGUSR1;
-
-static void DetermineRacoonVersion()
+static int UseOldRacoon()
 	{
+	static int g_oldRacoon = -1;
+
 	if (g_oldRacoon == -1)
 		{
 		char letter = 0;
 		int minor = 0;
 		g_oldRacoon = (MacOSXSystemBuildNumber(&letter, &minor) < 10);
-		if (g_oldRacoon || (letter == 'A' && minor < 218)) g_racoonSignal = SIGHUP;
-		debug("%s, signal=%d", g_oldRacoon?"old":"new", g_racoonSignal);
+		debug("%s", g_oldRacoon?"old":"new");
 		}
-	}
 
-static int UseOldRacoon()
-	{
-	DetermineRacoonVersion();
 	return g_oldRacoon;
 	}
 	
 static int RacoonSignal()
 	{
-	DetermineRacoonVersion();
-	return g_racoonSignal;
+	return UseOldRacoon() ? SIGHUP : SIGUSR1;
 	}
 	
 static const char* GetRacoonConfigDir()
@@ -1551,7 +1411,7 @@ createAnonymousRacoonConfiguration(const char *fqdn)
 	static const char config2[] =
 	  "\";\n"
 	  "  nonce_size 16;\n"
-	  "  lifetime time 5 min;\n"
+	  "  lifetime time 15 min;\n"
 	  "  initial_contact on;\n"
 	  "  support_proxy on;\n"
 	  "  nat_traversal force;\n"
@@ -1561,7 +1421,7 @@ createAnonymousRacoonConfiguration(const char *fqdn)
 	  "    hash_algorithm sha1;\n"
 	  "    authentication_method pre_shared_key;\n"
 	  "    dh_group 2;\n"
-	  "    lifetime time 5 min;\n"
+	  "    lifetime time 15 min;\n"
 	  "  }\n"
 	  "}\n\n"
 	  "sainfo anonymous { \n"
@@ -1807,7 +1667,7 @@ startRacoon(void)
 	bytes = 0;
 	h.cookie = 0;
 	
-	while (counter < 100)
+	for (counter = 0; counter < 100; counter++)
 		{
 		FD_ZERO(&fds);
 		FD_SET(fd, &fds);
@@ -1886,7 +1746,6 @@ do_mDNSConfigureServer(__unused mach_port_t port, int updown, const char *fqdn, 
 fin:
 #else
 	(void)port; (void)updown; (void)fqdn; (void)token;
-	*err = kmDNSHelperIPsecDisabled;
 #endif
 	update_idle_timer();
 	return KERN_SUCCESS;
@@ -2028,13 +1887,15 @@ v6addr_to_string(v6addr_t addr, char *buf, size_t buflen)
 
 /* Caller owns object returned in `policy' */
 static int
-generateTunnelPolicy(mDNSTunnelPolicyWhich which, int in,
+generateTunnelPolicy(mDNSTunnelPolicyWhich which, mDNSTunnelType type, int in,
 		     v4addr_t src, uint16_t src_port,
 		     v4addr_t dst, uint16_t dst_port,
+			 v6addr_t src6, v6addr_t dst6,
 		     ipsec_policy_t *policy, size_t *len)
 	{
 	char srcs[INET_ADDRSTRLEN], dsts[INET_ADDRSTRLEN];
-	char buf[128];
+	char srcs6[INET6_ADDRSTRLEN], dsts6[INET6_ADDRSTRLEN];
+	char buf[512];
 	char *inOut = in ? "in" : "out";
 	ssize_t n = 0;
 	int err = 0;
@@ -2045,13 +1906,26 @@ generateTunnelPolicy(mDNSTunnelPolicyWhich which, int in,
 	switch (which)
 	{
 	case kmDNSTunnelPolicySetup:
-		if (0 != (err = v4addr_to_string(src, srcs, sizeof(srcs))))
-			goto fin;
-		if (0 != (err = v4addr_to_string(dst, dsts, sizeof(dsts))))
-			goto fin;
-		n = snprintf(buf, sizeof(buf),
-		    "%s ipsec esp/tunnel/%s[%u]-%s[%u]/require",
-		    inOut, srcs, src_port, dsts, dst_port);
+		if (type == kmDNSIPv6IPv4Tunnel)
+			{
+			if (0 != (err = v4addr_to_string(src, srcs, sizeof(srcs))))
+				goto fin;
+			if (0 != (err = v4addr_to_string(dst, dsts, sizeof(dsts))))
+				goto fin;
+			n = snprintf(buf, sizeof(buf),
+		    	"%s ipsec esp/tunnel/%s[%u]-%s[%u]/require",
+		    	inOut, srcs, src_port, dsts, dst_port);
+			}
+		else if (type == kmDNSIPv6IPv6Tunnel)
+			{
+			if (0 != (err = v6addr_to_string(src6, srcs6, sizeof(srcs6))))
+				goto fin;
+			if (0 != (err = v6addr_to_string(dst6, dsts6, sizeof(dsts6))))
+				goto fin;
+			n = snprintf(buf, sizeof(buf),
+		    	"%s ipsec esp/tunnel/%s-%s/require",
+		    	inOut, srcs6, dsts6);
+			}
 		break;
 	case kmDNSTunnelPolicyTeardown:
 		n = strlcpy(buf, inOut, sizeof(buf));
@@ -2145,11 +2019,12 @@ fin:
 	}
 
 static int
-doTunnelPolicy(mDNSTunnelPolicyWhich which,
+doTunnelPolicy(mDNSTunnelPolicyWhich which, mDNSTunnelType type,
 	       v6addr_t loc_inner, uint8_t loc_bits,
 	       v4addr_t loc_outer, uint16_t loc_port, 
 	       v6addr_t rmt_inner, uint8_t rmt_bits,
-	       v4addr_t rmt_outer, uint16_t rmt_port)
+	       v4addr_t rmt_outer, uint16_t rmt_port,
+		   v6addr_t loc_outer6, v6addr_t rmt_outer6)
 	{
 	struct sockaddr_in6 sin6_loc;
 	struct sockaddr_in6 sin6_rmt;
@@ -2182,9 +2057,10 @@ doTunnelPolicy(mDNSTunnelPolicyWhich which,
 
 	int setup = which != kmDNSTunnelPolicyTeardown;
 
-	if (0 != (err = generateTunnelPolicy(which, 1,
+	if (0 != (err = generateTunnelPolicy(which, type, 1,
 	    rmt_outer, rmt_port,
 	    loc_outer, loc_port,
+		rmt_outer6, loc_outer6,
 	    &policy, &len)))
 		goto fin;
 	if (0 != (err = sendPolicy(s, setup,
@@ -2197,9 +2073,10 @@ doTunnelPolicy(mDNSTunnelPolicyWhich which,
 		free(policy);
 		policy = NULL;
 		}
-	if (0 != (err = generateTunnelPolicy(which, 0,
+	if (0 != (err = generateTunnelPolicy(which, type, 0,
 	    loc_outer, loc_port,
 	    rmt_outer, rmt_port,
+		loc_outer6, rmt_outer6,
 	    &policy, &len)))
 		goto fin;
 	if (0 != (err = sendPolicy(s, setup,
@@ -2208,26 +2085,49 @@ doTunnelPolicy(mDNSTunnelPolicyWhich which,
 	    policy, len)))
 		goto fin;
 
-	if (which == kmDNSTunnelPolicyTeardown && loc_outer && rmt_outer)
+	if (which == kmDNSTunnelPolicyTeardown)
 		{
-		struct sockaddr_in sin_loc;
-		struct sockaddr_in sin_rmt;
+		if (rmt_port)		// Outer tunnel is IPv4
+			{
+			if (loc_outer && rmt_outer)
+				{
+				struct sockaddr_in sin_loc;
+				struct sockaddr_in sin_rmt;
+				memset(&sin_loc, 0, sizeof(sin_loc));
+				sin_loc.sin_len = sizeof(sin_loc);
+				sin_loc.sin_family = AF_INET;
+				memcpy(&sin_loc.sin_addr, loc_outer, sizeof(sin_loc.sin_addr));
 		
-		memset(&sin_loc, 0, sizeof(sin_loc));
-		sin_loc.sin_len = sizeof(sin_loc);
-		sin_loc.sin_family = AF_INET;
-		sin_loc.sin_port = htons(0);
-		memcpy(&sin_loc.sin_addr, loc_outer, sizeof(sin_loc.sin_addr));
+				memset(&sin_rmt, 0, sizeof(sin_rmt));
+				sin_rmt.sin_len = sizeof(sin_rmt);
+				sin_rmt.sin_family = AF_INET;
+				memcpy(&sin_rmt.sin_addr, rmt_outer, sizeof(sin_rmt.sin_addr));
+				if (0 != (err = removeSA(s, (struct sockaddr *)&sin_loc, (struct sockaddr *)&sin_rmt)))
+					goto fin;
+				}
+			}
+		else
+			{
+			if (loc_outer6 && rmt_outer6)
+				{
+				struct sockaddr_in6 sin6_lo;
+				struct sockaddr_in6 sin6_rm;
 
-		memset(&sin_rmt, 0, sizeof(sin_rmt));
-		sin_rmt.sin_len = sizeof(sin_rmt);
-		sin_rmt.sin_family = AF_INET;
-		sin_rmt.sin_port = htons(0);
-		memcpy(&sin_rmt.sin_addr, rmt_outer, sizeof(sin_rmt.sin_addr));
-
-		if (0 != (err = removeSA(s, (struct sockaddr *)&sin_loc, (struct sockaddr *)&sin_rmt)))
-			goto fin;
+				memset(&sin6_lo, 0, sizeof(sin6_lo));
+				sin6_lo.sin6_len = sizeof(sin6_lo);
+				sin6_lo.sin6_family = AF_INET6;
+				memcpy(&sin6_lo.sin6_addr, loc_outer6, sizeof(sin6_lo.sin6_addr));
+		
+				memset(&sin6_rm, 0, sizeof(sin6_rm));
+				sin6_rm.sin6_len = sizeof(sin6_rm);
+				sin6_rm.sin6_family = AF_INET6;
+				memcpy(&sin6_rm.sin6_addr, rmt_outer6, sizeof(sin6_rm.sin6_addr));
+				if (0 != (err = removeSA(s, (struct sockaddr *)&sin6_lo, (struct sockaddr *)&sin6_rm)))
+					goto fin;
+				}
+			}
 		}
+
 
 	debug("succeeded");
 
@@ -2243,14 +2143,15 @@ fin:
 
 int
 do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
-    v6addr_t loc_inner, v4addr_t loc_outer, uint16_t loc_port,
-    v6addr_t rmt_inner, v4addr_t rmt_outer, uint16_t rmt_port,
+    v6addr_t loc_inner, v6addr_t loc_outer6, uint16_t loc_port,
+    v6addr_t rmt_inner, v6addr_t rmt_outer6, uint16_t rmt_port,
     const char *fqdn, int *err, audit_token_t token)
 	{
 #ifndef MDNS_NO_IPSEC
 	static const char config[] =
 	  "%s"
 	  "remote %s [%u] {\n"
+	  "  disconnect_on_idle idle_timeout 600 idle_direction idle_outbound;\n"
 	  "  exchange_mode aggressive;\n"
 	  "  doi ipsec_doi;\n"
 	  "  situation identity_only;\n"
@@ -2259,7 +2160,7 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 	  "  my_identifier user_fqdn \"dns:%s\";\n"
 	  "  shared_secret keychain \"dns:%s\";\n"
 	  "  nonce_size 16;\n"
-	  "  lifetime time 5 min;\n"
+	  "  lifetime time 15 min;\n"
 	  "  initial_contact on;\n"
 	  "  support_proxy on;\n"
 	  "  nat_traversal force;\n"
@@ -2269,7 +2170,7 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 	  "    hash_algorithm sha1;\n"
 	  "    authentication_method pre_shared_key;\n"
 	  "    dh_group 2;\n"
-	  "    lifetime time 5 min;\n"
+	  "    lifetime time 15 min;\n"
 	  "  }\n"
 	  "}\n\n"
 	  "sainfo address %s any address %s any {\n"
@@ -2287,11 +2188,12 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 	  "  compression_algorithm deflate;\n"
 	  "}\n";
 	char path[PATH_MAX] = "";
-	char li[INET6_ADDRSTRLEN], lo[INET_ADDRSTRLEN],
-	    ri[INET6_ADDRSTRLEN], ro[INET_ADDRSTRLEN];
+	char li[INET6_ADDRSTRLEN], lo[INET_ADDRSTRLEN], lo6[INET6_ADDRSTRLEN],
+	    ri[INET6_ADDRSTRLEN], ro[INET_ADDRSTRLEN], ro6[INET6_ADDRSTRLEN];
 	FILE *fp = NULL;
 	int fd = -1;
 	char tmp_path[PATH_MAX] = "";
+	v4addr_t loc_outer, rmt_outer;
 
 	debug("entry");
 	*err = 0;
@@ -2309,25 +2211,60 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 		*err = kmDNSHelperInvalidTunnelSetKeysOperation;
 		goto fin;
 		}
+
 	if (0 != (*err = v6addr_to_string(loc_inner, li, sizeof(li))))
 		goto fin;
 	if (0 != (*err = v6addr_to_string(rmt_inner, ri, sizeof(ri))))
 		goto fin;
-	if (0 != (*err = v4addr_to_string(loc_outer, lo, sizeof(lo))))
-		goto fin;
-	if (0 != (*err = v4addr_to_string(rmt_outer, ro, sizeof(ro))))
-		goto fin;
-	debug("loc_inner=%s rmt_inner=%s", li, ri);
-	debug("loc_outer=%s loc_port=%u rmt_outer=%s rmt_port=%u",
-	    lo, loc_port, ro, rmt_port);
 
-	if ((int)sizeof(path) <= snprintf(path, sizeof(path),
-	    "%s%s.%u.conf", GetRacoonConfigDir(), ro,
-	    rmt_port))
+	debug("loc_inner=%s rmt_inner=%s", li, ri);
+	if (!rmt_port)
 		{
-		*err = kmDNSHelperResultTooLarge;
-		goto fin;
+		loc_outer[0] = loc_outer[1] = loc_outer[2] = loc_outer[3] = 0;
+		rmt_outer[0] = rmt_outer[1] = rmt_outer[2] = rmt_outer[3] = 0;
+
+		if (0 != (*err = v6addr_to_string(loc_outer6, lo6, sizeof(lo6))))
+			goto fin;
+		if (0 != (*err = v6addr_to_string(rmt_outer6, ro6, sizeof(ro6))))
+			goto fin;
+		debug("IPv6 outer tunnel: loc_outer6=%s rmt_outer6=%s", lo6, ro6);
+		if ((int)sizeof(path) <= snprintf(path, sizeof(path),
+	    	"%s%s.conf", GetRacoonConfigDir(), ro6))
+			{
+			*err = kmDNSHelperResultTooLarge;
+			goto fin;
+			}
 		}
+	else
+		{
+		loc_outer[0] = loc_outer6[0];
+		loc_outer[1] = loc_outer6[1];
+		loc_outer[2] = loc_outer6[2];
+		loc_outer[3] = loc_outer6[3];
+
+		rmt_outer[0] = rmt_outer6[0];
+		rmt_outer[1] = rmt_outer6[1];
+		rmt_outer[2] = rmt_outer6[2];
+		rmt_outer[3] = rmt_outer6[3];
+
+		if (0 != (*err = v4addr_to_string(loc_outer, lo, sizeof(lo))))
+			goto fin;
+		if (0 != (*err = v4addr_to_string(rmt_outer, ro, sizeof(ro))))
+			goto fin;
+		debug("IPv4 outer tunnel: loc_outer=%s loc_port=%u rmt_outer=%s rmt_port=%u",
+	    	lo, loc_port, ro, rmt_port);
+
+		if ((int)sizeof(path) <= snprintf(path, sizeof(path),
+	    	"%s%s.%u.conf", GetRacoonConfigDir(), ro,
+	    	rmt_port))
+			{
+			*err = kmDNSHelperResultTooLarge;
+			goto fin;
+			}
+		}
+
+
+
 	if (kmDNSAutoTunnelSetKeysReplace == replacedelete)
 		{
 		if (0 > ensureExistenceOfRacoonConfigDir(GetRacoonConfigDir()))
@@ -2356,7 +2293,7 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 			goto fin;
 			}
 		fd = -1;
-		fprintf(fp, config, configHeader, ro, rmt_port, fqdn, fqdn, ri, li, li, ri);
+		fprintf(fp, config, configHeader, (!rmt_port ? ro6 : ro), rmt_port, fqdn, fqdn, ri, li, li, ri);
 		fclose(fp);
 		fp = NULL;
 		if (0 > rename(tmp_path, path))
@@ -2367,8 +2304,6 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 			*err = kmDNSHelperRacoonConfigCreationFailed;
 			goto fin;
 			}
-		if (0 != (*err = kickRacoon()))
-			goto fin;
 		}
 	else
 		{
@@ -2377,20 +2312,24 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
 			    strerror(errno));
 		}
 
-	if (0 != (*err = doTunnelPolicy(kmDNSTunnelPolicyTeardown,
+	if (0 != (*err = doTunnelPolicy(kmDNSTunnelPolicyTeardown, kmDNSNoTunnel,
 	    loc_inner, kWholeV6Mask, loc_outer, loc_port,
-	    rmt_inner, kWholeV6Mask, rmt_outer, rmt_port)))
+	    rmt_inner, kWholeV6Mask, rmt_outer, rmt_port, loc_outer6, rmt_outer6)))
 		goto fin;
 	if (kmDNSAutoTunnelSetKeysReplace == replacedelete &&
-	    0 != (*err = doTunnelPolicy(kmDNSTunnelPolicySetup,
+	    0 != (*err = doTunnelPolicy(kmDNSTunnelPolicySetup, (!rmt_port ? kmDNSIPv6IPv6Tunnel : kmDNSIPv6IPv4Tunnel),
 	        loc_inner, kWholeV6Mask, loc_outer, loc_port,
-		rmt_inner, kWholeV6Mask, rmt_outer, rmt_port)))
+		rmt_inner, kWholeV6Mask, rmt_outer, rmt_port, loc_outer6, rmt_outer6)))
 		goto fin;
 
 	if (0 != (*err = teardownTunnelRoute(rmt_inner)))
 		goto fin;
 	if (kmDNSAutoTunnelSetKeysReplace == replacedelete &&
 		0 != (*err = setupTunnelRoute(loc_inner, rmt_inner)))
+		goto fin;
+
+	if (kmDNSAutoTunnelSetKeysReplace == replacedelete &&
+		0 != (*err = kickRacoon()))
 		goto fin;
 
 	debug("succeeded");
@@ -2402,8 +2341,8 @@ fin:
 		close(fd);
 	unlink(tmp_path);
 #else
-	(void)replacedelete; (void)loc_inner; (void)loc_outer; (void)loc_port; (void)rmt_inner;
-	(void)rmt_outer; (void)rmt_port; (void)keydata; (void)token;
+	(void)replacedelete; (void)loc_inner; (void)loc_outer6; (void)loc_port; (void)rmt_inner;
+	(void)rmt_outer6; (void)rmt_port; (void)fqdn; (void)token;
 	
 	*err = kmDNSHelperIPsecDisabled;
 #endif /* MDNS_NO_IPSEC */

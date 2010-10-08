@@ -13,16 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: CarbonResource.r,v $
-Revision 1.6  2006/08/14 23:24:29  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.5  2003/08/12 19:56:24  cheshire
-Update to APSL 2.0
-
  */
 
 data 'carb' (0) { };

@@ -13,18 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: ConfigDialog.h,v $
-Revision 1.3  2006/08/14 23:25:28  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.2  2005/03/03 19:55:21  shersche
-<rdar://problem/4034481> ControlPanel source code isn't saving CVS log info
-
-
-*/
+ */
 
 #pragma once
 

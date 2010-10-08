@@ -13,28 +13,37 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: dlldatax.h,v $
-Revision 1.1  2009/05/26 04:43:54  herscher
-<rdar://problem/3948252> COM component that can be used with any .NET language and VB.
+ */
 
 
-*/
 
 #pragma once
 
+
+
 #ifdef _MERGE_PROXYSTUB
 
+
+
 extern "C" 
+
 {
+
 BOOL WINAPI PrxDllMain(HINSTANCE hInstance, DWORD dwReason, 
+
 	LPVOID lpReserved);
+
 STDAPI PrxDllCanUnloadNow(void);
+
 STDAPI PrxDllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv);
+
 STDAPI PrxDllRegisterServer(void);
+
 STDAPI PrxDllUnregisterServer(void);
+
 }
 
+
+
 #endif
+

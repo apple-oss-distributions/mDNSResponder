@@ -41,53 +41,7 @@
     OF THE APPLE SOFTWARE, HOWEVER CAUSED AND WHETHER UNDER THEORY OF CONTRACT, TORT
     (INCLUDING NEGLIGENCE), STRICT LIABILITY OR OTHERWISE, EVEN IF APPLE HAS BEEN
     ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-    Change History (most recent first):
-
-$Log: ddnswriteconfig.m,v $
-Revision 1.13  2008/11/04 20:08:44  cheshire
-Use constant kDNSServiceMaxDomainName instead of literal value "1005"
-
-Revision 1.12  2008/09/15 23:52:30  cheshire
-<rdar://problem/6218902> mDNSResponder-177 fails to compile on Linux with .desc pseudo-op
-Made __crashreporter_info__ symbol conditional, so we only use it for OS X build
-
-Revision 1.11  2008/06/26 17:34:18  mkrochma
-<rdar://problem/6030630> Pref pane destroying shared "system.preferences" authorization right
-
-Revision 1.10  2007/11/30 23:43:04  cheshire
-Fixed compile warning: declaration of 'access' shadows a global declaration
-
-Revision 1.9  2007/09/18 19:09:02  cheshire
-<rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
-
-Revision 1.8  2007/07/20 23:41:03  mkrochma
-<rdar://problem/5348663> null deref in ddnswriteconfig
-
-Revision 1.7  2007/03/07 00:49:00  cheshire
-<rdar://problem/4618207> Security: ddnswriteconfig does not verify that authorization blob is of correct size
-
-Revision 1.6  2007/02/09 00:39:06  cheshire
-Fix compile warnings
-
-Revision 1.5  2006/08/14 23:15:47  cheshire
-Tidy up Change History comment
-
-Revision 1.4  2005/06/04 04:47:47  cheshire
-<rdar://problem/4138070> ddnswriteconfig (Bonjour PreferencePane) vulnerability
-Remove self-installing capability of ddnswriteconfig
-
-Revision 1.3  2005/02/16 00:17:35  cheshire
-Don't create empty arrays -- CFArrayGetValueAtIndex(array,0) returns an essentially random (non-null)
-result for empty arrays, which can lead to code crashing if it's not sufficiently defensive.
-
-Revision 1.2  2005/02/10 22:35:20  cheshire
-<rdar://problem/3727944> Update name
-
-Revision 1.1  2005/02/05 01:59:19  cheshire
-Add Preference Pane to facilitate testing of DDNS & wide-area features
-
-*/
+ */
 
 
 #import "PrivilegedOperations.h"
@@ -171,8 +125,8 @@ static int
 readTaggedBlock(int fd, u_int32_t *pTag, u_int32_t *pLen, char **ppBuff)
 // Read tag, block len and block data from stream and return. Dealloc *ppBuff via free().
 {
-	ssize_t		num, len;
-	u_int32_t	tag;
+	ssize_t		num;
+	u_int32_t	tag, len;		// Don't use ssize_t because that's different on 32- vs. 64-bit
 	int			result = 0;
 
 	num = read(fd, &tag, sizeof tag);
@@ -184,7 +138,7 @@ readTaggedBlock(int fd, u_int32_t *pTag, u_int32_t *pLen, char **ppBuff)
 	require_action(*ppBuff != NULL, AllocFailed, result = -1;);
 
 	num = read(fd, *ppBuff, len);
-	if (num == len) {
+	if (num == (ssize_t)len) {
 		*pTag = tag;
 		*pLen = len;
 	} else {

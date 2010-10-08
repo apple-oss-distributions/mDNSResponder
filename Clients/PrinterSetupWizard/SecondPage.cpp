@@ -13,79 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: SecondPage.cpp,v $
-Revision 1.20  2009/06/18 18:05:50  herscher
-<rdar://problem/4694554> Eliminate the first screen of Printer Wizard and maybe combine others ("I'm Feeling Lucky")
-
-Revision 1.19  2006/08/14 23:24:09  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.18  2005/07/20 17:44:54  shersche
-<rdar://problem/4124524> UI fixes for CUPS workaround
-
-Revision 1.17  2005/07/11 20:17:15  shersche
-<rdar://problem/4124524> UI fixes associated with CUPS printer workaround fix.
-
-Revision 1.16  2005/07/07 17:53:20  shersche
-Fix problems associated with the CUPS printer workaround fix.
-
-Revision 1.15  2005/04/13 17:46:22  shersche
-<rdar://problem/4082122> Generic PCL not selected when printers advertise multiple text records
-
-Revision 1.14  2005/03/20 20:08:37  shersche
-<rdar://problem/4055670> Second screen should not select a printer by default
-
-Revision 1.13  2005/02/15 07:50:10  shersche
-<rdar://problem/4007151> Update name
-
-Revision 1.12  2005/02/10 22:35:11  cheshire
-<rdar://problem/3727944> Update name
-
-Revision 1.11  2005/01/31 23:54:30  shersche
-<rdar://problem/3947508> Start browsing when printer wizard starts. Move browsing logic from CSecondPage object to CPrinterSetupWizardSheet object.
-
-Revision 1.10  2005/01/20 19:54:38  shersche
-Fix parse error when text record is NULL
-
-Revision 1.9  2005/01/06 08:13:50  shersche
-Don't use moreComing flag to determine number of text record, disregard queue name if qtotal isn't defined, don't disregard queue name if "rp" is the only key specified
-
-Revision 1.8  2005/01/04 21:09:14  shersche
-Fix problems in parsing text records. Fix problems in remove event handling. Ensure that the same service can't be resolved more than once.
-
-Revision 1.7  2004/12/31 07:25:27  shersche
-Tidy up printer management, and fix memory leaks when hitting 'Cancel'
-
-Revision 1.6  2004/12/30 01:24:02  shersche
-<rdar://problem/3906182> Remove references to description key
-Bug #: 3906182
-
-Revision 1.5  2004/12/30 01:02:47  shersche
-<rdar://problem/3734478> Add Printer information box that displays description and location information when printer name is selected
-Bug #: 3734478
-
-Revision 1.4  2004/12/29 18:53:38  shersche
-<rdar://problem/3725106>
-<rdar://problem/3737413> Added support for LPR and IPP protocols as well as support for obtaining multiple text records. Reorganized and simplified codebase.
-Bug #: 3725106, 3737413
-
-Revision 1.3  2004/09/13 21:26:15  shersche
-<rdar://problem/3796483> Use the moreComing flag to determine whether drawing should take place in OnAddPrinter and OnRemovePrinter callbacks
-Bug #: 3796483
-
-Revision 1.2  2004/06/26 03:19:57  shersche
-clean up warning messages
-
-Submitted by: herscher
-
-Revision 1.1  2004/06/18 04:36:57  rpantos
-First checked in
-
-
-*/
+ */
 
 #include "stdafx.h"
 #include "PrinterSetupWizardApp.h"
@@ -203,6 +131,7 @@ CSecondPage::OnSetActive()
 {
 	CPrinterSetupWizardSheet	*	psheet;
 	Printer						*	printer;
+	CWnd						*	pWnd;
 	Printers::iterator				it;
 	OSStatus						err = kNoErr;
 	BOOL							b;
@@ -244,6 +173,13 @@ CSecondPage::OnSetActive()
 		::SetFocus( m_browseList );
 	}
 
+	// Hide the back button
+	pWnd = ((CPropertySheet*)GetParent())->GetDlgItem(ID_WIZBACK);
+	if ( pWnd != NULL )
+	{
+		pWnd->ShowWindow(SW_HIDE);
+	}
+
 exit:
 
 	return b;
@@ -253,12 +189,20 @@ exit:
 BOOL
 CSecondPage::OnKillActive()
 {
-	CPrinterSetupWizardSheet * psheet;
+	CPrinterSetupWizardSheet	* psheet;
+	CWnd						* pWnd;
 
 	psheet = reinterpret_cast<CPrinterSetupWizardSheet*>(GetParent());
 	require_quiet( psheet, exit );   
    
 	psheet->SetLastPage(this);
+
+	// Show the back button
+	pWnd = ((CPropertySheet*)GetParent())->GetDlgItem(ID_WIZBACK);
+	if ( pWnd != NULL )
+	{
+		pWnd->ShowWindow(SW_SHOW);
+	}
 
 exit:
 
@@ -290,36 +234,39 @@ CSecondPage::OnAddPrinter(
 
 	psheet = reinterpret_cast<CPrinterSetupWizardSheet*>(GetParent());
 	require_quiet( psheet, exit );
-	
-	selectedPrinter = psheet->GetSelectedPrinter();
 
-	printer->item = m_browseList.InsertItem(printer->displayName);
-
-	m_browseList.SetItemData( printer->item, (DWORD_PTR) printer );
-
-	m_browseList.SortChildren(TVI_ROOT);
-
-	//
-	// if the searching item is still in the list
-	// get rid of it
-	//
-	// note that order is important here.  Insert the printer
-	// item before removing the placeholder so we always have
-	// an item in the list to avoid experiencing the bug
-	// in Microsoft's implementation of CTreeCtrl
-	//
-	if (m_emptyListItem != NULL)
+	if ( printer )
 	{
-		m_browseList.DeleteItem(m_emptyListItem);
-		m_emptyListItem = NULL;
-		m_browseList.EnableWindow(TRUE);
-	}
+		selectedPrinter = psheet->GetSelectedPrinter();
 
-	if ( !selectedPrinter )
-	{
-		psheet->SetSelectedPrinter( printer );
-		m_browseList.SelectItem( printer->item );
-		::SetFocus( m_browseList );
+		printer->item = m_browseList.InsertItem(printer->displayName);
+
+		m_browseList.SetItemData( printer->item, (DWORD_PTR) printer );
+
+		m_browseList.SortChildren(TVI_ROOT);
+
+		//
+		// if the searching item is still in the list
+		// get rid of it
+		//
+		// note that order is important here.  Insert the printer
+		// item before removing the placeholder so we always have
+		// an item in the list to avoid experiencing the bug
+		// in Microsoft's implementation of CTreeCtrl
+		//
+		if (m_emptyListItem != NULL)
+		{
+			m_browseList.DeleteItem(m_emptyListItem);
+			m_emptyListItem = NULL;
+			m_browseList.EnableWindow(TRUE);
+		}
+
+		if ( !selectedPrinter )
+		{
+			psheet->SetSelectedPrinter( printer );
+			m_browseList.SelectItem( printer->item );
+			::SetFocus( m_browseList );
+		}
 	}
 
 exit:
@@ -350,25 +297,28 @@ CSecondPage::OnRemovePrinter(
 
 	m_browseList.SetRedraw(FALSE);
 
-	//
-	// check to make sure if we're the only item in the control...i.e.
-	// the list size is 1.
-	//
-	if (m_browseList.GetCount() > 1)
+	if ( printer )
 	{
 		//
-		// if we're not the only thing in the list, then
-		// simply remove it from the list
+		// check to make sure if we're the only item in the control...i.e.
+		// the list size is 1.
 		//
-		m_browseList.DeleteItem( printer->item );
-	}
-	else
-	{
-		//
-		// if we're the only thing in the list, then redisplay
-		// it with the no printers message
-		//
-		InitBrowseList();
+		if (m_browseList.GetCount() > 1)
+		{
+			//
+			// if we're not the only thing in the list, then
+			// simply remove it from the list
+			//
+			m_browseList.DeleteItem( printer->item );
+		}
+		else
+		{
+			//
+			// if we're the only thing in the list, then redisplay
+			// it with the no printers message
+			//
+			InitBrowseList();
+		}
 	}
 
 exit:

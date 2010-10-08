@@ -39,63 +39,7 @@
     OF THE APPLE SOFTWARE, HOWEVER CAUSED AND WHETHER UNDER THEORY OF CONTRACT, TORT
     (INCLUDING NEGLIGENCE), STRICT LIABILITY OR OTHERWISE, EVEN IF APPLE HAS BEEN
     ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-    Change History (most recent first):
-
-$Log: DNSServiceDiscoveryPref.m,v $
-Revision 1.16  2008/09/15 23:52:30  cheshire
-<rdar://problem/6218902> mDNSResponder-177 fails to compile on Linux with .desc pseudo-op
-Made __crashreporter_info__ symbol conditional, so we only use it for OS X build
-
-Revision 1.15  2008/08/18 17:57:04  mcguire
-<rdar://problem/6156209> build error
-
-Revision 1.14  2008/07/18 17:39:14  cheshire
-If NSInteger is not defined (indicated by lack of definition for NSINTEGER_DEFINED)
-then #define "NSInteger" to be "int" like it used to be
-
-Revision 1.13  2008/07/01 01:40:01  mcguire
-<rdar://problem/5823010> 64-bit fixes
-
-Revision 1.12  2008/05/08 00:46:38  cheshire
-<rdar://problem/5919272> GetNextLabel insufficiently defensive
-User shared copy of GetNextLabel in ClientCommon.c instead of having a local copy here
-
-Revision 1.11  2007/11/30 23:42:09  cheshire
-Fixed compile warning: declaration of 'index' shadows a global declaration
-
-Revision 1.10  2007/09/18 19:09:02  cheshire
-<rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
-
-Revision 1.9  2007/02/09 00:39:06  cheshire
-Fix compile warnings
-
-Revision 1.8  2006/08/14 23:15:47  cheshire
-Tidy up Change History comment
-
-Revision 1.7  2006/07/14 03:59:14  cheshire
-Fix compile warnings: 'sortUsingFunction:context:' comparison function needs to return int
-
-Revision 1.6  2005/02/26 00:44:24  cheshire
-Restore default reg domain if user deletes text and clicks "apply"
-
-Revision 1.5  2005/02/25 02:29:28  cheshire
-Show yellow dot for "update in progress"
-
-Revision 1.4  2005/02/16 00:18:33  cheshire
-Bunch o' fixes
-
-Revision 1.3  2005/02/10 22:35:20  cheshire
-<rdar://problem/3727944> Update name
-
-Revision 1.2  2005/02/08 01:32:05  cheshire
-Add trimCharactersFromDomain routine to strip leading and trailing
-white space and punctuation from user-entered fields.
-
-Revision 1.1  2005/02/05 01:59:19  cheshire
-Add Preference Pane to facilitate testing of DDNS & wide-area features
-
-*/
+ */
 
 #import "DNSServiceDiscoveryPref.h"
 #import "ConfigurationAuthority.h"

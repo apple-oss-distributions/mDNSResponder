@@ -13,29 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: Stdafx.h,v $
-Revision 1.6  2009/03/30 20:17:57  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.5  2006/08/14 23:25:43  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.4  2005/10/19 19:50:35  herscher
-Workaround a bug in the latest Microsoft Platform SDK when compiling C++ files that include (directly or indirectly) <WspiApi.h>
-
-Revision 1.3  2005/02/05 02:40:59  cheshire
-Convert newlines to Unix-style (ASCII 10)
-
-Revision 1.2  2005/02/05 02:37:01  cheshire
-Convert newlines to Unix-style (ASCII 10)
-
-Revision 1.1  2004/06/26 04:01:22  shersche
-Initial revision
-
  */
     
 // stdafx.h : include file for standard system include files,

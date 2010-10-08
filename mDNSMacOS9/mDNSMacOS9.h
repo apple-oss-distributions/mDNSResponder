@@ -13,23 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: mDNSMacOS9.h,v $
-Revision 1.11  2006/08/14 23:24:29  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.10  2004/03/12 21:30:26  cheshire
-Build a System-Context Shared Library from mDNSCore, for the benefit of developers
-like Muse Research who want to be able to use mDNS/DNS-SD from GPL-licensed code.
-
-Revision 1.9  2004/02/09 23:25:35  cheshire
-Need to set TTL 255 to interoperate with peers that check TTL (oops!)
-
-Revision 1.8  2003/08/12 19:56:24  cheshire
-Update to APSL 2.0
-
  */
 
 // ***************************************************************************

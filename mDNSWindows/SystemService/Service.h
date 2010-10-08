@@ -13,14 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: Service.h,v $
-Revision 1.1  2009/07/09 21:34:15  herscher
-<rdar://problem/3775717> SDK: Port mDNSNetMonitor to Windows. Refactor the system service slightly by removing the main() function from Service.c so that mDNSNetMonitor can link to functions defined in Service.c
-
-
  */
 
 #ifndef	__MDNS_SERVICE_H__

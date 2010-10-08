@@ -13,34 +13,15 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: ConfigPropertySheet.h,v $
-Revision 1.7  2009/07/01 19:20:37  herscher
-<rdar://problem/6713286> UI changes for configuring sleep proxy settings.
-
-Revision 1.6  2009/03/30 19:58:47  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.5  2006/08/14 23:25:28  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.4  2005/03/03 19:55:21  shersche
-<rdar://problem/4034481> ControlPanel source code isn't saving CVS log info
-
-
-*/
+ */
 
 #ifndef _ConfigPropertySheet_h
 #define _ConfigPropertySheet_h
 
 #include "stdafx.h"
-#include "FirstPage.h"
-#include "SecondPage.h"
-#include "ThirdPage.h"
-#include "FourthPage.h"
+#include "ServicesPage.h"
+#include "RegistrationPage.h"
+#include "BrowsingPage.h"
 
 #include <RegNames.h>
 #include <dns_sd.h>
@@ -61,14 +42,12 @@ public:
 	typedef std::list<CString> StringList;
 
 	StringList	m_browseDomains;
-	StringList	m_regDomains;
 
 protected:
 
-	CFirstPage	m_firstPage;
-	CSecondPage	m_secondPage;
-	CThirdPage m_thirdPage;
-	CFourthPage m_fourthPage;
+	CServicesPage		m_firstPage;
+	CRegistrationPage	m_secondPage;
+	CBrowsingPage		m_thirdPage;
 
 	//{{AFX_VIRTUAL(CConfigPropertySheet)
 	//}}AFX_VIRTUAL
@@ -94,30 +73,10 @@ private:
 	TearDownBrowsing();
 
 	OSStatus
-	SetupRegistryNotifications();
-
-	OSStatus
-	TearDownRegistryNotifications();
-
-	OSStatus
 	DecodeDomainName( const char * raw, CString & decoded );
-
-	const char*
-	GetNextLabel( const char * cstr, char label[64] );
 
 	static void DNSSD_API
 	BrowseDomainsReply
-				(
-				DNSServiceRef			sdRef,
-				DNSServiceFlags			flags,
-				uint32_t				interfaceIndex,
-				DNSServiceErrorType		errorCode,
-				const char			*	replyDomain,
-				void				*	context
-				);
-
-	static void DNSSD_API
-	RegDomainsReply
 				(
 				DNSServiceRef			sdRef,
 				DNSServiceFlags			flags,
@@ -139,7 +98,6 @@ private:
 	HANDLE				m_thread;
 	HANDLE				m_threadExited;
 	DNSServiceRef		m_browseDomainsRef;
-	DNSServiceRef		m_regDomainsRef;
 	CRITICAL_SECTION	m_lock;
 };
 

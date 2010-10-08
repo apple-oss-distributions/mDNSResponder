@@ -13,72 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: UtilTypes.h,v $
-Revision 1.18  2009/05/29 20:43:37  herscher
-<rdar://problem/6928136> Printer Wizard doesn't work correctly in Windows 7 64 bit
-
-Revision 1.17  2009/05/27 04:59:57  herscher
-<rdar://problem/4517393> COMPATIBILITY WITH HP CLJ4700
-<rdar://problem/6142138> Compatibility with Samsung print driver files
-
-Revision 1.16  2007/04/20 22:58:10  herscher
-<rdar://problem/4826126> mDNS: Printer Wizard doesn't offer generic HP printers or generic PS support on Vista RC2
-
-Revision 1.15  2006/08/14 23:24:09  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.14  2005/06/30 18:02:54  shersche
-<rdar://problem/4124524> Workaround for Mac OS X Printer Sharing bug
-
-Revision 1.13  2005/04/13 17:46:22  shersche
-<rdar://problem/4082122> Generic PCL not selected when printers advertise multiple text records
-
-Revision 1.12  2005/03/16 03:12:28  shersche
-<rdar://problem/4050504> Generic PCL driver isn't selected correctly on Win2K
-
-Revision 1.11  2005/03/05 02:27:46  shersche
-<rdar://problem/4030388> Generic drivers don't do color
-
-Revision 1.10  2005/02/08 21:45:06  shersche
-<rdar://problem/3947490> Default to Generic PostScript or PCL if unable to match driver
-
-Revision 1.9  2005/02/01 01:16:12  shersche
-Change window owner from CSecondPage to CPrinterSetupWizardSheet
-
-Revision 1.8  2005/01/06 08:18:26  shersche
-Add protocol field to service, add EmptyQueues() function to service
-
-Revision 1.7  2005/01/04 21:07:29  shersche
-add description member to service object.  this member corresponds to the 'ty' key in a printer text record
-
-Revision 1.6  2004/12/30 01:24:02  shersche
-<rdar://problem/3906182> Remove references to description key
-Bug #: 3906182
-
-Revision 1.5  2004/12/29 18:53:38  shersche
-<rdar://problem/3725106>
-<rdar://problem/3737413> Added support for LPR and IPP protocols as well as support for obtaining multiple text records. Reorganized and simplified codebase.
-Bug #: 3725106, 3737413
-
-Revision 1.4  2004/09/13 21:22:44  shersche
-<rdar://problem/3796483> Add moreComing argument to OnAddPrinter and OnRemovePrinter callbacks
-Bug #: 3796483
-
-Revision 1.3  2004/06/26 23:27:12  shersche
-support for installing multiple printers of the same name
-
-Revision 1.2  2004/06/25 02:25:59  shersche
-Remove item field from manufacturer and model structures
-Submitted by: herscher
-
-Revision 1.1  2004/06/18 04:36:58  rpantos
-First checked in
-
-
-*/
+ */
 
 #pragma once
 
@@ -154,7 +89,7 @@ namespace PrinterSetupWizard
 		// This let's us know that this printer was discovered via OSX Printer Sharing.
 		// We use this knowledge to workaround a problem with OS X Printer sharing.
 
-		bool			isSharedFromOSX;
+		bool			isCUPSPrinter;
 		
 		//
 		// state
@@ -243,7 +178,7 @@ namespace PrinterSetupWizard
 	inline
 	Printer::Printer()
 	:
-		isSharedFromOSX( false )
+		isCUPSPrinter( false )
 	{
 	}
 

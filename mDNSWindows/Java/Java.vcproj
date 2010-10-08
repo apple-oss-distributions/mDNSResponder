@@ -39,6 +39,27 @@
 			/>
 		</Configuration>
 		<Configuration
+			Name="Debug|x64"
+			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
+			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
+			ConfigurationType="0"
+			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
+			>
+			<Tool
+				Name="VCNMakeTool"
+				BuildCommandLine="nmake /f makefile64 DEBUG=1"
+				ReBuildCommandLine="nmake /f makefile64 DEBUG=1"
+				CleanCommandLine="nmake /f makefile64 DEBUG=1 clean"
+				Output=""
+				PreprocessorDefinitions=""
+				IncludeSearchPath=""
+				ForcedIncludes=""
+				AssemblySearchPath=""
+				ForcedUsingAssemblies=""
+				CompileAsManaged=""
+			/>
+		</Configuration>
+		<Configuration
 			Name="Release|Win32"
 			OutputDirectory="Release"
 			IntermediateDirectory="Release"
@@ -60,27 +81,6 @@
 			/>
 		</Configuration>
 		<Configuration
-			Name="Debug|x64"
-			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
-			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
-			ConfigurationType="0"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
-			>
-			<Tool
-				Name="VCNMakeTool"
-				BuildCommandLine="nmake /f makefile DEBUG=1"
-				ReBuildCommandLine="nmake /f makefile DEBUG=1"
-				CleanCommandLine="nmake /f makefile DEBUG=1 clean"
-				Output=""
-				PreprocessorDefinitions=""
-				IncludeSearchPath=""
-				ForcedIncludes=""
-				AssemblySearchPath=""
-				ForcedUsingAssemblies=""
-				CompileAsManaged=""
-			/>
-		</Configuration>
-		<Configuration
 			Name="Release|x64"
 			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
 			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
@@ -89,9 +89,9 @@
 			>
 			<Tool
 				Name="VCNMakeTool"
-				BuildCommandLine="nmake /f makefile"
-				ReBuildCommandLine="nmake /f makefile"
-				CleanCommandLine="nmake /f makefile clean"
+				BuildCommandLine="nmake /f makefile64"
+				ReBuildCommandLine="nmake /f makefile64"
+				CleanCommandLine="nmake /f makefile64 clean"
 				Output=""
 				PreprocessorDefinitions=""
 				IncludeSearchPath=""

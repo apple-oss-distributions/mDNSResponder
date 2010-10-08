@@ -39,33 +39,12 @@
     OF THE APPLE SOFTWARE, HOWEVER CAUSED AND WHETHER UNDER THEORY OF CONTRACT, TORT
     (INCLUDING NEGLIGENCE), STRICT LIABILITY OR OTHERWISE, EVEN IF APPLE HAS BEEN
     ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-    Change History (most recent first):
-
-$Log: PrivilegedOperations.h,v $
-Revision 1.5  2006/08/14 23:15:47  cheshire
-Tidy up Change History comment
-
-Revision 1.4  2005/06/04 04:50:00  cheshire
-<rdar://problem/4138070> ddnswriteconfig (Bonjour PreferencePane) vulnerability
-Use installtool instead of requiring ddnswriteconfig to self-install
-
-Revision 1.3  2005/02/16 00:17:35  cheshire
-Don't create empty arrays -- CFArrayGetValueAtIndex(array,0) returns an essentially random (non-null)
-result for empty arrays, which can lead to code crashing if it's not sufficiently defensive.
-
-Revision 1.2  2005/02/10 22:35:20  cheshire
-<rdar://problem/3727944> Update name
-
-Revision 1.1  2005/02/05 01:59:19  cheshire
-Add Preference Pane to facilitate testing of DDNS & wide-area features
-
-*/
+ */
 
 #include <CoreServices/CoreServices.h>
 #include <CoreFoundation/CoreFoundation.h>
 
-#define	PRIV_OP_TOOL_VERS	3
+#define	PRIV_OP_TOOL_VERS	4
 
 #define	kToolName      "ddnswriteconfig"
 #define	kToolPath      "/Library/Application Support/Bonjour/" kToolName

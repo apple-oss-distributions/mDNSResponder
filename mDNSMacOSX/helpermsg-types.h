@@ -13,18 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: helpermsg-types.h,v $
-Revision 1.3  2009/01/22 02:14:27  cheshire
-<rdar://problem/6515626> Sleep Proxy: Set correct target MAC address, instead of all zeroes
-
-Revision 1.2  2007/08/23 21:52:19  cheshire
-Added License header
-
-Revision 1.1  2007/08/08 22:34:58  mcguire
-<rdar://problem/5197869> Security: Run mDNSResponder as user id mdnsresponder instead of root
  */
 
 #ifndef H_HELPERMSG_TYPES_H

@@ -13,25 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: ControlPanel.cpp,v $
-Revision 1.5  2009/03/30 20:00:19  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.4  2007/04/27 20:42:11  herscher
-<rdar://problem/5078828> mDNS: Bonjour Control Panel for Windows doesn't work on Vista
-
-Revision 1.3  2006/08/14 23:25:28  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.2  2005/03/03 19:55:22  shersche
-<rdar://problem/4034481> ControlPanel source code isn't saving CVS log info
-
-
-*/
+ */
 
     
 #include "ControlPanel.h"

@@ -17,34 +17,6 @@
 #
 # Linux /etc/init.d script to start/stop the mdnsd daemon.
 #
-# $Log: mdnsd.sh,v $
-# Revision 1.9  2006/09/05 20:00:14  cheshire
-# Moved Emacs settings to second line of file
-#
-# Revision 1.8  2006/08/29 16:42:01  mkrochma
-# Fix POSIX startup script
-#
-# Revision 1.7  2006/08/14 23:24:47  cheshire
-# Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-#
-# Revision 1.6  2004/12/07 20:30:45  cheshire
-# Fix start-stop-daemon for Suse Linux (don't use -s TERM)
-#
-# Revision 1.5  2004/06/29 22:13:45  cheshire
-# Fix from Andrew White at NICTA
-#
-# Revision 1.4  2004/02/05 20:23:10  cheshire
-# Fix mdnsd.sh to work on *BSD distributions
-#
-# Revision 1.3  2004/01/19 22:47:17  cheshire
-# Define killprocterm() to do "killproc $1 -TERM" for Linux
-#
-# Revision 1.2  2003/12/11 19:42:13  cheshire
-# Change name "mDNSResponderd" to "mdnsd" for consistency with standard Linux (Unix) naming conventions
-#
-# Revision 1.1  2003/12/08 20:47:02  rpantos
-# Add support for mDNSResponder on Linux.
-#
 # The following lines are used by the *BSD rcorder system to decide
 # the order it's going to run the rc.d scripts at startup time.
 # PROVIDE: mdnsd

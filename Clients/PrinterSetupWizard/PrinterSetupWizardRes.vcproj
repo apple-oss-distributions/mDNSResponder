@@ -300,7 +300,7 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
-				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\PrinterWizard.Resources&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\PrinterWizard.Resources&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                                                           &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\PrinterWizard.Resources&quot;&#x0D;&#x0A;:END"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour Print Services\$(PlatformName)\PrinterWizard.Resources&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour Print Services\$(PlatformName)\PrinterWizard.Resources&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                                                           &quot;$(DSTROOT)\Program Files\Bonjour Print Services\$(PlatformName)\PrinterWizard.Resources&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 		<Configuration
@@ -398,7 +398,7 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
-				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\PrinterWizard.Resources&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\PrinterWizard.Resources&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                                                           &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\PrinterWizard.Resources&quot;&#x0D;&#x0A;:END"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour Print Services\$(PlatformName)\PrinterWizard.Resources&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour Print Services\$(PlatformName)\PrinterWizard.Resources&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                                                           &quot;$(DSTROOT)\Program Files\Bonjour Print Services\$(PlatformName)\PrinterWizard.Resources&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 	</Configurations>
@@ -435,23 +435,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\res\Print.ico"
-				>
-			</File>
-			<File
 				RelativePath=".\res\Printer.bmp"
-				>
-			</File>
-			<File
-				RelativePath=".\res\Printer.ico"
-				>
-			</File>
-			<File
-				RelativePath=".\res\Printer2.ico"
-				>
-			</File>
-			<File
-				RelativePath="res\PrinterSetupWizard.ico"
 				>
 			</File>
 			<File

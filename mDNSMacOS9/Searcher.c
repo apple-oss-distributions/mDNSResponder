@@ -13,23 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: Searcher.c,v $
-Revision 1.4  2006/12/19 22:43:54  cheshire
-Fix compiler warnings
-
-Revision 1.3  2006/08/14 23:24:29  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.2  2004/05/27 06:30:21  cheshire
-Add code to test DNSServiceQueryRecord()
-
-Revision 1.1  2004/03/12 21:30:25  cheshire
-Build a System-Context Shared Library from mDNSCore, for the benefit of developers
-like Muse Research who want to be able to use mDNS/DNS-SD from GPL-licensed code.
-
  */
 
 #include <stdio.h>						// For printf()

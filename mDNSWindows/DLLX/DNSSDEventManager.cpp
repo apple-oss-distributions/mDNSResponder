@@ -13,19 +13,19 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: DNSSDEventManager.cpp,v $
-Revision 1.1  2009/05/26 04:43:54  herscher
-<rdar://problem/3948252> COM component that can be used with any .NET language and VB.
+ */
 
 
-*/
 
 #include "stdafx.h"
+
 #include "DNSSDEventManager.h"
 
 
+
+
+
 // CDNSSDEventManager
+
+
 

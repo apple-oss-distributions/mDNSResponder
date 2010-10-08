@@ -26,45 +26,7 @@
  * thinking that variables x and y are both of type "char*" -- and anyone who doesn't
  * understand why variable y is not of type "char*" just proves the point that poor code
  * layout leads people to unfortunate misunderstandings about how the C language really works.)
-
-	Change History (most recent first):
-
-$Log: SamplemDNSClient.c,v $
-Revision 1.56  2008/10/22 02:59:58  mkrochma
-<rdar://problem/6309616> Fix errors compiling mDNS tool caused by BIND8 removal
-
-Revision 1.55  2008/09/15 23:52:30  cheshire
-<rdar://problem/6218902> mDNSResponder-177 fails to compile on Linux with .desc pseudo-op
-Made __crashreporter_info__ symbol conditional, so we only use it for OS X build
-
-Revision 1.54  2007/11/30 23:39:55  cheshire
-Fixed compile warning: declaration of 'client' shadows a global declaration
-
-Revision 1.53  2007/09/18 19:09:02  cheshire
-<rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
-
-Revision 1.52  2007/03/06 22:45:52  cheshire
-
-<rdar://problem/4138615> argv buffer overflow issues
-
-Revision 1.51  2007/02/13 18:56:45  cheshire
-<rdar://problem/4993485> Mach mDNS tool inconsistent with UDS-based dns-sd tool
-(missing domain should mean "system default(s)", not "local")
-
-Revision 1.50  2007/01/05 08:30:47  cheshire
-Trim excessive "$Log" checkin history from before 2006
-(checkin history still available via "cvs log ..." of course)
-
-Revision 1.49  2007/01/04 21:54:49  cheshire
-Fix compile warnings related to the deprecated Mach-based API
-
-Revision 1.48  2006/08/14 23:24:39  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.47  2006/01/10 02:29:22  cheshire
-<rdar://problem/4403861> Cosmetic IPv6 address display problem in mDNS test tool
-
-*/
+ */
 
 #include <libc.h>
 #include <arpa/nameser.h>

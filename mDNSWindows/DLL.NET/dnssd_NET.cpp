@@ -13,49 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: dnssd_NET.cpp,v $
-Revision 1.11  2009/03/30 20:19:05  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.10  2006/08/14 23:25:43  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.9  2004/09/16 18:17:13  shersche
-Use background threads, cleanup to parameter names.
-Submitted by: prepin@gmail.com
-
-Revision 1.8  2004/09/13 19:35:58  shersche
-<rdar://problem/3798941> Add Apple.DNSSD namespace to MC++ wrapper class
-<rdar://problem/3798950> Change all instances of unsigned short to int
-Bug #: 3798941, 3798950
-
-Revision 1.7  2004/09/11 00:36:40  shersche
-<rdar://problem/3786226> Modified .NET shim code to use host byte order for ports in APIs and callbacks
-Bug #: 3786226
-
-Revision 1.6  2004/09/02 21:20:56  cheshire
-<rdar://problem/3774871> DLL.NET crashes on null record
-
-Revision 1.5  2004/07/27 07:12:56  shersche
-make TextRecord an instantiable class object
-
-Revision 1.4  2004/07/26 06:19:05  shersche
-Treat byte arrays of zero-length as null arrays
-
-Revision 1.3  2004/07/19 16:08:56  shersche
-fix problems in UTF8/Unicode string translations
-
-Revision 1.2  2004/07/19 07:48:34  shersche
-fix bug in DNSService.Register when passing in NULL text record, add TextRecord APIs
-
-Revision 1.1  2004/06/26 04:01:22  shersche
-Initial revision
-
-
  */
     
 // This is the main DLL file.

@@ -13,30 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: AssemblyInfo.cpp,v $
-Revision 1.6  2009/03/30 20:16:27  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.5  2006/08/14 23:25:43  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.4  2004/07/26 21:03:00  shersche
-enable strong naming for dnssd.NET assembly
-
-Revision 1.3  2004/07/14 19:54:57  shersche
-use version file to get version numbers
-
-Revision 1.2  2004/07/14 15:42:47  shersche
-remove entries for strong authentication
-
-Revision 1.1  2004/06/26 04:01:22  shersche
-Initial revision
-
-
  */
     
 #include "stdafx.h"

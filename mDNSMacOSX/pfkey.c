@@ -57,10 +57,17 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#include <TargetConditionals.h>
 
 #include "ipsec_strerror.h"
 #include "libpfkey.h"
 #include "ipsec_options.h"
+
+#if TARGET_OS_EMBEDDED
+#ifndef MDNS_NO_IPSEC
+#define MDNS_NO_IPSEC 1
+#endif
+#endif
 
 #ifndef MDNS_NO_IPSEC
 

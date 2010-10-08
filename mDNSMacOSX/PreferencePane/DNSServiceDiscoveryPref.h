@@ -39,30 +39,7 @@
     OF THE APPLE SOFTWARE, HOWEVER CAUSED AND WHETHER UNDER THEORY OF CONTRACT, TORT
     (INCLUDING NEGLIGENCE), STRICT LIABILITY OR OTHERWISE, EVEN IF APPLE HAS BEEN
     ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-    Change History (most recent first):
-
-$Log: DNSServiceDiscoveryPref.h,v $
-Revision 1.6  2006/08/14 23:15:47  cheshire
-Tidy up Change History comment
-
-Revision 1.5  2005/02/26 00:44:24  cheshire
-Restore default reg domain if user deletes text and clicks "apply"
-
-Revision 1.4  2005/02/25 02:29:28  cheshire
-Show yellow dot for "update in progress"
-
-Revision 1.3  2005/02/10 22:35:19  cheshire
-<rdar://problem/3727944> Update name
-
-Revision 1.2  2005/02/08 01:32:05  cheshire
-Add trimCharactersFromDomain routine to strip leading and trailing
-white space and punctuation from user-entered fields.
-
-Revision 1.1  2005/02/05 01:59:19  cheshire
-Add Preference Pane to facilitate testing of DDNS & wide-area features
-
-*/
+ */
 
 #import <Cocoa/Cocoa.h>
 #import <PreferencePanes/PreferencePanes.h>

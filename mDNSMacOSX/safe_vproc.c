@@ -13,22 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: safe_vproc.c,v $
-Revision 1.3  2009/02/14 00:09:53  cheshire
-Only log "Compiled without vproc_transaction support" when running on a system
-where we expect that to be available -- if running on a system that doesn't even
-have vproc_transaction, then it doesn't matter that the code was compiled without it.
-
-Revision 1.2  2009/02/09 21:16:17  mcguire
-<rdar://problem/5858533> Adopt vproc_transaction API in mDNSResponder
-additional cleanup: don't alloc memory since we currently only expect to have one transaction
-
-Revision 1.1  2009/02/06 03:06:49  mcguire
-<rdar://problem/5858533> Adopt vproc_transaction API in mDNSResponder
-
  */
 
 #include <stdlib.h>
@@ -36,8 +20,9 @@ Revision 1.1  2009/02/06 03:06:49  mcguire
 #include <vproc.h>
 #include "safe_vproc.h"
 #include "mDNSDebug.h"
+#include <TargetConditionals.h>
 
-#ifdef VPROC_HAS_TRANSACTIONS
+#if defined(VPROC_HAS_TRANSACTIONS) && !TARGET_OS_EMBEDDED
 
 static vproc_transaction_t transaction = NULL;
 
@@ -61,6 +46,7 @@ void safe_vproc_transaction_end(void)
 
 #else
 
+#if ! TARGET_OS_EMBEDDED
 #include <stdio.h>
 #include <CoreFoundation/CFString.h>
 
@@ -86,6 +72,12 @@ void safe_vproc_transaction_begin(void)
 			LogMsg("Compiled without vproc_transaction support");
 		}
 	}
+
+#else
+
+void safe_vproc_transaction_begin(void) { }
+
+#endif
 
 void safe_vproc_transaction_end(void) { }
 

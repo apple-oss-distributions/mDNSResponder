@@ -13,48 +13,30 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ */
 
-    Change History (most recent first):
-
-$Log: ThirdPage.cpp,v $
-Revision 1.5  2006/08/14 23:25:29  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.4  2005/10/05 20:46:50  herscher
-<rdar://problem/4192011> Move Wide-Area preferences to another part of the registry so they don't removed during an update-install.
-
-Revision 1.3  2005/03/07 18:27:42  shersche
-<rdar://problem/4037940> Fix problem when ControlPanel commits changes to the browse domain list
-
-Revision 1.2  2005/03/03 19:55:22  shersche
-<rdar://problem/4034481> ControlPanel source code isn't saving CVS log info
-
-
-*/
-
-#include "ThirdPage.h"
+#include "BrowsingPage.h"
 #include "resource.h"
 
 #include "ConfigPropertySheet.h"
-#include "SharedSecret.h"
 
 #include <WinServices.h>
     
 #define MAX_KEY_LENGTH 255
 
 
-IMPLEMENT_DYNCREATE(CThirdPage, CPropertyPage)
+IMPLEMENT_DYNCREATE(CBrowsingPage, CPropertyPage)
 
 
 //---------------------------------------------------------------------------------------------------------------------------
-//	CThirdPage::CThirdPage
+//	CBrowsingPage::CBrowsingPage
 //---------------------------------------------------------------------------------------------------------------------------
 
-CThirdPage::CThirdPage()
+CBrowsingPage::CBrowsingPage()
 :
-	CPropertyPage(CThirdPage::IDD)
+	CPropertyPage(CBrowsingPage::IDD)
 {
-	//{{AFX_DATA_INIT(CThirdPage)
+	//{{AFX_DATA_INIT(CBrowsingPage)
 	//}}AFX_DATA_INIT
 
 	m_firstTime = true;
@@ -62,29 +44,29 @@ CThirdPage::CThirdPage()
 
 
 //---------------------------------------------------------------------------------------------------------------------------
-//	CThirdPage::~CThirdPage
+//	CBrowsingPage::~CBrowsingPage
 //---------------------------------------------------------------------------------------------------------------------------
 
-CThirdPage::~CThirdPage()
+CBrowsingPage::~CBrowsingPage()
 {
 }
 
 
 //---------------------------------------------------------------------------------------------------------------------------
-//	CThirdPage::DoDataExchange
+//	CBrowsingPage::DoDataExchange
 //---------------------------------------------------------------------------------------------------------------------------
 
-void CThirdPage::DoDataExchange(CDataExchange* pDX)
+void CBrowsingPage::DoDataExchange(CDataExchange* pDX)
 {
 	CPropertyPage::DoDataExchange(pDX);
-	//{{AFX_DATA_MAP(CThirdPage)
+	//{{AFX_DATA_MAP(CBrowsingPage)
 	//}}AFX_DATA_MAP
 	DDX_Control(pDX, IDC_BROWSE_LIST, m_browseListCtrl);
 	DDX_Control(pDX, IDC_REMOVE_BROWSE_DOMAIN, m_removeButton);
 }
 
-BEGIN_MESSAGE_MAP(CThirdPage, CPropertyPage)
-	//{{AFX_MSG_MAP(CThirdPage)
+BEGIN_MESSAGE_MAP(CBrowsingPage, CPropertyPage)
+	//{{AFX_MSG_MAP(CBrowsingPage)
 	//}}AFX_MSG_MAP
 	ON_BN_CLICKED(IDC_ADD_BROWSE_DOMAIN, OnBnClickedAddBrowseDomain)
 	ON_BN_CLICKED(IDC_REMOVE_BROWSE_DOMAIN, OnBnClickedRemoveBrowseDomain)
@@ -93,10 +75,10 @@ END_MESSAGE_MAP()
 
 
 //---------------------------------------------------------------------------------------------------------------------------
-//	CThirdPage::SetModified
+//	CBrowsingPage::SetModified
 //---------------------------------------------------------------------------------------------------------------------------
 
-void CThirdPage::SetModified( BOOL bChanged )
+void CBrowsingPage::SetModified( BOOL bChanged )
 {
 	m_modified = bChanged;
 
@@ -105,11 +87,11 @@ void CThirdPage::SetModified( BOOL bChanged )
 
 
 //---------------------------------------------------------------------------------------------------------------------------
-//	CThirdPage::OnSetActive
+//	CBrowsingPage::OnSetActive
 //---------------------------------------------------------------------------------------------------------------------------
 
 BOOL
-CThirdPage::OnSetActive()
+CBrowsingPage::OnSetActive()
 {
 	CConfigPropertySheet	*	psheet;
 	HKEY						key = NULL;
@@ -148,7 +130,8 @@ CThirdPage::OnSetActive()
 
 	// Now populate the browse domain box
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSBrowseDomains, &key );
+	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSBrowseDomains, 0,
+		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &key, NULL );
 	require_noerr( err, exit );
 
 	// Get information about this node
@@ -202,11 +185,11 @@ exit:
  
 
 //---------------------------------------------------------------------------------------------------------------------------
-//	CThirdPage::OnOK
+//	CBrowsingPage::OnOK
 //---------------------------------------------------------------------------------------------------------------------------
 
 void
-CThirdPage::OnOK()
+CBrowsingPage::OnOK()
 {
 	if ( m_modified )
 	{
@@ -217,11 +200,11 @@ CThirdPage::OnOK()
 
 
 //---------------------------------------------------------------------------------------------------------------------------
-//	CThirdPage::Commit
+//	CBrowsingPage::Commit
 //---------------------------------------------------------------------------------------------------------------------------
 
 void
-CThirdPage::Commit()
+CBrowsingPage::Commit()
 {
 	HKEY		key		= NULL;
 	HKEY		subKey	= NULL;
@@ -233,7 +216,8 @@ CThirdPage::Commit()
 	int			i;
 	DWORD		err;
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSBrowseDomains, &key );
+	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSBrowseDomains, 0,
+	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &key, NULL );
 	require_noerr( err, exit );
 
 	// First, remove all the entries that are there
@@ -258,7 +242,8 @@ CThirdPage::Commit()
 	{
 		DWORD enabled = (DWORD) m_browseListCtrl.GetCheck( i );
 
-		err = RegCreateKey( key, m_browseListCtrl.GetItemText( i, 1 ), &subKey );
+		err = RegCreateKeyEx( key, m_browseListCtrl.GetItemText( i, 1 ), 0,
+		                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &subKey, NULL );
 		require_noerr( err, exit );
 
 		err = RegSetValueEx( subKey, L"Enabled", NULL, REG_DWORD, (LPBYTE) &enabled, sizeof( enabled ) );
@@ -284,11 +269,11 @@ exit:
 
 
 //---------------------------------------------------------------------------------------------------------------------------
-//	CThirdPage::OnBnClickedAddBrowseDomain
+//	CBrowsingPage::OnBnClickedAddBrowseDomain
 //---------------------------------------------------------------------------------------------------------------------------
 
 void
-CThirdPage::OnBnClickedAddBrowseDomain()
+CBrowsingPage::OnBnClickedAddBrowseDomain()
 {
 	CAddBrowseDomain dlg( GetParent() );
 
@@ -310,11 +295,11 @@ CThirdPage::OnBnClickedAddBrowseDomain()
 
 
 //---------------------------------------------------------------------------------------------------------------------------
-//	CThirdPage::OnBnClickedRemoveBrowseDomain
+//	CBrowsingPage::OnBnClickedRemoveBrowseDomain
 //---------------------------------------------------------------------------------------------------------------------------
 
 void
-CThirdPage::OnBnClickedRemoveBrowseDomain()
+CBrowsingPage::OnBnClickedRemoveBrowseDomain()
 {
 	UINT	selectedCount = m_browseListCtrl.GetSelectedCount();
 	int		nItem = -1;
@@ -337,7 +322,7 @@ CThirdPage::OnBnClickedRemoveBrowseDomain()
 
 
 void
-CThirdPage::OnLvnItemchangedBrowseList(NMHDR *pNMHDR, LRESULT *pResult)
+CBrowsingPage::OnLvnItemchangedBrowseList(NMHDR *pNMHDR, LRESULT *pResult)
 {
 	if ( m_browseListCtrl.GetSelectedCount() )
 	{
@@ -375,13 +360,13 @@ CThirdPage::OnLvnItemchangedBrowseList(NMHDR *pNMHDR, LRESULT *pResult)
 
 
 int CALLBACK 
-CThirdPage::SortFunc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort)
+CBrowsingPage::SortFunc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort)
 {
 	CString str1;
 	CString	str2;
 	int		ret = 0;
 
-	CThirdPage * self = reinterpret_cast<CThirdPage*>( lParamSort );
+	CBrowsingPage * self = reinterpret_cast<CBrowsingPage*>( lParamSort );
 	require_quiet( self, exit );
 
 	str1 = self->m_browseListCtrl.GetItemText( (int) lParam1, 1 );

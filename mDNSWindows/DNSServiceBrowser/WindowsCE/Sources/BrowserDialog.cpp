@@ -13,39 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: BrowserDialog.cpp,v $
-Revision 1.4  2008/10/23 22:33:26  cheshire
-Changed "NOTE:" to "Note:" so that BBEdit 9 stops putting those comment lines into the funtion popup menu
-
-Revision 1.3  2006/08/14 23:25:55  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.2  2004/07/13 21:24:27  rpantos
-Fix for <rdar://problem/3701120>.
-
-Revision 1.1  2004/06/18 04:04:37  rpantos
-Move up one level
-
-Revision 1.5  2004/01/30 02:56:33  bradley
-Updated to support full Unicode display. Added support for all services on www.dns-sd.org.
-
-Revision 1.4  2003/10/16 09:21:56  bradley
-Ignore non-IPv4 resolves until mDNS on Windows supports IPv6.
-
-Revision 1.3  2003/10/14 03:28:50  bradley
-Insert services in sorted order to make them easier to find. Defer service adds/removes to the main
-thread to avoid potential problems with multi-threaded MFC message map access. Added some asserts.
-
-Revision 1.2  2003/10/10 03:43:34  bradley
-Added support for launching a web browser to go to the browsed web site on a single-tap.
-
-Revision 1.1  2003/08/21 02:16:10  bradley
-DNSServiceBrowser for HTTP services for Windows CE/PocketPC.
-
-*/
+ */
 
 #include	"stdafx.h"
 

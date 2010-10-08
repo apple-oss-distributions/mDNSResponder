@@ -26,83 +26,7 @@
  * thinking that variables x and y are both of type "char*" -- and anyone who doesn't
  * understand why variable y is not of type "char*" just proves the point that poor code
  * layout leads people to unfortunate misunderstandings about how the C language really works.)
-
-    Change History (most recent first):
-
-$Log: NetMonitor.c,v $
-Revision 1.96  2009/07/16 00:08:57  cheshire
-Display any stray Update (Authority) records in query packets
-
-Revision 1.95  2009/07/09 22:24:52  herscher
-<rdar://problem/3775717> SDK: Port mDNSNetMonitor to Windows
-
-Revision 1.94  2009/04/24 00:31:56  cheshire
-<rdar://problem/3476350> Return negative answers when host knows authoritatively that no answer exists
-Added code to display NSEC records
-
-Revision 1.93  2009/01/13 05:31:34  mkrochma
-<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
-
-Revision 1.92  2009/01/11 03:20:06  mkrochma
-<rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
-
-Revision 1.91  2008/11/13 22:08:07  cheshire
-Show additional records in Query packets
-
-Revision 1.90  2008/09/05 22:20:26  cheshire
-<rdar://problem/3988320> Should use randomized source ports and transaction IDs to avoid DNS cache poisoning
-Add "UDPSocket *src" parameter in mDNSPlatformSendUDP call
-
-Revision 1.89  2007/05/17 19:12:42  cheshire
-Tidy up code layout
-
-Revision 1.88  2007/04/22 20:16:25  cheshire
-Fix compiler errors (const parameter declarations)
-
-Revision 1.87  2007/04/16 20:49:39  cheshire
-Fix compile errors for mDNSPosix build
-
-Revision 1.86  2007/03/22 18:31:48  cheshire
-Put dst parameter first in mDNSPlatformStrCopy/mDNSPlatformMemCopy, like conventional Posix strcpy/memcpy
-
-Revision 1.85  2007/02/28 01:51:22  cheshire
-Added comment about reverse-order IP address
-
-Revision 1.84  2007/01/05 08:30:52  cheshire
-Trim excessive "$Log" checkin history from before 2006
-(checkin history still available via "cvs log ..." of course)
-
-Revision 1.83  2006/11/18 05:01:32  cheshire
-Preliminary support for unifying the uDNS and mDNS code,
-including caching of uDNS answers
-
-Revision 1.82  2006/08/14 23:24:46  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.81  2006/07/06 00:01:44  cheshire
-<rdar://problem/4472014> Add Private DNS client functionality to mDNSResponder
-Update mDNSSendDNSMessage() to use uDNS_TCPSocket type instead of "int"
-
-Revision 1.80  2006/06/12 18:22:42  cheshire
-<rdar://problem/4580067> mDNSResponder building warnings under Red Hat 64-bit (LP64) Linux
-
-Revision 1.79  2006/04/26 20:48:33  cheshire
-Make final count of unique source addresses show IPv4 and IPv6 counts separately
-
-Revision 1.78  2006/04/25 00:42:24  cheshire
-Add ability to specify a single interface index to capture on,
-e.g. typically "-i 4" for Ethernet and "-i 5" for AirPort
-
-Revision 1.77  2006/03/02 21:50:45  cheshire
-Removed strange backslash at the end of a line
-
-Revision 1.76  2006/02/23 23:38:43  cheshire
-<rdar://problem/4427969> On FreeBSD 4 "arpa/inet.h" requires "netinet/in.h" be included first
-
-Revision 1.75  2006/01/05 22:33:58  cheshire
-Use IFNAMSIZ (more portable) instead of IF_NAMESIZE
-
-*/
+ */
 
 //*************************************************************************************************************
 // Incorporate mDNS.c functionality
@@ -122,18 +46,15 @@ Use IFNAMSIZ (more portable) instead of IF_NAMESIZE
 #include <time.h>			// For "struct tm" etc.
 #include <signal.h>			// For SIGINT, SIGTERM
 #if defined(WIN32)
+// Both mDNS.c and mDNSWin32.h declare UDPSocket_struct type resulting in a compile-time error, so 
+// trick the compiler when including mDNSWin32.h
+#	define UDPSocket_struct _UDPSocket_struct
 #	include <mDNSEmbeddedAPI.h>
 #	include <mDNSWin32.h>
-#	include <uds_daemon.h>
 #	include <PosixCompat.h>
-#	include <Service.h>
 #	define IFNAMSIZ 256
-
-// Stub these functions out
-mDNSexport int udsserver_init(dnssd_sock_t skts[], mDNSu32 count) { return 0; }
-mDNSexport mDNSs32 udsserver_idle(mDNSs32 nextevent) { return 0; }
-mDNSexport void udsserver_handle_configchange(mDNS *const m) {}
-mDNSexport int udsserver_exit(void) { return 0; }
+static HANDLE gStopEvent = INVALID_HANDLE_VALUE;
+static BOOL WINAPI ConsoleControlHandler( DWORD inControlEvent ) { SetEvent( gStopEvent ); return TRUE; }
 void setlinebuf( FILE * fp ) {}
 #else
 #	include <netdb.h>			// For gethostbyname()
@@ -545,7 +466,7 @@ mDNSlocal const mDNSu8 *FindUpdate(mDNS *const m, const DNSMessage *const query,
 		const mDNSu8 *p2 = ptr;
 		ptr = GetLargeResourceRecord(m, query, ptr, end, q->InterfaceID, kDNSRecordTypePacketAuth, pkt);
 		if (!ptr) break;
-		if (ResourceRecordAnswersQuestion(&pkt->r.resrec, q)) return(p2);
+		if (m->rec.r.resrec.RecordType != kDNSRecordTypePacketNegative && ResourceRecordAnswersQuestion(&pkt->r.resrec, q)) return(p2);
 		}
 	return(mDNSNULL);
 	}
@@ -590,6 +511,10 @@ mDNSlocal void DisplayResourceRecord(const mDNSAddr *const srcaddr, const char *
 	mDNSu8 *rdend = (mDNSu8 *)rd + pktrr->rdlength;
 	int n = mprintf("%#-16a %-5s %-5s%5lu %##s -> ", srcaddr, op, DNSTypeName(pktrr->rrtype), pktrr->rroriginalttl, pktrr->name->c);
 
+	if (pktrr->RecordType == kDNSRecordTypePacketNegative) { mprintf("**** ERROR: FAILED TO READ RDATA ****\n"); return; }
+
+	// The kDNSType_OPT case below just calls GetRRDisplayString_rdb
+	// Perhaps more (or all?) of the cases should do that?
 	switch(pktrr->rrtype)
 		{
 		case kDNSType_A:	n += mprintf("%.4a", &rd->ipv4); break;
@@ -621,6 +546,15 @@ mDNSlocal void DisplayResourceRecord(const mDNSAddr *const srcaddr, const char *
 							} break;
 		case kDNSType_AAAA:	n += mprintf("%.16a", &rd->ipv6); break;
 		case kDNSType_SRV:	n += mprintf("%##s:%d", rd->srv.target.c, mDNSVal16(rd->srv.port)); break;
+		case kDNSType_OPT:	{
+							char b[MaxMsg];
+							// Quick hack: we don't want the prefix that GetRRDisplayString_rdb puts at the start of its
+							// string, because it duplicates the name and rrtype we already display, so we compute the
+							// length of that prefix and strip that many bytes off the beginning of the string we display.
+							mDNSu32 striplen = mDNS_snprintf(b, MaxMsg-1, "%4d %##s %s ", pktrr->rdlength, pktrr->name->c, DNSTypeName(pktrr->rrtype));
+							GetRRDisplayString_rdb(pktrr, &pktrr->rdata->u, b);
+							n += mprintf("%.*s", MaxWidth - n, b + striplen);
+							} break;
 		case kDNSType_NSEC:	{
 							int i;
 							for (i=0; i<255; i++)
@@ -829,7 +763,7 @@ mDNSlocal void ProcessUnicastResponse(mDNS *const m, const DNSMessage *const msg
 		{
 		LargeCacheRecord pkt;
 		ptr = GetLargeResourceRecord(m, msg, ptr, end, InterfaceID, kDNSRecordTypePacketAns, &pkt);
-		if (pkt.r.resrec.rroriginalttl && entry) RecordHostInfo(entry, &pkt.r.resrec);
+		if (ptr && pkt.r.resrec.rroriginalttl && entry) RecordHostInfo(entry, &pkt.r.resrec);
 		}
 	}
 
@@ -902,7 +836,16 @@ mDNSlocal mStatus mDNSNetMonitor(void)
 	gettimeofday(&tv_start, NULL);
 
 #if defined( WIN32 )
-	RunDirect( 0, NULL );
+	status = SetupInterfaceList(&mDNSStorage);
+	if (status) return(status);
+	gStopEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+	if (gStopEvent == INVALID_HANDLE_VALUE) return mStatus_UnknownErr;
+	if (!SetConsoleCtrlHandler(ConsoleControlHandler, TRUE)) return mStatus_UnknownErr;
+	SetSocketEventsEnabled(&mDNSStorage, TRUE);
+	while (WaitForSingleObjectEx(gStopEvent, INFINITE, TRUE) == WAIT_IO_COMPLETION);
+	SetSocketEventsEnabled(&mDNSStorage, FALSE);
+	if (!SetConsoleCtrlHandler(ConsoleControlHandler, FALSE)) return mStatus_UnknownErr;
+	CloseHandle(gStopEvent);
 #else
 	mDNSPosixListenForSignalInEventLoop(SIGINT);
 	mDNSPosixListenForSignalInEventLoop(SIGTERM);
@@ -983,7 +926,11 @@ mDNSexport int main(int argc, char **argv)
 	const char *progname = strrchr(argv[0], '/') ? strrchr(argv[0], '/') + 1 : argv[0];
 	int i;
 	mStatus status;
-	
+
+#if defined(WIN32)
+	HeapSetInformation(NULL, HeapEnableTerminationOnCorruption, NULL, 0);
+#endif
+
 	setlinebuf(stdout);				// Want to see lines as they appear, not block buffered
 
 	for (i=1; i<argc; i++)
@@ -1029,8 +976,9 @@ mDNSexport int main(int argc, char **argv)
 
 usage:
 	fprintf(stderr, "\nmDNS traffic monitor\n");
-	fprintf(stderr, "Usage: %s (<host>)\n", progname);
-	fprintf(stderr, "Optional <host> parameter displays only packets from that host\n");
+	fprintf(stderr, "Usage: %s [-i index] [host]\n", progname);
+	fprintf(stderr, "Optional [-i index] parameter displays only packets from that interface index\n");
+	fprintf(stderr, "Optional [host] parameter displays only packets from that host\n");
 
 	fprintf(stderr, "\nPer-packet header output:\n");
 	fprintf(stderr, "-Q-            Multicast Query from mDNS client that accepts multicast responses\n");

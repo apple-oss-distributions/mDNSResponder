@@ -13,39 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: dnsextd_parser.y,v $
-Revision 1.9  2009/01/11 03:20:06  mkrochma
-<rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
-
-Revision 1.8  2007/03/21 19:47:50  cheshire
-<rdar://problem/4789463> Leak: On error path in ParseConfig
-
-Revision 1.7  2007/01/17 17:38:13  cheshire
-Need to include stdlib.h for malloc/free
-
-Revision 1.6  2006/12/22 20:59:51  cheshire
-<rdar://problem/4742742> Read *all* DNS keys from keychain,
- not just key for the system-wide default registration domain
-
-Revision 1.5  2006/10/20 05:47:09  herscher
-Set the DNSZone pointer to NULL in ParseConfig() before parsing the configuration file.
-
-Revision 1.4  2006/08/16 00:35:39  mkrochma
-<rdar://problem/4386944> Get rid of NotAnInteger references
-
-Revision 1.3  2006/08/14 23:24:56  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.2  2006/07/14 02:03:37  cheshire
-<rdar://problem/4472013> Add Private DNS server functionality to dnsextd
-private_port and llq_port should use htons, not htonl
-
-Revision 1.1  2006/07/06 00:09:05  cheshire
-<rdar://problem/4472013> Add Private DNS server functionality to dnsextd
-
  */
 
 %{
@@ -218,12 +185,12 @@ optionsstatement:
 		|
 		PRIVATE PORT NUMBER
 		{
-			( ( DaemonInfo* ) context )->private_port = mDNSOpaque16fromIntVal( NUMBER );
+			( ( DaemonInfo* ) context )->private_port = mDNSOpaque16fromIntVal( $3 );
 		}
 		|
 		LLQ PORT NUMBER
 		{
-			( ( DaemonInfo* ) context )->llq_port = mDNSOpaque16fromIntVal( NUMBER );
+			( ( DaemonInfo* ) context )->llq_port = mDNSOpaque16fromIntVal( $3 );
 		}
 		;
 

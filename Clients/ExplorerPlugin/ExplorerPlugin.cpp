@@ -13,48 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: ExplorerPlugin.cpp,v $
-Revision 1.10  2009/03/30 18:51:04  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.9  2006/08/14 23:24:00  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.8  2005/06/30 18:01:54  shersche
-<rdar://problem/4130635> Cause IE to rebuild cache so we don't have to reboot following an install.
-
-Revision 1.7  2005/02/23 02:00:45  shersche
-<rdar://problem/4014479> Delete all the registry entries when component is unregistered
-
-Revision 1.6  2005/01/25 17:56:45  shersche
-<rdar://problem/3911084> Load resource DLLs, get icons and bitmaps from resource DLLs
-Bug #: 3911084
-
-Revision 1.5  2004/09/15 10:33:54  shersche
-<rdar://problem/3721611> Install XP toolbar button (8 bit mask) if running on XP platform, otherwise install 1 bit mask toolbar button
-Bug #: 3721611
-
-Revision 1.4  2004/07/13 21:24:21  rpantos
-Fix for <rdar://problem/3701120>.
-
-Revision 1.3  2004/06/26 14:12:07  shersche
-Register the toolbar button
-
-Revision 1.2  2004/06/24 20:09:39  shersche
-Change text
-Submitted by: herscher
-
-Revision 1.1  2004/06/18 04:34:59  rpantos
-Move to Clients from mDNSWindows
-
-Revision 1.1  2004/01/30 03:01:56  bradley
-Explorer Plugin to browse for DNS-SD advertised Web and FTP servers from within Internet Explorer.
-
-*/
+ */
 
 #include	"StdAfx.h"
 

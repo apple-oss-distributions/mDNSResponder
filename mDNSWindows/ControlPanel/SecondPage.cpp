@@ -13,27 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: SecondPage.cpp,v $
-Revision 1.7  2006/08/14 23:25:28  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.6  2005/10/05 20:46:50  herscher
-<rdar://problem/4192011> Move Wide-Area preferences to another part of the registry so they don't removed during an update-install.
-
-Revision 1.5  2005/04/05 04:15:46  shersche
-RegQueryString was returning uninitialized strings if the registry key couldn't be found, so always initialize strings before checking the registry key.
-
-Revision 1.4  2005/04/05 03:52:14  shersche
-<rdar://problem/4066485> Registering with shared secret key doesn't work. Additionally, mDNSResponder wasn't dynamically re-reading it's DynDNS setup after setting a shared secret key.
-
-Revision 1.3  2005/03/03 19:55:22  shersche
-<rdar://problem/4034481> ControlPanel source code isn't saving CVS log info
-
-
-*/
+ */
 
 #include "SecondPage.h"
 #include "resource.h"
@@ -43,6 +23,8 @@ Revision 1.3  2005/03/03 19:55:22  shersche
 
 #include <WinServices.h>
     
+#define MAX_KEY_LENGTH 255
+
 IMPLEMENT_DYNCREATE(CSecondPage, CPropertyPage)
 
 
@@ -60,7 +42,8 @@ CSecondPage::CSecondPage()
 
 	OSStatus err;
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSRegistrationDomains, &m_setupKey );
+	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSRegistrationDomains, 0,
+	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &m_setupKey, NULL );
 	check_noerr( err );
 }
 
@@ -126,8 +109,6 @@ BOOL
 CSecondPage::OnSetActive()
 {
 	CConfigPropertySheet	*	psheet;
-	DWORD						dwSize;
-	DWORD						enabled;
 	DWORD						err;
 	BOOL						b = CPropertyPage::OnSetActive();
 
@@ -144,12 +125,6 @@ CSecondPage::OnSetActive()
 
 	err = Populate( m_regDomainsBox, m_setupKey, psheet->m_regDomains );
 	check_noerr( err );
-
-	dwSize = sizeof( DWORD );
-	err = RegQueryValueEx( m_setupKey, L"Enabled", NULL, NULL, (LPBYTE) &enabled, &dwSize );
-	m_advertiseServicesButton.SetCheck( ( !err && enabled ) ? BST_CHECKED : BST_UNCHECKED );
-	m_regDomainsBox.EnableWindow( ( !err && enabled ) );
-	m_sharedSecretButton.EnableWindow( (!err && enabled ) );
 
 exit:
 
@@ -197,7 +172,30 @@ OSStatus
 CSecondPage::Commit( CComboBox & box, HKEY key, DWORD enabled )
 {
 	CString		selected;
+	HKEY		subKey	= NULL;
+	TCHAR		subKeyName[MAX_KEY_LENGTH];
+	DWORD		cSubKeys = 0;
+	DWORD		cbMaxSubKey;
+	DWORD		cchMaxClass;
+	DWORD		dwSize;
+	int			i;
 	OSStatus	err = kNoErr;
+
+	// First, remove all the entries that are there
+
+    err = RegQueryInfoKey( key, NULL, NULL, NULL, &cSubKeys, &cbMaxSubKey, &cchMaxClass, NULL, NULL, NULL, NULL, NULL );       
+	require_noerr( err, exit );
+
+	for ( i = 0; i < (int) cSubKeys; i++ )
+	{	
+		dwSize = MAX_KEY_LENGTH;
+            
+		err = RegEnumKeyEx( key, 0, subKeyName, &dwSize, NULL, NULL, NULL, NULL );
+		require_noerr( err, exit );
+			
+		err = RegDeleteKey( key, subKeyName );
+		require_noerr( err, exit );
+	}
 
 	// Get selected text
 	
@@ -231,11 +229,20 @@ CSecondPage::Commit( CComboBox & box, HKEY key, DWORD enabled )
 	// Save selected text in registry.  This will trigger mDNSResponder to setup
 	// DynDNS config again
 
-	err = RegSetValueEx( key, L"", 0, REG_SZ, (LPBYTE) (LPCTSTR) selected, ( selected.GetLength() + 1 ) * sizeof( TCHAR ) );
+	err = RegCreateKeyEx( key, selected, 0,
+	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &subKey, NULL );
+	require_noerr( err, exit );
+
+	err = RegSetValueEx( subKey, L"Enabled", 0, REG_DWORD, (LPBYTE) &enabled, sizeof( DWORD ) );
 	check_noerr( err );
 
-	err = RegSetValueEx( key, L"Enabled", 0, REG_DWORD, (LPBYTE) &enabled, sizeof( DWORD ) );
-	check_noerr( err );
+exit:
+
+	if ( subKey )
+	{
+		RegCloseKey( subKey );
+		subKey = NULL;
+	}
 
 	return err;
 }
@@ -253,7 +260,7 @@ void CSecondPage::OnBnClickedSharedSecret()
 
 	CSharedSecret dlg;
 
-	dlg.m_key = name;
+	dlg.Load( name );
 
 	if ( dlg.DoModal() == IDOK )
 	{
@@ -374,9 +381,14 @@ CSecondPage::EmptyComboBox( CComboBox & box )
 OSStatus
 CSecondPage::Populate( CComboBox & box, HKEY key, StringList & l )
 {
-	TCHAR		rawString[kDNSServiceMaxDomainName + 1];
-	DWORD		rawStringLen;
 	CString		string;
+	HKEY		subKey = NULL;
+	DWORD		dwSize;
+	DWORD		enabled = 0;
+	TCHAR		subKeyName[MAX_KEY_LENGTH];
+	DWORD		cSubKeys = 0;
+	DWORD		cbMaxSubKey;
+	DWORD		cchMaxClass;
 	OSStatus	err;
 
 	err = RegQueryString( key, L"UserDefined", string );
@@ -416,30 +428,43 @@ CSecondPage::Populate( CComboBox & box, HKEY key, StringList & l )
 		}
 	}
 
-	// Now look to see if there is a selected string, and if so,
-	// select it
+	err = RegQueryInfoKey( key, NULL, NULL, NULL, &cSubKeys, &cbMaxSubKey, &cchMaxClass, NULL, NULL, NULL, NULL, NULL );       
+	require_noerr( err, exit );
 
-	rawString[0] = '\0';
+	if ( cSubKeys > 0 )
+	{	
+		dwSize = MAX_KEY_LENGTH;
+            
+		err = RegEnumKeyEx( key, 0, subKeyName, &dwSize, NULL, NULL, NULL, NULL );
+		require_noerr( err, exit );
 
-	rawStringLen = sizeof( rawString );
+		err = RegOpenKey( key, subKeyName, &subKey );
+		require_noerr( err, exit );
 
-	err = RegQueryValueEx( key, L"", 0, NULL, (LPBYTE) rawString, &rawStringLen );
+		dwSize = sizeof( DWORD );
+		err = RegQueryValueEx( subKey, L"Enabled", NULL, NULL, (LPBYTE) &enabled, &dwSize );
+		require_noerr( err, exit );
 
-	string = rawString;
-	
-	if ( !err && ( string.GetLength() != 0 ) )
-	{
 		// See if it's there
 
-		if ( box.SelectString( -1, string ) == CB_ERR )
+		if ( box.SelectString( -1, subKeyName ) == CB_ERR )
 		{
 			// If not, add it
 
-			box.AddString( string );
+			box.AddString( subKeyName );
 		}
 
-		box.SelectString( -1, string );
+		box.SelectString( -1, subKeyName );
+
+		RegCloseKey( subKey );
+		subKey = NULL;
 	}
+
+exit:
+
+	m_advertiseServicesButton.SetCheck( ( !err && enabled ) ? BST_CHECKED : BST_UNCHECKED );
+	m_regDomainsBox.EnableWindow( ( !err && enabled ) );
+	m_sharedSecretButton.EnableWindow( (!err && enabled ) );
 
 	return err;
 }
@@ -455,7 +480,8 @@ CSecondPage::CreateKey( CString & name, DWORD enabled )
 	HKEY		key = NULL;
 	OSStatus	err;
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, (LPCTSTR) name, &key );
+	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, (LPCTSTR) name, 0,
+		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &key, NULL );
 	require_noerr( err, exit );
 
 	err = RegSetValueEx( key, L"Enabled", 0, REG_DWORD, (LPBYTE) &enabled, sizeof( DWORD ) );

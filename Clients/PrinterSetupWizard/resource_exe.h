@@ -77,9 +77,13 @@
 #define IDC_DESCRIPTION_FIELD           1030
 #define IDC_LOCATION_FIELD              1032
 #define IDC_DESCRIPTION_LABEL           1033
+#define IDC_COMPLETE1					1034
+#define IDC_COMPLETE2					1035
+#define IDC_INSTALLING					1036
+#define IDC_PROGRESS					1037
 
 // Next default values for new objects
-// 
+//
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        142

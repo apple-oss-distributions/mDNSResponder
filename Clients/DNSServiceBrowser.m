@@ -13,65 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: DNSServiceBrowser.m,v $
-Revision 1.35  2006/11/27 08:27:49  mkrochma
-Fix a crashing bug
-
-Revision 1.34  2006/11/24 05:41:07  mkrochma
-More cleanup and more service types
-
-Revision 1.33  2006/11/24 01:34:24  mkrochma
-Display interface index and query for IPv6 addresses even when there's no IPv4
-
-Revision 1.32  2006/11/24 00:25:31  mkrochma
-<rdar://problem/4084652> Tools: DNS Service Browser contains some bugs
-
-Revision 1.31  2006/08/14 23:23:55  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.30  2005/01/27 17:46:16  cheshire
-Added comment
-
-Revision 1.29  2004/06/04 20:58:36  cheshire
-Move DNSServiceBrowser from mDNSMacOSX directory to Clients directory
-
-Revision 1.28  2004/05/18 23:51:26  cheshire
-Tidy up all checkin comments to use consistent "<rdar://problem/xxxxxxx>" format for bug numbers
-
-Revision 1.27  2003/11/19 18:49:48  rpantos
-<rdar://problem/3282283> couple of little tweaks to previous checkin
-
-Revision 1.26  2003/11/07 19:35:20  rpantos
-<rdar://problem/3282283> Display multiple IP addresses. Connect using host rather than IP addr.
-
-Revision 1.25  2003/10/29 05:16:54  rpantos
-Checkpoint: transition from DNSServiceDiscovery.h to dns_sd.h
-
-Revision 1.24  2003/10/28 02:25:45  rpantos
-<rdar://problem/3282283> Cancel pending resolve when focus changes or service disappears.
-
-Revision 1.23  2003/10/28 01:29:15  rpantos
-<rdar://problem/3282283> Restructure a bit to make arrow keys work & views behave better.
-
-Revision 1.22  2003/10/28 01:23:27  rpantos
-<rdar://problem/3282283> Bail if mDNS cannot be initialized at startup.
-
-Revision 1.21  2003/10/28 01:19:45  rpantos
-<rdar://problem/3282283> Do not put a trailing '.' on service names. Handle PATH for HTTP txtRecords.
-
-Revision 1.20  2003/10/28 01:13:49  rpantos
-<rdar://problem/3282283> Remove filter when displaying browse results.
-
-Revision 1.19  2003/10/28 01:10:14  rpantos
-<rdar://problem/3282283> Change 'compare' to 'caseInsensitiveCompare' to fix sort order.
-
-Revision 1.18  2003/08/12 19:55:07  cheshire
-Update to APSL 2.0
-
-*/
+ */
 
 #import <Cocoa/Cocoa.h>
 #include <sys/types.h>
@@ -209,6 +151,9 @@ InterfaceIndexToName(uint32_t interface, char *interfaceName)
     } else if (interface == kDNSServiceInterfaceIndexLocalOnly) {
         // Only available locally on this machine.
         strlcpy(interfaceName, "local", IF_NAMESIZE);
+    } else if (interface == kDNSServiceInterfaceIndexP2P) {
+        // Peer-to-peer.
+        strlcpy(interfaceName, "p2p", IF_NAMESIZE);
     } else {
         // Converts interface index to interface name.
         if_indextoname(interface, interfaceName);

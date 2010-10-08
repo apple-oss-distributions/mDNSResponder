@@ -13,32 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: Firewall.cpp,v $
-Revision 1.6  2009/04/24 04:55:26  herscher
-<rdar://problem/3496833> Advertise SMB file sharing via Bonjour
-
-Revision 1.5  2009/03/30 20:39:29  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5712486> Put in extra defensive checks to prevent NULL pointer dereferencing crash
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.4  2006/08/14 23:26:07  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.3  2005/09/29 06:33:54  herscher
-<rdar://problem/4278931> Fix compilation error when using latest Microsoft Platform SDK.
-
-Revision 1.2  2004/09/15 09:39:53  shersche
-Retry the method INetFwPolicy::get_CurrentProfile on error
-
-Revision 1.1  2004/09/13 07:32:31  shersche
-Wrapper for Windows Firewall API code
-
-
-*/
+ */
 
 // <rdar://problem/4278931> Doesn't compile correctly with latest Platform SDK
 
@@ -302,54 +277,105 @@ exit:
 }
 
 
+
+
+
 static OSStatus
+
 mDNSFirewallIsFileAndPrintSharingEnabled
+
 	(
+
 	IN INetFwProfile	* fwProfile,
+
 	OUT BOOL			* fwServiceEnabled
+
 	)
+
 {
+
     VARIANT_BOOL fwEnabled;
+
     INetFwService* fwService = NULL;
+
     INetFwServices* fwServices = NULL;
+
 	OSStatus err = S_OK;
 
+
+
     _ASSERT(fwProfile != NULL);
+
     _ASSERT(fwServiceEnabled != NULL);
+
+
 
     *fwServiceEnabled = FALSE;
 
+
+
     // Retrieve the globally open ports collection.
+
     err = fwProfile->get_Services(&fwServices);
+
 	require( SUCCEEDED( err ), exit );
 
+
+
     // Attempt to retrieve the globally open port.
+
     err = fwServices->Item(NET_FW_SERVICE_FILE_AND_PRINT, &fwService);
+
 	require( SUCCEEDED( err ), exit );
+
 	
+
 	// Find out if the globally open port is enabled.
+
     err = fwService->get_Enabled(&fwEnabled);
+
 	require( SUCCEEDED( err ), exit );
+
 	if (fwEnabled != VARIANT_FALSE)
+
 	{
+
 		*fwServiceEnabled = TRUE;
+
 	}
+
+
 
 exit:
 
+
+
     // Release the globally open port.
+
     if (fwService != NULL)
+
     {
+
         fwService->Release();
+
     }
+
+
 
     // Release the globally open ports collection.
+
     if (fwServices != NULL)
+
     {
+
         fwServices->Release();
+
     }
 
+
+
     return err;
+
 }
 
 
@@ -408,7 +434,7 @@ exit:
 
 
 BOOL
-mDNSIsFileAndPrintSharingEnabled()
+mDNSIsFileAndPrintSharingEnabled( BOOL * retry )
 {
 	INetFwProfile	*	fwProfile					= NULL;
 	HRESULT				comInit						= E_FAIL;
@@ -417,6 +443,7 @@ mDNSIsFileAndPrintSharingEnabled()
 
 	// Initialize COM.
 
+	*retry = FALSE;
 	comInit = CoInitializeEx( 0, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
 
 	// Ignore this case. RPC_E_CHANGED_MODE means that COM has already been
@@ -424,6 +451,7 @@ mDNSIsFileAndPrintSharingEnabled()
 
 	if (comInit != RPC_E_CHANGED_MODE)
 	{
+		*retry = TRUE;
 		err = comInit;
 		require(SUCCEEDED(err), exit);
 	}

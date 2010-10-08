@@ -13,26 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: dllmain.c,v $
-Revision 1.4  2006/08/14 23:25:41  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.3  2005/07/07 19:18:29  shersche
-Fix error in previous checkin, change SystemServiceIsDisabled() to IsSystemServiceDisabled()
-
-Revision 1.2  2005/06/30 17:55:35  shersche
-<rdar://problem/4096913> Implement ISSystemServiceDisabled().  This is used to determine how long we should wait to connect to the system service.
-
-Revision 1.1  2004/06/18 03:55:11  rpantos
-Move DLL up to main level; additional integration from Scott.
-
-Revision 1.1  2004/02/21 04:16:50  bradley
-DLL wrapper for DNS-SD API.
-
-*/
+ */
 
 #include <windows.h>
 #include <DebugServices.h>

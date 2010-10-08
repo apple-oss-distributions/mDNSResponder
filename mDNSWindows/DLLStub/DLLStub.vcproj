@@ -212,6 +212,7 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot; mkdir &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot;&#x0D;&#x0A;echo F | xcopy /Y &quot;$(OutDir)\dnssdStatic.lib&quot;                                                        &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)\dnssd.lib&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 		<Configuration
@@ -276,6 +277,7 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot; mkdir &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot;&#x0D;&#x0A;echo F | xcopy /I/Y &quot;$(OutDir)\dnssdStatic.lib&quot;                                                     &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)\dnssd.lib&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 	</Configurations>

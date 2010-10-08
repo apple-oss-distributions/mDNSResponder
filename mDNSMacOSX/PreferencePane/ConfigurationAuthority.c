@@ -40,20 +40,7 @@
     OF THE APPLE SOFTWARE, HOWEVER CAUSED AND WHETHER UNDER THEORY OF CONTRACT, TORT
     (INCLUDING NEGLIGENCE), STRICT LIABILITY OR OTHERWISE, EVEN IF APPLE HAS BEEN
     ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-    Change History (most recent first):
-
-$Log: ConfigurationAuthority.c,v $
-Revision 1.3  2008/06/26 17:34:18  mkrochma
-<rdar://problem/6030630> Pref pane destroying shared "system.preferences" authorization right
-
-Revision 1.2  2005/08/07 22:48:05  mkrochma
-<rdar://problem/4204003> Bonjour Pref Pane returns -927 when "system.preferences" is not shared
-
-Revision 1.1  2005/02/05 02:28:22  cheshire
-Add Preference Pane to facilitate testing of DDNS & wide-area features
-
-*/
+ */
 
 #include "ConfigurationAuthority.h"
 #include "ConfigurationRights.h"
@@ -119,7 +106,7 @@ OSStatus InitConfigAuthority(void)
 	require_noerr( err, NewAuthFailed);
 
 	err = AuthorizationRightGet( UPDATE_SC_RIGHT, (CFDictionaryRef*) NULL);
-	if( err == errAuthorizationDenied)
+	if (err == errAuthorizationDenied)
 	{
 		rightInfo = CFCopyLocalizedString(CFSTR("Authentication required to set Dynamic DNS preferences."), 
 						CFSTR("Describes operation that requires user authorization"));
@@ -135,7 +122,7 @@ OSStatus InitConfigAuthority(void)
 	require_noerr( err, AuthSetFailed);
 
 	err = AuthorizationRightGet( EDIT_SYS_KEYCHAIN_RIGHT, (CFDictionaryRef*) NULL);
-	if( err == errAuthorizationDenied)
+	if (err == errAuthorizationDenied)
 	{
 		rightInfo = CFCopyLocalizedString( CFSTR("Authentication required to edit System Keychain."), 
 						CFSTR("Describes operation that requires user authorization"));

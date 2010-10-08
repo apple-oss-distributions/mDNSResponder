@@ -13,45 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: ThirdPage.h,v $
-Revision 1.10  2009/05/29 20:43:37  herscher
-<rdar://problem/6928136> Printer Wizard doesn't work correctly in Windows 7 64 bit
-
-Revision 1.9  2007/04/13 23:42:20  herscher
-<rdar://problem/4580061> mDNS: Printers added using Bonjour should be set as the default printer.
-
-Revision 1.8  2007/04/13 21:38:46  herscher
-<rdar://problem/4528853> mDNS: When auto-highlighting items in lists, scroll list so highlighted item is in the middle
-
-Revision 1.7  2007/04/13 20:18:30  herscher
-<rdar://problem/4189721> mDNS: Epson shows up twice in the list
-
-Revision 1.6  2006/08/14 23:24:09  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.5  2005/07/07 17:53:20  shersche
-Fix problems associated with the CUPS printer workaround fix.
-
-Revision 1.4  2005/02/08 21:45:06  shersche
-<rdar://problem/3947490> Default to Generic PostScript or PCL if unable to match driver
-
-Revision 1.3  2005/01/25 08:57:28  shersche
-<rdar://problem/3911084> Add m_printerControl member for dynamic loading of icons from resource DLLs
-Bug #: 3911084
-
-Revision 1.2  2004/12/29 18:53:38  shersche
-<rdar://problem/3725106>
-<rdar://problem/3737413> Added support for LPR and IPP protocols as well as support for obtaining multiple text records. Reorganized and simplified codebase.
-Bug #: 3725106, 3737413
-
-Revision 1.1  2004/06/18 04:36:58  rpantos
-First checked in
-
-
-*/
+ */
 
 #pragma once
 #include "afxcmn.h"
@@ -161,6 +123,8 @@ private:
 	//<rdar://problem/4528853> mDNS: When auto-highlighting items in lists, scroll list so highlighted item is in the middle
 	//
 	void				AutoScroll(CListCtrl & list, int nIndex);
+
+	void				FreeManufacturers( Manufacturers & manufacturers );
 
 	Manufacturers		m_manufacturers;
 

@@ -504,6 +504,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\FifthPage.cpp"
+				>
+			</File>
+			<File
 				RelativePath="FirstPage.cpp"
 				>
 				<FileConfiguration
@@ -654,6 +658,10 @@
 			</File>
 			<File
 				RelativePath=".\ControlPanelExe.h"
+				>
+			</File>
+			<File
+				RelativePath=".\FifthPage.h"
 				>
 			</File>
 			<File

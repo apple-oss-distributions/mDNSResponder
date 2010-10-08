@@ -13,38 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: DNSServiceBrowser.cs,v $
-Revision 1.8  2009/06/02 18:49:23  herscher
-<rdar://problem/3948252> Update the .NET code to use the new Bonjour COM component
-
-Revision 1.7  2006/08/14 23:23:58  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.6  2005/02/10 22:35:06  cheshire
-<rdar://problem/3727944> Update name
-
-Revision 1.5  2004/09/21 16:26:58  shersche
-Check to make sure browse list selected item is not null before resolving
-Submitted by: prepin@gmail.com
-
-Revision 1.4  2004/09/13 19:38:17  shersche
-Changed code to reflect namespace and type changes to dnssd.NET library
-
-Revision 1.3  2004/09/11 00:38:14  shersche
-DNSService APIs now assume port in host format. Check for null text record in resolve callback.
-
-Revision 1.2  2004/07/22 23:15:25  shersche
-Fix service names for teleport, tftp, and bootps
-
-Revision 1.1  2004/07/19 07:54:24  shersche
-Initial revision
-
-
-
-*/
+ */
 
 using System;
 using System.Drawing;

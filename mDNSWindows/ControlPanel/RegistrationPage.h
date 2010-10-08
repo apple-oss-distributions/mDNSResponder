@@ -13,58 +13,41 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: FirstPage.h,v $
-Revision 1.4  2006/08/14 23:25:28  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.3  2005/03/07 18:27:42  shersche
-<rdar://problem/4037940> Fix problem when ControlPanel commits changes to the browse domain list
-
-Revision 1.2  2005/03/03 19:55:21  shersche
-<rdar://problem/4034481> ControlPanel source code isn't saving CVS log info
-
-
-*/
+ */
 
 #pragma once
 
 #include "stdafx.h"
 #include "resource.h"
-
 #include <DebugServices.h>
 #include "afxwin.h"
 
     
 //---------------------------------------------------------------------------------------------------------------------------
-//	CFirstPage
+//	CRegistrationPage
 //---------------------------------------------------------------------------------------------------------------------------
 
-class CFirstPage : public CPropertyPage
+class CRegistrationPage : public CPropertyPage
 {
 public:
-	CFirstPage();
-	~CFirstPage();
+	CRegistrationPage();
+	~CRegistrationPage();
 
 protected:
-	//{{AFX_DATA(CFirstPage)
+	//{{AFX_DATA(CRegistrationPage)
 	enum { IDD = IDR_APPLET_PAGE1 };
 	//}}AFX_DATA
 
-	//{{AFX_VIRTUAL(CFirstPage)
+	//{{AFX_VIRTUAL(CRegistrationPage)
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
 	//}}AFX_VIRTUAL
 
-	DECLARE_DYNCREATE(CFirstPage)
+	DECLARE_DYNCREATE(CRegistrationPage)
 
-	//{{AFX_MSG(CFirstPage)
+	//{{AFX_MSG(CRegistrationPage)
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
-public:
-	afx_msg void	OnBnClickedSharedSecret();
-	void			OnRegistryChanged();
+
 private:
 
 	afx_msg BOOL	OnSetActive();
@@ -72,19 +55,21 @@ private:
 
 	void			SetModified( BOOL bChanged = TRUE );
 	void			Commit();
-	
-	OSStatus		CheckStatus();
-	void			ShowStatus( DWORD status );
 
 	CEdit			m_hostnameControl;
-	bool			m_ignoreHostnameChange;
+	CEdit			m_usernameControl;
+	CEdit			m_passwordControl;
+	CButton			m_advertiseServices;
+	bool			m_ignoreChanges;
 	bool			m_modified;
+	HKEY			m_hostnameSetupKey;
+	HKEY			m_registrationSetupKey;
 	HKEY			m_statusKey;
-	HKEY			m_setupKey;
 	
 public:
 	
 	afx_msg void OnEnChangeHostname();
-	CStatic m_failureIcon;
-	CStatic m_successIcon;
+	afx_msg void OnEnChangeUsername();
+	afx_msg void OnEnChangePassword();
+	afx_msg void OnBnClickedAdvertiseServices();
 };

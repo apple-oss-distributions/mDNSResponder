@@ -13,28 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: jdns_sd.rc,v $
-Revision 1.5  2007/04/27 20:34:31  herscher
-<rdar://problem/5159673> mDNS: Company name needs to be changed to Apple Inc.
-
-Revision 1.4  2006/08/14 23:26:04  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.3  2004/10/19 03:41:42  shersche
-<rdar://problem/3843396> Include "afxres.h" to resource script so it gets compiled correctly
-Bug #: 3843396
-
-Revision 1.2  2004/06/26 21:27:38  rpantos
-Update to use WinVersRes.h
-
-Revision 1.1  2004/06/26 20:06:51  rpantos
-Update to use WinVersRes.h
-
-
-*/
+ */
 
 #ifndef JDNS_SD_RC
 #define JDNS_SD_RC

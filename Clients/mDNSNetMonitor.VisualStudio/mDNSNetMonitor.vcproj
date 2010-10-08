@@ -55,12 +55,14 @@
 			/>
 			<Tool
 				Name="VCResourceCompilerTool"
+				AdditionalIncludeDirectories="../../mDNSWindows"
 			/>
 			<Tool
 				Name="VCPreLinkEventTool"
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalOptions="/NXCOMPAT /DYNAMICBASE /SAFESEH"
 				AdditionalDependencies="ws2_32.lib iphlpapi.lib crypt32.lib netapi32.lib powrprof.lib"
 				LinkIncremental="2"
 				GenerateDebugInformation="true"
@@ -131,12 +133,14 @@
 			/>
 			<Tool
 				Name="VCResourceCompilerTool"
+				AdditionalIncludeDirectories="../../mDNSWindows"
 			/>
 			<Tool
 				Name="VCPreLinkEventTool"
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalOptions="/NXCOMPAT /DYNAMICBASE /SAFESEH"
 				AdditionalDependencies="ws2_32.lib iphlpapi.lib crypt32.lib netapi32.lib powrprof.lib"
 				LinkIncremental="1"
 				GenerateDebugInformation="true"
@@ -222,10 +226,6 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\mDNSWindows\SystemService\Service.c"
-				>
-			</File>
-			<File
 				RelativePath="..\..\mDNSCore\uDNS.c"
 				>
 			</File>
@@ -285,6 +285,10 @@
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav"
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
+			<File
+				RelativePath=".\mDNSNetMonitor.rc"
+				>
+			</File>
 		</Filter>
 	</Files>
 	<Globals>

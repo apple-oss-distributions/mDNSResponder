@@ -13,18 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: stdafx.cpp,v $
-Revision 1.2  2006/08/14 23:24:09  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.1  2004/06/18 04:36:58  rpantos
-First checked in
-
-
-*/
+ */
 
 #include "stdafx.h"
 

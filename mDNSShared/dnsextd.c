@@ -13,198 +13,16 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ */
 
-    Change History (most recent first):
+#if __APPLE__
+// In Mac OS X 10.5 and later trying to use the daemon function gives a “‘daemon’ is deprecated”
+// error, which prevents compilation because we build with "-Werror".
+// Since this is supposed to be portable cross-platform code, we don't care that daemon is
+// deprecated on Mac OS X 10.5, so we use this preprocessor trick to eliminate the error message.
+#define daemon yes_we_know_that_daemon_is_deprecated_in_os_x_10_5_thankyou
+#endif
 
-$Log: dnsextd.c,v $
-Revision 1.97  2009/01/13 05:31:34  mkrochma
-<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
-
-Revision 1.96  2009/01/13 00:45:41  cheshire
-Uncommented "#ifdef NOT_HAVE_DAEMON" check
-
-Revision 1.95  2009/01/12 22:47:13  cheshire
-Only include "mDNSUNP.h" when building on a system that requires the "daemon()" definition (currently only Solaris)
-
-Revision 1.94  2009/01/11 03:20:06  mkrochma
-<rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
-
-Revision 1.93  2008/12/17 05:06:53  cheshire
-Increased maximum DNS Update lifetime from 20 minutes to 2 hours -- now that we have Sleep Proxy,
-having clients wake every fifteen minutes to renew their record registrations is no longer reasonable.
-
-Revision 1.92  2008/11/13 19:09:36  cheshire
-Updated rdataOPT code
-
-Revision 1.91  2008/11/04 23:06:51  cheshire
-Split RDataBody union definition into RDataBody and RDataBody2, and removed
-SOA from the normal RDataBody union definition, saving 270 bytes per AuthRecord
-
-Revision 1.90  2008/10/03 18:18:57  cheshire
-Define dummy "mDNS_ConfigChanged(mDNS *const m)" routine to avoid link errors
-
-Revision 1.89  2008/09/15 23:52:30  cheshire
-<rdar://problem/6218902> mDNSResponder-177 fails to compile on Linux with .desc pseudo-op
-Made __crashreporter_info__ symbol conditional, so we only use it for OS X build
-
-Revision 1.88  2008/03/06 21:26:11  cheshire
-Moved duplicated STRINGIFY macro from individual C files to DNSCommon.h
-
-Revision 1.87  2007/12/17 23:34:50  cheshire
-Don't need to set ptr to result of DNSDigest_SignMessage -- ptr is updated anyway (it's passed by reference)
-
-Revision 1.86  2007/12/13 20:22:34  cheshire
-Got rid of redundant SameResourceRecord() routine; replaced calls to this
-with calls to IdenticalResourceRecord() which does exactly the same thing.
-
-Revision 1.85  2007/12/01 00:30:36  cheshire
-Fixed compile warning: declaration of 'time' shadows a global declaration
-
-Revision 1.84  2007/10/24 18:19:37  cheshire
-Fixed header byte order bug sending update responses
-
-Revision 1.83  2007/10/17 22:52:26  cheshire
-Get rid of unused mDNS_UpdateLLQs()
-
-Revision 1.82  2007/09/27 17:42:49  cheshire
-Fix naming: for consistency, "kDNSFlag1_RC" should be "kDNSFlag1_RC_Mask"
-
-Revision 1.81  2007/09/21 21:12:37  cheshire
-DNSDigest_SignMessage does not need separate "mDNSu16 *numAdditionals" parameter
-
-Revision 1.80  2007/09/18 19:09:02  cheshire
-<rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
-
-Revision 1.79  2007/07/11 02:59:58  cheshire
-<rdar://problem/5303807> Register IPv6-only hostname and don't create port mappings for AutoTunnel services
-Add AutoTunnel parameter to mDNS_SetSecretForDomain
-
-Revision 1.78  2007/06/20 01:10:13  cheshire
-<rdar://problem/5280520> Sync iPhone changes into main mDNSResponder code
-
-Revision 1.77  2007/05/15 21:57:17  cheshire
-<rdar://problem/4608220> Use dnssd_SocketValid(x) macro instead of just
-assuming that all negative values (or zero!) are invalid socket numbers
-
-Revision 1.76  2007/05/01 23:53:26  cheshire
-<rdar://problem/5175318> dnsextd should refuse updates without attached lease
-
-Revision 1.75  2007/05/01 00:18:12  cheshire
-Use "-launchd" instead of "-d" when starting via launchd
-(-d sets foreground mode, which writes errors to stderr, which is ignored when starting via launchd)
-
-Revision 1.74  2007/04/26 00:35:16  cheshire
-<rdar://problem/5140339> uDNS: Domain discovery not working over VPN
-Fixes to make sure results update correctly when connectivity changes (e.g. a DNS server
-inside the firewall may give answers where a public one gives none, and vice versa.)
-
-Revision 1.73  2007/04/22 06:02:03  cheshire
-<rdar://problem/4615977> Query should immediately return failure when no server
-
-Revision 1.72  2007/04/05 22:55:37  cheshire
-<rdar://problem/5077076> Records are ending up in Lighthouse without expiry information
-
-Revision 1.71  2007/04/05 19:43:56  cheshire
-Added ProgramName and comment about '-d' option
-
-Revision 1.70  2007/04/05 18:34:40  cheshire
-<rdar://problem/4838930> dnsextd gives "bind - Address already in use" error
-
-Revision 1.69  2007/03/28 21:14:08  cheshire
-The rrclass field of an OPT pseudo-RR holds the sender's UDP payload size
-
-Revision 1.68  2007/03/28 18:20:50  cheshire
-Textual tidying
-
-Revision 1.67  2007/03/21 00:30:07  cheshire
-<rdar://problem/4789455> Multiple errors in DNameList-related code
-
-Revision 1.66  2007/03/20 17:07:16  cheshire
-Rename "struct uDNS_TCPSocket_struct" to "TCPSocket", "struct uDNS_UDPSocket_struct" to "UDPSocket"
-
-Revision 1.65  2007/02/07 19:32:00  cheshire
-<rdar://problem/4980353> All mDNSResponder components should contain version strings in SCCS-compatible format
-
-Revision 1.64  2007/01/20 01:43:26  cheshire
-<rdar://problem/4058383> Should not write log messages to /dev/console
-
-Revision 1.63  2007/01/20 01:31:56  cheshire
-Update comments
-
-Revision 1.62  2007/01/17 22:06:03  cheshire
-Replace duplicated literal constant "{ { 0 } }" with symbol "zeroIPPort"
-
-Revision 1.61  2007/01/05 08:30:54  cheshire
-Trim excessive "$Log" checkin history from before 2006
-(checkin history still available via "cvs log ..." of course)
-
-Revision 1.60  2007/01/05 08:07:29  cheshire
-Remove unnecessary dummy udsserver_default_reg_domain_changed() routine
-
-Revision 1.59  2007/01/05 05:46:47  cheshire
-Remove unnecessary dummy udsserver_automatic_browse_domain_changed() routine
-
-Revision 1.58  2007/01/04 23:11:54  cheshire
-udsserver_default_browse_domain_changed renamed to udsserver_automatic_browse_domain_changed
-
-Revision 1.57  2007/01/04 01:41:48  cheshire
-Use _dns-update-tls/_dns-query-tls/_dns-llq-tls instead of creating a new "_tls" subdomain
-
-Revision 1.56  2006/12/22 20:59:51  cheshire
-<rdar://problem/4742742> Read *all* DNS keys from keychain,
- not just key for the system-wide default registration domain
-
-Revision 1.55  2006/11/30 23:08:39  herscher
-<rdar://problem/4765644> uDNS: Sync up with Lighthouse changes for Private DNS
-
-Revision 1.54  2006/11/18 05:01:33  cheshire
-Preliminary support for unifying the uDNS and mDNS code,
-including caching of uDNS answers
-
-Revision 1.53  2006/11/17 23:55:09  cheshire
-<rdar://problem/4842494> dnsextd byte-order bugs on Intel
-
-Revision 1.52  2006/11/17 04:27:51  cheshire
-<rdar://problem/4842494> dnsextd byte-order bugs on Intel
-
-Revision 1.51  2006/11/17 03:50:18  cheshire
-Add debugging loggin in SendPacket and UDPServerTransaction
-
-Revision 1.50  2006/11/17 03:48:57  cheshire
-<rdar://problem/4842493> dnsextd replying on wrong port
-
-Revision 1.49  2006/11/03 06:12:44  herscher
-Make sure all buffers passed to GetRRDisplayString_rdb are of length MaxMsg
-
-Revision 1.48  2006/10/20 19:18:35  cheshire
-<rdar://problem/4669228> dnsextd generates bogus SRV record with null target
-
-Revision 1.47  2006/10/20 05:43:51  herscher
-LookupLLQ() needs to match on the port number when looking up the LLQ
-
-Revision 1.46  2006/10/11 22:56:07  herscher
-Tidy up the implementation of ZoneHandlesName
-
-Revision 1.45  2006/08/22 03:28:57  herscher
-<rdar://problem/4678717> Long-lived queries aren't working well in TOT.
-
-Revision 1.44  2006/08/14 23:24:56  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.43  2006/07/20 19:53:33  mkrochma
-<rdar://problem/4472013> Add Private DNS server functionality to dnsextd
-More fixes for private DNS
-
-Revision 1.42  2006/07/05 22:48:19  cheshire
-<rdar://problem/4472013> Add Private DNS server functionality to dnsextd
-
-*/
-
-#include "dnsextd.h"
-#include "../mDNSShared/uds_daemon.h"
-#include "../mDNSShared/dnssd_ipc.h"
-#include "../mDNSCore/uDNS.h"
-#include "../mDNSShared/DebugServices.h"
 #include <signal.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -221,10 +39,21 @@ Revision 1.42  2006/07/05 22:48:19  cheshire
 #include <time.h>
 #include <errno.h>
 
+#if __APPLE__
+#undef daemon
+extern int daemon(int, int);
+#endif
+
 // Solaris doesn't have daemon(), so we define it here
 #ifdef NOT_HAVE_DAEMON
 #include "../mDNSPosix/mDNSUNP.h"		// For daemon()
 #endif // NOT_HAVE_DAEMON
+
+#include "dnsextd.h"
+#include "../mDNSShared/uds_daemon.h"
+#include "../mDNSShared/dnssd_ipc.h"
+#include "../mDNSCore/uDNS.h"
+#include "../mDNSShared/DebugServices.h"
 
 // Compatibility workaround
 #ifndef AF_LOCAL
@@ -1368,30 +1197,38 @@ SetupSockets
 	self->llq_addr.sin_addr.s_addr	= zerov4Addr.NotAnInteger;
 	self->llq_addr.sin_port			= ( self->llq_port.NotAnInteger ) ? self->llq_port.NotAnInteger : DNSEXTPort.NotAnInteger;
 
-	self->llq_tcpsd = socket( AF_INET, SOCK_STREAM, 0 );
-	require_action( dnssd_SocketValid(self->llq_tcpsd), exit, err = mStatus_UnknownErr; LogErr( "SetupSockets", "socket" ) );
-
+	if (self->llq_addr.sin_port == self->addr.sin_port)
+		{
+		self->llq_tcpsd = self->tcpsd;
+		self->llq_udpsd = self->udpsd;
+		}
+	else
+		{
+		self->llq_tcpsd = socket( AF_INET, SOCK_STREAM, 0 );
+		require_action( dnssd_SocketValid(self->llq_tcpsd), exit, err = mStatus_UnknownErr; LogErr( "SetupSockets", "socket" ) );
+	
 #if defined(SO_REUSEADDR)
-	err = setsockopt(self->llq_tcpsd, SOL_SOCKET, SO_REUSEADDR, &kOn, sizeof(kOn));
-	require_action( !err, exit, LogErr( "SetupSockets", "SO_REUSEADDR self->llq_tcpsd" ) );
+		err = setsockopt(self->llq_tcpsd, SOL_SOCKET, SO_REUSEADDR, &kOn, sizeof(kOn));
+		require_action( !err, exit, LogErr( "SetupSockets", "SO_REUSEADDR self->llq_tcpsd" ) );
 #endif
-
-	err = bind( self->llq_tcpsd, ( struct sockaddr* ) &self->llq_addr, sizeof( self->llq_addr ) );
-	require_action( !err, exit, LogErr( "SetupSockets", "bind self->llq_tcpsd" ) );
-
-	err = listen( self->llq_tcpsd, LISTENQ );
-	require_action( !err, exit, LogErr( "SetupSockets", "listen" ) );
-
-	self->llq_udpsd = socket( AF_INET, SOCK_DGRAM, 0 );
-	require_action( dnssd_SocketValid(self->llq_udpsd), exit, err = mStatus_UnknownErr; LogErr( "SetupSockets", "socket" ) );
-
+	
+		err = bind( self->llq_tcpsd, ( struct sockaddr* ) &self->llq_addr, sizeof( self->llq_addr ) );
+		require_action( !err, exit, LogErr( "SetupSockets", "bind self->llq_tcpsd" ) );
+	
+		err = listen( self->llq_tcpsd, LISTENQ );
+		require_action( !err, exit, LogErr( "SetupSockets", "listen" ) );
+	
+		self->llq_udpsd = socket( AF_INET, SOCK_DGRAM, 0 );
+		require_action( dnssd_SocketValid(self->llq_udpsd), exit, err = mStatus_UnknownErr; LogErr( "SetupSockets", "socket" ) );
+	
 #if defined(SO_REUSEADDR)
-	err = setsockopt(self->llq_udpsd, SOL_SOCKET, SO_REUSEADDR, &kOn, sizeof(kOn));
-	require_action( !err, exit, LogErr( "SetupSockets", "SO_REUSEADDR self->llq_udpsd" ) );
+		err = setsockopt(self->llq_udpsd, SOL_SOCKET, SO_REUSEADDR, &kOn, sizeof(kOn));
+		require_action( !err, exit, LogErr( "SetupSockets", "SO_REUSEADDR self->llq_udpsd" ) );
 #endif
-
-	err = bind(self->llq_udpsd, ( struct sockaddr* ) &self->llq_addr, sizeof( self->llq_addr ) );
-	require_action( !err, exit, LogErr( "SetupSockets", "bind self->llq_udpsd" ) );
+	
+		err = bind(self->llq_udpsd, ( struct sockaddr* ) &self->llq_addr, sizeof( self->llq_addr ) );
+		require_action( !err, exit, LogErr( "SetupSockets", "bind self->llq_udpsd" ) );
+		}
 
 	// set up Unix domain socket pair for LLQ polling thread to signal main thread that a change to the zone occurred
 
@@ -1559,7 +1396,7 @@ mDNSlocal void UpdateLeaseTable(PktMsg *pkt, DaemonInfo *d, mDNSs32 lease)
 		mDNSBool DeleteAllRRSets = mDNSfalse, DeleteOneRRSet = mDNSfalse, DeleteOneRR = mDNSfalse;
 		
 		ptr = GetLargeResourceRecord(NULL, &pkt->msg, ptr, end, 0, kDNSRecordTypePacketAns, &lcr);
-		if (!ptr) { Log("UpdateLeaseTable: GetLargeResourceRecord returned NULL"); goto cleanup; }
+		if (!ptr || lcr.r.resrec.RecordType == kDNSRecordTypePacketNegative) { Log("UpdateLeaseTable: GetLargeResourceRecord failed"); goto cleanup; }
 		bucket = rr->namehash % d->nbuckets;
 		rptr = &d->table[bucket];
 
@@ -1688,7 +1525,7 @@ HandleRequest
 			{
 			LargeCacheRecord lcr;
 			ptr = GetLargeResourceRecord(NULL, &request->msg, ptr, end, 0, kDNSRecordTypePacketAns, &lcr);
-			if (lcr.r.resrec.rroriginalttl) adds++; else dels++;
+			if (lcr.r.resrec.RecordType != kDNSRecordTypePacketNegative && lcr.r.resrec.rroriginalttl) adds++; else dels++;
 			}
 		HdrHToN(request);
 		if (adds && !lease)
@@ -1959,17 +1796,20 @@ mDNSlocal CacheRecord *AnswerQuestion(DaemonInfo *d, AnswerListElem *e)
 		{
 		ansptr = GetLargeResourceRecord(NULL, &reply->msg, ansptr, end, 0, kDNSRecordTypePacketAns, &lcr);
 		if (!ansptr) { Log("AnswerQuestions: GetLargeResourceRecord returned NULL"); goto end; }
-		if (lcr.r.resrec.rrtype != e->type || lcr.r.resrec.rrclass != kDNSClass_IN || !SameDomainName(lcr.r.resrec.name, &e->name))
+		if (lcr.r.resrec.RecordType != kDNSRecordTypePacketNegative)
 			{
-			Log("AnswerQuestion: response %##s type #d does not answer question %##s type #d.  Discarding",
-				  lcr.r.resrec.name->c, lcr.r.resrec.rrtype, e->name.c, e->type);
-			}
-		else
-			{
-			CacheRecord *cr = CopyCacheRecord(&lcr.r, &e->name);
-			if (!cr) { Log("Error: AnswerQuestion - CopyCacheRecord returned NULL"); goto end; }
-			cr->next = AnswerList;
-			AnswerList = cr;
+			if (lcr.r.resrec.rrtype != e->type || lcr.r.resrec.rrclass != kDNSClass_IN || !SameDomainName(lcr.r.resrec.name, &e->name))
+				{
+				Log("AnswerQuestion: response %##s type #d does not answer question %##s type #d.  Discarding",
+					  lcr.r.resrec.name->c, lcr.r.resrec.rrtype, e->name.c, e->type);
+				}
+			else
+				{
+				CacheRecord *cr = CopyCacheRecord(&lcr.r, &e->name);
+				if (!cr) { Log("Error: AnswerQuestion - CopyCacheRecord returned NULL"); goto end; }
+				cr->next = AnswerList;
+				AnswerList = cr;
+				}
 			}
 		}
 	
@@ -2510,7 +2350,7 @@ mDNSlocal int RecvLLQ( DaemonInfo *d, PktMsg *pkt, TCPSocket *sock )
 		{
 		aptr = GetLargeResourceRecord(NULL, &pkt->msg, aptr, end, 0, kDNSRecordTypePacketAdd, &opt);
 		if (!aptr) { Log("Malformatted LLQ from %s: could not get Additional record %d", addr, i); goto end; }
-		if (opt.r.resrec.rrtype == kDNSType_OPT) break;
+		if (opt.r.resrec.RecordType != kDNSRecordTypePacketNegative && opt.r.resrec.rrtype == kDNSType_OPT) break;
 		}
 
 	// validate OPT
@@ -2579,7 +2419,7 @@ mDNSlocal mDNSBool IsAuthorized( DaemonInfo * d, PktMsg * pkt, DomainAuthInfo **
 					}
 				}
 
-				hasTSIG = ( ptr && lcr.r.resrec.rrtype == kDNSType_TSIG );
+				hasTSIG = ( ptr && lcr.r.resrec.RecordType != kDNSRecordTypePacketNegative && lcr.r.resrec.rrtype == kDNSType_TSIG );
 			}
 		else
 			{
@@ -3219,7 +3059,7 @@ int main(int argc, char *argv[])
 		Log("Using default file descriptor resource limit");
 		}
 	
-	if (!strcasecmp(argv[1], "-launchd"))
+	if (argc > 1 && !strcasecmp(argv[1], "-launchd"))
 		{
 		Log("started_via_launchd");
 		started_via_launchd = 1;
@@ -3264,8 +3104,8 @@ void mDNSCoreReceive(mDNS *const m, void *const msg, const mDNSu8 *const end,
                                 const mDNSAddr *const srcaddr, const mDNSIPPort srcport,
                                 const mDNSAddr *const dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID iid)
 	{ ( void ) m; ( void ) msg; ( void ) end; ( void ) srcaddr; ( void ) srcport; ( void ) dstaddr; ( void ) dstport; ( void ) iid; }
-DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSAddr *addr, const mDNSIPPort port)
-	{ ( void ) m; ( void ) d; ( void ) interface; ( void ) addr; ( void ) port; return(NULL); }
+DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSAddr *addr, const mDNSIPPort port, mDNSBool scoped)
+	{ ( void ) m; ( void ) d; ( void ) interface; ( void ) addr; ( void ) port; ( void ) scoped; return(NULL); }
 void mDNS_AddSearchDomain(const domainname *const domain) { (void)domain; }
 void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCallback *StatusCallback, const void *StatusContext)
 	{ ( void ) m; ( void ) fqdn; ( void ) StatusCallback; ( void ) StatusContext; }
@@ -3290,6 +3130,8 @@ mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
 	const domainname *domain, const domainname *keyname, const char *b64keydata, mDNSBool AutoTunnel)
 	{ ( void ) m; ( void ) info; ( void ) domain; ( void ) keyname; ( void ) b64keydata; ( void ) AutoTunnel; return 0; }
 mStatus mDNS_StopQuery(mDNS *const m, DNSQuestion *const question) { ( void ) m; ( void ) question; return 0; }
+void TriggerEventCompletion(void);
+void TriggerEventCompletion() {}
 mDNS mDNSStorage;
 
 

@@ -13,26 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: mDNSLibrary.c,v $
-Revision 1.4  2006/08/14 23:24:29  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.3  2004/12/16 20:49:35  cheshire
-<rdar://problem/3324626> Cache memory management improvements
-
-Revision 1.2  2004/09/17 01:08:50  cheshire
-Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
-  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
-  declared in that file are ONLY appropriate to single-address-space embedded applications.
-  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
-
-Revision 1.1  2004/03/12 21:30:26  cheshire
-Build a System-Context Shared Library from mDNSCore, for the benefit of developers
-like Muse Research who want to be able to use mDNS/DNS-SD from GPL-licensed code.
-
  */
 
 // Define the required CFM Shared Library entry and exit points

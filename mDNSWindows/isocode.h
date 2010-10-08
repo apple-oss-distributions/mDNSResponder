@@ -13,10 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-*/
+ */
 
 /* isocode.h                                                             */
 /* ----------------------------------------------------------------------*/
@@ -124,7 +121,7 @@ unsigned char ISOCODES[] = {
 8, 22, 'p','t','_','P','T', 0 ,
 4, 24, 'r','o', 0 , 0 , 0 , 0 ,
 8, 24, 'r','o', 0 , 0 , 0 , 0 ,
-4, 15, 'r','u', 0 , 0 , 0 , 0 ,
+4, 25, 'r','u', 0 , 0 , 0 , 0 ,
 8, 25, 'r','u', 0 , 0 , 0 , 0 ,
 4, 30, 't','h', 0 , 0 , 0 , 0 ,
 4, 31, 't','r', 0 , 0 , 0 , 0 ,

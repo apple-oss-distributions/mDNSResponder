@@ -13,32 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: FirstPage.cpp,v $
-Revision 1.6  2006/08/14 23:24:09  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.5  2005/07/07 17:53:20  shersche
-Fix problems associated with the CUPS printer workaround fix.
-
-Revision 1.4  2005/03/16 01:41:29  shersche
-<rdar://problem/3989644> Remove info icon from first page
-
-Revision 1.3  2005/01/25 08:58:08  shersche
-<rdar://problem/3911084> Load icons at run-time from resource DLLs
-Bug #: 3911084
-
-Revision 1.2  2004/07/13 20:15:04  shersche
-<rdar://problem/3726363> Load large font name from resource
-Bug #: 3726363
-
-Revision 1.1  2004/06/18 04:36:57  rpantos
-First checked in
-
-
-*/
+ */
 
 #include "stdafx.h"
 #include "PrinterSetupWizardApp.h"

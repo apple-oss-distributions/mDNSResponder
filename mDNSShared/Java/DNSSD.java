@@ -14,58 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
 
-    Change History (most recent first):
-
-$Log: DNSSD.java,v $
-Revision 1.16  2008/11/04 20:06:20  cheshire
-<rdar://problem/6186231> Change MAX_DOMAIN_NAME to 256
-
-Revision 1.15  2007/03/13 00:28:03  vazquez
-<rdar://problem/4625928> Java: Rename exported symbols in libjdns_sd.jnilib
-
-Revision 1.14  2007/03/13 00:10:14  vazquez
-<rdar://problem/4455206> Java: 64 bit JNI patch
-
-Revision 1.13  2007/02/24 23:08:02  mkrochma
-<rdar://problem/5001673> Typo in Bonjour Java API document
-
-Revision 1.12  2007/02/09 00:33:02  cheshire
-Add missing error codes to kMessages array
-
-Revision 1.11  2006/08/14 23:25:08  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.10  2006/06/20 23:05:55  rpantos
-<rdar://problem/3839132> Java needs to implement DNSServiceRegisterRecord equivalent
-
-Revision 1.9  2005/10/26 01:52:24  cheshire
-<rdar://problem/4316286> Race condition in Java code (doesn't work at all on Linux)
-
-Revision 1.8  2005/07/11 01:55:21  cheshire
-<rdar://problem/4175511> Race condition in Java API
-
-Revision 1.7  2005/07/05 13:01:52  cheshire
-<rdar://problem/4169791> If mDNSResponder daemon is stopped, Java API spins, burning CPU time
-
-Revision 1.6  2005/07/05 00:02:25  cheshire
-Add missing comma
-
-Revision 1.5  2005/07/04 21:13:47  cheshire
-Add missing error message strings
-
-Revision 1.4  2004/12/11 03:00:59  rpantos
-<rdar://problem/3907498> Java DNSRecord API should be cleaned up
-
-Revision 1.3  2004/11/12 03:23:08  rpantos
-rdar://problem/3809541 implement getIfIndexForName, getNameForIfIndex.
-
-Revision 1.2  2004/05/20 17:43:18  cheshire
-Fix invalid UTF-8 characters in file
-
-Revision 1.1  2004/04/30 16:32:34  rpantos
-First checked in.
-
-
 	This file declares and implements DNSSD, the central Java factory class
 	for doing DNS Service Discovery. It includes the mostly-abstract public
 	interface, as well as the Apple* implementation subclasses.
@@ -481,7 +429,7 @@ abstract public class	DNSSD
 	static protected final DNSSD	getInstance()
 	{
 		SecurityManager sm = System.getSecurityManager();
-        if ( sm != null)
+        if (sm != null)
             sm.checkPermission( new RuntimePermission( "getDNSSDInstance"));
 		 return fInstance;
 	}
@@ -524,9 +472,9 @@ abstract public class	DNSSD
 		try
 		{
 			String name = System.getProperty( "com.apple.dnssd.DNSSD" );
-			if( name == null )
+			if (name == null)
 				name = "com.apple.dnssd.AppleDNSSD";	// Fall back to Apple-provided class.
-			fInstance = (DNSSD) Class.forName( name ).newInstance();
+			fInstance = (DNSSD) Class.forName(name).newInstance();
 		}
 		catch( Exception e )
 		{
@@ -577,7 +525,7 @@ class	AppleDNSSDException extends DNSSDException
 			"NATPORTMAPPINGDISABLED"
 		};
 	
-		if ( fErrorCode <= UNKNOWN && fErrorCode > ( UNKNOWN - kMessages.length))
+		if (fErrorCode <= UNKNOWN && fErrorCode > ( UNKNOWN - kMessages.length))
 		{
 			return "DNS-SD Error " + String.valueOf( fErrorCode) + ": " + kMessages[ UNKNOWN - fErrorCode];
 		}
@@ -597,7 +545,7 @@ class	AppleDNSSD extends DNSSD
 	
 		int		libInitResult = InitLibrary( 2);	// Current version number (must be sync'd with jnilib version)
 
-		if ( libInitResult != DNSSDException.NO_ERROR)
+		if (libInitResult != DNSSDException.NO_ERROR)
 			throw new InternalError( "cannot instantiate DNSSD: " + new AppleDNSSDException( libInitResult).getMessage());
 	}
 
@@ -649,7 +597,7 @@ class	AppleDNSSD extends DNSSD
 		String[]	responseHolder = new String[1];	// lame maneuver to get around Java's lack of reference parameters
 
 		int rc = ConstructName( serviceName, regType, domain, responseHolder);
-		if ( rc != 0)
+		if (rc != 0)
 			throw new AppleDNSSDException( rc);
 
 		return responseHolder[0];
@@ -700,7 +648,7 @@ class	AppleService implements DNSSDService, Runnable
 
 	protected void			ThrowOnErr( int rc) throws DNSSDException
 	{
-		if ( rc != 0)
+		if (rc != 0)
 			throw new AppleDNSSDException( rc);
 	}
 
@@ -754,7 +702,7 @@ class	AppleBrowser extends AppleService
 	{
 		super(client);
 		this.ThrowOnErr( this.CreateBrowser( flags, ifIndex, regType, domain));
-		if ( !AppleDNSSD.hasAutoCallbacks)
+		if (!AppleDNSSD.hasAutoCallbacks)
 			new Thread(this).start();
 	}
 
@@ -770,7 +718,7 @@ class	AppleResolver extends AppleService
 	{
 		super(client);
 		this.ThrowOnErr( this.CreateResolver( flags, ifIndex, serviceName, regType, domain));
-		if ( !AppleDNSSD.hasAutoCallbacks)
+		if (!AppleDNSSD.hasAutoCallbacks)
 			new Thread(this).start();
 	}
 
@@ -805,7 +753,7 @@ class	AppleDNSRecord implements DNSRecord
 
 	protected void			ThrowOnErr( int rc) throws DNSSDException
 	{
-		if ( rc != 0)
+		if (rc != 0)
 			throw new AppleDNSSDException( rc);
 	}
 
@@ -822,7 +770,7 @@ class	AppleRegistration extends AppleService implements DNSSDRegistration
 	{
 		super(client);
 		this.ThrowOnErr( this.BeginRegister( ifIndex, flags, serviceName, regType, domain, host, port, txtRecord));
-		if ( !AppleDNSSD.hasAutoCallbacks)
+		if (!AppleDNSSD.hasAutoCallbacks)
 			new Thread(this).start();
 	}
 
@@ -856,7 +804,7 @@ class	AppleRecordRegistrar extends AppleService implements DNSSDRecordRegistrar
 	{
 		super(listener);
 		this.ThrowOnErr( this.CreateConnection());
-		if ( !AppleDNSSD.hasAutoCallbacks)
+		if (!AppleDNSSD.hasAutoCallbacks)
 			new Thread(this).start();
 	}
 
@@ -886,7 +834,7 @@ class	AppleQuery extends AppleService
 	{
 		super(client);
 		this.ThrowOnErr( this.CreateQuery( flags, ifIndex, serviceName, rrtype, rrclass));
-		if ( !AppleDNSSD.hasAutoCallbacks)
+		if (!AppleDNSSD.hasAutoCallbacks)
 			new Thread(this).start();
 	}
 
@@ -901,7 +849,7 @@ class	AppleDomainEnum extends AppleService
 	{
 		super(client);
 		this.ThrowOnErr( this.BeginEnum( flags, ifIndex));
-		if ( !AppleDNSSD.hasAutoCallbacks)
+		if (!AppleDNSSD.hasAutoCallbacks)
 			new Thread(this).start();
 	}
 

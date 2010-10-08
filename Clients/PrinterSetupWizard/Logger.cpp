@@ -13,19 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: Logger.cpp,v $
-Revision 1.3  2009/06/11 23:32:12  herscher
-<rdar://problem/4458913> Follow the app data folder naming convention of Safari/iTunes on Windows
-
-Revision 1.2  2009/06/11 23:11:53  herscher
-<rdar://problem/4458913> Log to user's app data folder
-
-Revision 1.1  2009/06/11 22:27:14  herscher
-<rdar://problem/4458913> Add comprehensive logging during printer installation process.
-
  */
 
 #include "stdafx.h"

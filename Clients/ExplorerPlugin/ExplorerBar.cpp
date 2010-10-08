@@ -13,30 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: ExplorerBar.cpp,v $
-Revision 1.5  2009/03/30 18:44:53  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.4  2006/08/14 23:24:00  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.3  2004/07/26 05:44:08  shersche
-remove extraneous debug statement
-
-Revision 1.2  2004/07/13 21:24:21  rpantos
-Fix for <rdar://problem/3701120>.
-
-Revision 1.1  2004/06/18 04:34:59  rpantos
-Move to Clients from mDNSWindows
-
-Revision 1.1  2004/01/30 03:01:56  bradley
-Explorer Plugin to browse for DNS-SD advertised Web and FTP servers from within Internet Explorer.
-
-*/
+ */
 
 #include	"StdAfx.h"
 

@@ -13,102 +13,13 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: helper-main.c,v $
-Revision 1.28  2009/04/11 00:20:08  jessic2
-<rdar://problem/4426780> Daemon: Should be able to turn on LogOperation dynamically
-
-Revision 1.27  2009/03/09 19:00:26  mcguire
-<rdar://problem/6660098> temporarily don't use getpwnam
-
-Revision 1.26  2009/03/05 23:08:12  cheshire
-<rdar://problem/6648751> mDNSResponderHelper deadlocked — Can't use syslog from within a signal handler
-
-Revision 1.25  2009/02/06 03:06:49  mcguire
-<rdar://problem/5858533> Adopt vproc_transaction API in mDNSResponder
-
-Revision 1.24  2009/01/28 17:20:46  mcguire
-changed incorrect notice level log to debug
-
-Revision 1.23  2009/01/28 03:17:19  mcguire
-<rdar://problem/5858535> helper: Adopt vproc_transaction API
-
-Revision 1.22  2008/12/19 01:56:47  mcguire
-<rdar://problem/6181947> crashes in mDNSResponderHelper
-
-Revision 1.21  2008/09/15 23:52:30  cheshire
-<rdar://problem/6218902> mDNSResponder-177 fails to compile on Linux with .desc pseudo-op
-Made __crashreporter_info__ symbol conditional, so we only use it for OS X build
-
-Revision 1.20  2008/08/13 23:11:35  mcguire
-<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
-
-Revision 1.19  2008/08/13 23:04:06  mcguire
-<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
-Preparation: rename message function, as it will no longer be called only on idle exit
-
-Revision 1.18  2008/08/13 22:56:32  mcguire
-<rdar://problem/5858535> handle SIGTERM in mDNSResponderHelper
-Preparation: store mach port in global variable so we can write to it from a signal handler
-
-Revision 1.17  2008/07/24 01:04:04  mcguire
-<rdar://problem/6003721> helper spawned every 10s
-
-Revision 1.16  2008/07/01 01:40:01  mcguire
-<rdar://problem/5823010> 64-bit fixes
-
-Revision 1.15  2008/03/13 20:55:16  mcguire
-<rdar://problem/5769316> fix deprecated warnings/errors
-Additional cleanup: use a conditional macro instead of lots of #if
-
-Revision 1.14  2008/03/12 23:02:59  mcguire
-<rdar://problem/5769316> fix deprecated warnings/errors
-
-Revision 1.13  2007/09/21 16:13:14  cheshire
-Additional Tiger compatibility fix: After bootstrap_check_in, we need to give
-ourselves a Mach "send" right to the port, otherwise our ten-second idle timeout
-mechanism is not able to send the "mDNSIdleExit" message to itself
-
-Revision 1.12  2007/09/20 22:26:20  cheshire
-Add necessary bootstrap_check_in() in Tiger compatibility code (not used on Leopard)
-
-Revision 1.11  2007/09/18 19:09:02  cheshire
-<rdar://problem/5489549> mDNSResponderHelper (and other binaries) missing SCCS version strings
-
-Revision 1.10  2007/09/09 02:21:17  mcguire
-<rdar://problem/5469345> Leopard Server9A547(Insatll):mDNSResponderHelper crashing
-
-Revision 1.9  2007/09/07 22:44:03  mcguire
-<rdar://problem/5448420> Move CFUserNotification code to mDNSResponderHelper
-
-Revision 1.8  2007/09/07 22:24:36  vazquez
-<rdar://problem/5466301> Need to stop spewing mDNSResponderHelper logs
-
-Revision 1.7  2007/08/31 18:09:32  cheshire
-<rdar://problem/5434050> Restore ability to run mDNSResponder on Tiger
-
-Revision 1.6  2007/08/31 17:45:13  cheshire
-Allow maxidle time of zero, meaning "run indefinitely"
-
-Revision 1.5  2007/08/31 00:09:54  cheshire
-Deleted extraneous whitespace (shortened code from 260 lines to 160)
-
-Revision 1.4  2007/08/28 00:33:04  jgraessley
-<rdar://problem/5423932> Selective compilation options
-
-Revision 1.3  2007/08/23 23:21:24  cheshire
-Tiger compatibility: Use old bootstrap_register() instead of Leopard-only bootstrap_register2()
-
-Revision 1.2  2007/08/23 21:36:17  cheshire
-Made code layout style consistent with existing project style; added $Log header
-
-Revision 1.1  2007/08/08 22:34:58  mcguire
-<rdar://problem/5197869> Security: Run mDNSResponder as user id mdnsresponder instead of root
  */
 
 #define _FORTIFY_SOURCE 2
+
+// We set VERSION_MIN_REQUIRED to 10.4 to avoid "bootstrap_register is deprecated" warnings from bootstrap.h
+#define MAC_OS_X_VERSION_MIN_REQUIRED MAC_OS_X_VERSION_10_4
+
 #include <CoreFoundation/CoreFoundation.h>
 #include <sys/cdefs.h>
 #include <sys/time.h>
@@ -309,7 +220,7 @@ static mach_port_t checkin(char *service_name)
 	if (MACH_PORT_NULL == (port = launch_data_get_machport(datum)))
 		{ helplog(ASL_LEVEL_ERR, "Launchd gave me a null Mach port."); goto fin; }
 	if (KERN_SUCCESS != (kr = mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND)))
-		{ helplog(ASL_LEVEL_ERR, "mach_port_insert_right: %s", mach_error_string(kr)); goto fin; }
+		{ helplog(ASL_LEVEL_ERR, "mach_port_insert_right: %d %X %s", kr, kr, mach_error_string(kr)); goto fin; }
 
 fin:
 	if (NULL != msg)   launch_data_free(msg);
@@ -326,18 +237,18 @@ static mach_port_t register_service(const char *service_name)
 	if (KERN_SUCCESS == (kr = bootstrap_check_in(bootstrap_port, (char *)service_name, &port)))
 		{
 		if (KERN_SUCCESS != (kr = mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND)))
-			helplog(ASL_LEVEL_ERR, "mach_port_insert_right: %s", mach_error_string(kr));
+			helplog(ASL_LEVEL_ERR, "mach_port_insert_right: %d %X %s", kr, kr, mach_error_string(kr));
 		else
 			return port;
 		}
 	if (KERN_SUCCESS != (kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &port)))
-		{ helplog(ASL_LEVEL_ERR, "mach_port_allocate: %s", mach_error_string(kr)); goto error; }
+		{ helplog(ASL_LEVEL_ERR, "mach_port_allocate: %d %X %s", kr, kr, mach_error_string(kr)); goto error; }
 	if (KERN_SUCCESS != (kr = mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND)))
-		{ helplog(ASL_LEVEL_ERR, "mach_port_insert_right: %s", mach_error_string(kr)); goto error; }
+		{ helplog(ASL_LEVEL_ERR, "mach_port_insert_right: %d %X %s", kr, kr, mach_error_string(kr)); goto error; }
 
 	// XXX bootstrap_register does not modify its second argument, but the prototype does not include const.
 	if (KERN_SUCCESS != (kr = bootstrap_register(bootstrap_port, (char *)service_name, port)))
-		{ helplog(ASL_LEVEL_ERR, "bootstrap_register failed: %s", mach_error_string(kr)); goto error; }
+		{ helplog(ASL_LEVEL_ERR, "bootstrap_register failed: %s %d %X %s", service_name, kr, kr, mach_error_string(kr)); goto error; }
 
 	return port;
 error:
@@ -378,7 +289,7 @@ int main(int ac, char *av[])
 #ifndef NO_SECURITYFRAMEWORK
 	// We should normally be running as a system daemon.  However, that might not be the case in some scenarios (e.g. debugging).
 	// Explicitly ensure that our Keychain operations utilize the system domain.
-	SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem);
+	if (opt_debug) SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem);
 #endif
 	gPort = checkin(kmDNSHelperServiceName);
 	if (!gPort)
@@ -407,14 +318,15 @@ int main(int ac, char *av[])
 		hdr.msgh_size = sizeof(hdr);
 		hdr.msgh_id = 0;
 		kr = mach_msg(&hdr, MACH_RCV_LARGE | MACH_RCV_MSG, 0, hdr.msgh_size, gPort, 0, 0);
-		if (MACH_RCV_TOO_LARGE != kr) helplog(ASL_LEVEL_ERR, "kr: %d: %s", kr, mach_error_string(kr));
+		if (MACH_RCV_TOO_LARGE != kr)
+			helplog(ASL_LEVEL_ERR, "main MACH_RCV_MSG error: %d %X %s", kr, kr, mach_error_string(kr));
 		
 		safe_vproc_transaction_begin();
 		
 		kr = mach_msg_server_once(helper_server, MAX_MSG_SIZE, gPort,
 			MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AUDIT) | MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0));
 		if (KERN_SUCCESS != kr)
-			{ helplog(ASL_LEVEL_ERR, "mach_msg_server: %s\n", mach_error_string(kr)); exit(EXIT_FAILURE); }
+			{ helplog(ASL_LEVEL_ERR, "mach_msg_server: %d %X %s", kr, kr, mach_error_string(kr)); exit(EXIT_FAILURE); }
 		
 		safe_vproc_transaction_end();
 		}

@@ -171,8 +171,10 @@ BEGIN
     LTEXT           "",IDC_PRINTER_MODEL,172,104,113,8
     LTEXT           "",IDC_PRINTER_PROTOCOL,172,117,113,8
     LTEXT           "",IDC_PRINTER_DEFAULT,172,130,113,8
-    LTEXT           "To complete the installation, click Finish.",IDC_STATIC,116,180,171,8
-    LTEXT           "To change these settings, click Back.",IDC_STATIC,116,190,171,8
+    LTEXT           "To complete the installation, click Finish.",IDC_COMPLETE1,116,180,171,8
+    LTEXT           "To change these settings, click Back.",IDC_COMPLETE2,116,190,171,8
+	LTEXT			"Please wait a few moments while the Bonjour Printer Wizard installs the printer.",IDC_INSTALLING,116,170,171,31
+	CONTROL			"",IDC_PROGRESS,"msctls_progress32",WS_BORDER,116,190,165,8
 END
 
 IDD_DIALOG1 DIALOGEX 0, 0, 265, 130

@@ -26,43 +26,7 @@
  * thinking that variables x and y are both of type "char*" -- and anyone who doesn't
  * understand why variable y is not of type "char*" just proves the point that poor code
  * layout leads people to unfortunate misunderstandings about how the C language really works.)
-
-    Change History (most recent first):
-
-$Log: Identify.c,v $
-Revision 1.44  2009/01/13 05:31:34  mkrochma
-<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
-
-Revision 1.43  2008/09/05 22:51:21  cheshire
-Minor cleanup to bring code in sync with TOT, and make "_services" metaquery work again
-
-Revision 1.42  2007/07/27 19:30:41  cheshire
-Changed mDNSQuestionCallback parameter from mDNSBool to QC_result,
-to properly reflect tri-state nature of the possible responses
-
-Revision 1.41  2007/04/16 20:49:39  cheshire
-Fix compile errors for mDNSPosix build
-
-Revision 1.40  2007/02/28 01:51:22  cheshire
-Added comment about reverse-order IP address
-
-Revision 1.39  2007/01/05 08:30:51  cheshire
-Trim excessive "$Log" checkin history from before 2006
-(checkin history still available via "cvs log ..." of course)
-
-Revision 1.38  2007/01/04 20:57:48  cheshire
-Rename ReturnCNAME to ReturnIntermed (for ReturnIntermediates)
-
-Revision 1.37  2006/10/27 01:32:08  cheshire
-Set ReturnIntermed to mDNStrue
-
-Revision 1.36  2006/08/14 23:24:46  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.35  2006/06/12 18:22:42  cheshire
-<rdar://problem/4580067> mDNSResponder building warnings under Red Hat 64-bit (LP64) Linux
-
-*/
+ */
 
 //*************************************************************************************************************
 // Incorporate mDNS.c functionality

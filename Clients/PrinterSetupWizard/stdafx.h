@@ -13,21 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: stdafx.h,v $
-Revision 1.3  2006/08/14 23:24:09  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.2  2005/10/19 19:50:35  herscher
-Workaround a bug in the latest Microsoft Platform SDK when compiling C++ files that include (directly or indirectly) <WspiApi.h>
-
-Revision 1.1  2004/06/18 04:36:58  rpantos
-First checked in
-
-
-*/
+ */
 
 #pragma once
 

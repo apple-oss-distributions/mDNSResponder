@@ -336,7 +336,7 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
-				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\ExplorerPlugin.Resources&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\ExplorerPlugin.Resources&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                                                            &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\ExplorerPlugin.Resources&quot;&#x0D;&#x0A;:END"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)\ExplorerPlugin.Resources&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)\ExplorerPlugin.Resources&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                                                            &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)\ExplorerPlugin.Resources&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 		<Configuration
@@ -447,7 +447,7 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
-				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\ExplorerPlugin.Resources&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\ExplorerPlugin.Resources&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                                                            &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)\ExplorerPlugin.Resources&quot;&#x0D;&#x0A;:END"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)\ExplorerPlugin.Resources&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)\ExplorerPlugin.Resources&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                                                            &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)\ExplorerPlugin.Resources&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 	</Configurations>
@@ -468,11 +468,11 @@
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;jpg;jpeg;jpe;manifest"
 			>
 			<File
-				RelativePath="res\about.bmp"
+				RelativePath=".\about.bmp"
 				>
 			</File>
 			<File
-				RelativePath=".\about.bmp"
+				RelativePath="res\about.bmp"
 				>
 			</File>
 			<File
@@ -496,11 +496,11 @@
 				>
 			</File>
 			<File
-				RelativePath="res\logo.bmp"
+				RelativePath=".\logo.bmp"
 				>
 			</File>
 			<File
-				RelativePath=".\logo.bmp"
+				RelativePath="res\logo.bmp"
 				>
 			</File>
 			<File

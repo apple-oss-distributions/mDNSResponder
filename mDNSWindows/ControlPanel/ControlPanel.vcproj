@@ -3,7 +3,8 @@
 	ProjectType="Visual C++"
 	Version="8.00"
 	Name="ControlPanel"
-	ProjectGUID="{F5D703B6-5612-4381-8BE2-2B7AEBAE58FC}"
+	ProjectGUID="{0DF09484-B4C2-4AB4-9FC0-7B091ADEAFEB}"
+	RootNamespace="ControlPanel"
 	Keyword="MFCProj"
 	>
 	<Platforms>
@@ -19,9 +20,9 @@
 	<Configurations>
 		<Configuration
 			Name="Debug|Win32"
-			OutputDirectory="DLLBuild\$(PlatformName)\$(ConfigurationName)"
-			IntermediateDirectory="DLLBuild\$(PlatformName)\$(ConfigurationName)"
-			ConfigurationType="2"
+			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
+			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
+			ConfigurationType="1"
 			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			UseOfMFC="1"
 			ATLMinimizesCRunTimeLibraryUsage="false"
@@ -41,17 +42,16 @@
 			<Tool
 				Name="VCMIDLTool"
 				PreprocessorDefinitions="_DEBUG"
-				MkTypLibCompatible="true"
-				SuppressStartupBanner="true"
-				TargetEnvironment="1"
-				TypeLibraryName=".\Debug/ControlPanel.tlb"
-				HeaderFileName=""
+				MkTypLibCompatible="false"
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..;../../mDNSCore;../../mDNSShared"
-				PreprocessorDefinitions="WIN32;_DEBUG;DEBUG=1;UNICODE;_UNICODE;_WINDOWS;_USRDLL;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1"
+				AdditionalIncludeDirectories="..;../../mDNSCore;../../mDNSShared;../../Clients"
+				PreprocessorDefinitions="WIN32;_DEBUG;DEBUG=1;UNICODE;_UNICODE;_WINDOWS;WINVER=0x0501;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1"
+				StringPooling="true"
+				MinimalRebuild="true"
+				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
 				UsePrecompiledHeader="0"
 				PrecompiledHeaderThrough=""
@@ -63,6 +63,7 @@
 				SuppressStartupBanner="true"
 				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
+				CallingConvention="0"
 				DisableSpecificWarnings="4311;4312"
 			/>
 			<Tool
@@ -80,15 +81,14 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/NXCOMPAT /DYNAMICBASE /SAFESEH"
-				AdditionalDependencies="../DLL/$(PlatformName)/$(ConfigurationName)/dnssd.lib ws2_32.lib"
-				OutputFile="$(OutDir)/Bonjour.cpl"
+				AdditionalDependencies="../DLLStub/$(PlatformName)/$(ConfigurationName)/dnssdStatic.lib ws2_32.lib"
+				OutputFile="$(OutDir)/ControlPanel.exe"
 				LinkIncremental="2"
 				SuppressStartupBanner="true"
-				ModuleDefinitionFile=".\ControlPanel.def"
 				GenerateDebugInformation="true"
-				ProgramDatabaseFile=".\$(IntDir)\ControlPanel.pdb"
+				ProgramDatabaseFile="$(OutDir)\ControlPanel.pdb"
 				SubSystem="2"
-				ImportLibrary=".\$(OutDir)\Bonjour.lib"
+				EntryPointSymbol="wWinMainCRTStartup"
 				TargetMachine="1"
 			/>
 			<Tool
@@ -119,9 +119,9 @@
 		</Configuration>
 		<Configuration
 			Name="Debug|x64"
-			OutputDirectory="DLLBuild\$(PlatformName)\$(ConfigurationName)"
-			IntermediateDirectory="DLLBuild\$(PlatformName)\$(ConfigurationName)"
-			ConfigurationType="2"
+			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
+			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
+			ConfigurationType="1"
 			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			UseOfMFC="1"
 			ATLMinimizesCRunTimeLibraryUsage="false"
@@ -141,17 +141,17 @@
 			<Tool
 				Name="VCMIDLTool"
 				PreprocessorDefinitions="_DEBUG"
-				MkTypLibCompatible="true"
-				SuppressStartupBanner="true"
+				MkTypLibCompatible="false"
 				TargetEnvironment="3"
-				TypeLibraryName=".\Debug/ControlPanel.tlb"
-				HeaderFileName=""
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..;../../mDNSCore;../../mDNSShared"
-				PreprocessorDefinitions="WIN32;_DEBUG;DEBUG=1;UNICODE;_UNICODE;_WINDOWS;_USRDLL;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1"
+				AdditionalIncludeDirectories="..;../../mDNSCore;../../mDNSShared;../../Clients"
+				PreprocessorDefinitions="WIN32;_DEBUG;DEBUG=1;UNICODE;_UNICODE;_WINDOWS;WINVER=0x0501;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1"
+				StringPooling="true"
+				MinimalRebuild="true"
+				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
 				UsePrecompiledHeader="0"
 				PrecompiledHeaderThrough=""
@@ -163,6 +163,7 @@
 				SuppressStartupBanner="true"
 				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
+				CallingConvention="0"
 				DisableSpecificWarnings="4311;4312"
 			/>
 			<Tool
@@ -180,15 +181,14 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/NXCOMPAT /DYNAMICBASE"
-				AdditionalDependencies="../DLL/$(PlatformName)/$(ConfigurationName)/dnssd.lib ws2_32.lib"
-				OutputFile="$(OutDir)/Bonjour.cpl"
+				AdditionalDependencies="../DLLStub/$(PlatformName)/$(ConfigurationName)/dnssdStatic.lib ws2_32.lib"
+				OutputFile="$(OutDir)/ControlPanel.exe"
 				LinkIncremental="2"
 				SuppressStartupBanner="true"
-				ModuleDefinitionFile=".\ControlPanel.def"
 				GenerateDebugInformation="true"
-				ProgramDatabaseFile=".\$(IntDir)\ControlPanel.pdb"
+				ProgramDatabaseFile="$(OutDir)\ControlPanel.pdb"
 				SubSystem="2"
-				ImportLibrary=".\$(OutDir)\Bonjour.lib"
+				EntryPointSymbol="wWinMainCRTStartup"
 				TargetMachine="17"
 			/>
 			<Tool
@@ -219,12 +219,12 @@
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
-			OutputDirectory="DLLBuild\$(PlatformName)\$(ConfigurationName)"
-			IntermediateDirectory="DLLBuild\$(PlatformName)\$(ConfigurationName)"
-			ConfigurationType="2"
+			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
+			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
+			ConfigurationType="1"
 			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			UseOfMFC="1"
-			ATLMinimizesCRunTimeLibraryUsage="false"
+			CharacterSet="2"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
@@ -241,21 +241,19 @@
 			<Tool
 				Name="VCMIDLTool"
 				PreprocessorDefinitions="NDEBUG"
-				MkTypLibCompatible="true"
-				SuppressStartupBanner="true"
-				TargetEnvironment="1"
-				TypeLibraryName=".\Release/ControlPanel.tlb"
-				HeaderFileName=""
+				MkTypLibCompatible="false"
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				InlineFunctionExpansion="1"
-				AdditionalIncludeDirectories="..;../../mDNSCore;../../mDNSShared"
-				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1"
+				AdditionalIncludeDirectories="..;../../mDNSCore;../../mDNSShared;../../Clients"
+				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;WINVER=0x0501;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1"
 				StringPooling="true"
+				MinimalRebuild="false"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
+				TreatWChar_tAsBuiltInType="true"
 				UsePrecompiledHeader="0"
 				AssemblerListingLocation="$(IntDir)\"
 				ObjectFile="$(IntDir)\"
@@ -279,14 +277,15 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/NXCOMPAT /DYNAMICBASE /SAFESEH"
-				AdditionalDependencies="../DLL/$(PlatformName)/$(ConfigurationName)/dnssd.lib ws2_32.lib"
-				OutputFile="$(OutDir)/Bonjour.cpl"
+				AdditionalDependencies="../DLLStub/$(PlatformName)/$(ConfigurationName)/dnssdStatic.lib ws2_32.lib"
+				OutputFile="$(OutDir)/ControlPanel.exe"
 				LinkIncremental="1"
 				SuppressStartupBanner="true"
-				ModuleDefinitionFile=".\ControlPanel.def"
-				ProgramDatabaseFile=".\$(IntDir)\ControlPanel.pdb"
+				ProgramDatabaseFile="$(OutDir)\ControlPanel.pdb"
 				SubSystem="2"
-				ImportLibrary=".\$(OutDir)\Bonjour.lib"
+				OptimizeReferences="0"
+				EnableCOMDATFolding="0"
+				EntryPointSymbol="wWinMainCRTStartup"
 				TargetMachine="1"
 			/>
 			<Tool
@@ -313,16 +312,17 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                  &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 		<Configuration
 			Name="Release|x64"
-			OutputDirectory="DLLBuild\$(PlatformName)\$(ConfigurationName)"
-			IntermediateDirectory="DLLBuild\$(PlatformName)\$(ConfigurationName)"
-			ConfigurationType="2"
+			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
+			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
+			ConfigurationType="1"
 			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			UseOfMFC="1"
-			ATLMinimizesCRunTimeLibraryUsage="false"
+			CharacterSet="2"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
@@ -339,21 +339,20 @@
 			<Tool
 				Name="VCMIDLTool"
 				PreprocessorDefinitions="NDEBUG"
-				MkTypLibCompatible="true"
-				SuppressStartupBanner="true"
+				MkTypLibCompatible="false"
 				TargetEnvironment="3"
-				TypeLibraryName=".\Release/ControlPanel.tlb"
-				HeaderFileName=""
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				InlineFunctionExpansion="1"
-				AdditionalIncludeDirectories="..;../../mDNSCore;../../mDNSShared"
-				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1"
+				AdditionalIncludeDirectories="..;../../mDNSCore;../../mDNSShared;../../Clients"
+				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;WINVER=0x0501;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1"
 				StringPooling="true"
+				MinimalRebuild="false"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
+				TreatWChar_tAsBuiltInType="true"
 				UsePrecompiledHeader="0"
 				AssemblerListingLocation="$(IntDir)\"
 				ObjectFile="$(IntDir)\"
@@ -377,14 +376,15 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/NXCOMPAT /DYNAMICBASE"
-				AdditionalDependencies="../DLL/$(PlatformName)/$(ConfigurationName)/dnssd.lib ws2_32.lib"
-				OutputFile="$(OutDir)/Bonjour.cpl"
+				AdditionalDependencies="../DLLStub/$(PlatformName)/$(ConfigurationName)/dnssdStatic.lib ws2_32.lib"
+				OutputFile="$(OutDir)/ControlPanel.exe"
 				LinkIncremental="1"
 				SuppressStartupBanner="true"
-				ModuleDefinitionFile=".\ControlPanel.def"
-				ProgramDatabaseFile=".\$(IntDir)\ControlPanel.pdb"
+				ProgramDatabaseFile="$(OutDir)\ControlPanel.pdb"
 				SubSystem="2"
-				ImportLibrary=".\$(OutDir)\Bonjour.lib"
+				OptimizeReferences="0"
+				EnableCOMDATFolding="0"
+				EntryPointSymbol="wWinMainCRTStartup"
 				TargetMachine="17"
 			/>
 			<Tool
@@ -411,6 +411,7 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                  &quot;$(DSTROOT)\Program Files\Bonjour SDK\bin\$(PlatformName)&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 	</Configurations>
@@ -502,7 +503,15 @@
 				</FileConfiguration>
 			</File>
 			<File
-				RelativePath="ControlPanel.cpp"
+				RelativePath=".\ControlPanelExe.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\ServicesPage.cpp"
+				>
+			</File>
+			<File
+				RelativePath="RegistrationPage.cpp"
 				>
 				<FileConfiguration
 					Name="Debug|Win32"
@@ -542,95 +551,7 @@
 				</FileConfiguration>
 			</File>
 			<File
-				RelativePath="ControlPanel.def"
-				>
-			</File>
-			<File
-				RelativePath="FirstPage.cpp"
-				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="0"
-						PreprocessorDefinitions=""
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Debug|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="0"
-						PreprocessorDefinitions=""
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="2"
-						PreprocessorDefinitions=""
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="2"
-						PreprocessorDefinitions=""
-					/>
-				</FileConfiguration>
-			</File>
-			<File
-				RelativePath=".\FourthPage.cpp"
-				>
-			</File>
-			<File
-				RelativePath="SecondPage.cpp"
-				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="0"
-						PreprocessorDefinitions=""
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Debug|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="0"
-						PreprocessorDefinitions=""
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="2"
-						PreprocessorDefinitions=""
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="2"
-						PreprocessorDefinitions=""
-					/>
-				</FileConfiguration>
-			</File>
-			<File
-				RelativePath="SharedSecret.cpp"
+				RelativePath="..\loclibrary.c"
 				>
 			</File>
 			<File
@@ -678,7 +599,7 @@
 				</FileConfiguration>
 			</File>
 			<File
-				RelativePath="ThirdPage.cpp"
+				RelativePath="BrowsingPage.cpp"
 				>
 			</File>
 		</Filter>
@@ -695,15 +616,19 @@
 				>
 			</File>
 			<File
-				RelativePath="ControlPanel.h"
+				RelativePath=".\ControlPanelExe.h"
 				>
 			</File>
 			<File
-				RelativePath="FirstPage.h"
+				RelativePath=".\ServicesPage.h"
 				>
 			</File>
 			<File
-				RelativePath=".\FourthPage.h"
+				RelativePath="RegistrationPage.h"
+				>
+			</File>
+			<File
+				RelativePath="..\loclibrary.h"
 				>
 			</File>
 			<File
@@ -711,19 +636,11 @@
 				>
 			</File>
 			<File
-				RelativePath="SecondPage.h"
-				>
-			</File>
-			<File
-				RelativePath="SharedSecret.h"
-				>
-			</File>
-			<File
 				RelativePath="stdafx.h"
 				>
 			</File>
 			<File
-				RelativePath="ThirdPage.h"
+				RelativePath="BrowsingPage.h"
 				>
 			</File>
 		</Filter>
@@ -740,11 +657,15 @@
 				>
 			</File>
 			<File
+				RelativePath=".\ControlPanel.rc"
+				>
+			</File>
+			<File
 				RelativePath=".\res\ControlPanel.rc2"
 				>
 			</File>
 			<File
-				RelativePath=".\ControlPanelDll.rc"
+				RelativePath=".\res\EnergySaver.ico"
 				>
 			</File>
 			<File
@@ -759,6 +680,14 @@
 		<Filter
 			Name="Support"
 			>
+			<File
+				RelativePath="..\..\Clients\ClientCommon.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\Clients\ClientCommon.h"
+				>
+			</File>
 			<File
 				RelativePath="..\..\mDNSShared\CommonServices.h"
 				>
@@ -794,9 +723,5 @@
 		</Filter>
 	</Files>
 	<Globals>
-		<Global
-			Name="RESOURCE_FILE"
-			Value="ControlPanelDll.rc"
-		/>
 	</Globals>
 </VisualStudioProject>

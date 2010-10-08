@@ -13,49 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: ExplorerBarWindow.h,v $
-Revision 1.9  2009/03/30 18:49:15  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.8  2006/08/14 23:24:00  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.7  2005/02/25 19:57:30  shersche
-<rdar://problem/4023323> Remove FTP browsing from plugin
-
-Revision 1.6  2005/01/27 22:27:03  shersche
-Add m_about member for "About ..." tree item
-
-Revision 1.5  2004/07/26 05:47:31  shersche
-use TXTRecord APIs, fix bug in locating service to be removed
-
-Revision 1.4  2004/07/20 06:49:18  shersche
-clean up socket handling code
-
-Revision 1.3  2004/07/13 21:24:21  rpantos
-Fix for <rdar://problem/3701120>.
-
-Revision 1.2  2004/06/27 14:59:59  shersche
-reference count service info to handle multi-homed hosts
-
-Revision 1.1  2004/06/18 04:34:59  rpantos
-Move to Clients from mDNSWindows
-
-Revision 1.3  2004/04/15 01:00:05  bradley
-Removed support for automatically querying for A/AAAA records when resolving names. Platforms
-without .local name resolving support will need to manually query for A/AAAA records as needed.
-
-Revision 1.2  2004/04/08 09:43:43  bradley
-Changed callback calling conventions to __stdcall so they can be used with C# delegates.
-
-Revision 1.1  2004/01/30 03:01:56  bradley
-Explorer Plugin to browse for DNS-SD advertised Web and FTP servers from within Internet Explorer.
-
-*/
+ */
 
 #ifndef	__EXPLORER_BAR_WINDOW__
 #define	__EXPLORER_BAR_WINDOW__

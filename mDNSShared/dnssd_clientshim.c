@@ -21,65 +21,6 @@
  * The shim is responsible for two main things:
  * - converting string parameters between C string format and native DNS format,
  * - and for allocating and freeing memory.
-
-	Change History (most recent first):
-
-$Log: dnssd_clientshim.c,v $
-Revision 1.16  2007/11/30 20:12:24  cheshire
-Removed unused "badparam:" label
-
-Revision 1.15  2007/07/27 19:30:41  cheshire
-Changed mDNSQuestionCallback parameter from mDNSBool to QC_result,
-to properly reflect tri-state nature of the possible responses
-
-Revision 1.14  2007/07/17 19:15:26  cheshire
-<rdar://problem/5297410> Crash in DNSServiceRegister() in dnssd_clientshim.c
-
-Revision 1.13  2007/01/04 20:57:49  cheshire
-Rename ReturnCNAME to ReturnIntermed (for ReturnIntermediates)
-
-Revision 1.12  2006/12/19 22:43:55  cheshire
-Fix compiler warnings
-
-Revision 1.11  2006/10/27 01:30:23  cheshire
-Need explicitly to set ReturnIntermed = mDNSfalse
-
-Revision 1.10  2006/08/14 23:24:56  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.9  2006/07/24 23:45:55  cheshire
-<rdar://problem/4605276> DNSServiceReconfirmRecord() should return error code
-
-Revision 1.8  2004/12/16 20:47:34  cheshire
-<rdar://problem/3324626> Cache memory management improvements
-
-Revision 1.7  2004/12/10 04:08:43  cheshire
-Added comments about autoname and autorename
-
-Revision 1.6  2004/10/19 21:33:22  cheshire
-<rdar://problem/3844991> Cannot resolve non-local registrations using the mach API
-Added flag 'kDNSServiceFlagsForceMulticast'. Passing through an interface id for a unicast name
-doesn't force multicast unless you set this flag to indicate explicitly that this is what you want
-
-Revision 1.5  2004/09/21 23:29:51  cheshire
-<rdar://problem/3680045> DNSServiceResolve should delay sending packets
-
-Revision 1.4  2004/09/17 01:08:55  cheshire
-Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
-  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
-  declared in that file are ONLY appropriate to single-address-space embedded applications.
-  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
-
-Revision 1.3  2004/05/27 06:26:31  cheshire
-Add shim for DNSServiceQueryRecord()
-
-Revision 1.2  2004/05/20 18:41:24  cheshire
-Fix build broken by removal of 'kDNSServiceFlagsRemove' from dns_sd.h
-
-Revision 1.1  2004/03/12 21:30:29  cheshire
-Build a System-Context Shared Library from mDNSCore, for the benefit of developers
-like Muse Research who want to be able to use mDNS/DNS-SD from GPL-licensed code.
-
  */
 
 #include "dns_sd.h"				// Defines the interface to the client layer above
@@ -581,6 +522,7 @@ DNSServiceErrorType DNSServiceResolve
 	x->qTXT.ExpectUnique        = mDNStrue;
 	x->qTXT.ForceMCast          = mDNSfalse;
 	x->qTXT.ReturnIntermed      = mDNSfalse;
+	x->qTXT.SuppressUnusable    = mDNSfalse;
 	x->qTXT.QuestionCallback    = FoundServiceInfo;
 	x->qTXT.QuestionContext     = x;
 
@@ -704,6 +646,7 @@ DNSServiceErrorType DNSServiceQueryRecord
 	x->q.ExpectUnique        = mDNSfalse;
 	x->q.ForceMCast          = (flags & kDNSServiceFlagsForceMulticast) != 0;
 	x->q.ReturnIntermed      = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
+	x->q.SuppressUnsable     = (flags & kDNSServiceFlagsSuppressUnusable) != 0;
 	x->q.QuestionCallback    = DNSServiceQueryRecordResponse;
 	x->q.QuestionContext     = x;
 
@@ -716,6 +659,82 @@ DNSServiceErrorType DNSServiceQueryRecord
 
 fail:
 	LogMsg("DNSServiceQueryRecord(\"%s\", %d, %d) failed: %s (%ld)", fullname, rrtype, rrclass, errormsg, err);
+	return(err);
+	}
+
+//*************************************************************************************************************
+// DNSServiceGetAddrInfo
+
+static void DNSServiceGetAddrInfoDispose(mDNS_DirectOP *op)
+	{
+	mDNS_DirectOP_GetAddrInfo *x = (mDNS_DirectOP_GetAddrInfo*)op;
+	if (x->aQuery) DNSServiceRefDeallocate(x->aQuery);
+	mDNSPlatformMemFree(x);
+	}
+
+static void DNSSD_API DNSServiceGetAddrInfoResponse(
+	DNSServiceRef		inRef,
+	DNSServiceFlags		inFlags,
+	uint32_t			inInterfaceIndex,
+	DNSServiceErrorType	inErrorCode,
+	const char *		inFullName,
+	uint16_t			inRRType,
+	uint16_t			inRRClass,
+	uint16_t			inRDLen,
+	const void *		inRData,
+	uint32_t			inTTL,
+	void *				inContext )
+	{
+	mDNS_DirectOP_GetAddrInfo *		x = (mDNS_DirectOP_GetAddrInfo*)inContext;
+	struct sockaddr_in				sa4;
+	
+	mDNSPlatformMemZero(&sa4, sizeof(sa4));
+	if (inErrorCode == kDNSServiceErr_NoError && inRRType == kDNSServiceType_A)
+		{
+		sa4.sin_family = AF_INET;
+		mDNSPlatformMemCopy(&sa4.sin_addr.s_addr, inRData, 4);
+		}
+	
+	x->callback((DNSServiceRef)x, inFlags, inInterfaceIndex, inErrorCode, inFullName, 
+		(const struct sockaddr *) &sa4, inTTL, x->context);
+	}
+
+DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo(
+	DNSServiceRef *				outRef,
+	DNSServiceFlags				inFlags,
+	uint32_t					inInterfaceIndex,
+	DNSServiceProtocol			inProtocol,
+	const char *				inHostName,
+	DNSServiceGetAddrInfoReply	inCallback,
+	void *						inContext )
+	{
+	const char *					errormsg = "Unknown";
+	DNSServiceErrorType				err;
+	mDNS_DirectOP_GetAddrInfo *		x;
+	
+	// Allocate memory, and handle failure
+	x = (mDNS_DirectOP_GetAddrInfo *)mDNSPlatformMemAllocate(sizeof(*x));
+	if (!x) { err = mStatus_NoMemoryErr; errormsg = "No memory"; goto fail; }
+	
+	// Set up object
+	x->disposefn = DNSServiceGetAddrInfoDispose;
+	x->callback  = inCallback;
+	x->context   = inContext;
+	x->aQuery    = mDNSNULL;
+	
+	// Start the query.
+	// (It would probably be more efficient to code this using mDNS_StartQuery directly,
+	// instead of wrapping DNSServiceQueryRecord, which then unnecessarily allocates
+	// more memory and then just calls through to mDNS_StartQuery. -- SC June 2010)
+	err = DNSServiceQueryRecord(&x->aQuery, inFlags, inInterfaceIndex, inHostName, kDNSServiceType_A, 
+		kDNSServiceClass_IN, DNSServiceGetAddrInfoResponse, x);
+	if (err) { DNSServiceGetAddrInfoDispose((mDNS_DirectOP*)x); errormsg = "DNSServiceQueryRecord"; goto fail; }
+	
+	*outRef = (DNSServiceRef)x;
+	return(mStatus_NoError);
+	
+fail:
+	LogMsg("DNSServiceGetAddrInfo(\"%s\", %d) failed: %s (%ld)", inHostName, inProtocol, errormsg, err);
 	return(err);
 	}
 

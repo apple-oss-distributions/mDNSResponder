@@ -13,24 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: RegNames.h,v $
-Revision 1.5  2009/03/30 21:47:35  herscher
-Fix file corruption during previous checkin
-
-Revision 1.3  2006/08/14 23:25:20  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.2  2005/10/05 18:05:28  herscher
-<rdar://problem/4192011> Save Wide-Area preferences in a different spot in the registry so they don't get removed when doing an update install.
-
-Revision 1.1  2005/03/03 02:31:37  shersche
-Consolidates all registry key names and can safely be included in any component that needs it
-
-
-*/
+ */
 
 //----------------------------------------------------------------------------------------
 //	Registry Constants
@@ -52,6 +35,7 @@ Consolidates all registry key names and can safely be included in any component 
 #	define kServiceManageLLRouting				L"ManageLLRouting"
 #	define kServiceCacheEntryCount				L"CacheEntryCount"
 #	define kServiceManageFirewall				L"ManageFirewall"
+#	define kServiceAdvertisedServices			L"Services"
 
 # else
 

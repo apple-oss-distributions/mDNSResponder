@@ -13,44 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: PrinterSetupWizardApp.cpp,v $
-Revision 1.10  2009/05/26 05:38:18  herscher
-<rdar://problem/6123821> use HeapSetInformation(HeapEnableTerminationOnCorruption) in dns-sd.exe and PrinterWizard.exe
-
-Revision 1.9  2006/08/14 23:24:09  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.8  2005/04/13 17:43:39  shersche
-<rdar://problem/4081448> Change "PrinterWizard.dll" to "PrinterWizardResources.dll"
-
-Revision 1.7  2005/02/15 07:50:09  shersche
-<rdar://problem/4007151> Update name
-
-Revision 1.6  2005/02/10 22:35:10  cheshire
-<rdar://problem/3727944> Update name
-
-Revision 1.5  2005/01/25 18:30:02  shersche
-Fix call to PathForResource() by passing in NULL as first parameter.
-
-Revision 1.4  2005/01/25 08:54:41  shersche
-<rdar://problem/3911084> Load resource DLLs at startup.
-Bug #: 3911084
-
-Revision 1.3  2004/07/13 21:24:23  rpantos
-Fix for <rdar://problem/3701120>.
-
-Revision 1.2  2004/06/24 20:12:08  shersche
-Clean up source code
-Submitted by: herscher
-
-Revision 1.1  2004/06/18 04:36:57  rpantos
-First checked in
-
-
-*/
+ */
 
 #include "stdafx.h"
 #include "PrinterSetupWizardApp.h"

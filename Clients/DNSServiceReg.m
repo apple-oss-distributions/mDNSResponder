@@ -13,22 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: DNSServiceReg.m,v $
-Revision 1.16  2006/08/14 23:23:55  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.15  2004/06/05 02:01:08  cheshire
-Move DNSServiceRegistration from mDNSMacOSX directory to Clients directory
-
-Revision 1.14  2004/03/04 19:20:23  cheshire
-Remove invalid UTF-8 character
-
-Revision 1.13  2003/08/12 19:55:07  cheshire
-Update to APSL 2.0
-
  */
 
 #include "dns_sd.h"

@@ -13,29 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: DNSSDException.java,v $
-Revision 1.6  2007/02/08 23:58:17  cheshire
-Added comment about updating kMessages array in AppleDNSSDException (DNSSD.java)
-
-Revision 1.5  2007/02/07 01:19:36  cheshire
-<rdar://problem/4849427> API: Reconcile conflicting error code values
-
-Revision 1.4  2006/08/14 23:25:08  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.3  2005/07/10 22:19:01  cheshire
-Add missing error codes to list of public static final ints
-
-Revision 1.2  2004/04/30 21:48:27  rpantos
-Change line endings for CVS.
-
-Revision 1.1  2004/04/30 16:29:35  rpantos
-First checked in.
-
-*/
+ */
 
 package	com.apple.dnssd;
 

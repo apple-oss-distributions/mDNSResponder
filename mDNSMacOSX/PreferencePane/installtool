@@ -41,19 +41,6 @@
 # OF THE APPLE SOFTWARE, HOWEVER CAUSED AND WHETHER UNDER THEORY OF CONTRACT, TORT
 # (INCLUDING NEGLIGENCE), STRICT LIABILITY OR OTHERWISE, EVEN IF APPLE HAS BEEN
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-# 
-# Change History (most recent first):
-# 
-# $Log: installtool,v $
-# Revision 1.3  2006/09/05 20:00:13  cheshire
-# Moved Emacs settings to second line of file
-#
-# Revision 1.2  2006/08/14 23:15:14  cheshire
-# Added "tab-width" emacs header line
-#
-# Revision 1.1  2005/06/04 04:51:48  cheshire
-# <rdar://problem/4138070> ddnswriteconfig (Bonjour PreferencePane) vulnerability
-# Added separate "installtool" script instead of making ddnswriteconfig self-install
 #
 # Create the Bonjour subdirectory.
 # Copy ARGV[0] to $dest and set owner and suid permissions.

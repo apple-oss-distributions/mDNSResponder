@@ -14,45 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# $Log: Makefile,v $
-# Revision 1.12  2008/09/05 17:37:08  cheshire
-# Need to include ClientCommon.c when building dns-sd
-#
-# Revision 1.11  2007/05/29 19:57:33  cheshire
-# Use "-Wall" for stricter compiler warnings
-#
-# Revision 1.10  2006/09/21 00:56:37  cheshire
-# <rdar://problem/4245577> Need 64-bit version of dns-sd command-line tool
-# Add in missing "build/" in targets line for builds other than OS X
-#
-# Revision 1.9  2006/09/18 18:55:39  cheshire
-# <rdar://problem/4245577> Need 64-bit version of dns-sd command-line tool
-#
-# Revision 1.8  2006/08/14 23:23:55  cheshire
-# Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-#
-# Revision 1.7  2006/01/06 01:06:17  cheshire
-# <rdar://problem/3978979> Compile library and client programs in one pass
-#
-# Revision 1.6  2004/09/24 21:15:26  cheshire
-# <rdar://problem/3724985> Library "libmdns" misnamed; should be "libdns_sd"
-#
-# Revision 1.5  2004/09/02 17:32:45  cheshire
-# Look for headers in ../mDNSShared before we go to /usr/include
-#
-# Revision 1.4  2004/05/21 17:25:56  cheshire
-# Fixes to make sample client work on Linux
-#
-# Revision 1.3  2004/03/12 08:05:32  cheshire
-# Add a "make clean" target
-#
-# Revision 1.2  2004/02/11 20:59:26  cheshire
-# Fix Makefile so it creates the "build" directory if necessary
-#
-# Revision 1.1  2004/02/06 03:19:09  cheshire
-# Check in code to make command-line "dns-sd" testing tool
-#
-#
 # Notes:
 # $@ means "The file name of the target of the rule"
 # $< means "The name of the first prerequisite"

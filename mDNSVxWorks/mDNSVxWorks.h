@@ -13,17 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: mDNSVxWorks.h,v $
-Revision 1.5  2006/08/14 23:25:18  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.4  2005/05/30 07:36:38  bradley
-New implementation of the mDNS platform plugin for VxWorks 5.5 or later with IPv6 support.
-
-*/
+ */
 
 #ifndef	__MDNS_VXWORKS_H__
 #define	__MDNS_VXWORKS_H__

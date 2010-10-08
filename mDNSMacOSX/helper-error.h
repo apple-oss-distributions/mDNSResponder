@@ -13,35 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: helper-error.h,v $
-Revision 1.8  2007/11/07 00:22:30  jgraessley
-Bug #: <rdar://problem/5573573> mDNSResponder doesn't build without IPSec
-Reviewed by: Stuart Cheshire
-
-Revision 1.7  2007/09/12 00:42:47  mcguire
-<rdar://problem/5468236> BTMM: Need to clean up security associations
-
-Revision 1.6  2007/09/04 22:32:58  mcguire
-<rdar://problem/5453633> BTMM: BTMM overwrites /etc/racoon/remote/anonymous.conf
-
-Revision 1.5  2007/08/29 21:42:12  mcguire
-<rdar://problem/5431192> BTMM: Duplicate Private DNS names are being added to DynamicStore
-
-Revision 1.4  2007/08/23 21:15:49  cheshire
-Added $Log header
-
-Revision 1.3  2007/08/23 21:04:44  cheshire
-Tidied up alignment of error message list
-
-Revision 1.2  2007/08/18 01:02:03  mcguire
-<rdar://problem/5415593> No Bonjour services are getting registered at boot
-
-Revision 1.1  2007/08/08 22:34:58  mcguire
-<rdar://problem/5197869> Security: Run mDNSResponder as user id mdnsresponder instead of root
-
  */
 
 ERROR(kmDNSHelperCommunicationFailed,             "Mach communication failed")

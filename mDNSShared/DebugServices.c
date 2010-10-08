@@ -14,33 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
 
-    Change History (most recent first):
-    
-$Log: DebugServices.c,v $
-Revision 1.6  2006/08/14 23:24:56  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.5  2004/09/17 01:08:57  cheshire
-Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
-  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
-  declared in that file are ONLY appropriate to single-address-space embedded applications.
-  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
-
-Revision 1.4  2004/04/15 08:59:08  bradley
-Removed deprecated debug and log levels and replaced them with modern equivalents.
-
-Revision 1.3  2004/04/08 09:29:55  bradley
-Manually do host->network byte order conversion to avoid needing libraries for htons/htonl. Changed
-hex dumps to better separate hex and ASCII. Added support for %.8a syntax in DebugSNPrintF for Fibre
-Channel addresses (00:11:22:33:44:55:66:77). Fixed a few places where HeaderDoc was incorrect.
-
-Revision 1.2  2004/03/07 05:59:34  bradley
-Sync'd with internal version: Added expect macros, error codes, and CoreServices exclusion.
-
-Revision 1.1  2004/01/30 02:27:30  bradley
-Debugging support for various platforms.
-
-
 	To Do:
 	
 	- Use StackWalk on Windows to optionally print stack frames.

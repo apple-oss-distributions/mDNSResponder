@@ -13,20 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: PString.h,v $
-Revision 1.3  2006/08/14 23:25:43  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.2  2004/07/19 16:08:56  shersche
-fix problems in UTF8/Unicode string translations
-
-Revision 1.1  2004/06/26 04:01:22  shersche
-Initial revision
-
-
  */
     
 #pragma once

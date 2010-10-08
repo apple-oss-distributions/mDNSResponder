@@ -13,45 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: CommonServices.h,v $
-Revision 1.11  2009/03/30 19:51:29  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.10  2009/01/11 03:20:06  mkrochma
-<rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
-
-Revision 1.9  2009/01/10 22:03:43  mkrochma
-<rdar://problem/5797507> dnsextd fails to build on Linux
-
-Revision 1.8  2007/01/17 19:16:59  cheshire
-Only define ssize_t if it's not already defined
-
-Revision 1.7  2007/01/16 23:00:45  cheshire
-Don't need to include CoreServices.h
-
-Revision 1.6  2006/08/24 22:41:53  herscher
-<rdar://problem/4580067> POSIX: dnsextd_parser doesn't compile on Linux
-
-Revision 1.5  2006/08/14 23:24:56  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.4  2006/07/05 22:43:21  cheshire
-<rdar://problem/4472014> Add Private DNS client functionality to mDNSResponder
-
-Revision 1.3  2004/04/08 09:27:12  bradley
-Added macro for portable specification of callback calling conventions.
-
-Revision 1.2  2004/03/07 05:53:39  bradley
-Fixed NumVersion extraction macros. Updated error code mappings to match latest internal version.
-
-Revision 1.1  2004/01/30 02:25:59  bradley
-Common Services and portability support for various platforms.
-
-*/
+ */
 
 //---------------------------------------------------------------------------------------------------------------------------
 /*!	@header		CommonServices

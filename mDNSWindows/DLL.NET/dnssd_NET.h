@@ -30,41 +30,6 @@
  * 
  * <http://lists.apple.com/bonjour-dev/>
  * 
-
-    Change History (most recent first):
-
-$Log: dnssd_NET.h,v $
-Revision 1.9  2006/08/14 23:25:43  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.8  2005/02/10 22:35:33  cheshire
-<rdar://problem/3727944> Update name
-
-Revision 1.7  2004/12/16 19:56:12  cheshire
-Update comments
-
-Revision 1.6  2004/09/20 22:47:06  cheshire
-Add cautionary comment
-
-Revision 1.5  2004/09/16 18:16:27  shersche
-Cleanup to parameter names
-Submitted by: prepin@gmail.com
-
-Revision 1.4  2004/09/13 19:35:57  shersche
-<rdar://problem/3798941> Add Apple.DNSSD namespace to MC++ wrapper class
-<rdar://problem/3798950> Change all instances of unsigned short to int
-Bug #: 3798941, 3798950
-
-Revision 1.3  2004/07/27 07:12:10  shersche
-make TextRecord an instantiable class object
-
-Revision 1.2  2004/07/19 07:48:34  shersche
-fix bug in DNSService.Register when passing in NULL text record, add TextRecord APIs
-
-Revision 1.1  2004/06/26 04:01:22  shersche
-Initial revision
-
-
  */
     
 #pragma once

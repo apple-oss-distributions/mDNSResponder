@@ -13,16 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: FourthPage.cpp,v $
-Revision 1.1  2009/07/01 19:20:37  herscher
-<rdar://problem/6713286> UI changes for configuring sleep proxy settings.
-
-
-
-*/
+ */
 
 #include "FourthPage.h"
 #include "resource.h"
@@ -75,7 +66,9 @@ void CFourthPage::DoDataExchange(CDataExchange* pDX)
 BEGIN_MESSAGE_MAP(CFourthPage, CPropertyPage)
 	//{{AFX_MSG_MAP(CFourthPage)
 	//}}AFX_MSG_MAP
+
 	ON_BN_CLICKED(IDC_POWER_MANAGEMENT, &CFourthPage::OnBnClickedPowerManagement)
+
 END_MESSAGE_MAP()
 
 
@@ -112,7 +105,8 @@ CFourthPage::OnSetActive()
 
 	// Now populate the browse domain box
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\Power Management", &key );
+	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\Power Management", 0,
+		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &key, NULL );
 	require_noerr( err, exit );
 
 	dwSize = sizeof( DWORD );
@@ -158,7 +152,8 @@ CFourthPage::Commit()
 	DWORD		enabled;
 	DWORD		err;
 
-	err = RegCreateKey( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\Power Management", &key );
+	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\Power Management", 0,
+		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &key, NULL );
 	require_noerr( err, exit );
 
 	enabled = m_checkBox.GetCheck();
@@ -179,13 +174,24 @@ exit:
 //---------------------------------------------------------------------------------------------------------------------------
 
 
+
 void CFourthPage::OnBnClickedPowerManagement()
+
 {
+
 	char buf[ 256 ];
 
+
+
 	sprintf( buf, "check box: %d", m_checkBox.GetCheck() );
+
 	OutputDebugStringA( buf );
+
 	// TODO: Add your control notification handler code here
 
+
+
 	SetModified( TRUE );
+
 }
+

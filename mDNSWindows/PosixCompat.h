@@ -13,15 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: PosixCompat.h,v $
-Revision 1.1  2009/07/09 21:40:32  herscher
-<rdar://problem/3775717> SDK: Port mDNSNetMonitor to Windows. Add a small Posix compatibility layer to the mDNSWindows platform layer. This makes it possible to centralize the implementations to functions such as if_indextoname() and inet_pton() that are made in several projects in B4W.
-
-
-*/
+ */
 
 #pragma once
 

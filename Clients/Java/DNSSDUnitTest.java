@@ -13,29 +13,8 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: DNSSDUnitTest.java,v $
-Revision 1.6  2006/08/14 23:24:07  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.5  2006/06/20 23:01:58  rpantos
-<rdar://problem/3839132> Java needs to implement DNSServiceRegisterRecord equivalent
-
-Revision 1.4  2004/08/04 01:07:43  rpantos
-Update unit test for <rdar://problems/3731579&3731582>.
-
-Revision 1.3  2004/05/26 01:41:58  cheshire
-Pass proper flags to DNSSD.enumerateDomains
-
-Revision 1.2  2004/04/30 21:53:34  rpantos
-Change line endings for CVS.
-
-Revision 1.1  2004/04/30 16:29:35  rpantos
-First checked in.
-
-	DNSSDUnitTest is a simple program that exercises parts of the DNSSD API.
+ *
+ * DNSSDUnitTest is a simple program that exercises parts of the DNSSD API.
  */
 
 import com.apple.dnssd.*;

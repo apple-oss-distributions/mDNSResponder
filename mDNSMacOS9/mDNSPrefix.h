@@ -13,23 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: mDNSPrefix.h,v $
-Revision 1.4  2006/08/14 23:24:29  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.3  2004/06/11 00:03:28  cheshire
-Add code for testing avail/busy subtypes
-
-Revision 1.2  2004/05/21 01:57:08  cheshire
-Add macros for malloc() and free() so that dnssd_clientlib.c can use them
-
-Revision 1.1  2004/03/12 21:30:26  cheshire
-Build a System-Context Shared Library from mDNSCore, for the benefit of developers
-like Muse Research who want to be able to use mDNS/DNS-SD from GPL-licensed code.
-
  */
 
 // Global definitions that apply to all source files

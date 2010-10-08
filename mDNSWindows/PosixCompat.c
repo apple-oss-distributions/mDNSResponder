@@ -13,15 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: PosixCompat.c,v $
-Revision 1.1  2009/07/09 21:40:32  herscher
-<rdar://problem/3775717> SDK: Port mDNSNetMonitor to Windows. Add a small Posix compatibility layer to the mDNSWindows platform layer. This makes it possible to centralize the implementations to functions such as if_indextoname() and inet_pton() that are made in several projects in B4W.
-
-
-*/
+ */
 
 #include "PosixCompat.h"
 #include <DebugServices.h>
@@ -106,29 +98,24 @@ inet_pton( int family, const char * addr, void * dst )
 int
 gettimeofday( struct timeval * tv, struct timezone * tz )
 {
-#if defined(_MSC_VER) || defined(_MSC_EXTENSIONS)
-#	define DELTA_EPOCH_IN_MICROSECS  11644473600000000Ui64
-#else
-#	define DELTA_EPOCH_IN_MICROSECS  11644473600000000ULL
-#endif
- 
-	FILETIME ft;
-	unsigned __int64 tmpres = 0;
- 
+#define EPOCHFILETIME (116444736000000000i64)
+
 	if ( tv != NULL )
 	{
+		FILETIME        ft;
+		LARGE_INTEGER   li;
+		__int64         t;
+
 		GetSystemTimeAsFileTime(&ft);
- 
-		tmpres |= ft.dwHighDateTime;
-		tmpres <<= 32;
-		tmpres |= ft.dwLowDateTime;
- 
-		tmpres -= DELTA_EPOCH_IN_MICROSECS; 
-		tmpres /= 10;  /*convert into microseconds*/
-		tv->tv_sec = (long)(tmpres / 1000000UL);
-		tv->tv_usec = (long)(tmpres % 1000000UL);
+		li.LowPart  = ft.dwLowDateTime;
+		li.HighPart = ft.dwHighDateTime;
+		t  = li.QuadPart;	/* In 100-nanosecond intervals */
+		t -= EPOCHFILETIME;	/* Offset to the Epoch time */
+		t /= 10;			/* In microseconds */
+		tv->tv_sec  = ( long )( t / 1000000 );
+		tv->tv_usec = ( long )( t % 1000000 );
 	}
- 
+
 	return 0;
 }
 
@@ -136,6 +123,6 @@ gettimeofday( struct timeval * tv, struct timezone * tz )
 extern struct tm*
 localtime_r( const time_t * clock, struct tm * result )
 {
-	result = localtime( clock );
+	localtime_s( result, clock );
 	return result;
 }

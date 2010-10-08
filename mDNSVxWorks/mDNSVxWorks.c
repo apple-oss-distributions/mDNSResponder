@@ -13,35 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: mDNSVxWorks.c,v $
-Revision 1.35  2009/01/13 05:31:35  mkrochma
-<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
-
-Revision 1.34  2008/10/03 18:25:18  cheshire
-Instead of calling "m->MainCallback" function pointer directly, call mDNSCore routine "mDNS_ConfigChanged(m);"
-
-Revision 1.33  2007/03/22 18:31:48  cheshire
-Put dst parameter first in mDNSPlatformStrCopy/mDNSPlatformMemCopy, like conventional Posix strcpy/memcpy
-
-Revision 1.32  2006/12/19 22:43:56  cheshire
-Fix compiler warnings
-
-Revision 1.31  2006/11/10 00:54:16  cheshire
-<rdar://problem/4816598> Changing case of Computer Name doesn't work
-
-Revision 1.30  2006/08/14 23:25:18  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.29  2006/03/19 02:00:12  cheshire
-<rdar://problem/4073825> Improve logic for delaying packets after repeated interface transitions
-
-Revision 1.28  2005/05/30 07:36:38  bradley
-New implementation of the mDNS platform plugin for VxWorks 5.5 or later with IPv6 support.
-
-*/
+ */
 
 #if 0
 #pragma mark == Configuration ==

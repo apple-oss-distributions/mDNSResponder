@@ -13,23 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: Prefix.h,v $
-Revision 1.2  2006/08/14 23:26:07  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.1  2004/06/18 04:16:41  rpantos
-Move up one level.
-
-Revision 1.2  2004/04/30 02:40:23  bradley
-Define DNS_SD_CLIENT_ENABLED=0 so DNSSD.c can be included without linking the client IPC code.
-
-Revision 1.1  2004/01/30 02:58:39  bradley
-mDNSResponder Windows Service. Provides global Bonjour support with an IPC interface.
-
-*/
+ */
 
 #ifndef __PREFIX__
 #define __PREFIX__

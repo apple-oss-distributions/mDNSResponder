@@ -43,17 +43,7 @@
     OF THE APPLE SOFTWARE, HOWEVER CAUSED AND WHETHER UNDER THEORY OF CONTRACT, TORT
     (INCLUDING NEGLIGENCE), STRICT LIABILITY OR OTHERWISE, EVEN IF APPLE HAS BEEN
     ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-    Change History (most recent first):
-
-$Log: ConfigurationRights.h,v $
-Revision 1.2  2006/08/14 23:15:47  cheshire
-Tidy up Change History comment
-
-Revision 1.1  2005/02/05 01:59:19  cheshire
-Add Preference Pane to facilitate testing of DDNS & wide-area features
-
-*/
+ */
 
 #define	UPDATE_SC_RIGHT	         "system.preferences"
 #define	EDIT_SYS_KEYCHAIN_RIGHT	 "system.preferences"

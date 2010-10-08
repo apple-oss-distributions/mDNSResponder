@@ -13,13 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: safe_vproc.h,v $
-Revision 1.1  2009/02/06 03:06:49  mcguire
-<rdar://problem/5858533> Adopt vproc_transaction API in mDNSResponder
-
  */
 
 #ifndef __SAFE_VPROC_H

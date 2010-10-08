@@ -13,63 +13,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: PrinterSetupWizardSheet.h,v $
-Revision 1.14  2009/06/11 22:27:16  herscher
-<rdar://problem/4458913> Add comprehensive logging during printer installation process.
-
-Revision 1.13  2009/03/30 19:18:49  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.12  2006/08/14 23:24:09  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.11  2005/10/05 17:32:51  herscher
-<rdar://problem/4141221> Use a case insensitive compare operation to check whether a printer with the same name has already been installed.
-
-Revision 1.10  2005/07/07 17:53:19  shersche
-Fix problems associated with the CUPS printer workaround fix.
-
-Revision 1.9  2005/04/13 17:46:22  shersche
-<rdar://problem/4082122> Generic PCL not selected when printers advertise multiple text records
-
-Revision 1.8  2005/02/08 18:53:33  shersche
-Remove qtotalDefined parameter from ParseTextRecord()
-
-Revision 1.7  2005/01/31 23:54:29  shersche
-<rdar://problem/3947508> Start browsing when printer wizard starts. Move browsing logic from CSecondPage object to CPrinterSetupWizardSheet object.
-
-Revision 1.6  2005/01/03 19:05:01  shersche
-Store pointer to instance of wizard sheet so that print driver install thread sends a window message to the correct window
-
-Revision 1.5  2004/12/29 18:53:38  shersche
-<rdar://problem/3725106>
-<rdar://problem/3737413> Added support for LPR and IPP protocols as well as support for obtaining multiple text records. Reorganized and simplified codebase.
-Bug #: 3725106, 3737413
-
-Revision 1.4  2004/07/13 21:24:23  rpantos
-Fix for <rdar://problem/3701120>.
-
-Revision 1.3  2004/06/28 00:51:47  shersche
-Move call to EnumPrinters out of browse callback into standalone function
-
-Revision 1.2  2004/06/24 20:12:07  shersche
-Clean up source code
-Submitted by: herscher
-
-Revision 1.1  2004/06/18 04:36:57  rpantos
-First checked in
-
-
-*/
+ */
 
 #pragma once
 
 
-#include "firstpage.h"
 #include "secondpage.h"
 #include "thirdpage.h"
 #include "fourthpage.h"
@@ -156,7 +104,6 @@ public:
 
 protected:
 	DECLARE_MESSAGE_MAP()
-	CFirstPage		m_pgFirst;
 	CSecondPage		m_pgSecond;
 	CThirdPage		m_pgThird;
 	CFourthPage		m_pgFourth;
@@ -168,6 +115,69 @@ protected:
 	void Init(void);
 
 private:
+
+	// This is from <cups/http.h>
+	typedef enum http_encryption_e		/**** HTTP encryption values ****/
+	{
+		HTTP_ENCRYPT_IF_REQUESTED,		/* Encrypt if requested (TLS upgrade) */
+		HTTP_ENCRYPT_NEVER,			/* Never encrypt */
+		HTTP_ENCRYPT_REQUIRED,		/* Encryption is required (TLS upgrade) */
+		HTTP_ENCRYPT_ALWAYS			/* Always encrypt (SSL) */
+	} http_encryption_t;
+
+	typedef void*				( *httpConnectEncryptFunc )( const char* host, int port, http_encryption_t encryption );
+	typedef http_encryption_t	( *cupsEncryptionFunc )( void );
+	typedef void				( *cupsSetEncryptionFunc )( http_encryption_t e );
+	typedef char*				( *cupsAdminCreateWindowsPPDFunc )( void * http, const char *dest, char *buffer, int bufsize );
+
+	class CUPSLibrary
+	{
+	public:
+
+		CUPSLibrary()
+			:
+			httpConnectEncrypt( NULL ),
+			cupsEncryption( NULL ),
+			cupsSetEncryption( NULL ),
+			cupsAdminCreateWindowsPPD( NULL ),
+			library( NULL )
+		{
+#if defined( LIBCUPS_ENABLED )
+			if ( ( library = LoadLibrary( TEXT( "libcups2.dll" ) ) ) != NULL )
+			{
+				httpConnectEncrypt = ( httpConnectEncryptFunc ) GetProcAddress( library, "httpConnectEncrypt" );
+				cupsEncryption = ( cupsEncryptionFunc ) GetProcAddress( library, "cupsEncryption" );
+				cupsSetEncryption = ( cupsSetEncryptionFunc ) GetProcAddress( library, "cupsSetEncryption" );
+				cupsAdminCreateWindowsPPD = ( cupsAdminCreateWindowsPPDFunc ) GetProcAddress( library, "cupsAdminCreateWindowsPPD" );
+			}
+#endif
+		}
+
+		~CUPSLibrary()
+		{
+			if ( library )
+			{
+				FreeLibrary( library );
+				library = NULL;
+			}
+		}
+
+		BOOL
+		IsInstalled()
+		{
+			return ( ( httpConnectEncrypt != NULL ) && ( cupsEncryption != NULL ) && ( cupsSetEncryption != NULL ) && ( cupsAdminCreateWindowsPPD != NULL ) );
+		}
+
+		httpConnectEncryptFunc			httpConnectEncrypt;
+		cupsEncryptionFunc				cupsEncryption;
+		cupsSetEncryptionFunc			cupsSetEncryption;
+		cupsAdminCreateWindowsPPDFunc	cupsAdminCreateWindowsPPD;
+
+	private:
+
+		HMODULE							library;
+	};
+
 
 	static void DNSSD_API
 	OnBrowse(
@@ -273,10 +283,19 @@ private:
 	InstallPrinter(Printer * printer);
 
 	OSStatus
-	InstallPrinterPDLAndLPR(Printer * printer, Service * service, DWORD protocol, Logger & log);
+	InstallPrinterPort( Printer * printer, Service * service, DWORD protocol, Logger & log );
+
+	OSStatus
+	InstallPrinterPDLAndLPR(Printer * printer, Service * service, Logger & log);
 
 	OSStatus
 	InstallPrinterIPP(Printer * printer, Service * service, Logger & log);
+	
+	OSStatus
+	InstallPrinterCUPS( Printer * printer, Service * service, CUPSLibrary & cupsLib );
+
+	OSStatus
+	InstallPrinterCUPS(Printer * printer, Service * service, CUPSLibrary & cupsLib, TCHAR * env );
 
 	static unsigned WINAPI
 	InstallDriverThread( LPVOID inParam );

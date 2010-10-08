@@ -13,129 +13,15 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ */
 
-    Change History (most recent first):
-
-$Log: Responder.c,v $
-Revision 1.36  2009/01/15 03:39:08  mkrochma
-Fix warning about ignoring return value of daemon
-
-Revision 1.35  2009/01/13 05:31:34  mkrochma
-<rdar://problem/6491367> Replace bzero, bcopy with mDNSPlatformMemZero, mDNSPlatformMemCopy, memset, memcpy
-
-Revision 1.34  2009/01/11 03:20:06  mkrochma
-<rdar://problem/5797526> Fixes from Igor Seleznev to get mdnsd working on Solaris
-
-Revision 1.33  2007/04/16 20:49:39  cheshire
-Fix compile errors for mDNSPosix build
-
-Revision 1.32  2006/08/14 23:24:46  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.31  2006/06/12 18:22:42  cheshire
-<rdar://problem/4580067> mDNSResponder building warnings under Red Hat 64-bit (LP64) Linux
-
-Revision 1.30  2005/10/26 22:21:16  cheshire
-<rdar://problem/4149841> Potential buffer overflow in mDNSResponderPosix
-
-Revision 1.29  2005/03/04 21:35:33  cheshire
-<rdar://problem/4037201> Services.txt file not parsed properly when it contains more than one service
-
-Revision 1.28  2005/01/11 01:55:26  ksekar
-Fix compile errors in Posix debug build
-
-Revision 1.27  2004/12/01 04:28:43  cheshire
-<rdar://problem/3872803> Darwin patches for Solaris and Suse
-Use version of daemon() provided in mDNSUNP.c instead of local copy
-
-Revision 1.26  2004/11/30 22:37:01  cheshire
-Update copyright dates and add "Mode: C; tab-width: 4" headers
-
-Revision 1.25  2004/11/11 02:00:51  cheshire
-Minor fixes to getopt, error message
-
-Revision 1.24  2004/11/09 19:32:10  rpantos
-Suggestion from Ademar de Souza Reis Jr. to allow comments in services file
-
-Revision 1.23  2004/09/17 01:08:54  cheshire
-Renamed mDNSClientAPI.h to mDNSEmbeddedAPI.h
-  The name "mDNSClientAPI.h" is misleading to new developers looking at this code. The interfaces
-  declared in that file are ONLY appropriate to single-address-space embedded applications.
-  For clients on general-purpose computers, the interfaces defined in dns_sd.h should be used.
-
-Revision 1.22  2004/09/16 01:58:22  cheshire
-Fix compiler warnings
-
-Revision 1.21  2004/06/15 03:48:07  cheshire
-Update mDNSResponderPosix to take multiple name=val arguments in a sane way
-
-Revision 1.20  2004/05/18 23:51:26  cheshire
-Tidy up all checkin comments to use consistent "<rdar://problem/xxxxxxx>" format for bug numbers
-
-Revision 1.19  2004/03/12 08:03:14  cheshire
-Update comments
-
-Revision 1.18  2004/01/25 00:00:55  cheshire
-Change to use mDNSOpaque16fromIntVal() instead of shifting and masking
-
-Revision 1.17  2003/12/11 19:11:55  cheshire
-Fix compiler warning
-
-Revision 1.16  2003/08/14 02:19:55  cheshire
-<rdar://problem/3375491> Split generic ResourceRecord type into two separate types: AuthRecord and CacheRecord
-
-Revision 1.15  2003/08/12 19:56:26  cheshire
-Update to APSL 2.0
-
-Revision 1.14  2003/08/06 18:20:51  cheshire
-Makefile cleanup
-
-Revision 1.13  2003/07/23 00:00:04  cheshire
-Add comments
-
-Revision 1.12  2003/07/15 01:55:16  cheshire
-<rdar://problem/3315777> Need to implement service registration with subtypes
-
-Revision 1.11  2003/07/14 18:11:54  cheshire
-Fix stricter compiler warnings
-
-Revision 1.10  2003/07/10 20:27:31  cheshire
-<rdar://problem/3318717> mDNSResponder Posix version is missing a 'b' in the getopt option string
-
-Revision 1.9  2003/07/02 21:19:59  cheshire
-<rdar://problem/3313413> Update copyright notices, etc., in source code comments
-
-Revision 1.8  2003/06/18 05:48:41  cheshire
-Fix warnings
-
-Revision 1.7  2003/05/06 00:00:50  cheshire
-<rdar://problem/3248914> Rationalize naming of domainname manipulation functions
-
-Revision 1.6  2003/03/08 00:35:56  cheshire
-Switched to using new "mDNS_Execute" model (see "mDNSCore/Implementer Notes.txt")
-
-Revision 1.5  2003/02/20 06:48:36  cheshire
-<rdar://problem/3169535> Xserve RAID needs to do interface-specific registrations
-Reviewed by: Josh Graessley, Bob Bradley
-
-Revision 1.4  2003/01/28 03:07:46  cheshire
-Add extra parameter to mDNS_RenameAndReregisterService(),
-and add support for specifying a domain other than dot-local.
-
-Revision 1.3  2002/09/21 20:44:53  zarzycki
-Added APSL info
-
-Revision 1.2  2002/09/19 04:20:44  cheshire
-Remove high-ascii characters that confuse some systems
-
-Revision 1.1  2002/09/17 06:24:35  cheshire
-First checkin
-
-*/
-
-#include "mDNSEmbeddedAPI.h"// Defines the interface to the client layer above
-#include "mDNSPosix.h"    // Defines the specific types needed to run mDNS on this platform
-#include "mDNSUNP.h"		// For daemon()
+#if __APPLE__
+// In Mac OS X 10.5 and later trying to use the daemon function gives a “‘daemon’ is deprecated”
+// error, which prevents compilation because we build with "-Werror".
+// Since this is supposed to be portable cross-platform code, we don't care that daemon is
+// deprecated on Mac OS X 10.5, so we use this preprocessor trick to eliminate the error message.
+#define daemon yes_we_know_that_daemon_is_deprecated_in_os_x_10_5_thankyou
+#endif
 
 #include <assert.h>
 #include <stdio.h>			// For printf()
@@ -145,6 +31,15 @@ First checkin
 #include <errno.h>			// For errno, EINTR
 #include <signal.h>
 #include <fcntl.h>
+
+#if __APPLE__
+#undef daemon
+extern int daemon(int, int);
+#endif
+
+#include "mDNSEmbeddedAPI.h"// Defines the interface to the client layer above
+#include "mDNSPosix.h"		// Defines the specific types needed to run mDNS on this platform
+#include "mDNSUNP.h"		// For daemon()
 
 #if COMPILER_LIKES_PRAGMA_MARK
 #pragma mark ***** Globals

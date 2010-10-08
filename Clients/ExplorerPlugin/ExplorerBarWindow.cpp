@@ -13,103 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: ExplorerBarWindow.cpp,v $
-Revision 1.23  2009/03/30 18:47:40  herscher
-<rdar://problem/5925472> Current Bonjour code does not compile on Windows
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.22  2006/08/14 23:24:00  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.21  2005/04/06 01:13:07  shersche
-<rdar://problem/4066195> Use the product icon instead of globe icon for 'About' link.
-
-Revision 1.20  2005/03/18 02:43:02  shersche
-<rdar://problem/4046443> Use standard IE website icon for 'About Bonjour', only using globe icon if standard icon cannot be loaded
-
-Revision 1.19  2005/03/16 03:46:27  shersche
-<rdar://problem/4045657> Use Bonjour icon for all discovered sites
-
-Revision 1.18  2005/02/26 01:24:05  shersche
-Remove display lines in tree control
-
-Revision 1.17  2005/02/25 19:57:30  shersche
-<rdar://problem/4023323> Remove FTP browsing from plugin
-
-Revision 1.16  2005/02/08 23:31:06  shersche
-Move "About ..." item underneath WebSites, change icons for discovered sites and "About ..." item
-
-Revision 1.15  2005/01/27 22:38:27  shersche
-add About item to tree list
-
-Revision 1.14  2005/01/25 17:55:39  shersche
-<rdar://problem/3911084> Get bitmaps from non-localizable resource module
-Bug #: 3911084
-
-Revision 1.13  2005/01/06 21:13:09  shersche
-<rdar://problem/3796779> Handle kDNSServiceErr_Firewall return codes
-Bug #: 3796779
-
-Revision 1.12  2004/10/26 00:56:03  cheshire
-Use "#if 0" instead of commenting out code
-
-Revision 1.11  2004/10/18 23:49:17  shersche
-<rdar://problem/3841564> Remove trailing dot from hostname, because some flavors of Windows have difficulty parsing hostnames with a trailing dot.
-Bug #: 3841564
-
-Revision 1.10  2004/09/02 02:18:58  cheshire
-Minor textual cleanup to improve readability
-
-Revision 1.9  2004/09/02 02:11:56  cheshire
-<rdar://problem/3783611> Fix incorrect testing of MoreComing flag
-
-Revision 1.8  2004/07/26 05:47:31  shersche
-use TXTRecord APIs, fix bug in locating service to be removed
-
-Revision 1.7  2004/07/22 16:08:20  shersche
-clean up debug print statements, re-enable code inadvertently commented out
-
-Revision 1.6  2004/07/22 05:27:20  shersche
-<rdar://problem/3735827> Check to make sure error isn't WSAEWOULDBLOCK when canceling browse
-Bug #: 3735827
-
-Revision 1.5  2004/07/20 06:49:18  shersche
-clean up socket handling code
-
-Revision 1.4  2004/07/13 21:24:21  rpantos
-Fix for <rdar://problem/3701120>.
-
-Revision 1.3  2004/06/27 14:59:59  shersche
-reference count service info to handle multi-homed hosts
-
-Revision 1.2  2004/06/23 16:09:34  shersche
-Add the resolve DNSServiceRef to list of extant refs.  This fixes the "doesn't resolve when double clicking" problem
-
-Submitted by: Scott Herscher
-
-Revision 1.1  2004/06/18 04:34:59  rpantos
-Move to Clients from mDNSWindows
-
-Revision 1.5  2004/04/15 01:00:05  bradley
-Removed support for automatically querying for A/AAAA records when resolving names. Platforms
-without .local name resolving support will need to manually query for A/AAAA records as needed.
-
-Revision 1.4  2004/04/09 21:03:15  bradley
-Changed port numbers to use network byte order for consistency with other platforms.
-
-Revision 1.3  2004/04/08 09:43:43  bradley
-Changed callback calling conventions to __stdcall so they can be used with C# delegates.
-
-Revision 1.2  2004/02/21 04:36:19  bradley
-Enable dot local name lookups now that the NSP is being installed.
-
-Revision 1.1  2004/01/30 03:01:56  bradley
-Explorer Plugin to browse for DNS-SD advertised Web and FTP servers from within Internet Explorer.
-
-*/
+ */
 
 #include	"StdAfx.h"
 
@@ -234,6 +138,9 @@ int	ExplorerBarWindow::OnCreate( LPCREATESTRUCT inCreateStruct )
 	
 	ServiceHandlerEntry *		e;
 	
+	s.LoadString( IDS_ABOUT );
+	m_about = mTree.InsertItem( s, 0, 0 );
+
 	// Web Site Handler
 	
 	e = new ServiceHandlerEntry;
@@ -245,9 +152,6 @@ int	ExplorerBarWindow::OnCreate( LPCREATESTRUCT inCreateStruct )
 	e->needsLogin		= false;
 	mServiceHandlers.Add( e );
 
-	s.LoadString( IDS_ABOUT );
-	m_about = mTree.InsertItem( s, 0, 0 );
-
 	err = DNSServiceBrowse( &e->ref, 0, 0, e->type, NULL, BrowseCallBack, e );
 	require_noerr( err, exit );
 
@@ -256,6 +160,25 @@ int	ExplorerBarWindow::OnCreate( LPCREATESTRUCT inCreateStruct )
 
 	m_serviceRefs.push_back(e->ref);
 
+#if defined( _BROWSE_FOR_HTTPS_ )
+	e = new ServiceHandlerEntry;
+	check( e );
+	e->type				= "_https._tcp";
+	e->urlScheme		= "https://";
+	e->ref				= NULL;
+	e->obj				= this;
+	e->needsLogin		= false;
+	mServiceHandlers.Add( e );
+
+	err = DNSServiceBrowse( &e->ref, 0, 0, e->type, NULL, BrowseCallBack, e );
+	require_noerr( err, exit );
+
+	err = WSAAsyncSelect((SOCKET) DNSServiceRefSockFD(e->ref), m_hWnd, WM_PRIVATE_SERVICE_EVENT, FD_READ|FD_CLOSE);
+	require_noerr( err, exit );
+
+	m_serviceRefs.push_back(e->ref);
+#endif
+	
 	m_imageList.Create( 16, 16, ILC_MASK | ILC_COLOR16, 2, 0);
 
 	bitmap.Attach( ::LoadBitmap( GetNonLocalizedResources(), MAKEINTRESOURCE( IDB_LOGO ) ) );

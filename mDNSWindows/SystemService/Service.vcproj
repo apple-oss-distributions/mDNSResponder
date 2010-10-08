@@ -4,6 +4,7 @@
 	Version="8.00"
 	Name="mDNSResponder"
 	ProjectGUID="{C1D98254-BA27-4427-A3BE-A68CA2CC5F69}"
+	RootNamespace="mDNSResponder"
 	Keyword="Win32Proj"
 	>
 	<Platforms>
@@ -166,7 +167,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/NXCOMPAT /DYNAMICBASE"
-				AdditionalDependencies="ws2_32.lib iphlpapi.lib crypt32.lib netapi32.lib"
+				AdditionalDependencies="ws2_32.lib iphlpapi.lib crypt32.lib netapi32.lib powrprof.lib"
 				OutputFile="$(OutDir)/mDNSResponder.exe"
 				LinkIncremental="2"
 				IgnoreAllDefaultLibraries="false"
@@ -234,6 +235,7 @@
 				WarningLevel="4"
 				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
+				CallingConvention="2"
 				DisableSpecificWarnings="4127;4201"
 			/>
 			<Tool
@@ -283,7 +285,7 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
-				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                  &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\AppleInternal&quot;                                                   mkdir &quot;$(DSTROOT)\AppleInternal&quot;&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\AppleInternal\bin&quot;                                            mkdir &quot;$(DSTROOT)\AppleInternal\bin&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                           &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetDir)$(TargetName).pdb&quot;                                          &quot;$(DSTROOT)\AppleInternal\bin&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 		<Configuration
@@ -369,7 +371,7 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
-				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                  &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;   mkdir &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\AppleInternal&quot;                                                   mkdir &quot;$(DSTROOT)\AppleInternal&quot;&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\AppleInternal\bin&quot;                                            mkdir &quot;$(DSTROOT)\AppleInternal\bin&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetPath)&quot;                                                                           &quot;$(DSTROOT)\Program Files\Bonjour\$(PlatformName)&quot;&#x0D;&#x0A;xcopy /I/Y &quot;$(TargetDir)$(TargetName).pdb&quot;                                          &quot;$(DSTROOT)\AppleInternal\bin&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 	</Configurations>
@@ -396,6 +398,50 @@
 			<File
 				RelativePath="..\..\mDNSShared\dnssd_ipc.c"
 				>
+			</File>
+			<File
+				RelativePath=".\EventLog.mc"
+				>
+				<FileConfiguration
+					Name="Debug|Win32"
+					>
+					<Tool
+						Name="VCCustomBuildTool"
+						Description="Compiling Message Resource"
+						CommandLine="mc.exe EventLog.mc"
+						Outputs="EventLog.rc EventLog.h"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug|x64"
+					>
+					<Tool
+						Name="VCCustomBuildTool"
+						Description="Compiling Message Resource"
+						CommandLine="mc.exe EventLog.mc"
+						Outputs="EventLog.rc EventLog.h"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|Win32"
+					>
+					<Tool
+						Name="VCCustomBuildTool"
+						Description="Compiling Message Resource"
+						CommandLine="mc.exe EventLog.mc"
+						Outputs="EventLog.rc EventLog.h"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|x64"
+					>
+					<Tool
+						Name="VCCustomBuildTool"
+						Description="Compiling Message Resource"
+						CommandLine="mc.exe EventLog.mc"
+						Outputs="EventLog.rc EventLog.h"
+					/>
+				</FileConfiguration>
 			</File>
 			<File
 				RelativePath="Firewall.cpp"

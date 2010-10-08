@@ -13,28 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-	
-$Log: NSPTool.c,v $
-Revision 1.4  2006/08/14 23:26:06  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.3  2004/08/26 04:46:49  shersche
-Add -q switch for silent operation
-
-Revision 1.2  2004/06/23 16:39:14  shersche
-Fix extraneous warnings regarding implict casts
-
-Submitted by: Scott Herscher (sherscher@apple.com)
-
-Revision 1.1  2004/06/18 04:14:26  rpantos
-Move up one level.
-
-Revision 1.1  2004/01/30 03:02:58  bradley
-NameSpace Provider Tool for installing, removing, list, etc. NameSpace Providers.
-
-*/
+ */
 
 #include	<stdio.h>
 #include	<stdlib.h>

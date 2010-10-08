@@ -13,23 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: LoginDialog.h,v $
-Revision 1.2  2006/08/14 23:25:49  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.1  2004/06/18 04:04:36  rpantos
-Move up one level
-
-Revision 1.2  2004/01/30 02:56:32  bradley
-Updated to support full Unicode display. Added support for all services on www.dns-sd.org.
-
-Revision 1.1  2003/12/25 03:47:28  bradley
-Login dialog to get the username/password from the user.
-
-*/
+ */
 
 #ifndef	__LOGIN_DIALOG__
 #define	__LOGIN_DIALOG__

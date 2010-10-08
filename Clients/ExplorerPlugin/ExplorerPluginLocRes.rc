@@ -131,7 +131,7 @@ BEGIN
     CONTROL         "",IDC_COMPONENT_VERSION,"Static",
                     SS_SIMPLE | WS_GROUP,142,10,122,8
     LTEXT           "Copyright (c) 2004-2007 Apple Inc. All rights reserved. Apple and the Apple logo are trademarks of Apple Inc., registered in the U.S. and other countries.",
-                    IDC_LEGAL,92,31,123,50,0,WS_EX_RTLREADING
+                    IDC_LEGAL,92,31,123,50,0
 END
 
 

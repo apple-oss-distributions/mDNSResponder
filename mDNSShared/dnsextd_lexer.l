@@ -13,30 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-
-$Log: dnsextd_lexer.l,v $
-Revision 1.6  2008/07/18 17:40:46  cheshire
-Removed redundant definition of "YY_NO_UNPUT" (not needed now that we use "%option nounput" instead)
-
-Revision 1.5  2008/06/24 18:32:26  mcguire
-<rdar://problem/6024542> flex producing .c files that result in warnings
-
-Revision 1.4  2007/05/25 20:01:43  cheshire
-<rdar://problem/5226767> /usr/bin/flex failures prevent mDNSResponder from building
-Only define "int yylineno" on flex 2.5.4 and earlier
-
-Revision 1.3  2006/08/14 23:24:56  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.2  2006/07/06 20:41:14  cheshire
-<rdar://problem/4472013> Add Private DNS server functionality to dnsextd
-Use derived filename "dnsextd_parser.h" instead of "dnsextd_parser.y.h"
-
-Revision 1.1  2006/07/06 00:09:05  cheshire
-<rdar://problem/4472013> Add Private DNS server functionality to dnsextd
-
  */
 
 %{

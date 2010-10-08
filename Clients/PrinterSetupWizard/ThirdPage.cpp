@@ -13,156 +13,12 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    Change History (most recent first):
-    
-$Log: ThirdPage.cpp,v $
-Revision 1.42  2009/07/07 22:04:55  herscher
-<rdar://problem/4176343> LOC Impact: Need custom text when selecting the wrong printer driver
-
-Revision 1.41  2009/06/18 18:05:50  herscher
-<rdar://problem/4694554> Eliminate the first screen of Printer Wizard and maybe combine others ("I'm Feeling Lucky")
-
-Revision 1.40  2009/05/29 20:43:36  herscher
-<rdar://problem/6928136> Printer Wizard doesn't work correctly in Windows 7 64 bit
-
-Revision 1.39  2009/05/27 06:25:49  herscher
-<rdar://problem/4176334> Need error dialog when selecting bad INF file
-
-Revision 1.38  2009/05/27 04:59:57  herscher
-<rdar://problem/4517393> COMPATIBILITY WITH HP CLJ4700
-<rdar://problem/6142138> Compatibility with Samsung print driver files
-
-Revision 1.37  2007/06/08 06:30:26  herscher
-<rdar://problem/5257700> Fix uninitialized pointers when detecting generic PCL and PS drivers
-
-Revision 1.36  2007/06/06 20:39:10  cheshire
-<rdar://problem/5254377> Printer Setup Wizard started crashing in Bonjour104A8, after update to Visual Studio 2005
-
-Revision 1.35  2007/06/06 20:08:01  cheshire
-<rdar://problem/4528853> mDNS: When auto-highlighting items in lists, scroll list so highlighted item is in the middle
-AutoScroll model list as well as manufacturer list
-
-Revision 1.34  2007/06/06 19:53:48  cheshire
-<rdar://problem/5187308> Move build train to Visual Studio 2005
-
-Revision 1.33  2007/04/20 22:58:10  herscher
-<rdar://problem/4826126> mDNS: Printer Wizard doesn't offer generic HP printers or generic PS support on Vista RC2
-
-Revision 1.32  2007/04/13 23:42:20  herscher
-<rdar://problem/4580061> mDNS: Printers added using Bonjour should be set as the default printer.
-
-Revision 1.31  2007/04/13 21:38:46  herscher
-<rdar://problem/4528853> mDNS: When auto-highlighting items in lists, scroll list so highlighted item is in the middle
-
-Revision 1.30  2007/04/13 20:23:40  herscher
-Fixed mistake in previous checkin that reverted license text for this file
-
-Revision 1.29  2007/04/13 18:10:24  herscher
-<rdar://problem/4496652> mDNS: Don't allow user to choose non-working driver
-
-Revision 1.28  2006/08/14 23:24:09  cheshire
-Re-licensed mDNSResponder daemon source code under Apache License, Version 2.0
-
-Revision 1.27  2005/10/05 21:41:45  herscher
-<rdar://problem/4190104> Use "application/octet-stream" to determine if CUPS shared queue supports raw
-
-Revision 1.26  2005/07/11 20:17:15  shersche
-<rdar://problem/4124524> UI fixes associated with CUPS printer workaround fix.
-
-Revision 1.25  2005/07/07 17:53:20  shersche
-Fix problems associated with the CUPS printer workaround fix.
-
-Revision 1.24  2005/06/30 18:02:54  shersche
-<rdar://problem/4124524> Workaround for Mac OS X Printer Sharing bug
-
-Revision 1.23  2005/04/18 02:33:47  shersche
-<rdar://problem/4091216> Default printer option cannot be deselected
-
-Revision 1.22  2005/04/13 17:46:22  shersche
-<rdar://problem/4082122> Generic PCL not selected when printers advertise multiple text records
-
-Revision 1.21  2005/03/30 02:09:55  shersche
-Auto-resize the column width to account for differing fonts and font sizes
-
-Revision 1.20  2005/03/05 02:27:45  shersche
-<rdar://problem/4030388> Generic drivers don't do color
-
-Revision 1.19  2005/02/23 02:08:51  shersche
-<rdar://problem/4012275> If we can't match the manufacturer, and select a generic printer, then show all the manufacturers in the manufacturer pane, not just "Generic".
-
-Revision 1.18  2005/02/15 07:02:51  shersche
-<rdar://problem/4003724> Display different UI text when generic printer drivers are selected
-
-Revision 1.17  2005/02/08 21:45:06  shersche
-<rdar://problem/3947490> Default to Generic PostScript or PCL if unable to match driver
-
-Revision 1.16  2005/02/08 18:56:03  shersche
-Fix generated IPP url so that it doesn't add "/printers" string
-
-Revision 1.15  2005/02/01 01:44:07  shersche
-Load ntprint.inf at startup.  This will cause the wizard to take a second or two longer to come up, but will eliminate the pause when auto-selecting the print drivers.
-
-Revision 1.14  2005/01/25 08:55:54  shersche
-<rdar://problem/3911084> Load icons at run-time from resource DLL
-Bug #: 3911084
-
-Revision 1.13  2005/01/06 08:15:45  shersche
-Append queue name to end of LPR port name, correctly build port name when queue name is absent
-
-Revision 1.12  2005/01/05 01:06:12  shersche
-<rdar://problem/3841218> Strip the first substring off the product key if an initial match can't be found with the whole product key.
-Bug #: 3841218
-
-Revision 1.11  2004/12/29 18:53:38  shersche
-<rdar://problem/3725106>
-<rdar://problem/3737413> Added support for LPR and IPP protocols as well as support for obtaining multiple text records. Reorganized and simplified codebase.
-Bug #: 3725106, 3737413
-
-Revision 1.10  2004/10/11 22:55:34  shersche
-<rdar://problem/3827624> Use the IP port number when deriving the printer port name.
-Bug #: 3827624
-
-Revision 1.9  2004/06/27 23:08:00  shersche
-code cleanup, make sure EnumPrintDrivers returns non-zero value, ignore comments in inf files
-
-Revision 1.8  2004/06/27 08:06:45  shersche
-Parse [Strings] section of inf file
-
-Revision 1.7  2004/06/26 04:00:05  shersche
-fix warnings compiling in debug mode
-Submitted by: herscher
-
-Revision 1.6  2004/06/26 03:19:57  shersche
-clean up warning messages
-
-Submitted by: herscher
-
-Revision 1.5  2004/06/25 05:06:02  shersche
-Trim whitespace from key/value pairs when parsing inf files
-Submitted by: herscher
-
-Revision 1.4  2004/06/25 02:44:13  shersche
-Tweaked code to handle Xerox Phaser printer identification
-Submitted by: herscher
-
-Revision 1.3  2004/06/25 02:27:58  shersche
-Do a CListCtrl::FindItem() before calling CListCtrl::SetItemState().
-Submitted by: herscher
-
-Revision 1.2  2004/06/23 18:09:23  shersche
-Normalize tag names when parsing inf files.
-Submitted by: herscher
-
-Revision 1.1  2004/06/18 04:36:58  rpantos
-First checked in
-*/
+ */
 
 #include "stdafx.h"
 #include "PrinterSetupWizardApp.h"
 #include "PrinterSetupWizardSheet.h"
 #include "ThirdPage.h"
-#include "StdioFileEx.h"
 #include <dns_sd.h>
 #include <tcpxcv.h>
 #include <winspool.h>
@@ -282,30 +138,25 @@ exit:
 	return;
 }
 
-CThirdPage::~CThirdPage()
+
+void
+CThirdPage::FreeManufacturers( Manufacturers & manufacturers )
 {
-	//
-	// clean up all the printer manufacturers
-	//
-	while (m_manufacturers.size())
+	for ( Manufacturers::iterator it = manufacturers.begin(); it != manufacturers.end(); it++ )
 	{
-		Manufacturers::iterator iter = m_manufacturers.begin();
-
-		while (iter->second->models.size())
+		for ( Models::iterator it2 = it->second->models.begin(); it2 != it->second->models.end(); it2++ )
 		{
-			Models::iterator it = iter->second->models.begin();
-
-			Model * model = *it;
-
-			delete model;
-
-			iter->second->models.erase(it);
+			delete *it2;
 		}
 
-		delete iter->second;
-
-		m_manufacturers.erase(iter);
+		delete it->second;
 	}
+}
+
+
+CThirdPage::~CThirdPage()
+{
+	FreeManufacturers( m_manufacturers );
 }
 
 // ----------------------------------------------------
@@ -381,6 +232,8 @@ CThirdPage::SelectMatch(Manufacturers & manufacturers, Printer * printer, Servic
 void
 CThirdPage::CopyPrinterSettings( Printer * printer, Service * service, Manufacturer * manufacturer, Model * model )
 {
+	DWORD portNameLen;
+
 	printer->manufacturer		=	manufacturer->name;
 	printer->displayModelName	=	model->displayName;
 	printer->modelName			=	model->name;
@@ -423,6 +276,18 @@ CThirdPage::CopyPrinterSettings( Printer * printer, Service * service, Manufactu
 		}
 
 		service->protocol = L"IPP";
+	}
+
+	// If it's not an IPP printr, truncate the portName so that it's valid
+
+	if ( service->type != kIPPServiceType )
+	{
+		portNameLen = printer->portName.GetLength() + 1;
+		
+		if ( portNameLen > MAX_PORTNAME_LEN )
+		{
+			printer->portName.Delete( MAX_PORTNAME_LEN - 1, ( portNameLen - MAX_PORTNAME_LEN ) );
+		}
 	}
 }
 
@@ -1112,7 +977,7 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 				useCUPSWorkaround = false;
 			}
 
-			if ( useCUPSWorkaround && printer->isSharedFromOSX && hasGenericDriver )
+			if ( useCUPSWorkaround && printer->isCUPSPrinter && hasGenericDriver )
 			{
 				//
 				// <rdar://problem/4496652> mDNS: Don't allow user to choose non-working driver
@@ -1122,6 +987,8 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 				LoadGenericPrintDriverDefs( genericManufacturers );
 
 				SelectMatch( genericManufacturers, printer, service, genericManufacturer, genericModel );
+
+				FreeManufacturers( genericManufacturers );
 			}
 			else
 			{
@@ -1143,7 +1010,7 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 	}
 	else if ( MatchGeneric( manufacturers, printer, service, &genericManufacturer, &genericModel ) )
 	{
-		if ( printer->isSharedFromOSX )
+		if ( printer->isCUPSPrinter )
 		{
 			//
 			// <rdar://problem/4496652> mDNS: Don't allow user to choose non-working driver
@@ -1155,6 +1022,8 @@ OSStatus CThirdPage::MatchPrinter(Manufacturers & manufacturers, Printer * print
 			SelectMatch( genericManufacturers, printer, service, genericManufacturer, genericModel );
 			
 			text.LoadString(IDS_PRINTER_MATCH_GOOD);
+
+			FreeManufacturers( genericManufacturers );
 		}
 		else
 		{
@@ -1691,6 +1560,7 @@ void CThirdPage::OnBnClickedHaveDisk()
 
 exit:
 
+	FreeManufacturers( manufacturers );
 	return;
 }
 
