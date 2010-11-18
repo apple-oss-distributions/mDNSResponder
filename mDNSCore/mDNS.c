@@ -2858,6 +2858,15 @@ mDNSexport void AnswerCurrentQuestionWithResourceRecord(mDNS *const m, CacheReco
 			mDNS_StopQuery_internal(m, q);								// Stop old query
 			AssignDomainName(&q->qname, &rr->resrec.rdata->u.name);		// Update qname
 			q->qnamehash = DomainNameHashValue(&q->qname);				// and namehash
+			// If a unicast query results in a CNAME that points to a .local, we need to re-try
+			// this as unicast. Setting the mDNSInterface_Unicast tells mDNS_StartQuery_internal
+			// to try this as unicast query even though it is a .local name
+			if (!mDNSOpaque16IsZero(q->TargetQID) && IsLocalDomain(&q->qname))
+				{
+				LogInfo("AnswerCurrentQuestionWithResourceRecord: Resolving a .local CNAME %p %##s (%s) CacheRecord %s",
+					q, q->qname.c, DNSTypeName(q->qtype), CRDisplayString(m, rr));
+				q->InterfaceID = mDNSInterface_Unicast;
+				}
 			mDNS_StartQuery_internal(m, q);								// start new query
 			// Record how many times we've done this. We need to do this *after* mDNS_StartQuery_internal,
 			// because mDNS_StartQuery_internal re-initializes CNAMEReferrals to zero
@@ -7067,7 +7076,7 @@ mDNSlocal mDNSBool ShouldSuppressQuery(mDNS *const m, domainname *qname, mDNSu16
 	// We still want the ability to be able to listen to the local services and hence
 	// don't fail .local requests. We always have a loopback interface which we don't
 	// check here.
-	if (IsLocalDomain(qname)) { LogInfo("ShouldSuppressQuery: Query not suppressed for %##s, qtype %s, Local question", qname, DNSTypeName(qtype)); return mDNSfalse; }
+	if (InterfaceID != mDNSInterface_Unicast && IsLocalDomain(qname)) { LogInfo("ShouldSuppressQuery: Query not suppressed for %##s, qtype %s, Local question", qname, DNSTypeName(qtype)); return mDNSfalse; }
 
 	// Skip Private domains as we have special addresses to get the hosts in the Private domain
 	AuthInfo = GetAuthInfoForName_internal(m, qname);
@@ -7083,7 +7092,7 @@ mDNSlocal mDNSBool ShouldSuppressQuery(mDNS *const m, domainname *qname, mDNSu16
 		if (i->ip.type != iptype) continue;
 
 		if (!InterfaceID || (InterfaceID == mDNSInterface_LocalOnly) || (InterfaceID == mDNSInterface_P2P) ||
-			(i->InterfaceID == InterfaceID))
+			(InterfaceID == mDNSInterface_Unicast) || (i->InterfaceID == InterfaceID))
 			{
 			if (iptype == mDNSAddrType_IPv4 && !mDNSv4AddressIsLoopback(&i->ip.ip.v4) && !mDNSv4AddressIsLinkLocal(&i->ip.ip.v4))
 				{
