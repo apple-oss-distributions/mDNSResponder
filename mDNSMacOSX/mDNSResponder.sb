@@ -113,6 +113,11 @@
 ; Allow access to System Keychain
 (allow file-read-data                 (regex #"^/System/Library/Security$"))
 (allow file-read-data                 (regex #"^/System/Library/Keychains/.*$"))
+; We just need access to System.keychain. But we don't want errors logged if other keychains are
+; accessed under /Library/Keychains. Other keychains may be accessed as part of setting up an SSL
+; connection. Instead of adding access to it here(to things which we don't need), we disable any
+; logging that might happen during the access
+(deny  file-read-data                 (regex #"^/Library/Keychains/") (with no-log))
 (allow file-read-data                 (regex #"^/Library/Keychains/System\.keychain$"))
 ; Our Module Directory Services cache
 (allow file-read-data                 (regex #"^/private/var/tmp/mds/"))
@@ -135,7 +140,6 @@
 (allow file-read-data (regex #"^/System/Library/PrivateFrameworks/DeviceToDeviceManager.framework(/|$)"))
 (allow file-read-data (regex #"^/System/Library/PrivateFrameworks/MobileBluetooth.framework(/|$)"))
 (allow file-read-data (regex #"^/System/Library/Frameworks/CoreFoundation.framework(/|$)"))
-(allow file-read-data (regex #"^/System/Library/Frameworks/CoreServices.framework(/|$)"))
 (allow file-read-data (regex #"^/System/Library/Frameworks/SystemConfiguration.framework(/|$)"))
 (allow file-read-data (regex #"^/System/Library/Frameworks/IOKit.framework(/|$)"))
 (allow file-read-data (regex #"^/System/Library/Frameworks/Security.framework(/|$)"))

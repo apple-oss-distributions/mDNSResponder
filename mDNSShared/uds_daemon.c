@@ -2040,7 +2040,7 @@ mDNSlocal mStatus handle_browse_request(request_state *request)
 
 	if (!request->msgptr) { LogMsg("%3d: DNSServiceBrowse(unreadable parameters)", request->sd); return(mStatus_BadParamErr); }
 
-	if (domain[0] == '\0') uDNS_RegisterSearchDomains(&mDNSStorage);
+	if (domain[0] == '\0') uDNS_SetupSearchDomains(&mDNSStorage, UDNS_START_WAB_QUERY);
 
 	typedn.c[0] = 0;
 	NumSubTypes = ChopSubTypes(regtype);	// Note: Modifies regtype string to remove trailing subtypes
@@ -2588,7 +2588,7 @@ mDNSlocal mStatus handle_enum_request(request_state *request)
 		{ LogMsg("%3d: DNSServiceEnumerateDomains(unreadable parameters)", request->sd); return(mStatus_BadParamErr); }
 
 	// allocate context structures
-	uDNS_RegisterSearchDomains(&mDNSStorage);
+	uDNS_SetupSearchDomains(&mDNSStorage, UDNS_START_WAB_QUERY);
 
 #if 0
 	// mark which kind of enumeration we're doing so we can (de)authorize certain domains
@@ -3832,6 +3832,8 @@ mDNSexport void udsserver_info(mDNS *const m)
 	LogTimer("m->DelaySleep           ", m->DelaySleep);
 	LogTimer("m->SleepLimit           ", m->SleepLimit);
 	LogMsgNoIdent("m->RegisterAutoTunnel6  %08X", m->RegisterAutoTunnel6);
+	LogMsgNoIdent("m->AutoTunnelRelayAddrIn  %.16a", &m->AutoTunnelRelayAddrIn);
+	LogMsgNoIdent("m->AutoTunnelRelayAddrOut  %.16a", &m->AutoTunnelRelayAddrOut);
 	}
 
 #if APPLE_OSX_mDNSResponder && MACOSX_MDNS_MALLOC_DEBUGGING

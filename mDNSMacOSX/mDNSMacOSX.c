@@ -48,7 +48,6 @@
 #include "dns_sd.h"					// For mDNSInterface_LocalOnly etc.
 #include "PlatformCommon.h"
 #include "uds_daemon.h"
-#include <CoreServices/CoreServices.h>
 
 #include <stdio.h>
 #include <stdarg.h>                 // For va_list support
@@ -3057,725 +3056,6 @@ mDNSlocal NetworkInterfaceInfoOSX *FindRoutableIPv4(mDNS *const m, mDNSu32 scope
 
 static DomainAuthInfo* AnonymousRacoonConfig = mDNSNULL;
 
-// We arbitrarily limit the message size to 128 bytes (which seems sufficient now) so that
-// freeing ELogContext is simpler which is treated as opaque quantity in many places
-typedef struct
-	{
-	char subdomain[32];
-	char message[128];
-	uuid_t uuid;
-	int result;
-	} ELogContext;
-
-typedef enum { HTTPGet = 1, HTTPPost } HTTPOperation;
-typedef enum { ConfigInvalid = 0, ConfigFetching, ConfigValid } ConfigState;
-typedef void (*HTTPClientCallback)(CFMutableDataRef responseData, ELogContext *context);
-#define	kReadStreamBufferSize			4096
-#define	kMaximumResponseSize			32768
-#define	kHTTPResponseCodeOK				200
-#define	kHTTPResponseCodeAuthFailure	401
-#define	kHTTPResponseCodeForbidden		403
-#define	kHTTPResponseCodeNotFound		404
-
-// eReporter configuration needs to be fetched whenever it becomes stale. We fetch it lazily
-// when we send the report.
-struct eReporterConfiguration {
-	CFDictionaryRef eRDict;
-	ConfigState eRState;
-} eReporterConfig;
-
-typedef struct
-	{
-	mDNSBool				authChecked;
-	CFHTTPAuthenticationRef	authentication;
-	CFMutableDataRef		responseData;
-	HTTPClientCallback		callback;
-	ELogContext				cbcontext;
-	HTTPOperation 			op;
-	CFStringRef 			headerFieldName;
-	CFStringRef 			headerFieldValue;
-	CFDataRef 				bodyData;
-	CFStringRef				url;
-	} HTTPDataStreamContext;
-
-
-// Forward declarations
-mDNSlocal void HTTPDataStream(CFStringRef url, HTTPOperation op, CFDataRef bodyData, CFStringRef headerFieldName,
-	CFStringRef headerFieldValue, CFHTTPAuthenticationRef auth, CFMutableDictionaryRef credentials,
-	HTTPClientCallback callback, ELogContext *context);
-mDNSlocal void mDNSReporterLogValidConfig(ELogContext *elog);
-
-mDNSlocal void CancelReadStream(CFReadStreamRef readStream)
-	{
-	if (readStream)
-		{
-		CFReadStreamSetClient(readStream, kCFStreamEventNone, NULL, NULL);
-		CFReadStreamUnscheduleFromRunLoop(readStream, CFRunLoopGetMain(), kCFRunLoopCommonModes);
-		CFReadStreamClose(readStream);
-		CFRelease(readStream);
-		}
-	}
-
-mDNSlocal void CancelHTTPDataStream(CFReadStreamRef stream, HTTPDataStreamContext *context)
-	{
-	LogInfo("CancelHTTPDataStream: called");
-	if (context)
-		{
-		if (context->authentication) CFRelease(context->authentication);
-		if (context->responseData) CFRelease(context->responseData);
-		if (context->headerFieldName) CFRelease(context->headerFieldName);
-		if (context->headerFieldValue) CFRelease(context->headerFieldValue);
-		if (context->bodyData) CFRelease(context->bodyData);
-		if (context->url) CFRelease(context->url);
-		freeL("HTTPDataStreamContext", context);
-		}
-	CancelReadStream(stream);
-	}
-
-mDNSlocal CFIndex HTTPResponseCode(CFReadStreamRef stream)
-	{
-	CFIndex errorCode = 0;
-	CFHTTPMessageRef responseHeaders = (CFHTTPMessageRef)CFReadStreamCopyProperty(stream, kCFStreamPropertyHTTPResponseHeader);
-	if (responseHeaders)
-		{
-		errorCode = CFHTTPMessageGetResponseStatusCode(responseHeaders);
-		CFRelease(responseHeaders);
-		}
-	return errorCode;
-	}
-
-mDNSlocal void RetryWithHTTPAuth(HTTPDataStreamContext *context, CFReadStreamRef stream)
-	{
-    CFStreamError err;
-	DomainAuthInfo *FoundInList;
-	CFMutableDictionaryRef	credentials = NULL;
-
-	// Need to use the same authentication object till it goes invalid
-	if (!context->authentication)
-		{
-		CFHTTPMessageRef responseHeader = (CFHTTPMessageRef)CFReadStreamCopyProperty(stream, kCFStreamPropertyHTTPResponseHeader);
-		// Get the authentication information from the response.
-		context->authentication = CFHTTPAuthenticationCreateFromResponse(NULL, responseHeader);
-		CFRelease(responseHeader);
-		}
-
-	// Check to see if the authentication is valid for use. Anything could have gone wrong
-	// from bad credentials to wrong type of authentication etc.
-	if (!context->authentication || !CFHTTPAuthenticationIsValid(context->authentication, &err))
-		{
-		LogMsg("RetryWithHTTPAuth: ERROR!! Authentication failed");
-		if (context->authentication)
-			{
-			// Check for bad credentials and treat these separately
-			if (err.domain == kCFStreamErrorDomainHTTP && (err.error == kCFStreamErrorHTTPAuthenticationBadUserName ||
-				err.error == kCFStreamErrorHTTPAuthenticationBadPassword))
-				{
-				LogMsg("RetryWithHTTPAuth: ERROR!! Bad credentials %d", err.error); 
-				}
-			}
-		CancelHTTPDataStream(stream, context);
-		return;
-    	}
-
-	// Do we need username & password?  Not all authentication types require them.
-	if (CFHTTPAuthenticationRequiresUserNameAndPassword(context->authentication))
-		{
-		char username[MAX_DOMAIN_LABEL + 1];
-
-
-		// Use the first BTMM username and password
-		for (FoundInList = (&mDNSStorage)->AuthInfoList; FoundInList; FoundInList = FoundInList->next)
-			if (!FoundInList->deltime && FoundInList->AutoTunnel) break;
-
-		if (!FoundInList)
-			{
-			LogInfo("RetryHTTPWithAuth:  No BTMM credentials");
-			CancelHTTPDataStream(stream, context);
-			return;
-			}
-
-		ConvertDomainLabelToCString_unescaped((domainlabel *)FoundInList->domain.c, username);
-		CFStringRef user = CFStringCreateWithBytes(NULL, (const mDNSu8 *)username, strlen(username), kCFStringEncodingASCII, false);
-		if (!user)
-			{
-			LogMsg("RetryHTTPWithAuth: ERROR!! CFStringCreateWithBytes error");
-			CancelHTTPDataStream(stream, context);
-			return;
-			}
-		CFStringRef pass = CFStringCreateWithBytes(NULL, (const mDNSu8 *)FoundInList->b64keydata, strlen(FoundInList->b64keydata),
-			kCFStringEncodingASCII, false);
-		if (!pass)
-			{
-			LogMsg("RetryHTTPWithAuth: ERROR!! CFStringCreateWithBytes error");
-			CFRelease(user);
-			CancelHTTPDataStream(stream, context);
-			return;
-			}
-		// Build the credentials dictionary
-		credentials = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-		if (!credentials)
-			{
-			LogMsg("RetryHTTPWithAuth: ERROR!! cannot allocate credentials");
-			CFRelease(user);
-			CFRelease(pass);
-			CancelHTTPDataStream(stream, context);
-			return;
-			}
-		CFDictionarySetValue(credentials, kCFHTTPAuthenticationUsername, user);
-		CFDictionarySetValue(credentials, kCFHTTPAuthenticationPassword, pass);
-		CFRelease(user);
-		CFRelease(pass);
-        }
-	else
-		{
-		LogMsg("RetryHTTPWithAuth: ERROR!! Unknown authentication method");
-		CancelHTTPDataStream(stream, context);
-		return;
-		}
-
-	HTTPDataStream(context->url, context->op, context->bodyData, context->headerFieldName, context->headerFieldValue,
-		context->authentication, credentials, context->callback, &context->cbcontext);
-
-	if (credentials) CFRelease(credentials);
-
-	// Cancel the old one
-	CancelHTTPDataStream(stream, context);
-	}
-
-mDNSlocal void HTTPDataStreamCallback(CFReadStreamRef stream, CFStreamEventType type, void *info)
-	{
-	HTTPDataStreamContext *context = (HTTPDataStreamContext *)info;
-	CFIndex status;
-
-	status = HTTPResponseCode(stream);
-
-	// if we are forbidden to access, we need to refetch the configuration file.
-	// For keeping it simple, we don't retry immediately. When the next message
-	// is logged, we will try getting the config file. If we want to modify this
-	// in the future to retry now, then we need to know to stop retrying after a
-	// few times.
-	if ((status == kHTTPResponseCodeNotFound) || (status == kHTTPResponseCodeForbidden))
-		{
-		if (status == kHTTPResponseCodeNotFound)
-			LogMsg("HTTPDataStreamCallback: ERROR!! Config plist cannot be found");
-		else if (status == kHTTPResponseCodeForbidden)
-			LogInfo("HTTPDataStreamCallback: Config plist Forbidden by server");
-		if (context->callback) context->callback(context->responseData, &context->cbcontext);
-		CancelHTTPDataStream(stream, context);
-		return;
-		}
-
-	switch (type)
-		{
-		case kCFStreamEventHasBytesAvailable:
-			{
-			mDNSu8 buffer[kReadStreamBufferSize];
-			CFIndex bytesRead;
-				
-			if (!context->authChecked)
-				{
-				context->authChecked = mDNStrue;
-				if (status == kHTTPResponseCodeAuthFailure)
-					{
-					RetryWithHTTPAuth(context, stream);
-					return;
-					}
-				}
-				
-			bytesRead = CFReadStreamRead(stream, buffer, sizeof(buffer));
-			if (bytesRead > 0)
-				{
-				CFDataAppendBytes(context->responseData, buffer, bytesRead);
-				if (CFDataGetLength(context->responseData) > kMaximumResponseSize)
-					{
-					LogMsg("HTTPDataStreamCallback: ERROR!! Appended max data %d", kMaximumResponseSize);
-					}
-				else { LogInfo("HTTPDataStreamCallback: successfully appended data of size %ld", bytesRead); return; }
-				}
-			else if (bytesRead < 0)
-				{
-				LogMsg("HTTPDataStreamCallback: ERROR!! CFReadStreamRead returned %ld", bytesRead);
-				}
-			}
-			break;
-		case kCFStreamEventEndEncountered:
-			{
-			if (!context->authChecked)
-				{
-				context->authChecked = mDNStrue;
-				if (status == kHTTPResponseCodeAuthFailure)
-					{
-					RetryWithHTTPAuth(context, stream);
-					return;
-					}
-				}
-			if (status != kHTTPResponseCodeOK)
-				LogMsg("HTTPDataStreamCallback: ERROR!! EndEncountered, statusCode %d, Operation %d", status, context->op);
-			else
-				LogInfo("HTTPDataStreamCallback: HTTP Ok for Operation %d", context->op);
-			if (context->callback) context->callback(context->responseData, &context->cbcontext);
-			}
-			break;
-		case kCFStreamEventErrorOccurred:
-			LogInfo("HTTPDataStreamCallback: ERROR!! kCFStreamEventErrorOccurred for Operation %d", context->op);
-			if (context->callback) context->callback(context->responseData, &context->cbcontext);
-			break;
-		default:
-			LogMsg("HTTPDataStreamCallback: ERROR!! default case");
-			if (context->callback) context->callback(context->responseData, &context->cbcontext);
-			break;
-		}
-	CancelHTTPDataStream(stream, context);
-}
-
-// Everything needs to be copied or retained locally if need to be accessed beyond function scope
-mDNSlocal void HTTPDataStream(CFStringRef url, HTTPOperation op, CFDataRef bodyData, CFStringRef headerFieldName,
-	CFStringRef headerFieldValue, CFHTTPAuthenticationRef authentication, CFMutableDictionaryRef credentials,
-	HTTPClientCallback callback, ELogContext *cbcontext)
-	{
-	CFURLRef myURL = NULL;
-	CFHTTPMessageRef myRequest = NULL;
-	CFReadStreamRef readStream = NULL;
-	HTTPDataStreamContext *contextInfo = NULL;
-	CFDictionaryRef proxyDict = NULL;
-
-	contextInfo = mallocL("HTTPDataStreamContext", sizeof(HTTPDataStreamContext));
-	if (!contextInfo) { LogMsg("HTTPDataStream: mallocL failure"); return; }
-
-	mDNSPlatformMemZero(contextInfo, sizeof(*contextInfo));
-	// Need to remember the state, so that if we need to retry with authentication, we can
-	// reissue the request
-	contextInfo->url = CFRetain(url);
-	contextInfo->callback = callback;
-	if(cbcontext) memcpy(&contextInfo->cbcontext, cbcontext, sizeof(ELogContext));
-	contextInfo->authChecked = mDNSfalse;
-	contextInfo->op = op;
-	if (authentication) contextInfo->authentication = (CFHTTPAuthenticationRef) CFRetain(authentication);
-	if (headerFieldName) contextInfo->headerFieldName = CFRetain(headerFieldName);
-	if (headerFieldValue) contextInfo->headerFieldValue = CFRetain(headerFieldValue);
-	if (bodyData) contextInfo->bodyData = CFRetain(bodyData);
-
-	myURL = CFURLCreateWithString(kCFAllocatorDefault, url, NULL);
-	if (!myURL) { LogMsg("HTTPDataStream: CFURLCreateWithString error"); goto cleanup; }
-
-	CFStringRef requestMethod = op == HTTPGet ? CFSTR("GET") : CFSTR("POST");
-	myRequest = CFHTTPMessageCreateRequest(kCFAllocatorDefault, requestMethod, myURL, kCFHTTPVersion1_1);
-	if (!myRequest) { LogMsg("HTTPDataStream: CFHTTPMessageCreateRequest error"); goto cleanup; }
-
-	if (bodyData) CFHTTPMessageSetBody(myRequest, bodyData);
-	if (headerFieldName) CFHTTPMessageSetHeaderFieldValue(myRequest, headerFieldName, headerFieldValue);
-
-	if (credentials)
-		{
-		if (!CFHTTPMessageApplyCredentialDictionary(myRequest, contextInfo->authentication, credentials, NULL))
-			{
-			LogMsg("HTTPDataStream: ERROR!! CFHTTPMessageApplyCredentialDictionary error");
-			goto cleanup;
-			}
-		}
-
-	readStream = CFReadStreamCreateForHTTPRequest(kCFAllocatorDefault, myRequest);
-	if (!readStream) { LogMsg("HTTPDataStream: CFStringCreateWithBytes error"); goto cleanup; }
-
-	proxyDict = SCDynamicStoreCopyProxies(NULL);
-	if (proxyDict)
-		{
-		mDNSBool ret = CFReadStreamSetProperty(readStream, kCFStreamPropertyHTTPProxy, proxyDict);
-		CFRelease(proxyDict);
-		if (!ret)
-			{
-			LogMsg("HTTPDataStream: CFReadStreamSetProperty HTTP proxy failed");
-			goto cleanup;
-			}
-		}
-
-	CFOptionFlags events = kCFStreamEventHasBytesAvailable | kCFStreamEventErrorOccurred | kCFStreamEventEndEncountered;
-
-	CFStreamClientContext readContext = {0, contextInfo, NULL, NULL, NULL};
-	CFReadStreamSetClient(readStream, events, HTTPDataStreamCallback, &readContext);
-	CFReadStreamScheduleWithRunLoop(readStream, CFRunLoopGetMain(), kCFRunLoopCommonModes);
-	if (CFReadStreamOpen(readStream))
-		{
-		contextInfo->responseData = CFDataCreateMutable(NULL, 0);
-		if (contextInfo->responseData)
-			{
-			// Release the things that we don't need
-			CFRelease(myURL);
-			CFRelease(myRequest);
-			return;
-			}
-		LogMsg("HTTPDataStream: ERROR!! responseData allocation failed");
-		}
-	else LogMsg("HTTPDataStream: ERROR!! CFReadStreamOpen failed");
-cleanup:
-	if (readStream) CancelReadStream(readStream);
-	if (myRequest) CFRelease(myRequest);
-	if (myURL) CFRelease(myURL);
-	if (contextInfo)
-		{
-		if (contextInfo->authentication) CFRelease(contextInfo->authentication);
-		if (contextInfo->headerFieldName) CFRelease(contextInfo->headerFieldName);
-		if (contextInfo->headerFieldValue) CFRelease(contextInfo->headerFieldValue);
-		if (contextInfo->bodyData) CFRelease(contextInfo->bodyData);
-		if (contextInfo->url) CFRelease(contextInfo->url);
-		freeL("HTTPDataStreamContext", contextInfo);
-		}
-	}
-
-mDNSlocal CFStringRef eReporterGetValueForKey(CFDictionaryRef dict, char *keyCString)
-	{
-	CFStringRef value;
-	CFStringRef key;
-
-	key = CFStringCreateWithCString(NULL, keyCString, kCFStringEncodingUTF8);
-	if (!CFDictionaryContainsKey(dict, key))
-		{
-		LogMsg("eReporterGetValueForKey: ERROR!! key %s not found", keyCString);
-		return NULL;
-		}
-	value = (CFStringRef)CFDictionaryGetValue(dict, key);
-	CFRelease(key);
-	if (!value)
-		{
-		LogMsg("eReporterGetValueForKey: ERROR!! value not found for %s", keyCString);
-		return NULL;
-		}
-	return value;
-	}
-	
-mDNSlocal void eReporterConfigCallback(CFMutableDataRef responseData, ELogContext *context)
-	{
-	CFDictionaryRef dict = NULL;
-	char *plistKeys[] = {"URL", "Publish", "LoadText", "URI", NULL};
-	int i;
-	CFErrorRef error;
-
-	if (!CFDataGetLength(responseData))
-		{
-		LogInfo("eReporterConfigCallback: Zero length data");
-		eReporterConfig.eRState = ConfigInvalid;
-		return;
-		}
-	CFPropertyListFormat format = kCFPropertyListXMLFormat_v1_0;
-	dict = CFPropertyListCreateWithData(0, responseData, kCFPropertyListImmutable, &format, &error);
-	if ( dict == NULL )
-		{
-		LogMsg("eReporterConfigCallback: Parsing property list failed");
-		eReporterConfig.eRState = ConfigInvalid;
-		CFRelease(error);
-		return;
-		}
-	i = 0;
-	while (plistKeys[i] != NULL)
-		{
-		if (eReporterGetValueForKey(dict, plistKeys[i]) == NULL)
-			{
-			LogMsg("eReporterConfigCallback: ERROR!! problem accessing key %s", plistKeys[i]);
-			CFRelease(dict);
-			eReporterConfig.eRState = ConfigInvalid;
-			return;
-			}
-		i++;
-		}
-	if (eReporterConfig.eRDict) CFRelease(eReporterConfig.eRDict);
-	eReporterConfig.eRDict = dict;
-	eReporterConfig.eRState = ConfigValid;
-	mDNSReporterLogValidConfig(context);
-	}
-
-mDNSlocal mDNSBool FetchEReporterConfiguration(ELogContext *context)
-	{
-	const char *urlString = "https://configuration.apple.com./configurations/internetservices/e3/mDNSResponder/Configurations1.0.plist";
-	//const char *urlString = "http://isdev02:9702/configuration/configurations/internetservices/e3/btmm/Configurations1.0.plist"; //dev server
-
-	CFStringRef url = CFStringCreateWithBytes(NULL, (const mDNSu8 *)urlString, strlen(urlString), kCFStringEncodingASCII, false);
-	if (!url) { LogMsg("FetchEReporterConfiguration: CFStringCreateWithBytes error"); return mDNSfalse; }
-
-	if (eReporterConfig.eRState == ConfigValid || eReporterConfig.eRState == ConfigFetching)
-		{
-		CFRelease(url);
-		return mDNSfalse;
-		}
-
-	eReporterConfig.eRState = ConfigFetching;
-	HTTPDataStream(url, HTTPGet, NULL, NULL, NULL, NULL, NULL, eReporterConfigCallback, context);
-	CFRelease(url);
-	return mDNStrue;
-	}
-
-// Builds an element of type : <key name="nameAttr"> value </key> and attaches it to
-// xmlTree
-mDNSlocal mDNSBool AddElementToTree(CFXMLTreeRef xmlTree, char *nameAttr, char *value)
-	{
-	/* <key name="BTMM domain"> domain </key> */
-
-	CFStringRef textval = CFStringCreateWithCString(NULL, value, kCFStringEncodingUTF8);
-	if (!textval) { LogMsg("AddElementToTree: cannot create CString for value %s", value); return mDNSfalse; }
-
-	CFStringRef keys[1] = { CFSTR("name") };
-	CFStringRef values[1] = { CFStringCreateWithCString(NULL, nameAttr, kCFStringEncodingUTF8) };
-
-	CFDictionaryRef dict = CFDictionaryCreate(NULL, (void*)keys, (void*)values, 1, &kCFTypeDictionaryKeyCallBacks,
-		&kCFTypeDictionaryValueCallBacks);
-	if (!dict)
-		{
-		LogMsg("AddElementToTree: ERROR!! CFDictionaryCreate failed for %s", nameAttr);
-		CFRelease(textval);
-		CFRelease(values[0]);
-		return mDNSfalse;
-		}
-
-	CFMutableArrayRef attr = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
-	if (!attr)
-		{
-		LogMsg("AddElementToTree: ERROR!! CFArrayCreateMutable failed for %s", nameAttr);
-		CFRelease(textval);
-		CFRelease(dict);
-		CFRelease(values[0]);
-		return mDNSfalse;
-		}
-
-	CFArrayAppendValue(attr, keys[0]);
-
-	/* Build <key name="nameAttr"> */
-
-	CFXMLElementInfo nameInfo;
-	nameInfo.attributes = (CFDictionaryRef)dict;
-	nameInfo.attributeOrder = (CFArrayRef) attr;
-	nameInfo.isEmpty = mDNSfalse;	
-	CFXMLNodeRef nameNode = CFXMLNodeCreate(kCFAllocatorDefault, kCFXMLNodeTypeElement, CFSTR("key"), &nameInfo,
-		kCFXMLNodeCurrentVersion);	
-	CFXMLTreeRef nameTree = CFXMLTreeCreateWithNode(kCFAllocatorDefault, nameNode);
-	CFTreeAppendChild(xmlTree, nameTree);
-	CFRelease(nameNode);
-	CFRelease(attr);
-	CFRelease(dict);
-	CFRelease(values[0]);
-
-	/* Build the rest: value </key> */
-
-	CFXMLNodeRef nameTextNode = CFXMLNodeCreate(kCFAllocatorDefault, kCFXMLNodeTypeText, textval, NULL,
-	   kCFXMLNodeCurrentVersion);	
-	CFXMLTreeRef nameTextTree = CFXMLTreeCreateWithNode(kCFAllocatorDefault, nameTextNode);
-	CFTreeAppendChild(nameTree, nameTextTree);
-	CFRelease(nameTextTree);
-	CFRelease(nameTextNode);
-	CFRelease(textval);
-
-	// Now that we are done with nameTree, we can release it
-	CFRelease(nameTree);
-
-	return mDNStrue;
-	}
-
-mDNSlocal void LogPOSTArgs(CFStringRef finalURL, CFStringRef LoadTextName, CFStringRef LoadTextValue, CFDataRef bodyData)
-	{
-	char buf1[128], buf2[64], buf3[64], buf4[1024];
-
-	if (!CFStringGetCString(finalURL, buf1, sizeof(buf1), kCFStringEncodingUTF8) ||
-		!CFStringGetCString(LoadTextName, buf2, sizeof(buf2), kCFStringEncodingUTF8) ||
-		!CFStringGetCString(LoadTextValue, buf3, sizeof(buf3), kCFStringEncodingUTF8))
-		{
-		LogMsg("mDNSEReportPOSTArgs: Error in parsing arguments");
-		return;	
-		}
-	CFStringRef bstr = CFStringCreateFromExternalRepresentation(NULL, bodyData, kCFStringEncodingUTF8);
-	buf4[0] = 0;
-	if (!CFStringGetCString(bstr, buf4, sizeof(buf4), kCFStringEncodingUTF8))
-		{
-		LogMsg("mDNSEReportPOSTArgs: buf4 cstring conversion problem");
-		}
-	if (bstr) CFRelease(bstr);
-	LogInfo("LogPOSTArgs: URL : %s, LoadTextName: %s, LoadTextValue: %s, bodyData %s", buf1, buf2, buf3, buf4);
-	}
-
-// This function is called when there is a valid configuration for eReporter service
-// We add the following:
-//
-// <key name="uuid"> uuid </key>
-// <key name="Subdomain"> subdomain </key>
-// <key name="Message"> message </key>
-// <key name="Time"> YYYY-MM-DD HH24:MI:SS </key>
-// <key name="SPS"> True/False </key>
-// <key name="Result"> Success/Fail </key>
-//
-// if result is -1, result won't be added. 1 means "Failed" and 0 means "Success"
-//
-mDNSlocal void mDNSReporterLogValidConfig(ELogContext *elog)
-	{
-	CFMutableStringRef finalURL = NULL;
-	CFStringRef LoadTextName = NULL;
-	CFDataRef bodyData = NULL;
-	CFBooleanRef pub;
-	CFXMLTreeRef appTree = NULL;
-
-	pub = (CFBooleanRef)eReporterGetValueForKey(eReporterConfig.eRDict, "Publish");
-	if (pub == NULL)
-		{
-		LogMsg("mDNSReporterLogValidConfig: Publish key does not exist");
-		return;
-		}
-
-	Boolean pubVal = CFBooleanGetValue(pub);
-	if (!pubVal)
-		{
-		// Set the config state to invalid so that we will refetch the configuration next time
-		// in case Publish value changes between now and then
-		eReporterConfig.eRState = ConfigInvalid;
-		LogInfo("mDNSReporterLogValidConfig: Value for Publish is %d", pubVal);
-		return;
-		}
-
-	CFXMLDocumentInfo documentInfo;
-	documentInfo.sourceURL = NULL;
-	documentInfo.encoding = kCFStringEncodingUTF8;
-	CFXMLNodeRef docNode = CFXMLNodeCreate( kCFAllocatorDefault, kCFXMLNodeTypeDocument, CFSTR(""), &documentInfo,
-		kCFXMLNodeCurrentVersion);
-	CFXMLTreeRef xmlDocument = CFXMLTreeCreateWithNode(kCFAllocatorDefault, docNode);
-	CFRelease(docNode);
-
-	/* <?xml version="1.0" encoding="utf-8"?> */
-	CFXMLProcessingInstructionInfo instructionInfo;
-	instructionInfo.dataString = CFSTR("version=\"1.0\" encoding=\"utf-8\"");
-	CFXMLNodeRef instructionNode = CFXMLNodeCreate(NULL, kCFXMLNodeTypeProcessingInstruction, CFSTR("xml"),
-		&instructionInfo, kCFXMLNodeCurrentVersion);
-	CFXMLTreeRef instructionTree = CFXMLTreeCreateWithNode(kCFAllocatorDefault, instructionNode);
-	CFTreeAppendChild(xmlDocument, instructionTree);
-	CFRelease(instructionTree);
-	CFRelease(instructionNode);
-
-	/* Root Element: <app name="mDNSResponder" version="XXX"> */
-
-	CFStringRef appKeys[2] = { CFSTR("name"), CFSTR("version") };
-	CFStringRef appValues[2] = { CFStringCreateWithCString(NULL, "mDNSResponder", kCFStringEncodingUTF8),
-								 CFStringCreateWithCString(NULL, STRINGIFY(mDNSResponderVersion), kCFStringEncodingUTF8) };
-
-	CFDictionaryRef appDict = CFDictionaryCreate(NULL, (void*)appKeys, (void*)appValues, 2, &kCFTypeDictionaryKeyCallBacks,
-		&kCFTypeDictionaryValueCallBacks);
-	if (!appDict) { LogMsg("mDNSEReporterLogValidConfig: CFDictionaryCreate App failed"); goto cleanup; }
-
-	CFMutableArrayRef appAttr = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
-	if (!appAttr) { LogMsg("mDNSEReporterLogValidConfig: CFArrayCreateMutable App failed"); goto cleanup; }
-
-	CFArrayAppendValue(appAttr, appKeys[0]);
-	CFArrayAppendValue(appAttr, appKeys[1]);
-
-	CFXMLElementInfo appInfo;
-	appInfo.attributes = (CFDictionaryRef) appDict;
-	appInfo.attributeOrder = (CFArrayRef) appAttr;
-	appInfo.isEmpty = mDNSfalse;
-	CFXMLNodeRef appNode = CFXMLNodeCreate ( kCFAllocatorDefault, kCFXMLNodeTypeElement, CFSTR("app"), &appInfo,
-		kCFXMLNodeCurrentVersion);	
-	appTree = CFXMLTreeCreateWithNode(kCFAllocatorDefault, appNode);
-	CFTreeAppendChild(xmlDocument, appTree);
-	CFRelease(appNode);
-	CFRelease(appAttr);
-	CFRelease(appDict);
-	CFRelease(appValues[0]);
-	CFRelease(appValues[1]);
-	// appTree will be released at the end as we will be appeneding other nodes to appTree below
-
-	char		uuidStr[37];
-	uuid_unparse(elog->uuid, uuidStr);
-	AddElementToTree(appTree, "UUID", uuidStr);
-
-	AddElementToTree(appTree, "Subdomain", elog->subdomain);
-	AddElementToTree(appTree, "Message", elog->message);
-
-	char tm_buffer[128];
-	time_t t = time(NULL);
-	struct tm *tm_t = gmtime(&t);
-	mDNS_snprintf(tm_buffer, sizeof(tm_buffer), "%4d-%02d-%02d %02d:%02d:%02d", tm_t->tm_year + 1900, tm_t->tm_mon + 1,
-		tm_t->tm_mday, tm_t->tm_hour, tm_t->tm_min, tm_t->tm_sec);
-	AddElementToTree(appTree, "Time", tm_buffer);
-
-	const CacheRecord *sps[3] = { mDNSNULL };
-	NetworkInterfaceInfo *intf;
-	mDNSBool SleepProxy = mDNSfalse;
-	for (intf = GetFirstActiveInterface(mDNSStorage.HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
-		{
-		if (intf->NetWake)
-			{
-			FindSPSInCache(&mDNSStorage, &intf->NetWakeBrowse, sps);
-			if (sps[0])
-				{
-				SleepProxy = mDNStrue;
-				break;
-				}
-			}
-		else { LogInfo("mDNSEReporterValidConfig: NetWake is not set %p", intf->InterfaceID); }
-		}
-	AddElementToTree(appTree, "SPS", (SleepProxy ? "True" : "False"));
-
-	if (elog->result != -1)
-		AddElementToTree(appTree, "Result", elog->result ? "fail" : "success");
-
-	bodyData = CFXMLTreeCreateXMLData(NULL, xmlDocument);
-	if (!bodyData) { LogMsg("mDNSEReporterLogValidConfig: CFXMLTreeCreateData failed for bodyData"); goto cleanup; }
-
-	CFStringRef url = eReporterGetValueForKey(eReporterConfig.eRDict, "URL");
-	if (!url) { LogMsg("mDNSEReporterLogValidConfig: eReporterGetValueForKey failed for URL"); goto cleanup; }
-
-	CFStringRef uri = eReporterGetValueForKey(eReporterConfig.eRDict, "URI");
-	if (!uri) { LogMsg("mDNSEReporterLogValidConfig: eReporterGetValueForKey failed for URI"); goto cleanup; }
-
-	finalURL = CFStringCreateMutable(NULL, 0);
-	if (!finalURL) { LogMsg("mDNSEReporterLogValidConfig: CFStringCreateMutable failed for finalURL"); goto cleanup; }
-
-	CFStringAppend(finalURL, url);
-	CFStringAppend(finalURL, uri);
-
-	LoadTextName = CFStringCreateWithCString(NULL, "x-LoadText", kCFStringEncodingUTF8);
-	if (!LoadTextName) { LogMsg("mDNSEReporterLogValidConfig: CFStringCreateWithCString failed for LoadText"); goto cleanup; }
-
-	CFStringRef LoadTextValue = eReporterGetValueForKey(eReporterConfig.eRDict, "LoadText");	
-	if (!LoadTextValue) { LogMsg("mDNSEReporterLogValidConfig: eReporterGetValueForKey failed for LoadTextValue"); goto cleanup; }
-
-	LogPOSTArgs(finalURL, LoadTextName, LoadTextValue, bodyData);
-
-	// we don't have a callback for the POST. If there is an error in POST, it will be logged
-	// by the callback of HTTPDataStream
-	HTTPDataStream(finalURL, HTTPPost, bodyData, LoadTextName, LoadTextValue, NULL, NULL, NULL, NULL);
-
-cleanup:
-	// Free whatever was allocated in this function
-	if (bodyData) CFRelease(bodyData);
-	if (finalURL) CFRelease(finalURL);
-	if (LoadTextName) CFRelease(LoadTextName);
-	if (appTree) CFRelease(appTree);
-	CFRelease(xmlDocument);
-	}
-
-mDNSlocal void mDNSEReporterLog(uuid_t *uuid, const char *subdomain, int result, char *message)
-	{
-	// We allocate ELogContext and free it at the end of the function. It is the
-	// responsibility of the called function to copy it if it needs to hold
-	// on to it
-	ELogContext *info = mallocL("ELogContext", sizeof (ELogContext));
-	if (!info) { LogMsg("mDNSEReporterLog: malloc failed"); return; }
-
-	// Take a local copy of all the log information
-	strlcpy(info->subdomain, subdomain, sizeof(info->subdomain));
-	strlcpy(info->message, message, sizeof(info->message));
-	info->result = result;
-	uuid_copy(info->uuid, *uuid);
-	if (eReporterConfig.eRState != ConfigValid)
-		{
-		// Currently we can't have two outstanding configuration fetches. If we have two quick
-		// back to back logs while the configuration is being fetched, we log only the first
-		// message to EReporter. If the configuration is valid (common case), then we don't
-		// drop any messages
-		if (!FetchEReporterConfiguration(info))
-			{
-			LogInfo("mDNSEReporterLog: Configuration being fetched.., Not logging");
-			}
-		freeL("ELogContext", info);
-		return;
-		}
-	mDNSReporterLogValidConfig(info);
-	freeL("ELogContext", info);
-	}
-
 #ifndef NO_SECURITYFRAMEWORK
 
 static CFMutableDictionaryRef domainStatusDict = NULL;
@@ -3983,10 +3263,10 @@ mDNSlocal void UpdateAutoTunnelDomainStatus(const mDNS *const m, const DomainAut
 			}
 		}
 	
-	// If we have a relay address, check the LLQ status as they don't go over the relay connection.
-	// If LLQs fail, then report failure. In future, when LLQs go over the relay connection, we don't
-	// need this logic
-	if (!mDNSIPv6AddressIsZero(m->AutoTunnelRelayAddr))
+	// If we have a relay address which lets other hosts to reach us through the relay, then we should
+	// report success except for the LLQs they don't go over the relay connection. If LLQs fail, then
+	// report failure. In future, when LLQs go over the relay connection, we don't need this logic
+	if (!mDNSIPv6AddressIsZero(m->AutoTunnelRelayAddrIn))
 		{
 		// If we have a bad signature error updating RR, it overrides any error as
 		// the user needs to be notified immediately 
@@ -4079,14 +3359,12 @@ mDNSlocal void UpdateAutoTunnelDomainStatus(const mDNS *const m, const DomainAut
 			static char statusBuf[16];
 			mDNS_snprintf(statusBuf, sizeof(statusBuf), "%d", (int)status);
 			mDNSASLLog((uuid_t *)&m->asl_uuid, "autotunnel.domainstatus", status ? "failure" : "success", statusBuf, "");
-			mDNSEReporterLog((uuid_t *)&m->asl_uuid, "autotunnel.domainstatus", status, statusBuf);
 			mDNSDynamicStoreSetConfig(kmDNSBackToMyMacConfig, mDNSNULL, domainStatusDict);
 			}
 		}
 		
 	CFRelease(domain);
 	CFRelease(dict);
-
 
 	debugf("UpdateAutoTunnelDomainStatus: %s", buffer);
 #endif // def NO_SECURITYFRAMEWORK
@@ -4135,7 +3413,7 @@ mDNSlocal void UpdateAnonymousRacoonConfig(mDNS *m)		// Determine whether we nee
 	DomainAuthInfo *info;
 	
 	for (info = m->AuthInfoList; info; info = info->next)
-		if (info->AutoTunnel && !info->deltime && (!mDNSIPPortIsZero(info->AutoTunnelNAT.ExternalPort) || !mDNSIPv6AddressIsZero(m->AutoTunnelRelayAddr)))
+		if (info->AutoTunnel && !info->deltime && (!mDNSIPPortIsZero(info->AutoTunnelNAT.ExternalPort) || !mDNSIPv6AddressIsZero(m->AutoTunnelRelayAddrIn)))
 			break;
 	
 	if (info != AnonymousRacoonConfig)
@@ -4167,7 +3445,7 @@ mDNSlocal void RegisterAutoTunnelHostRecord(mDNS *m, DomainAuthInfo *info)
 
 	NATProblem = mDNSIPPortIsZero(info->AutoTunnelNAT.ExternalPort) || info->AutoTunnelNAT.Result;
 
-	if (mDNSIPv6AddressIsZero(m->AutoTunnelRelayAddr))
+	if (mDNSIPv6AddressIsZero(m->AutoTunnelRelayAddrIn))
 		{
 		// If we don't have a relay address, check to see if we are behind a Double NAT or NAT with no NAT-PMP
 		// support.  
@@ -4420,16 +3698,16 @@ mDNSlocal void RegisterAutoTunnel6Record(mDNS *m, DomainAuthInfo *info)
 	// change, so check to see if the value has changed. This can also be zero when we are deregistering and
 	// getting called from the AutoTunnelRecordCallback
 
-	if (mDNSIPv6AddressIsZero(m->AutoTunnelRelayAddr))
+	if (mDNSIPv6AddressIsZero(m->AutoTunnelRelayAddrIn))
 		{
 		LogInfo("RegisterAutoTunnel6Record: Relay address is zero, not registering");
 		return;
 		}
 
 	if ((info->AutoTunnel6Record.resrec.RecordType > kDNSRecordTypeDeregistering) &&
-		(mDNSSameIPv6Address(info->AutoTunnel6Record.resrec.rdata->u.ipv6, m->AutoTunnelRelayAddr)))
+		(mDNSSameIPv6Address(info->AutoTunnel6Record.resrec.rdata->u.ipv6, m->AutoTunnelRelayAddrIn)))
 		{
-		LogInfo("RegisterAutoTunnel6Record: Relay address %.16a same, not registering", &m->AutoTunnelRelayAddr);
+		LogInfo("RegisterAutoTunnel6Record: Relay address %.16a same, not registering", &m->AutoTunnelRelayAddrIn);
 		return;
 		}
 
@@ -4451,7 +3729,7 @@ mDNSlocal void RegisterAutoTunnel6Record(mDNS *m, DomainAuthInfo *info)
 		AssignDomainName (&info->AutoTunnel6Record.namestorage, (const domainname*) "\x0C" "_autotunnel6");
 		AppendDomainLabel(&info->AutoTunnel6Record.namestorage, &m->hostlabel);
 		AppendDomainName (&info->AutoTunnel6Record.namestorage, &info->domain);
-		info->AutoTunnel6Record.resrec.rdata->u.ipv6 = m->AutoTunnelRelayAddr;
+		info->AutoTunnel6Record.resrec.rdata->u.ipv6 = m->AutoTunnelRelayAddrIn;
 		info->AutoTunnel6Record.resrec.RecordType = kDNSRecordTypeKnownUnique;
 
 		err = mDNS_Register_internal(m, &info->AutoTunnel6Record);
@@ -4459,10 +3737,10 @@ mDNSlocal void RegisterAutoTunnel6Record(mDNS *m, DomainAuthInfo *info)
 		else LogInfo("RegisterAutoTunnel6Record registering AutoTunnel6 Record %##s", info->AutoTunnel6Record.namestorage.c);
 
 		LogInfo("AutoTunnel6 server listening for connections on %##s[%.16a] :%##s[%.16a]",
-			info->AutoTunnel6Record.namestorage.c,     &m->AutoTunnelRelayAddr,
+			info->AutoTunnel6Record.namestorage.c,     &m->AutoTunnelRelayAddrIn,
 			info->AutoTunnelHostRecord.namestorage.c, &m->AutoTunnelHostAddr);
 
-		} else {LogInfo("RegisterAutoTunnel6Record: client context %p, RequestedPort %d, Address %.16a, record type %d", info->AutoTunnelNAT.clientContext, info->AutoTunnelNAT.RequestedPort, &m->AutoTunnelRelayAddr, info->AutoTunnel6Record.resrec.RecordType);}
+		} else {LogInfo("RegisterAutoTunnel6Record: client context %p, RequestedPort %d, Address %.16a, record type %d", info->AutoTunnelNAT.clientContext, info->AutoTunnelNAT.RequestedPort, &m->AutoTunnelRelayAddrIn, info->AutoTunnel6Record.resrec.RecordType);}
 
 	RegisterAutoTunnelHostRecord(m, info);
 	// When the AutoTunnel6 record comes up, we need to kick racoon and update the status.
@@ -4914,7 +4192,7 @@ mDNSlocal void TunnelClientFinish(mDNS *const m, DNSQuestion *question, const Re
 		{
 		LogInfo("TunnelClientFinish: Relay address %.16a", &answer->rdata->u.ipv6);
 		tun->rmt_outer6 = answer->rdata->u.ipv6;
-		tun->loc_outer6 = m->AutoTunnelRelayAddr;
+		tun->loc_outer6 = m->AutoTunnelRelayAddrOut;
 		}
 	else
 		{
@@ -4945,9 +4223,8 @@ mDNSlocal void TunnelClientFinish(mDNS *const m, DNSQuestion *question, const Re
 
 	mStatus result = needSetKeys ? AutoTunnelSetKeys(tun, mDNStrue) : mStatus_NoError;
 	static char msgbuf[32];
-	mDNS_snprintf(msgbuf, sizeof(msgbuf), "Client AutoTunnel setup - %d", result);
+	mDNS_snprintf(msgbuf, sizeof(msgbuf), "Tunnel setup - %d", result);
 	mDNSASLLog((uuid_t *)&m->asl_uuid, "autotunnel.config", result ? "failure" : "success", msgbuf, "");
-	mDNSEReporterLog((uuid_t *)&m->asl_uuid, "autotunnel.config", result, msgbuf);
 	// Kick off any questions that were held pending this tunnel setup
 	ReissueBlockedQuestions(m, &tun->dstname, (result == mStatus_NoError) ? mDNStrue : mDNSfalse);
 	}
@@ -4969,7 +4246,6 @@ mDNSexport void AutoTunnelCallback(mDNS *const m, DNSQuestion *question, const R
 		static char msgbuf[16];
 		mDNS_snprintf(msgbuf, sizeof(msgbuf), "%s lookup", DNSTypeName(question->qtype));
 		mDNSASLLog((uuid_t *)&m->asl_uuid, "autotunnel.config", "failure", msgbuf, "");
-		mDNSEReporterLog((uuid_t *)&m->asl_uuid, "autotunnel.config", 1, msgbuf);
 		UnlinkAndReissueBlockedQuestions(m, tun, mDNSfalse);
 		return;
 		}
@@ -4989,7 +4265,7 @@ mDNSexport void AutoTunnelCallback(mDNS *const m, DNSQuestion *question, const R
 				}
 			tun->rmt_inner = answer->rdata->u.ipv6;
 			LogInfo("AutoTunnelCallback:TC_STATE_AAAA_PEER: dst host %.16a", &tun->rmt_inner);
-			if (!mDNSIPv6AddressIsZero(m->AutoTunnelRelayAddr))
+			if (!mDNSIPv6AddressIsZero(m->AutoTunnelRelayAddrOut))
 				{
 				LogInfo("AutoTunnelCallback: Looking up _autotunnel6 AAAA");
 				tun->tc_state = TC_STATE_AAAA_PEER_RELAY;
@@ -7096,9 +6372,9 @@ mDNSexport void RemoveAutoTunnel6Record(mDNS *const m)
 	// Set the address to zero before calling DeregisterAutoTunnel6Record. If we call
 	// Deregister too quickly before the previous Register completed (just scheduled
 	// to be sent out) and when DeregisterAutoTunnel6Record calls mDNS_Register_internal,
-	// it invokes the AutoTunnelRecordCallback immediately and AutoTunnelRelayAddr should
+	// it invokes the AutoTunnelRecordCallback immediately and AutoTunnelRelayAddrIn should
 	// be zero so that we don't register again.
-	m->AutoTunnelRelayAddr = zerov6Addr;
+	m->AutoTunnelRelayAddrIn = zerov6Addr;
 	if (!m->AuthInfoList) LogInfo("RemoveAutoTunnel6Record: No Domain AuthInfo");
 	for (info = m->AuthInfoList; info; info = info->next)
 		{
@@ -7172,7 +6448,19 @@ mDNSlocal void AddAutoTunnel6Record(mDNS *const m, char *ifname, CFDictionaryRef
 		return;
 		}
 	
-	m->AutoTunnelRelayAddr = v6addr;
+	m->AutoTunnelRelayAddrOut = v6addr;
+
+	// if disabled administratively, don't bother to register. RegisterAutoTunnel6Record makes these same
+	// checks, but we do it here not just as an optimization but mainly to keep AutoTunnelRelayAddrIn zero
+	// as a non-zero AutoTunnelRelayAddrIn indicates that we have registered _autotunnel6 record and hence
+	// other hosts can connect to this host through the relay
+	if (!m->RegisterAutoTunnel6 || DisableInboundRelayConnection)
+		{
+		LogInfo("RegisterAutoTunnel6Record: registration Disabled RegisterAutoTunnel6 %d, DisableInbound %d",
+			m->RegisterAutoTunnel6, DisableInboundRelayConnection);
+		return;
+		}
+	m->AutoTunnelRelayAddrIn = v6addr;
 
 	if (!m->AuthInfoList) LogInfo("AddAutoTunnel6Record: No Domain AuthInfo");
 	for (info = m->AuthInfoList; info; info = info->next)
@@ -7204,6 +6492,9 @@ mDNSlocal void ParseBackToMyMac(mDNS *const m, CFDictionaryRef connd)
 		{
 		LogInfo("ParseBackToMyMac: CFDictionaryGetValue No value for BackToMyMac, Removing autotunnel6");
 		RemoveAutoTunnel6Record(m);
+		// Note: AutoTunnelRelayAddrIn is zeroed out in RemoveAutoTunnel6Record as it is called
+		// from other places.
+		m->AutoTunnelRelayAddrOut = zerov6Addr;
 		return;
 		}
 
@@ -7212,6 +6503,7 @@ mDNSlocal void ParseBackToMyMac(mDNS *const m, CFDictionaryRef connd)
 		{
 		LogInfo("ParseBackToMyMac: NULL value for Interface, Removing autotunnel6"); 
 		RemoveAutoTunnel6Record(m);
+		m->AutoTunnelRelayAddrOut = zerov6Addr;
 		// We don't have a utun interface, start the relay connection if possible
 		UpdateBTMMRelayConnection(m);
 		}
@@ -7293,11 +6585,11 @@ mDNSexport void mDNSMacOSXNetworkChanged(mDNS *const m)
 				else
 					{
 					if (!mDNSSameIPv6Address(p->loc_inner, m->AutoTunnelHostAddr) ||
-						!mDNSSameIPv6Address(p->loc_outer6, m->AutoTunnelRelayAddr))
+						!mDNSSameIPv6Address(p->loc_outer6, m->AutoTunnelRelayAddrOut))
 						{
 						AutoTunnelSetKeys(p, mDNSfalse);
 						p->loc_inner = m->AutoTunnelHostAddr;
-						p->loc_outer6 = m->AutoTunnelRelayAddr;
+						p->loc_outer6 = m->AutoTunnelRelayAddrOut;
 						AutoTunnelSetKeys(p, mDNStrue);
 						}
 					}
@@ -7647,7 +6939,14 @@ mDNSlocal void SysEventCallBack(int s1, short __unused filter, void *context)
 			msg.k.event_code == KEV_DL_LINK_ADDRESS_CHANGED ? "KEV_DL_LINK_ADDRESS_CHANGED" :
 			msg.k.event_code == KEV_DL_WAKEFLAGS_CHANGED    ? "KEV_DL_WAKEFLAGS_CHANGED"    : "?");
 
-		if (msg.k.event_code == KEV_DL_WAKEFLAGS_CHANGED) SetNetworkChanged(m, mDNSPlatformOneSecond * 2);
+		// We receive network change notifications both through configd and through SYSPROTO_EVENT socket.
+		// Configd may not generate network change events for manually configured interfaces (i.e., non-DHCP)
+		// always during sleep/wakeup due to some race conditions (See radar:8666757). At the same time, if
+		// "Wake on Network Access" is not turned on, the notification will not have KEV_DL_WAKEFLAGS_CHANGED.
+		// Hence, during wake up, if we see a KEV_DL_LINK_ON (i.e., link is UP), we trigger a network change.
+
+		if (msg.k.event_code == KEV_DL_WAKEFLAGS_CHANGED || msg.k.event_code == KEV_DL_LINK_ON)
+			SetNetworkChanged(m, mDNSPlatformOneSecond * 2);
 		}
 
 	mDNS_Unlock(m);
@@ -8039,7 +7338,8 @@ mDNSlocal mStatus mDNSPlatformInit_setup(mDNS *const m)
 #endif
 
 	m->AutoTunnelHostAddr.b[0] = 0;		// Zero out AutoTunnelHostAddr so UpdateInterfaceList() know it has to set it up
-	m->AutoTunnelRelayAddr = zerov6Addr;
+	m->AutoTunnelRelayAddrIn = zerov6Addr;
+	m->AutoTunnelRelayAddrOut = zerov6Addr;
 
 	NetworkChangedKey_IPv4         = SCDynamicStoreKeyCreateNetworkGlobalEntity(NULL, kSCDynamicStoreDomainState, kSCEntNetIPv4);
 	NetworkChangedKey_IPv6         = SCDynamicStoreKeyCreateNetworkGlobalEntity(NULL, kSCDynamicStoreDomainState, kSCEntNetIPv6);

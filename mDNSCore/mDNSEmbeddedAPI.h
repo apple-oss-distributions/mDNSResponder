@@ -1636,6 +1636,10 @@ struct NetworkInterfaceInfo_struct
 	mDNSu8          NetWake;			// Set if Wake-On-Magic-Packet is enabled on this interface
 	};
 
+#define SLE_DELETE              0x00000001
+#define SLE_WAB_QUERY_STARTED   0x00000002
+#define SLE_CF_QUERY_STARTED    0x00000004
+
 typedef struct SearchListElem
 	{
 	struct SearchListElem *next;
@@ -1646,8 +1650,8 @@ typedef struct SearchListElem
 	DNSQuestion AutomaticBrowseQ;
 	DNSQuestion RegisterQ;
 	DNSQuestion DefRegisterQ;
-	DNSQuestion DirQ;
-	int	numDirAnswers;
+	DNSQuestion CfQ;
+	int	numCfAnswers;
 	ARListElem *AuthRecs;
 	} SearchListElem;
 
@@ -1790,10 +1794,15 @@ struct mDNS_struct
 	HostnameInfo     *Hostnames;            // List of registered hostnames + hostname metadata
 	mDNSv6Addr        AutoTunnelHostAddr;	// IPv6 address advertised for AutoTunnel services on this machine
 	mDNSBool          AutoTunnelHostAddrActive;
-	mDNSv6Addr        AutoTunnelRelayAddr;	// IPv6 address advertised for AutoTunnel Relay services on this machine
+	// AutoTunnel Relay address has two distinct uses
+	// AutoTunnelRelayAddrIn: If non-zero, it means that this host can be reached (inbound connection) through the relay
+	// AutoTunnelRelayAddrOut: If non-zero, it means that this host can use the relay to reach (outbound connection) the
+	// other hosts through the relay
+	mDNSv6Addr        AutoTunnelRelayAddrIn;
+	mDNSv6Addr        AutoTunnelRelayAddrOut;
 	domainlabel       AutoTunnelLabel;		// Used to construct hostname for *IPv4* address of tunnel endpoints
 
-	mDNSBool          RegisterSearchDomains;
+	mDNSBool          StartWABQueries;
 	mDNSBool          RegisterAutoTunnel6;
 
 	// NAT-Traversal fields

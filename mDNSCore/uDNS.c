@@ -4577,8 +4577,9 @@ mDNSexport void mDNS_AddSearchDomain(const domainname *const domain)
 	for (p = &SearchList; *p; p = &(*p)->next)
 		if (SameDomainName(&(*p)->domain, domain))
 			{
-			// If domain is already in list, and marked for deletion, change it to "leave alone"
-			if ((*p)->flag == -1) (*p)->flag = 0;
+			// If domain is already in list, and marked for deletion, unmark the delete
+			// Be careful not to touch the other flags that may be present
+			if ((*p)->flag & SLE_DELETE) (*p)->flag &= ~SLE_DELETE;
 			LogInfo("mDNS_AddSearchDomain already in list %##s", domain->c);
 			return;
 			}
@@ -4588,7 +4589,6 @@ mDNSexport void mDNS_AddSearchDomain(const domainname *const domain)
 	if (!*p) { LogMsg("ERROR: mDNS_AddSearchDomain - malloc"); return; }
 	mDNSPlatformMemZero(*p, sizeof(SearchListElem));
 	AssignDomainName(&(*p)->domain, domain);
-	(*p)->flag = 1;	// add
 	(*p)->next = mDNSNULL;
 	LogInfo("mDNS_AddSearchDomain created new %##s", domain->c);
 	}
@@ -4630,40 +4630,40 @@ mDNSlocal void CheckAutoTunnel6Registration(mDNS *const m, mDNSBool RegisterAuto
 	}
 #endif
 
-mDNSlocal void FoundDirDomain(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
+mDNSlocal void FoundCFDomain(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 	{
 	SearchListElem *slElem = question->QuestionContext;
 	mDNSBool RegisterAutoTunnel6 = mDNStrue;
 	char *res = "DisableInboundRelay";
 	
-	LogInfo("FoundDirDomain: InterfaceID %p %s Question %##s Answer %s", answer->InterfaceID, AddRecord ? "Add" : "Rmv", question->qname.c, RRDisplayString(m, answer));
+	LogInfo("FoundCFDomain: InterfaceID %p %s Question %##s Answer %s", answer->InterfaceID, AddRecord ? "Add" : "Rmv", question->qname.c, RRDisplayString(m, answer));
 	if (answer->rrtype != kDNSType_TXT)
 		{
-		LogMsg("FoundDirDomain: answer type is not TXT %s for question %##s", DNSTypeName(answer->rrtype), question->qname.c);
+		LogMsg("FoundCFDomain: answer type is not TXT %s for question %##s", DNSTypeName(answer->rrtype), question->qname.c);
 		return;
 		}
 	if (answer->RecordType == kDNSRecordTypePacketNegative)
 		{
-		LogInfo("FoundDirDomain: Negative answer for %##s", question->qname.c);
+		LogInfo("FoundCFDomain: Negative answer for %##s", question->qname.c);
 		return;
 		}
 	if (answer->InterfaceID == mDNSInterface_LocalOnly)
 		{
-		LogInfo("FoundDirDomain: LocalOnly interfaceID for %##s", question->qname.c);
+		LogInfo("FoundCFDomain: LocalOnly interfaceID for %##s", question->qname.c);
 		return;
 		}
 
 	// TXT record is encoded as <len><data>
 	if (answer->rdlength != mDNSPlatformStrLen(res) + 1)
 		{
-		LogInfo("FoundDirDomain: Invalid TXT record to disable %##s, length %d", question->qname.c, answer->rdlength);
+		LogInfo("FoundCFDomain: Invalid TXT record to disable %##s, length %d", question->qname.c, answer->rdlength);
 		return;
 		}
 
 	// Compare the data (excluding the len byte)
 	if (!mDNSPlatformMemSame(&answer->rdata->u.txt.c[1], res, answer->rdlength - 1))
 		{
-		LogInfo("FoundDirDomain: Invalid TXT record to disable %##s", question->qname.c);
+		LogInfo("FoundCFDomain: Invalid TXT record to disable %##s", question->qname.c);
 		return;
 		}
 
@@ -4671,17 +4671,17 @@ mDNSlocal void FoundDirDomain(mDNS *const m, DNSQuestion *question, const Resour
 	// have zero answers across all domains to register autotunnel6.
 	if (AddRecord)
 		{
-		slElem->numDirAnswers++;
+		slElem->numCfAnswers++;
 		RegisterAutoTunnel6 = mDNSfalse;
 		}
 	else
 		{
 		const SearchListElem *s;
-		slElem->numDirAnswers--;
-		if (slElem->numDirAnswers < 0) LogMsg("FoundDirDomain: numDirAnswers less than zero %d", slElem->numDirAnswers);
+		slElem->numCfAnswers--;
+		if (slElem->numCfAnswers < 0) LogMsg("FoundCFDomain: numCfAnswers less than zero %d", slElem->numCfAnswers);
 		// See if any domain (including the slElem) has any answers
  		for (s=SearchList; s; s=s->next)
-			if (s->numDirAnswers) { RegisterAutoTunnel6 = mDNSfalse; break; }
+			if (s->numCfAnswers) { RegisterAutoTunnel6 = mDNSfalse; break; }
 		}
 #if APPLE_OSX_mDNSResponder
 	CheckAutoTunnel6Registration(m, RegisterAutoTunnel6);
@@ -4773,7 +4773,7 @@ mDNSexport void udns_validatelists(void *const v)
 	}
 #endif
 
-mDNSlocal void mDNS_StartDirQuestion(mDNS *const m, DNSQuestion *question, domainname *domain, void *context)
+mDNSlocal void mDNS_StartCFQuestion(mDNS *const m, DNSQuestion *question, domainname *domain, void *context)
 	{
 	AssignDomainName (&question->qname, (const domainname*)"\002cf" "\007_dns-sd" "\x04_udp");
 	AppendDomainName (&question->qname, domain);
@@ -4786,55 +4786,62 @@ mDNSlocal void mDNS_StartDirQuestion(mDNS *const m, DNSQuestion *question, domai
 	question->ForceMCast       = mDNSfalse;
 	question->ReturnIntermed   = mDNSfalse;
 	question->SuppressUnusable = mDNSfalse;
-	question->QuestionCallback = FoundDirDomain;
+	question->QuestionCallback = FoundCFDomain;
 	question->QuestionContext  = context;
-	LogInfo("mDNS_StartDirQuestion: Start DIR domain question %##s", question->qname.c);
+	LogInfo("mDNS_StartCFQuestion: Start CF domain question %##s", question->qname.c);
 	if (mDNS_StartQuery(m, question))
-		LogMsg("mDNS_StartDirQuestion: ERROR!! cannot start _dir._dns-sd query");
+		LogMsg("mDNS_StartCFQuestion: ERROR!! cannot start cf._dns-sd query");
 	}
 
 // This should probably move to the UDS daemon -- the concept of legacy clients and automatic registration / automatic browsing
 // is really a UDS API issue, not something intrinsic to uDNS
-mDNSexport mStatus uDNS_RegisterSearchDomains(mDNS *const m)
+mDNSexport mStatus uDNS_SetupSearchDomains(mDNS *const m, int action)
 	{
 	SearchListElem **p = &SearchList, *ptr;
 	const SearchListElem *s;
 	mDNSBool RegisterAutoTunnel6 = mDNStrue;
 	mStatus err;
 
-	// step 1: mark each element for removal (-1)
-	for (ptr = SearchList; ptr; ptr = ptr->next) ptr->flag = -1;
+	// step 1: mark each element for removal
+	for (ptr = SearchList; ptr; ptr = ptr->next) ptr->flag |= SLE_DELETE;
 
 	// Client has requested domain enumeration or automatic browse -- time to make sure we have the search domains from the platform layer
 	mDNS_Lock(m);
-	m->RegisterSearchDomains = mDNStrue;
-	mDNSPlatformSetDNSConfig(m, mDNSfalse, m->RegisterSearchDomains, mDNSNULL, mDNSNULL, mDNSNULL);
+	mDNSPlatformSetDNSConfig(m, mDNSfalse, mDNStrue, mDNSNULL, mDNSNULL, mDNSNULL);
 	mDNS_Unlock(m);
+
+	if (action & UDNS_START_WAB_QUERY)
+		m->StartWABQueries = mDNStrue;
 
 	// delete elems marked for removal, do queries for elems marked add
 	while (*p)
 		{
 		ptr = *p;
-		LogInfo("RegisterSearchDomains %d %p %##s", ptr->flag, ptr->AuthRecs, ptr->domain.c);
-		if (ptr->flag == -1)	// remove
+		LogInfo("uDNS_SetupSearchDomains:action %d: Flags %d,  AuthRecs %p, %##s", action, ptr->flag, ptr->AuthRecs, ptr->domain.c);
+		if (ptr->flag & SLE_DELETE)
 			{
 			ARListElem *arList = ptr->AuthRecs;
 			ptr->AuthRecs = mDNSNULL;
 			*p = ptr->next;
 
 			// If the user has "local" in their DNS searchlist, we ignore that for the purposes of domain enumeration queries
-			// Note: Stopping a question will not generate the RMV events for the question (handled in FoundDirDomain)
+			// Note: Stopping a question will not generate the RMV events for the question (handled in FoundCFDomain)
 			// and hence we need to recheck all the domains to see if we need to register/deregister _autotunnel6.
 			// This is done at the end.
-			if (!SameDomainName(&ptr->domain, &localdomain))
+			if ((ptr->flag & SLE_WAB_QUERY_STARTED) && !SameDomainName(&ptr->domain, &localdomain))
 				{
 				mDNS_StopGetDomains(m, &ptr->BrowseQ);
 				mDNS_StopGetDomains(m, &ptr->RegisterQ);
 				mDNS_StopGetDomains(m, &ptr->DefBrowseQ);
 				mDNS_StopGetDomains(m, &ptr->DefRegisterQ);
 				mDNS_StopGetDomains(m, &ptr->AutomaticBrowseQ);
-				mDNS_StopGetDomains(m, &ptr->DirQ);
 				}
+#if !TARGET_OS_EMBEDDED
+			if ((ptr->flag & SLE_CF_QUERY_STARTED) && !SameDomainName(&ptr->domain, &localdomain))
+				{
+				mDNS_StopGetDomains(m, &ptr->CfQ);
+				}
+#endif
 			mDNSPlatformMemFree(ptr);
 
 	        // deregister records generated from answers to the query
@@ -4844,15 +4851,15 @@ mDNSexport mStatus uDNS_RegisterSearchDomains(mDNS *const m)
 				arList = arList->next;
 				debugf("Deregistering PTR %##s -> %##s", dereg->ar.resrec.name->c, dereg->ar.resrec.rdata->u.name.c);
 				err = mDNS_Deregister(m, &dereg->ar);
-				if (err) LogMsg("uDNS_RegisterSearchDomains ERROR!! mDNS_Deregister returned %d", err);
+				if (err) LogMsg("uDNS_SetupSearchDomains:: ERROR!! mDNS_Deregister returned %d", err);
 				// Memory will be freed in the FreeARElemCallback
 				}
 			continue;
 			}
 
-		if (ptr->flag == 1)	// add
+		if ((action & UDNS_START_WAB_QUERY) && !(ptr->flag & SLE_WAB_QUERY_STARTED))
 			{
-			// If the user has "local" in their DNS searchlist, we ignore that for the purposes of domain enumeration queries
+			// If the user has "local" in their DNS searchlist, we ignore that for the purposes of domain enumeration queries.
 			if (!SameDomainName(&ptr->domain, &localdomain))
 				{
 				mStatus err1, err2, err3, err4, err5;
@@ -4862,27 +4869,36 @@ mDNSexport mStatus uDNS_RegisterSearchDomains(mDNS *const m)
 				err4 = mDNS_GetDomains(m, &ptr->DefRegisterQ,     mDNS_DomainTypeRegistrationDefault, &ptr->domain, mDNSInterface_Any, FoundDomain, ptr);
 				err5 = mDNS_GetDomains(m, &ptr->AutomaticBrowseQ, mDNS_DomainTypeBrowseAutomatic,     &ptr->domain, mDNSInterface_Any, FoundDomain, ptr);
 				if (err1 || err2 || err3 || err4 || err5)
-					LogMsg("uDNS_RegisterSearchDomains: GetDomains for domain %##s returned error(s):\n"
+					LogMsg("uDNS_SetupSearchDomains: GetDomains for domain %##s returned error(s):\n"
 						   "%d (mDNS_DomainTypeBrowse)\n"
 						   "%d (mDNS_DomainTypeBrowseDefault)\n"
 						   "%d (mDNS_DomainTypeRegistration)\n"
 						   "%d (mDNS_DomainTypeRegistrationDefault)"
 						   "%d (mDNS_DomainTypeBrowseAutomatic)\n",
 						   ptr->domain.c, err1, err2, err3, err4, err5);
-				mDNS_StartDirQuestion(m, &ptr->DirQ, &ptr->domain, ptr);
+				ptr->flag |= SLE_WAB_QUERY_STARTED;
 				}
-			ptr->flag = 0;
 			}
-
-		if (ptr->flag) { LogMsg("uDNS_RegisterSearchDomains - unknown flag %d. Skipping.", ptr->flag); }
+#if !TARGET_OS_EMBEDDED
+		if ((action & UDNS_START_CF_QUERY) && !(ptr->flag & SLE_CF_QUERY_STARTED))
+			{
+			if (!SameDomainName(&ptr->domain, &localdomain))
+				{
+				mDNS_StartCFQuestion(m, &ptr->CfQ, &ptr->domain, ptr);
+				ptr->flag |= SLE_CF_QUERY_STARTED;
+				}
+			}
+#endif
 
 		p = &ptr->next;
 		}
+#if !TARGET_OS_EMBEDDED
 	// if there is any domain has answers, need to deregister autotunnel6
  	for (s=SearchList; s; s=s->next)
-		if (s->numDirAnswers) { RegisterAutoTunnel6 = mDNSfalse; break; }
+		if (s->numCfAnswers) { RegisterAutoTunnel6 = mDNSfalse; break; }
 #if APPLE_OSX_mDNSResponder
 	CheckAutoTunnel6Registration(m, RegisterAutoTunnel6);
+#endif
 #endif
 	return mStatus_NoError;
 	}

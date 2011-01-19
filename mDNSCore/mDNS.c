@@ -7104,7 +7104,7 @@ mDNSlocal mDNSBool ShouldSuppressQuery(mDNS *const m, domainname *qname, mDNSu16
 				!mDNSv6AddressIsLoopback(&i->ip.ip.v6) &&
 				!mDNSv6AddressIsLinkLocal(&i->ip.ip.v6) &&
 				!mDNSSameIPv6Address(i->ip.ip.v6, m->AutoTunnelHostAddr) &&
-				!mDNSSameIPv6Address(i->ip.ip.v6, m->AutoTunnelRelayAddr))
+				!mDNSSameIPv6Address(i->ip.ip.v6, m->AutoTunnelRelayAddrOut))
 				{
 				LogInfo("ShouldSuppressQuery: Query not suppressed for %##s, qtype %s, Local Address %.16a found", qname, DNSTypeName(qtype),
 					&i->ip.ip.v6);
@@ -9557,7 +9557,7 @@ mDNSexport mStatus mDNS_Init(mDNS *const m, mDNS_PlatformSupport *const p,
 	m->AutoTunnelHostAddrActive = mDNSfalse;
 	m->AutoTunnelLabel.c[0]     = 0;
 
-	m->RegisterSearchDomains    = mDNSfalse;
+	m->StartWABQueries          = mDNSfalse;
 	m->RegisterAutoTunnel6      = mDNStrue;
 
 	// NAT traversal fields
@@ -9852,13 +9852,16 @@ mDNSexport mStatus uDNS_SetupDNSConfig(mDNS *const m)
 	
 	debugf("uDNS_SetupDNSConfig: entry");
 
-	if (m->RegisterSearchDomains) uDNS_RegisterSearchDomains(m);
+	// Let the platform layer get the current DNS information
+	// The m->StartWABQueries boolean is so that we lazily get the search domain list only on-demand
+	// and start the domain enumeration queries. (no need to hit the network with domain enumeration
+	// queries until we actually need that information).
+
+	uDNS_SetupSearchDomains(m, m->StartWABQueries ? (UDNS_START_WAB_QUERY | UDNS_START_CF_QUERY) :
+		(UDNS_START_CF_QUERY));
 
 	mDNS_Lock(m);
 
-	// Let the platform layer get the current DNS information
-	// The m->RegisterSearchDomains boolean is so that we lazily get the search domain list only on-demand
-	// (no need to hit the network with domain enumeration queries until we actually need that information).
 	for (ptr = m->DNSServers; ptr; ptr = ptr->next)
 		{
 		ptr->penaltyTime = 0;

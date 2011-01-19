@@ -66,8 +66,6 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
-		21E53F0F1219D1B3003EEE05 /* CoreServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 21E53F0E1219D1B3003EEE05 /* CoreServices.framework */; };
-		21E53F141219D1CA003EEE05 /* CoreServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 21E53F0E1219D1B3003EEE05 /* CoreServices.framework */; };
 		2E0405F50C3195F700F13B59 /* helper.c in Sources */ = {isa = PBXBuildFile; fileRef = 2E0405F40C3195F700F13B59 /* helper.c */; };
 		2E0405F60C31961100F13B59 /* helpermsg.defs in Sources */ = {isa = PBXBuildFile; fileRef = 2E0405EB0C3190DC00F13B59 /* helpermsg.defs */; settings = {ATTRIBUTES = (Server, Client, ); COMPILER_FLAGS = "-Wno-error"; }; };
 		2E0406150C3197CB00F13B59 /* libbsm.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 2E0406140C3197CB00F13B59 /* libbsm.dylib */; };
@@ -444,7 +442,6 @@
 		000753D303367C1C0CCA2C71 /* mDNSMacOSX.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = mDNSMacOSX.h; sourceTree = "<group>"; };
 		00CA213D02786FC30CCA2C71 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = /System/Library/Frameworks/IOKit.framework; sourceTree = "<absolute>"; };
 		09AB6884FE841BABC02AAC07 /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = /System/Library/Frameworks/CoreFoundation.framework; sourceTree = "<absolute>"; };
-		21E53F0E1219D1B3003EEE05 /* CoreServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreServices.framework; path = /System/Library/Frameworks/CoreServices.framework; sourceTree = "<absolute>"; };
 		21F432971134AA6800581B69 /* WebFilterDNS.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebFilterDNS.framework; path = /System/Library/PrivateFrameworks/WebFilterDNS.framework; sourceTree = "<absolute>"; };
 		2E0405EB0C3190DC00F13B59 /* helpermsg.defs */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.mig; path = helpermsg.defs; sourceTree = "<group>"; };
 		2E0405F00C31955500F13B59 /* mDNSResponderHelper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = mDNSResponderHelper; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -577,7 +574,6 @@
 				D284BE660ADD80740027CCDF /* SystemConfiguration.framework in Frameworks */,
 				D284BE670ADD80740027CCDF /* IOKit.framework in Frameworks */,
 				D284BE680ADD80740027CCDF /* Security.framework in Frameworks */,
-				21E53F0F1219D1B3003EEE05 /* CoreServices.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -589,7 +585,6 @@
 				D284BE8E0ADD80800027CCDF /* SystemConfiguration.framework in Frameworks */,
 				D284BE8F0ADD80800027CCDF /* IOKit.framework in Frameworks */,
 				D284BE900ADD80800027CCDF /* Security.framework in Frameworks */,
-				21E53F141219D1CA003EEE05 /* CoreServices.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -685,7 +680,6 @@
 				FFFB0DA407B43BED00B88D48 /* PreferencePane */,
 				08FB779DFE84155DC02AAC07 /* External Frameworks and Libraries */,
 				19C28FBDFE9D53C911CA2CBB /* Products */,
-				21E53F0E1219D1B3003EEE05 /* CoreServices.framework */,
 			);
 			name = mDNSResponder;
 			sourceTree = "<group>";

@@ -91,7 +91,17 @@ extern void UpdateAllSRVRecords(mDNS *m);
 extern void CheckNATMappings(mDNS *m);
 
 extern mStatus         uDNS_SetupDNSConfig(mDNS *const m);
-extern mStatus         uDNS_RegisterSearchDomains(mDNS *const m);
+
+// uDNS_SetupSearchDomains by default adds search domains. It also can be called with one or
+// more values for "action" which does the following:
+//
+// -UDNS_START_WAB_QUERY - start Wide Area Bonjour (domain enumeration) queries
+// -UDNS_START_CF_QUERY - start Configuration query
+
+#define UDNS_START_WAB_QUERY    0x00000001
+#define UDNS_START_CF_QUERY     0x00000002
+
+extern mStatus         uDNS_SetupSearchDomains(mDNS *const m, int action);
 
 typedef enum
 	{
