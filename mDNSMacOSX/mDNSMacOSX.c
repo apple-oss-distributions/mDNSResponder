@@ -4352,6 +4352,7 @@ mDNSexport void AddNewClientTunnel(mDNS *const m, DNSQuestion *const q)
 	p->q.ForceMCast       = mDNSfalse;
 	p->q.ReturnIntermed   = mDNStrue;
 	p->q.SuppressUnusable = mDNSfalse;
+	p->q.WakeOnResolve    = mDNSfalse;
 	p->q.QuestionCallback = AutoTunnelCallback;
 	p->q.QuestionContext  = p;
 
@@ -7671,4 +7672,18 @@ mDNSexport void mDNSPlatformSetAllowSleep(mDNS *const m, mDNSBool allowSleep)
 		IOPMAssertionCreateWithName(kIOPMAssertionTypeNoIdleSleep, kIOPMAssertionLevelOn, CFSTR("mDNSResponder"), &m->p->IOPMAssertion);
 		LogInfo("%s Creating NoIdleSleep power assertion", __FUNCTION__);
 		}
+	}
+
+mDNSexport void mDNSPlatformSendWakeupPacket(mDNS *const m, mDNSInterfaceID InterfaceID, char *EthAddr, char *IPAddr, int iteration)
+	{
+	mDNSu32 ifindex;
+
+	// Sanity check
+	ifindex = mDNSPlatformInterfaceIndexfromInterfaceID(m, InterfaceID);
+	if (ifindex <= 0)
+		{
+		LogMsg("mDNSPlatformSendWakeupPacket: ERROR!! Invalid InterfaceID %u", ifindex);
+		return;
+		}
+	mDNSSendWakeupPacket(ifindex, EthAddr, IPAddr, iteration);
 	}

@@ -2203,6 +2203,8 @@ mDNSlocal mStatus handle_resolve_request(request_state *request)
 	request->u.resolve.qsrv.ExpectUnique     = mDNStrue;
 	request->u.resolve.qsrv.ForceMCast       = (flags & kDNSServiceFlagsForceMulticast     ) != 0;
 	request->u.resolve.qsrv.ReturnIntermed   = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
+	request->u.resolve.qsrv.SuppressUnusable = mDNSfalse;
+	request->u.resolve.qsrv.WakeOnResolve    = (flags & kDNSServiceFlagsWakeOnResolve      ) != 0;
 	request->u.resolve.qsrv.QuestionCallback = resolve_result_callback;
 	request->u.resolve.qsrv.QuestionContext  = request;
 
@@ -2216,6 +2218,7 @@ mDNSlocal mStatus handle_resolve_request(request_state *request)
 	request->u.resolve.qtxt.ForceMCast       = (flags & kDNSServiceFlagsForceMulticast     ) != 0;
 	request->u.resolve.qtxt.ReturnIntermed   = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
 	request->u.resolve.qtxt.SuppressUnusable = mDNSfalse;
+	request->u.resolve.qtxt.WakeOnResolve    = mDNSfalse;
 	request->u.resolve.qtxt.QuestionCallback = resolve_result_callback;
 	request->u.resolve.qtxt.QuestionContext  = request;
 
@@ -2449,6 +2452,7 @@ mDNSlocal mStatus handle_queryrecord_request(request_state *request)
 	q->ForceMCast       = (flags & kDNSServiceFlagsForceMulticast     ) != 0;
 	q->ReturnIntermed   = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
 	q->SuppressUnusable = (flags & kDNSServiceFlagsSuppressUnusable) != 0;
+	q->WakeOnResolve    = mDNSfalse;
 	q->QuestionCallback = queryrecord_result_callback;
 	q->QuestionContext  = request;
 
@@ -2858,6 +2862,7 @@ mDNSlocal mStatus handle_addrinfo_request(request_state *request)
 	request->u.addrinfo.q4.ForceMCast       = request->u.addrinfo.q6.ForceMCast       = (flags & kDNSServiceFlagsForceMulticast     ) != 0;
 	request->u.addrinfo.q4.ReturnIntermed   = request->u.addrinfo.q6.ReturnIntermed   = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
 	request->u.addrinfo.q4.SuppressUnusable = request->u.addrinfo.q6.SuppressUnusable = (flags & kDNSServiceFlagsSuppressUnusable   ) != 0;
+	request->u.addrinfo.q4.SuppressUnusable = request->u.addrinfo.q6.SuppressUnusable = mDNSfalse;
 
 	if (request->u.addrinfo.protocol & kDNSServiceProtocol_IPv4)
 		{
@@ -4020,7 +4025,7 @@ struct CompileTimeAssertionChecks_uds_daemon
 	char sizecheck_request_state          [(sizeof(request_state)           <= 2000) ? 1 : -1];
 	char sizecheck_registered_record_entry[(sizeof(registered_record_entry) <=   60) ? 1 : -1];
 	char sizecheck_service_instance       [(sizeof(service_instance)        <= 6552) ? 1 : -1];
-	char sizecheck_browser_t              [(sizeof(browser_t)               <=  1016) ? 1 : -1];
+	char sizecheck_browser_t              [(sizeof(browser_t)               <=  1026) ? 1 : -1];
 	char sizecheck_reply_hdr              [(sizeof(reply_hdr)               <=   12) ? 1 : -1];
 	char sizecheck_reply_state            [(sizeof(reply_state)             <=   64) ? 1 : -1];
 	};

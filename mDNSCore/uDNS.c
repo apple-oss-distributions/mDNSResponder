@@ -553,6 +553,9 @@ mDNSexport mStatus mDNS_StartNATOperation_internal(mDNS *const m, NATTraversalIn
 			{
 			LogMsg("Error! Tried to add a NAT traversal that's already in the active list: request %p Prot %d Int %d TTL %d",
 				traversal, traversal->Protocol, mDNSVal16(traversal->IntPort), traversal->NATLease);
+			#if ForceAlerts
+				*(long*)0 = 0;
+			#endif
 			return(mStatus_AlreadyRegistered);
 			}
 		if (traversal->Protocol && traversal->Protocol == (*n)->Protocol && mDNSSameIPPort(traversal->IntPort, (*n)->IntPort) &&
@@ -1572,6 +1575,7 @@ mDNSlocal mStatus GetZoneData_StartQuery(mDNS *const m, ZoneData *zd, mDNSu16 qt
 	zd->question.ForceMCast          = mDNSfalse;
 	zd->question.ReturnIntermed      = mDNStrue;
 	zd->question.SuppressUnusable    = mDNSfalse;
+	zd->question.WakeOnResolve       = mDNSfalse;
 	zd->question.QuestionCallback    = GetZoneData_QuestionCallback;
 	zd->question.QuestionContext     = zd;
 
@@ -1709,7 +1713,7 @@ mDNSlocal void CompleteRecordNatMap(mDNS *m, NATTraversalInfo *n)
 	if (!rr->nta || mDNSIPv4AddressIsZero(rr->nta->Addr.ip.v4))
 		{
 		LogInfo("CompleteRecordNatMap called for %s but no zone information!", ARDisplayString(m, rr));
-		// We need to clear out the NATinfo state so that it will result in re-acuqiring the mapping
+		// We need to clear out the NATinfo state so that it will result in re-acquiring the mapping
 		// and hence this callback called again.
 		if (rr->NATinfo.clientContext)
 			{
@@ -1802,8 +1806,13 @@ mDNSlocal void StartRecordNatMap(mDNS *m, AuthRecord *rr)
 	else if (SameDomainLabel(p, (mDNSu8 *)"\x4" "_udp")) protocol = NATOp_MapUDP;
 	else { LogMsg("StartRecordNatMap: could not determine transport protocol of service %##s", rr->resrec.name->c); return; }
 	
+	//LogMsg("StartRecordNatMap: clientContext %p IntPort %d srv.port %d %s",
+	//	rr->NATinfo.clientContext, mDNSVal16(rr->NATinfo.IntPort), mDNSVal16(rr->resrec.rdata->u.srv.port), ARDisplayString(m, rr));
 	if (rr->NATinfo.clientContext) mDNS_StopNATOperation_internal(m, &rr->NATinfo);
 	rr->NATinfo.Protocol       = protocol;
+
+	// Shouldn't be trying to set IntPort here --
+	// BuildUpdateMessage overwrites srs->RR_SRV.resrec.rdata->u.srv.port with external (mapped) port number
 	rr->NATinfo.IntPort        = rr->resrec.rdata->u.srv.port;
 	rr->NATinfo.RequestedPort  = rr->resrec.rdata->u.srv.port;
 	rr->NATinfo.NATLease       = 0;		// Request default lease
@@ -1818,6 +1827,19 @@ mDNSlocal void StartRecordNatMap(mDNS *m, AuthRecord *rr)
 // record is temporarily left in the ResourceRecords list so that we can initialize later
 // when the target is resolvable. Similarly, when host name changes, we enter regState_NoTarget
 // and we do the same.
+
+// This UnlinkResourceRecord routine is very worrying. It bypasses all the normal cleanup performed
+// by mDNS_Deregister_internal and just unceremoniously cuts the record from the active list.
+// This is why re-regsitering this record was producing syslog messages like this:
+// "Error! Tried to add a NAT traversal that's already in the active list"
+// Right now UnlinkResourceRecord is fortunately only called by RegisterAllServiceRecords,
+// which then immediately calls mDNS_Register_internal to re-register the record, which probably
+// masked more serious problems. Any other use of UnlinkResourceRecord is likely to lead to crashes.
+// For now we'll workaround that specific problem by explicitly calling mDNS_StopNATOperation_internal,
+// but long-term we should either stop cancelling the record registration and then re-registering it,
+// or if we really do need to do this for some reason it should be done via the usual
+// mDNS_Deregister_internal path instead of just cutting the record from the list.
+
 mDNSlocal mStatus UnlinkResourceRecord(mDNS *const m, AuthRecord *const rr)
 	{
 	AuthRecord **list = &m->ResourceRecords;
@@ -1826,6 +1848,15 @@ mDNSlocal mStatus UnlinkResourceRecord(mDNS *const m, AuthRecord *const rr)
 		{
 		*list = rr->next;
 		rr->next = mDNSNULL;
+
+		// Temporary workaround to cancel any active NAT mapping operation
+		if (rr->NATinfo.clientContext)
+			{
+			mDNS_StopNATOperation_internal(m, &rr->NATinfo);
+			rr->NATinfo.clientContext = mDNSNULL;
+			if (rr->resrec.rrtype == kDNSType_SRV) rr->resrec.rdata->u.srv.port = rr->NATinfo.IntPort;
+			}
+
 		return(mStatus_NoError);
 		}
 	LogMsg("UnlinkResourceRecord:ERROR!! - no such active record %##s", rr->resrec.name->c);
@@ -2189,6 +2220,7 @@ mDNSlocal void GetStaticHostname(mDNS *m)
 	q->ForceMCast       = mDNSfalse;
 	q->ReturnIntermed   = mDNStrue;
 	q->SuppressUnusable = mDNSfalse;
+	q->WakeOnResolve    = mDNSfalse;
 	q->QuestionCallback = FoundStaticHostname;
 	q->QuestionContext  = mDNSNULL;
 
@@ -4786,6 +4818,7 @@ mDNSlocal void mDNS_StartCFQuestion(mDNS *const m, DNSQuestion *question, domain
 	question->ForceMCast       = mDNSfalse;
 	question->ReturnIntermed   = mDNSfalse;
 	question->SuppressUnusable = mDNSfalse;
+	question->WakeOnResolve    = mDNSfalse;
 	question->QuestionCallback = FoundCFDomain;
 	question->QuestionContext  = context;
 	LogInfo("mDNS_StartCFQuestion: Start CF domain question %##s", question->qname.c);
@@ -4919,5 +4952,5 @@ struct CompileTimeAssertionChecks_uDNS
 	// other overly-large structures instead of having a pointer to them, can inadvertently
 	// cause structure sizes (and therefore memory usage) to balloon unreasonably.
 	char sizecheck_tcpInfo_t     [(sizeof(tcpInfo_t)      <=  9056) ? 1 : -1];
-	char sizecheck_SearchListElem[(sizeof(SearchListElem) <=  4800) ? 1 : -1];
+	char sizecheck_SearchListElem[(sizeof(SearchListElem) <=  4860) ? 1 : -1];
 	};

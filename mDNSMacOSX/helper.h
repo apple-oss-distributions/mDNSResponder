@@ -73,5 +73,6 @@ extern void mDNSConfigureServer(int updown, const domainname *const fqdn);
 extern int  mDNSAutoTunnelSetKeys(int replacedelete, v6addr_t local_inner,
 				v6addr_t local_outer, short local_port, v6addr_t remote_inner,
 				v6addr_t remote_outer, short remote_port, const domainname *const fqdn);
+extern void mDNSSendWakeupPacket(unsigned ifid, char *eth_addr, char *ip_addr, int iteration);
 
 #endif /* H_HELPER_H */

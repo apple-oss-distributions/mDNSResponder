@@ -47,6 +47,7 @@
 #include <SystemConfiguration/SCDynamicStoreCopySpecific.h>
 #include <TargetConditionals.h>
 #include <IOKit/pwr_mgt/IOPMLib.h>
+#include <net/bpf.h>
 
 #include "mDNSEmbeddedAPI.h"
 #include "dns_sd.h"
@@ -2347,5 +2348,94 @@ fin:
 	*err = kmDNSHelperIPsecDisabled;
 #endif /* MDNS_NO_IPSEC */
 	update_idle_timer();
+	return KERN_SUCCESS;
+	}
+
+kern_return_t
+do_mDNSSendWakeupPacket(__unused mach_port_t port, unsigned ifid, const char *eth_addr, const char *ip_addr, int iteration, audit_token_t token)
+	{
+	int bpf_fd, i, j;
+	struct ifreq ifr;
+	char ifname[IFNAMSIZ];
+	char packet[512];
+	char *ptr = packet;
+	char bpf_device[12];
+    struct ether_addr *ea;
+	(void) ip_addr; // unused
+	(void) iteration; // unused
+	(void) token; // unused
+
+	if (if_indextoname(ifid, ifname) == NULL)
+		{
+		helplog(ASL_LEVEL_ERR, "do_mDNSSendWakeupPacket invalid interface index %u", ifid);
+		return errno;
+		}
+
+    ea = ether_aton(eth_addr);
+	if (ea == NULL)
+		{
+		helplog(ASL_LEVEL_ERR, "do_mDNSSendWakeupPacket invalid ethernet address %s", eth_addr);
+		return errno;
+		}
+
+	for (i = 0; i < 100; i++)
+		{
+        snprintf(bpf_device, sizeof(bpf_device), "/dev/bpf%d", i);
+		bpf_fd = open(bpf_device, O_RDWR, 0);
+		if (bpf_fd == -1)
+			continue;
+		else break;
+		}
+
+	if (bpf_fd == -1)
+		{
+		helplog(ASL_LEVEL_ERR, "do_mDNSSendWakeupPacket cannot find a bpf device");
+		return ENXIO;
+		}
+
+	memset(&ifr, 0, sizeof(ifr));
+	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
+
+	if (ioctl(bpf_fd, BIOCSETIF, (char *)&ifr) < 0)
+		{
+		helplog(ASL_LEVEL_ERR, "do_mDNSSendWakeupPacket BIOCSETIF failed %s", strerror(errno));
+		return errno;
+		}
+
+	// 0x00 Destination address
+    for (i=0; i<6; i++) *ptr++ = ea->octet[i];
+
+    // 0x06 Source address (Note: Since we don't currently set the BIOCSHDRCMPLT option, BPF will fill in the real interface address for us)
+    for (i=0; i<6; i++) *ptr++ = 0;
+
+    // 0x0C Ethertype (0x0842)
+    *ptr++ = 0x08;
+    *ptr++ = 0x42;
+
+    // 0x0E Wakeup sync sequence
+    for (i=0; i<6; i++) *ptr++ = 0xFF;
+
+    // 0x14 Wakeup data
+    for (j=0; j<16; j++) for (i=0; i<6; i++) *ptr++ = ea->octet[i];
+
+    // 0x74 Password
+    for (i=0; i<6; i++) *ptr++ = 0;
+
+	if (write(bpf_fd, packet, ptr - packet) < 0)
+		{
+		helplog(ASL_LEVEL_ERR, "do_mDNSSendWakeupPacket write failed %s", strerror(errno));
+		return errno;
+		}
+	helplog(ASL_LEVEL_INFO, "do_mDNSSendWakeupPacket sent unicast eth_addr %s, ip_addr %s", eth_addr, ip_addr);
+	// Send a broadcast one to handle ethernet switches that don't flood forward packets with
+	// unknown mac addresses.
+	for (i=0; i<6; i++) packet[i] = 0xFF;
+	if (write(bpf_fd, packet, ptr - packet) < 0)
+		{
+		helplog(ASL_LEVEL_ERR, "do_mDNSSendWakeupPacket write failed %s", strerror(errno));
+		return errno;
+		}
+	helplog(ASL_LEVEL_INFO, "do_mDNSSendWakeupPacket sent broadcast eth_addr %s, ip_addr %s", eth_addr, ip_addr);
+	close(bpf_fd);
 	return KERN_SUCCESS;
 	}

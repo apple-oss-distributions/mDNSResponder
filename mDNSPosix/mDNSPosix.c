@@ -1359,6 +1359,15 @@ mDNSexport mDNSs32 mDNSPlatformUTC(void)
 	return time(NULL);
 	}
 
+mDNSexport void mDNSPlatformSendWakeupPacket(mDNS *const m, mDNSInterfaceID InterfaceID, char *EthAddr, char *IPAddr, int iteration)
+	{
+	(void) m;
+	(void) InterfaceID;
+	(void) EthAddr;
+	(void) IPAddr;
+	(void) iteration;
+	}
+
 mDNSlocal void mDNSPosixAddToFDSet(int *nfds, fd_set *readfds, int s)
 	{
 	if (*nfds < s + 1) *nfds = s + 1;

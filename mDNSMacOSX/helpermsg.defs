@@ -98,3 +98,11 @@ routine mDNSAutoTunnelSetKeys(	port			: mach_port_t;
 								fqdn			: string_t;
 		out						err				: int;
 		ServerAuditToken		token			: audit_token_t);
+
+simpleroutine mDNSSendWakeupPacket(
+								port			: mach_port_t;
+								ifid			: unsigned;
+								eth_addr		: string_t;
+								ip_addr			: string_t;
+								iteration		: int;
+		ServerAuditToken		token			: audit_token_t);

@@ -523,6 +523,7 @@ DNSServiceErrorType DNSServiceResolve
 	x->qTXT.ForceMCast          = mDNSfalse;
 	x->qTXT.ReturnIntermed      = mDNSfalse;
 	x->qTXT.SuppressUnusable    = mDNSfalse;
+	x->qTXT.WakeOnResolve       = mDNSfalse;
 	x->qTXT.QuestionCallback    = FoundServiceInfo;
 	x->qTXT.QuestionContext     = x;
 

@@ -2183,6 +2183,14 @@ exit:
 	return err;
 }
 
+mDNSexport void mDNSPlatformSendWakeupPacket(mDNS *const m, mDNSInterfaceID InterfaceID, char *EthAddr, char *IPAddr, int iteration)
+	{
+	(void) m;
+	(void) InterfaceID;
+	(void) EthAddr;
+	(void) IPAddr;
+	(void) iteration;
+	}
 
 #if 0
 #pragma mark -

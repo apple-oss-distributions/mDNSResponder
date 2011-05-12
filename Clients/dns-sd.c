@@ -1073,7 +1073,7 @@ int main(int argc, char **argv)
 		}
 
 	if (argc < 2) goto Fail;        // Minimum command line is the command name and one argument
-	operation = getfirstoption(argc, argv, "EFBZLRPQqCAUNTMISV"
+	operation = getfirstoption(argc, argv, "EFBZLlRPQqCAUNTMISV"
 								#if HAS_NAT_PMP_API
 									"X"
 								#endif
@@ -1117,14 +1117,19 @@ int main(int argc, char **argv)
 					err = DNSServiceBrowse(&sc1, kDNSServiceFlagsShareConnection, opinterface, typ, dom, zonedata_browse, NULL);
 					break;
 
-		case 'L':	if (argc < opi+2) goto Fail;
-					typ = (argc < opi+2) ? ""      : argv[opi+1];
-					dom = (argc < opi+3) ? "local" : argv[opi+2];
-					typ = gettype(buffer, typ);
-					if (dom[0] == '.' && dom[1] == 0) dom = "local";   // We allow '.' on the command line as a synonym for "local"
-					printf("Lookup %s.%s.%s\n", argv[opi+0], typ, dom);
-					err = DNSServiceResolve(&client, 0, opinterface, argv[opi+0], typ, dom, resolve_reply, NULL);
-					break;
+		case 'l':
+		case 'L':	{
+					DNSServiceFlags rflags = 0;
+					if (argc < opi+2) goto Fail;
+ 					typ = (argc < opi+2) ? ""      : argv[opi+1];
+ 					dom = (argc < opi+3) ? "local" : argv[opi+2];
+ 					typ = gettype(buffer, typ);
+ 					if (dom[0] == '.' && dom[1] == 0) dom = "local";   // We allow '.' on the command line as a synonym for "local"
+ 					printf("Lookup %s.%s.%s\n", argv[opi+0], typ, dom);
+					if (operation == 'l') rflags |= kDNSServiceFlagsWakeOnResolve;
+					err = DNSServiceResolve(&client, rflags, opinterface, argv[opi+0], typ, dom, resolve_reply, NULL);
+ 					break;
+					}
 
 		case 'R':	if (argc < opi+4) goto Fail;
 					typ = (argc < opi+2) ? "" : argv[opi+1];

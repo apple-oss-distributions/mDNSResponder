@@ -75,6 +75,7 @@ void WCFConnectionDealloc(WCFConnection* c) __attribute__((weak_import));
 mDNSlocal void BeginSleepProcessing(mDNS *const m);
 mDNSlocal void RetrySPSRegistrations(mDNS *const m);
 mDNSlocal void SendWakeup(mDNS *const m, mDNSInterfaceID InterfaceID, mDNSEthAddr *EthAddr, mDNSOpaque48 *password);
+mDNSlocal void mDNS_PurgeBeforeResolve(mDNS *const m, DNSQuestion *q);
 
 // ***************************************************************************
 #if COMPILER_LIKES_PRAGMA_MARK
@@ -277,6 +278,9 @@ mDNSlocal void AnswerAllLocalQuestionsWithLocalAuthRecord(mDNS *const m, AuthRec
 // and then if the machine fails to wake, 3 goodbye packets).
 #define GoodbyeCount ((mDNSu8)3)
 #define WakeupCount ((mDNSu8)18)
+
+// Number of wakeups we send if WakeOnResolve is set in the question
+#define InitialWakeOnResolveCount ((mDNSu8)3)
 
 // Note that the announce intervals use exponential backoff, doubling each time. The probe intervals do not.
 // This means that because the announce interval is doubled after sending the first packet, the first
@@ -776,6 +780,11 @@ mDNSexport mStatus mDNS_Register_internal(mDNS *const m, AuthRecord *const rr)
 	rr->InFlightRDLen     = 0;
 	rr->QueuedRData       = 0;
 	rr->QueuedRDLen       = 0;
+	//mDNSPlatformMemZero(&rr->NATinfo, sizeof(rr->NATinfo));
+	// We should be recording the actual internal port for this service record here. Once we initiate our NAT mapping
+	// request we'll subsequently overwrite srv.port with the allocated external NAT port -- potentially multiple
+	// times with different values if the external NAT port changes during the lifetime of the service registration.
+	//if (rr->resrec.rrtype == kDNSType_SRV) rr->NATinfo.IntPort = rr->resrec.rdata->u.srv.port;
 
 //	rr->resrec.interface         = already set in mDNS_SetupResourceRecord
 //	rr->resrec.name->c           = MUST be set by client
@@ -2273,6 +2282,57 @@ mDNSlocal int RecordDupSuppressInfo(DupSuppressInfo ds[DupSuppressInfoSize], mDN
 	return(i);
 	}
 
+mDNSlocal void mDNSSendWakeOnResolve(mDNS *const m, DNSQuestion *q)
+	{
+	int len, i, cnt;
+	mDNSInterfaceID InterfaceID = q->InterfaceID;
+	domainname *d = &q->qname;
+
+	// We can't send magic packets without knowing which interface to send it on.
+	if (InterfaceID == mDNSInterface_Any || InterfaceID == mDNSInterface_LocalOnly || InterfaceID == mDNSInterface_P2P)
+		{
+		LogMsg("mDNSSendWakeOnResolve: ERROR!! Invalid InterfaceID %p for question %##s", InterfaceID, q->qname.c);
+		return;
+		}
+
+	// Split MAC@IPAddress and pass them separately
+	len = d->c[0];
+	i = 1;
+	cnt = 0;
+	for (i = 1; i < len; i++)
+		{
+		if (d->c[i] == '@')
+			{
+			char EthAddr[18];	// ethernet adddress : 12 bytes + 5 ":" + 1 NULL byte
+			char IPAddr[47];    // Max IP address len: 46 bytes (IPv6) + 1 NULL byte
+			if (cnt != 5)
+				{
+				LogMsg("mDNSSendWakeOnResolve: ERROR!! Malformed Ethernet address %##s, cnt %d", q->qname.c, cnt);
+				return;
+				}
+			if ((i - 1) > (int) (sizeof(EthAddr) - 1))
+				{
+				LogMsg("mDNSSendWakeOnResolve: ERROR!! Malformed Ethernet address %##s, length %d", q->qname.c, i - 1);
+				return;
+				}
+			if ((len - i) > (int)(sizeof(IPAddr) - 1))
+				{
+				LogMsg("mDNSSendWakeOnResolve: ERROR!! Malformed IP address %##s, length %d", q->qname.c, len - i);
+				return;
+				}
+			mDNSPlatformMemCopy(EthAddr, &d->c[1], i - 1);
+			EthAddr[i - 1] = 0;
+			mDNSPlatformMemCopy(IPAddr, &d->c[i + 1], len - i);
+			IPAddr[len - i] = 0;
+			mDNSPlatformSendWakeupPacket(m, InterfaceID, EthAddr, IPAddr, InitialWakeOnResolveCount - q->WakeOnResolveCount);
+			return;
+			}
+		else if (d->c[i] == ':')
+			cnt++;
+		}
+	LogMsg("mDNSSendWakeOnResolve: ERROR!! Malformed WakeOnResolve name %##s", q->qname.c);
+	}
+
 mDNSlocal mDNSBool AccelerateThisQuery(mDNS *const m, DNSQuestion *q)
 	{
 	// If more than 90% of the way to the query time, we should unconditionally accelerate it
@@ -2568,7 +2628,14 @@ mDNSlocal void SendQueries(mDNS *const m)
 					// If we're suppressing this question, or we successfully put it, update its SendQNow state
 					if (SuppressOnThisInterface(q->DupSuppress, intf) ||
 						BuildQuestion(m, &m->omsg, &queryptr, q, &kalistptr, &answerforecast))
-							q->SendQNow = (q->InterfaceID || !q->SendOnAll) ? mDNSNULL : GetNextActiveInterfaceID(intf);
+						{
+						q->SendQNow = (q->InterfaceID || !q->SendOnAll) ? mDNSNULL : GetNextActiveInterfaceID(intf);
+						if (q->WakeOnResolveCount)
+							{
+							mDNSSendWakeOnResolve(m, q);
+							q->WakeOnResolveCount--;
+							}
+						}
 					}
 				}
 
@@ -5932,8 +5999,11 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 								LogMsg("mDNSCoreReceiveResponse: ProbeCount %d; will rename %s", rr->ProbeCount, ARDisplayString(m, rr));
 								mDNS_Deregister_internal(m, rr, mDNS_Dereg_conflict);
 								}
-							// We assumed this record must be unique, but we were wrong. (e.g. There are two mDNSResponders on the same machine giving
-							// different answers for the reverse mapping record.) This is simply a misconfiguration, and we don't try to recover from it.
+							// We assumed this record must be unique, but we were wrong. (e.g. There are two mDNSResponders on the
+							// same machine giving different answers for the reverse mapping record, or there are two machines on the
+							// network using the same IP address.) This is simply a misconfiguration, and there's nothing we can do
+							// to fix it -- e.g. it's not our job to be trying to change the machine's IP address. We just discard our
+							// record to avoid continued conflicts (as we do for a conflict on our Unique records) and get on with life.
 							else if (rr->resrec.RecordType == kDNSRecordTypeKnownUnique)
 								{
 								LogMsg("mDNSCoreReceiveResponse: Unexpected conflict discarding %s", ARDisplayString(m, rr));
@@ -7378,6 +7448,13 @@ mDNSexport mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const qu
 		question->validDNSServers   = zeroOpaque64;
 		question->triedAllServersOnce = 0;
 		question->noServerResponse = 0;
+		if (question->WakeOnResolve)
+			{
+			question->WakeOnResolveCount = InitialWakeOnResolveCount;
+			mDNS_PurgeBeforeResolve(m, question);
+			}
+		else
+			question->WakeOnResolveCount = 0;
 
 		if (question->DuplicateOf) question->AuthInfo = question->DuplicateOf->AuthInfo;
 
@@ -7682,6 +7759,7 @@ mDNSlocal mStatus mDNS_StartBrowse_internal(mDNS *const m, DNSQuestion *const qu
 	question->ForceMCast       = ForceMCast;
 	question->ReturnIntermed   = mDNSfalse;
 	question->SuppressUnusable = mDNSfalse;
+	question->WakeOnResolve    = mDNSfalse;
 	question->QuestionCallback = Callback;
 	question->QuestionContext  = Context;
 	if (!ConstructServiceName(&question->qname, mDNSNULL, srv, domain)) return(mStatus_BadParamErr);
@@ -7855,6 +7933,7 @@ mDNSexport mStatus mDNS_StartResolveService(mDNS *const m,
 	query->qSRV.ForceMCast          = mDNSfalse;
 	query->qSRV.ReturnIntermed      = mDNSfalse;
 	query->qSRV.SuppressUnusable    = mDNSfalse;
+	query->qSRV.WakeOnResolve       = mDNSfalse;
 	query->qSRV.QuestionCallback    = FoundServiceInfoSRV;
 	query->qSRV.QuestionContext     = query;
 
@@ -7869,6 +7948,7 @@ mDNSexport mStatus mDNS_StartResolveService(mDNS *const m,
 	query->qTXT.ForceMCast          = mDNSfalse;
 	query->qTXT.ReturnIntermed      = mDNSfalse;
 	query->qTXT.SuppressUnusable    = mDNSfalse;
+	query->qTXT.WakeOnResolve       = mDNSfalse;
 	query->qTXT.QuestionCallback    = FoundServiceInfoTXT;
 	query->qTXT.QuestionContext     = query;
 
@@ -7883,6 +7963,7 @@ mDNSexport mStatus mDNS_StartResolveService(mDNS *const m,
 	query->qAv4.ForceMCast          = mDNSfalse;
 	query->qAv4.ReturnIntermed      = mDNSfalse;
 	query->qAv4.SuppressUnusable    = mDNSfalse;
+	query->qAv4.WakeOnResolve       = mDNSfalse;
 	query->qAv4.QuestionCallback    = FoundServiceInfo;
 	query->qAv4.QuestionContext     = query;
 
@@ -7897,6 +7978,7 @@ mDNSexport mStatus mDNS_StartResolveService(mDNS *const m,
 	query->qAv6.ForceMCast          = mDNSfalse;
 	query->qAv6.ReturnIntermed      = mDNSfalse;
 	query->qAv6.SuppressUnusable    = mDNSfalse;
+	query->qAv6.WakeOnResolve       = mDNSfalse;
 	query->qAv6.QuestionCallback    = FoundServiceInfo;
 	query->qAv6.QuestionContext     = query;
 
@@ -7947,6 +8029,7 @@ mDNSexport mStatus mDNS_GetDomains(mDNS *const m, DNSQuestion *const question, m
 	question->ForceMCast       = mDNSfalse;
 	question->ReturnIntermed   = mDNSfalse;
 	question->SuppressUnusable = mDNSfalse;
+	question->WakeOnResolve    = mDNSfalse;
 	question->QuestionCallback = Callback;
 	question->QuestionContext  = Context;
 	if (DomainType > mDNS_DomainTypeMax) return(mStatus_BadParamErr);
@@ -9670,6 +9753,22 @@ mDNSlocal void PurgeOrReconfirmCacheRecord(mDNS *const m, CacheRecord *cr, const
 		{
 		LogInfo("PurgeorReconfirmCacheRecord: Reconfirming Resourcerecord %s, RecordType %x", CRDisplayString(m, cr), cr->resrec.RecordType);
 		mDNS_Reconfirm_internal(m, cr, kDefaultReconfirmTimeForNoAnswer);
+		}
+	}
+
+mDNSlocal void mDNS_PurgeBeforeResolve(mDNS *const m, DNSQuestion *q)
+	{
+	const mDNSu32 slot = HashSlot(&q->qname);
+	CacheGroup *const cg = CacheGroupForName(m, slot, q->qnamehash, &q->qname);
+	CacheRecord *rp;
+
+	for (rp = cg ? cg->members : mDNSNULL; rp; rp = rp->next)
+		{
+		if (SameNameRecordAnswersQuestion(&rp->resrec, q))
+			{
+			LogInfo("mDNS_PurgeBeforeResolve: Flushing %s", CRDisplayString(m, rp));
+			mDNS_PurgeCacheResourceRecord(m, rp);
+			}
 		}
 	}
 

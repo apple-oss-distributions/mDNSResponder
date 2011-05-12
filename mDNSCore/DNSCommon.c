@@ -1074,6 +1074,7 @@ mDNSexport void mDNS_SetupQuestion(DNSQuestion *const q, const mDNSInterfaceID I
 	q->ForceMCast          = mDNSfalse;
 	q->ReturnIntermed      = mDNSfalse;
 	q->SuppressUnusable    = mDNSfalse;
+	q->WakeOnResolve       = mDNSfalse;
 	q->QuestionCallback    = callback;
 	q->QuestionContext     = context;
 	}

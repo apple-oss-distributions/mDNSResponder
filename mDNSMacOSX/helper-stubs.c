@@ -261,3 +261,14 @@ int mDNSAutoTunnelSetKeys(int replacedelete, v6addr_t local_inner,
 fin:
 	return err;
 	}
+
+void mDNSSendWakeupPacket(unsigned ifid, char *eth_addr, char *ip_addr, int iteration)
+	{
+	kern_return_t kr = KERN_SUCCESS;
+	int retry = 0, err = 0;
+	MACHRETRYLOOP_BEGIN(kr, retry, err, fin);
+	kr = proxy_mDNSSendWakeupPacket(getHelperPort(retry), ifid, eth_addr, ip_addr, iteration);
+	MACHRETRYLOOP_END(kr, retry, err, fin);
+fin:
+	(void) err;
+	}

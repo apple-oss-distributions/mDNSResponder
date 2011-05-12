@@ -1452,6 +1452,7 @@ struct DNSQuestion_struct
 	mDNSs32               LastQTxTime;		// Last time this Q was sent on one (but not necessarily all) interfaces
 	mDNSu32               CNAMEReferrals;	// Count of how many CNAME redirections we've done
 	mDNSBool              SuppressQuery;    // This query should be suppressed and not sent on the wire 
+	mDNSu8                WakeOnResolveCount; // Number of wakes that should be sent on resolve
 
 	// Wide Area fields. These are used internally by the uDNS core
 	UDPSocket            *LocalSocket;
@@ -1493,6 +1494,7 @@ struct DNSQuestion_struct
 	mDNSBool              ForceMCast;		// Set by client to force mDNS query, even for apparently uDNS names
 	mDNSBool              ReturnIntermed;	// Set by client to request callbacks for intermediate CNAME/NXDOMAIN results
 	mDNSBool              SuppressUnusable; // Set by client to suppress unusable queries to be sent on the wire
+	mDNSBool              WakeOnResolve;    // Send wakeup on resolve
 	mDNSQuestionCallback *QuestionCallback;
 	void                 *QuestionContext;
 	};
@@ -2541,6 +2543,7 @@ extern mStatus    mDNSPlatformGetPrimaryInterface(mDNS *const m, mDNSAddr *v4, m
 extern void       mDNSPlatformDynDNSHostNameStatusChanged(const domainname *const dname, const mStatus status);
 
 extern void       mDNSPlatformSetAllowSleep(mDNS *const m, mDNSBool allowSleep);
+extern void       mDNSPlatformSendWakeupPacket(mDNS *const m, mDNSInterfaceID InterfaceID, char *EthAddr, char *IPAddr, int iteration);
 
 #ifdef _LEGACY_NAT_TRAVERSAL_
 // Support for legacy NAT traversal protocols, implemented by the platform layer and callable by the core.
@@ -2810,15 +2813,15 @@ struct CompileTimeAssertionChecks_mDNS
 	char sizecheck_AuthRecord          [(sizeof(AuthRecord)           <=  1208) ? 1 : -1];
 	char sizecheck_CacheRecord         [(sizeof(CacheRecord)          <=   184) ? 1 : -1];
 	char sizecheck_CacheGroup          [(sizeof(CacheGroup)           <=   184) ? 1 : -1];
-	char sizecheck_DNSQuestion         [(sizeof(DNSQuestion)          <=   752) ? 1 : -1];
-	char sizecheck_ZoneData            [(sizeof(ZoneData)             <=  1588) ? 1 : -1];
+	char sizecheck_DNSQuestion         [(sizeof(DNSQuestion)          <=   762) ? 1 : -1];
+	char sizecheck_ZoneData            [(sizeof(ZoneData)             <=  1598) ? 1 : -1];
 	char sizecheck_NATTraversalInfo    [(sizeof(NATTraversalInfo)     <=   192) ? 1 : -1];
 	char sizecheck_HostnameInfo        [(sizeof(HostnameInfo)         <=  3050) ? 1 : -1];
 	char sizecheck_DNSServer           [(sizeof(DNSServer)            <=   320) ? 1 : -1];
 	char sizecheck_NetworkInterfaceInfo[(sizeof(NetworkInterfaceInfo) <=  6750) ? 1 : -1];
 	char sizecheck_ServiceRecordSet    [(sizeof(ServiceRecordSet)     <=  5500) ? 1 : -1];
 	char sizecheck_DomainAuthInfo      [(sizeof(DomainAuthInfo)       <=  7550) ? 1 : -1];
-	char sizecheck_ServiceInfoQuery    [(sizeof(ServiceInfoQuery)     <=  3050) ? 1 : -1];
+	char sizecheck_ServiceInfoQuery    [(sizeof(ServiceInfoQuery)     <=  3090) ? 1 : -1];
 #if APPLE_OSX_mDNSResponder
 	char sizecheck_ClientTunnel        [(sizeof(ClientTunnel)         <=  1104) ? 1 : -1];
 #endif

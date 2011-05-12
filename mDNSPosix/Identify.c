@@ -220,6 +220,8 @@ mDNSlocal mStatus StartQuery(DNSQuestion *q, char *qname, mDNSu16 qtype, const m
 	q->ExpectUnique     = mDNSfalse;	// Don't want to stop after the first response packet
 	q->ForceMCast       = mDNStrue;		// Query via multicast, even for apparently uDNS names like 1.1.1.17.in-addr.arpa.
 	q->ReturnIntermed   = mDNStrue;
+	q->SuppressUnusable = mDNSfalse;
+	q->WakeOnResolve    = mDNSfalse;
 	q->QuestionCallback = callback;
 	q->QuestionContext  = NULL;
 

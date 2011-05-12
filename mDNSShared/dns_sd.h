@@ -77,7 +77,7 @@
  */
 
 #ifndef _DNS_SD_H
-#define _DNS_SD_H 2581800
+#define _DNS_SD_H 2582100
 
 #ifdef  __cplusplus
     extern "C" {
@@ -341,7 +341,7 @@ enum
      * lock or take similar appropriate precautions to serialize those calls.
      */
 
-    kDNSServiceFlagsSuppressUnusable    = 0x8000
+    kDNSServiceFlagsSuppressUnusable    = 0x8000,
 	/*
 	 * This flag is meaningful only in DNSServiceQueryRecord which suppresses unusable queries on the
 	 * wire. If "hostname" is a wide-area unicast DNS hostname (i.e. not a ".local." name)
@@ -349,6 +349,11 @@ enum
 	 * for "hostname", since any addresses it found would be unlikely to be of any use anyway. Similarly,
 	 * if this host has no routable IPv4 address, the call will not try to look up IPv4 addresses for
 	 * "hostname".
+	 */
+	kDNSServiceFlagsWakeOnResolve      = 0x40000
+	/*
+	 * This flag is meaningful only in DNSServiceResolve. When set, it tries to send a magic packet
+	 * to wake up the client.
 	 */
 
     };

@@ -1094,6 +1094,16 @@ DNSServiceErrorType DNSSD_API DNSServiceResolve
 
 	if (!name || !regtype || !domain || !callBack) return kDNSServiceErr_BadParam;
 
+	// Need a real InterfaceID for WakeOnResolve
+	if ((flags & kDNSServiceFlagsWakeOnResolve) != 0 &&
+		((interfaceIndex == kDNSServiceInterfaceIndexAny) ||
+		(interfaceIndex == kDNSServiceInterfaceIndexLocalOnly) ||
+		(interfaceIndex == kDNSServiceInterfaceIndexUnicast) ||
+		(interfaceIndex == kDNSServiceInterfaceIndexP2P)))
+		{
+		return kDNSServiceErr_BadParam;
+		}
+
 	err = ConnectToServer(sdRef, flags, resolve_request, handle_resolve_response, callBack, context);
 	if (err) return err;	// On error ConnectToServer leaves *sdRef set to NULL
 
