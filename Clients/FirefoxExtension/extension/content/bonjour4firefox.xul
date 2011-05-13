@@ -180,7 +180,7 @@
 
 				if ( treeBrowseList.currentIndex == 0 )
 				{
-					window._content.location="http://www.apple.com/bonjour";
+					window._content.location="http://www.apple.com/macosx/features/bonjour";
 				}
 				else
 				{

@@ -478,7 +478,7 @@ mDNSlocal void DisplayPacketHeader(mDNS *const m, const DNSMessage *const msg, c
 
 	struct timeval tv;
 	struct tm tm;
-	const mDNSu32 index = mDNSPlatformInterfaceIndexfromInterfaceID(m, InterfaceID);
+	const mDNSu32 index = mDNSPlatformInterfaceIndexfromInterfaceID(m, InterfaceID, mDNSfalse);
 	char if_name[IFNAMSIZ];		// Older Linux distributions don't define IF_NAMESIZE
 	if_indextoname(index, if_name);
 	gettimeofday(&tv, NULL);
@@ -795,7 +795,7 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNS
 
 	// For now we're only interested in monitoring IPv4 traffic.
 	// All IPv6 packets should just be duplicates of the v4 packets.
-	if (!goodinterface) goodinterface = (FilterInterface == (int)mDNSPlatformInterfaceIndexfromInterfaceID(m, InterfaceID));
+	if (!goodinterface) goodinterface = (FilterInterface == (int)mDNSPlatformInterfaceIndexfromInterfaceID(m, InterfaceID, mDNSfalse));
 	if (goodinterface && AddressMatchesFilterList(srcaddr))
 		{
 		mDNS_Lock(m);
@@ -841,9 +841,8 @@ mDNSlocal mStatus mDNSNetMonitor(void)
 	gStopEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 	if (gStopEvent == INVALID_HANDLE_VALUE) return mStatus_UnknownErr;
 	if (!SetConsoleCtrlHandler(ConsoleControlHandler, TRUE)) return mStatus_UnknownErr;
-	SetSocketEventsEnabled(&mDNSStorage, TRUE);
-	while (WaitForSingleObjectEx(gStopEvent, INFINITE, TRUE) == WAIT_IO_COMPLETION);
-	SetSocketEventsEnabled(&mDNSStorage, FALSE);
+	while (WaitForSingleObjectEx(gStopEvent, INFINITE, TRUE) == WAIT_IO_COMPLETION)
+		DispatchSocketEvents(&mDNSStorage);
 	if (!SetConsoleCtrlHandler(ConsoleControlHandler, FALSE)) return mStatus_UnknownErr;
 	CloseHandle(gStopEvent);
 #else

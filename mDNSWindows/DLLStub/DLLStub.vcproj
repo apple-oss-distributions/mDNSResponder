@@ -51,6 +51,7 @@
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
 				UsePrecompiledHeader="0"
+				ProgramDataBaseFileName="$(IntDir)\dnssd.pdb"
 				WarningLevel="3"
 				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
@@ -118,6 +119,7 @@
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
 				UsePrecompiledHeader="0"
+				ProgramDataBaseFileName="$(IntDir)\dnssd.pdb"
 				WarningLevel="3"
 				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
@@ -181,6 +183,7 @@
 				PreprocessorDefinitions="WIN32;NDEBUG;_LIB;WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1"
 				RuntimeLibrary="0"
 				UsePrecompiledHeader="0"
+				ProgramDataBaseFileName="$(IntDir)\dnssd.lib.pdb"
 				WarningLevel="3"
 				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
@@ -212,7 +215,7 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
-				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot; mkdir &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot;&#x0D;&#x0A;echo F | xcopy /Y &quot;$(OutDir)\dnssdStatic.lib&quot;                                                        &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)\dnssd.lib&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot; mkdir &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot;&#x0D;&#x0A;echo F | xcopy /Y &quot;$(OutDir)\dnssdStatic.lib&quot;                                                        &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)\dnssd.lib&quot;&#x0D;&#x0A;xcopy /Y &quot;$(OutDir)\dnssd.lib.pdb&quot;                                                                         &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 		<Configuration
@@ -246,6 +249,7 @@
 				PreprocessorDefinitions="WIN32;NDEBUG;_LIB;WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1"
 				RuntimeLibrary="0"
 				UsePrecompiledHeader="0"
+				ProgramDataBaseFileName="$(IntDir)\dnssd.lib.pdb"
 				WarningLevel="3"
 				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
@@ -277,7 +281,7 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
-				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot; mkdir &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot;&#x0D;&#x0A;echo F | xcopy /I/Y &quot;$(OutDir)\dnssdStatic.lib&quot;                                                     &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)\dnssd.lib&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
+				CommandLine="if not &quot;%RC_XBS%&quot; == &quot;YES&quot; goto END&#x0D;&#x0A;if not exist &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot; mkdir &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot;&#x0D;&#x0A;echo F | xcopy /I/Y &quot;$(OutDir)\dnssdStatic.lib&quot;                                                     &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)\dnssd.lib&quot;&#x0D;&#x0A;xcopy /Y &quot;$(OutDir)\dnssd.lib.pdb&quot;                                                                         &quot;$(DSTROOT)\Program Files\Bonjour SDK\lib\$(PlatformName)&quot;&#x0D;&#x0A;:END&#x0D;&#x0A;"
 			/>
 		</Configuration>
 	</Configurations>

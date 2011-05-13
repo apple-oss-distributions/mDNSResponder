@@ -224,16 +224,22 @@ fin:
 	(void)err;
 	}
 
-void mDNSConfigureServer(int updown, const domainname *const fqdn)
+extern const char dnsprefix[];
+
+void mDNSConfigureServer(int updown, const char *const prefix, const domainname *const fqdn)
 	{
 	kern_return_t kr = KERN_SUCCESS;
 	int retry = 0, err = 0;
-	char fqdnStr[MAX_ESCAPED_DOMAIN_NAME] = { 0 };
-	if (fqdn && ConvertDomainNameToCString(fqdn, fqdnStr))
+	char fqdnStr[MAX_ESCAPED_DOMAIN_NAME + 10] = { 0 }; // Assume the prefix is no larger than 10 chars
+	if (fqdn)
 		{
-		// remove the trailing dot, as that is not used in the keychain entry racoon will lookup
-		mDNSu32 fqdnEnd = mDNSPlatformStrLen(fqdnStr);
-		if (fqdnEnd) fqdnStr[fqdnEnd - 1] = 0;
+		mDNSPlatformStrCopy(fqdnStr, prefix);
+		if (ConvertDomainNameToCString(fqdn, fqdnStr + mDNSPlatformStrLen(prefix)) && prefix == dnsprefix)
+			{
+			// remove the trailing dot, as that is not used in the keychain entry racoon will lookup
+			mDNSu32 fqdnEnd = mDNSPlatformStrLen(fqdnStr);
+			if (fqdnEnd) fqdnStr[fqdnEnd - 1] = 0;
+			}
 		}
 	MACHRETRYLOOP_BEGIN(kr, retry, err, fin);
 	kr = proxy_mDNSConfigureServer(getHelperPort(retry), updown, fqdnStr);
@@ -244,20 +250,46 @@ fin:
 
 int mDNSAutoTunnelSetKeys(int replacedelete, v6addr_t local_inner,
     v6addr_t local_outer, short local_port, v6addr_t remote_inner,
-    v6addr_t remote_outer, short remote_port, const domainname *const fqdn)
+    v6addr_t remote_outer, short remote_port, const char* const prefix, const domainname *const fqdn)
 	{
 	kern_return_t kr = KERN_SUCCESS;
 	int retry = 0, err = 0;
-	char fqdnStr[MAX_ESCAPED_DOMAIN_NAME] = { 0 };
-	if (fqdn && ConvertDomainNameToCString(fqdn, fqdnStr))
+	char fqdnStr[MAX_ESCAPED_DOMAIN_NAME + 10] = { 0 }; // Assume the prefix is no larger than 10 chars
+	if (fqdn)
 		{
-		// remove the trailing dot, as that is not used in the keychain entry racoon will lookup
-		mDNSu32 fqdnEnd = mDNSPlatformStrLen(fqdnStr);
-		if (fqdnEnd) fqdnStr[fqdnEnd - 1] = 0;
+		mDNSPlatformStrCopy(fqdnStr, prefix);
+		if (ConvertDomainNameToCString(fqdn, fqdnStr + mDNSPlatformStrLen(prefix)) && prefix == dnsprefix)
+			{
+			// remove the trailing dot, as that is not used in the keychain entry racoon will lookup
+			mDNSu32 fqdnEnd = mDNSPlatformStrLen(fqdnStr);
+			if (fqdnEnd) fqdnStr[fqdnEnd - 1] = 0;
+			}
 		}
 	MACHRETRYLOOP_BEGIN(kr, retry, err, fin);
 	kr = proxy_mDNSAutoTunnelSetKeys(getHelperPort(retry), replacedelete, local_inner, local_outer, local_port, remote_inner, remote_outer, remote_port, fqdnStr, &err);
 	MACHRETRYLOOP_END(kr, retry, err, fin);
 fin:
 	return err;
+	}
+
+void mDNSSendWakeupPacket(unsigned ifid, char *eth_addr, char *ip_addr, int iteration)
+	{
+	kern_return_t kr = KERN_SUCCESS;
+	int retry = 0, err = 0;
+	MACHRETRYLOOP_BEGIN(kr, retry, err, fin);
+	kr = proxy_mDNSSendWakeupPacket(getHelperPort(retry), ifid, eth_addr, ip_addr, iteration);
+	MACHRETRYLOOP_END(kr, retry, err, fin);
+fin:
+	(void) err;
+	}
+
+void mDNSPacketFilterControl(uint32_t command, char * ifname, uint16_t servicePort, uint16_t protocol)
+	{
+	kern_return_t kr = KERN_SUCCESS;
+	int retry = 0, err = 0;
+	MACHRETRYLOOP_BEGIN(kr, retry, err, fin);
+	kr = proxy_mDNSPacketFilterControl(getHelperPort(retry), command, ifname, servicePort, protocol);
+	MACHRETRYLOOP_END(kr, retry, err, fin);
+fin:
+	(void) err;
 	}

@@ -500,9 +500,7 @@ typedef uint32_t		DebugPropertyTag;
 	work with GCC due to GCC allow a zero-length array. Using a -1 condition turned out to be more portable.
 */
 
-#ifndef check_compile_time
 #define	check_compile_time( X )		extern int debug_compile_time_name[ ( X ) ? 1 : -1 ]
-#endif
 
 //---------------------------------------------------------------------------------------------------------------------------
 /*!	@defined	check_compile_time_code

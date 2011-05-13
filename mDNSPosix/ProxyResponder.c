@@ -69,8 +69,8 @@ mDNSlocal mStatus mDNS_RegisterProxyHost(mDNS *m, ProxyHost *p)
 	{
 	char buffer[32];
 	
-	mDNS_SetupResourceRecord(&p->RR_A,   mDNSNULL, mDNSInterface_Any, kDNSType_A,   60, kDNSRecordTypeUnique,      HostNameCallback, p);
-	mDNS_SetupResourceRecord(&p->RR_PTR, mDNSNULL, mDNSInterface_Any, kDNSType_PTR, 60, kDNSRecordTypeKnownUnique, HostNameCallback, p);
+	mDNS_SetupResourceRecord(&p->RR_A,   mDNSNULL, mDNSInterface_Any, kDNSType_A,   60, kDNSRecordTypeUnique,      AuthRecordAny, HostNameCallback, p);
+	mDNS_SetupResourceRecord(&p->RR_PTR, mDNSNULL, mDNSInterface_Any, kDNSType_PTR, 60, kDNSRecordTypeKnownUnique, AuthRecordAny, HostNameCallback, p);
 
 	p->RR_A.namestorage.c[0] = 0;
 	AppendDomainLabel(&p->RR_A.namestorage, &p->hostlabel);
@@ -158,7 +158,7 @@ mDNSlocal void RegisterService(mDNS *m, ServiceRecordSet *recordset,
 		txtbuffer, bptr-txtbuffer,	// TXT data, length
 		mDNSNULL, 0,				// Subtypes
 		mDNSInterface_Any,			// Interface ID
-		ServiceCallback, mDNSNULL);	// Callback and context
+		ServiceCallback, mDNSNULL, 0);	// Callback, context, flags
 
 	ConvertDomainNameToCString(recordset->RR_SRV.resrec.name, buffer);
 	printf("Made Service Records for %s\n", buffer);
@@ -198,7 +198,7 @@ mDNSlocal void NoSuchServiceCallback(mDNS *const m, AuthRecord *const rr, mStatu
 		ConvertDomainNameToCString(rr->resrec.name, buffer1);
 		DeconstructServiceName(rr->resrec.name, &n, &t, &d);
 		IncrementLabelSuffix(&n, mDNStrue);
-		mDNS_RegisterNoSuchService(m, rr, &n, &t, &d, proxyhostname, mDNSInterface_Any, NoSuchServiceCallback, mDNSNULL);
+		mDNS_RegisterNoSuchService(m, rr, &n, &t, &d, proxyhostname, mDNSInterface_Any, NoSuchServiceCallback, mDNSNULL, mDNSfalse);
 		ConvertDomainNameToCString(rr->resrec.name, buffer2);
 		printf("Name Conflict! %s renamed as %s\n", buffer1, buffer2);
 		}
@@ -213,7 +213,7 @@ mDNSlocal void RegisterNoSuchService(mDNS *m, AuthRecord *const rr, domainname *
 	MakeDomainLabelFromLiteralString(&n, name);
 	MakeDomainNameFromDNSNameString(&t, type);
 	MakeDomainNameFromDNSNameString(&d, domain);
-	mDNS_RegisterNoSuchService(m, rr, &n, &t, &d, proxyhostname, mDNSInterface_Any, NoSuchServiceCallback, proxyhostname);
+	mDNS_RegisterNoSuchService(m, rr, &n, &t, &d, proxyhostname, mDNSInterface_Any, NoSuchServiceCallback, proxyhostname, mDNSfalse);
 	ConvertDomainNameToCString(rr->resrec.name, buffer);
 	printf("Made Non-existence Record for %s\n", buffer);
 	}

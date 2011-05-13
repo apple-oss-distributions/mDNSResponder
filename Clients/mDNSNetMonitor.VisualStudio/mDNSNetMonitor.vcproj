@@ -40,7 +40,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="../../mDNSWindows/SystemService;../../mDNSWindows;../../mDNSShared;../../mDNSCore;&quot;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include&quot;"
+				AdditionalIncludeDirectories="../../mDNSWindows/SystemService;../../mDNSWindows;../../mDNSShared;../../mDNSCore;&quot;$(VCInstallDir)include&quot;;&quot;$(VCInstallDir)atlmfc\include&quot;;&quot;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include&quot;"
 				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE;_WIN32_WINNT=0x0501;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=&quot;&quot;&quot;&quot;;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_USE_32BIT_TIME_T"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -120,7 +120,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="../../mDNSWindows/SystemService;../../mDNSWindows;../../mDNSShared;../../mDNSCore;&quot;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include&quot;"
+				AdditionalIncludeDirectories="../../mDNSWindows/SystemService;../../mDNSWindows;../../mDNSShared;../../mDNSCore;&quot;$(VCInstallDir)include&quot;;&quot;$(VCInstallDir)atlmfc\include&quot;;&quot;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include&quot;"
 				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_WIN32_WINNT=0x0501;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=&quot;&quot;&quot;&quot;;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_USE_32BIT_TIME_T"
 				RuntimeLibrary="2"
 				UsePrecompiledHeader="0"

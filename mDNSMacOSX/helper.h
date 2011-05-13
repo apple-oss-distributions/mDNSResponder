@@ -47,6 +47,17 @@ enum mDNSAutoTunnelSetKeysReplaceDelete
 	kmDNSAutoTunnelSetKeysDelete
 	};
 
+// helper parses the system keychain and returns the information to mDNSResponder.
+// It returns four attributes. Attributes are defined after how they show up in
+// keychain access utility (the actual attribute name to retrieve these are different).
+enum mDNSKeyChainAttributes
+	{
+	kmDNSKcWhere, 	// Where
+	kmDNSKcAccount,	// Account
+	kmDNSKcKey,		// Key
+	kmDNSKcName		// Name
+	};
+
 #define ERROR(x, y) x,
 enum mDNSHelperErrors
 	{
@@ -69,9 +80,11 @@ extern void mDNSDynamicStoreSetConfig(int key, const char *subkey, CFPropertyLis
 extern void mDNSPreferencesSetName(int key, domainlabel *old, domainlabel *new);
 extern int  mDNSKeychainGetSecrets(CFArrayRef *secrets);
 extern void mDNSAutoTunnelInterfaceUpDown(int updown, v6addr_t addr);
-extern void mDNSConfigureServer(int updown, const domainname *const fqdn);
+extern void mDNSConfigureServer(int updown, const char *const prefix, const domainname *const fqdn);
 extern int  mDNSAutoTunnelSetKeys(int replacedelete, v6addr_t local_inner,
 				v6addr_t local_outer, short local_port, v6addr_t remote_inner,
-				v6addr_t remote_outer, short remote_port, const domainname *const fqdn);
+				v6addr_t remote_outer, short remote_port, const char *const prefix, const domainname *const fqdn);
+extern void mDNSSendWakeupPacket(unsigned ifid, char *eth_addr, char *ip_addr, int iteration);
+extern void mDNSPacketFilterControl(uint32_t command, char * ifname, uint16_t servicePort, uint16_t protocol);
 
 #endif /* H_HELPER_H */

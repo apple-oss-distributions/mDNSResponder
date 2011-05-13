@@ -78,7 +78,7 @@ mDNSlocal void RegisterService(mDNS *m, ServiceRecordSet *recordset,
 		txtbuffer, (mDNSu16)(1+txtbuffer[0]),		// TXT data, length
 		mDNSNULL, 0,								// Subtypes (none)
 		mDNSInterface_Any,							// Interface ID
-		Callback, mDNSNULL);						// Callback and context
+		Callback, mDNSNULL, 0);						// Callback, context, flags 
 
 	ConvertDomainNameToCString(recordset->RR_SRV.resrec.name, buffer);
 	printf("Made Service Records for %s\n", buffer);

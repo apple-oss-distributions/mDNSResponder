@@ -442,7 +442,7 @@ static mStatus RegisterOneService(const char *  richTextName,
                 text, textLen,						// TXT data, length
                 NULL, 0,							// Subtypes
                 mDNSInterface_Any,					// Interface ID
-                RegistrationCallback, thisServ);	// Callback and context
+                RegistrationCallback, thisServ, 0);	// Callback, context, flags
     }
     if (status == mStatus_NoError) {
         thisServ->serviceID = gServiceID;

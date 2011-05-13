@@ -84,7 +84,7 @@ simpleroutine mDNSAutoTunnelInterfaceUpDown(
 simpleroutine mDNSConfigureServer(
 								port			: mach_port_t;
 								updown			: int;
-								fqdn			: string_t;
+								id				: string_t;
 		ServerAuditToken		token			: audit_token_t);
 
 routine mDNSAutoTunnelSetKeys(	port			: mach_port_t;
@@ -95,6 +95,22 @@ routine mDNSAutoTunnelSetKeys(	port			: mach_port_t;
 								remote_inner	: v6addr_t;
 								remote_outer	: v6addr_t;
 								remote_port		: uint16_t;		/* Port expressed as a numeric integer value */
-								fqdn			: string_t;
+								id				: string_t;
 		out						err				: int;
+		ServerAuditToken		token			: audit_token_t);
+
+simpleroutine mDNSSendWakeupPacket(
+								port			: mach_port_t;
+								ifid			: unsigned;
+								eth_addr		: string_t;
+								ip_addr			: string_t;
+								iteration		: int;
+		ServerAuditToken		token			: audit_token_t);
+
+simpleroutine mDNSPacketFilterControl(
+								port			: mach_port_t;
+								command			: uint32_t;
+								ifname			: string_t;
+								servicePort		: uint16_t;
+								protocol		: uint16_t;
 		ServerAuditToken		token			: audit_token_t);

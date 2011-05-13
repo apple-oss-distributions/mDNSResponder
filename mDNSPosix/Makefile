@@ -141,7 +141,7 @@ ifeq ($(os),x)
 # we get build failures: ‘daemon’ is deprecated (declared at /usr/include/stdlib.h:283)
 CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror -Wdeclaration-after-statement \
 	-D__MAC_OS_X_VERSION_MIN_REQUIRED=__MAC_OS_X_VERSION_10_4 #-Wunreachable-code
-CC = @gcc-4.0
+CC = gcc
 LD = $(CC) -dynamiclib
 LINKOPTS = -lSystem
 LDSUFFIX = dylib

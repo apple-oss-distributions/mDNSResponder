@@ -885,7 +885,7 @@ mDNSlocal mDNSu8 *PutUpdateSRV(DaemonInfo *d, DNSZone * zone, PktMsg *pkt, mDNSu
 	
 	( void ) d;
 
-	mDNS_SetupResourceRecord(&rr, NULL, 0, kDNSType_SRV, SRV_TTL, kDNSRecordTypeUnique, NULL, NULL);
+	mDNS_SetupResourceRecord(&rr, NULL, 0, kDNSType_SRV, SRV_TTL, kDNSRecordTypeUnique, AuthRecordAny, NULL, NULL);
 	rr.resrec.rrclass = kDNSClass_IN;
 	rr.resrec.rdata->u.srv.priority = 0;
 	rr.resrec.rdata->u.srv.weight   = 0;
@@ -1645,7 +1645,7 @@ exit:
 mDNSlocal void FormatLLQOpt(AuthRecord *opt, int opcode, const mDNSOpaque64 *const id, mDNSs32 lease)
 	{
 	mDNSPlatformMemZero(opt, sizeof(*opt));
-	mDNS_SetupResourceRecord(opt, mDNSNULL, mDNSInterface_Any, kDNSType_OPT, kStandardTTL, kDNSRecordTypeKnownUnique, mDNSNULL, mDNSNULL);
+	mDNS_SetupResourceRecord(opt, mDNSNULL, mDNSInterface_Any, kDNSType_OPT, kStandardTTL, kDNSRecordTypeKnownUnique, AuthRecordAny, mDNSNULL, mDNSNULL);
 	opt->resrec.rrclass = NormalMaxDNSMessageData;
 	opt->resrec.rdlength   = sizeof(rdataOPT);	// One option in this OPT record
 	opt->resrec.rdestimate = sizeof(rdataOPT);
@@ -3104,9 +3104,9 @@ void mDNSCoreReceive(mDNS *const m, void *const msg, const mDNSu8 *const end,
                                 const mDNSAddr *const srcaddr, const mDNSIPPort srcport,
                                 const mDNSAddr *const dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID iid)
 	{ ( void ) m; ( void ) msg; ( void ) end; ( void ) srcaddr; ( void ) srcport; ( void ) dstaddr; ( void ) dstport; ( void ) iid; }
-DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSAddr *addr, const mDNSIPPort port, mDNSBool scoped)
-	{ ( void ) m; ( void ) d; ( void ) interface; ( void ) addr; ( void ) port; ( void ) scoped; return(NULL); }
-void mDNS_AddSearchDomain(const domainname *const domain) { (void)domain; }
+DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSAddr *addr, const mDNSIPPort port, mDNSBool scoped, mDNSu32 timeout)
+	{ ( void ) m; ( void ) d; ( void ) interface; ( void ) addr; ( void ) port; ( void ) scoped; ( void ) timeout; return(NULL); }
+void mDNS_AddSearchDomain(const domainname *const domain, mDNSInterfaceID InterfaceID) { (void)domain; (void) InterfaceID;}
 void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCallback *StatusCallback, const void *StatusContext)
 	{ ( void ) m; ( void ) fqdn; ( void ) StatusCallback; ( void ) StatusContext; }
 mDNSs32 mDNS_Execute   (mDNS *const m) { ( void ) m; return 0; }
@@ -3127,8 +3127,8 @@ void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const mDNSAd
 	{ ( void ) m; ( void ) v4addr; ( void ) v6addr; ( void ) router; }
 mStatus uDNS_SetupDNSConfig( mDNS *const m ) { ( void ) m; return 0; }
 mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
-	const domainname *domain, const domainname *keyname, const char *b64keydata, mDNSBool AutoTunnel)
-	{ ( void ) m; ( void ) info; ( void ) domain; ( void ) keyname; ( void ) b64keydata; ( void ) AutoTunnel; return 0; }
+	const domainname *domain, const domainname *keyname, const char *b64keydata, const domainname *hostname, mDNSIPPort *port, const char *autoTunnelPrefix)
+	{ ( void ) m; ( void ) info; ( void ) domain; ( void ) keyname; ( void ) b64keydata; ( void ) hostname; (void) port; ( void ) autoTunnelPrefix; return 0; }
 mStatus mDNS_StopQuery(mDNS *const m, DNSQuestion *const question) { ( void ) m; ( void ) question; return 0; }
 void TriggerEventCompletion(void);
 void TriggerEventCompletion() {}

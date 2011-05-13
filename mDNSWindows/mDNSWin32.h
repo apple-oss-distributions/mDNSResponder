@@ -31,6 +31,21 @@
 	extern "C" {
 #endif
 
+
+typedef struct Overlapped
+{
+	BOOL		pending;
+	OVERLAPPED	data;
+	WSABUF		wbuf;
+	DWORD		error;
+	DWORD		bytesTransferred;
+	mDNSAddr	srcAddr;
+	mDNSIPPort	srcPort;
+	mDNSAddr	dstAddr;
+	mDNSIPPort	dstPort;
+} Overlapped;
+
+
 typedef void ( *TCPReadEventHandler )( TCPSocket * sock );
 typedef void ( *TCPUserCallback )();
 
@@ -43,13 +58,14 @@ struct TCPSocket_struct
 	BOOL						connected;
 	TCPUserCallback				userCallback;
 	void					*	userContext;
+	Overlapped					overlapped;
 	DWORD						lastError;
 	BOOL						closed;
-	OVERLAPPED					overlapped;
-	WSABUF						wbuf;
-	uint8_t						buf[ 4192 ];
+	uint8_t						bbuf[ 4192 ];
 	uint8_t					*	bptr;
 	uint8_t					*	eptr;
+	uint8_t					*	ebuf;
+	TCPSocket				*	nextDispatchable;
 	mDNS					*	m;
 };
 
@@ -61,51 +77,17 @@ struct UDPSocket_struct
 													// dstAddr from WSARecvMsg we use this value instead.
 	SOCKET							fd;
 	LPFN_WSARECVMSG					recvMsgPtr;
-	OVERLAPPED						overlapped;
+	Overlapped						overlapped;
 	WSAMSG							wmsg;
-	WSABUF							wbuf;
 	DNSMessage						packet;
 	uint8_t							controlBuffer[ 128 ];
 	struct sockaddr_storage			srcAddr;		// This is filled in by the WSARecv* function
 	INT								srcAddrLen;		// See above
 	struct mDNSInterfaceData	*	ifd;
+	UDPSocket					*	nextDispatchable;
 	UDPSocket					*	next;
 	mDNS						*	m;
 };
-
-
-typedef void ( *SocketEventHandler )( mDNS * const inMDNS, void * v );
-
-
-typedef struct SocketEvent
-{
-	void					*	sock;
-	SocketEventHandler			handler;
-	struct SocketEvent		*	next;
-} SocketEvent;
-
-
-typedef struct TCPSocketEvent
-{
-	struct SocketEvent			super;
-	DWORD						error;
-	DWORD						bytesTransferred;
-	uint8_t						buf[ 4192 ];
-} TCPSocketEvent;
-
-
-typedef struct UDPSocketEvent
-{
-	struct SocketEvent			super;
-	mDNSInterfaceID				iid;
-	DNSMessage					packet;
-	mDNSu8					*	end;
-	mDNSAddr					srcAddr;
-	mDNSIPPort					srcPort;
-	mDNSAddr					dstAddr;
-	mDNSIPPort					dstPort;
-} UDPSocketEvent;
-
 
 
 //---------------------------------------------------------------------------------------------------------------------------
@@ -216,7 +198,7 @@ extern mStatus  TCPAddSocket( mDNS * const inMDNS, TCPSocket *sock );
 extern mStatus	SetupInterfaceList( mDNS * const inMDNS );
 extern mStatus	TearDownInterfaceList( mDNS * const inMDNS );
 extern BOOL		IsWOMPEnabled();
-extern void		SetSocketEventsEnabled( mDNS * const inMDNS, BOOL val );
+extern void     DispatchSocketEvents( mDNS * const inMDNS );
 
 
 #ifdef	__cplusplus

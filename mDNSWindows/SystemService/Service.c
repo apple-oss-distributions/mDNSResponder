@@ -1189,6 +1189,7 @@ static OSStatus	ServiceSpecificInitialize( int argc, LPTSTR argv[] )
 
 	gPlatformStorage.registerWaitableEventFunc = RegisterWaitableEvent;
 	gPlatformStorage.unregisterWaitableEventFunc = UnregisterWaitableEvent;
+	gPlatformStorage.reportStatusFunc = ReportStatus;
 
 	err = mDNS_Init( &gMDNSRecord, &gPlatformStorage, gRRCache, RR_CACHE_SIZE, mDNS_Init_AdvertiseLocalAddresses, CoreCallback, mDNS_Init_NoInitCallbackContext); 
 	require_noerr( err, exit);
@@ -1305,11 +1306,27 @@ static OSStatus	ServiceSpecificRun( int argc, LPTSTR argv[] )
 			}
 
 			// Wait until something occurs (e.g. cancel, incoming packet, or timeout).
+			//
+			// Note: There seems to be a bug in WinSock with respect to Alertable I/O. According
+			// to MSDN <http://msdn.microsoft.com/en-us/library/aa363772(VS.85).aspx>, Alertable I/O
+			// callbacks will only be invoked during the following calls (when the caller sets
+			// the appropriate flag):
+			//
+			// - SleepEx
+			// - WaitForSingleObjectEx
+			// - WaitForMultipleObjectsEx
+			// - SignalObjectAndWait
+			// - MsgWaitForMultipleObjectsEx
+			//
+			// However, we have seen callbacks be invoked during calls to bind() (and maybe others). If there
+			// weren't a bug, then socket events would only be queued during the call to WaitForMultipleObjects() and
+			// we'd only have to check them once afterwards. However since that doesn't seem to be the case, we'll
+			// check the queue both before we call WaitForMultipleObjects() and after.
 
-			SetSocketEventsEnabled( &gMDNSRecord, TRUE );
+			DispatchSocketEvents( &gMDNSRecord );
 			result = WaitForMultipleObjectsEx( ( DWORD ) waitListCount, waitList, FALSE, (DWORD) nextTimerEvent, TRUE );
-			SetSocketEventsEnabled( &gMDNSRecord, FALSE );
 			check( result != WAIT_FAILED );
+			DispatchSocketEvents( &gMDNSRecord );
 
 			if ( result != WAIT_FAILED )
 			{
@@ -2060,6 +2077,7 @@ mDNSlocal void UDSCanRead( TCPSocket * sock )
 //===========================================================================================================================
 //	udsSupportAddFDToEventLoop
 //===========================================================================================================================
+
 
 mStatus
 udsSupportAddFDToEventLoop( SocketRef fd, udsEventCallback callback, void *context, void **platform_data)

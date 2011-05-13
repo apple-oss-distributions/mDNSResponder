@@ -264,7 +264,7 @@ DNSServiceErrorType DNSServiceRegister
 		txtRecord, txtLen,		// TXT data, length
 		SubTypes, NumSubTypes,	// Subtypes
 		mDNSInterface_Any,		// Interface ID
-		RegCallback, x);		// Callback and context
+		RegCallback, x, 0);		// Callback, context, flags
 	if (err) { mDNSPlatformMemFree(x); errormsg = "mDNS_RegisterService"; goto fail; }
 
 	// Succeeded: Wrap up and return
@@ -509,6 +509,13 @@ DNSServiceErrorType DNSServiceResolve
 	x->qSRV.ExpectUnique        = mDNStrue;
 	x->qSRV.ForceMCast          = mDNSfalse;
 	x->qSRV.ReturnIntermed      = mDNSfalse;
+	x->qSRV.SuppressUnusable    = mDNSfalse;
+	x->qSRV.SearchListIndex     = 0;
+	x->qSRV.AppendSearchDomains = 0;
+	x->qSRV.RetryWithSearchDomains = mDNSfalse;
+	x->qSRV.TimeoutQuestion     = 0;
+	x->qSRV.WakeOnResolve       = 0;
+	x->qSRV.qnameOrig           = mDNSNULL;
 	x->qSRV.QuestionCallback    = FoundServiceInfo;
 	x->qSRV.QuestionContext     = x;
 
@@ -523,6 +530,12 @@ DNSServiceErrorType DNSServiceResolve
 	x->qTXT.ForceMCast          = mDNSfalse;
 	x->qTXT.ReturnIntermed      = mDNSfalse;
 	x->qTXT.SuppressUnusable    = mDNSfalse;
+	x->qTXT.SearchListIndex     = 0;
+	x->qTXT.AppendSearchDomains = 0;
+	x->qTXT.RetryWithSearchDomains = mDNSfalse;
+	x->qTXT.TimeoutQuestion     = 0;
+	x->qTXT.WakeOnResolve       = 0;
+	x->qTXT.qnameOrig           = mDNSNULL;
 	x->qTXT.QuestionCallback    = FoundServiceInfo;
 	x->qTXT.QuestionContext     = x;
 
@@ -647,6 +660,11 @@ DNSServiceErrorType DNSServiceQueryRecord
 	x->q.ForceMCast          = (flags & kDNSServiceFlagsForceMulticast) != 0;
 	x->q.ReturnIntermed      = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
 	x->q.SuppressUnsable     = (flags & kDNSServiceFlagsSuppressUnusable) != 0;
+	x->q.SearchListIndex     = 0;
+	x->q.AppendSearchDomains = 0;
+	x->q.RetryWithSearchDomains = mDNSfalse;
+	x->q.WakeOnResolve       = 0;
+	x->q.qnameOrig           = mDNSNULL;
 	x->q.QuestionCallback    = DNSServiceQueryRecordResponse;
 	x->q.QuestionContext     = x;
 

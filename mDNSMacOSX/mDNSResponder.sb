@@ -88,6 +88,8 @@
 (allow file-read-data                 (regex #"^/dev/random$"))
 (allow file-read-data file-write-data (regex #"^/dev/console$"))		; Needed for syslog early in the boot process
 (allow file-read-data                 (regex #"^/dev/autofs_nowait$"))	; Used by CF to circumvent automount triggers
+(allow file-read-data                 (regex #"^/private/etc/hosts$"))			; /etc/hosts support
+(allow file-read-data                 (regex #"^/private/etc$"))				; /etc/hosts support
 
 ; Allow us to read and write our socket
 (allow file-read*     file-write*     (regex #"^/private/var/run/mDNSResponder$"))
@@ -113,6 +115,11 @@
 ; Allow access to System Keychain
 (allow file-read-data                 (regex #"^/System/Library/Security$"))
 (allow file-read-data                 (regex #"^/System/Library/Keychains/.*$"))
+; We just need access to System.keychain. But we don't want errors logged if other keychains are
+; accessed under /Library/Keychains. Other keychains may be accessed as part of setting up an SSL
+; connection. Instead of adding access to it here(to things which we don't need), we disable any
+; logging that might happen during the access
+(deny  file-read-data                 (regex #"^/Library/Keychains/") (with no-log))
 (allow file-read-data                 (regex #"^/Library/Keychains/System\.keychain$"))
 ; Our Module Directory Services cache
 (allow file-read-data                 (regex #"^/private/var/tmp/mds/"))
@@ -124,18 +131,17 @@
 ; CRL Cache for SSL/TLS connections
 (allow file-read-data                 (regex #"^/private/var/db/crls/crlcache\.db$"))
 
-; For mDNS sleep proxy offload
-(allow iokit-open (iokit-user-client-class "NVEthernetUserClientMDNS"))
-(allow iokit-open (iokit-user-client-class "mDNSOffloadUserClient"))
-
-; For IOPMConnectionCreate
-(allow iokit-open (iokit-user-client-class "RootDomainUserClient"))
+; For mDNS sleep proxy offload and IOPMConnectionCreate
+(if (defined? 'iokit-open)
+   (begin
+     (allow iokit-open (iokit-user-client-class "NVEthernetUserClientMDNS"))
+     (allow iokit-open (iokit-user-client-class "mDNSOffloadUserClient"))
+     (allow iokit-open (iokit-user-client-class "RootDomainUserClient"))))
 
 ; For D2D
 (allow file-read-data (regex #"^/System/Library/PrivateFrameworks/DeviceToDeviceManager.framework(/|$)"))
 (allow file-read-data (regex #"^/System/Library/PrivateFrameworks/MobileBluetooth.framework(/|$)"))
 (allow file-read-data (regex #"^/System/Library/Frameworks/CoreFoundation.framework(/|$)"))
-(allow file-read-data (regex #"^/System/Library/Frameworks/CoreServices.framework(/|$)"))
 (allow file-read-data (regex #"^/System/Library/Frameworks/SystemConfiguration.framework(/|$)"))
 (allow file-read-data (regex #"^/System/Library/Frameworks/IOKit.framework(/|$)"))
 (allow file-read-data (regex #"^/System/Library/Frameworks/Security.framework(/|$)"))

@@ -30,8 +30,8 @@
 #include <netinet/in.h>
 #include "mDNSEmbeddedAPI.h"  // for domain name structure
 
-//#define __LIB_DISPATCH__
-#ifdef __LIB_DISPATCH__
+//#define MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
+#ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 #include <dispatch/dispatch.h>
 #endif
 
@@ -43,7 +43,7 @@ typedef struct
 	KQueueEventCallback	 KQcallback;
 	void                *KQcontext;
 	const char const    *KQtask;		// For debugging messages
-#ifdef __LIB_DISPATCH__
+#ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 	dispatch_source_t readSource;
 	dispatch_source_t writeSource;
 	mDNSBool		  fdClosed;
@@ -91,7 +91,7 @@ struct NetworkInterfaceInfoOSX_struct
 	int                      BPF_fd;			// -1 uninitialized; -2 requested BPF; -3 failed
 	int                      BPF_mcfd;			// Socket for our IPv6 ND group membership
 	u_int                    BPF_len;
-#ifdef __LIB_DISPATCH__
+#ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 	dispatch_source_t		 BPF_source;
 #else
 	CFSocketRef              BPF_cfs;
@@ -116,13 +116,7 @@ struct mDNS_PlatformSupport_struct
 	mDNSs32                  NotifyUser;
 	mDNSs32                  HostNameConflict;	// Time we experienced conflict on our link-local host name
 	mDNSs32                  NetworkChanged;
-	
-	// KeyChain frequently fails to notify clients of change events. To work around this
-	// we set a timer and periodically poll to detect if any changes have occurred.
-	// Without this Back To My Mac just does't work for a large number of users.
-	// See <rdar://problem/5124399> Not getting Keychain Changed events when enabling BTMM
-	mDNSs32                  KeyChainBugTimer;
-	mDNSs32                  KeyChainBugInterval;
+	mDNSs32                  KeyChainTimer;
 
 	CFRunLoopRef             CFRunLoop;
 	SCDynamicStoreRef        Store;
@@ -141,7 +135,7 @@ struct mDNS_PlatformSupport_struct
 	long                     SleepCookie;		// Cookie we need to pass to IOAllowPowerChange()
 	long                     WakeAtUTC;
 	mDNSs32                  RequestReSleep;
-#ifdef __LIB_DISPATCH__
+#ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 	dispatch_source_t		 timer;
 	dispatch_source_t		 custom;
 #else
@@ -156,8 +150,9 @@ struct mDNS_PlatformSupport_struct
 
 extern int OfferSleepProxyService;
 extern int DisableSleepProxyClient;
+extern int UseInternalSleepProxy;
+extern int OSXVers, iOSVers;
 extern mDNSBool DisableInboundRelayConnection;
-extern int OSXVers;
 #define OSXVers_Base              4
 #define OSXVers_10_0_Cheetah      4
 #define OSXVers_10_1_Puma         5
@@ -172,10 +167,10 @@ extern int KQueueFD;
 extern void NotifyOfElusiveBug(const char *title, const char *msg);	// Both strings are UTF-8 text
 extern void SetDomainSecrets(mDNS *m);
 extern void mDNSMacOSXNetworkChanged(mDNS *const m);
-extern int mDNSMacOSXSystemBuildNumber(char *HINFO_SWstring);
+extern void mDNSMacOSXSystemBuildNumber(char *HINFO_SWstring);
 extern NetworkInterfaceInfoOSX *IfindexToInterfaceInfoOSX(const mDNS *const m, mDNSInterfaceID ifindex);
 
-#ifdef __LIB_DISPATCH__
+#ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 extern int KQueueSet(int fd, u_short flags, short filter, KQueueEntry *const entryRef);
 mDNSexport void TriggerEventCompletion(void);
 #else
