@@ -3170,7 +3170,7 @@ mDNSlocal mStatus UpdateRRStatus(const mDNS *const m, char *buffer, int bufsz, c
 			for (ptr = m->AuthInfoList; ptr; ptr = ptr->next)
 				if (SameDomainName(&ptr->domain, n))
 					{
-					if (ptr == info && r->updateError == mStatus_BadSig)
+					if (ptr == info && (r->updateError == mStatus_BadSig || r->updateError == mStatus_BadKey))
 						{
 						mDNS_snprintf(buffer, bufsz, "Resource record update failed for %##s", r->resrec.name);
 						return r->updateError;
@@ -7616,6 +7616,8 @@ mDNSlocal void SnowLeopardPowerChanged(void *refcon, IOPMConnection connection, 
 // "hash" function to solve this, the others are hard to solve. Hence, we share the hash (AuthHash) implementation
 // of the core layer which does all of the above very efficiently
 
+#define ETCHOSTS_BUFSIZE	1024	// Buffer size to parse a single line in /etc/hosts
+
 mDNSexport void FreeEtcHosts(mDNS *const m, AuthRecord *const rr, mStatus result)
     {
     (void)m;  // unused
@@ -7757,6 +7759,8 @@ mDNSlocal int EtcHostsParseOneName(int start, int length, char *buffer, char **n
 	*name = NULL;
 	for (i = start; i < length; i++)
 		{
+		if (buffer[i] == '#')
+			return -1;
 		if (buffer[i] != ' ' && buffer[i] != ',' && buffer[i] != '\t')
 			{
 			*name = &buffer[i];
@@ -7935,58 +7939,38 @@ mDNSlocal void mDNSMacOSXParseEtcHostsLine(mDNS *const m, char *buffer, ssize_t 
 
 mDNSlocal void mDNSMacOSXParseEtcHosts(mDNS *const m, int fd, AuthHash *auth)
 	{
-	if (fd == -1) { LogInfo("mDNSMacOSXParseEtcHosts: fd is -1"); return; }
-	
-	LogInfo("mDNSMacOSXParseEtcHosts: Parsing etc hosts");
+	mDNSBool good;
+	char	buf[ETCHOSTS_BUFSIZE];
+	int len;
+	FILE *fp;
 
-	// Read through the file
-	char	readBuf[1024]; // support a maximum line of 1024 bytes including newline
-	off_t	offset = 0;
-	int	comment = 0;
-	ssize_t	i = 0;
-	ssize_t	length;
-	ssize_t	linestart;
-	while ((length = pread(fd, &readBuf[i], sizeof(readBuf) - i, offset) + i) >= i)
+	if (fd == -1) { LogInfo("mDNSMacOSXParseEtcHosts: fd is -1"); return; }
+
+	fp = fopen("/etc/hosts", "r");
+	if (!fp) { LogInfo("mDNSMacOSXParseEtcHosts: fp is NULL"); return; }
+
+	while (1)
 		{
-		if (length == i)
-			{
-			// end of file
-			if (length != 0) mDNSMacOSXParseEtcHostsLine(m, readBuf, length, auth);
-			break;
-			}
-		
-		// increment our offset by the number of bytes we read
-		offset += length - i;
-		
-		// loop through the buffer looking for end of lines
-		for (linestart = 0; i < length; i++)
-			{
-			if (readBuf[i] == '#' || readBuf[i] == '\r' || readBuf[i] == '\n')
-				{
-				int parseline = i - linestart > 0 && comment == 0;
-				comment = readBuf[i] == '#';
-				if (parseline)
-					{
-					readBuf[i] = 0;
-					mDNSMacOSXParseEtcHostsLine(m, &readBuf[linestart], i - linestart, auth);
-					}
-				linestart = i + 1;
-				}
-			}
-		
-		// prepare to read the next chunk of the file
-		if (linestart == 0)
-			{
-			// single line was larger than our buffer, we're going to ignore it
-			comment = 1; // treat remainder of line as comment
-			i = 0;
-			}
-		else
-			{
-			i = length - linestart;
-			if (i) memmove(readBuf, &readBuf[linestart], i);
-			}
+		good = (fgets(buf, ETCHOSTS_BUFSIZE, fp) != NULL);
+		if (!good) break;
+
+		// skip comment and empty lines
+		if (buf[0] == '#' || buf[0] == '\r' || buf[0] == '\n')
+			continue;
+
+		len = strlen(buf);
+		if (!len) break;	// sanity check
+
+		if (buf[len - 1] == '\r' || buf[len - 1] == '\n')
+			buf[len - 1] = '\0';
+
+		// fgets always null terminates and hence even if we have no
+		// newline at the end, it is null terminated. The callee expects
+		// the length to be such that buf[length] to be zero and hence
+		// we pass len - 1.
+		mDNSMacOSXParseEtcHostsLine(m, buf, len - 1, auth);
 		}
+	fclose(fp);
 	}
 
 mDNSlocal void mDNSMacOSXUpdateEtcHosts(mDNS *const m);

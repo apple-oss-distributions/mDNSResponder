@@ -3156,7 +3156,7 @@ mDNSlocal void hndlRecordUpdateReply(mDNS *m, AuthRecord *rr, mStatus err, mDNSu
 
 	rr->updateError = err;
 #if APPLE_OSX_mDNSResponder
-	if (err == mStatus_BadSig) UpdateAutoTunnelDomainStatuses(m);
+	if (err == mStatus_BadSig || err == mStatus_BadKey) UpdateAutoTunnelDomainStatuses(m);
 #endif
 
 	SetRecordRetry(m, rr, random);

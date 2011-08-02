@@ -274,10 +274,10 @@
 			fileType = sourcecode.yacc;
 			isEditable = 1;
 			outputFiles = (
-				"$(DERIVED_FILE_DIR)/dnsextd_parser.h",
-				"$(DERIVED_FILE_DIR)/dnsextd_parser.c",
+				"$(DERIVED_FILE_DIR)/$(INPUT_FILE_BASE).h",
+				"$(DERIVED_FILE_DIR)/$(INPUT_FILE_BASE).c",
 			);
-			script = "/usr/bin/bison -o ${DERIVED_FILE_DIR}/${INPUT_FILE_BASE}.c -d ${INPUT_FILE_PATH}";
+			script = "echo NOOP yacc ${INPUT_FILE_PATH}";
 		};
 		D284BFB80ADD8E510027CCDF /* PBXBuildRule */ = {
 			isa = PBXBuildRule;
@@ -285,7 +285,7 @@
 			fileType = sourcecode.lex;
 			isEditable = 1;
 			outputFiles = (
-				"$(DERIVED_FILE_DIR)/dnsextd_lexer.c",
+				"$(DERIVED_FILE_DIR)/$(INPUT_FILE_BASE).c",
 			);
 			script = "/usr/bin/flex -i -o${DERIVED_FILE_DIR}/${INPUT_FILE_BASE}.c ${INPUT_FILE_PATH}";
 		};
@@ -1337,9 +1337,9 @@
 			buildConfigurationList = D284BED60ADD80A20027CCDF /* Build configuration list for PBXNativeTarget "dnsextd" */;
 			buildPhases = (
 				D284BEC20ADD80A20027CCDF /* Headers */,
+				4A4EE3A413CB8E82005C624B /* Build yacc file into derived source files */,
 				D284BEC40ADD80A20027CCDF /* Sources */,
 				D284BECE0ADD80A20027CCDF /* Frameworks */,
-				D284BED30ADD80A20027CCDF /* Rez */,
 				D284BED40ADD80A20027CCDF /* CopyFiles */,
 				FFFF8F770C32F0FD00722979 /* CopyFiles */,
 				FF37FAAD0BC581780044A5CF /* ShellScript */,
@@ -1561,13 +1561,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		D284BED30ADD80A20027CCDF /* Rez */ = {
-			isa = PBXRezBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		D284BEE40ADD80A70027CCDF /* Rez */ = {
 			isa = PBXRezBuildPhase;
 			buildActionMask = 2147483647;
@@ -1636,6 +1629,23 @@
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/sh;
 			shellScript = "#if we are building for simulator, change the installation path\nif [ \"${RC_ProjectName%_Sim}\" != \"${RC_ProjectName}\" ] ; then\n\tDSTROOT=${DSTROOT}${SDKROOT}\nfi\nmkdir -p \"$DSTROOT/usr/include/DNSServiceDiscovery\"\ncp $SRCROOT/DNSServiceDiscovery.h $DSTROOT/usr/include/DNSServiceDiscovery\nsed 's/\\(^#define _DNS_SD_LIBDISPATCH \\)0$/\\1 1/' \"$SRCROOT/../mDNSShared/dns_sd.h\" > \"$DSTROOT/usr/include/dns_sd.h\"";
+		};
+		4A4EE3A413CB8E82005C624B /* Build yacc file into derived source files */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../mDNSShared/dnsextd_parser.y",
+			);
+			name = "Build yacc file into derived source files";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/dnsextd_parser.c",
+				"$(DERIVED_FILE_DIR)/dnsextd_parser.h",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/usr/bin/bison -o ${SCRIPT_OUTPUT_FILE_0} -d ${SCRIPT_INPUT_FILE_0}";
 		};
 		D284BE510ADD80740027CCDF /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -2421,9 +2431,6 @@
 					"${CONFIGURATION_TEMP_DIR}",
 				);
 				INSTALL_PATH = /usr/sbin;
-				LEX = /usr/bin/flex;
-				LEXFLAGS = "";
-				LEX_CASE_INSENSITIVE_SCANNER = YES;
 				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
 				MACOSX_DEPLOYMENT_TARGET = 10.5;
 				OTHER_CFLAGS = (
@@ -2432,11 +2439,8 @@
 				);
 				OTHER_LDFLAGS = "";
 				"OTHER_LDFLAGS[sdk=macosx10.7][arch=*]" = "-Wl,-pie";
-				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = dnsextd;
-				REZ_EXECUTABLE = YES;
 				SECTORDER_FLAGS = "";
-				YACC = "/usr/bin/bison -y";
 			};
 			name = Development;
 		};

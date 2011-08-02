@@ -349,7 +349,7 @@ mDNSexport mDNSBool mDNS_AddressIsLocalSubnet(mDNS *const m, const mDNSInterface
 
 	if (addr->type == mDNSAddrType_IPv6)
 		{
-		if (mDNSv6AddressIsLinkLocal(&addr->ip.v4)) return(mDNStrue);
+		if (mDNSv6AddressIsLinkLocal(&addr->ip.v6)) return(mDNStrue);
 		for (intf = m->HostInterfaces; intf; intf = intf->next)
 			if (intf->ip.type == addr->type && intf->InterfaceID == InterfaceID && intf->McastTxRx)
 				if ((((intf->ip.ip.v6.l[0] ^ addr->ip.v6.l[0]) & intf->mask.ip.v6.l[0]) == 0) &&
@@ -1663,6 +1663,7 @@ mDNSlocal void SendDelayedUnicastResponse(mDNS *const m, const mDNSAddr *const d
 	AuthRecord *rr;
 	AuthRecord  *ResponseRecords = mDNSNULL;
 	AuthRecord **nrp             = &ResponseRecords;
+	NetworkInterfaceInfo *intf = FirstInterfaceForID(m, InterfaceID);
 
 	// Make a list of all our records that need to be unicast to this destination
 	for (rr = m->ResourceRecords; rr; rr=rr->next)
@@ -1674,6 +1675,7 @@ mDNSlocal void SendDelayedUnicastResponse(mDNS *const m, const mDNSAddr *const d
 			rr->ImmedUnicast = mDNSfalse;
 
 		if (rr->ImmedUnicast && rr->ImmedAnswer == InterfaceID)
+			{
 			if ((dest->type == mDNSAddrType_IPv4 && mDNSSameIPv4Address(rr->v4Requester, dest->ip.v4)) ||
 				(dest->type == mDNSAddrType_IPv6 && mDNSSameIPv6Address(rr->v6Requester, dest->ip.v6)))
 				{
@@ -1681,9 +1683,18 @@ mDNSlocal void SendDelayedUnicastResponse(mDNS *const m, const mDNSAddr *const d
 				rr->ImmedUnicast = mDNSfalse;
 				rr->v4Requester  = zerov4Addr;
 				rr->v6Requester  = zerov6Addr;
+
+				// Only sent records registered for P2P over P2P interfaces
+				if (intf && !mDNSPlatformValidRecordForInterface(rr, intf))
+					{
+					LogInfo("SendDelayedUnicastResponse: Not sending %s, on %s", ARDisplayString(m, rr), InterfaceNameForID(m, InterfaceID));
+					continue;
+					}
+
 				if (rr->NextResponse == mDNSNULL && nrp != &rr->NextResponse)	// rr->NR_AnswerTo
 					{ rr->NR_AnswerTo = (mDNSu8*)~0; *nrp = rr; nrp = &rr->NextResponse; }
 				}
+			}
 		}
 
 	AddAdditionalsToResponseList(m, ResponseRecords, &nrp, InterfaceID);
@@ -1730,7 +1741,7 @@ mDNSlocal void SendDelayedUnicastResponse(mDNS *const m, const mDNSAddr *const d
 			}
 
 		if (m->omsg.h.numAnswers)
-			mDNSSendDNSMessage(m, &m->omsg, responseptr, mDNSInterface_Any, mDNSNULL, dest, MulticastDNSPort, mDNSNULL, mDNSNULL);
+			mDNSSendDNSMessage(m, &m->omsg, responseptr, InterfaceID, mDNSNULL, dest, MulticastDNSPort, mDNSNULL, mDNSNULL);
 		}
 	}
 
@@ -2240,7 +2251,7 @@ mDNSlocal void SendResponses(mDNS *const m)
 			if ((rr->SendRNow == intf->InterfaceID) &&
 				((rr->resrec.InterfaceID == mDNSInterface_Any) && !mDNSPlatformValidRecordForInterface(rr, intf)))
 				{
-					LogInfo("SendResponses: Not Sending %s, on %s", ARDisplayString(m, rr), InterfaceNameForID(m, rr->SendRNow));
+					LogInfo("SendResponses: Not sending %s, on %s", ARDisplayString(m, rr), InterfaceNameForID(m, rr->SendRNow));
 					rr->SendRNow = GetNextActiveInterfaceID(intf);
 				}
 			else if (rr->SendRNow == intf->InterfaceID)
@@ -6278,6 +6289,8 @@ mDNSlocal DNSQuestion *ExpectingUnicastResponseForQuestion(const mDNS *const m, 
 	return(mDNSNULL);
 	}
 
+// This function is called when we receive a unicast response. This could be the case of a unicast response from the
+// DNS server or a response to the QU query. Hence, the cache record's InterfaceId can be both NULL or non-NULL (QU case)
 mDNSlocal DNSQuestion *ExpectingUnicastResponseForRecord(mDNS *const m,
 	const mDNSAddr *const srcaddr, const mDNSBool SrcLocal, const mDNSIPPort port, const mDNSOpaque16 id, const CacheRecord *const rr, mDNSBool tcp)
 	{
@@ -6285,12 +6298,9 @@ mDNSlocal DNSQuestion *ExpectingUnicastResponseForRecord(mDNS *const m,
 	(void)id;
 	(void)srcaddr;
 
-	// Unicast records have zero as InterfaceID
-	if (rr->resrec.InterfaceID) return mDNSNULL;
-
 	for (q = m->Questions; q; q=q->next)
 		{
-		if (!q->DuplicateOf && UnicastResourceRecordAnswersQuestion(&rr->resrec, q))
+		if (!q->DuplicateOf && ResourceRecordAnswersUnicastResponse(&rr->resrec, q))
 			{
 			if (!mDNSOpaque16IsZero(q->TargetQID))
 				{
