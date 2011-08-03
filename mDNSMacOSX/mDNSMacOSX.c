@@ -7568,6 +7568,11 @@ mDNSlocal void SnowLeopardPowerChanged(void *refcon, IOPMConnection connection, 
 			m->SleepLimit = 0;
 			}
 		LogSPS("SnowLeopardPowerChanged: Waking up, Acking Wakeup, SleepLimit %d SleepState %d", m->SleepLimit, m->SleepState);
+		// If the network notifications have already come before we got the wakeup, we ignored them and
+		// in case we get no more, we need to trigger one.
+		mDNS_Lock(m);
+		SetNetworkChanged(m, 2 * mDNSPlatformOneSecond);
+		mDNS_Unlock(m);
 		// CPU Waking. Note: Can get this message repeatedly, as other subsystems power up or down.
 		if (m->SleepState != SleepState_Awake) PowerOn(m);
 		IOPMConnectionAcknowledgeEvent(connection, token);
