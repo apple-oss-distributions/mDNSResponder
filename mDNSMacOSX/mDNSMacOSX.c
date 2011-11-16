@@ -204,6 +204,8 @@ static mDNSu8 SPMetricTotalPower    = 99;
 mDNSexport domainname ActiveDirectoryPrimaryDomain;
 mDNSexport int        ActiveDirectoryPrimaryDomainLabelCount;
 mDNSexport mDNSAddr   ActiveDirectoryPrimaryDomainServer;
+
+static mDNSBool AWACSDConnected = mDNSfalse;
 #endif // APPLE_OSX_mDNSResponder
 
 // Used by AutoTunnel
@@ -3699,6 +3701,41 @@ mDNSlocal void DeregisterAutoTunnelDevInfoRecord(mDNS *m, DomainAuthInfo *info)
 	}
 #endif
 
+// pre-declaration
+mDNSlocal void AutoTunnelRecordCallback(mDNS *const m, AuthRecord *const rr, mStatus result);
+
+// Notify remote peers to connect to the relay servers for potential outbound connections from this host.
+// Caller should hold the lock. We don't call mDNS_Register (which acquires the lock) in this function because
+// sometimes the caller may already be holding the lock e.g., SetupLocalAutoTunnelInterface_internal and sometimes
+// not e.g., AutoTunnelHostNameChanged
+mDNSlocal void RegisterAutoTunnel6MetaRecord(mDNS *m, DomainAuthInfo *info)
+	{
+	mStatus err;
+
+	if (!m->mDNS_busy) LogMsg("RegisterAutoTunnel6MetaRecord: ERROR!! Lock not held");
+	
+	if (!AWACSDConnected)
+		{
+		LogInfo("RegisterAutoTunnel6MetaRecord no need to register");
+		return;
+		}
+
+	if (info->AutoTunnel6MetaRecord.resrec.RecordType == kDNSRecordTypeUnregistered)
+		{
+		mDNS_SetupResourceRecord(&info->AutoTunnel6MetaRecord, mDNSNULL, mDNSInterface_Any, kDNSType_PTR, kStandardTTL, kDNSRecordTypeUnregistered, AuthRecordAny, AutoTunnelRecordCallback, info);
+		AssignDomainName (&info->AutoTunnel6MetaRecord.namestorage, (const domainname*) "\x0C" "_autotunnel6");
+		AppendDomainName (&info->AutoTunnel6MetaRecord.namestorage, &info->domain);
+
+		info->AutoTunnel6MetaRecord.resrec.rdata->u.name.c[0] = 0;
+		AppendDomainLabel(&info->AutoTunnel6MetaRecord.resrec.rdata->u.name, &m->hostlabel);
+		AppendDomainName (&info->AutoTunnel6MetaRecord.resrec.rdata->u.name, &info->domain);
+		info->AutoTunnel6MetaRecord.resrec.RecordType = kDNSRecordTypeShared;
+
+		err = mDNS_Register_internal(m, &info->AutoTunnel6MetaRecord);
+		if (err) LogMsg("RegisterAutoTunnel6MetaRecord error %d registering %##s", err, info->AutoTunnel6MetaRecord.namestorage.c);
+		else LogInfo("RegisterAutoTunnel6MetaRecord registering %##s %##s", info->AutoTunnel6MetaRecord.namestorage.c, info->AutoTunnel6MetaRecord.resrec.rdata->u.name.c);
+		}
+	}
 
 // Caller should hold the lock. We don't call mDNS_Register (which acquires the lock) in this function because
 // sometimes the caller may already be holding the lock e.g., SetupLocalAutoTunnelInterface_internal and sometimes
@@ -3786,6 +3823,24 @@ mDNSlocal void RegisterAutoTunnel6Record(mDNS *m, DomainAuthInfo *info)
 	UpdateAutoTunnelDomainStatus(m, info);
 	}
 
+mDNSlocal void DeregisterAutoTunnel6MetaRecord(mDNS *m, DomainAuthInfo *info)
+	{
+	LogInfo("DeregisterAutoTunnel6MetaRecord %##s", info->domain.c);
+
+	if (info->AutoTunnel6MetaRecord.resrec.RecordType > kDNSRecordTypeDeregistering)
+		{
+		mStatus err = mDNS_Deregister(m, &info->AutoTunnel6MetaRecord);
+		if (err)
+			{
+			info->AutoTunnel6MetaRecord.resrec.RecordType = kDNSRecordTypeUnregistered;
+			info->AutoTunnel6MetaRecord.resrec.rdata->u.name.c[0] = 0;
+			LogMsg("DeregisterAutoTunnel6MetaRecord error %d deregistering %##s", err, info->AutoTunnel6MetaRecord.namestorage.c);
+			}
+		else LogInfo("DeregisterAutoTunnel6MetaRecord: Deregistered record");
+		}
+	else LogInfo("DeregisterAutoTunnel6MetaRecord: Not deregistering record state:%d", info->AutoTunnel6MetaRecord.resrec.RecordType);
+	}
+
 mDNSlocal void DeregisterAutoTunnel6Record(mDNS *m, DomainAuthInfo *info)
 	{
 	LogInfo("DeregisterAutoTunnel6Record %##s", info->domain.c);
@@ -3846,6 +3901,12 @@ mDNSlocal void AutoTunnelRecordCallback(mDNS *const m, AuthRecord *const rr, mSt
 			info->AutoTunnel6Record.resrec.rdata->u.ipv6 = zerov6Addr;
 			RegisterAutoTunnel6Record(m,info);
 			}
+		else if (rr == &info->AutoTunnel6MetaRecord)
+			{
+			LogInfo("AutoTunnelRecordCallback: Calling RegisterAutoTunnel6MetaRecord");
+			info->AutoTunnel6MetaRecord.resrec.rdata->u.name.c[0] = 0;
+			RegisterAutoTunnel6MetaRecord(m,info);
+			}
 		}
 	}
 
@@ -3858,6 +3919,7 @@ mDNSlocal void AutoTunnelDeleteAuthInfoState(mDNS *m, DomainAuthInfo *info)
 	DeregisterAutoTunnelDevInfoRecord(m, info);
 	DeregisterAutoTunnelServiceRecords(m, info);
 	DeregisterAutoTunnel6Record(m, info);
+	DeregisterAutoTunnel6MetaRecord(m, info);
 	UpdateAnonymousRacoonConfig(m);		// Determine whether we need racoon to accept incoming connections
 	UpdateAutoTunnelDomainStatus(m, info);
 	}
@@ -3900,11 +3962,13 @@ mDNSlocal void AutoTunnelHostNameChanged(mDNS *m, DomainAuthInfo *info)
 #endif
 	DeregisterAutoTunnelServiceRecords(m, info);
 	DeregisterAutoTunnel6Record(m, info);
+	DeregisterAutoTunnel6MetaRecord(m, info);
 	RegisterAutoTunnelServiceRecords(m, info);
 
 	mDNS_Lock(m);
 	RegisterAutoTunnelDevInfoRecord(m, info);
 	RegisterAutoTunnel6Record(m, info);
+	RegisterAutoTunnel6MetaRecord(m, info);
 	m->NextSRVUpdate = NonZeroTime(m->timenow);
 	mDNS_Unlock(m);
 	}
@@ -5596,7 +5660,6 @@ mDNSlocal void UpdateBTMMRelayConnection(mDNS *const m)
 	{
 	DomainAuthInfo *BTMMDomain = mDNSNULL;
 	DomainAuthInfo *FoundInList;
-	static mDNSBool AWACSDConnected = mDNSfalse;
 	char AllUsers[1024];	// maximum size of mach message
 	char AllPass[1024];  	// maximum size of mach message
 	char username[MAX_DOMAIN_LABEL + 1];
@@ -5635,6 +5698,14 @@ mDNSlocal void UpdateBTMMRelayConnection(mDNS *const m)
 		LogInfo("UpdateBTMMRelayConnection: AWS_Connect for user %s", AllUsers);
 		AWACS_Connect(AllUsers, AllPass, "hello.connectivity.me.com");
 		AWACSDConnected = mDNStrue;
+		
+		// We have to do this after AWACSDConnected is true
+		for (FoundInList = m->AuthInfoList; FoundInList; FoundInList = FoundInList->next)
+			if (!FoundInList->deltime && FoundInList->AutoTunnel && IsBTMMDomain(&FoundInList->domain))
+				{
+				LogInfo("UpdateBTMMRelayConnection RegisterAutoTunnel6MetaRecord: %##s", FoundInList->domain.c);
+				RegisterAutoTunnel6MetaRecord(m, FoundInList);
+				}
 		}
 	else
 		{
@@ -6633,7 +6704,9 @@ mDNSlocal void AddAutoTunnel6Record(mDNS *const m, char *ifname, CFDictionaryRef
 		// this case as though the dictionary does not have the value
 		RemoveAutoTunnel6Record(m);
 		// If awacsd crashes or exits for some reason, restart the relay connection
+		mDNS_Lock(m);
 		UpdateBTMMRelayConnection(m);
+		mDNS_Unlock(m);
 		return;
 		}
 	
@@ -6697,7 +6770,9 @@ mDNSlocal void ParseBackToMyMac(mDNS *const m, CFDictionaryRef connd)
 		RemoveAutoTunnel6Record(m);
 		m->AutoTunnelRelayAddrOut = zerov6Addr;
 		// We don't have a utun interface, start the relay connection if possible
+		mDNS_Lock(m);
 		UpdateBTMMRelayConnection(m);
+		mDNS_Unlock(m);
 		}
 	else
 		{
@@ -7960,15 +8035,32 @@ mDNSlocal void mDNSMacOSXParseEtcHosts(mDNS *const m, int fd, AuthHash *auth)
 
 		len = strlen(buf);
 		if (!len) break;	// sanity check
-
+		//Check for end of line code(mostly only \n but pre-OS X Macs could have only \r)  
 		if (buf[len - 1] == '\r' || buf[len - 1] == '\n')
+			{
 			buf[len - 1] = '\0';
-
+			len = len - 1;
+			}
 		// fgets always null terminates and hence even if we have no
-		// newline at the end, it is null terminated. The callee expects
-		// the length to be such that buf[length] to be zero and hence
-		// we pass len - 1.
-		mDNSMacOSXParseEtcHostsLine(m, buf, len - 1, auth);
+                // newline at the end, it is null terminated. The callee                                                                                                          
+                // (mDNSMacOSXParseEtcHostsLine) expects the length to be such that
+                // buf[length] is zero and hence we decrement len to reflect that.
+		if (len)
+			{
+			//Additional check when end of line code is 2 chars ie\r\n(DOS, other old OSes)
+			//here we need to check for just \r but taking extra caution.
+			if (buf[len - 1] == '\r' || buf[len - 1] == '\n')
+				{
+				buf[len - 1] = '\0';
+				len = len - 1;
+				}
+			}
+		if (!len) //Sanity Check: len should never be zero
+			{
+			LogMsg("mDNSMacOSXParseEtcHosts: Length is zero!");
+			continue;
+			}
+		mDNSMacOSXParseEtcHostsLine(m, buf, len, auth);
 		}
 	fclose(fp);
 	}

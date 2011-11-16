@@ -7074,11 +7074,15 @@ exit:
 			// *not* on a Microsoft Active Directory network, and there is no authoritative server for "local". Note that this is not
 			// in conflict with the mDNS spec, because that spec says, "Multicast DNS Zones have no SOA record," so it's okay to cache
 			// negative answers for "local. SOA" from a uDNS server, because the mDNS spec already says that such records do not exist :-)
+			//
+			// By suppressing negative responses, it might take longer to timeout a .local question as it might be expecting a
+			// response e.g., we deliver a positive "A" response and suppress negative "AAAA" response and the upper layer may
+			// be waiting longer to get the AAAA response before returning the "A" response to the application. To handle this
+			// case without creating the negative cache entries, we generate a negative response and let the layer above us
+			// do the appropriate thing. This negative response is also needed for appending new search domains.
 			if (!InterfaceID && q.qtype != kDNSType_SOA && IsLocalDomain(&q.qname))
 				{
-				// If we did not find a positive answer and we can append search domains to this question,
-				// generate a negative response (without creating a cache entry) to append search domains.
-				if (qptr->AppendSearchDomains && !rr)
+				if (!rr)
 					{
 					LogInfo("mDNSCoreReceiveResponse: Generate negative response for %##s (%s)", q.qname.c, DNSTypeName(q.qtype));
 					m->CurrentQuestion = qptr;
@@ -10857,6 +10861,30 @@ mDNSlocal void mDNS_PurgeBeforeResolve(mDNS *const m, DNSQuestion *q)
 			mDNS_PurgeCacheResourceRecord(m, rp);
 			}
 		}
+	}
+
+// Check for a positive unicast response to the question but with qtype
+mDNSexport mDNSBool mDNS_CheckForCacheRecord(mDNS *const m, DNSQuestion *q, mDNSu16 qtype)
+	{
+	DNSQuestion question;
+	const mDNSu32 slot = HashSlot(&q->qname);
+	CacheGroup *const cg = CacheGroupForName(m, slot, q->qnamehash, &q->qname);
+	CacheRecord *rp;
+
+	// Create an identical question but with qtype
+	mDNS_SetupQuestion(&question, q->InterfaceID, &q->qname, qtype, mDNSNULL, mDNSNULL);
+	question.qDNSServer = q->qDNSServer;
+
+	for (rp = cg ? cg->members : mDNSNULL; rp; rp = rp->next)
+		{
+		if (!rp->resrec.InterfaceID && rp->resrec.RecordType != kDNSRecordTypePacketNegative && 
+			SameNameRecordAnswersQuestion(&rp->resrec, &question))
+			{
+			LogInfo("mDNS_CheckForCacheRecord: Found %s", CRDisplayString(m, rp));
+			return mDNStrue;
+			}
+		}
+	return mDNSfalse;
 	}
 
 mDNSlocal void CacheRecordResetDNSServer(mDNS *const m, DNSQuestion *q, DNSServer *new)

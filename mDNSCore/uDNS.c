@@ -384,12 +384,13 @@ mDNSexport mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
 
 	// Caution: Only zero AutoTunnelHostRecord.namestorage and AutoTunnelNAT.clientContext AFTER we've determined that this is a NEW DomainAuthInfo
 	// being added to the list. Otherwise we risk smashing our AutoTunnel host records and NATOperation that are already active and in use.
-	info->AutoTunnelHostRecord.resrec.RecordType = kDNSRecordTypeUnregistered;
-	info->AutoTunnelHostRecord.namestorage.c[0] = 0;
-	info->AutoTunnelTarget    .resrec.RecordType = kDNSRecordTypeUnregistered;
-	info->AutoTunnelDeviceInfo.resrec.RecordType = kDNSRecordTypeUnregistered;
-	info->AutoTunnelService   .resrec.RecordType = kDNSRecordTypeUnregistered;
-	info->AutoTunnel6Record   .resrec.RecordType = kDNSRecordTypeUnregistered;
+	info->AutoTunnelHostRecord .resrec.RecordType = kDNSRecordTypeUnregistered;
+	info->AutoTunnelHostRecord .namestorage.c[0] = 0;
+	info->AutoTunnelTarget     .resrec.RecordType = kDNSRecordTypeUnregistered;
+	info->AutoTunnelDeviceInfo .resrec.RecordType = kDNSRecordTypeUnregistered;
+	info->AutoTunnelService    .resrec.RecordType = kDNSRecordTypeUnregistered;
+	info->AutoTunnel6Record    .resrec.RecordType = kDNSRecordTypeUnregistered;
+	info->AutoTunnel6MetaRecord.resrec.RecordType = kDNSRecordTypeUnregistered;
 	info->AutoTunnelNAT.clientContext = mDNSNULL;
 	info->next = mDNSNULL;
 	*p = info;
