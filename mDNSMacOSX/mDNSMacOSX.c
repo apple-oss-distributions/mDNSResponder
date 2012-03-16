@@ -4488,13 +4488,6 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
 	if (InfoSocket < 3 && errno != EAFNOSUPPORT) LogMsg("UpdateInterfaceList: InfoSocket error %d errno %d (%s)", InfoSocket, errno, strerror(errno));
 #endif
 
-	// During wakeup, we may get a network change notification e.g., new addresses, before we get
-	// a wake notification. This means that we have not set AnnounceOwner. Registering interfaces with
-	// core would cause us to probe again which will conflict with the sleep proxy server, if we had
-	// registered with it when going to sleep. Hence, need to delay until we get the wake notification
-
-	if (m->SleepState == SleepState_Sleeping) ifa = NULL;
-
 	while (ifa)
 		{
 #if LIST_ALL_INTERFACES
@@ -6544,7 +6537,7 @@ mDNSexport mDNSBool RecordReadyForSleep(mDNS *const m, AuthRecord *rr)
 	{
 	if (!AuthRecord_uDNS(rr)) return mDNStrue;
 
-	if (SameDomainLabel(rr->namestorage.c, (const mDNSu8 *)"\x0c_autotunnel6"))
+	if ((rr->resrec.rrtype == kDNSType_AAAA) && SameDomainLabel(rr->namestorage.c, (const mDNSu8 *)"\x0c_autotunnel6"))
 		{
 		LogInfo("RecordReadyForSleep: %s not ready for sleep", ARDisplayString(m, rr));
 		return mDNSfalse;

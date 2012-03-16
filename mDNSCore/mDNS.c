@@ -8078,6 +8078,8 @@ mDNSlocal mDNSBool ShouldSuppressQuery(mDNS *const m, domainname *qname, mDNSu16
 				{
 				LogInfo("ShouldSuppressQuery: Query not suppressed for %##s, qtype %s, Local Address %.4a found", qname, DNSTypeName(qtype),
 					&i->ip.ip.v4);
+				if (m->SleepState == SleepState_Sleeping)
+					LogInfo("ShouldSuppressQuery: Would have returned true earlier");
 				return mDNSfalse;
 				}
 			else if (iptype == mDNSAddrType_IPv6 &&
@@ -8088,6 +8090,8 @@ mDNSlocal mDNSBool ShouldSuppressQuery(mDNS *const m, domainname *qname, mDNSu16
 				{
 				LogInfo("ShouldSuppressQuery: Query not suppressed for %##s, qtype %s, Local Address %.16a found", qname, DNSTypeName(qtype),
 					&i->ip.ip.v6);
+				if (m->SleepState == SleepState_Sleeping)
+					LogInfo("ShouldSuppressQuery: Would have returned true earlier");
 				return mDNSfalse;
 				}
 			}
