@@ -4286,6 +4286,24 @@ mDNSlocal void TimeoutQuestions(mDNS *const m)
 	m->CurrentQuestion = mDNSNULL;
 	}
 
+mDNSlocal void mDNSCoreFreeProxyRR(mDNS *const m)
+	{
+	NetworkInterfaceInfo *intf  = m->HostInterfaces;
+	AuthRecord *rrPtr = mDNSNULL, *rrNext = mDNSNULL;
+	while (intf)
+		{
+		rrPtr  = intf->SPSRRSet;
+		while (rrPtr)
+			{
+			rrNext = rrPtr->next;
+			mDNSPlatformMemFree(rrPtr);
+			rrPtr  = rrNext;
+			}
+		intf->SPSRRSet = mDNSNULL;
+		intf = intf->next;
+		}
+	}
+
 mDNSexport mDNSs32 mDNS_Execute(mDNS *const m)
 	{
 	mDNS_Lock(m);	// Must grab lock before trying to read m->timenow
@@ -4350,7 +4368,12 @@ mDNSexport mDNSs32 mDNS_Execute(mDNS *const m)
 		SetSPSProxyListChanged(mDNSNULL);		// Perform any deferred BPF reconfiguration now
 
 		// Clear AnnounceOwner if necessary. (Do this *before* SendQueries() and SendResponses().)
-		if (m->AnnounceOwner && m->timenow - m->AnnounceOwner >= 0) m->AnnounceOwner = 0;
+		if (m->AnnounceOwner && m->timenow - m->AnnounceOwner >= 0)
+			{
+			m->AnnounceOwner = 0;
+			// Also free the stored records that we had registered with the sleep proxy
+			mDNSCoreFreeProxyRR(m);
+			}
 
 		if (m->DelaySleep && m->timenow - m->DelaySleep >= 0)
 			{
@@ -4937,6 +4960,7 @@ mDNSlocal mDNSBool RecordIsFirstOccurrenceOfOwner(mDNS *const m, const AuthRecor
 	return mDNStrue;
 	}
 
+
 mDNSlocal void SendSPSRegistration(mDNS *const m, NetworkInterfaceInfo *const intf, const mDNSOpaque16 id)
 	{
 	AuthRecord *ar;
@@ -4950,6 +4974,55 @@ mDNSlocal void SendSPSRegistration(mDNS *const m, NetworkInterfaceInfo *const in
 			{
 			owner = ar->WakeUp;
 			SendSPSRegistrationForOwner(m, intf, id, &owner);
+			}
+		}
+	}
+
+mDNSlocal void mDNSCoreStoreProxyRR(mDNS *const m, const mDNSInterfaceID InterfaceID, AuthRecord *const rr)
+	{
+	NetworkInterfaceInfo *intf  = FirstInterfaceForID(m, InterfaceID);
+	AuthRecord           *newRR = mDNSPlatformMemAllocate(sizeof(AuthRecord));
+
+	if ((intf == mDNSNULL) || (newRR == mDNSNULL))
+		return;
+	mDNSPlatformMemZero(newRR, sizeof(AuthRecord));
+	mDNS_SetupResourceRecord(newRR, mDNSNULL, InterfaceID, rr->resrec.rrtype,
+							 rr->resrec.rroriginalttl, rr->resrec.RecordType,
+							 rr->ARType, mDNSNULL, mDNSNULL);
+	AssignDomainName(&newRR->namestorage, &rr->namestorage);
+	newRR->resrec.rdlength           = DomainNameLength(rr->resrec.name);
+	newRR->resrec.rdata->u.name.c[0] = 0;
+	AssignDomainName(&newRR->resrec.rdata->u.name, rr->resrec.name);
+	newRR->resrec.namehash           = DomainNameHashValue(newRR->resrec.name);
+	newRR->resrec.rrclass            = rr->resrec.rrclass;
+	if (intf->ip.type == mDNSAddrType_IPv4)
+		newRR->resrec.rdata->u.ipv4 =  rr->resrec.rdata->u.ipv4;
+	else
+		newRR->resrec.rdata->u.ipv6 = rr->resrec.rdata->u.ipv6;
+	SetNewRData(&newRR->resrec, mDNSNULL, 0);
+	// Insert the new node at the head of the list.
+	newRR->next    = intf->SPSRRSet;
+	intf->SPSRRSet = newRR;
+	}
+
+mDNSlocal void SPSInitRecordsBeforeUpdate(mDNS *const m, mDNSOpaque64 updateIntID)
+	{
+	AuthRecord *ar;
+	LogSPS("SPSInitRecordsBeforeUpdate: UpdateIntID 0x%x 0x%x", updateIntID.l[1], updateIntID.l[0]);
+
+	// Before we store the A and AAAA records that we are going to register with the sleep proxy,
+	// make sure that the old sleep proxy records are removed.
+	mDNSCoreFreeProxyRR(m);
+
+	for (ar = m->ResourceRecords; ar; ar=ar->next)
+		{
+		if (AuthRecord_uDNS(ar))
+			continue;
+		// Store the A and AAAA records that we registered with the sleep proxy.
+		// We will use this to prevent spurious name conflicts that may occur when we wake up
+		if (ar->resrec.rrtype == kDNSType_A || ar->resrec.rrtype == kDNSType_AAAA)
+			{
+			mDNSCoreStoreProxyRR(m, ar->resrec.InterfaceID, ar);
 			}
 		}
 	}
@@ -5064,6 +5137,7 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
 	{
 	mDNSBool SendGoodbyes = mDNStrue;
 	const CacheRecord *sps[3] = { mDNSNULL };
+	mDNSOpaque64 updateIntID = zeroOpaque64;
 
 	m->NextScheduledSPRetry = m->timenow;
 
@@ -5093,9 +5167,15 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
 				else
 					{
 					int i;
+					mDNSu32 scopeid;
 					SendGoodbyes = mDNSfalse;
 					intf->NextSPSAttempt = 0;
 					intf->NextSPSAttemptTime = m->timenow + mDNSPlatformOneSecond;
+					
+					scopeid = mDNSPlatformInterfaceIndexfromInterfaceID(m, intf->InterfaceID, mDNStrue);
+					// Now we know for sure that we have to wait for registration to complete on this interface.
+					if (scopeid < (sizeof(updateIntID) * mDNSNBBY))
+						bit_set_opaque64(updateIntID, scopeid);
 					// Don't need to set m->NextScheduledSPRetry here because we already set "m->NextScheduledSPRetry = m->timenow" above
 					for (i=0; i<3; i++)
 						{
@@ -5120,7 +5200,9 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
 				}
 			}
 		}
-
+	// If we have at least one interface on which we are registering with an external sleep proxy,
+	// initialize all the records appropriately.
+	if (!mDNSOpaque64IsZero(&updateIntID)) SPSInitRecordsBeforeUpdate(m, updateIntID);
 	if (SendGoodbyes)	// If we didn't find even one Sleep Proxy
 		{
 		LogSPS("BeginSleepProcessing: Not registering with Sleep Proxy Server");
@@ -6460,6 +6542,28 @@ mDNSlocal mDNSu32 GetEffectiveTTL(const uDNS_LLQType LLQType, mDNSu32 ttl)		// T
 	return ttl;
 	}
 
+mDNSlocal mDNSBool mDNSCoreRegisteredProxyRecord(mDNS *const m, AuthRecord *rr)
+	{
+	NetworkInterfaceInfo *intf  = m->HostInterfaces;
+	AuthRecord           *rrPtr = mDNSNULL;
+
+	while (intf)
+		{
+		rrPtr = intf->SPSRRSet;
+		while (rrPtr)
+			{
+			if (SameResourceRecordSignature(rrPtr, rr))
+				{
+				LogSPS("mDNSCoreRegisteredProxyRecord: Ignoring packet registered with sleep proxy : %s ", ARDisplayString(m, rr));
+				return mDNStrue;
+				}
+			rrPtr = rrPtr->next;
+			}
+		intf = intf->next;
+		}
+	return mDNSfalse;
+}
+
 // Note: mDNSCoreReceiveResponse calls mDNS_Deregister_internal which can call a user callback, which may change
 // the record list and/or question list.
 // Any code walking either list must use the CurrentQuestion and/or CurrentRecord mechanism to protect against this.
@@ -6754,8 +6858,12 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
 							// If we're probing for this record, we just failed
 							else if (rr->resrec.RecordType == kDNSRecordTypeUnique)
 								{
-								LogMsg("mDNSCoreReceiveResponse: ProbeCount %d; will deregister %s", rr->ProbeCount, ARDisplayString(m, rr));
-								mDNS_Deregister_internal(m, rr, mDNS_Dereg_conflict);
+								// Before we call deregister, check if this is a packet we registered with the sleep proxy.
+								if (!mDNSCoreRegisteredProxyRecord(m, rr))
+									{
+									LogMsg("mDNSCoreReceiveResponse: ProbeCount %d; will deregister %s", rr->ProbeCount, ARDisplayString(m, rr));
+									mDNS_Deregister_internal(m, rr, mDNS_Dereg_conflict);
+									}
 								}
 							// We assumed this record must be unique, but we were wrong. (e.g. There are two mDNSResponders on the
 							// same machine giving different answers for the reverse mapping record, or there are two machines on the

@@ -1727,6 +1727,7 @@ struct NetworkInterfaceInfo_struct
 	mDNSu8          McastTxRx;			// Send/Receive multicast on this { InterfaceID, address family } ?
 	mDNSu8          NetWake;			// Set if Wake-On-Magic-Packet is enabled on this interface
 	mDNSu8          Loopback;			// Set if this is the loopback interface
+	AuthRecord     *SPSRRSet;			// To help the client keep track of the records registered with the sleep proxy
 	};
 
 #define SLE_DELETE              0x00000001
