@@ -1,87 +1,48 @@
-Microsoft Visual Studio Solution File, Format Version 9.00
-# Visual Studio 2005
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DLL", "mDNSWindows\DLL\dnssd.vcproj", "{AB581101-18F0-46F6-B56A-83A6B1EA657E}"
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio 2010
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DLL", "mDNSWindows\DLL\dnssd.vcxproj", "{AB581101-18F0-46F6-B56A-83A6B1EA657E}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mDNSResponder", "mDNSWindows\SystemService\Service.vcproj", "{C1D98254-BA27-4427-A3BE-A68CA2CC5F69}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mDNSResponder", "mDNSWindows\SystemService\Service.vcxproj", "{C1D98254-BA27-4427-A3BE-A68CA2CC5F69}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NSPTool", "mDNSWindows\NSPTool\NSPTool.vcproj", "{208B3A9F-1CA0-4D1D-9D6C-C61616F94705}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NSPTool", "mDNSWindows\NSPTool\NSPTool.vcxproj", "{208B3A9F-1CA0-4D1D-9D6C-C61616F94705}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mdnsNSP", "mDNSWindows\mdnsNSP\mdnsNSP.vcproj", "{F4F15529-F0EB-402F-8662-73C5797EE557}"
-	ProjectSection(ProjectDependencies) = postProject
-		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mdnsNSP", "mDNSWindows\mdnsNSP\mdnsNSP.vcxproj", "{F4F15529-F0EB-402F-8662-73C5797EE557}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExplorerPlugin", "Clients\ExplorerPlugin\ExplorerPlugin.vcproj", "{BB8AC1B5-6587-4163-BDC6-788B157705CA}"
-	ProjectSection(ProjectDependencies) = postProject
-		{3A2B6325-3053-4236-84BD-AA9BE2E323E5} = {3A2B6325-3053-4236-84BD-AA9BE2E323E5}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExplorerPlugin", "Clients\ExplorerPlugin\ExplorerPlugin.vcxproj", "{BB8AC1B5-6587-4163-BDC6-788B157705CA}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PrinterSetupWizard", "Clients\PrinterSetupWizard\PrinterSetupWizard.vcproj", "{B1D2CDA2-CC8F-45D5-A694-2EE45B0308CF}"
-	ProjectSection(ProjectDependencies) = postProject
-		{3A2B6325-3053-4236-84BD-AA9BE2E323E5} = {3A2B6325-3053-4236-84BD-AA9BE2E323E5}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PrinterSetupWizard", "Clients\PrinterSetupWizard\PrinterSetupWizard.vcxproj", "{B1D2CDA2-CC8F-45D5-A694-2EE45B0308CF}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PrinterSetupWizardLocRes", "Clients\PrinterSetupWizard\PrinterSetupWizardLocRes.vcproj", "{967F5375-0176-43D3-ADA3-22EE25551C37}"
-	ProjectSection(ProjectDependencies) = postProject
-		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PrinterSetupWizardLocRes", "Clients\PrinterSetupWizard\PrinterSetupWizardLocRes.vcxproj", "{967F5375-0176-43D3-ADA3-22EE25551C37}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PrinterSetupWizardRes", "Clients\PrinterSetupWizard\PrinterSetupWizardRes.vcproj", "{CFCCB176-6CAA-472B-B0A2-90511C8E2E52}"
-	ProjectSection(ProjectDependencies) = postProject
-		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PrinterSetupWizardRes", "Clients\PrinterSetupWizard\PrinterSetupWizardRes.vcxproj", "{CFCCB176-6CAA-472B-B0A2-90511C8E2E52}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExplorerPluginLocRes", "Clients\ExplorerPlugin\ExplorerPluginLocRes.vcproj", "{1643427B-F226-4AD6-B413-97DA64D5C6B4}"
-	ProjectSection(ProjectDependencies) = postProject
-		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExplorerPluginLocRes", "Clients\ExplorerPlugin\ExplorerPluginLocRes.vcxproj", "{1643427B-F226-4AD6-B413-97DA64D5C6B4}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExplorerPluginRes", "Clients\ExplorerPlugin\ExplorerPluginRes.vcproj", "{871B1492-B4A4-4B57-9237-FA798484D7D7}"
-	ProjectSection(ProjectDependencies) = postProject
-		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExplorerPluginRes", "Clients\ExplorerPlugin\ExplorerPluginRes.vcxproj", "{871B1492-B4A4-4B57-9237-FA798484D7D7}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dns-sd", "Clients\DNS-SD.VisualStudio\dns-sd.vcproj", "{AA230639-E115-4A44-AA5A-44A61235BA50}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dns-sd", "Clients\DNS-SD.VisualStudio\dns-sd.vcxproj", "{AA230639-E115-4A44-AA5A-44A61235BA50}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Java", "mDNSWindows\Java\Java.vcproj", "{9CE2568A-3170-41C6-9F20-A0188A9EC114}"
-	ProjectSection(ProjectDependencies) = postProject
-		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Java", "mDNSWindows\Java\Java.vcxproj", "{9CE2568A-3170-41C6-9F20-A0188A9EC114}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "JavaSamples", "Clients\Java\JavaSamples.vcproj", "{A987A0C1-344F-475C-869C-F082EB11EEBA}"
-	ProjectSection(ProjectDependencies) = postProject
-		{9CE2568A-3170-41C6-9F20-A0188A9EC114} = {9CE2568A-3170-41C6-9F20-A0188A9EC114}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "JavaSamples", "Clients\Java\JavaSamples.vcxproj", "{A987A0C1-344F-475C-869C-F082EB11EEBA}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DLLStub", "mDNSWindows\DLLStub\DLLStub.vcproj", "{3A2B6325-3053-4236-84BD-AA9BE2E323E5}"
-	ProjectSection(ProjectDependencies) = postProject
-		{AB581101-18F0-46F6-B56A-83A6B1EA657E} = {AB581101-18F0-46F6-B56A-83A6B1EA657E}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DLLStub", "mDNSWindows\DLLStub\DLLStub.vcxproj", "{3A2B6325-3053-4236-84BD-AA9BE2E323E5}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DLLX", "mDNSWindows\DLLX\DLLX.vcproj", "{78FBFCC5-2873-4AE2-9114-A08082F71124}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DLLX", "mDNSWindows\DLLX\DLLX.vcxproj", "{78FBFCC5-2873-4AE2-9114-A08082F71124}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DNSServiceBrowser.NET", "Clients\DNSServiceBrowser.NET\DNSServiceBrowser.NET.csproj", "{DE8DB97E-37A3-43ED-9A5E-CCC5F6DE9CB4}"
 EndProject
 Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "DNSServiceBrowser.VB", "Clients\DNSServiceBrowser.VB\DNSServiceBrowser.VB.vbproj", "{FB79E297-5703-435C-A829-51AA51CD71C2}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mDNSNetMonitor", "Clients\mDNSNetMonitor.VisualStudio\mDNSNetMonitor.vcproj", "{AF35C285-528D-46A1-8A0E-47B0733DC718}"
-	ProjectSection(ProjectDependencies) = postProject
-		{C1D98254-BA27-4427-A3BE-A68CA2CC5F69} = {C1D98254-BA27-4427-A3BE-A68CA2CC5F69}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mDNSNetMonitor", "Clients\mDNSNetMonitor.VisualStudio\mDNSNetMonitor.vcxproj", "{AF35C285-528D-46A1-8A0E-47B0733DC718}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ControlPanelLocRes", "mDNSWindows\ControlPanel\ControlPanelLocRes.vcproj", "{4490229E-025A-478F-A2CF-51154DA83E39}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ControlPanelLocRes", "mDNSWindows\ControlPanel\ControlPanelLocRes.vcxproj", "{4490229E-025A-478F-A2CF-51154DA83E39}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ControlPanelRes", "mDNSWindows\ControlPanel\ControlPanelRes.vcproj", "{5254AA9C-3D2E-4539-86D9-5EB0F4151215}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ControlPanelRes", "mDNSWindows\ControlPanel\ControlPanelRes.vcxproj", "{5254AA9C-3D2E-4539-86D9-5EB0F4151215}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ControlPanel", "mDNSWindows\ControlPanel\ControlPanel.vcproj", "{0DF09484-B4C2-4AB4-9FC0-7B091ADEAFEB}"
-	ProjectSection(ProjectDependencies) = postProject
-		{3A2B6325-3053-4236-84BD-AA9BE2E323E5} = {3A2B6325-3053-4236-84BD-AA9BE2E323E5}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ControlPanel", "mDNSWindows\ControlPanel\ControlPanel.vcxproj", "{0DF09484-B4C2-4AB4-9FC0-7B091ADEAFEB}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FirefoxExtension", "Clients\FirefoxExtension\FirefoxExtension.vcproj", "{7826EA27-D4CC-4FAA-AD23-DF813823227B}"
-	ProjectSection(ProjectDependencies) = postProject
-		{3A2B6325-3053-4236-84BD-AA9BE2E323E5} = {3A2B6325-3053-4236-84BD-AA9BE2E323E5}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FirefoxExtension", "Clients\FirefoxExtension\FirefoxExtension.vcxproj", "{7826EA27-D4CC-4FAA-AD23-DF813823227B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -332,7 +293,7 @@ Global
 		{AF35C285-528D-46A1-8A0E-47B0733DC718}.Debug|Mixed Platforms.Build.0 = Debug|Win32
 		{AF35C285-528D-46A1-8A0E-47B0733DC718}.Debug|Win32.ActiveCfg = Debug|Win32
 		{AF35C285-528D-46A1-8A0E-47B0733DC718}.Debug|Win32.Build.0 = Debug|Win32
-		{AF35C285-528D-46A1-8A0E-47B0733DC718}.Debug|x64.ActiveCfg = Debug|Win32
+		{AF35C285-528D-46A1-8A0E-47B0733DC718}.Debug|x64.ActiveCfg = Debug|x64
 		{AF35C285-528D-46A1-8A0E-47B0733DC718}.Release|Any CPU.ActiveCfg = Release|Win32
 		{AF35C285-528D-46A1-8A0E-47B0733DC718}.Release|Mixed Platforms.ActiveCfg = Release|Win32
 		{AF35C285-528D-46A1-8A0E-47B0733DC718}.Release|Mixed Platforms.Build.0 = Release|Win32

@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2007 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2012 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,9 @@ type v4addr_t  = array [ 4] of uint8_t;
 type ethaddr_t = array [ 6] of uint8_t;
 type v6addr_t  = array [16] of uint8_t;
 type string_t = c_string[*:1024];
+
+// Mig doesn't generate the output file if I use the constant PFPortArraySize below
+type pfArray_t  = array [16] of uint16_t;
 
 subsystem helper 1833193043;
 serverprefix do_;
@@ -75,12 +78,6 @@ routine mDNSKeychainGetSecrets( port			: mach_port_t;
 		out						err				: int;
 		ServerAuditToken		token			: audit_token_t);
 
-simpleroutine mDNSAutoTunnelInterfaceUpDown(
-								port			: mach_port_t;
-								updown			: int;
-								address			: v6addr_t;
-		ServerAuditToken		token			: audit_token_t);
-
 simpleroutine mDNSConfigureServer(
 								port			: mach_port_t;
 								updown			: int;
@@ -111,6 +108,23 @@ simpleroutine mDNSPacketFilterControl(
 								port			: mach_port_t;
 								command			: uint32_t;
 								ifname			: string_t;
-								servicePort		: uint16_t;
-								protocol		: uint16_t;
+								arraySize		: uint32_t;
+								portArray		: pfArray_t;
+								protocolArray	: pfArray_t;
 		ServerAuditToken		token			: audit_token_t);
+
+
+simpleroutine mDNSSendKeepalive( port		: mach_port_t;
+								sadd			: v6addr_t;
+								dadd			: v6addr_t;
+								lport			: uint16_t;
+								rport			: uint16_t;
+								seq				: unsigned;
+								ack				: unsigned;
+								win				: uint16_t;
+		ServerAuditToken		token			: audit_token_t);
+
+simpleroutine mDNSInterfaceAdvtIoctl( port		: mach_port_t;
+									ifname 		: string_t;
+									op			: int;
+					ServerAuditToken token		: audit_token_t);

@@ -6,7 +6,6 @@ _main
 _LogMsgWithLevel
 _mDNS_vsnprintf
 _mDNSPlatformWriteLogMsg
-_safe_vproc_transaction_begin
 _KQueueSet
 _mDNSMacOSXSystemBuildNumber
 _mDNSDaemonInitialize
@@ -149,8 +148,6 @@ _mDNS_RegisterService
 _ServiceCallback
 _GetServiceTarget
 _SetupLocalAutoTunnelInterface_internal
-_mDNSAutoTunnelInterfaceUpDown
-_proxy_mDNSAutoTunnelInterfaceUpDown
 _NetworkChanged
 _KQueueLock
 _AbortDeregistration

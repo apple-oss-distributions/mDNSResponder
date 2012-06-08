@@ -44,22 +44,22 @@
 #include <CoreServices/CoreServices.h>
 #include <CoreFoundation/CoreFoundation.h>
 
-#define	PRIV_OP_TOOL_VERS	4
+#define PRIV_OP_TOOL_VERS   4
 
-#define	kToolName      "ddnswriteconfig"
-#define	kToolPath      "/Library/Application Support/Bonjour/" kToolName
-#define	kToolInstaller "installtool"
+#define kToolName      "ddnswriteconfig"
+#define kToolPath      "/Library/Application Support/Bonjour/" kToolName
+#define kToolInstaller "installtool"
 
-#define	SC_DYNDNS_SETUP_KEY			CFSTR("Setup:/Network/DynamicDNS")
-#define	SC_DYNDNS_STATE_KEY			CFSTR("State:/Network/DynamicDNS")
-#define	SC_DYNDNS_REGDOMAINS_KEY	CFSTR("RegistrationDomains")
-#define	SC_DYNDNS_BROWSEDOMAINS_KEY	CFSTR("BrowseDomains")
-#define	SC_DYNDNS_HOSTNAMES_KEY		CFSTR("HostNames")
-#define	SC_DYNDNS_DOMAIN_KEY		CFSTR("Domain")
-#define	SC_DYNDNS_KEYNAME_KEY		CFSTR("KeyName")
-#define	SC_DYNDNS_SECRET_KEY		CFSTR("Secret")
-#define	SC_DYNDNS_ENABLED_KEY		CFSTR("Enabled")
-#define	SC_DYNDNS_STATUS_KEY		CFSTR("Status")
+#define SC_DYNDNS_SETUP_KEY         CFSTR("Setup:/Network/DynamicDNS")
+#define SC_DYNDNS_STATE_KEY         CFSTR("State:/Network/DynamicDNS")
+#define SC_DYNDNS_REGDOMAINS_KEY    CFSTR("RegistrationDomains")
+#define SC_DYNDNS_BROWSEDOMAINS_KEY CFSTR("BrowseDomains")
+#define SC_DYNDNS_HOSTNAMES_KEY     CFSTR("HostNames")
+#define SC_DYNDNS_DOMAIN_KEY        CFSTR("Domain")
+#define SC_DYNDNS_KEYNAME_KEY       CFSTR("KeyName")
+#define SC_DYNDNS_SECRET_KEY        CFSTR("Secret")
+#define SC_DYNDNS_ENABLED_KEY       CFSTR("Enabled")
+#define SC_DYNDNS_STATUS_KEY        CFSTR("Status")
 #define DYNDNS_KEYCHAIN_DESCRIPTION "Dynamic DNS Key"
 
 

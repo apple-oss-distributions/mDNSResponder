@@ -245,10 +245,11 @@ STDMETHODIMP CTXTRecord::GetCount(ULONG* count)
 
 	*count = 0;
 
-
-
-	if ( m_byteArray.size() > 0 )
-
+	if ( m_allocated )
+	{
+		*count = TXTRecordGetCount( TXTRecordGetLength( &m_tref ), TXTRecordGetBytesPtr( &m_tref ) );
+	}
+	else if ( m_byteArray.size() > 0 )
 	{
 
 		*count = TXTRecordGetCount( ( uint16_t ) m_byteArray.size(), &m_byteArray[ 0 ] );

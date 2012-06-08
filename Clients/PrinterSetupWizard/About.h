@@ -5,17 +5,17 @@
 
 class CAbout : public CDialog
 {
-	DECLARE_DYNAMIC(CAbout)
+DECLARE_DYNAMIC(CAbout)
 
 public:
-	CAbout(CWnd* pParent = NULL);   // standard constructor
-	virtual ~CAbout();
+CAbout(CWnd* pParent = NULL);       // standard constructor
+virtual ~CAbout();
 
 // Dialog Data
-	enum { IDD = IDD_DIALOG1 };
+enum { IDD = IDD_DIALOG1 };
 
 protected:
-	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
+virtual void DoDataExchange(CDataExchange* pDX);        // DDX/DDV support
 
-	DECLARE_MESSAGE_MAP()
+DECLARE_MESSAGE_MAP()
 };

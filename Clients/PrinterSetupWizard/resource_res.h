@@ -45,14 +45,14 @@
 #define IDD_DIALOG1                     139
 #define IDI_ICON2                       141
 #define IDI_PRINTER                     141
-#define IDS_REINSTALL					142
-#define IDS_REINSTALL_CAPTION			143
-#define IDC_INFO						144
+#define IDS_REINSTALL                   142
+#define IDS_REINSTALL_CAPTION           143
+#define IDC_INFO                        144
 #define IDS_PRINTER_UNAVAILABLE         145
-#define IDS_BAD_INF_FILE				150
-#define IDS_BAD_INF_FILE_CAPTION		151
-#define IDS_NO_MATCH_INF_FILE			152
-#define IDS_NO_MATCH_INF_FILE_CAPTION	153
+#define IDS_BAD_INF_FILE                150
+#define IDS_BAD_INF_FILE_CAPTION        151
+#define IDS_NO_MATCH_INF_FILE           152
+#define IDS_NO_MATCH_INF_FILE_CAPTION   153
 #define IDC_BUTTON1                     1000
 #define IDC_LIST1                       1000
 #define IDC_BROWSE_LIST                 1000
@@ -77,13 +77,13 @@
 #define IDC_DESCRIPTION_FIELD           1030
 #define IDC_LOCATION_FIELD              1032
 #define IDC_DESCRIPTION_LABEL           1033
-#define IDC_COMPLETE1					1034
-#define IDC_COMPLETE2					1035
-#define IDC_INSTALLING					1036
-#define IDC_PROGRESS					1037
+#define IDC_COMPLETE1                   1034
+#define IDC_COMPLETE2                   1035
+#define IDC_INSTALLING                  1036
+#define IDC_PROGRESS                    1037
 
 // Next default values for new objects
-// 
+//
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        142

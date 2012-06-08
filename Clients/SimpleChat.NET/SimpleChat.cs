@@ -41,24 +41,15 @@ namespace SimpleChat.NET
 		private System.Windows.Forms.Label      label1;
 
         private Bonjour.DNSSDEventManager       m_eventManager = null;
-
         private Bonjour.DNSSDService            m_service = null;
-
         private Bonjour.DNSSDService            m_registrar = null;
-
         private Bonjour.DNSSDService            m_browser = null;
-
         private Bonjour.DNSSDService            m_resolver = null;
 		private String					        m_name;
-
         private Socket                          m_socket = null;
-
         private const int                       BUFFER_SIZE = 1024;
-
         public byte[]                           m_buffer = new byte[BUFFER_SIZE];
-
         public bool                             m_complete = false;
-
         public StringBuilder                    m_sb = new StringBuilder();
 
         delegate void                           ReadMessageCallback(String data);
@@ -75,51 +66,30 @@ namespace SimpleChat.NET
 		// Called by DNSServices core as a result of Register()
 		// call
 		//
-
-
-
         public void
-
         ServiceRegistered
-
                     (
-
                     DNSSDService service,
-
                     DNSSDFlags flags,
-
                     String name,
-
                     String regType,
-
                     String domain
-
                     )
-
         {
-
             m_name = name;
 
-
-
+			//
+			// Try to start browsing for other instances of this service
+			//
             try
-
             {
-
                 m_browser = m_service.Browse(0, 0, "_p2pchat._udp", null, m_eventManager);
-
             }
-
             catch
-
             {
-
                 MessageBox.Show("Browse Failed", "Error");
-
                 Application.Exit();
-
             }
-
         }
 
 		//
@@ -127,7 +97,6 @@ namespace SimpleChat.NET
 		//
 		// Called by DNSServices core as a result of a Browse call
 		//
-
 		public void
         ServiceFound
 				    (
@@ -139,96 +108,50 @@ namespace SimpleChat.NET
                     String          domain
 				    )
 		{
-
             if (serviceName != m_name)
-
             {
-
                 PeerData peer = new PeerData();
 
-
-
                 peer.InterfaceIndex = ifIndex;
-
                 peer.Name = serviceName;
-
                 peer.Type = regType;
-
                 peer.Domain = domain;
-
                 peer.Address = null;
-
-
 
                 comboBox1.Items.Add(peer);
 
-
-
                 if (comboBox1.Items.Count == 1)
-
                 {
-
                     comboBox1.SelectedIndex = 0;
-
                 }
-
             }
 		}
 
-
-
         //
-
         // ServiceLost
-
         //
-
         // Called by DNSServices core as a result of a Browse call
-
         //
-
-
-
         public void
-
         ServiceLost
-
                     (
-
                     DNSSDService sref,
-
                     DNSSDFlags flags,
-
                     uint ifIndex,
-
                     String serviceName,
-
                     String regType,
-
                     String domain
-
                     )
-
         {
-
             PeerData peer = new PeerData();
 
-
-
             peer.InterfaceIndex = ifIndex;
-
             peer.Name = serviceName;
-
             peer.Type = regType;
-
             peer.Domain = domain;
-
             peer.Address = null;
 
-
-
             comboBox1.Items.Remove(peer);
-
         }
 
 		//
@@ -237,61 +160,36 @@ namespace SimpleChat.NET
 		// Called by DNSServices core as a result of DNSService.Resolve()
 		// call
 		//
-
-
         public void
-
         ServiceResolved
-
                     (
-
                     DNSSDService sref,
-
                     DNSSDFlags flags,
-
                     uint ifIndex,
-
                     String fullName,
-
                     String hostName,
-
                     ushort port,
-
                     TXTRecord txtRecord
-
                     )
 		{
-
             m_resolver.Stop();
-
             m_resolver = null;
-
-
 
             PeerData peer = (PeerData)comboBox1.SelectedItem;
 
-
-
             peer.Port = port;
 
-
-
+			//
+			// Query for the IP address associated with "hostName"
+			//
             try
-
             {
-
                 m_resolver = m_service.QueryRecord(0, ifIndex, hostName, DNSSDRRType.kDNSSDType_A, DNSSDRRClass.kDNSSDClass_IN, m_eventManager );
-
             }
-
             catch
-
             {
-
                 MessageBox.Show("QueryRecord Failed", "Error");
-
                 Application.Exit();
-
             }
 		}
 
@@ -301,7 +199,6 @@ namespace SimpleChat.NET
 		// Called by DNSServices core as a result of DNSService.QueryRecord()
 		// call
 		//
-
 		public void
 		QueryAnswered
 			(
@@ -315,90 +212,54 @@ namespace SimpleChat.NET
             uint            ttl
             )
         {
-
+			//
+			// Stop the resolve to reduce the burden on the network
+			//
             m_resolver.Stop();
-
             m_resolver = null;
 
-
-
             PeerData peer = (PeerData) comboBox1.SelectedItem;
-
-
 			uint bits = BitConverter.ToUInt32( (Byte[])rdata, 0);
 			System.Net.IPAddress address = new System.Net.IPAddress(bits);
 
             peer.Address = address;
 		}
 
-
-
         public void
-
         OperationFailed
-
                     (
-
                     DNSSDService service,
-
                     DNSSDError error
-
                     )
-
         {
-
             MessageBox.Show("Operation returned an error code " + error, "Error");
-
         }
 
-
-
         //
-
         // OnReadMessage
-
         //
-
         // Called when there is data to be read on a socket
-
         //
-
         // This is called (indirectly) from OnReadSocket()
-
         //
-
         private void
-
         OnReadMessage
-
                 (
-
                 String msg
-
                 )
-
         {
-
             int rgb = 0;
 
-
-
             for (int i = 0; i < msg.Length && msg[i] != ':'; i++)
-
             {
-
                 rgb = rgb ^ ((int)msg[i] << (i % 3 + 2) * 8);
 
             }
 
-
-
             Color color = Color.FromArgb(rgb & 0x007F7FFF);
 
             richTextBox1.SelectionColor = color;
-
             richTextBox1.AppendText(msg + Environment.NewLine);
-
         }
 
 		//
@@ -439,42 +300,30 @@ namespace SimpleChat.NET
 			//
 			InitializeComponent();
 
-
-
             try
-
             {
-
                 m_service = new DNSSDService();
-
             }
-
             catch
-
             {
-
                 MessageBox.Show("Bonjour Service is not available", "Error");
-
                 Application.Exit();
-
             }
 
-
-
+			//
+			// Associate event handlers with all the Bonjour events that the app is interested in.
+			//
             m_eventManager = new DNSSDEventManager();
-
             m_eventManager.ServiceRegistered += new _IDNSSDEvents_ServiceRegisteredEventHandler(this.ServiceRegistered);
-
             m_eventManager.ServiceFound += new _IDNSSDEvents_ServiceFoundEventHandler(this.ServiceFound);
-
             m_eventManager.ServiceLost += new _IDNSSDEvents_ServiceLostEventHandler(this.ServiceLost);
-
             m_eventManager.ServiceResolved += new _IDNSSDEvents_ServiceResolvedEventHandler(this.ServiceResolved);
-
             m_eventManager.QueryRecordAnswered += new _IDNSSDEvents_QueryRecordAnsweredEventHandler(this.QueryAnswered);
-
             m_eventManager.OperationFailed += new _IDNSSDEvents_OperationFailedEventHandler(this.OperationFailed);
 
+			//
+			// Socket read handler
+			//
 			m_readMessageCallback = new ReadMessageCallback(OnReadMessage);
 
 			this.Load += new System.EventHandler(this.Form1_Load);
@@ -505,26 +354,15 @@ namespace SimpleChat.NET
 					m_browser.Stop();
 				}
 
-
-
                 if (m_resolver != null)
-
                 {
-
                     m_resolver.Stop();
-
                 }
 
-
-
                 m_eventManager.ServiceFound -= new _IDNSSDEvents_ServiceFoundEventHandler(this.ServiceFound);
-
                 m_eventManager.ServiceLost -= new _IDNSSDEvents_ServiceLostEventHandler(this.ServiceLost);
-
                 m_eventManager.ServiceResolved -= new _IDNSSDEvents_ServiceResolvedEventHandler(this.ServiceResolved);
-
                 m_eventManager.QueryRecordAnswered -= new _IDNSSDEvents_QueryRecordAnsweredEventHandler(this.QueryAnswered);
-
                 m_eventManager.OperationFailed -= new _IDNSSDEvents_OperationFailedEventHandler(this.OperationFailed);
 			}
 			base.Dispose( disposing );
@@ -711,101 +549,53 @@ namespace SimpleChat.NET
 		}
 	}
 
-
-
     //
-
     // PeerData
-
     //
-
     // Holds onto the information associated with a peer on the network
-
     //
-
     public class PeerData
-
     {
-
         public uint InterfaceIndex;
-
         public String Name;
-
         public String Type;
-
         public String Domain;
-
         public IPAddress Address;
-
         public int Port;
 
-
-
         public override String
-
         ToString()
-
         {
-
             return Name;
-
         }
-
-
 
         public override bool
-
         Equals(object other)
-
         {
-
             bool result = false;
 
-
-
             if (other != null)
-
             {
-
                 if ((object)this == other)
-
                 {
-
                     result = true;
-
                 }
-
                 else if (other is PeerData)
-
                 {
-
                     PeerData otherPeerData = (PeerData)other;
 
-
-
                     result = (this.Name == otherPeerData.Name);
-
                 }
-
             }
 
-
-
             return result;
-
         }
-
 
 
         public override int
-
         GetHashCode()
-
         {
-
             return Name.GetHashCode();
-
         }
-
     };
 }

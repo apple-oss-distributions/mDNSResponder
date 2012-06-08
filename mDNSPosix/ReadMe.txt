@@ -297,6 +297,16 @@ Networking, Communications, Hardware
 
 6 Aug 2002
 
+Impact: A local network user may cause a denial of the Bonjour service
+Description: An error handling issue exists in the Bonjour Namespace
+Provider. A local network user may send a maliciously crafted multicast
+DNS packet leading to an unexpected termination of the Bonjour service.
+This update addresses the issue by performing additional validation of
+multicast DNS packets. This issue does not affect systems running Mac OS
+X or Windows.
+CVE-ID
+CVE-2011-0220 : JaeSeung Song of the Department of Computing at Imperial
+College London
 
 To Do List
 ----------

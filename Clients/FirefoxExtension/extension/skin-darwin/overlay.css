@@ -4,7 +4,7 @@
 }
 #bonjour4firefox-toolbar-button
 {
-  list-style-image: url("chrome://bonjour4firefox/skin/toolbar-button.png");
+  list-style-image: url("chrome://bonjour4firefox/skin/_internal_toolbar-button.png");
   -moz-image-region: rect(0px 36px 23px 0px);
 }
 #bonjour4firefox-toolbar-button[disabled="true"]

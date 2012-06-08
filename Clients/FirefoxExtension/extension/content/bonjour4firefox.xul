@@ -26,7 +26,7 @@
         <treechildren class="sidebar-placesTreechildren" context="targetmenu" flex="1" id="treeChildrenBrowseList">
 			<treeitem>
 				<treerow>
-					<treecell src="chrome://bonjour4firefox/content/bonjour4firefox.png" label="About Bonjour"/>
+					<treecell src="chrome://bonjour4firefox/content/_internal_bonjour4firefox.png" label="About Bonjour"/>
 				</treerow>
 			</treeitem>
 		</treechildren>
@@ -121,7 +121,7 @@
 							newTreeRow.setAttribute( 'properties', 'bonjourRow' );
 							var newTreeCell = document.createElement('treecell');
                 			newTreeCell.setAttribute( 'label', serviceName );
-							newTreeCell.setAttribute( 'src', 'chrome://bonjour4firefox/content/bonjour4firefox.png' );
+							newTreeCell.setAttribute( 'src', 'chrome://bonjour4firefox/content/_internal_bonjour4firefox.png' );
 				
 							newTreeItem.appendChild( newTreeRow );
 							newTreeRow.appendChild( newTreeCell );

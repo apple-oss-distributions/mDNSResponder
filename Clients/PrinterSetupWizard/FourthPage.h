@@ -5,9 +5,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,39 +23,39 @@
 
 class CFourthPage : public CPropertyPage
 {
-	DECLARE_DYNAMIC(CFourthPage)
+DECLARE_DYNAMIC(CFourthPage)
 
 public:
-	CFourthPage();
-	virtual ~CFourthPage();
+CFourthPage();
+virtual ~CFourthPage();
 
 // Dialog Data
-	enum { IDD = IDD_FOURTH_PAGE };
+enum { IDD = IDD_FOURTH_PAGE };
 
-	virtual BOOL OnSetActive();
-	virtual BOOL OnKillActive();
+virtual BOOL OnSetActive();
+virtual BOOL OnKillActive();
 
-	BOOL StartActivityIndicator();
-	BOOL StopActivityIndicator();
+BOOL StartActivityIndicator();
+BOOL StopActivityIndicator();
 
 protected:
-	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
+virtual void DoDataExchange(CDataExchange* pDX);        // DDX/DDV support
 
-	DECLARE_MESSAGE_MAP()
+DECLARE_MESSAGE_MAP()
 
 private:
 
-	OSStatus	OnInitPage();
-	CFont		m_largeFont;
-	bool		m_initialized;
+OSStatus    OnInitPage();
+CFont m_largeFont;
+bool m_initialized;
 
 
 public:
-	CStatic m_goodbye;
+CStatic m_goodbye;
 private:
-	CStatic m_printerNameCtrl;
-	CStatic m_printerManufacturerCtrl;
-	CStatic m_printerModelCtrl;
-	CStatic m_printerProtocolCtrl;
-	CStatic m_printerDefault;
+CStatic m_printerNameCtrl;
+CStatic m_printerManufacturerCtrl;
+CStatic m_printerModelCtrl;
+CStatic m_printerProtocolCtrl;
+CStatic m_printerDefault;
 };

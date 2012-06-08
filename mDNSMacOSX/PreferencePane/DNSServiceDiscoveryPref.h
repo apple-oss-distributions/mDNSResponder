@@ -49,13 +49,13 @@
 #import <dns_sd.h>
 
 typedef struct MyDNSServiceState {
-    DNSServiceRef       service;
-    CFRunLoopSourceRef  source;
-    CFSocketRef         socket;
+    DNSServiceRef service;
+    CFRunLoopSourceRef source;
+    CFSocketRef socket;
 } MyDNSServiceState;
 
 
-@interface DNSServiceDiscoveryPref : NSPreferencePane 
+@interface DNSServiceDiscoveryPref : NSPreferencePane
 {
     IBOutlet NSTextField         *hostName;
     IBOutlet NSTextField         *sharedSecretName;
@@ -68,103 +68,103 @@ typedef struct MyDNSServiceState {
     IBOutlet NSButton            *applyButton;
     IBOutlet NSButton            *revertButton;
     IBOutlet NSWindow            *sharedSecretWindow;
-	IBOutlet NSWindow            *addBrowseDomainWindow;
+    IBOutlet NSWindow            *addBrowseDomainWindow;
     IBOutlet NSButton            *addBrowseDomainButton;
-    IBOutlet NSButton            *removeBrowseDomainButton;	
+    IBOutlet NSButton            *removeBrowseDomainButton;
     IBOutlet NSButton            *browseOKButton;
     IBOutlet NSButton            *browseCancelButton;
-	IBOutlet NSButton            *secretOKButton;
+    IBOutlet NSButton            *secretOKButton;
     IBOutlet NSButton            *secretCancelButton;
     IBOutlet NSImageView         *statusImageView;
     IBOutlet NSTabView           *tabView;
-	IBOutlet NSTableView         *browseDomainList;
-	IBOutlet SFAuthorizationView *comboAuthButton;
+    IBOutlet NSTableView         *browseDomainList;
+    IBOutlet SFAuthorizationView *comboAuthButton;
 
     NSWindow       *mainWindow;
     NSString       *currentHostName;
     NSString       *currentRegDomain;
-	NSArray        *currentBrowseDomainsArray;
-	NSMutableArray *browseDomainsArray;
-	NSMutableArray *defaultBrowseDomainsArray;
+    NSArray        *currentBrowseDomainsArray;
+    NSMutableArray *browseDomainsArray;
+    NSMutableArray *defaultBrowseDomainsArray;
     NSString       *defaultRegDomain;
 
     NSString       *hostNameSharedSecretName;
     NSString       *hostNameSharedSecretValue;
     NSString       *regSharedSecretName;
     NSString       *regSharedSecretValue;
-    BOOL           currentWideAreaState;
-    BOOL           prefsNeedUpdating;
-    BOOL           toolInstalled;
-	BOOL           browseDomainListEnabled;
-    BOOL           justStartedEditing;
-	NSImage        *successImage;
-	NSImage        *inprogressImage;
-	NSImage        *failureImage;
-    
+    BOOL currentWideAreaState;
+    BOOL prefsNeedUpdating;
+    BOOL toolInstalled;
+    BOOL browseDomainListEnabled;
+    BOOL justStartedEditing;
+    NSImage        *successImage;
+    NSImage        *inprogressImage;
+    NSImage        *failureImage;
+
     MyDNSServiceState regQuery;
     MyDNSServiceState browseQuery;
     NSMutableArray    *browseDataSource;
     NSMutableArray    *registrationDataSource;
 }
 
-- (IBAction)applyClicked:(id)sender;
-- (IBAction)enableBrowseDomainClicked:(id)sender;
-- (IBAction)addBrowseDomainClicked:(id)sender;
-- (IBAction)removeBrowseDomainClicked:(id)sender;
-- (IBAction)revertClicked:(id)sender;
-- (IBAction)changeButtonPressed:(id)sender;
-- (IBAction)closeMyCustomSheet:(id)sender;
-- (IBAction)comboAction:(id)sender;
-- (IBAction)wideAreaCheckBoxChanged:(id)sender;
+-(IBAction)applyClicked : (id)sender;
+-(IBAction)enableBrowseDomainClicked : (id)sender;
+-(IBAction)addBrowseDomainClicked : (id)sender;
+-(IBAction)removeBrowseDomainClicked : (id)sender;
+-(IBAction)revertClicked : (id)sender;
+-(IBAction)changeButtonPressed : (id)sender;
+-(IBAction)closeMyCustomSheet : (id)sender;
+-(IBAction)comboAction : (id)sender;
+-(IBAction)wideAreaCheckBoxChanged : (id)sender;
 
 
-- (NSMutableArray *)browseDataSource;
-- (NSMutableArray *)registrationDataSource;
-- (NSComboBox *)browseDomainsComboBox;
-- (NSComboBox *)regDomainsComboBox;
-- (NSString *)currentRegDomain;
-- (NSMutableArray *)defaultBrowseDomainsArray;
-- (NSArray *)currentBrowseDomainsArray;
-- (NSString *)currentHostName;
-- (NSString *)defaultRegDomain;
-- (void)setDefaultRegDomain:(NSString *)domain;
+-(NSMutableArray *)browseDataSource;
+-(NSMutableArray *)registrationDataSource;
+-(NSComboBox *)browseDomainsComboBox;
+-(NSComboBox *)regDomainsComboBox;
+-(NSString *)currentRegDomain;
+-(NSMutableArray *)defaultBrowseDomainsArray;
+-(NSArray *)currentBrowseDomainsArray;
+-(NSString *)currentHostName;
+-(NSString *)defaultRegDomain;
+-(void)setDefaultRegDomain : (NSString *)domain;
 
 
 
-- (void)enableApplyButton;
-- (void)disableApplyButton;
-- (void)applyCurrentState;
-- (void)setBrowseDomainsComboBox;
-- (void)setupInitialValues;
-- (void)startDomainBrowsing;
-- (void)toggleWideAreaBonjour:(BOOL)state;
-- (void)updateApplyButtonState;
-- (void)enableControls;
-- (void)disableControls;
-- (void)validateTextFields;
-- (void)readPreferences;
-- (void)savePreferences;
-- (void)restorePreferences;
-- (void)watchForPreferenceChanges;
-- (void)updateStatusImageView;
+-(void)enableApplyButton;
+-(void)disableApplyButton;
+-(void)applyCurrentState;
+-(void)setBrowseDomainsComboBox;
+-(void)setupInitialValues;
+-(void)startDomainBrowsing;
+-(void)toggleWideAreaBonjour : (BOOL)state;
+-(void)updateApplyButtonState;
+-(void)enableControls;
+-(void)disableControls;
+-(void)validateTextFields;
+-(void)readPreferences;
+-(void)savePreferences;
+-(void)restorePreferences;
+-(void)watchForPreferenceChanges;
+-(void)updateStatusImageView;
 
 
-- (NSString *)sharedSecretKeyName:(NSString * )domain;
-- (NSString *)domainForHostName:(NSString *)hostNameString;
-- (int)statusForHostName:(NSString * )domain;
-- (NSData *)dataForDomainArray:(NSArray *)domainArray;
-- (NSData *)dataForDomain:(NSString *)domainName isEnabled:(BOOL)enabled;
-- (NSData *)dataForSharedSecret:(NSString *)secret domain:(NSString *)domainName key:(NSString *)keyName;
-- (BOOL)domainAlreadyInList:(NSString *)domainString;
-- (NSString *)trimCharactersFromDomain:(NSString *)domain;
+-(NSString *)sharedSecretKeyName : (NSString * )domain;
+-(NSString *)domainForHostName : (NSString *)hostNameString;
+-(int)statusForHostName : (NSString * )domain;
+-(NSData *)dataForDomainArray : (NSArray *)domainArray;
+-(NSData *)dataForDomain : (NSString *)domainName isEnabled : (BOOL)enabled;
+-(NSData *)dataForSharedSecret : (NSString *)secret domain : (NSString *)domainName key : (NSString *)keyName;
+-(BOOL)domainAlreadyInList : (NSString *)domainString;
+-(NSString *)trimCharactersFromDomain : (NSString *)domain;
 
 
 // Delegate methods
-- (void)authorizationViewDidAuthorize:(SFAuthorizationView *)view;
-- (void)authorizationViewDidDeauthorize:(SFAuthorizationView *)view;
-- (void)mainViewDidLoad;
-- (int)numberOfItemsInComboBox:(NSComboBox *)aComboBox;
-- (id)comboBox:(NSComboBox *)aComboBox objectValueForItemAtIndex:(int)index;
-- (void)controlTextDidChange:(NSNotification *) notification;
+-(void)authorizationViewDidAuthorize : (SFAuthorizationView *)view;
+-(void)authorizationViewDidDeauthorize : (SFAuthorizationView *)view;
+-(void)mainViewDidLoad;
+-(int)numberOfItemsInComboBox : (NSComboBox *)aComboBox;
+-(id)comboBox : (NSComboBox *)aComboBox objectValueForItemAtIndex : (int)index;
+-(void)controlTextDidChange : (NSNotification *) notification;
 
 @end

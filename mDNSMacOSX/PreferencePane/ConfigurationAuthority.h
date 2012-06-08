@@ -46,7 +46,7 @@
 #include <Security/Security.h>
 
 OSStatus InitConfigAuthority(void);
-Boolean	 CurrentlyAuthorized(void);
+Boolean  CurrentlyAuthorized(void);
 OSStatus AttemptAcquireAuthority(Boolean allowUI);
 OSStatus ReleaseAuthority(void);
 OSStatus ExternalizeAuthority(AuthorizationExternalForm *pAuth);

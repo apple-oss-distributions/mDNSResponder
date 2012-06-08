@@ -5,9 +5,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -39,65 +39,65 @@
 class CDNSSDService : public IDNSSDService, nsIRunnable
 {
 public:
-	NS_DECL_ISUPPORTS
-	NS_DECL_IDNSSDSERVICE
-	NS_DECL_NSIRUNNABLE
+NS_DECL_ISUPPORTS
+NS_DECL_IDNSSDSERVICE
+NS_DECL_NSIRUNNABLE
 
-	CDNSSDService();
-	CDNSSDService( DNSServiceRef mainRef, nsISupports * listener );
+CDNSSDService();
+CDNSSDService( DNSServiceRef mainRef, nsISupports * listener );
 
-	virtual ~CDNSSDService();
-	
+virtual ~CDNSSDService();
+
 private:
 
-	static void DNSSD_API
-	BrowseReply
-		(
-		DNSServiceRef		sdRef,
-		DNSServiceFlags		flags,
-		uint32_t			interfaceIndex,
-		DNSServiceErrorType	errorCode,
-		const char		*	serviceName,
-		const char		*	regtype,
-		const char		*	replyDomain,
-		void			*	context
-		);
-		
-	static void DNSSD_API
-	ResolveReply
-		(
-		DNSServiceRef			sdRef,
-		DNSServiceFlags			flags,
-		uint32_t				interfaceIndex,
-		DNSServiceErrorType		errorCode,
-		const char			*	fullname,
-		const char			*	hosttarget,
-		uint16_t				port,
-		uint16_t				txtLen,
-		const unsigned char	*	txtRecord,
-		void				*	context
-		);
-		
-	static void
-	Read
-		(
-		void * arg
-		);
-		
-	nsresult
-	SetupNotifications();
-	
-	void
-	Cleanup();
+static void DNSSD_API
+BrowseReply
+(
+    DNSServiceRef sdRef,
+    DNSServiceFlags flags,
+    uint32_t interfaceIndex,
+    DNSServiceErrorType errorCode,
+    const char      *   serviceName,
+    const char      *   regtype,
+    const char      *   replyDomain,
+    void            *   context
+);
 
-	char				m_master;
-	PRThreadPool	*	m_threadPool;
-	DNSServiceRef		m_mainRef;
-	DNSServiceRef		m_subRef;
-	nsISupports		*	m_listener;
-	PRFileDesc		*	m_fileDesc;
-	PRJobIoDesc			m_iod;
-	PRJob			*	m_job;
+static void DNSSD_API
+ResolveReply
+(
+    DNSServiceRef sdRef,
+    DNSServiceFlags flags,
+    uint32_t interfaceIndex,
+    DNSServiceErrorType errorCode,
+    const char          *   fullname,
+    const char          *   hosttarget,
+    uint16_t port,
+    uint16_t txtLen,
+    const unsigned char *   txtRecord,
+    void                *   context
+);
+
+static void
+Read
+(
+    void * arg
+);
+
+nsresult
+SetupNotifications();
+
+void
+Cleanup();
+
+char m_master;
+PRThreadPool    *   m_threadPool;
+DNSServiceRef m_mainRef;
+DNSServiceRef m_subRef;
+nsISupports     *   m_listener;
+PRFileDesc      *   m_fileDesc;
+PRJobIoDesc m_iod;
+PRJob           *   m_job;
 };
 
 

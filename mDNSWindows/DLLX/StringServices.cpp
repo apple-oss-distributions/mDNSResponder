@@ -288,56 +288,56 @@ exit:
 extern BOOL
 
 VariantToByteArray
-
 	(
-
 	VARIANT				*	inVariant,
-
 	std::vector< BYTE >	&	outArray
-
 	)
-
 {
+	BOOL ok = TRUE;
 
-	SAFEARRAY	*	psa			= NULL;
+	if ( V_VT( inVariant ) == VT_BSTR )
+	{
+		BSTR bstr = V_BSTR( inVariant );
+		std::string utf8;
 
-	BYTE		*	pData		= NULL;
+		BSTRToUTF8( bstr, utf8 );
 
-	ULONG			cElements	= 0;
+		outArray.reserve( utf8.size() );
+		outArray.assign( utf8.begin(), utf8.end() );
+	}
+	else if ( V_VT( inVariant ) == VT_ARRAY )
+	{
+		SAFEARRAY	*	psa			= NULL;
+		BYTE		*	pData		= NULL;
+		ULONG			cElements	= 0;
+		HRESULT			hr;
+		
+		psa = V_ARRAY( inVariant );
 
-	HRESULT			hr;
+		require_action( psa, exit, ok = FALSE );
 
-	BOOL			ok = TRUE;
+		require_action( SafeArrayGetDim( psa ) == 1, exit, ok = FALSE );
 
+		hr = SafeArrayAccessData( psa, ( LPVOID* )&pData );
 
+		require_action( hr == S_OK, exit, ok = FALSE );
 
-	require_action( V_VT( inVariant ) == ( VT_ARRAY|VT_UI1 ), exit, ok = FALSE );
+		cElements = psa->rgsabound[0].cElements;
 
-	psa = V_ARRAY( inVariant );
+		outArray.reserve( cElements );
 
-	require_action( psa, exit, ok = FALSE );
+		outArray.assign( cElements, 0 );
 
-	require_action( SafeArrayGetDim( psa ) == 1, exit, ok = FALSE );
+		memcpy( &outArray[ 0 ], pData, cElements );
 
-	hr = SafeArrayAccessData( psa, ( LPVOID* )&pData );
-
-	require_action( hr == S_OK, exit, ok = FALSE );
-
-	cElements = psa->rgsabound[0].cElements;
-
-	outArray.reserve( cElements );
-
-	outArray.assign( cElements, 0 );
-
-	memcpy( &outArray[ 0 ], pData, cElements );
-
-	SafeArrayUnaccessData( psa );
-
-
+		SafeArrayUnaccessData( psa );
+	}
+	else
+	{
+		ok = FALSE;
+	}
 
 exit:
-
-
 
 	return ok;
 

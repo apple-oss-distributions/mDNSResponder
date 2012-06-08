@@ -5,9 +5,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -37,8 +37,8 @@
 #include <netinet/in.h>
 
 extern boolean_t DNSServiceDiscoveryReply_server(
-        mach_msg_header_t *InHeadP,
-        mach_msg_header_t *OutHeadP);
+    mach_msg_header_t *InHeadP,
+    mach_msg_header_t *OutHeadP);
 
 extern
 kern_return_t DNSServiceBrowserCreate_rpc
@@ -111,28 +111,28 @@ kern_return_t DNSServiceRegistrationRemoveRecord_rpc
 );
 
 struct a_requests {
-    struct a_requests		*next;
-    mach_port_t				client_port;
+    struct a_requests       *next;
+    mach_port_t client_port;
     union {
-        DNSServiceBrowserReply 				browserCallback;
-        DNSServiceDomainEnumerationReply 	enumCallback;
-        DNSServiceRegistrationReply 		regCallback;
-        DNSServiceResolverReply 			resolveCallback;
+        DNSServiceBrowserReply browserCallback;
+        DNSServiceDomainEnumerationReply enumCallback;
+        DNSServiceRegistrationReply regCallback;
+        DNSServiceResolverReply resolveCallback;
     } callout;
-    void					*context;
+    void                    *context;
 };
 
-static struct a_requests	*a_requests	= NULL;
-static pthread_mutex_t		a_requests_lock	= PTHREAD_MUTEX_INITIALIZER;
+static struct a_requests    *a_requests = NULL;
+static pthread_mutex_t a_requests_lock = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct _dns_service_discovery_t {
-    mach_port_t	port;
+    mach_port_t port;
 } dns_service_discovery_t;
 
 static mach_port_t DNSServiceDiscoveryLookupServer(void)
 {
-    static mach_port_t sndPort 	= MACH_PORT_NULL;
-    kern_return_t   result;
+    static mach_port_t sndPort  = MACH_PORT_NULL;
+    kern_return_t result;
 
     if (sndPort != MACH_PORT_NULL) {
         return sndPort;
@@ -152,7 +152,7 @@ static void _increaseQueueLengthOnPort(mach_port_t port)
 {
     mach_port_limits_t qlimits;
     kern_return_t result;
-    
+
     qlimits.mpl_qlimit = 16;
     result = mach_port_set_attributes(mach_task_self(), port, MACH_PORT_LIMITS_INFO, (mach_port_info_t)&qlimits, MACH_PORT_LIMITS_INFO_COUNT);
 
@@ -167,8 +167,8 @@ dns_service_discovery_ref DNSServiceBrowserCreate (const char *regtype, const ch
     mach_port_t clientPort;
     kern_return_t result;
     dns_service_discovery_ref return_t;
-    struct a_requests	*request;
-    
+    struct a_requests   *request;
+
     if (!serverPort) {
         return NULL;
     }
@@ -206,7 +206,7 @@ dns_service_discovery_ref DNSServiceBrowserCreate (const char *regtype, const ch
     request->next = a_requests;
     a_requests = request;
     pthread_mutex_unlock(&a_requests_lock);
-    
+
     return return_t;
 }
 
@@ -218,7 +218,7 @@ dns_service_discovery_ref DNSServiceDomainEnumerationCreate (int registrationDom
     mach_port_t clientPort;
     kern_return_t result;
     dns_service_discovery_ref return_t;
-    struct a_requests	*request;
+    struct a_requests   *request;
 
     if (!serverPort) {
         return NULL;
@@ -252,7 +252,7 @@ dns_service_discovery_ref DNSServiceDomainEnumerationCreate (int registrationDom
         free(request);
         return NULL;
     }
-    
+
     pthread_mutex_lock(&a_requests_lock);
     request->next = a_requests;
     a_requests = request;
@@ -265,22 +265,22 @@ dns_service_discovery_ref DNSServiceDomainEnumerationCreate (int registrationDom
 /* Service Registration */
 
 dns_service_discovery_ref DNSServiceRegistrationCreate
-(const char *name, const char *regtype, const char *domain, uint16_t port, const char *txtRecord, DNSServiceRegistrationReply callBack, void *context)
+    (const char *name, const char *regtype, const char *domain, uint16_t port, const char *txtRecord, DNSServiceRegistrationReply callBack, void *context)
 {
     mach_port_t serverPort = DNSServiceDiscoveryLookupServer();
     mach_port_t clientPort;
-    kern_return_t		result;
+    kern_return_t result;
     dns_service_discovery_ref return_t;
-    struct a_requests	*request;
+    struct a_requests   *request;
     IPPort IpPort;
-	char *portptr = (char *)&port;
-	
+    char *portptr = (char *)&port;
+
     if (!serverPort) {
         return NULL;
     }
 
     if (!txtRecord) {
-      txtRecord = "";
+        txtRecord = "";
     }
 
     result = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &clientPort);
@@ -304,13 +304,13 @@ dns_service_discovery_ref DNSServiceRegistrationCreate
     request->context = context;
     request->callout.regCallback = callBack;
 
-	// older versions of this code passed the port via mach IPC as an int.
-	// we continue to pass it as 4 bytes to maintain binary compatibility,
-	// but now ensure that the network byte order is preserved by using a struct
-	IpPort.bytes[0] = 0;
-	IpPort.bytes[1] = 0;
-	IpPort.bytes[2] = portptr[0];
-	IpPort.bytes[3] = portptr[1];
+    // older versions of this code passed the port via mach IPC as an int.
+    // we continue to pass it as 4 bytes to maintain binary compatibility,
+    // but now ensure that the network byte order is preserved by using a struct
+    IpPort.bytes[0] = 0;
+    IpPort.bytes[1] = 0;
+    IpPort.bytes[2] = portptr[0];
+    IpPort.bytes[3] = portptr[1];
 
     result = DNSServiceRegistrationCreate_rpc(serverPort, clientPort, (char *)name, (char *)regtype, (char *)domain, IpPort, (char *)txtRecord);
 
@@ -334,9 +334,9 @@ dns_service_discovery_ref DNSServiceResolverResolve(const char *name, const char
 {
     mach_port_t serverPort = DNSServiceDiscoveryLookupServer();
     mach_port_t clientPort;
-    kern_return_t		result;
+    kern_return_t result;
     dns_service_discovery_ref return_t;
-    struct a_requests	*request;
+    struct a_requests   *request;
 
     if (!serverPort) {
         return NULL;
@@ -395,7 +395,7 @@ DNSRecordReference DNSServiceRegistrationAddRecord(dns_service_discovery_ref ref
     if (result != KERN_SUCCESS) {
         printf("The result of the registration was not successful.  Error %d, result %s\n", result, mach_error_string(result));
     }
-    
+
     return reference;
 }
 
@@ -453,10 +453,10 @@ DNSServiceRegistrationReplyErrorType DNSServiceRegistrationRemoveRecord(dns_serv
 
 void DNSServiceDiscovery_handleReply(void *replyMsg)
 {
-    unsigned long			result = 0xFFFFFFFF;
-    mach_msg_header_t *    	msgSendBufPtr;
+    unsigned long result = 0xFFFFFFFF;
+    mach_msg_header_t *     msgSendBufPtr;
     mach_msg_header_t *     receivedMessage;
-    unsigned        		msgSendBufLength;
+    unsigned msgSendBufLength;
 
     msgSendBufLength = internal_DNSServiceDiscoveryReply_subsystem.maxsize;
     msgSendBufPtr = (mach_msg_header_t *) malloc(msgSendBufLength);
@@ -478,7 +478,7 @@ mach_port_t DNSServiceDiscoveryMachPort(dns_service_discovery_ref dnsServiceDisc
 
 void DNSServiceDiscoveryDeallocate(dns_service_discovery_ref dnsServiceDiscovery)
 {
-    struct a_requests	*request0, *request;
+    struct a_requests   *request0, *request;
     mach_port_t reply = dnsServiceDiscovery->port;
 
     if (dnsServiceDiscovery->port) {
@@ -504,7 +504,7 @@ void DNSServiceDiscoveryDeallocate(dns_service_discovery_ref dnsServiceDiscovery
         pthread_mutex_unlock(&a_requests_lock);
 
         free(request);
-        
+
         mach_port_destroy(mach_task_self(), dnsServiceDiscovery->port);
 
         free(dnsServiceDiscovery);
@@ -522,7 +522,7 @@ kern_return_t internal_DNSServiceDomainEnumerationReply_rpc
     int flags
 )
 {
-    struct a_requests	*request;
+    struct a_requests   *request;
     void *requestContext = NULL;
     DNSServiceDomainEnumerationReply callback = NULL;
 
@@ -544,7 +544,7 @@ kern_return_t internal_DNSServiceDomainEnumerationReply_rpc
     if (request != NULL) {
         (callback)(resultType, replyDomain, flags, requestContext);
     }
-    
+
     return KERN_SUCCESS;
 
 }
@@ -559,7 +559,7 @@ kern_return_t internal_DNSServiceBrowserReply_rpc
     int flags
 )
 {
-    struct a_requests	*request;
+    struct a_requests   *request;
     void *requestContext = NULL;
     DNSServiceBrowserReply callback = NULL;
 
@@ -592,7 +592,7 @@ kern_return_t internal_DNSServiceRegistrationReply_rpc
     int resultType
 )
 {
-    struct a_requests	*request;
+    struct a_requests   *request;
     void *requestContext = NULL;
     DNSServiceRegistrationReply callback = NULL;
 
@@ -628,7 +628,7 @@ kern_return_t internal_DNSServiceResolverReply_rpc
 {
     struct sockaddr  *interface_storage = NULL;
     struct sockaddr  *address_storage = NULL;
-    struct a_requests	*request;
+    struct a_requests   *request;
     void *requestContext = NULL;
     DNSServiceResolverReply callback = NULL;
 
@@ -669,6 +669,6 @@ kern_return_t internal_DNSServiceResolverReply_rpc
     if (address) {
         free(address_storage);
     }
-    
+
     return KERN_SUCCESS;
 }

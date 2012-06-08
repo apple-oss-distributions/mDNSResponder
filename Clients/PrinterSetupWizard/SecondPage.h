@@ -5,9 +5,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -31,75 +31,75 @@ using namespace PrinterSetupWizard;
 
 class CSecondPage : public CPropertyPage
 {
-	DECLARE_DYNAMIC(CSecondPage)
+DECLARE_DYNAMIC(CSecondPage)
 
 public:
-	CSecondPage();
-	virtual ~CSecondPage();
+CSecondPage();
+virtual ~CSecondPage();
 
 // Dialog Data
-	enum { IDD = IDD_SECOND_PAGE };
+enum { IDD = IDD_SECOND_PAGE };
 
 protected:
 
-	void		 InitBrowseList();
-	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
-	afx_msg BOOL OnSetCursor(CWnd * pWnd, UINT nHitTest, UINT message);
-	virtual BOOL OnSetActive();
-	virtual BOOL OnKillActive();
+void         InitBrowseList();
+virtual void DoDataExchange(CDataExchange* pDX);        // DDX/DDV support
+afx_msg BOOL OnSetCursor(CWnd * pWnd, UINT nHitTest, UINT message);
+virtual BOOL OnSetActive();
+virtual BOOL OnKillActive();
 
-	DECLARE_MESSAGE_MAP()
+DECLARE_MESSAGE_MAP()
 
 public:
 
-	HTREEITEM		m_emptyListItem;
-	bool			m_selectOkay;
-	CTreeCtrl		m_browseList;
-	bool			m_initialized;
-	bool			m_waiting;
+HTREEITEM m_emptyListItem;
+bool m_selectOkay;
+CTreeCtrl m_browseList;
+bool m_initialized;
+bool m_waiting;
 
-	afx_msg void	OnTvnSelchangedBrowseList(NMHDR *pNMHDR, LRESULT *pResult);
-	afx_msg void	OnNmClickBrowseList(NMHDR * pNMHDR, LRESULT * pResult);
-	afx_msg void	OnTvnKeyDownBrowseList(NMHDR * pNMHDR, LRESULT * pResult );
+afx_msg void    OnTvnSelchangedBrowseList(NMHDR *pNMHDR, LRESULT *pResult);
+afx_msg void    OnNmClickBrowseList(NMHDR * pNMHDR, LRESULT * pResult);
+afx_msg void    OnTvnKeyDownBrowseList(NMHDR * pNMHDR, LRESULT * pResult );
 
-	OSStatus
-	OnAddPrinter(
-			Printer		*	printer,
-			bool			moreComing);
+OSStatus
+OnAddPrinter(
+    Printer     *   printer,
+    bool moreComing);
 
-	OSStatus
-	OnRemovePrinter(
-			Printer		*	printer,
-			bool			moreComing);
+OSStatus
+OnRemovePrinter(
+    Printer     *   printer,
+    bool moreComing);
 
-	void
-	OnResolveService( Service * service );
-
-private:
-
-	void
-	LoadTextAndDisableWindow( CString & text );
-	
-	void
-	SetPrinterInformationState( BOOL state );
-
-	std::string		m_selectedName;
-
+void
+OnResolveService( Service * service );
 
 private:
 
+void
+LoadTextAndDisableWindow( CString & text );
+
+void
+SetPrinterInformationState( BOOL state );
+
+std::string m_selectedName;
 
 
-	CStatic m_printerInformation;
-
-	CStatic m_descriptionLabel;
-
-	CStatic m_descriptionField;
-
-	CStatic m_locationLabel;
-
-	CStatic m_locationField;
+private:
 
 
-	bool	m_gotChoice;
+
+CStatic m_printerInformation;
+
+CStatic m_descriptionLabel;
+
+CStatic m_descriptionField;
+
+CStatic m_locationLabel;
+
+CStatic m_locationField;
+
+
+bool m_gotChoice;
 };

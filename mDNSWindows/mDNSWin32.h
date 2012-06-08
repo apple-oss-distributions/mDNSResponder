@@ -32,61 +32,31 @@
 #endif
 
 
-typedef struct Overlapped
-{
-	BOOL		pending;
-	OVERLAPPED	data;
-	WSABUF		wbuf;
-	DWORD		error;
-	DWORD		bytesTransferred;
-	mDNSAddr	srcAddr;
-	mDNSIPPort	srcPort;
-	mDNSAddr	dstAddr;
-	mDNSIPPort	dstPort;
-} Overlapped;
-
-
-typedef void ( *TCPReadEventHandler )( TCPSocket * sock );
 typedef void ( *TCPUserCallback )();
 
 struct TCPSocket_struct
 {
 	TCPSocketFlags				flags;		// MUST BE FIRST FIELD -- mDNSCore expects every TCPSocket_struct to begin with TCPSocketFlags flags
 	SOCKET						fd;
-	TCPReadEventHandler			readEventHandler;
-	HANDLE						connectEvent;
 	BOOL						connected;
 	TCPUserCallback				userCallback;
 	void					*	userContext;
-	Overlapped					overlapped;
-	DWORD						lastError;
 	BOOL						closed;
-	uint8_t						bbuf[ 4192 ];
-	uint8_t					*	bptr;
-	uint8_t					*	eptr;
-	uint8_t					*	ebuf;
-	TCPSocket				*	nextDispatchable;
 	mDNS					*	m;
 };
 
 
 struct UDPSocket_struct
 {
-	mDNSIPPort						port; 			// MUST BE FIRST FIELD -- mDNSCoreReceive expects every UDPSocket_struct to begin with mDNSIPPort port
-	mDNSAddr						addr;			// This is initialized by our code. If we don't get the 
-													// dstAddr from WSARecvMsg we use this value instead.
-	SOCKET							fd;
-	LPFN_WSARECVMSG					recvMsgPtr;
-	Overlapped						overlapped;
-	WSAMSG							wmsg;
-	DNSMessage						packet;
-	uint8_t							controlBuffer[ 128 ];
-	struct sockaddr_storage			srcAddr;		// This is filled in by the WSARecv* function
-	INT								srcAddrLen;		// See above
-	struct mDNSInterfaceData	*	ifd;
-	UDPSocket					*	nextDispatchable;
-	UDPSocket					*	next;
-	mDNS						*	m;
+	mDNSIPPort					port; 		// MUST BE FIRST FIELD -- mDNSCoreReceive expects every UDPSocket_struct to begin with mDNSIPPort port
+	mDNSAddr					addr;		// This is initialized by our code. If we don't get the 
+											// dstAddr from WSARecvMsg we use this value instead.
+	SOCKET						fd;
+	LPFN_WSARECVMSG				recvMsgPtr;
+	DNSMessage					packet;
+	struct mDNSInterfaceData	*ifd;
+	UDPSocket					*next;
+	mDNS						*m;
 };
 
 
@@ -110,21 +80,6 @@ struct	mDNSInterfaceData
 
 
 //---------------------------------------------------------------------------------------------------------------------------
-/*!	@typedef	RegisterWaitableEventHandler
-*/
-typedef void		(*RegisterWaitableEventHandler)(mDNS * const inMDNS, HANDLE event, void * context );
-
-//---------------------------------------------------------------------------------------------------------------------------
-/*!	@typedef	RegisterWaitableEventFunc
-*/
-typedef mStatus		(*RegisterWaitableEventFunc)(mDNS * const inMDNS, HANDLE event, void * context, RegisterWaitableEventHandler handler );
-
-//---------------------------------------------------------------------------------------------------------------------------
-/*!	@typedef	UnregisterWaitableEventHandler
-*/
-typedef void		(*UnregisterWaitableEventFunc)(mDNS * const inMDNS, HANDLE event );
-
-//---------------------------------------------------------------------------------------------------------------------------
 /*!	@typedef	ReportStatusFunc
 */
 typedef void		(*ReportStatusFunc)(int inType, const char *inFormat, ...);
@@ -141,8 +96,6 @@ struct	mDNS_PlatformSupport_struct
 	HANDLE						mainThread;
 	HANDLE						checkFileSharesTimer;
 	mDNSs32						checkFileSharesTimeout;
-	RegisterWaitableEventFunc	registerWaitableEventFunc;
-	UnregisterWaitableEventFunc	unregisterWaitableEventFunc;
 	ReportStatusFunc			reportStatusFunc;
 	time_t						nextDHCPLeaseExpires;
 	char						nbname[ 32 ];
@@ -157,6 +110,8 @@ struct	mDNS_PlatformSupport_struct
 	mDNSInterfaceData *			inactiveInterfaceList;
 	struct UDPSocket_struct		unicastSock4;
 	struct UDPSocket_struct		unicastSock6;
+	DWORD						osMajorVersion;
+	DWORD						osMinorVersion;
 };
 
 //---------------------------------------------------------------------------------------------------------------------------

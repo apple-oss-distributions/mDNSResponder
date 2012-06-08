@@ -20,6 +20,9 @@ Imports System.Data
 Imports System.Text
 
 Public Class SimpleChat
+	'
+	' Associate Bonjour events with event handlers
+	'
     Public WithEvents MyEventManager As New Bonjour.DNSSDEventManager
     Private m_service As New Bonjour.DNSSDService
     Private m_registrar As Bonjour.DNSSDService
@@ -52,10 +55,18 @@ Public Class SimpleChat
         m_async = m_socket.BeginReceive(m_buffer, 0, m_buffer.Length, SocketFlags.Partial, New AsyncCallback(AddressOf OnReceive), Me)
         m_registrar = m_service.Register(0, 0, Environment.UserName, "_p2pchat._udp", vbNullString, vbNullString, m_port, txtRecord, MyEventManager)
     End Sub
+
+	'
+	' Called when Bonjour core finished registering a service successfully
+	'
     Public Sub MyEventManager_ServiceRegistered(ByVal registrar As Bonjour.DNSSDService, ByVal flags As Bonjour.DNSSDFlags, ByVal name As String, ByVal regType As String, ByVal domain As String) Handles MyEventManager.ServiceRegistered
         m_name = name
         m_browser = m_service.Browse(0, 0, regType, vbNullString, MyEventManager)
     End Sub
+
+	'
+	' Called when a service is found
+	'
     Public Sub MyEventManager_ServiceFound(ByVal browser As Bonjour.DNSSDService, ByVal flags As Bonjour.DNSSDFlags, ByVal ifIndex As UInteger, ByVal serviceName As String, ByVal regtype As String, ByVal domain As String) Handles MyEventManager.ServiceFound
         If (serviceName <> m_name) Then
             Dim peer As PeerData = New PeerData
@@ -67,15 +78,24 @@ Public Class SimpleChat
             ComboBox1.SelectedIndex = 0
         End If
     End Sub
+
+	'
+	' Called when a service is lost
+	'
     Public Sub MyEventManager_ServiceLost(ByVal browser As Bonjour.DNSSDService, ByVal flags As Bonjour.DNSSDFlags, ByVal ifIndex As UInteger, ByVal serviceName As String, ByVal regtype As String, ByVal domain As String) Handles MyEventManager.ServiceLost
         ComboBox1.Items.Remove(serviceName)
     End Sub
+
+	'
+	' Called when a service is resolved
+	'
     Public Sub MyEventManager_ServiceResolved(ByVal resolver As Bonjour.DNSSDService, ByVal flags As Bonjour.DNSSDFlags, ByVal ifIndex As UInteger, ByVal fullname As String, ByVal hostname As String, ByVal port As UShort, ByVal record As Bonjour.TXTRecord) Handles MyEventManager.ServiceResolved
         m_resolver.Stop()
         Dim peer As PeerData = ComboBox1.SelectedItem
         peer.Port = port
         m_resolver = m_service.QueryRecord(0, ifIndex, hostname, Bonjour.DNSSDRRType.kDNSSDType_A, Bonjour.DNSSDRRClass.kDNSSDClass_IN, MyEventManager)
     End Sub
+
     Public Sub MyEventManager_QueryAnswered(ByVal resolver As Bonjour.DNSSDService, ByVal flags As Bonjour.DNSSDFlags, ByVal ifIndex As UInteger, ByVal fullName As String, ByVal rrtype As Bonjour.DNSSDRRType, ByVal rrclass As Bonjour.DNSSDRRClass, ByVal rdata As Object, ByVal ttl As UInteger) Handles MyEventManager.QueryRecordAnswered
         m_resolver.Stop()
         Dim peer As PeerData = ComboBox1.SelectedItem
@@ -83,6 +103,7 @@ Public Class SimpleChat
         Dim address As IPAddress = New System.Net.IPAddress(bits)
         peer.Address = address
     End Sub
+
     Public Sub MyEventManager_OperationFailed(ByVal registrar As Bonjour.DNSSDService, ByVal errorCode As Bonjour.DNSSDError) Handles MyEventManager.OperationFailed
         MessageBox.Show("Operation failed error code: " + errorCode)
     End Sub

@@ -17,5 +17,7 @@
   </dict>
   <key>EnableTransactions</key>
   <true/>
+  <key>BeginTransactionAtShutdown</key>
+  <true/>
 </dict>
 </plist>

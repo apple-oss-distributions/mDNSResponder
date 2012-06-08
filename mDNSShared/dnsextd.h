@@ -5,9 +5,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -28,56 +28,56 @@
 #include <netinet/in.h>
 
 
-#define LLQ_TABLESIZE	1024	// !!!KRS make this dynamically growable
+#define LLQ_TABLESIZE   1024    // !!!KRS make this dynamically growable
 
 
 typedef enum DNSZoneSpecType
 {
-	kDNSZonePublic,
-	kDNSZonePrivate
+    kDNSZonePublic,
+    kDNSZonePrivate
 } DNSZoneSpecType;
 
 
 typedef struct DNSZone
 {
-	domainname				name;
-	DNSZoneSpecType			type;
-	DomainAuthInfo		*	updateKeys;	// linked list of keys for signing deletion updates
-	DomainAuthInfo		*	queryKeys;	// linked list of keys for queries
-	struct DNSZone		*	next;
+    domainname name;
+    DNSZoneSpecType type;
+    DomainAuthInfo      *   updateKeys; // linked list of keys for signing deletion updates
+    DomainAuthInfo      *   queryKeys;  // linked list of keys for queries
+    struct DNSZone      *   next;
 } DNSZone;
-	
-	
+
+
 typedef struct
-	{
+{
     struct sockaddr_in src;
     size_t len;
-	DNSZone * zone;
-	mDNSBool   isZonePublic;
+    DNSZone * zone;
+    mDNSBool isZonePublic;
     DNSMessage msg;
     // Note: extra storage for oversized (TCP) messages goes here
-	} PktMsg;
+} PktMsg;
 
 // lease table entry
 typedef struct RRTableElem
-	{
+{
     struct RRTableElem *next;
     struct sockaddr_in cli;   // client's source address
     long expire;              // expiration time, in seconds since epoch
     domainname zone;          // from zone field of update message
     domainname name;          // name of the record
     CacheRecord rr;           // last field in struct allows for allocation of oversized RRs
-	} RRTableElem;
+} RRTableElem;
 
 typedef enum
-	{
-	RequestReceived = 0,
-	ChallengeSent   = 1,
-	Established     = 2
-	} LLQState;
+{
+    RequestReceived = 0,
+    ChallengeSent   = 1,
+    Established     = 2
+} LLQState;
 
 typedef struct AnswerListElem
-	{
+{
     struct AnswerListElem *next;
     domainname name;
     mDNSu16 type;
@@ -86,13 +86,13 @@ typedef struct AnswerListElem
     int refcount;
     mDNSBool UseTCP;            // Use TCP if UDP would cause truncation
     pthread_t tid;              // Allow parallel list updates
-	} AnswerListElem;
+} AnswerListElem;
 
 // llq table entry
 typedef struct LLQEntry
-	{
-    struct LLQEntry *next;     
-    struct sockaddr_in cli;   // clien'ts source address 
+{
+    struct LLQEntry *next;
+    struct sockaddr_in cli;   // clien'ts source address
     domainname qname;
     mDNSu16 qtype;
     mDNSOpaque64 id;
@@ -100,36 +100,36 @@ typedef struct LLQEntry
     mDNSu32 lease;            // original lease, in seconds
     mDNSs32 expire;           // expiration, absolute, in seconds since epoch
     AnswerListElem *AnswerList;
-	} LLQEntry;
+} LLQEntry;
 
 
-typedef	void (*EventCallback)( void * context );
+typedef void (*EventCallback)( void * context );
 
 typedef struct EventSource
-	{
-	EventCallback			callback;
-	void				*	context;
-	TCPSocket *			sock;
-	int						fd;
-	mDNSBool				markedForDeletion;
-	struct  EventSource	*	next;
-	} EventSource;
+{
+    EventCallback callback;
+    void                *   context;
+    TCPSocket *         sock;
+    int fd;
+    mDNSBool markedForDeletion;
+    struct  EventSource *   next;
+} EventSource;
 
 
 // daemon-wide information
-typedef struct 
-	{
+typedef struct
+{
     // server variables - read only after initialization (no locking)
-	struct sockaddr_in	addr;			// the address we will bind to
-	struct sockaddr_in	llq_addr;		// the address we will receive llq requests on.
-    struct sockaddr_in	ns_addr;		// the real ns server address
-	int					tcpsd;			// listening TCP socket for dns requests
-	int					udpsd;			// listening UDP socket for dns requests
-	int					tlssd;			// listening TCP socket for private browsing
-    int					llq_tcpsd;		// listening TCP socket for llq service
-    int					llq_udpsd;		// listening UDP socket for llq service
-	DNameListElem	*	public_names;	// list of public SRV names
-	DNSZone			*	zones;
+    struct sockaddr_in addr;            // the address we will bind to
+    struct sockaddr_in llq_addr;        // the address we will receive llq requests on.
+    struct sockaddr_in ns_addr;         // the real ns server address
+    int tcpsd;                          // listening TCP socket for dns requests
+    int udpsd;                          // listening UDP socket for dns requests
+    int tlssd;                          // listening TCP socket for private browsing
+    int llq_tcpsd;                      // listening TCP socket for llq service
+    int llq_udpsd;                      // listening UDP socket for llq service
+    DNameListElem   *   public_names;   // list of public SRV names
+    DNSZone         *   zones;
 
     // daemon variables - read only after initialization (no locking)
     mDNSIPPort private_port;           // listening port for private messages
@@ -148,16 +148,16 @@ typedef struct
     int LLQEventNotifySock;          // Unix domain socket pair - update handling thread writes to EventNotifySock, which wakes
     int LLQEventListenSock;          // the main thread listening on EventListenSock, indicating that the zone has changed
 
-	GenLinkedList	eventSources;	// linked list of EventSource's
-	} DaemonInfo;
+    GenLinkedList eventSources;     // linked list of EventSource's
+} DaemonInfo;
 
 
 int
 ParseConfig
-	(
-	DaemonInfo	*	d,
-	const char	*	file
-	);
+(
+    DaemonInfo  *   d,
+    const char  *   file
+);
 
 
 #endif

@@ -99,12 +99,18 @@ STRIP = strip
 endif
 else
 
-ifeq ($(os),linux)
-CFLAGS_OS = -DNOT_HAVE_SA_LEN -DUSES_NETLINK -DHAVE_LINUX -DTARGET_OS_LINUX
+# any target that contains the string "linux"
+ifeq ($(findstring linux,$(os)),linux)
+CFLAGS_OS = -D_GNU_SOURCE -DHAVE_IPV6 -DNOT_HAVE_SA_LEN -DUSES_NETLINK -DHAVE_LINUX -DTARGET_OS_LINUX -fno-strict-aliasing
+LD = gcc -shared
 FLEXFLAGS_OS = -l
 JAVACFLAGS_OS += -I$(JDK)/include/linux
+
+# uClibc does not support Name Service Switch
+ifneq ($(os),linux-uclibc)
 OPTIONALTARG = nss_mdns
 OPTINSTALL   = InstalledNSS
+endif
 else
 
 ifeq ($(os),netbsd)
@@ -114,11 +120,9 @@ else
 
 ifeq ($(os),freebsd)
 # If not already defined, set LOCALBASE to /usr/local
-# FreeBSD requires the startup script to end in ".sh"
 LOCALBASE?=/usr/local
 INSTBASE=$(LOCALBASE)
-STARTUPSCRIPTNAME=mdns.sh
-CFLAGS_OS =
+CFLAGS_OS = -DHAVE_IPV6
 # FreeBSD 4 requires threaded code to be compiled and linked using the "-pthread" option,
 # and requires that the "-lpthread" link option NOT be used
 # This appies only to FreeBSD -- "man cc" on FreeBSD says:
@@ -140,7 +144,8 @@ ifeq ($(os),x)
 # We have to define __MAC_OS_X_VERSION_MIN_REQUIRED=__MAC_OS_X_VERSION_10_4 or on Leopard
 # we get build failures: ‘daemon’ is deprecated (declared at /usr/include/stdlib.h:283)
 CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror -Wdeclaration-after-statement \
-	-D__MAC_OS_X_VERSION_MIN_REQUIRED=__MAC_OS_X_VERSION_10_4 #-Wunreachable-code
+	-D__MAC_OS_X_VERSION_MIN_REQUIRED=__MAC_OS_X_VERSION_10_4 \
+	-D__APPLE_USE_RFC_2292 #-Wunreachable-code
 CC = gcc
 LD = $(CC) -dynamiclib
 LINKOPTS = -lSystem
@@ -150,7 +155,7 @@ JAVACFLAGS_OS = -dynamiclib -I/System/Library/Frameworks/JavaVM.framework/Header
 else
 
 $(error ERROR: Must specify target OS on command-line, e.g. "make os=x [target]".\
-Supported operating systems include: x, linux, netbsd, freebsd, openbsd, solaris) 
+Supported operating systems include: x, linux, linux-uclibc, netbsd, freebsd, openbsd, solaris) 
 endif
 endif
 endif
@@ -229,11 +234,13 @@ clean:
 # daemon target builds the daemon
 DAEMONOBJS = $(OBJDIR)/PosixDaemon.c.o $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNS.c.o \
              $(OBJDIR)/DNSDigest.c.o $(OBJDIR)/uDNS.c.o $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/uds_daemon.c.o \
-             $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/dnssd_ipc.c.o $(OBJDIR)/GenLinkedList.c.o $(OBJDIR)/PlatformCommon.c.o 
+             $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/dnssd_ipc.c.o $(OBJDIR)/GenLinkedList.c.o $(OBJDIR)/PlatformCommon.c.o \
+			 $(OBJDIR)/CryptoAlg.c.o
 
 # dnsextd target build dnsextd
 DNSEXTDOBJ = $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/GenLinkedList.c.o $(OBJDIR)/DNSDigest.c.o \
-             $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/PlatformCommon.c.o $(OBJDIR)/dnsextd_parser.y.o $(OBJDIR)/dnsextd_lexer.l.o
+             $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/PlatformCommon.c.o $(OBJDIR)/dnsextd_parser.y.o $(OBJDIR)/dnsextd_lexer.l.o \
+			 $(OBJDIR)/CryptoAlg.c.o
 
 Daemon: setup $(BUILDDIR)/mdnsd
 	@echo "Responder daemon done"
@@ -438,7 +445,8 @@ JavaDoc: Java setup
 
 # The following targets build embedded example programs
 SPECIALOBJ = $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/GenLinkedList.c.o \
-	$(OBJDIR)/DNSDigest.c.o $(OBJDIR)/uDNS.c.o $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/PlatformCommon.c.o
+	$(OBJDIR)/DNSDigest.c.o $(OBJDIR)/uDNS.c.o $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/PlatformCommon.c.o \
+	$(OBJDIR)/CryptoAlg.c.o
 COMMONOBJ  = $(SPECIALOBJ) $(OBJDIR)/mDNS.c.o
 APPOBJ     = $(COMMONOBJ) $(OBJDIR)/ExampleClientApp.c.o
 

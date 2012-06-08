@@ -131,7 +131,7 @@ CBrowsingPage::OnSetActive()
 	// Now populate the browse domain box
 
 	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSBrowseDomains, 0,
-		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &key, NULL );
+		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &key, NULL );
 	require_noerr( err, exit );
 
 	// Get information about this node
@@ -217,7 +217,7 @@ CBrowsingPage::Commit()
 	DWORD		err;
 
 	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSBrowseDomains, 0,
-	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &key, NULL );
+	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &key, NULL );
 	require_noerr( err, exit );
 
 	// First, remove all the entries that are there
@@ -243,7 +243,7 @@ CBrowsingPage::Commit()
 		DWORD enabled = (DWORD) m_browseListCtrl.GetCheck( i );
 
 		err = RegCreateKeyEx( key, m_browseListCtrl.GetItemText( i, 1 ), 0,
-		                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &subKey, NULL );
+		                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &subKey, NULL );
 		require_noerr( err, exit );
 
 		err = RegSetValueEx( subKey, L"Enabled", NULL, REG_DWORD, (LPBYTE) &enabled, sizeof( enabled ) );

@@ -106,7 +106,7 @@ CFourthPage::OnSetActive()
 	// Now populate the browse domain box
 
 	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\Power Management", 0,
-		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &key, NULL );
+		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &key, NULL );
 	require_noerr( err, exit );
 
 	dwSize = sizeof( DWORD );
@@ -153,7 +153,7 @@ CFourthPage::Commit()
 	DWORD		err;
 
 	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\Power Management", 0,
-		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &key, NULL );
+		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &key, NULL );
 	require_noerr( err, exit );
 
 	enabled = m_checkBox.GetCheck();

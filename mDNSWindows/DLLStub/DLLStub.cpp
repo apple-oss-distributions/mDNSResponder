@@ -28,7 +28,7 @@
 
 #include "DLLStub.h"
 
-static int		g_defaultErrorCode = kDNSServiceErr_Unknown;
+static int		g_defaultErrorCode = kDNSServiceErr_ServiceNotRunning;
 static DLLStub	g_glueLayer;
 
 

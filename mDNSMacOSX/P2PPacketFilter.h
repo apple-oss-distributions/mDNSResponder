@@ -18,12 +18,14 @@
 #ifndef _P2P_PACKET_FILTER_H_
 #define _P2P_PACKET_FILTER_H_
 
+#include "helpermsg-types.h"
+
 enum {
-	PF_SET_RULES,
-	PF_CLEAR_RULES
+    PF_SET_RULES,
+    PF_CLEAR_RULES
 };
 
-int P2PPacketFilterAddBonjourRuleSet(const char * interfaceName, u_int16_t port, u_int16_t protocol );
+int P2PPacketFilterAddBonjourRuleSet(const char * interfaceName, u_int32_t count, pfArray_t portArray, pfArray_t protocolArray );
 int P2PPacketFilterClearBonjourRules(void);
 
 #endif /* _P2P_PACKET_FILTER_H_ */

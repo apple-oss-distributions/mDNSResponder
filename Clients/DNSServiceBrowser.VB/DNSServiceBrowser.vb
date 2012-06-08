@@ -29,17 +29,53 @@ Public Class DNSServiceBrowser
 
         ComboBox1.SelectedIndex = 0
     End Sub
+
+	'Called when a service is found as a result of a browse operation
     Public Sub MyEventManager_ServiceFound(ByVal browser As Bonjour.DNSSDService, ByVal flags As Bonjour.DNSSDFlags, ByVal ifIndex As UInteger, ByVal serviceName As String, ByVal regtype As String, ByVal domain As String) Handles MyEventManager.ServiceFound
-        Dim browseData As New BrowseData
-        browseData.ServiceName = serviceName
-        browseData.RegType = regtype
-        browseData.Domain = domain
-        ServiceNames.Items.Add(browseData)
+        Dim index As Integer
+        index = ServiceNames.Items.IndexOf(serviceName)
+		'
+		' A simple reference counting scheme is implemented so that the same service
+		' does not show up more than once in the browse list.  This can happen
+		' if the machine has more than one network interface.
+		'
+		' If we have not seen this service before, then it is added to the browse list
+		' Otherwise it's reference count is bumped up.
+		'
+        If index = -1 Then
+            Dim browseData As New BrowseData
+            browseData.ServiceName = serviceName
+            browseData.RegType = regtype
+            browseData.Domain = domain
+            browseData.Refs = 1
+            ServiceNames.Items.Add(browseData)
+        Else
+            Dim browseData As BrowseData
+            browseData = ServiceNames.Items([index])
+            browseData.Refs += 1
+        End If
     End Sub
+
     Public Sub MyEventManager_ServiceLost(ByVal browser As Bonjour.DNSSDService, ByVal flags As Bonjour.DNSSDFlags, ByVal ifIndex As UInteger, ByVal serviceName As String, ByVal regtype As String, ByVal domain As String) Handles MyEventManager.ServiceLost
-        ServiceNames.Items.Remove(serviceName)
+        Dim index As Integer
+		'
+		' See the above about reference counting
+		'
+        index = ServiceNames.Items.IndexOf(serviceName)
+        If index <> -1 Then
+            Dim browseData As BrowseData
+            browseData = ServiceNames.Items([index])
+            browseData.Refs -= 1
+            If browseData.Refs = 0 Then
+                ServiceNames.Items.Remove(serviceName)
+            End If
+        End If
     End Sub
+
     Public Sub MyEventManager_ServiceResolved(ByVal resolver As Bonjour.DNSSDService, ByVal flags As Bonjour.DNSSDFlags, ByVal ifIndex As UInteger, ByVal fullname As String, ByVal hostname As String, ByVal port As UShort, ByVal record As Bonjour.TXTRecord) Handles MyEventManager.ServiceResolved
+		'
+		' Once the service is resolved, the resolve operation is stopped. This reduces the burdne on the network
+		'
         m_resolver.Stop()
         m_resolver = Nothing
         Dim browseData As BrowseData = ServiceNames.Items.Item(ServiceNames.SelectedIndex)
@@ -49,6 +85,9 @@ Public Class DNSServiceBrowser
         HostField.Text = hostname
         PortField.Text = port
 
+		'
+		' The values found in the text record are assumed to be human readable strings.
+		'
         If record IsNot Nothing Then
             For i As UInteger = 0 To record.GetCount() - 1
                 Dim key As String = record.GetKeyAtIndex(i)
@@ -58,6 +97,7 @@ Public Class DNSServiceBrowser
             Next i
         End If
     End Sub
+
     Private Sub ClearServiceInfo()
         TextRecord.Items.Clear()
         NameField.Text = ""
@@ -66,14 +106,20 @@ Public Class DNSServiceBrowser
         HostField.Text = ""
         PortField.Text = ""
     End Sub
+
     Private Sub ServiceNames_SelectedIndexChanged(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles ServiceNames.SelectedIndexChanged
         If m_resolver IsNot Nothing Then
             m_resolver.Stop()
         End If
         Me.ClearServiceInfo()
         Dim browseData As BrowseData = ServiceNames.Items.Item(ServiceNames.SelectedIndex)
+
+		'
+		' Selecting a service instance starts a new resolve operation
+		'
         m_resolver = m_service.Resolve(0, 0, browseData.ServiceName, browseData.RegType, browseData.Domain, MyEventManager)
     End Sub
+
     Private Sub ComboBox1_SelectedIndexChanged(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles ComboBox1.SelectedIndexChanged
         If m_browser IsNot Nothing Then
             m_browser.Stop()
@@ -81,6 +127,11 @@ Public Class DNSServiceBrowser
 
         ServiceNames.Items.Clear()
         Me.ClearServiceInfo()
+
+		'
+		' Selecting a service type start a new browse operation
+		'
+
         m_browser = m_service.Browse(0, 0, ComboBox1.Items.Item(ComboBox1.SelectedIndex), "", MyEventManager)
     End Sub
 
@@ -92,6 +143,7 @@ Public Class BrowseData
     Private m_serviceName As String
     Private m_regType As String
     Private m_domain As String
+    Private m_refs As Integer
 
     Property ServiceName() As String
         Get
@@ -119,6 +171,23 @@ Public Class BrowseData
             m_domain = Value
         End Set
     End Property
+
+    Property Refs As Integer
+        Get
+            Return m_refs
+        End Get
+        Set(ByVal Value As Integer)
+            m_refs = Value
+        End Set
+    End Property
+
+    Public Overrides Function Equals(obj As Object) As Boolean
+        If obj Is Nothing Then
+            Return False
+        Else
+            Return m_serviceName.Equals(obj.ToString)
+        End If
+    End Function
 
     Public Overrides Function ToString() As String
         Return m_serviceName

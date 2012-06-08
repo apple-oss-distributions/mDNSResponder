@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -57,21 +57,21 @@ int ipsec_get_keylen __P((u_int, u_int, struct sadb_alg *));
 u_int pfkey_set_softrate __P((u_int, u_int));
 u_int pfkey_get_softrate __P((u_int));
 int pfkey_send_getspi __P((int, u_int, u_int, struct sockaddr *,
-	struct sockaddr *, u_int32_t, u_int32_t, u_int32_t, u_int32_t));
+                           struct sockaddr *, u_int32_t, u_int32_t, u_int32_t, u_int32_t));
 int pfkey_send_update __P((int, u_int, u_int, struct sockaddr *,
-	struct sockaddr *, u_int32_t, u_int32_t, u_int,
-	caddr_t, u_int, u_int, u_int, u_int, u_int, u_int32_t, u_int64_t,
-	u_int64_t, u_int64_t, u_int32_t));
+                           struct sockaddr *, u_int32_t, u_int32_t, u_int,
+                           caddr_t, u_int, u_int, u_int, u_int, u_int, u_int32_t, u_int64_t,
+                           u_int64_t, u_int64_t, u_int32_t));
 int pfkey_send_add __P((int, u_int, u_int, struct sockaddr *,
-	struct sockaddr *, u_int32_t, u_int32_t, u_int,
-	caddr_t, u_int, u_int, u_int, u_int, u_int, u_int32_t, u_int64_t,
-	u_int64_t, u_int64_t, u_int32_t));
+                        struct sockaddr *, u_int32_t, u_int32_t, u_int,
+                        caddr_t, u_int, u_int, u_int, u_int, u_int, u_int32_t, u_int64_t,
+                        u_int64_t, u_int64_t, u_int32_t));
 int pfkey_send_delete __P((int, u_int, u_int,
-	struct sockaddr *, struct sockaddr *, u_int32_t));
+                           struct sockaddr *, struct sockaddr *, u_int32_t));
 int pfkey_send_delete_all __P((int, u_int, u_int,
-	struct sockaddr *, struct sockaddr *));
+                               struct sockaddr *, struct sockaddr *));
 int pfkey_send_get __P((int, u_int, u_int,
-	struct sockaddr *, struct sockaddr *, u_int32_t));
+                        struct sockaddr *, struct sockaddr *, u_int32_t));
 int pfkey_send_register __P((int, u_int));
 int pfkey_recv_register __P((int));
 int pfkey_set_supported __P((struct sadb_msg *, int));
@@ -79,21 +79,21 @@ int pfkey_send_flush __P((int, u_int));
 int pfkey_send_dump __P((int, u_int));
 int pfkey_send_promisc_toggle __P((int, int));
 int pfkey_send_spdadd __P((int, struct sockaddr *, u_int,
-	struct sockaddr *, u_int, u_int, caddr_t, int, u_int32_t));
+                           struct sockaddr *, u_int, u_int, caddr_t, int, u_int32_t));
 int pfkey_send_spdadd2 __P((int, struct sockaddr *, u_int,
-	struct sockaddr *, u_int, u_int, u_int64_t, u_int64_t,
-	caddr_t, int, u_int32_t));
+                            struct sockaddr *, u_int, u_int, u_int64_t, u_int64_t,
+                            caddr_t, int, u_int32_t));
 int pfkey_send_spdupdate __P((int, struct sockaddr *, u_int,
-	struct sockaddr *, u_int, u_int, caddr_t, int, u_int32_t));
+                              struct sockaddr *, u_int, u_int, caddr_t, int, u_int32_t));
 int pfkey_send_spdupdate2 __P((int, struct sockaddr *, u_int,
-	struct sockaddr *, u_int, u_int, u_int64_t, u_int64_t,
-	caddr_t, int, u_int32_t));
+                               struct sockaddr *, u_int, u_int, u_int64_t, u_int64_t,
+                               caddr_t, int, u_int32_t));
 int pfkey_send_spddelete __P((int, struct sockaddr *, u_int,
-	struct sockaddr *, u_int, u_int, caddr_t, int, u_int32_t));
+                              struct sockaddr *, u_int, u_int, caddr_t, int, u_int32_t));
 int pfkey_send_spddelete2 __P((int, u_int32_t));
 int pfkey_send_spdget __P((int, u_int32_t));
 int pfkey_send_spdsetidx __P((int, struct sockaddr *, u_int,
-	struct sockaddr *, u_int, u_int, caddr_t, int, u_int32_t));
+                              struct sockaddr *, u_int, u_int, caddr_t, int, u_int32_t));
 int pfkey_send_spdflush __P((int));
 int pfkey_send_spddump __P((int));
 

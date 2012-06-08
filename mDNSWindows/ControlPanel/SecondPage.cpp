@@ -43,7 +43,7 @@ CSecondPage::CSecondPage()
 	OSStatus err;
 
 	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSRegistrationDomains, 0,
-	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &m_setupKey, NULL );
+	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &m_setupKey, NULL );
 	check_noerr( err );
 }
 
@@ -230,7 +230,7 @@ CSecondPage::Commit( CComboBox & box, HKEY key, DWORD enabled )
 	// DynDNS config again
 
 	err = RegCreateKeyEx( key, selected, 0,
-	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &subKey, NULL );
+	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &subKey, NULL );
 	require_noerr( err, exit );
 
 	err = RegSetValueEx( subKey, L"Enabled", 0, REG_DWORD, (LPBYTE) &enabled, sizeof( DWORD ) );
@@ -481,7 +481,7 @@ CSecondPage::CreateKey( CString & name, DWORD enabled )
 	OSStatus	err;
 
 	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, (LPCTSTR) name, 0,
-		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &key, NULL );
+		                  NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &key, NULL );
 	require_noerr( err, exit );
 
 	err = RegSetValueEx( key, L"Enabled", 0, REG_DWORD, (LPBYTE) &enabled, sizeof( DWORD ) );

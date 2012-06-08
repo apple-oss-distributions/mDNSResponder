@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2007 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2012 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,50 +21,50 @@
 #define kmDNSHelperServiceName "com.apple.mDNSResponderHelper"
 
 enum mDNSDynamicStoreSetConfigKey
-	{
-	kmDNSMulticastConfig = 1,
-	kmDNSDynamicConfig,
-	kmDNSPrivateConfig,
-	kmDNSBackToMyMacConfig,
-	kmDNSSleepProxyServersState
-	};
+{
+    kmDNSMulticastConfig = 1,
+    kmDNSDynamicConfig,
+    kmDNSPrivateConfig,
+    kmDNSBackToMyMacConfig,
+    kmDNSSleepProxyServersState
+};
 
 enum mDNSPreferencesSetNameKey
-	{
-	kmDNSComputerName = 1,
-	kmDNSLocalHostName
-	};
+{
+    kmDNSComputerName = 1,
+    kmDNSLocalHostName
+};
 
 enum mDNSUpDown
-	{
-	kmDNSUp = 1,
-	kmDNSDown
-	};
+{
+    kmDNSUp = 1,
+    kmDNSDown
+};
 
 enum mDNSAutoTunnelSetKeysReplaceDelete
-	{
-	kmDNSAutoTunnelSetKeysReplace = 1,
-	kmDNSAutoTunnelSetKeysDelete
-	};
+{
+    kmDNSAutoTunnelSetKeysReplace = 1,
+    kmDNSAutoTunnelSetKeysDelete
+};
 
 // helper parses the system keychain and returns the information to mDNSResponder.
 // It returns four attributes. Attributes are defined after how they show up in
 // keychain access utility (the actual attribute name to retrieve these are different).
 enum mDNSKeyChainAttributes
-	{
-	kmDNSKcWhere, 	// Where
-	kmDNSKcAccount,	// Account
-	kmDNSKcKey,		// Key
-	kmDNSKcName		// Name
-	};
+{
+    kmDNSKcWhere,   // Where
+    kmDNSKcAccount, // Account
+    kmDNSKcKey,     // Key
+    kmDNSKcName     // Name
+};
 
 #define ERROR(x, y) x,
 enum mDNSHelperErrors
-	{
-	mDNSHelperErrorBase = 2300,
-	#include "helper-error.h"
-	mDNSHelperErrorEnd
-	};
+{
+    mDNSHelperErrorBase = 2300,
+    #include "helper-error.h"
+    mDNSHelperErrorEnd
+};
 #undef ERROR
 
 #include "mDNSEmbeddedAPI.h"
@@ -75,16 +75,17 @@ extern const char *mDNSHelperError(int errornum);
 extern void mDNSRequestBPF(void);
 extern int  mDNSPowerRequest(int key, int interval);
 extern int  mDNSSetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const ethaddr_t eth);
-extern void mDNSNotify(const char *title, const char *msg);		// Both strings are UTF-8 text
+extern void mDNSNotify(const char *title, const char *msg);     // Both strings are UTF-8 text
 extern void mDNSDynamicStoreSetConfig(int key, const char *subkey, CFPropertyListRef value);
 extern void mDNSPreferencesSetName(int key, domainlabel *old, domainlabel *new);
 extern int  mDNSKeychainGetSecrets(CFArrayRef *secrets);
-extern void mDNSAutoTunnelInterfaceUpDown(int updown, v6addr_t addr);
 extern void mDNSConfigureServer(int updown, const char *const prefix, const domainname *const fqdn);
 extern int  mDNSAutoTunnelSetKeys(int replacedelete, v6addr_t local_inner,
-				v6addr_t local_outer, short local_port, v6addr_t remote_inner,
-				v6addr_t remote_outer, short remote_port, const char *const prefix, const domainname *const fqdn);
+                                  v6addr_t local_outer, short local_port, v6addr_t remote_inner,
+                                  v6addr_t remote_outer, short remote_port, const char *const prefix, const domainname *const fqdn);
 extern void mDNSSendWakeupPacket(unsigned ifid, char *eth_addr, char *ip_addr, int iteration);
-extern void mDNSPacketFilterControl(uint32_t command, char * ifname, uint16_t servicePort, uint16_t protocol);
+extern void mDNSPacketFilterControl(uint32_t command, char * ifname, uint32_t count, pfArray_t portArray, pfArray_t protocolArray);
+extern int mDNSSendKeepalive(v6addr_t sadd, v6addr_t dadd, uint16_t lport, uint16_t rport, unsigned seq, unsigned ack, uint16_t win);
+extern int mDNSInterfaceAdvtIoctl(const char *ifname, int op);
 
 #endif /* H_HELPER_H */

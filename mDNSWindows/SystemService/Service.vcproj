@@ -472,6 +472,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\Poll.c"
+				>
+			</File>
+			<File
 				RelativePath="..\Secret.c"
 				>
 			</File>
@@ -523,6 +527,10 @@
 			</File>
 			<File
 				RelativePath="..\mDNSWin32.h"
+				>
+			</File>
+			<File
+				RelativePath="..\Poll.h"
 				>
 			</File>
 			<File

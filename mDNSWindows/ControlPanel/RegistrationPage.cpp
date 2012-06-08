@@ -49,15 +49,15 @@ CRegistrationPage::CRegistrationPage()
 	OSStatus err;
 
 	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\Hostnames", 0,
-	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &m_hostnameSetupKey, NULL );
+	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &m_hostnameSetupKey, NULL );
 	check_noerr( err );
 
 	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\Setup\\" kServiceDynDNSRegistrationDomains, 0,
-	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &m_registrationSetupKey, NULL );
+	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &m_registrationSetupKey, NULL );
 	check_noerr( err );
 
 	err = RegCreateKeyEx( HKEY_LOCAL_MACHINE, kServiceParametersNode L"\\DynDNS\\State\\Hostnames", 0,
-	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &m_statusKey, NULL );
+	                      NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &m_statusKey, NULL );
 	check_noerr( err );
 
 	
@@ -364,7 +364,7 @@ CRegistrationPage::Commit()
 			domain		= domainUTF8;
 
 			err = RegCreateKeyEx( m_registrationSetupKey, domain, 0,
-									 NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE|KEY_WOW64_32KEY, NULL, &subKey, NULL );
+									 NULL, REG_OPTION_NON_VOLATILE, KEY_READ|KEY_WRITE, NULL, &subKey, NULL );
 			if ( !err )
 			{
 				err = RegSetValueEx( subKey, L"Enabled", 0, REG_DWORD, (LPBYTE) &enabled, sizeof( DWORD ) );

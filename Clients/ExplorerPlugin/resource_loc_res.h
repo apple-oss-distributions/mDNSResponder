@@ -10,7 +10,7 @@
 #define IDD_ABOUT                       118
 #define IDR_CONTEXT_MENU                120
 #define IDD_LOGIN                       145
-#define IDC_ABOUT_BACKGROUND				146
+#define IDC_ABOUT_BACKGROUND                146
 #define IDS_ABOUT                       147
 #define IDS_ABOUT_URL                   148
 #define IDC_COMPONENT                   1001
@@ -21,7 +21,7 @@
 #define ID_Menu                         40001
 
 // Next default values for new objects
-// 
+//
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        119

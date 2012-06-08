@@ -45,5 +45,5 @@
     ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define	UPDATE_SC_RIGHT	         "system.preferences"
-#define	EDIT_SYS_KEYCHAIN_RIGHT	 "system.preferences"
+#define UPDATE_SC_RIGHT          "system.preferences"
+#define EDIT_SYS_KEYCHAIN_RIGHT  "system.preferences"

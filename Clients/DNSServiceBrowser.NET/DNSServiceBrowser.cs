@@ -63,6 +63,14 @@ namespace DNSServiceBrowser_NET
 
 			this.Load += new System.EventHandler(this.Form1_Load);
 
+			//
+			// Create the DNSSDEventManager. You can then associate event handlers
+			// with the instance that will be invoked when the event occurs
+			//
+			// In this example, we're associating ServiceFound, ServiceLost,
+			// ServiceResolved, and OperationFailed event handlers with the
+			// event manager instance.
+			//
             eventManager                    =  new DNSSDEventManager();
             eventManager.ServiceFound       += new _IDNSSDEvents_ServiceFoundEventHandler(this.ServiceFound);
             eventManager.ServiceLost        += new _IDNSSDEvents_ServiceLostEventHandler(this.ServiceLost);
@@ -90,6 +98,9 @@ namespace DNSServiceBrowser_NET
                     components.Dispose();
                 }
 
+				// 
+				// Clean up
+				//
                 if (resolver != null)
                 {
                     resolver.Stop();
@@ -449,6 +460,7 @@ namespace DNSServiceBrowser_NET
 			public String	Name;
 			public String	Type;
 			public String	Domain;
+            public int      Refs;
 
 			public override String
 			ToString()
@@ -463,16 +475,7 @@ namespace DNSServiceBrowser_NET
 
 				if (other != null)
 				{
-					if ((object) this == other)
-					{
-						result = true;
-					}
-					else if (other is BrowseData)
-					{
-						BrowseData otherBrowseData = (BrowseData) other;
-
-						result = (this.Name == otherBrowseData.Name);
-					}
+					result = (this.Name == other.ToString());
 				}
 
 				return result;
@@ -524,6 +527,10 @@ namespace DNSServiceBrowser_NET
 
 			serviceTextField.Items.Clear();
             
+			//
+			// When we print the text record, we're going to assume that every value
+			// is a string.
+			//
             if (resolveData.TxtRecord != null)
             {
                 for (uint idx = 0; idx < resolveData.TxtRecord.GetCount(); idx++)
@@ -556,6 +563,9 @@ namespace DNSServiceBrowser_NET
 		{
 			browseList.Items.Clear();
 
+			//
+			// Stop the current browse operation
+			//
 			if (browser != null)
 			{
 				browser.Stop();
@@ -570,6 +580,9 @@ namespace DNSServiceBrowser_NET
 
 			try
 			{
+				//
+				// Selecting a service type will start a new browse operation.
+				//
 				browser = service.Browse( 0, 0, typeBox.SelectedItem.ToString(), null, eventManager );
 			}
 			catch
@@ -593,6 +606,10 @@ namespace DNSServiceBrowser_NET
                 {
                     BrowseData data = (BrowseData) browseList.SelectedItem;
 
+					//
+					// Clicking on a service instance results in starting a resolve operation
+					// that will call us back with information about the service
+					//
                     resolver = service.Resolve(0, data.InterfaceIndex, data.Name, data.Type, data.Domain, eventManager);
                 }
                 catch
@@ -610,47 +627,72 @@ namespace DNSServiceBrowser_NET
         // a BrowseData object and invoked the appropriate method
         // in the GUI thread so we can update the UI
 		//
-		public void ServiceFound
-						(
-						DNSSDService    sref,
-						DNSSDFlags  	flags,
-						uint			ifIndex,
-                        String          serviceName,
-                        String          regType,
-                        String          domain
-						)
-		{
-			BrowseData data = new BrowseData();
+        public void ServiceFound
+                        (
+                        DNSSDService sref,
+                        DNSSDFlags flags,
+                        uint ifIndex,
+                        String serviceName,
+                        String regType,
+                        String domain
+                        )
+        {
+            int index = browseList.Items.IndexOf(serviceName);
 
-			data.InterfaceIndex = ifIndex;
-			data.Name           = serviceName;
-			data.Type           = regType;
-			data.Domain         = domain;
+			//
+			// Check to see if we've seen this service before. If the machine has multiple
+			// interfaces, we could potentially get called back multiple times for the
+			// same service. Implementing a simple reference counting scheme will address
+			// the problem of the same service showing up more than once in the browse list.
+			//
+            if (index == -1)
+            {
+                BrowseData data = new BrowseData();
 
-            browseList.Items.Add(data);
-            browseList.Invalidate();
-		}
+                data.InterfaceIndex = ifIndex;
+                data.Name = serviceName;
+                data.Type = regType;
+                data.Domain = domain;
+                data.Refs = 1;
+
+                browseList.Items.Add(data);
+                browseList.Invalidate();
+            }
+            else
+            {
+                BrowseData data = (BrowseData) browseList.Items[index];
+                data.Refs++;
+            }
+        }
 
         public void ServiceLost
                         (
-                        DNSSDService    sref,
-                        DNSSDFlags      flags,
-                        uint            ifIndex,
-                        String          serviceName,
-                        String          regType,
-                        String          domain
+                        DNSSDService sref,
+                        DNSSDFlags flags,
+                        uint ifIndex,
+                        String serviceName,
+                        String regType,
+                        String domain
                         )
         {
-            BrowseData data = new BrowseData();
+            int index = browseList.Items.IndexOf(serviceName);
 
-			data.InterfaceIndex = ifIndex;
-			data.Name           = serviceName;
-			data.Type           = regType;
-			data.Domain         = domain;
+			//
+			// See above comment in ServiceFound about reference counting
+			//
+            if (index != -1)
+            {
+                BrowseData data = (BrowseData) browseList.Items[index];
 
-            browseList.Items.Remove(data);
-			browseList.Invalidate();
-        }             
+                data.Refs--;
+
+                if (data.Refs == 0)
+                {
+                    browseList.Items.Remove(data);
+                    browseList.Invalidate();
+                }
+            }
+        }
 
 		public void ServiceResolved
 						(
@@ -671,6 +713,9 @@ namespace DNSServiceBrowser_NET
 			data.Port			= port;
 			data.TxtRecord		= txtRecord;
 
+			//
+			// Don't forget to stop the resolver. This eases the burden on the network
+			//
             resolver.Stop();
 			resolver = null;
 

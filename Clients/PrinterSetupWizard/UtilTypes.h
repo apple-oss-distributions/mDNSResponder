@@ -5,9 +5,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,257 +24,257 @@
 
 class CPrinterSetupWizardSheet;
 
-#define	kDefaultPriority	50
-#define kDefaultQTotal		1
+#define kDefaultPriority    50
+#define kDefaultQTotal      1
 
 namespace PrinterSetupWizard
 {
-	struct Printer;
-	struct Service;
-	struct Queue;
-	struct Manufacturer;
-	struct Model;
+struct Printer;
+struct Service;
+struct Queue;
+struct Manufacturer;
+struct Model;
 
-	typedef std::list<Queue*>	Queues;
-	typedef std::list<Printer*>	Printers;
-	typedef std::list<Service*>	Services;
-	typedef std::list<Model*>	Models;
+typedef std::list<Queue*>   Queues;
+typedef std::list<Printer*> Printers;
+typedef std::list<Service*> Services;
+typedef std::list<Model*>   Models;
 
-	struct Printer
-	{
-		Printer();
+struct Printer
+{
+    Printer();
 
-		~Printer();
+    ~Printer();
 
-		Service*
-		LookupService
-			(
-			const std::string	&	type
-			);
+    Service*
+    LookupService
+    (
+        const std::string   &   type
+    );
 
-		CPrinterSetupWizardSheet	*	window;
-		HTREEITEM		item;
+    CPrinterSetupWizardSheet    *   window;
+    HTREEITEM item;
 
-		//
-		// These are from the browse reply
-		//
-		std::string		name;
-		CString			displayName;
-		CString			actualName;
+    //
+    // These are from the browse reply
+    //
+    std::string name;
+    CString displayName;
+    CString actualName;
 
-		//
-		// These keep track of the different services associated with this printer.
-		// the services are ordered according to preference.
-		//
-		Services		services;
+    //
+    // These keep track of the different services associated with this printer.
+    // the services are ordered according to preference.
+    //
+    Services services;
 
-		//
-		// these are derived from the printer matching code
-		//
-		// if driverInstalled is false, then infFileName should
-		// have an absolute path to the printers inf file.  this
-		// is used to install the printer from printui.dll
-		//
-		// if driverInstalled is true, then model is the name
-		// of the driver to use in AddPrinter
-		// 
-		bool			driverInstalled;
-		CString			infFileName;
-		CString			manufacturer;
-		CString			displayModelName;
-		CString			modelName;
-		CString			portName;
-		bool			deflt;
+    //
+    // these are derived from the printer matching code
+    //
+    // if driverInstalled is false, then infFileName should
+    // have an absolute path to the printers inf file.  this
+    // is used to install the printer from printui.dll
+    //
+    // if driverInstalled is true, then model is the name
+    // of the driver to use in AddPrinter
+    //
+    bool driverInstalled;
+    CString infFileName;
+    CString manufacturer;
+    CString displayModelName;
+    CString modelName;
+    CString portName;
+    bool deflt;
 
-		// This let's us know that this printer was discovered via OSX Printer Sharing.
-		// We use this knowledge to workaround a problem with OS X Printer sharing.
+    // This let's us know that this printer was discovered via OSX Printer Sharing.
+    // We use this knowledge to workaround a problem with OS X Printer sharing.
 
-		bool			isCUPSPrinter;
-		
-		//
-		// state
-		//
-		unsigned		resolving;
-		bool			installed;
-	};
+    bool isCUPSPrinter;
 
-
-	struct Service
-	{
-		Service();
-
-		~Service();
-
-		Queue*
-		SelectedQueue();
-
-		void
-		EmptyQueues();
-
-		Printer		*	printer;
-		uint32_t		ifi;
-		std::string		type;
-		std::string		domain;
-
-		//
-		// these are from the resolve
-		//
-		DNSServiceRef	serviceRef;
-		CString			hostname;
-		unsigned short	portNumber;
-		CString			protocol;
-		unsigned short	qtotal;
-
-		//
-		// There will usually one be one of these, however
-		// this will handle printers that have multiple
-		// queues.  These are ordered according to preference.
-		//
-		Queues			queues;
-
-		//
-		// Reference count
-		//
-		unsigned		refs;
-	};
+    //
+    // state
+    //
+    unsigned resolving;
+    bool installed;
+};
 
 
-	struct Queue
-	{
-		Queue();
+struct Service
+{
+    Service();
 
-		~Queue();
+    ~Service();
 
-		CString		name;
-		uint32_t	priority;
-		CString		pdl;
-		CString		usb_MFG;
-		CString		usb_MDL;
-		CString		description;
-		CString		location;
-		CString		product;
-	};
+    Queue*
+    SelectedQueue();
+
+    void
+    EmptyQueues();
+
+    Printer     *   printer;
+    uint32_t ifi;
+    std::string type;
+    std::string domain;
+
+    //
+    // these are from the resolve
+    //
+    DNSServiceRef serviceRef;
+    CString hostname;
+    unsigned short portNumber;
+    CString protocol;
+    unsigned short qtotal;
+
+    //
+    // There will usually one be one of these, however
+    // this will handle printers that have multiple
+    // queues.  These are ordered according to preference.
+    //
+    Queues queues;
+
+    //
+    // Reference count
+    //
+    unsigned refs;
+};
 
 
-	struct Manufacturer
-	{
-		CString		name;
-		Models		models;
+struct Queue
+{
+    Queue();
 
-		Model*
-		find( const CString & name );
-	};
+    ~Queue();
 
-
-	struct Model
-	{
-		bool		driverInstalled;
-		CString		infFileName;
-		CString		displayName;
-		CString		name;
-	};
+    CString name;
+    uint32_t priority;
+    CString pdl;
+    CString usb_MFG;
+    CString usb_MDL;
+    CString description;
+    CString location;
+    CString product;
+};
 
 
-	inline
-	Printer::Printer()
-	:
-		isCUPSPrinter( false )
-	{
-	}
+struct Manufacturer
+{
+    CString name;
+    Models models;
 
-	inline
-	Printer::~Printer()
-	{
-		while ( services.size() > 0 )
-		{
-			Service * service = services.front();
-			services.pop_front();
-			delete service;
-		}
-	}
+    Model*
+    find( const CString & name );
+};
 
-	inline Service*
-	Printer::LookupService
-				(
-				const std::string	&	type
-				)
-	{
-		Services::iterator it;
 
-		for ( it = services.begin(); it != services.end(); it++ )
-		{
-			Service * service = *it;
+struct Model
+{
+    bool driverInstalled;
+    CString infFileName;
+    CString displayName;
+    CString name;
+};
 
-			if ( strcmp(service->type.c_str(), type.c_str()) == 0 )
-			{
-				return service;
-			}
-		}
 
-		return NULL;
-	}
+inline
+Printer::Printer()
+    :
+    isCUPSPrinter( false )
+{
+}
 
-	inline
-	Service::Service()
-	:
-		qtotal(kDefaultQTotal)
-	{
-	}
+inline
+Printer::~Printer()
+{
+    while ( services.size() > 0 )
+    {
+        Service * service = services.front();
+        services.pop_front();
+        delete service;
+    }
+}
 
-	inline
-	Service::~Service()
-	{
-		check( serviceRef == NULL );
+inline Service*
+Printer::LookupService
+(
+    const std::string   &   type
+)
+{
+    Services::iterator it;
 
-		EmptyQueues();
-	}
+    for ( it = services.begin(); it != services.end(); it++ )
+    {
+        Service * service = *it;
 
-	inline Queue*
-	Service::SelectedQueue()
-	{
-		return queues.front();
-	}
+        if ( strcmp(service->type.c_str(), type.c_str()) == 0 )
+        {
+            return service;
+        }
+    }
 
-	inline void
-	Service::EmptyQueues()
-	{
-		while ( queues.size() > 0 )
-		{
-			Queue * q = queues.front();
-			queues.pop_front();
-			delete q;
-		}
-	}
+    return NULL;
+}
 
-	inline
-	Queue::Queue()
-	:
-		priority(kDefaultPriority)
-	{
-	}
+inline
+Service::Service()
+    :
+    qtotal(kDefaultQTotal)
+{
+}
 
-	inline
-	Queue::~Queue()
-	{
-	}
+inline
+Service::~Service()
+{
+    check( serviceRef == NULL );
 
-	inline Model*
-	Manufacturer::find( const CString & name )
-	{
-		Models::iterator it;
+    EmptyQueues();
+}
 
-		for ( it = models.begin(); it != models.end(); it++ )
-		{
-			Model * model = *it;
+inline Queue*
+Service::SelectedQueue()
+{
+    return queues.front();
+}
 
-			if ( model->name == name )
-			{
-				return model;
-			}
-		}
+inline void
+Service::EmptyQueues()
+{
+    while ( queues.size() > 0 )
+    {
+        Queue * q = queues.front();
+        queues.pop_front();
+        delete q;
+    }
+}
 
-		return NULL;
-	}
+inline
+Queue::Queue()
+    :
+    priority(kDefaultPriority)
+{
+}
+
+inline
+Queue::~Queue()
+{
+}
+
+inline Model*
+Manufacturer::find( const CString & name )
+{
+    Models::iterator it;
+
+    for ( it = models.begin(); it != models.end(); it++ )
+    {
+        Model * model = *it;
+
+        if ( model->name == name )
+        {
+            return model;
+        }
+    }
+
+    return NULL;
+}
 }
 
 

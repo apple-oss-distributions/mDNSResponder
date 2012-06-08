@@ -5,9 +5,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,7 +19,7 @@
 #define __mDNSOSX_h
 
 #ifdef  __cplusplus
-    extern "C" {
+extern "C" {
 #endif
 
 #include <SystemConfiguration/SystemConfiguration.h>
@@ -39,120 +39,118 @@ typedef struct NetworkInterfaceInfoOSX_struct NetworkInterfaceInfoOSX;
 
 typedef void (*KQueueEventCallback)(int fd, short filter, void *context);
 typedef struct
-	{
-	KQueueEventCallback	 KQcallback;
-	void                *KQcontext;
-	const char const    *KQtask;		// For debugging messages
+{
+    KQueueEventCallback KQcallback;
+    void                *KQcontext;
+    const char const    *KQtask;        // For debugging messages
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
-	dispatch_source_t readSource;
-	dispatch_source_t writeSource;
-	mDNSBool		  fdClosed;
+    dispatch_source_t readSource;
+    dispatch_source_t writeSource;
+    mDNSBool fdClosed;
 #endif
-	} KQueueEntry;
+} KQueueEntry;
 
 typedef struct
-	{
-	mDNSIPPort port; // MUST BE FIRST FIELD -- UDPSocket_struct begins with a KQSocketSet,
-	// and mDNSCore requires every UDPSocket_struct to begin with a mDNSIPPort port
-	mDNS                    *m;
-	int                      sktv4;
-	KQueueEntry				 kqsv4;
+{
+    mDNSIPPort port; // MUST BE FIRST FIELD -- UDPSocket_struct begins with a KQSocketSet,
+    // and mDNSCore requires every UDPSocket_struct to begin with a mDNSIPPort port
+    mDNS                    *m;
+    int sktv4;
+    KQueueEntry kqsv4;
 #ifndef NO_IPV6
-	int                      sktv6;
-	KQueueEntry	             kqsv6;
+    int sktv6;
+    KQueueEntry kqsv6;
 #endif
-	int                     *closeFlag;
-	} KQSocketSet;
+    int                     *closeFlag;
+} KQSocketSet;
 
 struct UDPSocket_struct
-	{
-	KQSocketSet ss;		// First field of KQSocketSet has to be mDNSIPPort -- mDNSCore requires every UDPSocket_struct to begin with mDNSIPPort port
-	};
+{
+    KQSocketSet ss;     // First field of KQSocketSet has to be mDNSIPPort -- mDNSCore requires every UDPSocket_struct to begin with mDNSIPPort port
+};
 
 struct NetworkInterfaceInfoOSX_struct
-	{
-	NetworkInterfaceInfo     ifinfo;			// MUST be the first element in this structure
-	NetworkInterfaceInfoOSX *next;
-	mDNS                    *m;
-	mDNSu8                   Exists;			// 1 = currently exists in getifaddrs list; 0 = doesn't
-												// 2 = exists, but McastTxRx state changed
-	mDNSu8                   Flashing;			// Set if interface appeared for less than 60 seconds and then vanished
-	mDNSu8                   Occulting;			// Set if interface vanished for less than 60 seconds and then came back
-	mDNSs32                  AppearanceTime;	// Time this interface appeared most recently in getifaddrs list
-												// i.e. the first time an interface is seen, AppearanceTime is set.
-												// If an interface goes away temporarily and then comes back then
-												// AppearanceTime is updated to the time of the most recent appearance.
-	mDNSs32                  LastSeen;			// If Exists==0, last time this interface appeared in getifaddrs list
-	unsigned int             ifa_flags;
-	struct in_addr           ifa_v4addr;
-	mDNSu32                  scope_id;			// interface index / IPv6 scope ID
-	mDNSEthAddr              BSSID;				// BSSID of 802.11 base station, if applicable
-	u_short                  sa_family;
-	int                      BPF_fd;			// -1 uninitialized; -2 requested BPF; -3 failed
-	int                      BPF_mcfd;			// Socket for our IPv6 ND group membership
-	u_int                    BPF_len;
+{
+    NetworkInterfaceInfo ifinfo;                // MUST be the first element in this structure
+    NetworkInterfaceInfoOSX *next;
+    mDNS                    *m;
+    mDNSu8 Exists;                              // 1 = currently exists in getifaddrs list; 0 = doesn't
+                                                // 2 = exists, but McastTxRx state changed
+    mDNSu8 Flashing;                            // Set if interface appeared for less than 60 seconds and then vanished
+    mDNSu8 Occulting;                           // Set if interface vanished for less than 60 seconds and then came back
+    mDNSu8 D2DInterface;                        // IFEF_LOCALNET_PRIVATE flag indicates we should call
+                                                // D2D plugin for operations over this interface
+
+    mDNSs32 AppearanceTime;                     // Time this interface appeared most recently in getifaddrs list
+                                                // i.e. the first time an interface is seen, AppearanceTime is set.
+                                                // If an interface goes away temporarily and then comes back then
+                                                // AppearanceTime is updated to the time of the most recent appearance.
+    mDNSs32 LastSeen;                           // If Exists==0, last time this interface appeared in getifaddrs list
+    unsigned int ifa_flags;
+    struct in_addr ifa_v4addr;
+    mDNSu32 scope_id;                           // interface index / IPv6 scope ID
+    mDNSEthAddr BSSID;                          // BSSID of 802.11 base station, if applicable
+    u_short sa_family;
+    int BPF_fd;                                 // -1 uninitialized; -2 requested BPF; -3 failed
+    int BPF_mcfd;                               // Socket for our IPv6 ND group membership
+    u_int BPF_len;
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
-	dispatch_source_t		 BPF_source;
+    dispatch_source_t BPF_source;
 #else
-	CFSocketRef              BPF_cfs;
-	CFRunLoopSourceRef       BPF_rls;
+    CFSocketRef BPF_cfs;
+    CFRunLoopSourceRef BPF_rls;
 #endif
-	NetworkInterfaceInfoOSX	*Registered;		// non-NULL means registered with mDNS Core
-	};
+    NetworkInterfaceInfoOSX *Registered;        // non-NULL means registered with mDNS Core
+};
 
 struct mDNS_PlatformSupport_struct
-	{
-	NetworkInterfaceInfoOSX *InterfaceList;
-	KQSocketSet              permanentsockets;
-	domainlabel              userhostlabel;		// The hostlabel as it was set in System Preferences the last time we looked
-	domainlabel              usernicelabel;		// The nicelabel as it was set in System Preferences the last time we looked
-	// Following four variables are used for optimization where the helper is not
-	// invoked when not needed. It records the state of what we told helper the
-	// last time we invoked mDNSPreferencesSetName
-	domainlabel              prevoldhostlabel;  // Previous m->p->userhostlabel
-	domainlabel              prevnewhostlabel;  // Previous m->hostlabel
-	domainlabel              prevoldnicelabel;  // Previous m->p->usernicelabel
-	domainlabel              prevnewnicelabel;  // Previous m->nicelabel
-	mDNSs32                  NotifyUser;
-	mDNSs32                  HostNameConflict;	// Time we experienced conflict on our link-local host name
-	mDNSs32                  NetworkChanged;
-	mDNSs32                  KeyChainTimer;
+{
+    NetworkInterfaceInfoOSX *InterfaceList;
+    KQSocketSet permanentsockets;
+    domainlabel userhostlabel;                  // The hostlabel as it was set in System Preferences the last time we looked
+    domainlabel usernicelabel;                  // The nicelabel as it was set in System Preferences the last time we looked
+    // Following four variables are used for optimization where the helper is not
+    // invoked when not needed. It records the state of what we told helper the
+    // last time we invoked mDNSPreferencesSetName
+    domainlabel prevoldhostlabel;               // Previous m->p->userhostlabel
+    domainlabel prevnewhostlabel;               // Previous m->hostlabel
+    domainlabel prevoldnicelabel;               // Previous m->p->usernicelabel
+    domainlabel prevnewnicelabel;               // Previous m->nicelabel
+    mDNSs32 NotifyUser;
+    mDNSs32 HostNameConflict;                   // Time we experienced conflict on our link-local host name
+    mDNSs32 NetworkChanged;
+    mDNSs32 KeyChainTimer;
 
-	CFRunLoopRef             CFRunLoop;
-	SCDynamicStoreRef        Store;
-	CFRunLoopSourceRef       StoreRLS;
-	CFRunLoopSourceRef       PMRLS;
-	int                      SysEventNotifier;
-	KQueueEntry              SysEventKQueue;
-	IONotificationPortRef    PowerPortRef;
-	io_connect_t             PowerConnection;
-	io_object_t              PowerNotifier;
+    CFRunLoopRef CFRunLoop;
+    SCDynamicStoreRef Store;
+    CFRunLoopSourceRef StoreRLS;
+    CFRunLoopSourceRef PMRLS;
+    int SysEventNotifier;
+    KQueueEntry SysEventKQueue;
+    IONotificationPortRef PowerPortRef;
+    io_connect_t PowerConnection;
+    io_object_t PowerNotifier;
 #ifdef kIOPMAcknowledgmentOptionSystemCapabilityRequirements
-	IOPMConnection           IOPMConnection;
+    IOPMConnection IOPMConnection;
 #endif
-	IOPMAssertionID          IOPMAssertion;
-	SCPreferencesRef         SCPrefs;
-	long                     SleepCookie;		// Cookie we need to pass to IOAllowPowerChange()
-	long                     WakeAtUTC;
-	mDNSs32                  RequestReSleep;
+    IOPMAssertionID IOPMAssertion;
+    long SleepCookie;                           // Cookie we need to pass to IOAllowPowerChange()
+    long WakeAtUTC;
+    mDNSs32 RequestReSleep;
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
-	dispatch_source_t		 timer;
-	dispatch_source_t		 custom;
+    dispatch_source_t timer;
+    dispatch_source_t custom;
 #else
-	pthread_mutex_t          BigMutex;
+    pthread_mutex_t BigMutex;
 #endif
-	mDNSs32                  BigMutexStartTime;
-	int						 WakeKQueueLoopFD;
-#if APPLE_OSX_mDNSResponder
-	CFDictionaryRef 		ConndBTMMDict;			// Dictionary of tunnel name/value pairs
-#endif
-	};
+    mDNSs32 BigMutexStartTime;
+    int WakeKQueueLoopFD;
+};
 
 extern int OfferSleepProxyService;
 extern int DisableSleepProxyClient;
 extern int UseInternalSleepProxy;
 extern int OSXVers, iOSVers;
-extern mDNSBool DisableInboundRelayConnection;
 #define OSXVers_Base              4
 #define OSXVers_10_0_Cheetah      4
 #define OSXVers_10_1_Puma         5
@@ -164,11 +162,12 @@ extern mDNSBool DisableInboundRelayConnection;
 
 extern int KQueueFD;
 
-extern void NotifyOfElusiveBug(const char *title, const char *msg);	// Both strings are UTF-8 text
+extern void NotifyOfElusiveBug(const char *title, const char *msg); // Both strings are UTF-8 text
 extern void SetDomainSecrets(mDNS *m);
 extern void mDNSMacOSXNetworkChanged(mDNS *const m);
 extern void mDNSMacOSXSystemBuildNumber(char *HINFO_SWstring);
 extern NetworkInterfaceInfoOSX *IfindexToInterfaceInfoOSX(const mDNS *const m, mDNSInterfaceID ifindex);
+extern void mDNSUpdatePacketFilter(const ResourceRecord *const excludeRecord);
 
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 extern int KQueueSet(int fd, u_short flags, short filter, KQueueEntry *const entryRef);
@@ -184,6 +183,8 @@ extern void KQueueUnlock(mDNS *const m, const char const *task);
 extern void mDNSPlatformCloseFD(KQueueEntry *kq, int fd);
 
 extern mDNSBool DictionaryIsEnabled(CFDictionaryRef dict);
+
+extern void mDNSPlatformToggleInterfaceAdvt(mDNS *const m, mDNSBool stopAdvt);
 
 // If any event takes more than WatchDogReportingThreshold milliseconds to be processed, we log a warning message
 // General event categories are:
@@ -204,16 +205,16 @@ extern mDNSBool DictionaryIsEnabled(CFDictionaryRef dict);
 extern int WatchDogReportingThreshold;
 
 struct CompileTimeAssertionChecks_mDNSMacOSX
-	{
-	// Check our structures are reasonable sizes. Including overly-large buffers, or embedding
-	// other overly-large structures instead of having a pointer to them, can inadvertently
-	// cause structure sizes (and therefore memory usage) to balloon unreasonably.
-	char sizecheck_NetworkInterfaceInfoOSX[(sizeof(NetworkInterfaceInfoOSX) <=  7000) ? 1 : -1];
-	char sizecheck_mDNS_PlatformSupport   [(sizeof(mDNS_PlatformSupport)    <=   768) ? 1 : -1];
-	};
+{
+    // Check our structures are reasonable sizes. Including overly-large buffers, or embedding
+    // other overly-large structures instead of having a pointer to them, can inadvertently
+    // cause structure sizes (and therefore memory usage) to balloon unreasonably.
+    char sizecheck_NetworkInterfaceInfoOSX[(sizeof(NetworkInterfaceInfoOSX) <=  7000) ? 1 : -1];
+    char sizecheck_mDNS_PlatformSupport   [(sizeof(mDNS_PlatformSupport)    <=   768) ? 1 : -1];
+};
 
 #ifdef  __cplusplus
-    }
+}
 #endif
 
 #endif
