@@ -5507,12 +5507,56 @@ mDNSlocal void SendSleepGoodbyes(mDNS *const m)
     SendResponses(m);
 }
 
+mDNSlocal mDNSBool skipSameSubnetRegistration(mDNS *const m, mDNSInterfaceID *regID, mDNSu32 count, mDNSInterfaceID intfid)
+{
+    NetworkInterfaceInfo *intf;
+    NetworkInterfaceInfo *newIntf;
+    mDNSu32 i;
+
+    newIntf = FirstInterfaceForID(m, intfid);
+    if (newIntf == mDNSNULL)
+    {
+        LogMsg("%s : Could not get Interface for id %d", __func__, intfid);
+        return (mDNSfalse);
+    }
+
+    for ( i = 0; i < count; i++)
+    {
+        intf = FirstInterfaceForID(m, regID[i]);
+        if (intf == mDNSNULL)
+        {
+            LogMsg("%s : Could not get Interface for id %d", __func__, regID[i]);
+            return (mDNSfalse);
+        }
+
+        if ((newIntf->ip.type == mDNSAddrType_IPv4) &&
+            (((intf->ip.ip.v4.NotAnInteger ^ newIntf->ip.ip.v4.NotAnInteger) & intf->mask.ip.v4.NotAnInteger) == 0))
+        {
+            LogSPS("%s : Already registered for the same subnet (IPv4) for interface %s", __func__, intf->ifname);
+            return (mDNStrue);
+        }
+
+        if ( (newIntf->ip.type == mDNSAddrType_IPv6) &&
+             ((((intf->ip.ip.v6.l[0] ^ newIntf->ip.ip.v6.l[0]) & intf->mask.ip.v6.l[0]) == 0) &&
+              (((intf->ip.ip.v6.l[1] ^ newIntf->ip.ip.v6.l[1]) & intf->mask.ip.v6.l[1]) == 0) &&
+              (((intf->ip.ip.v6.l[2] ^ newIntf->ip.ip.v6.l[2]) & intf->mask.ip.v6.l[2]) == 0) &&
+              (((intf->ip.ip.v6.l[3] ^ newIntf->ip.ip.v6.l[3]) & intf->mask.ip.v6.l[3]) == 0)))
+        {
+            LogSPS("%s : Already registered for the same subnet (IPv6) for interface %s", __func__, intf->ifname);
+            return (mDNStrue);
+        }
+    }
+    return (mDNSfalse);
+}
+
 // BeginSleepProcessing is called, with the lock held, from either mDNS_Execute or mDNSCoreMachineSleep
 mDNSlocal void BeginSleepProcessing(mDNS *const m)
 {
     mDNSBool SendGoodbyes = mDNStrue;
     const CacheRecord *sps[3] = { mDNSNULL };
     mDNSOpaque64 updateIntID = zeroOpaque64;
+    mDNSInterfaceID registeredIntfIDS[128];
+    mDNSu32 registeredCount = 0;
 
     m->NextScheduledSPRetry = m->timenow;
 
@@ -5524,6 +5568,14 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
         for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
         {
             if (!intf->NetWake) LogSPS("BeginSleepProcessing: %-6s not capable of magic packet wakeup", intf->ifname);
+
+            // Check if we have already registered with a sleep proxy for this subnet
+            if (skipSameSubnetRegistration(m, registeredIntfIDS, registeredCount, intf->InterfaceID))
+            {
+                LogSPS("%s : Skipping sleep proxy registration on %s", __func__, intf->ifname);
+                continue;
+            }
+
 #if APPLE_OSX_mDNSResponder
             else if (ActivateLocalProxy(m, intf->ifname) == mStatus_NoError)
             {
@@ -5532,6 +5584,9 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
                 // This will leave m->SleepState set to SleepState_Transferring,
                 // which is okay because with no outstanding resolves, or updates in flight,
                 // mDNSCoreReadyForSleep() will conclude correctly that all the updates have already completed
+
+                registeredIntfIDS[registeredCount] = intf->InterfaceID;
+                registeredCount++;
             }
 #endif // APPLE_OSX_mDNSResponder
             else
@@ -5574,6 +5629,10 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
                             mDNS_SetupQuestion(&intf->NetWakeResolve[i], intf->InterfaceID, &sps[i]->resrec.rdata->u.name, kDNSType_SRV, NetWakeResolve, intf);
                             intf->NetWakeResolve[i].ReturnIntermed = mDNStrue;
                             mDNS_StartQuery_internal(m, &intf->NetWakeResolve[i]);
+
+                            // If we are registering with a Sleep Proxy for a new subnet, add it to our list
+                            registeredIntfIDS[registeredCount] = intf->InterfaceID;
+                            registeredCount++;
                         }
                     }
                 }
