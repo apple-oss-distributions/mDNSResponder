@@ -3292,6 +3292,54 @@ mDNSlocal mStatus handle_reconfirm_request(request_state *request)
     return(status);
 }
 
+#if APPLE_OSX_mDNSResponder
+
+mDNSlocal mStatus handle_release_request(request_state *request)
+{
+    mStatus err = 0;
+    char name[256], regtype[MAX_ESCAPED_DOMAIN_NAME], domain[MAX_ESCAPED_DOMAIN_NAME];
+    domainname instance;
+
+    // extract the data from the message
+    DNSServiceFlags flags = get_flags(&request->msgptr, request->msgend);
+
+    if (get_string(&request->msgptr, request->msgend, name, 256) < 0 ||
+        get_string(&request->msgptr, request->msgend, regtype, MAX_ESCAPED_DOMAIN_NAME) < 0 ||
+        get_string(&request->msgptr, request->msgend, domain, MAX_ESCAPED_DOMAIN_NAME) < 0)
+    {
+        LogMsg("ERROR: handle_release_request - Couldn't read name/regtype/domain");
+        return(mStatus_BadParamErr);
+    }
+
+    if (!request->msgptr)
+    {
+        LogMsg("%3d: PeerConnectionRelease(unreadable parameters)", request->sd);
+        return(mStatus_BadParamErr);
+    }
+
+    if (build_domainname_from_strings(&instance, name, regtype, domain) < 0)
+    {
+        LogMsg("ERROR: handle_release_request bad “%s” “%s” “%s”", name, regtype, domain);
+        return(mStatus_BadParamErr);
+    }
+
+    LogOperation("%3d: PeerConnectionRelease(%X %##s) START PID[%d](%s)",
+        request->sd, flags, instance.c, get_peer_pid(request->sd, pid_name), pid_name);
+    
+    external_connection_release(&instance);
+    return(err);
+}
+
+#else   // APPLE_OSX_mDNSResponder
+
+mDNSlocal mStatus handle_release_request(request_state *request)
+{
+    (void) request; 
+    return mStatus_UnsupportedErr;
+}
+
+#endif  // APPLE_OSX_mDNSResponder
+
 mDNSlocal mStatus handle_setdomain_request(request_state *request)
 {
     char domainstr[MAX_ESCAPED_DOMAIN_NAME];
@@ -3899,6 +3947,7 @@ mDNSlocal void request_callback(int fd, short filter, void *info)
         case addrinfo_request:         min_size += sizeof(mDNSu32) + 4 /* v4/v6 */   + 1 /* hostname */;                       break;
         case send_bpf:                     // Same as cancel_request below
         case cancel_request:           min_size = 0;                                                                           break;
+        case release_request:          min_size += sizeof(mDNSu32) + 3 /* type, type, domain */;                               break;
         default: LogMsg("ERROR: validate_message - unsupported req type: %d", req->hdr.op); min_size = -1;                     break;
         }
 
@@ -3956,6 +4005,7 @@ mDNSlocal void request_callback(int fd, short filter, void *info)
             case update_record_request:        err = handle_update_request      (req);  break;
             case remove_record_request:        err = handle_removerecord_request(req);  break;
             case cancel_request:                     handle_cancel_request      (req);  break;
+            case release_request:              err = handle_release_request     (req);  break;
             default: LogMsg("%3d: ERROR: Unsupported UDS req: %d", req->sd, req->hdr.op);
             }
 

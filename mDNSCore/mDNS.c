@@ -5507,43 +5507,44 @@ mDNSlocal void SendSleepGoodbyes(mDNS *const m)
     SendResponses(m);
 }
 
+/*
+ * This function attempts to detect if multiple interfaces are on the same subnet.
+ * It makes this determination based only on the IPv4 Addresses and subnet masks.
+ * IPv6 link local addresses that are configured by default on all interfaces make
+ * it hard to make this determination
+ *
+ * The 'real' fix for this would be to send out multicast packets over one interface
+ * and conclude that multiple interfaces are on the same subnet only if these packets
+ * are seen on other interfaces on the same system
+ */
 mDNSlocal mDNSBool skipSameSubnetRegistration(mDNS *const m, mDNSInterfaceID *regID, mDNSu32 count, mDNSInterfaceID intfid)
 {
     NetworkInterfaceInfo *intf;
     NetworkInterfaceInfo *newIntf;
     mDNSu32 i;
 
-    newIntf = FirstInterfaceForID(m, intfid);
-    if (newIntf == mDNSNULL)
+    for (newIntf = FirstInterfaceForID(m, intfid); newIntf; newIntf = newIntf->next)
     {
-        LogMsg("%s : Could not get Interface for id %d", __func__, intfid);
-        return (mDNSfalse);
-    }
-
-    for ( i = 0; i < count; i++)
-    {
-        intf = FirstInterfaceForID(m, regID[i]);
-        if (intf == mDNSNULL)
+        if ((newIntf->InterfaceID != intfid) ||
+            (newIntf->ip.type     != mDNSAddrType_IPv4))
         {
-            LogMsg("%s : Could not get Interface for id %d", __func__, regID[i]);
-            return (mDNSfalse);
+            continue;
         }
-
-        if ((newIntf->ip.type == mDNSAddrType_IPv4) &&
-            (((intf->ip.ip.v4.NotAnInteger ^ newIntf->ip.ip.v4.NotAnInteger) & intf->mask.ip.v4.NotAnInteger) == 0))
+        for ( i = 0; i < count; i++)
         {
-            LogSPS("%s : Already registered for the same subnet (IPv4) for interface %s", __func__, intf->ifname);
-            return (mDNStrue);
-        }
-
-        if ( (newIntf->ip.type == mDNSAddrType_IPv6) &&
-             ((((intf->ip.ip.v6.l[0] ^ newIntf->ip.ip.v6.l[0]) & intf->mask.ip.v6.l[0]) == 0) &&
-              (((intf->ip.ip.v6.l[1] ^ newIntf->ip.ip.v6.l[1]) & intf->mask.ip.v6.l[1]) == 0) &&
-              (((intf->ip.ip.v6.l[2] ^ newIntf->ip.ip.v6.l[2]) & intf->mask.ip.v6.l[2]) == 0) &&
-              (((intf->ip.ip.v6.l[3] ^ newIntf->ip.ip.v6.l[3]) & intf->mask.ip.v6.l[3]) == 0)))
-        {
-            LogSPS("%s : Already registered for the same subnet (IPv6) for interface %s", __func__, intf->ifname);
-            return (mDNStrue);
+            for (intf = FirstInterfaceForID(m, regID[i]); intf; intf = intf->next)
+            {
+                if ((intf->InterfaceID != regID[i]) ||
+                    (intf->ip.type     != mDNSAddrType_IPv4))
+                {
+                    continue;
+                }
+                if ((intf->ip.ip.v4.NotAnInteger & intf->mask.ip.v4.NotAnInteger) == (newIntf->ip.ip.v4.NotAnInteger & newIntf->mask.ip.v4.NotAnInteger))
+                {
+                    LogSPS("%s : Already registered for the same subnet (IPv4) for interface %s", __func__, intf->ifname);
+                    return (mDNStrue);
+                }
+            }
         }
     }
     return (mDNSfalse);

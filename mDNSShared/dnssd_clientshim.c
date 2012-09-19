@@ -794,4 +794,5 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
     (void)rdata;            // Unused
     return(kDNSServiceErr_Unsupported);
 }
-#endif
+
+#endif  // !MDNS_BUILDINGSTUBLIBRARY

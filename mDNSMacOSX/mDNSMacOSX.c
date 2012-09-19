@@ -227,7 +227,15 @@ static mDNSu8 *const compression_lhs = (mDNSu8 *const) compression_base_msg.data
 mDNSlocal void FreeD2DARElemCallback(mDNS *const m, AuthRecord *const rr, mStatus result);
 mDNSlocal void PrintHex(mDNSu8 *data, mDNSu16 len);
 
-static ARListElem *D2DRecords = NULL; // List of locally-generated PTR records to records found via D2D
+typedef struct D2DRecordListElem
+{
+    struct D2DRecordListElem *next;
+    AuthRecord               ar;
+    D2DServiceInstance       instanceHandle;
+    D2DTransportType         transportType;
+} D2DRecordListElem;
+
+static D2DRecordListElem *D2DRecords = NULL; // List of records returned with D2DServiceFound events
 
 typedef struct D2DBrowseListElem
 {
@@ -388,8 +396,8 @@ mDNSlocal void FreeD2DARElemCallback(mDNS *const m, AuthRecord *const rr, mStatu
     (void)m;  // unused
     if (result == mStatus_MemFree)
     {
-        ARListElem **ptr = &D2DRecords;
-        ARListElem *tmp;
+        D2DRecordListElem **ptr = &D2DRecords;
+        D2DRecordListElem *tmp;
         while (*ptr && &(*ptr)->ar != rr) ptr = &(*ptr)->next;
         if (!*ptr) { LogMsg("FreeD2DARElemCallback: Could not find in D2DRecords: %s", ARDisplayString(m, rr)); return; }
         LogInfo("FreeD2DARElemCallback: Found in D2DRecords: %s", ARDisplayString(m, rr));
@@ -400,9 +408,26 @@ mDNSlocal void FreeD2DARElemCallback(mDNS *const m, AuthRecord *const rr, mStatu
     }
 }
 
+mDNSexport void external_connection_release(const domainname *instance)
+{
+    (void) instance;
+    D2DRecordListElem *ptr = D2DRecords;
+
+    for ( ; ptr ; ptr = ptr->next)
+    {
+        if ((ptr->ar.resrec.rrtype == kDNSServiceType_PTR) &&
+             SameDomainName(&ptr->ar.rdatastorage.u.name, instance))
+        {
+            LogInfo("external_connection_release: Calling D2DRelease(instanceHandle = %p, transportType = %d", 
+                ptr->instanceHandle,  ptr->transportType);
+            if (D2DRelease) D2DRelease(ptr->instanceHandle, ptr->transportType);
+        }
+    }
+}
+
 mDNSlocal void xD2DClearCache(const domainname *regType)
 {
-    ARListElem *ptr = D2DRecords;
+    D2DRecordListElem *ptr = D2DRecords;
     for ( ; ptr ; ptr = ptr->next)
     {
         if (SameDomainName(&ptr->ar.namestorage, regType))
@@ -476,15 +501,12 @@ mDNSlocal mStatus xD2DParse(mDNS *const m, const mDNSu8 * const lhs, const mDNSu
 
 mDNSlocal void xD2DAddToCache(mDNS *const m, D2DStatus result, D2DServiceInstance instanceHandle, D2DTransportType transportType, const Byte *key, size_t keySize, const Byte *value, size_t valueSize)
 {
-    (void)transportType; // We don't care about this, yet.
-    (void)instanceHandle; // We don't care about this, yet.
-
     if (result == kD2DSuccess)
     {
         if ( key == NULL || value == NULL || keySize == 0 || valueSize == 0) { LogMsg("xD2DAddToCache: NULL Byte * passed in or length == 0"); return; }
 
         mStatus err;
-        ARListElem *ptr = mDNSPlatformMemAllocate(sizeof(ARListElem) + (valueSize < sizeof(RData) ? 0 : valueSize - sizeof(RData)));
+        D2DRecordListElem *ptr = mDNSPlatformMemAllocate(sizeof(D2DRecordListElem) + (valueSize < sizeof(RData) ? 0 : valueSize - sizeof(RData)));
 
         if (ptr == NULL) { LogMsg("xD2DAddToCache: memory allocation failure"); return; }
 
@@ -505,6 +527,8 @@ mDNSlocal void xD2DAddToCache(mDNS *const m, D2DStatus result, D2DServiceInstanc
         }
 
         LogInfo("xD2DAddToCache: mDNS_Register succeeded for %s", ARDisplayString(m, &ptr->ar));
+        ptr->instanceHandle = instanceHandle;
+        ptr->transportType = transportType;
         ptr->next = D2DRecords;
         D2DRecords = ptr;
     }
@@ -512,14 +536,14 @@ mDNSlocal void xD2DAddToCache(mDNS *const m, D2DStatus result, D2DServiceInstanc
         LogMsg("xD2DAddToCache: Unexpected result %d", result);
 }
 
-mDNSlocal ARListElem * xD2DFindInList(mDNS *const m, const Byte *const key, const size_t keySize, const Byte *const value, const size_t valueSize)
+mDNSlocal D2DRecordListElem * xD2DFindInList(mDNS *const m, const Byte *const key, const size_t keySize, const Byte *const value, const size_t valueSize)
 {
-    ARListElem *ptr = D2DRecords;
-    ARListElem *arptr;
+    D2DRecordListElem *ptr = D2DRecords;
+    D2DRecordListElem *arptr;
 
     if ( key == NULL || value == NULL || keySize == 0 || valueSize == 0) { LogMsg("xD2DFindInList: NULL Byte * passed in or length == 0"); return NULL; }
 
-    arptr = mDNSPlatformMemAllocate(sizeof(ARListElem) + (valueSize < sizeof(RData) ? 0 : valueSize - sizeof(RData)));
+    arptr = mDNSPlatformMemAllocate(sizeof(D2DRecordListElem) + (valueSize < sizeof(RData) ? 0 : valueSize - sizeof(RData)));
     if (arptr == NULL) { LogMsg("xD2DFindInList: memory allocation failure"); return NULL; }
 
     if (xD2DParse(m, (const mDNSu8 *const)key, (const mDNSu16)keySize, (const mDNSu8 *const)value, (const mDNSu16)valueSize, &arptr->ar) != mStatus_NoError)
@@ -547,7 +571,7 @@ mDNSlocal void xD2DRemoveFromCache(mDNS *const m, D2DStatus result, D2DServiceIn
 
     if (result == kD2DSuccess)
     {
-        ARListElem *ptr = xD2DFindInList(m, key, keySize, value, valueSize);
+        D2DRecordListElem *ptr = xD2DFindInList(m, key, keySize, value, valueSize);
         if (ptr)
         {
             LogInfo("xD2DRemoveFromCache: Remove from cache: %s", ARDisplayString(m, &ptr->ar));
@@ -9349,10 +9373,6 @@ mDNSexport mDNSBool mDNSPlatformValidQuestionForInterface(DNSQuestion *q, const 
 // with the kDNSServiceFlagsIncludeAWDL flag set.
 mDNSexport mDNSBool   mDNSPlatformValidRecordForQuestion(const ResourceRecord *const rr, const DNSQuestion *const q)
 {
-    // Don't do AWDL specific filtering if AWDL support is not enabled.
-    if (!mDNSStorage.mDNSHandlePeerEvents)
-        return mDNStrue;
-
     if (!rr->InterfaceID || (rr->InterfaceID == q->InterfaceID))
         return mDNStrue;
 

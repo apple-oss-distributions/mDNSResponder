@@ -135,6 +135,7 @@ typedef enum
     port_mapping_request,   // New in Leopard and B4W 2.0
     addrinfo_request,
     send_bpf,               // New in SL
+    release_request,
 
     cancel_request = 63
 } request_op_t;

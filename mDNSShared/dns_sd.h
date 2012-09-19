@@ -77,7 +77,7 @@
  */
 
 #ifndef _DNS_SD_H
-#define _DNS_SD_H 3792701
+#define _DNS_SD_H 3793201
 
 #ifdef  __cplusplus
 extern "C" {
@@ -627,9 +627,9 @@ enum
  *   DNSServiceQueryRecord, it restricts the operation to P2P.
  *
  * - If kDNSServiceInterfaceIndexP2P is passed to DNSServiceResolve, it is
- *   mapped internally to kDNSServiceInterfaceIndexAny, because resolving
- *   a P2P service may create and/or enable an interface whose index is not
- *   known a priori. The resolve callback will indicate the index of the
+ *   mapped internally to kDNSServiceInterfaceIndexAny with the kDNSServiceFlagsIncludeP2P
+ *   set, because resolving a P2P service may create and/or enable an interface whose 
+ *   index is not known a priori. The resolve callback will indicate the index of the
  *   interface via which the service can be accessed.
  *
  * If applications pass kDNSServiceInterfaceIndexAny to DNSServiceBrowse
@@ -1791,7 +1791,6 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
     uint16_t rdlen,
     const void                         *rdata
 );
-
 
 /*********************************************************************************************
 *

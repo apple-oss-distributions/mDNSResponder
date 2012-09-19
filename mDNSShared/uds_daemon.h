@@ -66,6 +66,7 @@ extern void external_start_advertising_service(const ResourceRecord *const resou
 extern void external_stop_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags);
 extern void external_start_resolving_service(mDNSInterfaceID InterfaceID, const domainname *const fqdn, DNSServiceFlags flags);
 extern void external_stop_resolving_service(mDNSInterfaceID InterfaceID, const domainname *const fqdn, DNSServiceFlags flags);
+extern void external_connection_release(const domainname *instance);
 #else
 #define external_start_browsing_for_service(A,B,C,D) (void)(A)
 #define external_stop_browsing_for_service(A,B,C,D)  (void)(A)
@@ -73,6 +74,7 @@ extern void external_stop_resolving_service(mDNSInterfaceID InterfaceID, const d
 #define external_stop_advertising_service(A,B)       (void)(A)
 #define external_start_resolving_service(A,B,C)      (void)(A)
 #define external_stop_resolving_service(A,B,C)       (void)(A)
+#define external_connection_release(A)               (void)(A)
 #endif // APPLE_OSX_mDNSResponder
 
 extern const char mDNSResponderVersionString_SCCS[];
