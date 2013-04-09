@@ -4423,21 +4423,16 @@ mDNSlocal void TimeoutQuestions(mDNS *const m)
 
 mDNSlocal void mDNSCoreFreeProxyRR(mDNS *const m)
 {
-    NetworkInterfaceInfo *intf  = m->HostInterfaces;
-    AuthRecord *rrPtr = mDNSNULL, *rrNext = mDNSNULL;
-
-    while (intf)
+    AuthRecord *rrPtr = m->SPSRRSet, *rrNext = mDNSNULL;
+    LogSPS("%s : Freeing stored sleep proxy A/AAAA records", __func__);
+    rrPtr  = m->SPSRRSet;
+    while (rrPtr)
     {
-        rrPtr  = intf->SPSRRSet;
-        while (rrPtr)
-        {
-            rrNext = rrPtr->next;
-            mDNSPlatformMemFree(rrPtr);
-            rrPtr  = rrNext;
-        }
-        intf->SPSRRSet = mDNSNULL;
-        intf = intf->next;
+        rrNext = rrPtr->next;
+        mDNSPlatformMemFree(rrPtr);
+        rrPtr  = rrNext;
     }
+    m->SPSRRSet = mDNSNULL;
 }
 
 mDNSexport mDNSs32 mDNS_Execute(mDNS *const m)
@@ -4524,8 +4519,12 @@ mDNSexport mDNSs32 mDNS_Execute(mDNS *const m)
         if (m->AnnounceOwner && m->timenow - m->AnnounceOwner >= 0)
         {
             m->AnnounceOwner = 0;
-            // Also free the stored records that we had registered with the sleep proxy
+        }
+        if (m->ClearSPSRecords && m->timenow - m->ClearSPSRecords >= 0)
+        {
+            // Free the stored records that we had registered with the sleep proxy
             mDNSCoreFreeProxyRR(m);
+            m->ClearSPSRecords = 0;
         }
 
         if (m->DelaySleep && m->timenow - m->DelaySleep >= 0)
@@ -5263,10 +5262,10 @@ mDNSlocal void SendSPSRegistrationForOwner(mDNS *const m, NetworkInterfaceInfo *
                 // if (intf->NextSPSAttempt < 5) m->omsg.h.flags = zeroID;	// For simulating packet loss
                 err = mDNSSendDNSMessage(m, &m->omsg, p, intf->InterfaceID, mDNSNULL, &intf->SPSAddr[sps], intf->SPSPort[sps], mDNSNULL, mDNSNULL, mDNSfalse);
                 if (err) LogSPS("SendSPSRegistration: mDNSSendDNSMessage err %d", err);
-                if (err && intf->SPSAddr[sps].type == mDNSAddrType_IPv6 && intf->NetWakeResolve[sps].ThisQInterval == -1)
+                if (err && intf->SPSAddr[sps].type == mDNSAddrType_IPv4 && intf->NetWakeResolve[sps].ThisQInterval == -1)
                 {
-                    LogSPS("SendSPSRegistration %d %##s failed to send to IPv6 address; will try IPv4 instead", sps, intf->NetWakeResolve[sps].qname.c);
-                    intf->NetWakeResolve[sps].qtype = kDNSType_A;
+                    LogSPS("SendSPSRegistration %d %##s failed to send to IPv4 address; will try IPv6 instead", sps, intf->NetWakeResolve[sps].qname.c);
+                    intf->NetWakeResolve[sps].qtype = kDNSType_AAAA;
                     mDNS_StartQuery_internal(m, &intf->NetWakeResolve[sps]);
                     return;
                 }
@@ -5290,11 +5289,10 @@ mDNSlocal mDNSBool RecordIsFirstOccurrenceOfOwner(mDNS *const m, const AuthRecor
 
 mDNSlocal void mDNSCoreStoreProxyRR(mDNS *const m, const mDNSInterfaceID InterfaceID, AuthRecord *const rr)
 {
-    NetworkInterfaceInfo *intf  = FirstInterfaceForID(m, InterfaceID);
-    AuthRecord           *newRR = mDNSPlatformMemAllocate(sizeof(AuthRecord));
-
-    if ((intf == mDNSNULL) || (newRR == mDNSNULL))
+    AuthRecord *newRR = mDNSPlatformMemAllocate(sizeof(AuthRecord));
+    if (newRR == mDNSNULL)
     {
+        LogSPS("%s : could not allocate memory for new resource record", __func__);
         return;
     }
 
@@ -5304,25 +5302,25 @@ mDNSlocal void mDNSCoreStoreProxyRR(mDNS *const m, const mDNSInterfaceID Interfa
                              rr->ARType, mDNSNULL, mDNSNULL);
 
     AssignDomainName(&newRR->namestorage, &rr->namestorage);
-    newRR->resrec.rdlength           = DomainNameLength(rr->resrec.name);
-    newRR->resrec.rdata->u.name.c[0] = 0;
-    AssignDomainName(&newRR->resrec.rdata->u.name, rr->resrec.name);
-    newRR->resrec.namehash           = DomainNameHashValue(newRR->resrec.name);
-    newRR->resrec.rrclass            = rr->resrec.rrclass;
+    newRR->resrec.rdlength = DomainNameLength(rr->resrec.name);
+    newRR->resrec.namehash = DomainNameHashValue(newRR->resrec.name);
+    newRR->resrec.rrclass  = rr->resrec.rrclass;
 
-    if (intf->ip.type == mDNSAddrType_IPv4)
+    if (rr->resrec.rrtype == kDNSType_A)
     {
         newRR->resrec.rdata->u.ipv4 =  rr->resrec.rdata->u.ipv4;
     }
-    else
+    else if (rr->resrec.rrtype == kDNSType_AAAA)
     {
         newRR->resrec.rdata->u.ipv6 = rr->resrec.rdata->u.ipv6;
     }
     SetNewRData(&newRR->resrec, mDNSNULL, 0);
 
     // Insert the new node at the head of the list.
-    newRR->next    = intf->SPSRRSet;
-    intf->SPSRRSet = newRR;
+    newRR->next        = m->SPSRRSet;
+    m->SPSRRSet        = newRR;
+    m->ClearSPSRecords = 0;
+    LogSPS("%s : Storing proxy record : %s ", __func__, ARDisplayString(m, rr));
 }
 
 // Some records are interface specific and some are not. The ones that are supposed to be registered
@@ -5334,7 +5332,7 @@ mDNSlocal void SPSInitRecordsBeforeUpdate(mDNS *const m, mDNSOpaque64 updateIntI
 {
     AuthRecord *ar;
     LogSPS("SPSInitRecordsBeforeUpdate: UpdateIntID 0x%x 0x%x", updateIntID.l[1], updateIntID.l[0]);
-    
+
     // Before we store the A and AAAA records that we are going to register with the sleep proxy,
     // make sure that the old sleep proxy records are removed.
     mDNSCoreFreeProxyRR(m);
@@ -5443,39 +5441,39 @@ mDNSlocal void NetWakeResolve(mDNS *const m, DNSQuestion *question, const Resour
 
     if (answer->rrtype == kDNSType_SRV)
     {
-        // 1. Got the SRV record; now look up the target host's IPv6 link-local address
+        // 1. Got the SRV record; now look up the target host's IP  address
         mDNS_StopQuery(m, question);
         intf->SPSPort[sps] = answer->rdata->u.srv.port;
         AssignDomainName(&question->qname, &answer->rdata->u.srv.target);
-        question->qtype = kDNSType_AAAA;
-        mDNS_StartQuery(m, question);
-    }
-    else if (answer->rrtype == kDNSType_AAAA && answer->rdlength == sizeof(mDNSv6Addr) && mDNSv6AddressIsLinkLocal(&answer->rdata->u.ipv6))
-    {
-        // 2. Got the target host's IPv6 link-local address; record address and initiate an SPS registration if appropriate
-        mDNS_StopQuery(m, question);
-        question->ThisQInterval = -1;
-        intf->SPSAddr[sps].type = mDNSAddrType_IPv6;
-        intf->SPSAddr[sps].ip.v6 = answer->rdata->u.ipv6;
-        mDNS_Lock(m);
-        if (sps == intf->NextSPSAttempt/3) SendSPSRegistration(m, intf, zeroID);    // If we're ready for this result, use it now
-        mDNS_Unlock(m);
-    }
-    else if (answer->rrtype == kDNSType_AAAA && answer->rdlength == 0)
-    {
-        // 3. Got negative response -- target host apparently has IPv6 disabled -- so try looking up the target host's IPv4 address(es) instead
-        mDNS_StopQuery(m, question);
-        LogSPS("NetWakeResolve: SPS %d %##s has no IPv6 address, will try IPv4 instead", sps, question->qname.c);
         question->qtype = kDNSType_A;
         mDNS_StartQuery(m, question);
     }
     else if (answer->rrtype == kDNSType_A && answer->rdlength == sizeof(mDNSv4Addr))
     {
-        // 4. Got an IPv4 address for the target host; record address and initiate an SPS registration if appropriate
+        // 2. Got an IPv4 address for the target host; record address and initiate an SPS registration if appropriate
         mDNS_StopQuery(m, question);
         question->ThisQInterval = -1;
         intf->SPSAddr[sps].type = mDNSAddrType_IPv4;
         intf->SPSAddr[sps].ip.v4 = answer->rdata->u.ipv4;
+        mDNS_Lock(m);
+        if (sps == intf->NextSPSAttempt/3) SendSPSRegistration(m, intf, zeroID);    // If we're ready for this result, use it now
+        mDNS_Unlock(m);
+    }
+    else if (answer->rrtype == kDNSType_A && answer->rdlength == 0)
+    {
+        // 3. Got negative response -- target host apparently has IPv4 disabled -- so try looking up the target host's IPv6 address(es) instead
+        mDNS_StopQuery(m, question);
+        LogSPS("NetWakeResolve: SPS %d %##s has no IPv4 address, will try IPv6 instead", sps, question->qname.c);
+        question->qtype = kDNSType_AAAA;
+        mDNS_StartQuery(m, question);
+    }
+    else if (answer->rrtype == kDNSType_AAAA && answer->rdlength == sizeof(mDNSv6Addr) && mDNSv6AddressIsLinkLocal(&answer->rdata->u.ipv6))
+    {
+        // 4. Got the target host's IPv6 link-local address; record address and initiate an SPS registration if appropriate
+        mDNS_StopQuery(m, question);
+        question->ThisQInterval = -1;
+        intf->SPSAddr[sps].type = mDNSAddrType_IPv6;
+        intf->SPSAddr[sps].ip.v6 = answer->rdata->u.ipv6;
         mDNS_Lock(m);
         if (sps == intf->NextSPSAttempt/3) SendSPSRegistration(m, intf, zeroID);    // If we're ready for this result, use it now
         mDNS_Unlock(m);
@@ -6260,8 +6258,12 @@ mDNSlocal mDNSu8 *ProcessQuery(mDNS *const m, const DNSMessage *const query, con
     mDNSBool FromLocalSubnet    = srcaddr && mDNS_AddressIsLocalSubnet(m, InterfaceID, srcaddr);
     AuthRecord   *ResponseRecords    = mDNSNULL;
     AuthRecord  **nrp                = &ResponseRecords;
+
+#if POOF_ENABLED
     CacheRecord  *ExpectedAnswers    = mDNSNULL;            // Records in our cache we expect to see updated
     CacheRecord **eap                = &ExpectedAnswers;
+#endif // POOF_ENABLED
+
     DNSQuestion  *DupQuestions       = mDNSNULL;            // Our questions that are identical to questions in this packet
     DNSQuestion **dqp                = &DupQuestions;
     mDNSs32 delayresponse      = 0;
@@ -6394,6 +6396,7 @@ mDNSlocal mDNSu8 *ProcessQuery(mDNS *const m, const DNSMessage *const query, con
         if (QuestionNeedsMulticastResponse && !(query->h.flags.b[0] & kDNSFlag0_TC))
 #endif
         {
+#if POOF_ENABLED
             const mDNSu32 slot = HashSlot(&pktq.qname);
             CacheGroup *cg = CacheGroupForName(m, slot, pktq.qnamehash, &pktq.qname);
             CacheRecord *cr;
@@ -6402,7 +6405,7 @@ mDNSlocal mDNSu8 *ProcessQuery(mDNS *const m, const DNSMessage *const query, con
             // Note: Records larger than 1K are not habitually multicast, so don't expect those to be updated
 #if ENABLE_MULTI_PACKET_QUERY_SNOOPING
             if (!(query->h.flags.b[0] & kDNSFlag0_TC))
-#endif
+#endif // ENABLE_MULTI_PACKET_QUERY_SNOOPING
             for (cr = cg ? cg->members : mDNSNULL; cr; cr=cr->next)
                 if (SameNameRecordAnswersQuestion(&cr->resrec, &pktq) && cr->resrec.rdlength <= SmallRecordLimit)
                     if (!cr->NextInKAList && eap != &cr->NextInKAList)
@@ -6419,8 +6422,9 @@ mDNSlocal mDNSu8 *ProcessQuery(mDNS *const m, const DNSMessage *const query, con
                             cr->MPLastUnansweredQT = m->timenow;
                             cr->MPExpectingKA = mDNStrue;
                         }
-#endif
+#endif // ENABLE_MULTI_PACKET_QUERY_SNOOPING
                     }
+#endif // POOF_ENABLED
 
             // Check if this question is the same as any of mine.
             // We only do this for non-truncated queries. Right now it would be too complicated to try
@@ -6505,6 +6509,7 @@ mDNSlocal mDNSu8 *ProcessQuery(mDNS *const m, const DNSMessage *const query, con
             }
     #endif
 
+#if POOF_ENABLED
             // Having built our ExpectedAnswers list from the questions in this packet, we then remove
             // any records that are suppressed by the Known Answer list in this packet.
             eap = &ExpectedAnswers;
@@ -6515,6 +6520,7 @@ mDNSlocal mDNSu8 *ProcessQuery(mDNS *const m, const DNSMessage *const query, con
                 { *eap = cr->NextInKAList; cr->NextInKAList = mDNSNULL; }
                 else eap = &cr->NextInKAList;
             }
+#endif // POOF_ENABLED
 
             // See if this Known-Answer is a surprise to us. If so, we shouldn't suppress our own query.
             if (!ourcacherr)
@@ -6659,6 +6665,7 @@ exit:
         rr->NR_AdditionalTo = mDNSNULL;
     }
 
+#if POOF_ENABLED
     while (ExpectedAnswers)
     {
         CacheRecord *cr = ExpectedAnswers;
@@ -6676,7 +6683,7 @@ exit:
                 if (cr->UnansweredQueries > 1)
                     debugf("ProcessQuery: (!TC) UAQ %lu MPQ %lu MPKA %lu %s",
                            cr->UnansweredQueries, cr->MPUnansweredQ, cr->MPUnansweredKA, CRDisplayString(m, cr));
-#endif
+#endif // ENABLE_MULTI_PACKET_QUERY_SNOOPING
                 SetNextCacheCheckTimeForRecord(m, cr);
             }
 
@@ -6689,7 +6696,7 @@ exit:
             if (RRExpireTime(cr) - m->timenow > 4 * mDNSPlatformOneSecond)
                 debugf("ProcessQuery: (Max) UAQ %lu MPQ %lu MPKA %lu mDNS_Reconfirm() for %s",
                        cr->UnansweredQueries, cr->MPUnansweredQ, cr->MPUnansweredKA, CRDisplayString(m, cr));
-#endif
+#endif // ENABLE_MULTI_PACKET_QUERY_SNOOPING
             mDNS_Reconfirm_internal(m, cr, kDefaultReconfirmTimeForNoAnswer);
         }
 #if ENABLE_MULTI_PACKET_QUERY_SNOOPING
@@ -6723,8 +6730,9 @@ exit:
                 remain = kDefaultReconfirmTimeForNoAnswer;
             mDNS_Reconfirm_internal(m, cr, remain);
         }
-#endif
+#endif // ENABLE_MULTI_PACKET_QUERY_SNOOPING
     }
+#endif // POOF_ENABLED
 
     while (DupQuestions)
     {
@@ -7279,25 +7287,29 @@ mDNSlocal void mDNSCoreReceiveNoUnicastAnswers(mDNS *const m, const DNSMessage *
     if (NSECRecords) { LogInfo("mDNSCoreReceiveNoUnicastAnswers: NSECRecords not used"); FreeNSECRecords(m, NSECRecords); }
 }
 
+mDNSlocal void mDNSCorePrintStoredProxyRecords(mDNS *const m)
+{
+    AuthRecord *rrPtr = mDNSNULL;
+    LogSPS("Stored Proxy records :");
+    for (rrPtr = m->SPSRRSet; rrPtr; rrPtr = rrPtr->next)
+    {
+        LogSPS("%s", ARDisplayString(m, rrPtr));
+    }
+}
+
 mDNSlocal mDNSBool mDNSCoreRegisteredProxyRecord(mDNS *const m, AuthRecord *rr)
 {
-    NetworkInterfaceInfo *intf  = m->HostInterfaces;
-    AuthRecord           *rrPtr = mDNSNULL;
+    AuthRecord *rrPtr = mDNSNULL;
 
-    while (intf)
+    for (rrPtr = m->SPSRRSet; rrPtr; rrPtr = rrPtr->next)
     {
-        rrPtr = intf->SPSRRSet;
-        while (rrPtr)
+        if (IdenticalResourceRecord(&rrPtr->resrec, &rr->resrec))
         {
-            if (SameResourceRecordSignature(rrPtr, rr))
-            {
-                LogSPS("mDNSCoreRegisteredProxyRecord: Ignoring packet registered with sleep proxy : %s ", ARDisplayString(m, rr));
-                return mDNStrue;
-            }
-            rrPtr = rrPtr->next;
+            LogSPS("mDNSCoreRegisteredProxyRecord: Ignoring packet registered with sleep proxy : %s ", ARDisplayString(m, rr));
+            return mDNStrue;
         }
-        intf = intf->next;
     }
+    mDNSCorePrintStoredProxyRecords(m);
     return mDNSfalse;
 }
 
@@ -10792,6 +10804,8 @@ mDNSexport mStatus mDNS_RegisterInterface(mDNS *const m, NetworkInterfaceInfo *s
         // that the network link comes UP after 60 seconds and we never set the OWNER option
         m->AnnounceOwner = NonZeroTime(m->timenow + 60 * mDNSPlatformOneSecond);
 
+        m->ClearSPSRecords = NonZeroTime(m->timenow + 60 * mDNSPlatformOneSecond);
+
         // Clear the flag that ignores IPv6 neighbor advertisements after 2 seconds.
         m->clearIgnoreNA = NonZeroTime(m->timenow + 2  * mDNSPlatformOneSecond);
 
@@ -11992,6 +12006,7 @@ mDNSexport mStatus mDNS_Init(mDNS *const m, mDNS_PlatformSupport *const p,
     m->SleepSeqNum             = 0;
     m->SystemWakeOnLANEnabled  = mDNSfalse;
     m->AnnounceOwner           = NonZeroTime(timenow + 60 * mDNSPlatformOneSecond);
+    m->ClearSPSRecords         = 0;
     m->clearIgnoreNA           = NonZeroTime(timenow +  2 * mDNSPlatformOneSecond);
     m->DelaySleep              = 0;
     m->SleepLimit              = 0;

@@ -163,6 +163,7 @@ struct _DNSRecordRef_t
     DNSServiceRegisterRecordReply AppCallback;
     DNSRecordRef recref;
     uint32_t record_index;  // index is unique to the ServiceDiscoveryRef
+    client_context_t uid;  // For demultiplexing multiple DNSServiceRegisterRecord calls
     DNSServiceOp *sdr;
 };
 
@@ -1586,7 +1587,6 @@ DNSServiceErrorType DNSSD_API DNSServiceEnumerateDomains
 
 static void ConnectionResponse(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *const data, const char *const end)
 {
-    DNSRecordRef rref = cbh->ipc_hdr.client_context.context;
     (void)data; // Unused
 
     //printf("ConnectionResponse got %d\n", cbh->ipc_hdr.op);
@@ -1604,15 +1604,38 @@ static void ConnectionResponse(DNSServiceOp *const sdr, const CallbackHeader *co
         // WARNING: Don't touch op or sdr after this -- client may have called DNSServiceRefDeallocate
         return;
     }
-
-    if (sdr->op == connection_request)
-        rref->AppCallback(rref->sdr, rref, cbh->cb_flags, cbh->cb_err, rref->AppContext);
     else
     {
-        syslog(LOG_WARNING, "dnssd_clientstub ConnectionResponse: sdr->op != connection_request");
-        rref->AppCallback(rref->sdr, rref, 0, kDNSServiceErr_Unknown, rref->AppContext);
+        DNSRecordRef rec;
+        for (rec = sdr->rec; rec; rec = rec->recnext)
+        {
+            if (rec->uid.u32[0] == cbh->ipc_hdr.client_context.u32[0] && rec->uid.u32[1] == cbh->ipc_hdr.client_context.u32[1])
+                break;
+        }
+        // The record might have been freed already and hence not an
+        // error if the record is not found.
+        if (!rec)
+        {
+            syslog(LOG_INFO, "ConnectionResponse: Record not found");
+            return;
+        }
+        if (rec->sdr != sdr)
+        {
+            syslog(LOG_WARNING, "ConnectionResponse: Record sdr mismatch: rec %p sdr %p", rec->sdr, sdr);
+            return;
+        }
+
+        if (sdr->op == connection_request)
+        {
+            rec->AppCallback(rec->sdr, rec, cbh->cb_flags, cbh->cb_err, rec->AppContext);
+        }
+        else
+        {
+            syslog(LOG_WARNING, "dnssd_clientstub ConnectionResponse: sdr->op != connection_request");
+            rec->AppCallback(rec->sdr, rec, 0, kDNSServiceErr_Unknown, rec->AppContext);
+        }
+        // MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
     }
-    // MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
 }
 
 DNSServiceErrorType DNSSD_API DNSServiceCreateConnection(DNSServiceRef *sdRef)
@@ -1681,6 +1704,15 @@ DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
     len += strlen(fullname) + 1;
     len += rdlen;
 
+    // Bump up the uid. Normally for shared operations (kDNSServiceFlagsShareConnection), this
+    // is done in ConnectToServer. For DNSServiceRegisterRecord, ConnectToServer has already
+    // been called. As multiple DNSServiceRegisterRecords can be multiplexed over a single
+    // connection, we need a way to demultiplex the response so that the callback corresponding
+    // to the right DNSServiceRegisterRecord instance can be called. Use the same mechanism that
+    // is used by kDNSServiceFlagsShareConnection. create_hdr copies the uid value to ipc
+    // hdr->client_context which will be returned in the ipc response.
+    if (++sdRef->uid.u32[0] == 0)
+        ++sdRef->uid.u32[1];
     hdr = create_hdr(reg_record_request, &len, &ptr, 1, sdRef);
     if (!hdr) return kDNSServiceErr_NoMemory;
 
@@ -1701,7 +1733,9 @@ DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
     rref->sdr = sdRef;
     rref->recnext = NULL;
     *RecordRef = rref;
-    hdr->client_context.context = rref;
+    // Remember the uid that we are sending across so that we can match
+    // when the response comes back.
+    rref->uid = sdRef->uid;
     hdr->reg_index = rref->record_index;
 
     p = &(sdRef)->rec;

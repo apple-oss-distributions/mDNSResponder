@@ -1853,7 +1853,6 @@ struct NetworkInterfaceInfo_struct
     mDNSu8 McastTxRx;                   // Send/Receive multicast on this { InterfaceID, address family } ?
     mDNSu8 NetWake;                     // Set if Wake-On-Magic-Packet is enabled on this interface
     mDNSu8 Loopback;                    // Set if this is the loopback interface
-    AuthRecord *SPSRRSet;               // To help the client keep track of the records registered with the sleep proxy
 };
 
 #define SLE_DELETE              0x00000001
@@ -1966,7 +1965,8 @@ struct mDNS_struct
                                         // Only valid if SleepLimit is nonzero and DelaySleep is zero.
 
     mDNSs32 NextScheduledStopTime;      // Next time to stop a question
-
+    mDNSs32 ClearSPSRecords;            // Time to clear stored Addr/AAAA records that were registered with a Sleep Proxy
+ 
     // These fields only required for mDNS Searcher...
     DNSQuestion *Questions;             // List of all registered questions, active and inactive
     DNSQuestion *NewQuestions;          // Fresh questions not yet answered from cache
@@ -2052,6 +2052,9 @@ struct mDNS_struct
     mDNSu8           *UPnPSOAPURL;              // router's SOAP control URL string
     mDNSu8           *UPnPRouterAddressString;  // holds both the router's address and port
     mDNSu8           *UPnPSOAPAddressString;    // holds both address and port for SOAP messages
+
+    // Sleep Proxy client fields
+    AuthRecord *SPSRRSet;               // To help the client keep track of the records registered with the sleep proxy
 
     // Sleep Proxy Server fields
     mDNSu8 SPSType;                             // 0 = off, 10-99 encodes desirability metric
