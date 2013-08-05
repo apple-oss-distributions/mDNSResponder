@@ -1929,6 +1929,7 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
     return err;
 }
 
+
 static void handle_port_mapping_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *const end)
 {
     union { uint32_t l; u_char b[4]; } addr;

@@ -2549,12 +2549,67 @@ mDNSlocal int AppendNewSearchDomain(mDNS *const m, DNSQuestion *question)
 
 #if APPLE_OSX_mDNSResponder
 
-mDNSlocal mDNSBool DomainInSearchList(domainname *domain)
+mDNSlocal mDNSBool DomainInSearchList(const domainname *domain, mDNSBool excludeLocal)
 {
     const SearchListElem *s;
+    int qcount, scount;
+
+    qcount = CountLabels(domain);
     for (s=SearchList; s; s=s->next)
-        if (SameDomainName(&s->domain, domain)) return mDNStrue;
+    {
+        if (excludeLocal && SameDomainName(&s->domain, &localdomain))
+            continue;
+        scount = CountLabels(&s->domain);
+        if (qcount >= scount)
+        {
+            // Note: When qcount == scount, we do a complete match of the domain
+            // which is expected by the callers.
+            const domainname *d = SkipLeadingLabels(domain, (qcount - scount));
+            if (SameDomainName(&s->domain, d))
+            {
+                return mDNStrue;
+            }
+        }
+    }
     return mDNSfalse;
+}
+
+// The caller already checks that this is a dotlocal question.
+mDNSlocal mDNSBool ShouldDeliverNegativeResponse(mDNS *const m, DNSQuestion *question)
+{
+    mDNSu16 qtype;
+
+    // If the question matches the search domain exactly or the search domain is a
+    // subdomain of the question, it is most likely a valid unicast domain and hence
+    // don't suppress negative responses.
+    //
+    // If the user has configured ".local" as a search domain, we don't want
+    // to deliver a negative response for names ending in ".local" as that would
+    // prevent bonjour discovery. Passing mDNStrue for the last argument excludes
+    // ".local" search domains.
+    if (DomainInSearchList(&question->qname, mDNStrue))
+    {
+        LogOperation("ShouldDeliverNegativeResponse: Question %##s (%s) in SearchList", question->qname.c, DNSTypeName(question->qtype));
+        return mDNStrue;
+    }
+
+    // Deliver negative response for A/AAAA if there was a positive response for AAAA/A respectively.
+    if (question->qtype != kDNSType_A && question->qtype != kDNSType_AAAA)
+    {
+        LogOperation("ShouldDeliverNegativeResponse: Question %##s (%s) not answering local question with negative unicast response",
+            question->qname.c, DNSTypeName(question->qtype));
+        return mDNSfalse;
+    }
+    qtype = (question->qtype == kDNSType_A ? kDNSType_AAAA : kDNSType_A);
+    if (!mDNS_CheckForCacheRecord(m, question, qtype))
+    {
+        LogOperation("ShouldDeliverNegativeResponse:Question %##s (%s) not answering local question with negative unicast response"
+            " (can't find positive record)", question->qname.c, DNSTypeName(question->qtype));
+        return mDNSfalse;
+    }
+    LogOperation("ShouldDeliverNegativeResponse:Question %##s (%s) answering local with negative unicast response (found positive record)",
+        question->qname.c, DNSTypeName(question->qtype));
+    return mDNStrue;
 }
 
 // Workaround for networks using Microsoft Active Directory using "local" as a private internal
@@ -2636,7 +2691,7 @@ mDNSlocal mStatus SendAdditionalQuery(DNSQuestion *q, request_state *request, mS
             // "my-small-company.local" but *not* for "local", which is why the "local SOA" check would fail in that case.
             // We need to check against both ActiveDirectoryPrimaryDomain and SearchList. If it matches against either
             // of those, we don't want do the SOA check for the local
-            if (labels == 2 && !SameDomainName(&q->qname, &ActiveDirectoryPrimaryDomain) && !DomainInSearchList(&q->qname))
+            if (labels == 2 && !SameDomainName(&q->qname, &ActiveDirectoryPrimaryDomain) && !DomainInSearchList(&q->qname, mDNSfalse))
             {
                 AssignDomainName(&q2->qname, &localdomain);
                 q2->qtype          = kDNSType_SOA;
@@ -2835,23 +2890,14 @@ mDNSlocal void queryrecord_result_callback(mDNS *const m, DNSQuestion *question,
         {
             if (!answer->InterfaceID && IsLocalDomain(answer->name))
             {
-                mDNSu16 qtype;
                 // Sanity check: "q" will be set only if "question" is the .local unicast query.
                 if (!q)
                 {
                     LogMsg("queryrecord_result_callback: ERROR!! answering multicast question with unicast cache record");
                     return;
                 }
-                // Deliver negative response for A/AAAA if there was a positive response for AAAA/A respectively.
-                if (question->qtype != kDNSType_A && question->qtype != kDNSType_AAAA)
+                if (!ShouldDeliverNegativeResponse(m, question))
                 {
-                    LogInfo("queryrecord_result_callback:Question %##s (%s) not answering local question with negative unicast response", question->qname.c, DNSTypeName(question->qtype));
-                    return;
-                }
-                qtype = (question->qtype == kDNSType_A ? kDNSType_AAAA : kDNSType_A);
-                if (!mDNS_CheckForCacheRecord(m, question, qtype))
-                {
-                    LogInfo("queryrecord_result_callback:Question %##s (%s) not answering local question with negative unicast response (can't find positive record)", question->qname.c, DNSTypeName(question->qtype));
                     return;
                 }
                 LogInfo("queryrecord_result_callback:Question %##s (%s) answering local with negative unicast response (found positive record)", question->qname.c, DNSTypeName(question->qtype));

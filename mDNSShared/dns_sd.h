@@ -77,7 +77,7 @@
  */
 
 #ifndef _DNS_SD_H
-#define _DNS_SD_H 3793700
+#define _DNS_SD_H 3793801
 
 #ifdef  __cplusplus
 extern "C" {
@@ -1791,6 +1791,7 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
     uint16_t rdlen,
     const void                         *rdata
 );
+
 
 /*********************************************************************************************
 *
