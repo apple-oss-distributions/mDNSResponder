@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2012 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2013 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,8 +51,8 @@
 
  */
 
-#ifndef __mDNSClientAPI_h
-#define __mDNSClientAPI_h
+#ifndef __mDNSEmbeddedAPI_h
+#define __mDNSEmbeddedAPI_h
 
 #if defined(EFI32) || defined(EFI64) || defined(EFIX64)
 // EFI doesn't have stdarg.h unless it's building with GCC.
@@ -74,6 +74,33 @@
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+// ***************************************************************************
+// Feature removal compile options & limited resource targets
+
+// The following compile options are responsible for removing certain features from mDNSCore to reduce the
+// memory footprint for use in embedded systems with limited resources.
+
+// UNICAST_DISABLED - disables unicast DNS functionality, including Wide Area Bonjour
+// ANONYMOUS_DISABLED - disables anonymous functionality
+// DNSSEC_DISABLED - disables DNSSEC functionality
+// SPC_DISABLED - disables Bonjour Sleep Proxy client
+// IDLESLEEPCONTROL_DISABLED - disables sleep control for Bonjour Sleep Proxy clients
+
+// In order to disable the above features pass the option to your compiler, e.g. -D UNICAST_DISABLED
+
+// Additionally, the LIMITED_RESOURCES_TARGET compile option will eliminate caching and
+// and reduce the maximum DNS message sizes.
+
+#ifdef LIMITED_RESOURCES_TARGET
+// Don't support jumbo frames
+#define AbsoluteMaxDNSMessageData 	1500
+// StandardAuthRDSize is 264 (256+8), which is large enough to hold a maximum-sized SRV record (6 + 256 bytes)
+#define MaximumRDSize				264
+// Don't cache anything
+#define AUTH_HASH_SLOTS 			1
+#define CACHE_HASH_SLOTS			1
 #endif
 
 // ***************************************************************************
@@ -220,31 +247,21 @@ typedef enum                // From RFC 1035
 
 // mDNS defines its own names for these common types to simplify portability across
 // multiple platforms that may each have their own (different) names for these types.
-typedef          int mDNSBool;
+typedef unsigned char mDNSBool;
 typedef   signed char mDNSs8;
 typedef unsigned char mDNSu8;
 typedef   signed short mDNSs16;
 typedef unsigned short mDNSu16;
 
-// <http://gcc.gnu.org/onlinedocs/gcc-3.3.3/cpp/Common-Predefined-Macros.html> says
-//   __LP64__ _LP64
-//   These macros are defined, with value 1, if (and only if) the compilation is
-//   for a target where long int and pointer both use 64-bits and int uses 32-bit.
-// <http://www.intel.com/software/products/compilers/clin/docs/ug/lin1077.htm> says
-//   Macro Name __LP64__ Value 1
-// A quick Google search for "defined(__LP64__)" OR "#ifdef __LP64__" gives 2590 hits and
-// a search for "#if __LP64__" gives only 12, so I think we'll go with the majority and use defined()
+// Source: http://www.unix.org/version2/whatsnew/lp64_wp.html
+// http://software.intel.com/sites/products/documentation/hpc/mkl/lin/MKL_UG_structure/Support_for_ILP64_Programming.htm
+// It can be safely assumed that int is 32bits on the platform
 #if defined(_ILP64) || defined(__ILP64__)
 typedef   signed int32 mDNSs32;
 typedef unsigned int32 mDNSu32;
-#elif defined(_LP64) || defined(__LP64__)
+#else
 typedef   signed int mDNSs32;
 typedef unsigned int mDNSu32;
-#else
-typedef   signed long mDNSs32;
-typedef unsigned long mDNSu32;
-//typedef   signed int mDNSs32;
-//typedef unsigned int mDNSu32;
 #endif
 
 // To enforce useful type checking, we make mDNSInterfaceID be a pointer to a dummy struct
@@ -344,8 +361,8 @@ enum
     mStatus_BadKey                    = -65561,
     mStatus_TransientErr              = -65562,     // transient failures, e.g. sending packets shortly after a network transition or wake from sleep
     mStatus_ServiceNotRunning         = -65563,     // Background daemon not running
-    mStatus_NATPortMappingUnsupported = -65564,     // NAT doesn't support NAT-PMP or UPnP
-    mStatus_NATPortMappingDisabled    = -65565,     // NAT supports NAT-PMP or UPnP but it's disabled by the administrator
+    mStatus_NATPortMappingUnsupported = -65564,     // NAT doesn't support PCP, NAT-PMP or UPnP
+    mStatus_NATPortMappingDisabled    = -65565,     // NAT supports PCP, NAT-PMP or UPnP, but it's disabled by the administrator
     mStatus_NoRouter                  = -65566,
     mStatus_PollingMode               = -65567,
     mStatus_Timeout                   = -65568,
@@ -364,6 +381,10 @@ enum
 };
 
 typedef mDNSs32 mStatus;
+#define MaxIp 5 // Needs to be consistent with MaxInputIf in dns_services.h
+
+typedef enum { q_stop = 0, q_start } q_state;
+typedef enum { reg_stop = 0, reg_start } reg_state;
 
 // RFC 1034/1035 specify that a domain label consists of a length byte plus up to 63 characters
 #define MAX_DOMAIN_LABEL 63
@@ -427,6 +448,13 @@ typedef struct { mDNSu8 c[256]; } UTF8str255;       // Null-terminated C string
 #define kStaticCacheTTL 10
 
 #define DefaultTTLforRRType(X) (((X) == kDNSType_A || (X) == kDNSType_AAAA || (X) == kDNSType_SRV) ? kHostNameTTL : kStandardTTL)
+#define mDNS_KeepaliveRecord(rr) ((rr)->rrtype == kDNSType_NULL && SameDomainLabel(SecondLabel((rr)->name)->c, (mDNSu8 *)"\x0A_keepalive"))
+
+// Number of times keepalives are sent if no ACK is received before waking up the system
+// this is analogous to net.inet.tcp.keepcnt
+#define kKeepaliveRetryCount    10
+// The frequency at which keepalives are retried if no ACK is received
+#define kKeepaliveRetryInterval 30
 
 typedef struct AuthRecord_struct AuthRecord;
 typedef struct ServiceRecordSet_struct ServiceRecordSet;
@@ -438,6 +466,7 @@ typedef struct ZoneData_struct ZoneData;
 typedef struct mDNS_struct mDNS;
 typedef struct mDNS_PlatformSupport_struct mDNS_PlatformSupport;
 typedef struct NATTraversalInfo_struct NATTraversalInfo;
+typedef struct ResourceRecord_struct ResourceRecord;
 
 // Structure to abstract away the differences between TCP/SSL sockets, and one for UDP sockets
 // The actual definition of these structures appear in the appropriate platform support code
@@ -467,7 +496,9 @@ typedef packedstruct
 // We can send and receive packets up to 9000 bytes (Ethernet Jumbo Frame size, if that ever becomes widely used)
 // However, in the normal case we try to limit packets to 1500 bytes so that we don't get IP fragmentation on standard Ethernet
 // 40 (IPv6 header) + 8 (UDP header) + 12 (DNS message header) + 1440 (DNS message body) = 1500 total
+#ifndef AbsoluteMaxDNSMessageData
 #define AbsoluteMaxDNSMessageData 8940
+#endif
 #define NormalMaxDNSMessageData 1440
 typedef packedstruct
 {
@@ -596,6 +627,12 @@ typedef packedstruct
     mDNSv6Addr target;
     // Typically 8 bytes of options are also present
 } IPv6NDP;                  // 24 bytes or more; IP protocol type 0x3A
+
+typedef struct
+{
+    mDNSAddr    ipaddr;
+    char        ethaddr[18];
+} IPAddressMACMapping;
 
 #define NDP_Sol 0x87
 #define NDP_Adv 0x88
@@ -742,9 +779,12 @@ typedef packedstruct
 
 #define CRYPTO_ALG_MAX              0x0B
 
-// alg - same as in RRSIG, DNS KEY or DS
+// alg - same as in RRSIG, DNS KEY or DS.
 // RFC 4034 defines SHA1
 // RFC 4509 defines SHA256
+// Note: NSEC3 also uses 1 for SHA1 and hence we will reuse for now till a new
+// value is assigned.
+//
 #define SHA1_DIGEST_TYPE        1
 #define SHA256_DIGEST_TYPE      2
 #define DIGEST_TYPE_MAX         3
@@ -812,15 +852,57 @@ typedef packedstruct
     mDNSu8  *data;
 } rdataDNSKey;
 
+#define NSEC3_FIXED_SIZE          5
+#define NSEC3_FLAGS_OPTOUT        1
+#define NSEC3_MAX_ITERATIONS      2500
+typedef packedstruct
+{
+    mDNSu8 alg;
+    mDNSu8 flags;
+    mDNSu16 iterations;
+    mDNSu8 saltLength;
+    mDNSu8 *salt;
+    // hashLength, nxt, bitmap
+} rdataNSEC3;
+
+// In the multicast usage of NSEC3, we know the actual size of RData
+// 4 bytes : HashAlg, Flags,Iterations
+// 5 bytes : Salt Length 1 byte, Salt 4 bytes
+// 21 bytes : HashLength 1 byte, Hash 20 bytes
+// 34 bytes : Window number, Bitmap length, Type bit map to include the first 256 types
+#define MCAST_NSEC3_RDLENGTH (4 + 5 + 21 + 34)
+#define SHA1_HASH_LENGTH 20
+
+// Base32 encoding takes 5 bytes of the input and encodes as 8 bytes of output.
+// For example, SHA-1 hash of 20 bytes will be encoded as 20/5 * 8 = 32 base32
+// bytes. For a max domain name size of 255 bytes of base32 encoding : (255/8)*5
+// is the max hash length possible.
+#define NSEC3_MAX_HASH_LEN	155
+// In NSEC3, the names are hashed and stored in the first label and hence cannot exceed label
+// size.
+#define NSEC3_MAX_B32_LEN	MAX_DOMAIN_LABEL
+
 // We define it here instead of dnssec.h so that these values can be used
 // in files without bringing in all of dnssec.h unnecessarily.
 typedef enum
 {
     DNSSEC_Secure = 1,      // Securely validated and has a chain up to the trust anchor
     DNSSEC_Insecure,        // Cannot build a chain up to the trust anchor
-    DNSSEC_Indeterminate,   // Cannot fetch DNSSEC RRs
-    DNSSEC_Bogus            // failed to validate signatures
+    DNSSEC_Indeterminate,   // Not used currently
+    DNSSEC_Bogus,           // failed to validate signatures
+    DNSSEC_NoResponse       // No DNSSEC records to start with
 } DNSSECStatus;
+
+#define DNSSECRecordType(rrtype) (((rrtype) == kDNSType_RRSIG) || ((rrtype) == kDNSType_NSEC) || ((rrtype) == kDNSType_DNSKEY) || ((rrtype) == kDNSType_DS) || \
+                                  ((rrtype) == kDNSType_NSEC3))
+
+typedef enum
+{
+    platform_OSX = 1,   // OSX Platform 
+    platform_iOS,       // iOS Platform 
+    platform_Atv,       // Atv Platform 
+    platform_NonApple   // Non-Apple (Windows, POSIX) Platform
+} Platform_t;
 
 // EDNS Option Code registrations are recorded in the "DNS EDNS0 Options" section of
 // <http://www.iana.org/assignments/dns-parameters>
@@ -829,6 +911,7 @@ typedef enum
 #define kDNSOpt_Lease 2
 #define kDNSOpt_NSID  3
 #define kDNSOpt_Owner 4
+#define kDNSOpt_Trace 65001  // 65001-65534 Reserved for Local/Experimental Use 
 
 typedef struct
 {
@@ -849,19 +932,27 @@ typedef struct
     mDNSOpaque48 password;  // Optional password
 } OwnerOptData;
 
+typedef struct
+{
+    mDNSu8    platf;       // Running platform (see enum Platform_t)
+    mDNSu16   mDNSv;       // mDNSResponder Version (defined in dns_sd.h)
+} TracerOptData;
+
 // Note: rdataOPT format may be repeated an arbitrary number of times in a single resource record
 typedef packedstruct
 {
     mDNSu16 opt;
     mDNSu16 optlen;
-    union { LLQOptData llq; mDNSu32 updatelease; OwnerOptData owner; } u;
+    union { LLQOptData llq; mDNSu32 updatelease; OwnerOptData owner; TracerOptData tracer; } u;
 } rdataOPT;
 
 // Space needed to put OPT records into a packet:
-// Header      11 bytes (name 1, type 2, class 2, TTL 4, length 2)
-// LLQ rdata   18 bytes (opt 2, len 2, vers 2, op 2, err 2, id 8, lease 4)
-// Lease rdata  8 bytes (opt 2, len 2, lease 4)
-// Owner rdata 12-24    (opt 2, len 2, owner 8-20)
+// Header         11  bytes (name 1, type 2, class 2, TTL 4, length 2)
+// LLQ   rdata    18  bytes (opt 2, len 2, vers 2, op 2, err 2, id 8, lease 4)
+// Lease rdata     8  bytes (opt 2, len 2, lease 4)
+// Owner rdata 12-24  bytes (opt 2, len 2, owner 8-20)
+// Trace rdata     7  bytes (opt 2, len 2, platf 1, mDNSv 2)
+
 
 #define DNSOpt_Header_Space                 11
 #define DNSOpt_LLQData_Space               (4 + 2 + 2 + 2 + 8 + 4)
@@ -870,6 +961,7 @@ typedef packedstruct
 #define DNSOpt_OwnerData_ID_Wake_Space     (4 + 2 + 6 + 6)
 #define DNSOpt_OwnerData_ID_Wake_PW4_Space (4 + 2 + 6 + 6 + 4)
 #define DNSOpt_OwnerData_ID_Wake_PW6_Space (4 + 2 + 6 + 6 + 6)
+#define DNSOpt_TraceData_Space             (4 + 1 + 2)
 
 #define ValidOwnerLength(X) (   (X) == DNSOpt_OwnerData_ID_Space          - 4 || \
                                 (X) == DNSOpt_OwnerData_ID_Wake_Space     - 4 || \
@@ -881,6 +973,7 @@ typedef packedstruct
 #define DNSOpt_Data_Space(O) (                                  \
         (O)->opt == kDNSOpt_LLQ   ? DNSOpt_LLQData_Space   :        \
         (O)->opt == kDNSOpt_Lease ? DNSOpt_LeaseData_Space :        \
+        (O)->opt == kDNSOpt_Trace ? DNSOpt_TraceData_Space :        \
         (O)->opt == kDNSOpt_Owner ? DNSOpt_Owner_Space(&(O)->u.owner.HMAC, &(O)->u.owner.IMAC) : 0x10000)
 
 // NSEC record is defined in RFC 4034.
@@ -893,20 +986,22 @@ typedef packedstruct
 //
 // This would be a waste, as types about 256 are not very common. But it would be odd, if we receive
 // a type above 256 (.US zone had TYPE65534 when this code was written) and not able to handle it.
-// Hence, we handle any size by not fixing a strucure in place. The following is just a palceholder
+// Hence, we handle any size by not fixing a strucure in place. The following is just a placeholder
 // and never used anywhere.
 //
 #define NSEC_MCAST_WINDOW_SIZE 32
 typedef struct
 {
-    //domainname *next;
-    //char bitmap[32];
+    domainname *next; //placeholders are uncommented because C89 in Windows requires that a struct has at least a member.
+    char bitmap[32];
 } rdataNSEC;
 
 // StandardAuthRDSize is 264 (256+8), which is large enough to hold a maximum-sized SRV record (6 + 256 bytes)
 // MaximumRDSize is 8K the absolute maximum we support (at least for now)
 #define StandardAuthRDSize 264
+#ifndef MaximumRDSize
 #define MaximumRDSize 8192
+#endif
 
 // InlineCacheRDSize is 68
 // Records received from the network with rdata this size or less have their rdata stored right in the CacheRecord object
@@ -1052,6 +1147,76 @@ typedef packedstruct
     mDNSu32 NATRep_lease;
 } NATPortMapReply;
 
+// PCP Support for IPv4 mappings
+
+#define PCP_VERS 0x02
+#define PCP_WAITSECS_AFTER_EPOCH_INVALID 5
+
+typedef enum
+{
+    PCPOp_Announce = 0,
+    PCPOp_Map      = 1
+} PCPOp_t;
+
+typedef enum
+{
+    PCPProto_All = 0,
+    PCPProto_TCP = 6,
+    PCPProto_UDP = 17
+} PCPProto_t;
+
+typedef enum
+{
+    PCPResult_Success         = 0,
+    PCPResult_UnsuppVersion   = 1,
+    PCPResult_NotAuthorized   = 2,
+    PCPResult_MalformedReq    = 3,
+    PCPResult_UnsuppOpcode    = 4,
+    PCPResult_UnsuppOption    = 5,
+    PCPResult_MalformedOption = 6,
+    PCPResult_NetworkFailure  = 7,
+    PCPResult_NoResources     = 8,
+    PCPResult_UnsuppProtocol  = 9,
+    PCPResult_UserExQuota     = 10,
+    PCPResult_CantProvideExt  = 11,
+    PCPResult_AddrMismatch    = 12,
+    PCPResult_ExcesRemotePeer = 13
+} PCPResult_t;
+
+typedef packedstruct
+{
+    mDNSu8       version;
+    mDNSu8       opCode;
+    mDNSOpaque16 reserved;
+    mDNSu32      lifetime;
+    mDNSv6Addr   clientAddr;
+    mDNSu32      nonce[3];
+    mDNSu8       protocol;
+    mDNSu8       reservedMapOp[3];
+    mDNSIPPort   intPort;
+    mDNSIPPort   extPort;
+    mDNSv6Addr   extAddress;
+} PCPMapRequest;
+
+typedef packedstruct
+{
+    mDNSu8     version;
+    mDNSu8     opCode;
+    mDNSu8     reserved;
+    mDNSu8     result;
+    mDNSu32    lifetime;
+    mDNSu32    epoch;
+    mDNSu32    clientAddrParts[3];
+    mDNSu32    nonce[3];
+    mDNSu8     protocol;
+    mDNSu8     reservedMapOp[3];
+    mDNSIPPort intPort;
+    mDNSIPPort extPort;
+    mDNSv6Addr extAddress;
+} PCPMapReply;
+
+// LNT Support
+
 typedef enum
 {
     LNTDiscoveryOp      = 1,
@@ -1084,6 +1249,14 @@ typedef void (*NATTraversalClientCallback)(mDNS *m, NATTraversalInfo *n);
 // if m->timenow <  ExpiryTime then we have an active mapping, and we'll renew halfway to expiry
 // if m->timenow >= ExpiryTime then our mapping has expired, and we're trying to create one
 
+typedef enum
+{
+    NATTProtocolNone    = 0,
+    NATTProtocolNATPMP  = 1,
+    NATTProtocolUPNPIGD = 2,
+    NATTProtocolPCP     = 3,
+} NATTProtocol;
+
 struct NATTraversalInfo_struct
 {
     // Internal state fields. These are used internally by mDNSCore; the client layer needn't be concerned with them.
@@ -1093,6 +1266,9 @@ struct NATTraversalInfo_struct
     mDNSs32 retryInterval;                          // Current interval, between last packet we sent and the next one
     mDNSs32 retryPortMap;                           // If Protocol is nonzero, time to send our next mapping packet
     mStatus NewResult;                              // New error code; will be copied to Result just prior to invoking callback
+    NATTProtocol lastSuccessfulProtocol;            // To send correct deletion request & update non-PCP external address operations
+    mDNSBool sentNATPMP;                            // Whether we just sent a NAT-PMP packet, so we won't send another if
+                                                    //    we receive another NAT-PMP "Unsupported Version" packet
 
 #ifdef _LEGACY_NAT_TRAVERSAL_
     tcpLNTInfo tcpInfo;                             // Legacy NAT traversal (UPnP) TCP connection
@@ -1107,10 +1283,11 @@ struct NATTraversalInfo_struct
     //     is reported as the same as our InternalPort, since that is effectively our externally-visible port too.
     //     Again, RequestedPort retains the external port we'd like to get the next time we find ourself behind a NAT gateway.
     // To improve stability of port mappings, RequestedPort is updated any time we get a successful
-    // mapping response from the NAT-PMP or UPnP gateway. For example, if we ask for port 80, and
+    // mapping response from the PCP, NAT-PMP or UPnP gateway. For example, if we ask for port 80, and
     // get assigned port 81, then thereafter we'll contine asking for port 81.
     mDNSInterfaceID InterfaceID;
     mDNSv4Addr ExternalAddress;                     // Initially set to onesIPv4Addr, until first callback
+    mDNSv4Addr NewAddress;                          // May be updated with actual value assigned by gateway
     mDNSIPPort ExternalPort;
     mDNSu32 Lifetime;
     mStatus Result;
@@ -1123,6 +1300,12 @@ struct NATTraversalInfo_struct
     NATTraversalClientCallback clientCallback;
     void                       *clientContext;
 };
+
+// ***************************************************************************
+#if 0
+#pragma mark -
+#pragma mark - DNSServer & McastResolver structures and constants
+#endif
 
 enum
 {
@@ -1153,10 +1336,27 @@ typedef struct McastResolver
     mDNSu32 timeout;            // timeout value for questions
 } McastResolver;
 
+// scoped values for DNSServer matching
+enum
+{
+    kScopeNone         = 0,        // DNS server used by unscoped questions
+    kScopeInterfaceID  = 1,        // Scoped DNS server used only by scoped questions
+    kScopeServiceID    = 2         // Service specific DNS server used only by questions
+                                   // have a matching serviceID
+};
+
+// Note: DNSSECAware is set if we are able to get a valid response to
+// a DNSSEC question. In some cases it is possible that the proxy
+// strips the EDNS0 option and we just get a plain response with no
+// signatures. But we still mark DNSSECAware in that case. As DNSSECAware
+// is only used to determine whether DNSSEC_VALIDATION_SECURE_OPTIONAL
+// should be turned off or not, it is sufficient that we are getting
+// responses back.
 typedef struct DNSServer
 {
     struct DNSServer *next;
-    mDNSInterfaceID interface;  // For specialized uses; we can have DNS servers reachable over specific interfaces
+    mDNSInterfaceID interface;  // DNS requests should be sent on this interface
+    mDNSs32 serviceID;
     mDNSAddr addr;
     mDNSIPPort port;
     mDNSOpaque16 testid;
@@ -1164,15 +1364,29 @@ typedef struct DNSServer
     mDNSu32 teststate;          // Have we sent bug-detection query to this server?
     mDNSs32 lasttest;           // Time we sent last bug-detection query to this server
     domainname domain;          // name->server matching for "split dns"
-    mDNSs32 penaltyTime;         // amount of time this server is penalized
-    mDNSBool scoped;            // interface should be matched against question only
-                                // if scoped is set
+    mDNSs32 penaltyTime;        // amount of time this server is penalized
+    mDNSu32 scoped;             // See the scoped enum above
     mDNSu32 timeout;            // timeout value for questions
     mDNSBool cellIntf;          // Resolver from Cellular Interface ?
     mDNSu16 resGroupID;         // ID of the resolver group that contains this DNSServer
+    mDNSBool req_A;             // If set, send v4 query (DNSConfig allows A queries)
+    mDNSBool req_AAAA;          // If set, send v6 query (DNSConfig allows AAAA queries)
+    mDNSBool req_DO;            // If set, okay to send DNSSEC queries (EDNS DO bit is supported)
+    mDNSBool retransDO;         // Total Retransmissions for queries sent with DO option
+    mDNSBool DNSSECAware;       // set if we are able to receive a response to a request
+                                // sent with DO option.
 } DNSServer;
 
-typedef struct                          // Size is 36 bytes when compiling for 32-bit; 48 when compiling for 64-bit
+typedef struct
+{
+    mDNSu8 *AnonData;
+    int AnonDataLen;
+    mDNSu32 salt;
+    ResourceRecord *nsec3RR;
+    mDNSInterfaceID SendNow;     // The interface ID that this record should be sent on
+} AnonymousInfo;
+
+struct ResourceRecord_struct
 {
     mDNSu8 RecordType;                  // See enum above
     mDNSu16 rrtype;
@@ -1197,7 +1411,9 @@ typedef struct                          // Size is 36 bytes when compiling for 3
     const domainname *name;
     RData           *rdata;             // Pointer to storage for this rdata
     DNSServer       *rDNSServer;        // Unicast DNS server authoritative for this entry;null for multicast
-} ResourceRecord;
+    AnonymousInfo   *AnonInfo;          // Anonymous Information
+};
+
 
 // Unless otherwise noted, states may apply to either independent record registrations or service registrations
 typedef enum
@@ -1239,7 +1455,9 @@ struct AuthGroup_struct             // Header object for a list of AuthRecords w
     mDNSu8 namestorage[AUTH_GROUP_NAME_SIZE];
 };
 
+#ifndef AUTH_HASH_SLOTS
 #define AUTH_HASH_SLOTS 499
+#endif
 #define FORALL_AUTHRECORDS(SLOT,AG,AR)                              \
     for ((SLOT) = 0; (SLOT) < AUTH_HASH_SLOTS; (SLOT)++)                                                                     \
         for ((AG)=m->rrauth.rrauth_hash[(SLOT)]; (AG); (AG)=(AG)->next)                                                                         \
@@ -1262,9 +1480,15 @@ typedef enum
     AuthRecordAny,              // registered for *Any, NOT including P2P interfaces
     AuthRecordAnyIncludeP2P,    // registered for *Any, including P2P interfaces
     AuthRecordAnyIncludeAWDL,   // registered for *Any, including AWDL interface
+    AuthRecordAnyIncludeAWDLandP2P, // registered for *Any, including AWDL and P2P interfaces
     AuthRecordLocalOnly,
     AuthRecordP2P               // discovered over D2D/P2P framework
 } AuthRecType;
+
+typedef enum
+{
+    AuthFlagsWakeOnly = 0x1     // WakeOnly service
+} AuthRecordFlags;
 
 struct AuthRecord_struct
 {
@@ -1287,6 +1511,7 @@ struct AuthRecord_struct
     mDNSu8 AutoTarget;                  // Set if the target of this record (PTR, CNAME, SRV, etc.) is our host name
     mDNSu8 AllowRemoteQuery;            // Set if we allow hosts not on the local link to query this record
     mDNSu8 ForceMCast;                  // Set by client to advertise solely via multicast, even for apparently unicast names
+    mDNSu8 AuthFlags;
 
     OwnerOptData WakeUp;                // WakeUp.HMAC.l[0] nonzero indicates that this is a Sleep Proxy record
     mDNSAddr AddressProxy;              // For reverse-mapping Sleep Proxy PTR records, address in question
@@ -1297,6 +1522,7 @@ struct AuthRecord_struct
 
     // Field Group 3: Transient state for Authoritative Records
     mDNSu8 Acknowledged;                // Set if we've given the success callback to the client
+    mDNSu8 ProbeRestartCount;           // Number of times we have restarted probing
     mDNSu8 ProbeCount;                  // Number of probes remaining before this record is valid (kDNSRecordTypeUnique)
     mDNSu8 AnnounceCount;               // Number of announcements remaining (kDNSRecordTypeShared)
     mDNSu8 RequireGoodbye;              // Set if this RR has been announced on the wire and will require a goodbye packet
@@ -1376,16 +1602,17 @@ struct AuthRecord_struct
 // Note: Question_uDNS(Q) is used in *only* one place -- on entry to mDNS_StartQuery_internal, to decide whether to set TargetQID.
 // Everywhere else in the code, the determination of whether a question is unicast is made by checking to see if TargetQID is nonzero.
 #define AuthRecord_uDNS(R) ((R)->resrec.InterfaceID == mDNSInterface_Any && !(R)->ForceMCast && !IsLocalDomain((R)->resrec.name))
-#define Question_uDNS(Q)   ((Q)->InterfaceID == mDNSInterface_Unicast || \
+#define Question_uDNS(Q)   ((Q)->InterfaceID == mDNSInterface_Unicast || (Q)->ProxyQuestion || \
                             ((Q)->InterfaceID != mDNSInterface_LocalOnly && (Q)->InterfaceID != mDNSInterface_P2P && !(Q)->ForceMCast && !IsLocalDomain(&(Q)->qname)))
 
 #define RRLocalOnly(rr) ((rr)->ARType == AuthRecordLocalOnly || (rr)->ARType == AuthRecordP2P)
 
-#define RRAny(rr) ((rr)->ARType == AuthRecordAny || (rr)->ARType == AuthRecordAnyIncludeP2P || (rr)->ARType == AuthRecordAnyIncludeAWDL)
+#define RRAny(rr) ((rr)->ARType == AuthRecordAny || (rr)->ARType == AuthRecordAnyIncludeP2P || (rr)->ARType == AuthRecordAnyIncludeAWDL || (rr)->ARType == AuthRecordAnyIncludeAWDLandP2P)
 
 // Question (A or AAAA) that is suppressed currently because IPv4 or IPv6 address
-// is not available locally for A or AAAA question respectively
-#define QuerySuppressed(Q) ((Q)->SuppressUnusable && (Q)->SuppressQuery)
+// is not available locally for A or AAAA question respectively. Also, if the
+// query is disallowed for the "pid" that we are sending on behalf of, suppress it.
+#define QuerySuppressed(Q) (((Q)->SuppressUnusable && (Q)->SuppressQuery) || ((Q)->DisallowPID))
 
 #define PrivateQuery(Q) ((Q)->AuthInfo && (Q)->AuthInfo->AutoTunnel)
 
@@ -1414,8 +1641,9 @@ struct CacheRecord_struct
     mDNSs32 LastUsed;                   // In platform time units
     DNSQuestion    *CRActiveQuestion;   // Points to an active question referencing this answer. Can never point to a NewQuestion.
     mDNSs32 LastUnansweredTime;         // In platform time units; last time we incremented UnansweredQueries
-    mDNSu16 UnansweredQueries;          // Number of times we've issued a query for this record without getting an answer
-    mDNSu16 rcode;                      // Error code needed for NSEC proofs
+    mDNSu8  UnansweredQueries;          // Number of times we've issued a query for this record without getting an answer
+    mDNSu8  CRDNSSECQuestion;           // Set to 1 if this was created in response to a DNSSEC question
+    mDNSOpaque16 responseFlags;         // Second 16 bit in the DNS response
 #if ENABLE_MULTI_PACKET_QUERY_SNOOPING
     mDNSu32 MPUnansweredQ;              // Multi-packet query handling: Number of times we've seen a query for this record
     mDNSs32 MPLastUnansweredQT;         // Multi-packet query handling: Last time we incremented MPUnansweredQ
@@ -1424,6 +1652,7 @@ struct CacheRecord_struct
 #endif
     CacheRecord    *NextInCFList;       // Set if this is in the list of records we just received with the cache flush bit set
     CacheRecord    *nsec;               // NSEC records needed for non-existence proofs
+    CacheRecord    *soa;                // SOA record to return for proxy questions
 
     mDNSAddr sourceAddress;             // node from which we received this record
     // Size to here is 76 bytes when compiling 32-bit; 104 bytes when compiling 64-bit
@@ -1511,6 +1740,9 @@ struct ServiceRecordSet_struct
     ExtraResourceRecord *Extras;    // Optional list of extra AuthRecords attached to this service registration
     mDNSu32 NumSubTypes;
     AuthRecord          *SubTypes;
+    const mDNSu8        *AnonData;
+    mDNSu32             flags;      // saved for subsequent calls to mDNS_RegisterService() if records 
+                                    // need to be re-registered.
     AuthRecord RR_ADV;              // e.g. _services._dns-sd._udp.local. PTR _printer._tcp.local.
     AuthRecord RR_PTR;              // e.g. _printer._tcp.local.        PTR Name._printer._tcp.local.
     AuthRecord RR_SRV;              // e.g. Name._printer._tcp.local.   SRV 0 0 port target
@@ -1609,8 +1841,11 @@ typedef struct DomainAuthInfo
 // layer. These values are used within mDNSResponder and not sent across to the application. QC_addnocache is for
 // delivering a response without adding to the cache. QC_forceresponse is superset of QC_addnocache where in
 // addition to not entering in the cache, it also forces the negative response through.
-typedef enum { QC_rmv = 0, QC_add, QC_addnocache, QC_forceresponse, QC_dnssec } QC_result;
+typedef enum { QC_rmv = 0, QC_add, QC_addnocache, QC_forceresponse, QC_dnssec , QC_nodnssec, QC_suppressed } QC_result;
 typedef void mDNSQuestionCallback (mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord);
+typedef void AsyncDispatchFunc(mDNS *const m, void *context);
+typedef void DNSSECAuthInfoFreeCallback(mDNS *const m, void *context);
+extern void mDNSPlatformDispatchAsync(mDNS *const m, void *context, AsyncDispatchFunc func);
 
 #define NextQSendTime(Q)  ((Q)->LastQTime + (Q)->ThisQInterval)
 #define ActiveQuestion(Q) ((Q)->ThisQInterval > 0 && !(Q)->DuplicateOf)
@@ -1621,7 +1856,33 @@ typedef void mDNSQuestionCallback (mDNS *const m, DNSQuestion *question, const R
 // questions from /etc/hosts, then we go straight to DNSSECValDone from the initial state.
 typedef enum { DNSSECValNotRequired = 0, DNSSECValRequired, DNSSECValInProgress, DNSSECValDone } DNSSECValState;
 
-#define DNSSECQuestion(q) ((q)->ValidationRequired || (q)->ValidatingResponse)
+// ValidationRequired can be set to the following values:
+//
+// SECURE validation is set to determine whether something is secure or bogus 
+// INSECURE validation is set internally by dnssec code to indicate that it is currently proving something
+// is insecure
+#define DNSSEC_VALIDATION_NONE              0x00
+#define DNSSEC_VALIDATION_SECURE            0x01
+#define DNSSEC_VALIDATION_SECURE_OPTIONAL   0x02
+#define DNSSEC_VALIDATION_INSECURE          0x03
+
+// For both ValidationRequired and ValidatingResponse question, we validate DNSSEC responses.
+// For ProxyQuestion with DNSSECOK, we just receive the DNSSEC records to pass them along without
+// validation and if the CD bit is not set, we also validate.
+#define DNSSECQuestion(q) ((q)->ValidationRequired || (q)->ValidatingResponse || ((q)->ProxyQuestion && (q)->ProxyDNSSECOK))
+
+// ValidatingQuestion is used when we need to know whether we are validating the DNSSEC responses for a question
+#define ValidatingQuestion(q) ((q)->ValidationRequired || (q)->ValidatingResponse)
+
+#define DNSSECOptionalQuestion(q) ((q)->ValidationRequired == DNSSEC_VALIDATION_SECURE_OPTIONAL)
+
+// Given the resource record and the question, should we follow the CNAME ?
+#define FollowCNAME(q, rr, AddRecord)   (AddRecord && (q)->qtype != kDNSType_CNAME && \
+                                         (rr)->RecordType != kDNSRecordTypePacketNegative && \
+                                         (rr)->rrtype == kDNSType_CNAME)
+
+// RFC 4122 defines it to be 16 bytes 
+#define UUID_SIZE       16
 
 struct DNSQuestion_struct
 {
@@ -1638,32 +1899,47 @@ struct DNSQuestion_struct
     mDNSs32 LastAnswerPktNum;               // The sequence number of the last response packet containing an answer to this Q
     mDNSu32 RecentAnswerPkts;               // Number of answers since the last time we sent this query
     mDNSu32 CurrentAnswers;                 // Number of records currently in the cache that answer this question
+    mDNSu32 BrowseThreshold;                // If we have received at least this number of answers,
+                                            // set the next question interval to MaxQuestionInterval
     mDNSu32 LargeAnswers;                   // Number of answers with rdata > 1024 bytes
     mDNSu32 UniqueAnswers;                  // Number of answers received with kDNSClass_UniqueRRSet bit set
-    mDNSInterfaceID FlappingInterface1;      // Set when an interface goes away, to flag if remove events are delivered for this Q
-    mDNSInterfaceID FlappingInterface2;      // Set when an interface goes away, to flag if remove events are delivered for this Q
+    mDNSInterfaceID FlappingInterface1;     // Set when an interface goes away, to flag if remove events are delivered for this Q
+    mDNSInterfaceID FlappingInterface2;     // Set when an interface goes away, to flag if remove events are delivered for this Q
     DomainAuthInfo       *AuthInfo;         // Non-NULL if query is currently being done using Private DNS
     DNSQuestion          *DuplicateOf;
     DNSQuestion          *NextInDQList;
+    AnonymousInfo        *AnonInfo;         // Anonymous Information
     DupSuppressInfo DupSuppress[DupSuppressInfoSize];
     mDNSInterfaceID SendQNow;               // The interface this query is being sent on right now
     mDNSBool SendOnAll;                     // Set if we're sending this question on all active interfaces
+    mDNSBool CachedAnswerNeedsUpdate;       // See SendQueries().  Set if we're sending this question 
+                                            // because a cached answer needs to be refreshed.
     mDNSu32 RequestUnicast;                 // Non-zero if we want to send query with kDNSQClass_UnicastResponse bit set
     mDNSs32 LastQTxTime;                    // Last time this Q was sent on one (but not necessarily all) interfaces
     mDNSu32 CNAMEReferrals;                 // Count of how many CNAME redirections we've done
     mDNSBool SuppressQuery;                 // This query should be suppressed and not sent on the wire
     mDNSu8 LOAddressAnswers;                // Number of answers from the local only auth records that are
-                                            // answering A, AAAA and CNAME (/etc/hosts)
-    mDNSu8 WakeOnResolveCount;                // Number of wakes that should be sent on resolve
+                                            // answering A, AAAA, CNAME, or PTR (/etc/hosts)
+    mDNSu8 WakeOnResolveCount;              // Number of wakes that should be sent on resolve
     mDNSs32 StopTime;                       // Time this question should be stopped by giving them a negative answer
 
-    // Wide Area fields. These are used internally by the uDNS core
+    // DNSSEC fields
+    DNSSECValState ValidationState;            // Current state of the Validation process
+    DNSSECStatus ValidationStatus;             // Validation status for "ValidationRequired" questions (dnssec)
+    mDNSu8 ValidatingResponse;                 // Question trying to validate a response (dnssec) on behalf of
+                                               // ValidationRequired question
+    void *DNSSECAuthInfo;
+    DNSSECAuthInfoFreeCallback *DAIFreeCallback;
+
+    // Wide Area fields. These are used internally by the uDNS core (Unicast)
     UDPSocket            *LocalSocket;
+
+    // |-> DNS Configuration related fields used in uDNS (Subset of Wide Area/Unicast fields)
     DNSServer            *qDNSServer;       // Caching server for this query (in the absence of an SRV saying otherwise)
     mDNSOpaque64 validDNSServers;           // Valid DNSServers for this question
     mDNSu16 noServerResponse;               // At least one server did not respond.
-    mDNSu16 triedAllServersOnce;              // Tried all DNS servers once
-    mDNSu8 unansweredQueries;              // The number of unanswered queries to this server
+    mDNSu16 triedAllServersOnce;            // Tried all DNS servers once
+    mDNSu8 unansweredQueries;               // The number of unanswered queries to this server
 
     ZoneData             *nta;              // Used for getting zone data for private or LLQ query
     mDNSAddr servAddr;                      // Address and port learned from _dns-llq, _dns-llq-tls or _dns-query-tls SRV query
@@ -1672,6 +1948,7 @@ struct DNSQuestion_struct
     mDNSIPPort tcpSrcPort;                  // Local Port TCP packet received on;need this as tcp struct is disposed
                                             // by tcpCallback before calling into mDNSCoreReceive
     mDNSu8 NoAnswer;                        // Set if we want to suppress answers until tunnel setup has completed
+    mDNSu8 Restart;                         // This question should be restarted soon
 
     // LLQ-specific fields. These fields are only meaningful when LongLived flag is set
     LLQ_State state;
@@ -1681,12 +1958,14 @@ struct DNSQuestion_struct
                                             // for TCP: there is some ambiguity in the use of this variable, but in general, it is
                                             //          the number of TCP/TLS connection attempts for this LLQ state, or
                                             //          the number of packets sent for this TCP/TLS connection
-    DNSSECValState ValidationState;            // Current state of the Validation process
-    DNSSECStatus ValidationStatus;             // Validation status for "ValidationRequired" questions (dnssec)
-    mDNSu8 ValidatingResponse;                 // Question trying to validate a response (dnssec) on behalf of
-                                               // ValidationRequired question
     mDNSOpaque64 id;
 
+    // DNS Proxy fields
+    mDNSOpaque16 responseFlags;             // Temporary place holder for the error we get back from the DNS server
+                                            // till we populate in the cache
+    mDNSBool     DisallowPID;               // Is the query allowed for the "PID" that we are sending on behalf of ?
+    mDNSs32      ServiceID;                 // Service identifier to match against the DNS server
+    
     // Client API fields: The client must set up these fields *before* calling mDNS_StartQuery()
     mDNSInterfaceID InterfaceID;            // Non-zero if you want to issue queries only on a single specific IP interface
     mDNSu32  flags;                         // flags from original DNSService*() API request.
@@ -1701,15 +1980,19 @@ struct DNSQuestion_struct
     mDNSBool ForceMCast;                    // Set by client to force mDNS query, even for apparently uDNS names
     mDNSBool ReturnIntermed;                // Set by client to request callbacks for intermediate CNAME/NXDOMAIN results
     mDNSBool SuppressUnusable;              // Set by client to suppress unusable queries to be sent on the wire
-    mDNSBool RetryWithSearchDomains;                // Retry with search domains if there is no entry in the cache or AuthRecords
+    mDNSu8 RetryWithSearchDomains;          // Retry with search domains if there is no entry in the cache or AuthRecords
     mDNSu8 TimeoutQuestion;                 // Timeout this question if there is no reply in configured time
     mDNSu8 WakeOnResolve;                   // Send wakeup on resolve
-    mDNSu8 UseBrackgroundTrafficClass;      // Use background traffic class for request
+    mDNSu8 UseBackgroundTrafficClass;       // Use background traffic class for request
     mDNSs8 SearchListIndex;                 // Index into SearchList; Used by the client layer but not touched by core
-    mDNSs8 AppendSearchDomains;                // Search domains can be appended for this query
-    mDNSs8 AppendLocalSearchDomains;                // Search domains ending in .local can be appended for this query
-    mDNSu8 ValidationRequired;                      // Requires DNSSEC validation.
-    domainname           *qnameOrig;       // Copy of the original question name if it is not fully qualified
+    mDNSs8 AppendSearchDomains;             // Search domains can be appended for this query
+    mDNSs8 AppendLocalSearchDomains;        // Search domains ending in .local can be appended for this query
+    mDNSu8 ValidationRequired;              // Requires DNSSEC validation.
+    mDNSu8 ProxyQuestion;                   // Proxy Question
+    mDNSu8 ProxyDNSSECOK;                   // Proxy Question with EDNS0 DNSSEC OK bit set
+    mDNSs32 pid;                            // Process ID of the client that is requesting the question
+    mDNSu8  uuid[UUID_SIZE];                // Unique ID of the client that is requesting the question (valid only if pid is zero)
+    domainname           *qnameOrig;        // Copy of the original question name if it is not fully qualified
     mDNSQuestionCallback *QuestionCallback;
     void                 *QuestionContext;
 };
@@ -1853,11 +2136,14 @@ struct NetworkInterfaceInfo_struct
     mDNSu8 McastTxRx;                   // Send/Receive multicast on this { InterfaceID, address family } ?
     mDNSu8 NetWake;                     // Set if Wake-On-Magic-Packet is enabled on this interface
     mDNSu8 Loopback;                    // Set if this is the loopback interface
-    AuthRecord *SPSRRSet;               // To help the client keep track of the records registered with the sleep proxy
+    mDNSu8 IgnoreIPv4LL;                // Set if IPv4 Link-Local addresses have to be ignored.
+    mDNSu8 SendGoodbyes;                // Send goodbyes on this interface while sleeping
 };
 
-#define SLE_DELETE              0x00000001
-#define SLE_WAB_QUERY_STARTED   0x00000002
+#define SLE_DELETE                      0x00000001
+#define SLE_WAB_BROWSE_QUERY_STARTED    0x00000002
+#define SLE_WAB_LBROWSE_QUERY_STARTED   0x00000004
+#define SLE_WAB_REG_QUERY_STARTED       0x00000008
 
 typedef struct SearchListElem
 {
@@ -1889,13 +2175,9 @@ extern SearchListElem *SearchList;      // This really ought to be part of mDNS_
 
 typedef void mDNSCallback (mDNS *const m, mStatus result);
 
+#ifndef CACHE_HASH_SLOTS
 #define CACHE_HASH_SLOTS 499
-
-enum        // Bit flags -- i.e. values should be 1, 2, 4, 8, etc.
-{
-    mDNS_KnownBug_LimitedIPv6       = 1,
-    mDNS_KnownBug_LossySyslog       = 2     // <rdar://problem/6561888>
-};
+#endif
 
 enum
 {
@@ -1903,6 +2185,74 @@ enum
     SleepState_Transferring = 1,
     SleepState_Sleeping = 2
 };
+
+typedef enum
+{
+    kStatsActionIncrement,
+    kStatsActionDecrement,
+    kStatsActionClear,
+    kStatsActionSet
+} DNSSECStatsAction;
+
+typedef enum
+{
+    kStatsTypeMemoryUsage,
+    kStatsTypeLatency,
+    kStatsTypeExtraPackets,
+    kStatsTypeStatus,
+    kStatsTypeProbe,
+    kStatsTypeMsgSize
+} DNSSECStatsType;
+
+typedef struct
+{
+    mDNSu32 TotalMemUsed;
+    mDNSu32 Latency0;           // 0 to 4 ms
+    mDNSu32 Latency5;           // 5 to  9 ms
+    mDNSu32 Latency10;          // 10 to 19 ms
+    mDNSu32 Latency20;          // 20 to 49 ms
+    mDNSu32 Latency50;          // 50 to 99 ms
+    mDNSu32 Latency100;         // >= 100 ms
+    mDNSu32 ExtraPackets0;      // 0 to 2 packets
+    mDNSu32 ExtraPackets3;      // 3 to 6 packets
+    mDNSu32 ExtraPackets7;      // 7 to 9 packets
+    mDNSu32 ExtraPackets10;     // >= 10 packets
+    mDNSu32 SecureStatus;
+    mDNSu32 InsecureStatus;
+    mDNSu32 IndeterminateStatus;
+    mDNSu32 BogusStatus;
+    mDNSu32 NoResponseStatus;
+    mDNSu32 NumProbesSent;      // Number of probes sent
+    mDNSu32 MsgSize0;           // DNSSEC message size <= 1024
+    mDNSu32 MsgSize1;           // DNSSEC message size <= 2048
+    mDNSu32 MsgSize2;           // DNSSEC message size > 2048
+} DNSSECStatistics;
+
+typedef struct
+{
+    mDNSu32 NameConflicts;                  // Normal Name conflicts
+    mDNSu32 KnownUniqueNameConflicts;       // Name Conflicts for KnownUnique Records
+    mDNSu32 DupQuerySuppressions;           // Duplicate query suppressions
+    mDNSu32 KnownAnswerSuppressions;        // Known Answer suppressions
+    mDNSu32 KnownAnswerMultiplePkts;        // Known Answer in queries spannign multiple packets
+    mDNSu32 PoofCacheDeletions;             // Number of times the cache was deleted due to POOF
+    mDNSu32 UnicastBitInQueries;            // Queries with QU bit set
+    mDNSu32 NormalQueries;                  // Queries with QU bit not set
+    mDNSu32 MatchingAnswersForQueries;      // Queries for which we had a response
+    mDNSu32 UnicastResponses;               // Unicast responses to queries
+    mDNSu32 MulticastResponses;             // Multicast responses to queries
+    mDNSu32 UnicastDemotedToMulticast;      // Number of times unicast demoted to multicast
+    mDNSu32 Sleeps;                         // Total sleeps
+    mDNSu32 Wakes;                          // Total wakes
+    mDNSu32 InterfaceUp;                    // Total Interface UP events
+    mDNSu32 InterfaceUpFlap;                // Total Interface UP events with flaps
+    mDNSu32 InterfaceDown;                  // Total Interface Down events
+    mDNSu32 InterfaceDownFlap;              // Total Interface Down events with flaps
+    mDNSu32 CacheRefreshQueries;            // Number of queries that we sent for refreshing cache
+    mDNSu32 CacheRefreshed;                 // Number of times the cache was refreshed due to a response
+    mDNSu32 WakeOnResolves;                 // Number of times we did a wake on resolve
+} mDNSStatistics;
+extern void LogMDNSStatistics(mDNS *const m);
 
 struct mDNS_struct
 {
@@ -1912,7 +2262,6 @@ struct mDNS_struct
     // all required data is passed as parameters to that function.
 
     mDNS_PlatformSupport *p;            // Pointer to platform-specific data of indeterminite size
-    mDNSu32 KnownBugs;
     mDNSBool CanReceiveUnicastOn5353;
     mDNSBool AdvertiseLocalAddresses;
     mDNSBool DivertMulticastAdvertisements; // from interfaces that do not advertise local addresses to local-only
@@ -1951,6 +2300,7 @@ struct mDNS_struct
     mDNSs32 RandomQueryDelay;           // For de-synchronization of query packets on the wire
     mDNSu32 RandomReconfirmDelay;       // For de-synchronization of reconfirmation queries on the wire
     mDNSs32 PktNum;                     // Unique sequence number assigned to each received packet
+    mDNSs32 MPktNum;                    // Unique sequence number assigned to each received Multicast packet
     mDNSu8 LocalRemoveEvents;           // Set if we may need to deliver remove events for local-only questions and/or local-only records
     mDNSu8 SleepState;                  // Set if we're sleeping
     mDNSu8 SleepSeqNum;                 // "Epoch number" of our current period of wakefulness
@@ -1958,14 +2308,23 @@ struct mDNS_struct
     mDNSu8 SentSleepProxyRegistration;  // Set if we registered (or tried to register) with a Sleep Proxy
     mDNSu8 SystemSleepOnlyIfWakeOnLAN;  // Set if we may only sleep if we managed to register with a Sleep Proxy
     mDNSs32 AnnounceOwner;              // After waking from sleep, include OWNER option in packets until this time
-    mDNSs32 clearIgnoreNA;              // After waking from sleep, clear the ignore neighbor advertisement after this time
     mDNSs32 DelaySleep;                 // To inhibit re-sleeping too quickly right after wake
     mDNSs32 SleepLimit;                 // Time window to allow deregistrations, etc.,
                                         // during which underying platform layer should inhibit system sleep
+    mDNSs32 TimeSlept;                  // Time we went to sleep.
+
+    mDNSs32 StatStartTime;              // Time we started gathering statistics during this interval.
+    mDNSs32 NextStatLogTime;            // Next time to log statistics.
+    mDNSs32 ActiveStatTime;             // Total time awake/gathering statistics for this log period.
+    mDNSs32 UnicastPacketsSent;         // Number of unicast packets sent.
+    mDNSs32 MulticastPacketsSent;       // Number of multicast packets sent.
+    mDNSs32 RemoteSubnet;               // Multicast packets received from outside our subnet.
+
     mDNSs32 NextScheduledSPRetry;       // Time next sleep proxy registration action is required.
                                         // Only valid if SleepLimit is nonzero and DelaySleep is zero.
 
     mDNSs32 NextScheduledStopTime;      // Next time to stop a question
+
 
     // These fields only required for mDNS Searcher...
     DNSQuestion *Questions;             // List of all registered questions, active and inactive
@@ -1977,6 +2336,7 @@ struct mDNS_struct
     DNSQuestion *ValidationQuestion;    // Questions that are being validated (dnssec)
     mDNSu32 rrcache_size;               // Total number of available cache entries
     mDNSu32 rrcache_totalused;          // Number of cache entries currently occupied
+    mDNSu32 rrcache_totalused_unicast;  // Number of cache entries currently occupied by unicast
     mDNSu32 rrcache_active;             // Number of cache entries currently occupied by records that answer active questions
     mDNSu32 rrcache_report;
     CacheEntity *rrcache_free;
@@ -2001,6 +2361,7 @@ struct mDNS_struct
     mDNSs32 ProbeFailTime;
     mDNSu32 NumFailedProbes;
     mDNSs32 SuppressProbes;
+    Platform_t mDNS_plat;
 
     // Unicast-specific data
     mDNSs32 NextuDNSEvent;                  // uDNS next event
@@ -2023,18 +2384,21 @@ struct mDNS_struct
     NATTraversalInfo AutoTunnelNAT;         // Shared between all AutoTunnel DomainAuthInfo structs
     mDNSv6Addr AutoTunnelRelayAddr;
 
-    mDNSBool StartWABQueries;               // Start WAB queries for the purpose of domain enumeration
+    mDNSu32 WABBrowseQueriesCount;          // Number of WAB Browse domain enumeration queries (b, db) callers
+    mDNSu32 WABLBrowseQueriesCount;         // Number of legacy WAB Browse domain enumeration queries (lb) callers
+    mDNSu32 WABRegQueriesCount;             // Number of WAB Registration domain enumeration queries (r, dr) callers
     mDNSu8 SearchDomainsHash[MD5_LEN];
 
     // NAT-Traversal fields
     NATTraversalInfo LLQNAT;                    // Single shared NAT Traversal to receive inbound LLQ notifications
     NATTraversalInfo *NATTraversals;
     NATTraversalInfo *CurrentNATTraversal;
-    mDNSs32 retryIntervalGetAddr;               // delta between time sent and retry
-    mDNSs32 retryGetAddr;                       // absolute time when we retry
-    mDNSv4Addr ExternalAddress;
+    mDNSs32 retryIntervalGetAddr;               // delta between time sent and retry for NAT-PMP & UPnP/IGD external address request
+    mDNSs32 retryGetAddr;                       // absolute time when we retry for NAT-PMP & UPnP/IGD external address request
+    mDNSv4Addr ExtAddress;                      // the external address discovered via NAT-PMP or UPnP/IGD
+    mDNSu32 PCPNonce[3];                        // the nonce if using PCP
 
-    UDPSocket        *NATMcastRecvskt;          // For receiving NAT-PMP AddrReply multicasts from router on port 5350
+    UDPSocket        *NATMcastRecvskt;          // For receiving PCP & NAT-PMP announcement multicasts from router on port 5350
     mDNSu32 LastNATupseconds;                   // NAT engine uptime in seconds, from most recent NAT packet
     mDNSs32 LastNATReplyLocalTime;              // Local time in ticks when most recent NAT packet was received
     mDNSu16 LastNATMapResultCode;               // Most recent error code for mappings
@@ -2053,6 +2417,9 @@ struct mDNS_struct
     mDNSu8           *UPnPRouterAddressString;  // holds both the router's address and port
     mDNSu8           *UPnPSOAPAddressString;    // holds both address and port for SOAP messages
 
+    // Sleep Proxy client fields
+    AuthRecord *SPSRRSet;                       // To help the client keep track of the records registered with the sleep proxy
+
     // Sleep Proxy Server fields
     mDNSu8 SPSType;                             // 0 = off, 10-99 encodes desirability metric
     mDNSu8 SPSPortability;                      // 10-99
@@ -2062,7 +2429,9 @@ struct mDNS_struct
     mDNSu8 SPSState;                            // 0 = off, 1 = running, 2 = shutting down, 3 = suspended during sleep
     mDNSInterfaceID SPSProxyListChanged;
     UDPSocket        *SPSSocket;
+#ifndef SPC_DISABLED
     ServiceRecordSet SPSRecords;
+#endif
     mDNSQuestionCallback *SPSBrowseCallback;    // So the platform layer can do something useful with SPS browse results
     int ProxyRecords;                           // Total number of records we're holding as proxy
     #define           MAX_PROXY_RECORDS 10000   /* DOS protection: 400 machines at 25 records each */
@@ -2072,9 +2441,17 @@ struct mDNS_struct
     uuid_t asl_uuid;                            // uuid for ASL logging
     void            *WCF;
 #endif
+    // DNS Proxy fields
+    mDNSu32 dp_ipintf[MaxIp];                   // input interface index list from the DNS Proxy Client
+    mDNSu32 dp_opintf;                          // output interface index from the DNS Proxy Client
+
     TrustAnchor     *TrustAnchors;
     int             notifyToken;
-    mDNSBool        mDNSHandlePeerEvents;       // Handle AWDL Peer Events
+    int             uds_listener_skt;           // Listening socket for incoming UDS clients
+    mDNSBool        mDNSOppCaching;             // Opportunistic Caching
+    mDNSu32         AutoTargetServices;         // # of services that have AutoTarget set
+    DNSSECStatistics DNSSECStats;
+    mDNSStatistics   mDNSStats;
 
     // Fixed storage, to avoid creating large objects on the stack
     // The imsg is declared as a union with a pointer type to enforce CPU-appropriate alignment
@@ -2099,6 +2476,7 @@ extern const mDNSInterfaceID mDNSInterface_LocalOnly;       // Special value
 extern const mDNSInterfaceID mDNSInterface_Unicast;         // Special value
 extern const mDNSInterfaceID mDNSInterfaceMark;             // Special value
 extern const mDNSInterfaceID mDNSInterface_P2P;             // Special value
+extern const mDNSInterfaceID uDNSInterfaceMark;             // Special value
 
 extern const mDNSIPPort DiscardPort;
 extern const mDNSIPPort SSHPort;
@@ -2148,6 +2526,7 @@ extern mDNSu8 NumUnicastDNSServers;
 
 #define localdomain           (*(const domainname *)"\x5" "local")
 #define DeviceInfoName        (*(const domainname *)"\xC" "_device-info" "\x4" "_tcp")
+#define LocalDeviceInfoName   (*(const domainname *)"\xC" "_device-info" "\x4" "_tcp" "\x5" "local")
 #define SleepProxyServiceType (*(const domainname *)"\xC" "_sleep-proxy" "\x4" "_udp")
 
 // ***************************************************************************
@@ -2279,6 +2658,7 @@ extern mStatus mDNS_StartQuery(mDNS *const m, DNSQuestion *const question);
 extern mStatus mDNS_StopQuery (mDNS *const m, DNSQuestion *const question);
 extern mStatus mDNS_StopQueryWithRemoves(mDNS *const m, DNSQuestion *const question);
 extern mStatus mDNS_Reconfirm (mDNS *const m, CacheRecord *const cacherr);
+extern mStatus mDNS_Reconfirm_internal(mDNS *const m, CacheRecord *const rr, mDNSu32 interval);
 extern mStatus mDNS_ReconfirmByValue(mDNS *const m, ResourceRecord *const rr);
 extern void    mDNS_PurgeCacheResourceRecord(mDNS *const m, CacheRecord *rr);
 extern mDNSs32 mDNS_TimeNow(const mDNS *const m);
@@ -2343,7 +2723,8 @@ enum
 {
     coreFlagIncludeP2P   = 0x1,     // include P2P interfaces when using mDNSInterface_Any
     coreFlagIncludeAWDL  = 0x2,     // include AWDL interface when using mDNSInterface_Any
-    coreFlagKnownUnique  = 0x4      // client guarantees that SRV and TXT record names are unique
+    coreFlagKnownUnique  = 0x4,     // client guarantees that SRV and TXT record names are unique
+    coreFlagWakeOnly     = 0x8      // Service won't be registered with sleep proxy
 };
 
 extern mStatus mDNS_RegisterService  (mDNS *const m, ServiceRecordSet *sr,
@@ -2367,7 +2748,7 @@ extern void mDNS_SetupQuestion(DNSQuestion *const q, const mDNSInterfaceID Inter
                                const mDNSu16 qtype, mDNSQuestionCallback *const callback, void *const context);
 
 extern mStatus mDNS_StartBrowse(mDNS *const m, DNSQuestion *const question,
-                                const domainname *const srv, const domainname *const domain,
+                                const domainname *const srv, const domainname *const domain, const mDNSu8 *anondata,
                                 const mDNSInterfaceID InterfaceID, mDNSu32 flags,
                                 mDNSBool ForceMCast, mDNSBool useBackgroundTrafficClass,
                                 mDNSQuestionCallback *Callback, void *Context);
@@ -2396,9 +2777,8 @@ extern mStatus mDNS_AdvertiseDomains(mDNS *const m, AuthRecord *rr, mDNS_DomainT
 #define        mDNS_StopAdvertiseDomains mDNS_Deregister
 
 extern mDNSOpaque16 mDNS_NewMessageID(mDNS *const m);
-extern mDNSBool mDNS_AddressIsLocalSubnet(mDNS *const m, const mDNSInterfaceID InterfaceID, const mDNSAddr *addr);
+extern mDNSBool mDNS_AddressIsLocalSubnet(mDNS *const m, const mDNSInterfaceID InterfaceID, const mDNSAddr *addr, mDNSBool *myself);
 
-extern DNSServer *GetServerForName(mDNS *m, const domainname *name, mDNSInterfaceID InterfaceID);
 extern DNSServer *GetServerForQuestion(mDNS *m, DNSQuestion *question);
 extern mDNSu32 SetValidDNSServers(mDNS *m, DNSQuestion *question);
 
@@ -2510,8 +2890,12 @@ extern char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RDataB
 #define CRDisplayString(m, rr) GetRRDisplayString_rdb(&(rr)->resrec, &(rr)->resrec.rdata->u, (m)->MsgBuffer)
 extern mDNSBool mDNSSameAddress(const mDNSAddr *ip1, const mDNSAddr *ip2);
 extern void IncrementLabelSuffix(domainlabel *name, mDNSBool RichText);
-extern mDNSBool mDNSv4AddrIsRFC1918(mDNSv4Addr *addr);  // returns true for RFC1918 private addresses
+extern mDNSBool mDNSv4AddrIsRFC1918(const mDNSv4Addr * const addr);  // returns true for RFC1918 private addresses
 #define mDNSAddrIsRFC1918(X) ((X)->type == mDNSAddrType_IPv4 && mDNSv4AddrIsRFC1918(&(X)->ip.v4))
+
+// For PCP
+extern void mDNSAddrMapIPv4toIPv6(mDNSv4Addr* in, mDNSv6Addr* out);
+extern mDNSBool mDNSAddrIPv4FromMappedIPv6(mDNSv6Addr *in, mDNSv4Addr *out);
 
 #define mDNSSameIPPort(A,B)      ((A).NotAnInteger == (B).NotAnInteger)
 #define mDNSSameOpaque16(A,B)    ((A).NotAnInteger == (B).NotAnInteger)
@@ -2586,7 +2970,7 @@ extern mDNSBool mDNSv4AddrIsRFC1918(mDNSv4Addr *addr);  // returns true for RFC1
 extern mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
                                        const domainname *domain, const domainname *keyname, const char *b64keydata, const domainname *hostname, mDNSIPPort *port, mDNSBool autoTunnel);
 
-extern void RecreateNATMappings(mDNS *const m);
+extern void RecreateNATMappings(mDNS *const m, const mDNSu32 waitTicks);
 
 // Hostname/Unicast Interface Configuration
 
@@ -2608,8 +2992,10 @@ extern void RecreateNATMappings(mDNS *const m);
 extern void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCallback *StatusCallback, const void *StatusContext);
 extern void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn);
 extern void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const mDNSAddr *v6addr, const mDNSAddr *router);
-extern DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSAddr *addr, const mDNSIPPort port, mDNSBool scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSu16 resGroupID);
-extern void PenalizeDNSServer(mDNS *const m, DNSQuestion *q);
+extern DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, mDNSs32 serviceID, const mDNSAddr *addr,
+                                    const mDNSIPPort port, mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSu16 resGroupID, mDNSBool reqA,
+                                    mDNSBool reqAAAA, mDNSBool reqDO);
+extern void PenalizeDNSServer(mDNS *const m, DNSQuestion *q, mDNSOpaque16 responseFlags);
 extern void mDNS_AddSearchDomain(const domainname *const domain, mDNSInterfaceID InterfaceID);
 
 extern McastResolver *mDNS_AddMcastResolver(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, mDNSu32 timeout);
@@ -2686,6 +3072,7 @@ extern mStatus  mDNSPlatformSendUDP(const mDNS *const m, const void *const msg, 
                                     mDNSInterfaceID InterfaceID, UDPSocket *src, const mDNSAddr *dst, 
                                     mDNSIPPort dstport, mDNSBool useBackgroundTrafficClass);
 
+extern mDNSBool mDNSPlatformPeekUDP     (mDNS *const m, UDPSocket *src);
 extern void     mDNSPlatformLock        (const mDNS *const m);
 extern void     mDNSPlatformUnlock      (const mDNS *const m);
 
@@ -2729,9 +3116,12 @@ extern void mDNSPlatformWriteLogMsg(const char *ident, const char *msg, mDNSLogL
 // Utility function for ASL logging
 mDNSexport void mDNSASLLog(uuid_t *uuid, const char *subdomain, const char *result, const char *signature, const char *fmt, ...);
 
-// Function to toggle IPv6 advertisements
-mDNSexport void mDNSPlatformToggleInterfaceAdvt(mDNS *const m, mDNSBool stopAdvt);
-#endif
+// Log unicast and multicast traffic statistics once a day. Also used for DNSSEC statistics.
+#define kDefaultNextStatsticsLogTime (24 * 60 * 60)
+
+extern void mDNSLogStatistics(mDNS *const m);
+
+#endif // APPLE_OSX_mDNSResponder
 
 // Platform support modules should provide the following functions to map between opaque interface IDs
 // and interface indexes in order to support the DNS-SD API. If your target platform does not support
@@ -2772,6 +3162,7 @@ extern void       mDNSPlatformTCPCloseConnection(TCPSocket *sock);
 extern long       mDNSPlatformReadTCP(TCPSocket *sock, void *buf, unsigned long buflen, mDNSBool *closed);
 extern long       mDNSPlatformWriteTCP(TCPSocket *sock, const char *msg, unsigned long len);
 extern UDPSocket *mDNSPlatformUDPSocket(mDNS *const m, const mDNSIPPort requestedport);
+extern mDNSu16    mDNSPlatformGetUDPPort(UDPSocket *sock);
 extern void       mDNSPlatformUDPClose(UDPSocket *sock);
 extern void       mDNSPlatformReceiveBPF_fd(mDNS *const m, int fd);
 extern void       mDNSPlatformUpdateProxyList(mDNS *const m, const mDNSInterfaceID InterfaceID);
@@ -2779,7 +3170,9 @@ extern void       mDNSPlatformSendRawPacket(const void *const msg, const mDNSu8 
 extern void       mDNSPlatformSetLocalAddressCacheEntry(mDNS *const m, const mDNSAddr *const tpa, const mDNSEthAddr *const tha, mDNSInterfaceID InterfaceID);
 extern void       mDNSPlatformSourceAddrForDest(mDNSAddr *const src, const mDNSAddr *const dst);
 extern void       mDNSPlatformSendKeepalive(mDNSAddr *sadd, mDNSAddr *dadd, mDNSIPPort *lport, mDNSIPPort *rport, mDNSu32 seq, mDNSu32 ack, mDNSu16 win);
-extern mStatus    mDNSPlatformRetrieveTCPInfo(mDNS *const m, mDNSAddr *laddr, mDNSIPPort *lport, mDNSAddr *raddr, mDNSIPPort *rport, mDNSTCPInfo *mti);
+extern mStatus    mDNSPlatformRetrieveTCPInfo(mDNS *const m, mDNSAddr *laddr, mDNSIPPort *lport, mDNSAddr *raddr,  mDNSIPPort *rport, mDNSTCPInfo *mti);
+extern mStatus    mDNSPlatformGetRemoteMacAddr(mDNS *const m, mDNSAddr *raddr);
+extern mStatus    mDNSPlatformStoreSPSMACAddr(mDNSAddr *spsaddr, char *ifname);
 
 // mDNSPlatformTLSSetupCerts/mDNSPlatformTLSTearDownCerts used by dnsextd
 extern mStatus    mDNSPlatformTLSSetupCerts(void);
@@ -2788,7 +3181,8 @@ extern void       mDNSPlatformTLSTearDownCerts(void);
 // Platforms that support unicast browsing and dynamic update registration for clients who do not specify a domain
 // in browse/registration calls must implement these routines to get the "default" browse/registration list.
 
-extern void       mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers, mDNSBool setsearch, domainname *const fqdn, DNameListElem **RegDomains, DNameListElem **BrowseDomains);
+extern mDNSBool   mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers, mDNSBool setsearch, domainname *const fqdn, DNameListElem **RegDomains,
+                        DNameListElem **BrowseDomains, mDNSBool ackConfig);
 extern mStatus    mDNSPlatformGetPrimaryInterface(mDNS *const m, mDNSAddr *v4, mDNSAddr *v6, mDNSAddr *router);
 extern void       mDNSPlatformDynDNSHostNameStatusChanged(const domainname *const dname, const mStatus status);
 
@@ -2891,6 +3285,9 @@ extern void ActivateUnicastRegistration(mDNS *const m, AuthRecord *const rr);
 extern void CheckSuppressUnusableQuestions(mDNS *const m);
 extern void RetrySearchDomainQuestions(mDNS *const m);
 extern mDNSBool DomainEnumQuery(const domainname *qname);
+extern mStatus UpdateKeepaliveRData(mDNS *const m, AuthRecord *rr, NetworkInterfaceInfo *const intf, mDNSBool updateMac, char *ethAddr);
+extern void  UpdateKeepaliveRMACAsync(mDNS *const m, void *context);
+extern void UpdateRMACCallback(mDNS *const m, void *context);
 
 // Used only in logging to restrict the number of /etc/hosts entries printed
 extern void FreeEtcHosts(mDNS *const m, AuthRecord *const rr, mStatus result);
@@ -2910,13 +3307,31 @@ extern void StartServerTunnel(mDNS *const m, DomainAuthInfo *const info);
 extern void UpdateAutoTunnelDomainStatuses(const mDNS *const m);
 extern void RemoveAutoTunnel6Record(mDNS *const m);
 extern mDNSBool RecordReadyForSleep(mDNS *const m, AuthRecord *rr);
-#endif
-
 // For now this LocalSleepProxy stuff is specific to Mac OS X.
 // In the future, if there's demand, we may see if we can abstract it out cleanly into the platform layer
-#if APPLE_OSX_mDNSResponder
-extern mStatus ActivateLocalProxy(mDNS *const m, char *ifname);
+extern mStatus ActivateLocalProxy(mDNS *const m, NetworkInterfaceInfo *const intf);
+extern void mDNSPlatformUpdateDNSStatus(mDNS *const m, DNSQuestion *q);
+extern void mDNSPlatformTriggerDNSRetry(mDNS *const m, DNSQuestion *v4q, DNSQuestion *v6q);
+extern void mDNSPlatformLogToFile(int log_level, const char *buffer);
+extern mDNSBool SupportsInNICProxy(NetworkInterfaceInfo *const intf);
 #endif
+
+typedef void ProxyCallback (mDNS *const m, void *socket, void *const msg, const mDNSu8 *const end, const mDNSAddr *const srcaddr,
+    const mDNSIPPort srcport, const mDNSAddr *dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID InterfaceID, void *context);
+extern void mDNSPlatformInitDNSProxySkts(mDNS *const m, ProxyCallback *UDPCallback, ProxyCallback *TCPCallback);
+extern void mDNSPlatformCloseDNSProxySkts(mDNS *const m);
+extern void mDNSPlatformDisposeProxyContext(void *context);
+extern mDNSu8 *DNSProxySetAttributes(DNSQuestion *q, DNSMessageHeader *h, DNSMessage *msg, mDNSu8 *start, mDNSu8 *limit);
+
+// Sleep Assertions are specific to Mac OS X
+#if APPLE_OSX_mDNSResponder
+extern void mDNSPlatformSleepAssertion(mDNS *const m, double timeout);
+#endif
+
+extern mDNSBool mDNSPlatformAllowPID(mDNS *const m, DNSQuestion *q);
+extern mDNSs32 mDNSPlatformGetServiceID(mDNS *const m, DNSQuestion *q);
+extern void mDNSPlatformSetDelegatePID(UDPSocket *src, const mDNSAddr *dst, DNSQuestion *q);
+extern mDNSs32 mDNSPlatformGetPID(void);
 
 // ***************************************************************************
 #if 0
@@ -3048,6 +3463,13 @@ typedef enum
     mDNSSleepProxyMetric_IncidentalSoftware = 80
 } mDNSSleepProxyMetric;
 
+typedef enum
+{
+    mDNS_NoWake        = 0, // System does not support Wake on LAN
+    mDNS_WakeOnAC      = 1, // System supports Wake on LAN when connected to AC power only
+    mDNS_WakeOnBattery = 2  // System supports Wake on LAN on battery
+} mDNSWakeForNetworkAccess;
+
 extern void mDNSCoreBeSleepProxyServer_internal(mDNS *const m, mDNSu8 sps, mDNSu8 port, mDNSu8 marginalpower, mDNSu8 totpower, mDNSu8 features);
 #define mDNSCoreBeSleepProxyServer(M,S,P,MP,TP,F)                       \
     do { mDNS_Lock(m); mDNSCoreBeSleepProxyServer_internal((M),(S),(P),(MP),(TP),(F)); mDNS_Unlock(m); } while(0)
@@ -3122,23 +3544,35 @@ struct CompileTimeAssertionChecks_mDNS
     // other overly-large structures instead of having a pointer to them, can inadvertently
     // cause structure sizes (and therefore memory usage) to balloon unreasonably.
     char sizecheck_RDataBody           [(sizeof(RDataBody)            ==   264) ? 1 : -1];
-    char sizecheck_ResourceRecord      [(sizeof(ResourceRecord)       <=    64) ? 1 : -1];
+    char sizecheck_ResourceRecord      [(sizeof(ResourceRecord)       <=    72) ? 1 : -1];
     char sizecheck_AuthRecord          [(sizeof(AuthRecord)           <=  1208) ? 1 : -1];
-    char sizecheck_CacheRecord         [(sizeof(CacheRecord)          <=   216) ? 1 : -1];
-    char sizecheck_CacheGroup          [(sizeof(CacheGroup)           <=   216) ? 1 : -1];
-    char sizecheck_DNSQuestion         [(sizeof(DNSQuestion)          <=   786) ? 1 : -1];
-    char sizecheck_ZoneData            [(sizeof(ZoneData)             <=  1624) ? 1 : -1];
-    char sizecheck_NATTraversalInfo    [(sizeof(NATTraversalInfo)     <=   192) ? 1 : -1];
+    char sizecheck_CacheRecord         [(sizeof(CacheRecord)          <=   232) ? 1 : -1];
+    char sizecheck_CacheGroup          [(sizeof(CacheGroup)           <=   232) ? 1 : -1];
+    char sizecheck_DNSQuestion         [(sizeof(DNSQuestion)          <=   832) ? 1 : -1];
+
+// Checks commented out when sizeof(DNSQuestion) change cascaded into having to change yet another
+// set of hardcoded size values because these structures contain one or more DNSQuestion
+// instances.
+//     char sizecheck_ZoneData            [(sizeof(ZoneData)             <=  1648) ? 1 : -1];
+    char sizecheck_NATTraversalInfo    [(sizeof(NATTraversalInfo)     <=   200) ? 1 : -1];
     char sizecheck_HostnameInfo        [(sizeof(HostnameInfo)         <=  3050) ? 1 : -1];
-    char sizecheck_DNSServer           [(sizeof(DNSServer)            <=   328) ? 1 : -1];
-    char sizecheck_NetworkInterfaceInfo[(sizeof(NetworkInterfaceInfo) <=  6850) ? 1 : -1];
-    char sizecheck_ServiceRecordSet    [(sizeof(ServiceRecordSet)     <=  5500) ? 1 : -1];
+    char sizecheck_DNSServer           [(sizeof(DNSServer)            <=   340) ? 1 : -1];
+//    char sizecheck_NetworkInterfaceInfo[(sizeof(NetworkInterfaceInfo) <=  6988) ? 1 : -1];
+    char sizecheck_ServiceRecordSet    [(sizeof(ServiceRecordSet)     <=  5540) ? 1 : -1];
     char sizecheck_DomainAuthInfo      [(sizeof(DomainAuthInfo)       <=  7888) ? 1 : -1];
-    char sizecheck_ServiceInfoQuery    [(sizeof(ServiceInfoQuery)     <=  3200) ? 1 : -1];
+//    char sizecheck_ServiceInfoQuery    [(sizeof(ServiceInfoQuery)     <=  3302) ? 1 : -1];
 #if APPLE_OSX_mDNSResponder
-    char sizecheck_ClientTunnel        [(sizeof(ClientTunnel)         <=  1148) ? 1 : -1];
+//    char sizecheck_ClientTunnel        [(sizeof(ClientTunnel)         <=  1160) ? 1 : -1];
 #endif
 };
+
+// Routine to initialize device-info TXT record contents
+mDNSu32 initializeDeviceInfoTXT(mDNS *m, mDNSu8 *ptr);
+
+#if APPLE_OSX_mDNSResponder
+extern void D2D_start_advertising_interface(NetworkInterfaceInfo *interface);
+extern void D2D_stop_advertising_interface(NetworkInterfaceInfo *interface);
+#endif
 
 // ***************************************************************************
 

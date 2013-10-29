@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2013 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ extern "C" {
 
 
 extern mDNSBool
-LsaGetSecret( const char * inDomain, char * outDomain, unsigned outDomainLength, char * outKey, unsigned outKeyLength, char * outSecret, unsigned outSecretLength );
+LsaGetSecret( const char * inDomain, char * outDomain, unsigned outDomainSize, char * outKey, unsigned outKeySize, char * outSecret, unsigned outSecretSize );
 
 
 extern mDNSBool

@@ -63,6 +63,12 @@
     <ClCompile Include="..\..\mDNSShared\uds_daemon.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\mDNSCore\anonymous.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mDNSCore\CryptoAlg.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\mDNSShared\CommonServices.h">
@@ -105,6 +111,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\mDNSShared\uds_daemon.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mDNSCore\anonymous.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mDNSCore\CryptoAlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

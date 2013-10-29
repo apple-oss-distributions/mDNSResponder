@@ -36,11 +36,13 @@ typedef struct
     mStatus (*Create)(AlgContext *ctx);
     mStatus (*Destroy)(AlgContext *ctx);
     mDNSu32 (*Length)(AlgContext *ctx);
-    mStatus (*Add)(AlgContext *ctx, void *data, mDNSu32 len);
+    mStatus (*Add)(AlgContext *ctx, const void *data, mDNSu32 len);
     // Verify the ctx using the key and compare it against signature/siglen
     mStatus (*Verify)(AlgContext *ctx, mDNSu8 *key, mDNSu32 keylen, mDNSu8 *signature, mDNSu32 siglen);
     // Encode the data and return the encoded data
     mDNSu8* (*Encode)(AlgContext *ctx);
+    // Return the finalized data in data whose length is len (used by hash algorithms)
+    mStatus (*Final)(AlgContext *ctx, void *data, mDNSu32 len);
 } AlgFuncs;
 
 mDNSexport mStatus DigestAlgInit(mDNSu8 digestType, AlgFuncs *func);
@@ -51,8 +53,9 @@ mDNSexport mStatus EncAlgInit(mDNSu8 algType, AlgFuncs *func);
 extern AlgContext *AlgCreate(AlgType type, mDNSu8 alg);
 extern mStatus AlgDestroy(AlgContext *ctx);
 extern mDNSu32 AlgLength(AlgContext *ctx);
-extern mStatus AlgAdd(AlgContext *ctx, void *data, mDNSu32 len);
+extern mStatus AlgAdd(AlgContext *ctx, const void *data, mDNSu32 len);
 extern mStatus AlgVerify(AlgContext *ctx, mDNSu8 *key, mDNSu32 keylen, mDNSu8 *signature, mDNSu32 siglen);
 extern mDNSu8* AlgEncode(AlgContext *ctx);
+extern mStatus AlgFinal(AlgContext *ctx, void *data, mDNSu32 len);
 
 #endif // __CRYPTO_ALG_H

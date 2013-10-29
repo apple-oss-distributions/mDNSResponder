@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2013 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -672,6 +672,38 @@ mDNSexport mDNSBool AddNSECSForCacheRecord(mDNS *const m, CacheRecord *crlist, C
 	(void)rcode;
 	return mDNSfalse;
 	}
+
+mDNSexport void BumpDNSSECStats(mDNS *const m, DNSSECStatsAction action, DNSSECStatsType type, mDNSu32 value)
+    {
+    (void)m;
+    (void)action;
+    (void)type;
+    (void)value;
+    }
+
+// Proxy stub functions
+mDNSexport mDNSu8 *DNSProxySetAttributes(DNSQuestion *q, DNSMessageHeader *h, DNSMessage *msg, mDNSu8 *ptr, mDNSu8 *limit)
+{
+    (void) q;
+    (void) h;
+    (void) msg;
+    (void) ptr;
+    (void) limit;
+
+    return ptr;
+}
+
+mDNSexport void DNSProxyInit(mDNS *const m, mDNSu32 IpIfArr[], mDNSu32 OpIf)
+{
+    (void) m;
+    (void) IpIfArr;
+    (void) OpIf;
+}
+
+mDNSexport void DNSProxyTerminate(mDNS *const m)
+{
+    (void) m;
+}
 
 //===========================================================================================================================
 //	mDNSPlatformMemZero
@@ -1419,6 +1451,13 @@ exit:
 }
 
 
+mDNSexport mDNSBool mDNSPlatformPeekUDP(mDNS *const m, UDPSocket *src)
+{
+	DEBUG_UNUSED( m );
+	DEBUG_UNUSED( src );
+	return mDNSfalse;
+}
+
 mDNSexport void mDNSPlatformUpdateProxyList(mDNS *const m, const mDNSInterfaceID InterfaceID)
 	{
 	DEBUG_UNUSED( m );
@@ -1648,8 +1687,10 @@ mDNSPlatformTLSTearDownCerts(void)
 mDNSlocal void SetDNSServers( mDNS *const m );
 mDNSlocal void SetSearchDomainList( void );
 
-mDNSexport void mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers, mDNSBool setsearch, domainname *const fqdn, DNameListElem **regDomains, DNameListElem **browseDomains)
+mDNSexport mDNSBool mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers, mDNSBool setsearch, domainname *const fqdn, DNameListElem **regDomains, DNameListElem **browseDomains, mDNSBool ackConfig)
 {
+	(void) ackConfig;
+
 	if (setservers) SetDNSServers(m);
 	if (setsearch) SetSearchDomainList();
 	
@@ -1667,6 +1708,7 @@ mDNSexport void mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers, mDN
 	{
 		GetDDNSDomains( regDomains, kServiceParametersNode TEXT("\\DynDNS\\Setup\\") kServiceDynDNSRegistrationDomains );
 	}
+    return mDNStrue;
 }
 
 
@@ -1920,7 +1962,7 @@ SetDNSServers( mDNS *const m )
 	{
 		mDNSAddr addr;
 		err = StringToAddress( &addr, ipAddr->IpAddress.String );
-		if ( !err ) mDNS_AddDNSServer(m, mDNSNULL, mDNSInterface_Any, &addr, UnicastDNSPort, mDNSfalse, DEFAULT_UDNS_TIMEOUT, mDNSfalse, 0);
+		if ( !err ) mDNS_AddDNSServer(m, mDNSNULL, mDNSInterface_Any, 0, &addr, UnicastDNSPort, kScopeNone, DEFAULT_UDNS_TIMEOUT, mDNSfalse, 0, mDNStrue, mDNStrue, mDNSfalse);
 	}
 
 exit:
@@ -2113,6 +2155,18 @@ mDNSexport void mDNSPlatformSendKeepalive(mDNSAddr *sadd, mDNSAddr *dadd, mDNSIP
 	(void) win;		// Unused
 	}
 
+mDNSexport mStatus mDNSPlatformGetRemoteMacAddr(mDNSAddr *raddr, char *eth)
+	{
+	(void) raddr; // Unused
+	(void) eth;   // Unused
+	}
+
+mDNSexport  mStatus    mDNSPlatformStoreSPSMACAddr(mDNSAddr *spsaddr, char *ifname)
+	{
+	(void) spsaddr; // Unused
+	(void) ifname;  // Unused
+	}
+
 mDNSexport mStatus mDNSPlatformRetrieveTCPInfo(mDNS *const m, mDNSAddr *laddr, mDNSIPPort *lport, mDNSAddr *raddr, mDNSIPPort *rport, mDNSTCPInfo *mti)
 	{
 	(void) m;       // Unused
@@ -2122,6 +2176,46 @@ mDNSexport mStatus mDNSPlatformRetrieveTCPInfo(mDNS *const m, mDNSAddr *laddr, m
 	(void) rport; 	// Unused
 	(void) mti; 	// Unused
 	}
+
+mDNSexport mDNSBool mDNSPlatformAllowPID(mDNS *const m, DNSQuestion *q)
+    {
+    (void) m;
+    (void) q;
+    return mDNStrue;
+    }
+
+mDNSexport mDNSs32 mDNSPlatformGetServiceID(mDNS *const m, DNSQuestion *q)
+    {
+    (void) m;
+    (void) q;
+    return 0;
+    }
+
+mDNSexport void mDNSPlatformSetDelegatePID(UDPSocket *src, const mDNSAddr *dst, DNSQuestion *q)
+    {
+    (void) src;
+    (void) dst;
+    (void) q;
+    }
+
+mDNSexport mDNSs32 mDNSPlatformGetPID()
+    {
+    return 0;
+    }
+
+mDNSexport mDNSu16 mDNSPlatformGetUDPPort(UDPSocket *sock)
+{
+	DEBUG_UNUSED( sock );
+ 
+	return (mDNSu16)-1;
+}
+
+mDNSexport mDNSBool mDNSPlatformInterfaceIsD2D(mDNSInterfaceID InterfaceID)
+{
+	DEBUG_UNUSED( InterfaceID );
+    
+	return mDNSfalse;
+}
 
 #if 0
 #pragma mark -

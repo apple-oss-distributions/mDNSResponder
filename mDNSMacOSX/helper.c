@@ -42,12 +42,11 @@
 #include <unistd.h>
 #include <Security/Security.h>
 #include <SystemConfiguration/SystemConfiguration.h>
-#include <SystemConfiguration/SCDynamicStore.h>
 #include <SystemConfiguration/SCPreferencesSetSpecific.h>
-#include <SystemConfiguration/SCDynamicStoreCopySpecific.h>
 #include <TargetConditionals.h>
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #include <net/bpf.h>
+#include <sys/sysctl.h>
 
 #include "mDNSEmbeddedAPI.h"
 #include "dns_sd.h"
@@ -61,7 +60,6 @@
 
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
-#include <netinet6/nd6.h>
 
 #ifndef RTF_IFSCOPE
 #define RTF_IFSCOPE 0x1000000
@@ -147,44 +145,6 @@ kern_return_t do_mDNSRequestBPF(__unused mach_port_t port, audit_token_t token)
     deliver_request(hdr, ref);      // Will free hdr for us
     DNSServiceRefDeallocate(ref);
     update_idle_timer();
-    return KERN_SUCCESS;
-}
-
-kern_return_t do_mDNSInterfaceAdvtIoctl(__unused mach_port_t port, const char *ifname, int op, audit_token_t token)
-{
-    struct  in6_ndireq nd;
-    mDNSu32 newflags;
-    int     sock;
-
-    if (!authorized(&token))
-    {
-        return KERN_SUCCESS;
-    }
-
-    if ((sock = socket(AF_INET6, SOCK_DGRAM, 0)) < 0)
-    {
-        helplog(ASL_LEVEL_ERR, "%s: Socket call failed - error (%d) %s", __func__, errno, strerror(errno));
-        return errno;
-    }
-    memset(&nd, 0, sizeof(nd));
-    strlcpy(nd.ifname, ifname, sizeof(nd.ifname));
-
-    if (ioctl(sock, SIOCGIFINFO_IN6, (caddr_t)&nd) < 0)
-    {
-        helplog(ASL_LEVEL_ERR, "%s: ioctl call SIOCGIFINFO_IN6 failed - error (%d) %s", __func__, errno, strerror(errno));
-        close(sock);
-        return errno;
-    }
-    newflags = nd.ndi.flags;
-    newflags = (op == 0) ? (newflags |  ND6_IFF_IGNORE_NA) : (newflags & ~(ND6_IFF_IGNORE_NA));
-
-    if (ioctl(sock, SIOCSIFINFO_FLAGS, (caddr_t)&nd) < 0)
-    {
-        helplog(ASL_LEVEL_ERR, "%s: ioctl call SIOCSIFINFO_IN6 failed - error (%d) %s", __func__, errno, strerror(errno));
-        close(sock);
-        return errno;
-    }
-    close(sock);
     return KERN_SUCCESS;
 }
 
@@ -389,86 +349,6 @@ kern_return_t do_mDNSNotify(__unused mach_port_t port, const char *title, const 
     (void)msg;
 #endif /* NO_CFUSERNOTIFICATION */
 
-    update_idle_timer();
-    return KERN_SUCCESS;
-}
-
-kern_return_t
-do_mDNSDynamicStoreSetConfig(__unused mach_port_t port, int key,
-                             const char* subkey, vm_offset_t value, mach_msg_type_number_t valueCnt,
-                             audit_token_t token)
-{
-    CFStringRef sckey = NULL;
-    Boolean release_sckey = FALSE;
-    CFDataRef bytes = NULL;
-    CFPropertyListRef plist = NULL;
-    SCDynamicStoreRef store = NULL;
-
-    debug("entry");
-    if (!authorized(&token)) goto fin;
-
-    switch ((enum mDNSDynamicStoreSetConfigKey)key)
-    {
-    case kmDNSMulticastConfig:
-        sckey = CFSTR("State:/Network/" kDNSServiceCompMulticastDNS);
-        break;
-    case kmDNSDynamicConfig:
-        sckey = CFSTR("State:/Network/DynamicDNS");
-        break;
-    case kmDNSPrivateConfig:
-        sckey = CFSTR("State:/Network/" kDNSServiceCompPrivateDNS);
-        break;
-    case kmDNSBackToMyMacConfig:
-        sckey = CFSTR("State:/Network/BackToMyMac");
-        break;
-    case kmDNSSleepProxyServersState:
-    {
-        CFMutableStringRef tmp = CFStringCreateMutable(kCFAllocatorDefault, 0);
-        CFStringAppend(tmp, CFSTR("State:/Network/Interface/"));
-        CFStringAppendCString(tmp, subkey, kCFStringEncodingUTF8);
-        CFStringAppend(tmp, CFSTR("/SleepProxyServers"));
-        sckey = CFStringCreateCopy(kCFAllocatorDefault, tmp);
-        release_sckey = TRUE;
-        CFRelease(tmp);
-        break;
-    }
-    default:
-        debug("unrecognized key %d", key);
-        goto fin;
-    }
-    if (NULL == (bytes = CFDataCreateWithBytesNoCopy(NULL, (void *)value,
-                                                     valueCnt, kCFAllocatorNull)))
-    {
-        debug("CFDataCreateWithBytesNoCopy of value failed");
-        goto fin;
-    }
-    if (NULL == (plist = CFPropertyListCreateFromXMLData(NULL, bytes,
-                                                         kCFPropertyListImmutable, NULL)))
-    {
-        debug("CFPropertyListCreateFromXMLData of bytes failed");
-        goto fin;
-    }
-    CFRelease(bytes);
-    bytes = NULL;
-    if (NULL == (store = SCDynamicStoreCreate(NULL,
-                                              CFSTR(kmDNSHelperServiceName), NULL, NULL)))
-    {
-        debug("SCDynamicStoreCreate failed: %s", SCErrorString(SCError()));
-        goto fin;
-    }
-    SCDynamicStoreSetValue(store, sckey, plist);
-    debug("succeeded");
-
-fin:
-    if (NULL != bytes)
-        CFRelease(bytes);
-    if (NULL != plist)
-        CFRelease(plist);
-    if (NULL != store)
-        CFRelease(store);
-    if (release_sckey && sckey)
-        CFRelease(sckey);
-    vm_deallocate(mach_task_self(), value, valueCnt);
     update_idle_timer();
     return KERN_SUCCESS;
 }
@@ -1365,6 +1245,13 @@ createAnonymousRacoonConfiguration(const char *fqdn)
         "  proposal_check claim;\n"
         "  proposal {\n"
         "    encryption_algorithm aes;\n"
+        "    hash_algorithm sha256;\n"
+        "    authentication_method pre_shared_key;\n"
+        "    dh_group 2;\n"
+        "    lifetime time 15 min;\n"
+        "  }\n"
+        "  proposal {\n"
+        "    encryption_algorithm aes;\n"
         "    hash_algorithm sha1;\n"
         "    authentication_method pre_shared_key;\n"
         "    dh_group 2;\n"
@@ -1375,7 +1262,7 @@ createAnonymousRacoonConfiguration(const char *fqdn)
         "  pfs_group 2;\n"
         "  lifetime time 10 min;\n"
         "  encryption_algorithm aes;\n"
-        "  authentication_algorithm hmac_sha1;\n"
+        "  authentication_algorithm hmac_sha256,hmac_sha1;\n"
         "  compression_algorithm deflate;\n"
         "}\n";
     char tmp_config_path[64];
@@ -1591,7 +1478,7 @@ startRacoon(void)
     }
 
     u_int32_t btmm_cookie = 0x4d4d5442;
-    vpnctl_hdr h = { VPNCTL_CMD_PING, 0, btmm_cookie, 0, 0, 0 };
+    vpnctl_hdr h = { htons(VPNCTL_CMD_PING), 0, btmm_cookie, 0, 0, 0 };
     size_t bytes = 0;
     ssize_t ret = 0;
 
@@ -2114,6 +2001,13 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
         "  proposal_check claim;\n"
         "  proposal {\n"
         "    encryption_algorithm aes;\n"
+        "    hash_algorithm sha256;\n"
+        "    authentication_method pre_shared_key;\n"
+        "    dh_group 2;\n"
+        "    lifetime time 15 min;\n"
+        "  }\n"
+        "  proposal {\n"
+        "    encryption_algorithm aes;\n"
         "    hash_algorithm sha1;\n"
         "    authentication_method pre_shared_key;\n"
         "    dh_group 2;\n"
@@ -2124,14 +2018,14 @@ do_mDNSAutoTunnelSetKeys(__unused mach_port_t port, int replacedelete,
         "  pfs_group 2;\n"
         "  lifetime time 10 min;\n"
         "  encryption_algorithm aes;\n"
-        "  authentication_algorithm hmac_sha1;\n"
+        "  authentication_algorithm hmac_sha256,hmac_sha1;\n"
         "  compression_algorithm deflate;\n"
         "}\n\n"
         "sainfo address %s any address %s any {\n"
         "  pfs_group 2;\n"
         "  lifetime time 10 min;\n"
         "  encryption_algorithm aes;\n"
-        "  authentication_algorithm hmac_sha1;\n"
+        "  authentication_algorithm hmac_sha256,hmac_sha1;\n"
         "  compression_algorithm deflate;\n"
         "}\n";
     char path[PATH_MAX] = "";
@@ -2682,4 +2576,269 @@ again:
     }
     close(sock);
     return KERN_SUCCESS;
+}
+
+
+kern_return_t do_mDNSRetrieveTCPInfo(__unused mach_port_t port, int family, v6addr_t laddr, uint16_t lport, v6addr_t raddr, uint16_t  rport,
+                                     uint32_t *seq, uint32_t *ack, uint16_t *win, int32_t *intfid, audit_token_t token)
+{
+    struct tcp_info   ti;
+    struct info_tuple itpl;
+    int               mib[4];
+    unsigned int      miblen;
+    size_t            len;
+    size_t            sz;
+
+    memset(&itpl, 0, sizeof(struct info_tuple));
+    memset(&ti,   0, sizeof(struct tcp_info));
+
+    if (!authorized(&token))
+    {
+        helplog(ASL_LEVEL_ERR, "mDNSRetrieveTCPInfo: Not authorized");
+        return kmDNSHelperNotAuthorized;
+    }
+
+    if (family == AF_INET)
+    {
+        memcpy(&itpl.itpl_local_sin.sin_addr,  laddr, sizeof(struct in_addr));
+        memcpy(&itpl.itpl_remote_sin.sin_addr, raddr, sizeof(struct in_addr));
+        itpl.itpl_local_sin.sin_port    = lport;
+        itpl.itpl_remote_sin.sin_port   = rport;
+        itpl.itpl_local_sin.sin_family  = AF_INET;
+        itpl.itpl_remote_sin.sin_family = AF_INET;
+    }
+    else
+    {
+        memcpy(&itpl.itpl_local_sin6.sin6_addr,  laddr, sizeof(struct in6_addr));
+        memcpy(&itpl.itpl_remote_sin6.sin6_addr, raddr, sizeof(struct in6_addr));
+        itpl.itpl_local_sin6.sin6_port    = lport;
+        itpl.itpl_remote_sin6.sin6_port   = rport;
+        itpl.itpl_local_sin6.sin6_family  = AF_INET6;
+        itpl.itpl_remote_sin6.sin6_family = AF_INET6;
+    }
+    itpl.itpl_proto = IPPROTO_TCP;
+    sz = sizeof(mib)/sizeof(mib[0]);
+    if (sysctlnametomib("net.inet.tcp.info", mib, &sz) == -1)
+    {
+        helplog(ASL_LEVEL_ERR, "do_RetrieveTCPInfo: sysctlnametomib failed %d, %s", errno, strerror(errno));
+        return errno;
+    }
+    miblen = (unsigned int)sz;
+    len    = sizeof(struct tcp_info);
+    if (sysctl(mib, miblen, &ti, &len, &itpl, sizeof(struct info_tuple)) == -1)
+    {
+        helplog(ASL_LEVEL_ERR, "do_RetrieveTCPInfo: sysctl failed %d, %s", errno, strerror(errno));
+        return errno;
+    }
+
+    *seq    = ti.tcpi_snd_nxt - 1;
+    *ack    = ti.tcpi_rcv_nxt;
+    *win    = ti.tcpi_rcv_space >> ti.tcpi_rcv_wscale;
+    *intfid = ti.tcpi_last_outif;
+    return KERN_SUCCESS;
+}
+
+static int getMACAddress(int family, v6addr_t raddr, v6addr_t gaddr, int *gfamily, ethaddr_t eth)
+{
+    struct
+    {
+        struct rt_msghdr m_rtm;
+        char   m_space[512];
+    } m_rtmsg;
+
+    struct rt_msghdr *rtm = &(m_rtmsg.m_rtm);
+    char  *cp  = m_rtmsg.m_space;
+    int    seq = 6367, sock, rlen, i;
+    struct sockaddr_in      *sin  = NULL;
+    struct sockaddr_in6     *sin6 = NULL;
+    struct sockaddr_dl      *sdl  = NULL;
+    struct sockaddr_storage  sins;
+    struct sockaddr_dl       sdl_m;
+
+#define NEXTADDR(w, s, len)         \
+    if (rtm->rtm_addrs & (w))       \
+    {                               \
+        bcopy((char *)s, cp, len);  \
+        cp += len;                  \
+    }
+
+    bzero(&sins,  sizeof(struct sockaddr_storage));
+    bzero(&sdl_m, sizeof(struct sockaddr_dl));
+    bzero((char *)&m_rtmsg, sizeof(m_rtmsg));
+
+    sock = socket(PF_ROUTE, SOCK_RAW, 0);
+    if (sock < 0)
+    {
+        helplog(ASL_LEVEL_ERR, "mDNSGetRemoteMAC: Can not open the socket - %s", strerror(errno));
+        return errno;
+    }
+
+    rtm->rtm_addrs   |= RTA_DST | RTA_GATEWAY;
+    rtm->rtm_type     = RTM_GET;
+    rtm->rtm_flags    = 0;
+    rtm->rtm_version  = RTM_VERSION;
+    rtm->rtm_seq      = ++seq;
+
+    sdl_m.sdl_len     = sizeof(sdl_m);
+    sdl_m.sdl_family  = AF_LINK;
+    if (family == AF_INET)
+    {
+        sin = (struct sockaddr_in*)&sins;
+        sin->sin_family = AF_INET;
+        sin->sin_len    = sizeof(struct sockaddr_in);
+        memcpy(&sin->sin_addr, raddr, sizeof(struct in_addr));
+        NEXTADDR(RTA_DST, sin, sin->sin_len);
+    }
+    else if (family == AF_INET6)
+    {
+        sin6 = (struct sockaddr_in6 *)&sins;
+        sin6->sin6_len    = sizeof(struct sockaddr_in6);
+        sin6->sin6_family = AF_INET6;
+        memcpy(&sin6->sin6_addr, raddr, sizeof(struct in6_addr));
+        NEXTADDR(RTA_DST, sin6, sin6->sin6_len);
+    }
+    NEXTADDR(RTA_GATEWAY, &sdl_m, sdl_m.sdl_len);
+    rtm->rtm_msglen = rlen = cp - (char *)&m_rtmsg;
+
+    if (write(sock, (char *)&m_rtmsg, rlen) < 0)
+    {
+        helplog(ASL_LEVEL_INFO, "do_mDNSGetRemoteMAC: writing to routing socket: %s", strerror(errno));
+        close(sock);
+        return errno;
+    }
+
+    do
+    {
+        rlen = read(sock, (char *)&m_rtmsg, sizeof(m_rtmsg));
+    }
+    while (rlen > 0 && (rtm->rtm_seq != seq || rtm->rtm_pid != getpid()));
+
+    if (rlen < 0)
+        helplog(ASL_LEVEL_ERR, "do_mDNSGetRemoteMAC: Read from routing socket failed");
+
+    if (family == AF_INET)
+    {
+        sin = (struct sockaddr_in *) (rtm + 1);
+        sdl = (struct sockaddr_dl *) (sin->sin_len + (char *) sin);
+    }
+    else if (family == AF_INET6)
+    {
+        sin6 = (struct sockaddr_in6 *) (rtm +1);
+        sdl  = (struct sockaddr_dl  *) (sin6->sin6_len + (char *) sin6);
+    }
+    // If the address is not on the local net, we get the IP address of the gateway.
+    // We would have to repeat the process to get the MAC address of the gateway
+    *gfamily = sdl->sdl_family;
+    if (sdl->sdl_family == AF_INET)
+    {
+        struct sockaddr_in *new_sin = (struct sockaddr_in *)(sin->sin_len +(char*) sin);
+        memcpy(gaddr, &new_sin->sin_addr, sizeof(struct in_addr));
+        close(sock);
+        return -1;
+    }
+    else if (sdl->sdl_family == AF_INET6)
+    {
+        struct sockaddr_in6 *new_sin6 = (struct sockaddr_in6 *)(sin6->sin6_len +(char*) sin6);
+        memcpy(gaddr, &new_sin6->sin6_addr, sizeof(struct in6_addr));
+        close(sock);
+        return -1;
+    }
+
+    unsigned char *ptr = (unsigned char *)LLADDR(sdl);
+    for (i = 0; i < ETHER_ADDR_LEN; i++)
+        (eth)[i] = *(ptr +i);
+
+    close(sock);
+    return KERN_SUCCESS;
+}
+
+kern_return_t do_mDNSGetRemoteMAC(__unused mach_port_t port, int family, v6addr_t raddr, ethaddr_t eth, audit_token_t token)
+{
+    int      ret = 0;
+    v6addr_t gateway;
+    int      gfamily;
+    int      count = 0;
+
+    if (!authorized(&token))
+    {
+        helplog(ASL_LEVEL_ERR, "mDNSGetRemoteMAC: Not authorized");
+        return kmDNSHelperNotAuthorized;
+    }
+
+    do
+    {
+        ret = getMACAddress(family, raddr, gateway, &gfamily, eth);
+        if (ret == -1)
+        {
+            memcpy(raddr, gateway, sizeof(family));
+            family = gfamily;
+            count++;
+        }
+    }
+    while ((ret == -1) && (count < 5));
+    return ret;
+}
+
+
+kern_return_t do_mDNSStoreSPSMACAddress(__unused mach_port_t port, int family, v6addr_t spsaddr, const char *ifname, audit_token_t token)
+{
+    ethaddr_t              eth;
+    char                   spsip[INET6_ADDRSTRLEN];
+    int                    ret   = 0;
+    CFStringRef            sckey = NULL;
+    SCDynamicStoreRef      store = NULL;
+    CFMutableDictionaryRef dict  = NULL;
+
+    if (!authorized(&token))
+    {
+        helplog(ASL_LEVEL_ERR, "mDNSStoreSPSMAC: Not authorized");
+        return kmDNSHelperNotAuthorized;
+    }
+
+    // Get the MAC address of the Sleep Proxy Server
+    memset(eth, 0, sizeof(eth));
+    ret = do_mDNSGetRemoteMAC(port, family, spsaddr, eth, token);
+    if (ret !=  KERN_SUCCESS)
+    {
+        helplog(ASL_LEVEL_ERR, "mDNSStoreSPSMAC: Failed to determine the MAC address");
+        goto fin;
+    }
+
+    // Create/Update the dynamic store entry for the specified interface
+    sckey = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("%s%s%s"), "State:/Network/Interface/", ifname, "/BonjourSleepProxyAddress");
+    dict  = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    if (!dict)
+    {
+        helplog(ASL_LEVEL_ERR, "SPSCreateDict: Could not create CFDictionary dict");
+        ret = KERN_FAILURE;
+        goto fin;
+    }
+
+    CFStringRef macaddr = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("%02x:%02x:%02x:%02x:%02x:%02x"), eth[0], eth[1], eth[2], eth[3], eth[4], eth[5]);
+    CFDictionarySetValue(dict, CFSTR("MACAddress"), macaddr);
+    CFRelease(macaddr);
+
+    if( NULL == inet_ntop(family, (void *)spsaddr, spsip, sizeof(spsip)))
+    {
+         helplog(ASL_LEVEL_ERR, "inet_ntop failed: %s", strerror(errno));
+         ret = kmDNSHelperInvalidNetworkAddress;
+         goto fin;
+    }
+
+    CFStringRef ipaddr = CFStringCreateWithCString(NULL, spsip, kCFStringEncodingUTF8);
+    CFDictionarySetValue(dict, CFSTR("IPAddress"), ipaddr);
+    CFRelease(ipaddr);
+
+    SCDynamicStoreSetValue(store, sckey, dict);
+
+fin:
+    if (NULL != store)
+        CFRelease(store);
+    if (NULL != sckey)
+        CFRelease(sckey);
+    if (NULL != dict)
+        CFRelease(dict);
+
+    update_idle_timer();
+    return ret;
 }

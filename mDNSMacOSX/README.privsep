@@ -9,21 +9,15 @@ needed and handles requests from mDNSResponder.
   10 seconds of idle time.
 
 * The com.apple.mDNSResponder LaunchD job specifies the account under
-  which to run, so that mDNSResponder starts as _mdnsresponder.  When
-  run as root--- e.g. from the command line with `sudo'---
-  mDNSResponder drops privileges itself.
+  which to run, so that mDNSResponder starts as _mdnsresponder.
 
 * A subdirectory named "mdns" and owned by _mdnsresponder has been
   created in /var/run.  The PID file and uDNS server socket has been
   moved to that subdirectory.
 
 * There are currently six remote procedure calls handled by
-  mDNSResponderHelper: mDNSDynamicStoreSetConfig,
-  mDNSPreferencesSetName, mDNSKeychainGetSecrets,
+  mDNSResponderHelper: mDNSPreferencesSetName, mDNSKeychainGetSecrets,
   mDNSConfigureServer, and mDNSAutoTunnelSetKeys
-
-* mDNSDynamicStoreSetConfig allows mDNSResponder to set the
-  MulticastDNS, PrivateDNS, or DynamicDNS configurations.
 
 * mDNSPreferencesSetName allows mDNSResponder to set the computer name
   or local host name, and displays a notification if there was a

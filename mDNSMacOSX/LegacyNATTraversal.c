@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2004-2013 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -364,7 +364,7 @@ mDNSlocal void handleLNTPortMappingResponse(tcpLNTInfo *tcpInfo)
         // Make sure to compute extport *before* we zero tcpInfo->retries
         extport = mDNSOpaque16fromIntVal(RequestedPortNum(natInfo));
         tcpInfo->retries = 0;
-        natTraversalHandlePortMapReply(m, natInfo, m->UPnPInterfaceID, mStatus_NoError, extport, NATMAP_DEFAULT_LEASE);
+        natTraversalHandlePortMapReply(m, natInfo, m->UPnPInterfaceID, mStatus_NoError, extport, NATMAP_DEFAULT_LEASE, NATTProtocolUPNPIGD);
     }
     else if (http_result == HTTPCode_500)
     {
@@ -382,7 +382,7 @@ mDNSlocal void handleLNTPortMappingResponse(tcpLNTInfo *tcpInfo)
                 {
                     LogMsg("handleLNTPortMappingResponse too many conflict retries %d %d", mDNSVal16(natInfo->IntPort), mDNSVal16(natInfo->RequestedPort));
                     mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.PortMapRequest", "noop", "Conflict - too many retries", "Retries: %d", tcpInfo->retries);
-                    natTraversalHandlePortMapReply(m, natInfo, m->UPnPInterfaceID, NATErr_Res, zeroIPPort, 0);
+                    natTraversalHandlePortMapReply(m, natInfo, m->UPnPInterfaceID, NATErr_Res, zeroIPPort, 0, NATTProtocolUPNPIGD);
                 }
                 return;
             }
@@ -485,8 +485,8 @@ exit:
                 mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.DeviceDescription", "success", "success", "");
             break;
         case LNTExternalAddrOp:  mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.AddressRequest",
-                                            mDNSIPv4AddressIsZero(m->ExternalAddress) ? "failure" : "success",
-                                            mDNSIPv4AddressIsZero(m->ExternalAddress) ? "failure" : "success", "");
+                                            mDNSIPv4AddressIsZero(m->ExtAddress) ? "failure" : "success",
+                                            mDNSIPv4AddressIsZero(m->ExtAddress) ? "failure" : "success", "");
             break;
         case LNTPortMapOp:       if (tcpInfo->parentNATInfo)
                 mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.PortMapRequest", (tcpInfo->parentNATInfo->Result) ? "failure" : "success",
@@ -658,7 +658,7 @@ mDNSlocal mStatus SendPortMapRequest(mDNS *m, NATTraversalInfo *n)
             }
             else
             {
-                natTraversalHandlePortMapReply(m, n, m->UPnPInterfaceID, NATErr_Res, zeroIPPort, 0);
+                natTraversalHandlePortMapReply(m, n, m->UPnPInterfaceID, NATErr_Res, zeroIPPort, 0, NATTProtocolUPNPIGD);
                 return mStatus_NoError;
             }
         }
@@ -911,7 +911,7 @@ mDNSexport void LNT_SendDiscoveryMsg(mDNS *m)
     // Create message
     bufLen = mDNS_snprintf((char*)buf, sizeof(m->omsg), msg, m->SSDPWANPPPConnection ? "PPP" : "IP");
 
-    debugf("LNT_SendDiscoveryMsg Router %.4a Current External Address %.4a", &m->Router.ip.v4, &m->ExternalAddress);
+    debugf("LNT_SendDiscoveryMsg Router %.4a Current External Address %.4a", &m->Router.ip.v4, &m->ExtAddress);
 
     if (!mDNSIPv4AddressIsZero(m->Router.ip.v4))
     {

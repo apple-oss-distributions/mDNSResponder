@@ -23,6 +23,12 @@
 #include "mDNSEmbeddedAPI.h"
 #include "DNSCommon.h"
 #include "nsec.h"
+#include "nsec3.h"
+
+// Define DNSSEC_DISABLED to remove all the DNSSEC functionality
+// and use the stub functions implemented later in this file.
+
+#ifndef DNSSEC_DISABLED
 
 // Implementation Notes
 //
@@ -67,6 +73,13 @@ mDNSlocal CacheRecord *NSECParentForQuestion(mDNS *const m, DNSQuestion *q)
     return mDNSNULL;
 }
 
+mDNSlocal void UpdateParent(DNSSECVerifier *dv)
+{
+    AuthChainLink(dv->parent, dv->ac);
+    ResetAuthChain(dv);
+    dv->parent->NumPackets += dv->NumPackets;
+}
+
 // Note: This should just call the parent callback which will free the DNSSECVerifier.
 mDNSlocal void VerifyNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus status)
 {
@@ -78,13 +91,21 @@ mDNSlocal void VerifyNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECStatu
     }
     if (dv->ac)
     {
-        // Before we call the callback, we need to update the
+        // Before we free the "dv", we need to update the
         // parent with our AuthChain information
-        AuthChainLink(dv->parent, dv->ac);
-        dv->ac = mDNSNULL;
-        dv->actail = &dv->ac;
+        UpdateParent(dv);
     }
-    dv->parent->DVCallback(m, dv->parent, status);
+    // "status" indicates whether we are able to successfully verify
+    // the NSEC/NSEC3 signatures. For NSEC3, the OptOut flag may be set
+    // for which we need to deliver insecure result.
+    if ((dv->parent->flags & NSEC3_OPT_OUT) && (status == DNSSEC_Secure))
+    {
+        dv->parent->DVCallback(m, dv->parent, DNSSEC_Insecure);
+    }
+    else
+    {
+        dv->parent->DVCallback(m, dv->parent, status);
+    }
     // The callback we called in the previous line should recursively
     // free all the DNSSECVerifiers starting from dv->parent and above.
     // So, set that to NULL and free the "dv" itself here.
@@ -108,8 +129,7 @@ mDNSlocal void VerifyNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECStatu
 // them based on the name hash like other records as in most cases the returned NSECs has a different name than we asked for
 // (except for NODATA error where the name exists but type does not exist).
 //
-mDNSlocal void VerifyNSEC(mDNS *const m, ResourceRecord *rr, RRVerifier *rv, DNSSECVerifier *pdv, CacheRecord *ncr,
-                          DNSSECVerifierCallback callback)
+mDNSexport void VerifyNSEC(mDNS *const m, ResourceRecord *rr, RRVerifier *rv, DNSSECVerifier *pdv, CacheRecord *ncr, DNSSECVerifierCallback callback)
 {
     DNSSECVerifier *dv = mDNSNULL;
     CacheRecord **rp;
@@ -142,8 +162,13 @@ mDNSlocal void VerifyNSEC(mDNS *const m, ResourceRecord *rr, RRVerifier *rv, DNS
         rrtype = rv->rrtype;
     }
 
-    dv = AllocateDNSSECVerifier(m, name, rrtype, pdv->q.InterfaceID, (callback ? callback : VerifyNSECCallback), mDNSNULL);
-    if (!dv) { LogMsg("VerifyNSEC: mDNSPlatformMemAlloc failed"); return; }
+    dv = AllocateDNSSECVerifier(m, name, rrtype, pdv->q.InterfaceID, DNSSEC_VALIDATION_SECURE,
+        (callback ? callback : VerifyNSECCallback), mDNSNULL);
+    if (!dv)
+    {
+        LogMsg("VerifyNSEC: mDNSPlatformMemAlloc failed");
+        return;
+    }
 
     dv->parent = pdv;
 
@@ -164,11 +189,14 @@ mDNSlocal void VerifyNSEC(mDNS *const m, ResourceRecord *rr, RRVerifier *rv, DNS
         rp=&(*rp)->next;
     }
 
-    if (!dv->rrset || !dv->rrsig)
+    if (!dv->rrset)
     {
-        LogMsg("VerifyNSEC: ERROR!! AddRRSetToVerifier missing rrset %p, rrsig %p", dv->rrset, dv->rrsig);
+        LogMsg("VerifyNSEC: ERROR!! AddRRSetToVerifier missing rrset");
         goto error;
     }
+    // Expired signatures.
+    if (!dv->rrsig)
+        goto error;
 
     // Next step is to fetch the keys
     dv->next = RRVS_key;
@@ -176,7 +204,7 @@ mDNSlocal void VerifyNSEC(mDNS *const m, ResourceRecord *rr, RRVerifier *rv, DNS
     StartDNSSECVerification(m, dv);
     return;
 error:
-    pdv->DVCallback(m, pdv, DNSSEC_Indeterminate);
+    pdv->DVCallback(m, pdv, DNSSEC_Bogus);
     if (dv)
     {
         dv->parent = mDNSNULL;
@@ -202,7 +230,9 @@ mDNSlocal void DeleteCachedNSECS(mDNS *const m, CacheRecord *cr)
 // failure (mDNSfalse)
 mDNSexport mDNSBool AddNSECSForCacheRecord(mDNS *const m, CacheRecord *crlist, CacheRecord *negcr, mDNSu8 rcode)
 {
-    CacheRecord *cr, *next;
+    CacheRecord *cr;
+    mDNSBool nsecs_seen = mDNSfalse;
+    mDNSBool nsec3s_seen = mDNSfalse;
 
     if (rcode != kDNSFlag1_RC_NoErr && rcode != kDNSFlag1_RC_NXDomain)
     {
@@ -214,8 +244,8 @@ mDNSexport mDNSBool AddNSECSForCacheRecord(mDNS *const m, CacheRecord *crlist, C
     // NSECs and its RRSIGs
     for (cr = crlist; cr; cr = cr->next)
     {
-        next = cr->next;
-        if (cr->resrec.rrtype != kDNSType_NSEC && cr->resrec.rrtype != kDNSType_RRSIG)
+        if (cr->resrec.rrtype != kDNSType_NSEC && cr->resrec.rrtype != kDNSType_NSEC3 &&
+            cr->resrec.rrtype != kDNSType_SOA && cr->resrec.rrtype != kDNSType_RRSIG)
         {
             LogMsg("AddNSECSForCacheRecord: ERROR!! Adding Wrong record %s", CRDisplayString(m, cr));
             return mDNSfalse;
@@ -224,24 +254,37 @@ mDNSexport mDNSBool AddNSECSForCacheRecord(mDNS *const m, CacheRecord *crlist, C
         {
             RDataBody2 *const rdb = (RDataBody2 *)cr->smallrdatastorage.data;
             rdataRRSig *rrsig = &rdb->rrsig;
-            if (swap16(rrsig->typeCovered) != kDNSType_NSEC)
+            mDNSu16 tc = swap16(rrsig->typeCovered);
+            if (tc != kDNSType_NSEC && tc != kDNSType_NSEC3 && tc != kDNSType_SOA)
             {
                 LogMsg("AddNSECSForCacheRecord:ERROR!! Adding RRSIG with Wrong type %s", CRDisplayString(m, cr));
                 return mDNSfalse;
             }
         }
+        else if (cr->resrec.rrtype == kDNSType_NSEC)
+        {
+            nsecs_seen = mDNStrue;
+        }
+        else if (cr->resrec.rrtype == kDNSType_NSEC3)
+        {
+            nsec3s_seen = mDNStrue;
+        }
         LogDNSSEC("AddNSECSForCacheRecord: Found a valid record %s", CRDisplayString(m, cr));
+    }
+    if ((nsecs_seen && nsec3s_seen) || (!nsecs_seen && !nsec3s_seen))
+    {
+        LogDNSSEC("AddNSECSForCacheRecord:ERROR  nsecs_seen %d, nsec3s_seen %d", nsecs_seen, nsec3s_seen);
+        return mDNSfalse;
     }
     DeleteCachedNSECS(m, negcr);
     LogDNSSEC("AddNSECSForCacheRecord: Adding NSEC Records for %s", CRDisplayString(m, negcr));
     negcr->nsec = crlist;
-    negcr->rcode = rcode;
     return mDNStrue;
 }
 
 // Return the number of labels that matches starting from the right (excluding the
 // root label)
-mDNSlocal int CountLabelsMatch(const domainname *const d1, const domainname *const d2)
+mDNSexport int CountLabelsMatch(const domainname *const d1, const domainname *const d2)
 {
     int count, c1, c2;
     int match, i, skip1, skip2;
@@ -271,98 +314,6 @@ mDNSlocal int CountLabelsMatch(const domainname *const d1, const domainname *con
     return match;
 }
 
-// RFC 4034:
-//
-// Section 6.1:
-//
-// For the purposes of DNS security, owner names are ordered by treating
-// individual labels as unsigned left-justified octet strings.  The
-// absence of a octet sorts before a zero value octet, and uppercase
-// US-ASCII letters are treated as if they were lowercase US-ASCII
-// letters.
-//
-// To compute the canonical ordering of a set of DNS names, start by
-// sorting the names according to their most significant (rightmost)
-// labels.  For names in which the most significant label is identical,
-// continue sorting according to their next most significant label, and
-// so forth.
-//
-// Returns 0 if the names are same
-// Returns -1 if d1 < d2
-// Returns  1 if d1 > d2
-//
-// subdomain is set if there is at least one label match (starting from the end)
-// and d1 has more labels than d2 e.g., a.b.com is a subdomain of b.com
-//
-mDNSlocal int DNSSECCanonicalOrder(const domainname *const d1, const domainname *const d2, int *subdomain)
-{
-    int count, c1, c2;
-    int i, skip1, skip2;
-
-    c1 = CountLabels(d1);
-    skip1 = c1 - 1;
-    c2 = CountLabels(d2);
-    skip2 = c2 - 1;
-
-    if (subdomain) *subdomain = 0;
-
-    // Compare as many labels as possible starting from the rightmost
-    count = c1 < c2 ? c1 : c2;
-    for (i = count; i > 0; i--)
-    {
-        mDNSu8 *a, *b;
-        int j, len, lena, lenb;
-
-        a = (mDNSu8 *)SkipLeadingLabels(d1, skip1);
-        b = (mDNSu8 *)SkipLeadingLabels(d2, skip2);
-        lena = *a;
-        lenb = *b;
-        // Compare label by label. Note that "z" > "yak" because z > y, but z < za
-        // (lena - lenb check below) because 'za' has two characters. Hence compare the
-        // letters first and then compare the length of the label at the end.
-        len = lena < lenb ? lena : lenb;
-        a++; b++;
-        for (j = 0; j < len; j++)
-        {
-            mDNSu8 ac = *a++;
-            mDNSu8 bc = *b++;
-            if (mDNSIsUpperCase(ac)) ac += 'a' - 'A';
-            if (mDNSIsUpperCase(bc)) bc += 'a' - 'A';
-            if (ac != bc)
-            {
-                verbosedebugf("DNSSECCanonicalOrder: returning ac %c, bc %c", ac, bc);
-                return ((ac < bc) ? -1 : 1);
-            }
-        }
-        if ((lena - lenb) != 0)
-        {
-            verbosedebugf("DNSSECCanonicalOrder: returning lena %d lenb %d", lena, lenb);
-            return ((lena < lenb) ? -1 : 1);
-        }
-
-        // Continue with the next label
-        skip1--;
-        skip2--;
-    }
-    // We have compared label by label. Both of them are same if we are here.
-    //
-    // Two possibilities.
-    //
-    // 1) Both names have same number of labels. In that case, return zero.
-    // 2) The number of labels is not same. As zero label sorts before, names
-    //    with more number of labels is greater.
-
-    // a.b.com is a subdomain of b.com
-    if ((c1 > c2) && subdomain)
-        *subdomain = 1;
-
-    verbosedebugf("DNSSECCanonicalOrder: returning c1 %d c2 %d\n", c1, c2);
-    if (c1 != c2)
-        return ((c1 < c2) ? -1 : 1);
-    else
-        return 0;
-}
-
 // Empty Non-Terminal (ENT): if the qname is bigger than nsec owner's name and a
 // subdomain of the nsec's nxt field, then the qname is a empty non-terminal. For
 // example, if you are looking for (in RFC 4035 example zone) "y.w.example  A"
@@ -373,7 +324,7 @@ mDNSlocal int DNSSECCanonicalOrder(const domainname *const d1, const domainname 
 // This function is normally called before checking for wildcard matches. If you
 // find this NSEC, there is no need to look for a wildcard record
 // that could possibly answer the question.
-mDNSexport mDNSBool NSECAnswersENT(const ResourceRecord *const rr, domainname *qname)
+mDNSlocal mDNSBool NSECAnswersENT(const ResourceRecord *const rr, domainname *qname)
 {
     const domainname *oname = rr->name;
     const RDataBody2 *const rdb = (RDataBody2 *)rr->rdata->u.data;
@@ -456,13 +407,13 @@ mDNSlocal int NSECNameExists(mDNS *const m, ResourceRecord *rr, domainname *name
 
         // We are here because the owner name is the same as "name". Make sure the
         // NSEC has the right NS and SOA bits set.
-        if (ns && !soa && qtype != kDNSType_DS)
+        if (qtype != kDNSType_DS && ns && !soa)
         {
             LogDNSSEC("NSECNameExists: Parent side NSEC %s can't be used for question %##s (%s)",
                       RRDisplayString(m, rr), name->c, DNSTypeName(qtype));
             return -1;
         }
-        else if (ns && soa && qtype == kDNSType_DS)
+        else if (qtype == kDNSType_DS && soa)
         {
             LogDNSSEC("NSECNameExists: Child side NSEC %s can't be used for question %##s (%s)",
                       RRDisplayString(m, rr), name->c, DNSTypeName(qtype));
@@ -568,6 +519,7 @@ mDNSexport void WildcardAnswerProof(mDNS *const m, DNSSECVerifier *dv)
     CacheRecord **rp;
     const domainname *ce;
     DNSQuestion q;
+    CacheRecord **nsec3 = mDNSNULL;
 
     LogDNSSEC("WildcardAnswerProof: Question %##s (%s)", dv->origName.c, DNSTypeName(dv->origType));
     //
@@ -591,8 +543,12 @@ mDNSexport void WildcardAnswerProof(mDNS *const m, DNSSECVerifier *dv)
     ncr = NSECParentForQuestion(m, &q);
     if (!ncr)
     {
-        LogMsg("NSECWildCardProof: Can't find NSEC Parent for %##s (%s)", q.qname.c, DNSTypeName(q.qtype));
+        LogMsg("WildcardAnswerProof: Can't find NSEC Parent for %##s (%s)", q.qname.c, DNSTypeName(q.qtype));
         goto error;
+    }
+    else
+    {
+        LogDNSSEC("WildcardAnswerProof: found %s", CRDisplayString(m, ncr));
     }
     rp = &(ncr->nsec);
     while (*rp)
@@ -603,29 +559,45 @@ mDNSexport void WildcardAnswerProof(mDNS *const m, DNSSECVerifier *dv)
             if (!NSECNameExists(m, &cr->resrec, &dv->origName, dv->origType))
                 break;
         }
+        else if ((*rp)->resrec.rrtype == kDNSType_NSEC3)
+        {
+            nsec3 = rp;
+        }
         rp=&(*rp)->next;
     }
     if (!(*rp))
     {
-        LogMsg("NSECWildCardProof: ERROR!! No  NSECs found for %##s (%s)", q.qname.c, DNSTypeName(q.qtype));
-        goto error;
+        mDNSBool ret = mDNSfalse;
+        if (nsec3)
+        {
+            ret = NSEC3WildcardAnswerProof(m, ncr, dv);
+        }
+        if (!ret)
+        {
+            LogDNSSEC("WildcardAnswerProof: NSEC3 wildcard proof failed for %##s (%s)", q.qname.c, DNSTypeName(q.qtype));
+            goto error;
+        }
+        rp = nsec3;
     }
-    ce = NSECClosestEncloser(&((*rp)->resrec), &dv->origName);
-    if (!ce)
+    else
     {
-        LogMsg("NSECWildCardProof: ERROR!! Closest Encloser NULL for %##s (%s)", q.qname.c, DNSTypeName(q.qtype));
-        goto error;
-    }
-    if (!SameDomainName(ce, dv->wildcardName))
-    {
-        LogMsg("NSECWildCardProof: ERROR!! Closest Encloser %##s does not match wildcard name %##s", q.qname.c, dv->wildcardName->c);
-        goto error;
+        ce = NSECClosestEncloser(&((*rp)->resrec), &dv->origName);
+        if (!ce)
+        {
+            LogMsg("WildcardAnswerProof: ERROR!! Closest Encloser NULL for %##s (%s)", q.qname.c, DNSTypeName(q.qtype));
+            goto error;
+        }
+        if (!SameDomainName(ce, dv->wildcardName))
+        {
+            LogMsg("WildcardAnswerProof: ERROR!! Closest Encloser %##s does not match wildcard name %##s", q.qname.c, dv->wildcardName->c);
+            goto error;
+        }
     }
 
     VerifyNSEC(m, &((*rp)->resrec), mDNSNULL, dv, ncr, mDNSNULL);
     return;
 error:
-    dv->DVCallback(m, dv, DNSSEC_Insecure);
+    dv->DVCallback(m, dv, DNSSEC_Bogus);
 }
 
 // We have a NSEC. Need to see if it proves that NODATA exists for the given name. Note that this
@@ -669,7 +641,7 @@ mDNSlocal mDNSBool NSECNoDataError(mDNS *const m, ResourceRecord *rr, domainname
         }
         else
         {
-            if (ns && soa)
+            if (soa)
             {
                 LogDNSSEC("NSECNoDataError: Child side NSEC %s, can't use for parent qname %##s (%s)",
                           RRDisplayString(m, rr), name->c, DNSTypeName(qtype));
@@ -688,10 +660,9 @@ mDNSlocal mDNSBool NSECNoDataError(mDNS *const m, ResourceRecord *rr, domainname
     {
         // Name does not exist. Before we check for a wildcard match, make sure that
         // this is not an ENT.
-        //
         if (NSECAnswersENT(rr, name))
         {
-            LogDNSSEC("NSECNoDataError: ERROR!! name %##s exists %s", name->c, RRDisplayString(m, rr));
+            LogDNSSEC("NSECNoDataError: name %##s exists %s", name->c, RRDisplayString(m, rr));
             return mDNSfalse;
         }
 
@@ -716,17 +687,16 @@ mDNSlocal mDNSBool NSECNoDataError(mDNS *const m, ResourceRecord *rr, domainname
                     LogMsg("NSECNoDataError: ERROR!! qtype %s exists in wildcard %s", DNSTypeName(qtype), RRDisplayString(m, rr));
                     return mDNSfalse;
                 }
-                // It is odd for a wildcard to match when we are looking up DS
-                // See RFC 4592
-                if (qtype == kDNSType_DS)
+                if (qtype == kDNSType_DS && RRAssertsExistence(rr, kDNSType_SOA))
                 {
-                    LogMsg("NSECNoDataError: ERROR!! DS qtype exists in wildcard %s", RRDisplayString(m, rr));
+                    LogDNSSEC("NSECNoDataError: Child side wildcard NSEC %s, can't use for parent qname %##s (%s)",
+                              RRDisplayString(m, rr), name->c, DNSTypeName(qtype));
                     return mDNSfalse;
                 }
-                // Don't use the parent side record for this
-                if (RRAssertsNonexistence(rr, kDNSType_SOA) &&
+                else if (qtype != kDNSType_DS && RRAssertsNonexistence(rr, kDNSType_SOA) &&
                     RRAssertsExistence(rr, kDNSType_NS))
                 {
+                    // Don't use the parent side record for this
                     LogDNSSEC("NSECNoDataError: Parent side wildcard NSEC %s, can't use for child qname %##s (%s)",
                               RRDisplayString(m, rr), name->c, DNSTypeName(qtype));
                     return mDNSfalse;
@@ -740,7 +710,7 @@ mDNSlocal mDNSBool NSECNoDataError(mDNS *const m, ResourceRecord *rr, domainname
     }
 }
 
-mDNSlocal void NoDataNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus status)
+mDNSexport void NoDataNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus status)
 {
     RRVerifier *rv;
     DNSSECVerifier *pdv;
@@ -758,32 +728,21 @@ mDNSlocal void NoDataNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECStatu
     {
         // Before we free the "dv", we need to update the
         // parent with our AuthChain information
-        AuthChainLink(dv->parent, dv->ac);
-        dv->ac = mDNSNULL;
-        dv->actail = &dv->ac;
+        UpdateParent(dv);
     }
 
     pdv = dv->parent;
+
+    // We don't care about the "dv" that was allocated in VerifyNSEC
+    // as it just verifies one of the nsecs. Get the original verifier and
+    // verify the other NSEC like we did the first time.
+    dv->parent = mDNSNULL;
+    FreeDNSSECVerifier(m, dv);
+
     if (status != DNSSEC_Secure)
     {
         goto error;
     }
-    if (!(pdv->flags & NSEC_PROVES_NONAME_EXISTS))
-    {
-        LogMsg("NoDataNSECCCallback: ERROR!! NSEC_PROVES_NONAME_EXISTS not set");
-        goto error;
-    }
-    if (!(pdv->flags & WILDCARD_PROVES_NONAME_EXISTS))
-    {
-        LogMsg("NoDataNSECCCallback: ERROR!! WILDCARD_PROVES_NONAME_EXISTS not set");
-        goto error;
-    }
-
-    // We don't care about the "dv" that was allocated in VerifyNSEC.
-    // Get the original verifier and verify the other NSEC like we did
-    // the first time.
-    dv->parent = mDNSNULL;
-    FreeDNSSECVerifier(m, dv);
 
     ncr = NSECParentForQuestion(m, &pdv->q);
     if (!ncr)
@@ -791,21 +750,23 @@ mDNSlocal void NoDataNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECStatu
         LogMsg("NoDataNSECCallback: Can't find NSEC Parent for %##s (%s)", pdv->q.qname.c, DNSTypeName(pdv->q.qtype));
         goto error;
     }
-
     rv = pdv->pendingNSEC;
-    pdv->pendingNSEC = mDNSNULL;
-    // Verify the pendingNSEC and we don't need to come back here. Let the regular
-    // NSECCallback call the original callback.
-    VerifyNSEC(m, mDNSNULL, rv, pdv, ncr, mDNSNULL);
+    pdv->pendingNSEC = rv->next;
+    // We might have more than one pendingNSEC in the case of NSEC3. If this is the last one,
+    // we don't need to come back here; let the regular NSECCallback call the original callback.
+    rv->next = mDNSNULL;
+    LogDNSSEC("NoDataNSECCallback: Verifying %##s (%s)", rv->name.c, DNSTypeName(rv->rrtype));
+    if (!pdv->pendingNSEC)
+        VerifyNSEC(m, mDNSNULL, rv, pdv, ncr, mDNSNULL);
+    else
+        VerifyNSEC(m, mDNSNULL, rv, pdv, ncr, NoDataNSECCallback);
     return;
 
 error:
-    dv->parent->DVCallback(m, dv->parent, status);
-    dv->parent = mDNSNULL;
-    FreeDNSSECVerifier(m, dv);
+    pdv->DVCallback(m, pdv, status);
 }
 
-mDNSlocal void NameErrorNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus status)
+mDNSexport void NameErrorNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus status)
 {
     RRVerifier *rv;
     DNSSECVerifier *pdv;
@@ -823,21 +784,20 @@ mDNSlocal void NameErrorNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECSt
     {
         // Before we free the "dv", we need to update the
         // parent with our AuthChain information
-        AuthChainLink(dv->parent, dv->ac);
-        dv->ac = mDNSNULL;
-        dv->actail = &dv->ac;
+        UpdateParent(dv);
     }
 
     pdv = dv->parent;
+    // We don't care about the "dv" that was allocated in VerifyNSEC
+    // as it just verifies one of the nsecs. Get the original verifier and
+    // verify the other NSEC like we did the first time.
+    dv->parent = mDNSNULL;
+    FreeDNSSECVerifier(m, dv);
+
     if (status != DNSSEC_Secure)
     {
         goto error;
     }
-    // We don't care about the "dv" that was allocated in VerifyNSEC.
-    // Get the original verifier and verify the other NSEC like we did
-    // the first time.
-    dv->parent = mDNSNULL;
-    FreeDNSSECVerifier(m, dv);
 
     ncr = NSECParentForQuestion(m, &pdv->q);
     if (!ncr)
@@ -846,16 +806,20 @@ mDNSlocal void NameErrorNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECSt
         goto error;
     }
     rv = pdv->pendingNSEC;
-    pdv->pendingNSEC = mDNSNULL;
-    // Verify the pendingNSEC and we don't need to come back here. Let the regular
-    // NSECCallback call the original callback.
-    VerifyNSEC(m, mDNSNULL, rv, pdv, ncr, mDNSNULL);
+    pdv->pendingNSEC = rv->next;
+    // We might have more than one pendingNSEC in the case of NSEC3. If this is the last one,
+    // we don't need to come back here; let the regular NSECCallback call the original callback.
+    rv->next = mDNSNULL;
+    LogDNSSEC("NameErrorNSECCallback: Verifying %##s (%s)", rv->name.c, DNSTypeName(rv->rrtype));
+    if (!pdv->pendingNSEC)
+        VerifyNSEC(m, mDNSNULL, rv, pdv, ncr, mDNSNULL);
+    else
+        VerifyNSEC(m, mDNSNULL, rv, pdv, ncr, NameErrorNSECCallback);
+
     return;
 
 error:
-    dv->parent->DVCallback(m, dv->parent, status);
-    dv->parent = mDNSNULL;
-    FreeDNSSECVerifier(m, dv);
+    pdv->DVCallback(m, pdv, status);
 }
 
 // We get a NODATA error with no records in answer section. This proves
@@ -910,6 +874,11 @@ mDNSlocal void NoDataProof(mDNS *const m, DNSSECVerifier *dv, CacheRecord *ncr)
         }
         rp=&(*rp)->next;
     }
+    if (!nsec_noname && !nsec_wild)
+    {
+        LogDNSSEC("NoDataProof: No valid NSECs for %##s (%s)", dv->q.qname.c, DNSTypeName(dv->q.qtype));
+        goto error;
+    }
     // If the type exists, then we have to verify just that NSEC
     if (!(dv->flags & NSEC_PROVES_NOTYPE_EXISTS))
     {
@@ -926,6 +895,12 @@ mDNSlocal void NoDataProof(mDNS *const m, DNSSECVerifier *dv, CacheRecord *ncr)
             LogMsg("NoDataProof: wildcard %##s does not match closest encloser %##s", wildcard->c, ce->c);
             goto error;
         }
+        // If a single NSEC can prove both, then we just have validate that one NSEC.
+        if (nsec_wild == nsec_noname)
+        {
+            nsec_noname = mDNSNULL;
+            dv->flags &= ~NSEC_PROVES_NONAME_EXISTS;
+        }
     }
 
     if ((dv->flags & (WILDCARD_PROVES_NONAME_EXISTS|NSEC_PROVES_NONAME_EXISTS)) ==
@@ -937,21 +912,24 @@ mDNSlocal void NoDataProof(mDNS *const m, DNSSECVerifier *dv, CacheRecord *ncr)
         // First verify wildcard NSEC and then when we are done, we
         // will verify the noname nsec
         dv->pendingNSEC = r;
+        LogDNSSEC("NoDataProof: Verifying wild and noname %s", RRDisplayString(m, nsec_wild));
         VerifyNSEC(m, nsec_wild, mDNSNULL, dv, ncr, NoDataNSECCallback);
     }
     else if ((dv->flags & WILDCARD_PROVES_NONAME_EXISTS) ||
              (dv->flags & NSEC_PROVES_NOTYPE_EXISTS))
     {
+        LogDNSSEC("NoDataProof: Verifying wild %s", RRDisplayString(m, nsec_wild));
         VerifyNSEC(m, nsec_wild, mDNSNULL, dv, ncr, mDNSNULL);
     }
     else if (dv->flags & NSEC_PROVES_NONAME_EXISTS)
     {
+        LogDNSSEC("NoDataProof: Verifying noname %s", RRDisplayString(m, nsec_noname));
         VerifyNSEC(m, nsec_noname, mDNSNULL, dv, ncr, mDNSNULL);
     }
     return;
 error:
     LogDNSSEC("NoDataProof: Error return");
-    dv->DVCallback(m, dv, DNSSEC_Insecure);
+    dv->DVCallback(m, dv, DNSSEC_Bogus);
 }
 
 mDNSlocal mDNSBool NSECNoWildcard(mDNS *const m, ResourceRecord *rr, domainname *qname, mDNSu16 qtype)
@@ -1055,77 +1033,234 @@ mDNSlocal void NameErrorProof(mDNS *const m, DNSSECVerifier *dv, CacheRecord *nc
         RRVerifier *r = AllocateRRVerifier(nsec_noname, &status);
         if (!r) goto error;
         dv->pendingNSEC = r;
+        LogDNSSEC("NoDataProof: Verifying wild %s", RRDisplayString(m, nsec_wild));
         VerifyNSEC(m, nsec_wild, mDNSNULL, dv, ncr, NameErrorNSECCallback);
     }
     else
     {
+        LogDNSSEC("NoDataProof: Verifying only one %s", RRDisplayString(m, nsec_wild));
         VerifyNSEC(m, nsec_wild, mDNSNULL, dv, ncr, mDNSNULL);
     }
     return;
 error:
-    dv->DVCallback(m, dv, DNSSEC_Insecure);
+    dv->DVCallback(m, dv, DNSSEC_Bogus);
+}
+
+mDNSexport CacheRecord *NSECRecordIsDelegation(mDNS *const m, domainname *name, mDNSu16 qtype)
+{
+    CacheGroup *cg;
+    CacheRecord *cr;
+    mDNSu32 slot, namehash;
+
+    slot = HashSlot(name);
+    namehash = DomainNameHashValue(name);
+
+    cg = CacheGroupForName(m, (const mDNSu32)slot, namehash, name);
+    if (!cg)
+    {
+        LogDNSSEC("NSECRecordForName: cg NULL for %##s", name);
+        return mDNSNULL;
+    }
+    for (cr = cg->members; cr; cr = cr->next)
+    {
+        if (cr->resrec.RecordType == kDNSRecordTypePacketNegative && cr->resrec.rrtype == qtype)
+        {
+            CacheRecord *ncr;
+            for (ncr = cr->nsec; ncr; ncr = ncr->next)
+            {
+                if (ncr->resrec.rrtype == kDNSType_NSEC &&
+                    SameDomainName(ncr->resrec.name, name))
+                {
+                    // See the Insecure Delegation Proof section in dnssec-bis: DS bit and SOA bit
+                    // should be absent
+                    if (RRAssertsExistence(&ncr->resrec, kDNSType_SOA) ||
+                        RRAssertsExistence(&ncr->resrec, kDNSType_DS))
+                    {
+                        LogDNSSEC("NSECRecordForName: found record %s for %##s (%s), but DS or SOA bit set", CRDisplayString(m, ncr), name,
+                            DNSTypeName(qtype));
+                        return mDNSNULL;
+                    }
+                    // Section 2.3 of RFC 4035 states that:
+                    //
+                    // Each owner name in the zone that has authoritative data or a delegation point NS RRset MUST
+                    // have an NSEC resource record. 
+                    //
+                    // So, if we have an NSEC record matching the question name with the NS bit set,
+                    // then this is a delegation.
+                    //
+                    if (RRAssertsExistence(&ncr->resrec, kDNSType_NS))
+                    {
+                        LogDNSSEC("NSECRecordForName: found record %s for %##s (%s)", CRDisplayString(m, ncr), name, DNSTypeName(qtype));
+                        return ncr;
+                    }
+                    else
+                    {
+                        LogDNSSEC("NSECRecordForName: found record %s for %##s (%s), but NS bit is not set", CRDisplayString(m, ncr), name,
+                            DNSTypeName(qtype));
+                        return mDNSNULL;
+                    }
+                }
+            }
+        }
+    }
+    return mDNSNULL;
+}
+
+mDNSlocal void StartInsecureProof(mDNS * const m, DNSSECVerifier *dv)
+{
+    domainname trigger;
+    DNSSECVerifier *prevdv = mDNSNULL;
+
+    // Remember the name that triggered the insecure proof
+    AssignDomainName(&trigger, &dv->q.qname);
+    while (dv->parent)
+    {
+        prevdv = dv;
+        dv = dv->parent;
+    }
+    if (prevdv)
+    {
+        prevdv->parent = mDNSNULL;
+        FreeDNSSECVerifier(m, prevdv);
+    }
+    // For Optional DNSSEC, we are opportunistically verifying dnssec. We don't care
+    // if something results in bogus as we still want to deliver results to the
+    // application e.g., CNAME processing results in bogus because the path is broken,
+    // but we still want to follow CNAMEs so that we can deliver the final results to
+    // the application.
+    if (dv->ValidationRequired == DNSSEC_VALIDATION_SECURE_OPTIONAL)
+    {
+        LogDNSSEC("StartInsecureProof: Aborting insecure proof for %##s (%s)", dv->q.qname.c, DNSTypeName(dv->q.qtype));
+        dv->DVCallback(m, dv, DNSSEC_Bogus);
+        return;
+    }
+
+    LogDNSSEC("StartInsecureProof for %##s (%s)", dv->q.qname.c, DNSTypeName(dv->q.qtype));
+    // Don't start the insecure proof again after we finish the one that we start here by
+    // setting InsecureProofDone.
+    dv->InsecureProofDone = 1;
+    ProveInsecure(m, dv, mDNSNULL, &trigger);
+    return;
 }
 
 mDNSexport void ValidateWithNSECS(mDNS *const m, DNSSECVerifier *dv, CacheRecord *cr)
 {
     LogDNSSEC("ValidateWithNSECS: called for %s", CRDisplayString(m, cr));
-    // "parent" is set when we are validating a NSEC. In the process of validating that
-    // nsec, we encountered another NSEC. For example, we are looking up the A record for
-    // www.example.com, we got an NSEC at some stage. We come here to validate the NSEC
-    // the first time. While validating the NSEC we remember the original validation result
-    // in the parent. But while validating the NSEC, we got another NSEC back e.g., not
-    // a secure delegation i.e., we got an NSEC proving that DS does not exist. We prove
-    // that again. But if we receive more NSECs after this, we stop.
+
+    // If we are encountering a break in the chain of trust i.e., NSEC/NSEC3s for
+    // DS query, then do the insecure proof. This is important because if we
+    // validate these NSECs normally and prove that they are "secure", we will
+    // end up delivering the secure result to the original question where as
+    // these NSEC/NSEC3s actually prove that DS does not exist and hence insecure.
     //
-    if (dv->parent)
+    // This break in the chain can happen after we have partially validated the
+    // path (dv->ac is non-NULL) or the first time (dv->ac is NULL) after we
+    // fetched the DNSKEY (dv->key is non-NULL). We don't want to do this
+    // if we have just started the non-existence proof (dv->key is NULL) as
+    // it does not indicate a break in the chain of trust.
+    //
+    // If we are already doing a insecurity proof, don't start another one. In
+    // the case of NSECs, it is possible that insecurity proof starts and it
+    // gets NSECs and as part of validating that we receive more NSECS in which
+    // case we don't want to start another insecurity proof.
+    if (dv->ValidationRequired != DNSSEC_VALIDATION_INSECURE &&
+        (!dv->parent || dv->parent->ValidationRequired != DNSSEC_VALIDATION_INSECURE))
     {
-        if (dv->parent->parent)
+         if ((dv->ac && dv->q.qtype == kDNSType_DS) ||
+             (!dv->ac && dv->key && dv->q.qtype == kDNSType_DS))
         {
-            LogMsg("ValidateWithNSECS: ERROR!! dv parent is set already");
-            dv->DVCallback(m, dv, DNSSEC_Indeterminate);
+            LogDNSSEC("ValidateWithNSECS: Starting insecure proof: name %##s ac %p, key %p, parent %p", dv->q.qname.c,
+                dv->ac, dv->key, dv->parent);
+            StartInsecureProof(m, dv);
             return;
         }
-        else
-        {
-            DNSSECVerifier *pdv = dv;
-            dv = AllocateDNSSECVerifier(m, &pdv->q.qname, pdv->q.qtype, pdv->q.InterfaceID, VerifyNSECCallback, mDNSNULL);
-            if (!dv)
-            {
-                LogMsg("VerifyNSEC: mDNSPlatformMemAlloc failed");
-                pdv->DVCallback(m, pdv, DNSSEC_Indeterminate);
-                return;
-            }
-            LogDNSSEC("ValidateWithNSECS: Parent set, Verifying dv %p %##s (%s)", dv, pdv->q.qname.c, DNSTypeName(pdv->q.qtype));
-            dv->parent = pdv;
-        }
+    }
+    // "parent" is set when we are validating a NSEC and we should not be here in
+    // the normal case when parent is set. For example, we are looking up the A
+    // record for www.example.com and following can happen.
+    //
+    // a) Record does not exist and we get a NSEC
+    // b) While validating (a), we get an NSEC for the first DS record that we look up
+    // c) Record exists but we get NSECs for the first DS record
+    // d) We are able to partially validate (a) or (b), but we get NSECs somewhere in
+    //    the chain
+    //
+    // For (a), parent is not set as we are not validating the NSEC yet. Hence we would
+    // start the validation now.
+    //
+    // For (b), the parent is set, but should be caught by the above "if" block because we 
+    // should have gotten the DNSKEY at least. In the case of nested insecurity proof,
+    // we would end up here and fail with bogus.
+    //
+    // For (c), the parent is not set and should be caught by the above "if" block because we 
+    // should have gotten the DNSKEY at least.
+    //
+    // For (d), the above "if" block would catch it as "dv->ac" is non-NULL.
+    // 
+    // Hence, we should not come here in the normal case. Possible pathological cases are:
+    // Insecure proof getting NSECs while validating NSECs, getting NSECs for DNSKEY for (c)
+    // above etc.
+    if (dv->parent)
+    {
+        LogDNSSEC("ValidateWithNSECS: dv parent set for %##s (%s)", dv->q.qname.c, DNSTypeName(dv->q.qtype));
+        dv->DVCallback(m, dv, DNSSEC_Bogus);
+        return;
     }
     if (cr->resrec.RecordType == kDNSRecordTypePacketNegative)
     {
+        mDNSu8 rcode;
         CacheRecord *neg = cr->nsec;
+        mDNSBool nsecs_seen = mDNSfalse;
+
         while (neg)
         {
+            // The list can only have NSEC or NSEC3s. This was checked when we added the
+            // NSECs to the cache record.
+            if (neg->resrec.rrtype == kDNSType_NSEC)
+                nsecs_seen = mDNStrue;
             LogDNSSEC("ValidateWithNSECS: NSECCached Record %s", CRDisplayString(m, neg));
             neg = neg->next;
         }
 
-        if (cr->rcode == kDNSFlag1_RC_NoErr)
+        rcode = (mDNSu8)(cr->responseFlags.b[1] & kDNSFlag1_RC_Mask);
+        if (rcode == kDNSFlag1_RC_NoErr)
         {
-            NoDataProof(m, dv, cr);
+            if (nsecs_seen)
+                NoDataProof(m, dv, cr);
+            else
+                NSEC3NoDataProof(m, dv, cr);
         }
-        else if (cr->rcode == kDNSFlag1_RC_NXDomain)
+        else if (rcode == kDNSFlag1_RC_NXDomain)
         {
-            NameErrorProof(m, dv, cr);
+            if (nsecs_seen)
+                NameErrorProof(m, dv, cr);
+            else
+                NSEC3NameErrorProof(m, dv, cr);
         }
         else
         {
-            LogDNSSEC("ValidateWithNSECS: Rcode %d invalid", cr->rcode);
-            dv->DVCallback(m, dv, DNSSEC_Insecure);
+            LogDNSSEC("ValidateWithNSECS: Rcode %d invalid", rcode);
+            dv->DVCallback(m, dv, DNSSEC_Bogus);
         }
     }
     else
     {
         LogMsg("ValidateWithNSECS: Not a valid cache record %s for NSEC proofs", CRDisplayString(m, cr));
-        dv->DVCallback(m, dv, DNSSEC_Insecure);
+        dv->DVCallback(m, dv, DNSSEC_Bogus);
         return;
     }
 }
+
+#else // !DNSSEC_DISABLED
+
+mDNSexport mDNSBool AddNSECSForCacheRecord(mDNS *const m, CacheRecord *crlist, CacheRecord *negcr, mDNSu8 rcode)
+{
+    (void)m;
+    (void)crlist;
+    (void)negcr;
+    (void)rcode;
+
+    return mDNSfalse;
+}
+
+#endif // !DNSSEC_DISABLED

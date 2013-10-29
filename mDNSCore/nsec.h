@@ -20,9 +20,14 @@
 #include "dnssec.h"
 
 extern mDNSBool AddNSECSForCacheRecord(mDNS *const m, CacheRecord *crlist, CacheRecord *negcr, mDNSu8 rcode);
-extern mDNSBool NSECAnswersENT(const ResourceRecord *const rr, domainname *name);
 extern void WildcardAnswerProof(mDNS *const m, DNSSECVerifier *dv);
 extern void ValidateWithNSECS(mDNS *const m, DNSSECVerifier *dv, CacheRecord *rr);
-mDNSexport mDNSBool NSECAnswersDS(mDNS *const m, ResourceRecord *rr, DNSQuestion *q);
+extern mDNSBool NSECAnswersDS(mDNS *const m, ResourceRecord *rr, DNSQuestion *q);
+extern int CountLabelsMatch(const domainname *const d1, const domainname *const d2);
+extern void NameErrorNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus status);
+extern void VerifyNSEC(mDNS *const m, ResourceRecord *rr, RRVerifier *rv, DNSSECVerifier *pdv, CacheRecord *ncr,
+	DNSSECVerifierCallback callback);
+extern CacheRecord *NSECRecordIsDelegation(mDNS *const m, domainname *name, mDNSu16 qtype);
+extern void NoDataNSECCallback(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus status);
 
 #endif // __NSEC_H

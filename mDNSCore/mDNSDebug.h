@@ -138,6 +138,8 @@ extern void verbosedebugf_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1
 
 extern int mDNS_LoggingEnabled;
 extern int mDNS_PacketLoggingEnabled;
+extern int mDNS_McastLoggingEnabled;
+extern int mDNS_McastTracingEnabled;
 extern int mDNS_DebugMode;          // If non-zero, LogMsg() writes to stderr instead of syslog
 extern const char ProgramName[];
 

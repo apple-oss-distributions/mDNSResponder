@@ -58,13 +58,6 @@ simpleroutine mDNSNotify(		port			: mach_port_t;
 								msg				: string_t;
 		ServerAuditToken		token			: audit_token_t);
 
-simpleroutine mDNSDynamicStoreSetConfig(
-								port			: mach_port_t;
-								key				: int;
-								subkey			: string_t;
-								value			: pointer_t;
-		ServerAuditToken		token			: audit_token_t);
-
 simpleroutine mDNSPreferencesSetName(
 								port			: mach_port_t;
 								key				: int;
@@ -124,7 +117,27 @@ simpleroutine mDNSSendKeepalive( port		: mach_port_t;
 								win				: uint16_t;
 		ServerAuditToken		token			: audit_token_t);
 
-simpleroutine mDNSInterfaceAdvtIoctl( port		: mach_port_t;
-									ifname 		: string_t;
-									op			: int;
-					ServerAuditToken token		: audit_token_t);
+routine mDNSRetrieveTCPInfo(
+								port			: mach_port_t;
+								family			: int;
+								laddr			: v6addr_t;
+								lport			: uint16_t;
+								raddr			: v6addr_t;
+								rport			: uint16_t;
+						 out	seq				: uint32_t;
+						 out	ack				: uint32_t;
+						 out	win				: uint16_t;
+						 out	intfid			: int32_t;
+		ServerAuditToken		token			: audit_token_t);
+
+routine mDNSGetRemoteMAC(		port			: mach_port_t;
+								family			: int;
+								raddr			: v6addr_t;
+		out						eth				: ethaddr_t;
+		ServerAuditToken		token			: audit_token_t);
+
+simpleroutine mDNSStoreSPSMACAddress(	port			: mach_port_t;
+								family			: int;
+								spsaddr			: v6addr_t;
+								ifname			: string_t;
+		ServerAuditToken		token			: audit_token_t);

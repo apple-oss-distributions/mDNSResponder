@@ -309,6 +309,13 @@ mDNSlocal void SocketDataReady(mDNS *const m, PosixNetworkInterface *intf, int s
                         &senderAddr, senderPort, &destAddr, MulticastDNSPort, InterfaceID);
 }
 
+mDNSexport mDNSBool mDNSPlatformPeekUDP(mDNS *const m, UDPSocket *src)
+{
+    (void)m;    // unused
+    (void)src;  // unused
+    return mDNSfalse;
+}
+
 mDNSexport TCPSocket *mDNSPlatformTCPSocket(mDNS * const m, TCPSocketFlags flags, mDNSIPPort * port, mDNSBool useBackgroundTrafficClass)
 {
     (void)m;            // Unused
@@ -432,7 +439,8 @@ mDNSexport void FreeEtcHosts(mDNS *const m, AuthRecord *const rr, mStatus result
 #pragma mark ***** DDNS Config Platform Functions
 #endif
 
-mDNSexport void mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers, mDNSBool setsearch, domainname *const fqdn, DNameListElem **RegDomains, DNameListElem **BrowseDomains)
+mDNSexport mDNSBool mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers, mDNSBool setsearch, domainname *const fqdn, DNameListElem **RegDomains,
+    DNameListElem **BrowseDomains, mDNSBool ackConfig)
 {
     (void) m;
     (void) setservers;
@@ -440,6 +448,9 @@ mDNSexport void mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers, mDN
     (void) setsearch;
     (void) RegDomains;
     (void) BrowseDomains;
+    (void) ackConfig;
+
+    return mDNStrue;
 }
 
 mDNSexport mStatus mDNSPlatformGetPrimaryInterface(mDNS * const m, mDNSAddr * v4, mDNSAddr * v6, mDNSAddr * router)
@@ -499,7 +510,7 @@ mDNSexport int ParseDNSServers(mDNS *m, const char *filePath)
             mDNSAddr DNSAddr;
             DNSAddr.type = mDNSAddrType_IPv4;
             DNSAddr.ip.v4.NotAnInteger = ina.s_addr;
-            mDNS_AddDNSServer(m, NULL, mDNSInterface_Any, &DNSAddr, UnicastDNSPort, mDNSfalse, 0, mDNSfalse, 0);
+            mDNS_AddDNSServer(m, NULL, mDNSInterface_Any, 0, &DNSAddr, UnicastDNSPort, kScopeNone, 0, mDNSfalse, 0, mDNStrue, mDNStrue, mDNSfalse);
             numOfServers++;
         }
     }
@@ -1362,6 +1373,38 @@ mDNSexport mDNSBool AddNSECSForCacheRecord(mDNS *const m, CacheRecord *crlist, C
     return mDNSfalse;
 }
 
+mDNSexport void BumpDNSSECStats(mDNS *const m, DNSSECStatsAction action, DNSSECStatsType type, mDNSu32 value)
+{
+    (void)m;
+    (void)action;
+    (void)type;
+    (void)value;
+}
+
+// Proxy stub functions
+mDNSexport mDNSu8 *DNSProxySetAttributes(DNSQuestion *q, DNSMessageHeader *h, DNSMessage *msg, mDNSu8 *ptr, mDNSu8 *limit)
+{
+    (void) q;
+    (void) h;
+    (void) msg;
+    (void) ptr;
+    (void) limit;
+
+    return ptr;
+}
+
+mDNSexport void DNSProxyInit(mDNS *const m, mDNSu32 IpIfArr[], mDNSu32 OpIf)
+{
+    (void) m;
+    (void) IpIfArr;
+    (void) OpIf;
+}
+
+mDNSexport void DNSProxyTerminate(mDNS *const m)
+{
+    (void) m;
+}
+
 // mDNS core calls this routine to clear blocks of memory.
 // On the Posix platform this is a simple wrapper around ANSI C memset.
 mDNSexport void    mDNSPlatformMemZero(void *dst, mDNSu32 len)
@@ -1460,6 +1503,62 @@ mDNSexport mStatus mDNSPlatformRetrieveTCPInfo(mDNS *const m, mDNSAddr *laddr, m
     (void) mti;     // Unused
 
     return mStatus_NoError;
+}
+
+mDNSexport mStatus mDNSPlatformGetRemoteMacAddr(mDNS *const m, mDNSAddr *raddr)
+{
+    (void) raddr; // Unused
+    (void) m;     // Unused
+
+    return mStatus_NoError;
+}
+
+mDNSexport mStatus    mDNSPlatformStoreSPSMACAddr(mDNSAddr *spsaddr, char *ifname)
+{
+    (void) spsaddr; // Unused
+    (void) ifname;  // Unused
+
+    return mStatus_NoError;
+}
+
+mDNSexport mDNSu16 mDNSPlatformGetUDPPort(UDPSocket *sock)
+{
+    (void) sock; // unused
+ 
+    return (mDNSu16)-1;
+}
+
+mDNSexport mDNSBool mDNSPlatformInterfaceIsD2D(mDNSInterfaceID InterfaceID)
+{
+    (void) InterfaceID; // unused
+    
+    return mDNSfalse;
+}
+
+mDNSexport mDNSBool mDNSPlatformAllowPID(mDNS *const m, DNSQuestion *q)
+{
+    (void) m;
+    (void) q;
+    return mDNStrue;
+}
+
+mDNSexport mDNSs32 mDNSPlatformGetServiceID(mDNS *const m, DNSQuestion *q)
+{
+    (void) m;
+    (void) q;
+    return 0;
+}
+
+mDNSexport void mDNSPlatformSetDelegatePID(UDPSocket *src, const mDNSAddr *dst, DNSQuestion *q)
+{
+    (void) src;
+    (void) dst;
+    (void) q;
+}
+
+mDNSexport mDNSs32 mDNSPlatformGetPID()
+{
+    return 0;
 }
 
 mDNSlocal void mDNSPosixAddToFDSet(int *nfds, fd_set *readfds, int s)

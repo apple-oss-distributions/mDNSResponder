@@ -15,12 +15,13 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/usr/sbin/mDNSResponder</string>
-		<string>-launchd</string>
 	</array>
 	<key>MachServices</key>
 	<dict>
 		<key>com.apple.mDNSResponder</key>
 		<true/>
+               <key>com.apple.mDNSResponder.dnsproxy</key>
+               <true/>
 	</dict>
 	<key>Sockets</key>
 	<dict>

@@ -195,6 +195,8 @@ xcopy /I/Y "$(TargetPath)"                                                      
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\mDNSCore\anonymous.c" />
+    <ClCompile Include="..\..\mDNSCore\CryptoAlg.c" />
     <ClCompile Include="..\..\mDNSCore\DNSCommon.c" />
     <ClCompile Include="..\..\mDNSCore\DNSDigest.c" />
     <ClCompile Include="..\..\mDNSShared\dnssd_ipc.c" />
@@ -209,6 +211,8 @@ xcopy /I/Y "$(TargetPath)"                                                      
     <ClCompile Include="..\..\mDNSCore\uDNS.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\mDNSCore\anonymous.h" />
+    <ClInclude Include="..\..\mDNSCore\CryptoAlg.h" />
     <ClInclude Include="..\..\mDNSCore\DNSCommon.h" />
     <ClInclude Include="..\..\mDNSShared\dnssd_ipc.h" />
     <ClInclude Include="..\..\mDNSWindows\Poll.h" />

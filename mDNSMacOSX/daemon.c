@@ -16,12 +16,8 @@
  *
  */
 
-// We set VERSION_MIN_REQUIRED to 10.4 to avoid "bootstrap_register is deprecated" warnings from bootstrap.h
-#define MAC_OS_X_VERSION_MIN_REQUIRED MAC_OS_X_VERSION_10_4
-
 #include <mach/mach.h>
 #include <mach/mach_error.h>
-#include <servers/bootstrap.h>
 #include <sys/types.h>
 #include <errno.h>
 #include <signal.h>
@@ -29,18 +25,18 @@
 #include <paths.h>
 #include <fcntl.h>
 #include <launch.h>
+#include <launch_priv.h>         // for launch_socket_service_check_in()
 #include <vproc.h>
 #include <pwd.h>
 #include <sys/event.h>
 #include <pthread.h>
 #include <sandbox.h>
 #include <SystemConfiguration/SCDynamicStoreCopyDHCPInfo.h>
-
-#if TARGET_OS_EMBEDDED
-#include <bootstrap_priv.h>
-
-#define bootstrap_register(A,B,C) bootstrap_register2((A),(B),(C),0)
-#endif
+#include <asl.h>
+#include <syslog.h>
+#include <err.h>
+#include <sysexits.h>
+#include <bootstrap_priv.h>      // for bootstrap_check_in() 
 
 #include "DNSServiceDiscoveryRequestServer.h"
 #include "DNSServiceDiscoveryReply.h"
@@ -50,9 +46,20 @@
 #include "mDNSMacOSX.h"             // Defines the specific types needed to run mDNS on this platform
 
 #include "uds_daemon.h"             // Interface to the server side implementation of dns_sd.h
+#include "xpc_services.h"           // Interface to XPC services
 
-#include <DNSServiceDiscovery/DNSServiceDiscovery.h>
+#include "../mDNSMacOSX/DNSServiceDiscovery.h"
 #include "helper.h"
+
+static aslclient log_client = NULL;
+static aslmsg log_msg = NULL;
+
+// Used on Embedded Side for Reading mDNSResponder Managed Preferences Profile
+#if TARGET_OS_EMBEDDED
+#define kmDNSEnableLoggingStr CFSTR("EnableLogging")
+#define kmDNSResponderPrefIDStr "com.apple.mDNSResponder.plist"
+#define kmDNSResponderPrefID CFSTR(kmDNSResponderPrefIDStr)
+#endif
 
 //*************************************************************************************************************
 #if COMPILER_LIKES_PRAGMA_MARK
@@ -68,7 +75,6 @@ static mDNS_PlatformSupport PlatformStorage;
 #define RR_CACHE_SIZE ((16*1024) / sizeof(CacheRecord))
 static CacheEntity rrcachestorage[RR_CACHE_SIZE];
 
-static const char kmDNSBootstrapName[] = "com.apple.mDNSResponderRestart";
 static mach_port_t m_port            = MACH_PORT_NULL;
 
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
@@ -77,8 +83,6 @@ mDNSlocal void PrepareForIdle(void *m_param);
 static mach_port_t client_death_port = MACH_PORT_NULL;
 static mach_port_t signal_port       = MACH_PORT_NULL;
 #endif // MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
-
-static mach_port_t server_priv_port  = MACH_PORT_NULL;
 
 static dnssd_sock_t *launchd_fds = mDNSNULL;
 static mDNSu32 launchd_fds_count = 0;
@@ -91,8 +95,6 @@ static mDNSu32 launchd_fds_count = 0;
 // even extra-slow clients a fair chance before we cut them off.
 #define MDNS_MM_TIMEOUT 250
 
-static int restarting_via_mach_init = 0;    // Used on Jaguar/Panther when daemon is started via mach_init mechanism
-static int started_via_launchdaemon = 0;    // Indicates we're running on Tiger or later, where daemon is managed by launchd
 static mDNSBool advertise = mDNS_Init_AdvertiseLocalAddresses; // By default, advertise addresses (& other records) via multicast
 
 extern mDNSBool StrictUnicastOrdering;
@@ -710,7 +712,7 @@ mDNSlocal mStatus AddDomainToBrowser(DNSServiceBrowser *browser, const domainnam
     AssignDomainName(&question->domain, d);
     question->next = browser->qlist;
     LogOperation("%5d: DNSServiceBrowse(%##s%##s) START", browser->ClientMachPort, browser->type.c, d->c);
-    err = mDNS_StartBrowse(&mDNSStorage, &question->q, &browser->type, d, mDNSInterface_Any, 0, mDNSfalse, mDNSfalse, FoundInstance, browser);
+    err = mDNS_StartBrowse(&mDNSStorage, &question->q, &browser->type, d, mDNSNULL, mDNSInterface_Any, 0, mDNSfalse, mDNSfalse, FoundInstance, browser);
     if (!err)
         browser->qlist = question;
     else
@@ -768,7 +770,7 @@ mDNSexport kern_return_t provide_DNSServiceBrowserCreate_rpc(mach_port_t unuseds
     // Check other parameters
     domainname t, d;
     t.c[0] = 0;
-    mDNSs32 NumSubTypes = ChopSubTypes(regtype);    // Note: Modifies regtype string to remove trailing subtypes
+    mDNSs32 NumSubTypes = ChopSubTypes(regtype, mDNSNULL);    // Note: Modifies regtype string to remove trailing subtypes
     if (NumSubTypes < 0 || NumSubTypes > 1)               { errormsg = "Bad Service SubType"; goto badparam; }
     if (NumSubTypes == 1 && !AppendDNSNameString(&t, regtype + strlen(regtype) + 1))
     { errormsg = "Bad Service SubType"; goto badparam; }
@@ -1052,7 +1054,7 @@ mDNSlocal mStatus AddServiceInstance(DNSServiceRegistration *x, const domainname
         { LogMsg("Requested addition of domain %##s already in list", domain->c); return mStatus_AlreadyRegistered; }
     }
 
-    SubTypes = AllocateSubTypes(x->NumSubTypes, x->regtype);
+    SubTypes = AllocateSubTypes(x->NumSubTypes, x->regtype, mDNSNULL);
     if (x->NumSubTypes && !SubTypes) return mStatus_NoMemoryErr;
 
     si = mallocL("ServiceInstance", sizeof(*si) - sizeof(RDataBody) + x->rdsize);
@@ -1063,6 +1065,7 @@ mDNSlocal mStatus AddServiceInstance(DNSServiceRegistration *x, const domainname
     si->autoname        = x->autoname;
     si->name            = x->autoname ? mDNSStorage.nicelabel : x->name;
     si->domain          = *domain;
+    si->srs.AnonData    = mDNSNULL;    
 
     err = mDNS_RegisterService(&mDNSStorage, &si->srs, &si->name, &x->type, domain, NULL,
                                x->port, x->txtinfo, x->txt_len, SubTypes, x->NumSubTypes, mDNSInterface_Any, RegCallback, si, 0);
@@ -1129,7 +1132,7 @@ mDNSexport kern_return_t provide_DNSServiceRegistrationCreate_rpc(mach_port_t un
     // Check for sub-types after the service type
     size_t reglen = strlen(regtype) + 1;
     if (reglen > MAX_ESCAPED_DOMAIN_NAME) { errormsg = "reglen too long"; goto badparam; }
-    mDNSs32 NumSubTypes = ChopSubTypes(regtype);    // Note: Modifies regtype string to remove trailing subtypes
+    mDNSs32 NumSubTypes = ChopSubTypes(regtype, mDNSNULL);    // Note: Modifies regtype string to remove trailing subtypes
     if (NumSubTypes < 0) { errormsg = "Bad Service SubType"; goto badparam; }
 
     // Check other parameters
@@ -1560,6 +1563,30 @@ fail:
 #pragma mark - Startup, shutdown, and supporting code
 #endif
 
+mDNSlocal void ExitCallback(int sig)
+{
+    (void)sig; // Unused
+    LogMsg("%s stopping", mDNSResponderVersionString);
+
+    debugf("ExitCallback: Aborting MIG clients");
+    while (DNSServiceDomainEnumerationList)
+        AbortClient(DNSServiceDomainEnumerationList->ClientMachPort, DNSServiceDomainEnumerationList);
+    while (DNSServiceBrowserList)
+        AbortClient(DNSServiceBrowserList->ClientMachPort, DNSServiceBrowserList);
+    while (DNSServiceResolverList)
+        AbortClient(DNSServiceResolverList->ClientMachPort, DNSServiceResolverList);
+    while (DNSServiceRegistrationList)
+        AbortClient(DNSServiceRegistrationList->ClientMachPort, DNSServiceRegistrationList);
+
+    if (udsserver_exit() < 0) 
+        LogMsg("ExitCallback: udsserver_exit failed");
+
+    debugf("ExitCallback: mDNS_StartExit");
+    mDNS_StartExit(&mDNSStorage);
+}
+
+#ifndef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
+
 mDNSlocal void DNSserverCallback(CFMachPortRef port, void *msg, CFIndex size, void *info)
 {
     mig_reply_error_t *request = msg;
@@ -1653,76 +1680,6 @@ done:
     KQueueUnlock(&mDNSStorage, "Mach client event");
 }
 
-mDNSlocal kern_return_t registerBootstrapService()
-{
-    kern_return_t status;
-    mach_port_t service_rcv_port;
-
-    LogMsg("Registering Bootstrap Service");
-
-    /*
-     * See if our service name is already registered and if we have privilege to check in.
-     */
-    status = bootstrap_check_in(bootstrap_port, (char*)kmDNSBootstrapName, &service_rcv_port);
-    if (status == KERN_SUCCESS)
-    {
-        /*
-         * If so, we must be a followup instance of an already defined server.  In that case,
-         * the bootstrap port we inherited from our parent is the server's privilege port, so set
-         * that in case we have to unregister later (which requires the privilege port).
-         */
-        server_priv_port = bootstrap_port;
-        restarting_via_mach_init = TRUE;
-    }
-    else
-    {
-        LogMsg("registerBootstrapService: ERROR!! Registering Bootstrap Service failed %d", status);
-        return status;
-    }
-
-    /*
-     * We have no intention of responding to requests on the service port.  We are not otherwise
-     * a Mach port-based service.  We are just using this mechanism for relaunch facilities.
-     * So, we can dispose of all the rights we have for the service port.  We don't destroy the
-     * send right for the server's privileged bootstrap port - in case we have to unregister later.
-     */
-    mach_port_destroy(mach_task_self(), service_rcv_port);
-    return status;
-}
-
-mDNSlocal kern_return_t destroyBootstrapService()
-{
-    debugf("Destroying Bootstrap Service");
-    return bootstrap_register(server_priv_port, (char*)kmDNSBootstrapName, MACH_PORT_NULL);
-}
-
-mDNSlocal void ExitCallback(int sig)
-{
-    (void)sig; // Unused
-    LogMsg("%s stopping", mDNSResponderVersionString);
-
-    debugf("ExitCallback");
-    if (!mDNS_DebugMode && !started_via_launchdaemon)
-        destroyBootstrapService();
-
-    debugf("ExitCallback: Aborting MIG clients");
-    while (DNSServiceDomainEnumerationList)
-        AbortClient(DNSServiceDomainEnumerationList->ClientMachPort, DNSServiceDomainEnumerationList);
-    while (DNSServiceBrowserList)
-        AbortClient(DNSServiceBrowserList->ClientMachPort, DNSServiceBrowserList);
-    while (DNSServiceResolverList)
-        AbortClient(DNSServiceResolverList->ClientMachPort, DNSServiceResolverList);
-    while (DNSServiceRegistrationList)
-        AbortClient(DNSServiceRegistrationList->ClientMachPort, DNSServiceRegistrationList);
-
-    if (udsserver_exit() < 0) LogMsg("ExitCallback: udsserver_exit failed");
-
-    debugf("ExitCallback: mDNS_StartExit");
-    mDNS_StartExit(&mDNSStorage);
-}
-
-#ifndef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
-
 // Send a mach_msg to ourselves (since that is signal safe) telling us to cleanup and exit
 mDNSlocal void HandleSIG(int sig)
 {
@@ -1751,43 +1708,19 @@ mDNSlocal void HandleSIG(int sig)
 mDNSlocal void INFOCallback(void)
 {
     mDNSs32 utc = mDNSPlatformUTC();
-    DNSServiceDomainEnumeration *e;
-    DNSServiceBrowser           *b;
-    DNSServiceResolver          *l;
-    DNSServiceRegistration      *r;
     NetworkInterfaceInfoOSX     *i;
     DNSServer *s;
     McastResolver *mr;
 
+    // Create LoggerID(Key)->com.apple.networking.mDNSResponder(Value) pair when SIGINFO is received.
+    // This key-value pair is used as a condition by syslogd to Log to com.apple.networking.mDNSResponder.log file
+    // present in /etc/asl/com.apple.networking.mDNSResponder.
+    asl_set(log_msg, "LoggerID", "com.apple.networking.mDNSResponder");
+
     LogMsg("---- BEGIN STATE LOG ---- %s %s %d", mDNSResponderVersionString, OSXVers ? "OSXVers" : "iOSVers", OSXVers ? OSXVers : iOSVers);
 
     udsserver_info(&mDNSStorage);
-
-    LogMsgNoIdent("--------- Mach Clients ---------");
-    if (!DNSServiceDomainEnumerationList && !DNSServiceBrowserList && !DNSServiceResolverList && !DNSServiceRegistrationList)
-        LogMsgNoIdent("<None>");
-    else
-    {
-        for (e = DNSServiceDomainEnumerationList; e; e=e->next)
-            LogMsgNoIdent("%5d: Mach DomainEnumeration   %##s", e->ClientMachPort, e->dom.qname.c);
-
-        for (b = DNSServiceBrowserList; b; b=b->next)
-        {
-            DNSServiceBrowserQuestion *qptr;
-            for (qptr = b->qlist; qptr; qptr = qptr->next)
-                LogMsgNoIdent("%5d: Mach ServiceBrowse       %##s", b->ClientMachPort, qptr->q.qname.c);
-        }
-
-        for (l = DNSServiceResolverList; l; l=l->next)
-            LogMsgNoIdent("%5d: Mach ServiceResolve      %##s", l->ClientMachPort, l->i.name.c);
-
-        for (r = DNSServiceRegistrationList; r; r=r->next)
-        {
-            ServiceInstance *si;
-            for (si = r->regs; si; si = si->next)
-                LogMsgNoIdent("%5d: Mach ServiceInstance     %##s %u", si->ClientMachPort, si->srs.RR_SRV.resrec.name->c, mDNSVal16(si->srs.RR_SRV.resrec.rdata->u.srv.port));
-        }
-    }
+    xpcserver_info(&mDNSStorage);
 
     LogMsgNoIdent("----- KQSocketEventSources -----");
     if (!gEventSources) LogMsgNoIdent("<None>");
@@ -1795,10 +1728,7 @@ mDNSlocal void INFOCallback(void)
     {
         KQSocketEventSource *k;
         for (k = gEventSources; k; k=k->next)
-        {
-            LogMsgNoIdent("%3d %s", k->fd, k->kqs.KQtask);
-            usleep((mDNSStorage.KnownBugs & mDNS_KnownBug_LossySyslog) ? 3333 : 1000);
-        }
+            LogMsgNoIdent("%3d %s %s", k->fd, k->kqs.KQtask, k->fd == mDNSStorage.uds_listener_skt ? "Listener for incoming UDS clients" : " ");
     }
 
     LogMsgNoIdent("------ Network Interfaces ------");
@@ -1824,9 +1754,9 @@ mDNSlocal void INFOCallback(void)
                               i->ifinfo.IPv4Available ? "v4" : "  ",
                               i->ifinfo.IPv4Available ? (mDNSv4Addr*)&i->ifa_v4addr : &zerov4Addr,
                               i->ifinfo.IPv6Available ? "v6" : "  ",
-                              i->ifinfo.Advertise ? "⊙" : " ",
-                              i->ifinfo.McastTxRx ? "⇆" : " ",
-                              !(i->ifinfo.InterfaceActive && i->ifinfo.NetWake) ? " " : !sps[0] ? "☼" : "☀",
+                              i->ifinfo.Advertise ? "A" : " ",
+                              i->ifinfo.McastTxRx ? "M" : " ",
+                              !(i->ifinfo.InterfaceActive && i->ifinfo.NetWake) ? " " : !sps[0] ? "p" : "P",
                               &i->ifinfo.ip);
 
                 if (sps[0]) LogMsgNoIdent("  %13d %#s", SPSMetric(sps[0]->resrec.rdata->u.name.c), sps[0]->resrec.rdata->u.name.c);
@@ -1836,23 +1766,31 @@ mDNSlocal void INFOCallback(void)
         }
     }
 
-    LogMsgNoIdent("--------- DNS Servers ----------");
+    LogMsgNoIdent("--------- DNS Servers(%d) ----------", NumUnicastDNSServers);
     if (!mDNSStorage.DNSServers) LogMsgNoIdent("<None>");
     else
     {
         for (s = mDNSStorage.DNSServers; s; s = s->next)
         {
             NetworkInterfaceInfoOSX *ifx = IfindexToInterfaceInfoOSX(&mDNSStorage, s->interface);
-            LogMsgNoIdent("DNS Server %##s %s%s%#a:%d %d %s %d %d %s",
+            LogMsgNoIdent("DNS Server %##s %s%s%#a:%d %d %s %d %d %s %s %s %s %s",
                           s->domain.c, ifx ? ifx->ifinfo.ifname : "", ifx ? " " : "", &s->addr, mDNSVal16(s->port),
-                          s->penaltyTime ? s->penaltyTime - mDNS_TimeNow(&mDNSStorage) : 0, s->scoped ? "Scoped" : "",
+                          s->penaltyTime ? s->penaltyTime - mDNS_TimeNow(&mDNSStorage) : 0, DNSScopeToString(s->scoped),
                           s->timeout, s->resGroupID,
                           s->teststate == DNSServer_Untested ? "(Untested)" :
                           s->teststate == DNSServer_Passed   ? ""           :
                           s->teststate == DNSServer_Failed   ? "(Failed)"   :
-                          s->teststate == DNSServer_Disabled ? "(Disabled)" : "(Unknown state)");
+                          s->teststate == DNSServer_Disabled ? "(Disabled)" : "(Unknown state)",
+                          s->req_A ? "v4" : "!v4",  
+                          s->req_AAAA ? "v6" : "!v6",
+                          s->cellIntf ? "cell" : "!cell",
+                          s->DNSSECAware ? "DNSSECAware" : "!DNSSECAware");
         }
     }
+    mDNSs32 now = mDNS_TimeNow(&mDNSStorage);
+    LogMsgNoIdent("v4answers %d", mDNSStorage.p->v4answers);
+    LogMsgNoIdent("v6answers %d", mDNSStorage.p->v6answers);
+    LogMsgNoIdent("Last DNS Trigger: %d ms ago", (now - mDNSStorage.p->DNSTrigger));
 
     LogMsgNoIdent("--------- Mcast Resolvers ----------");
     if (!mDNSStorage.McastResolvers) LogMsgNoIdent("<None>");
@@ -1862,11 +1800,154 @@ mDNSlocal void INFOCallback(void)
             LogMsgNoIdent("Mcast Resolver %##s timeout %u", mr->domain.c, mr->timeout);
     }
 
-    mDNSs32 now = mDNS_TimeNow(&mDNSStorage);
     LogMsgNoIdent("Timenow 0x%08lX (%d)", (mDNSu32)now, now);
-
     LogMsg("----  END STATE LOG  ---- %s %s %d", mDNSResponderVersionString, OSXVers ? "OSXVers" : "iOSVers", OSXVers ? OSXVers : iOSVers);
+    
+    // If logging is disabled, only then clear the key we set at the top of this func
+    if (!mDNS_LoggingEnabled)
+        asl_unset(log_msg, "LoggerID");
 }
+
+mDNSlocal void DebugSetFilter()
+{
+    if (!log_client)
+        return;
+
+    // When USR1 is turned on, we log only the LOG_WARNING and LOG_NOTICE messages by default.
+    // The user has to manually do "syslog -c mDNSResponder -i" to get the LOG_INFO messages
+    // also to be logged. Most of the times, we need the INFO level messages for debugging.
+    // Hence, we set the filter to INFO level when USR1 logging is turned on to avoid 
+    // having the user to do this extra step manually. 
+
+    if (mDNS_LoggingEnabled)
+    {
+        asl_set_filter(log_client, ASL_FILTER_MASK_UPTO(ASL_LEVEL_INFO));
+        asl_set(log_msg, "LoggerID", "com.apple.networking.mDNSResponder");
+        // Create LoggerID(Key)->com.apple.networking.mDNSResponder(Value) pair when USR1 Logging is Enabled.
+        // This key-value pair is used as a condition by syslogd to Log to com.apple.networking.mDNSResponder.log file
+        // present in /etc/asl/com.apple.networking.mDNSResponder.
+    }
+    else
+    {
+        asl_set_filter(log_client, ASL_FILTER_MASK_UPTO(ASL_LEVEL_ERR));
+        asl_unset(log_msg, "LoggerID");
+        // Clear the key-value pair when USR1 Logging is Disabled, as we do not want to log to 
+        // com.apple.networking.mDNSResponder.log file in this case.
+    }
+}
+
+mDNSexport void mDNSPlatformLogToFile(int log_level, const char *buffer)
+{
+    int asl_level = ASL_LEVEL_ERR;
+
+    if (!log_client)
+    {
+        syslog(log_level, "%s", buffer);
+        return;
+    }
+    switch (log_level)
+    {
+        case LOG_ERR:
+            asl_level = ASL_LEVEL_ERR;
+            break;
+        case LOG_WARNING:
+            asl_level = ASL_LEVEL_WARNING;
+            break;
+        case LOG_NOTICE:
+            asl_level = ASL_LEVEL_NOTICE;
+            break;
+        case LOG_INFO:
+            asl_level = ASL_LEVEL_INFO;
+            break;
+        case LOG_DEBUG:
+            asl_level = ASL_LEVEL_DEBUG;
+            break;
+        default:
+            break;
+    }
+    asl_log(log_client, log_msg, asl_level, "%s", buffer);
+}
+
+// Writes the state out to the dynamic store and also affects the ASL filter level
+mDNSexport void UpdateDebugState()
+{
+    mDNSu32 one  = 1;
+    mDNSu32 zero = 0;
+
+    CFMutableDictionaryRef dict = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    if (!dict)
+    {
+        LogMsg("UpdateDebugState: Could not create dict");
+        return;
+    }
+
+    CFNumberRef numOne = CFNumberCreate(NULL, kCFNumberSInt32Type, &one);
+    if (!numOne)
+    {
+        LogMsg("UpdateDebugState: Could not create CFNumber one");
+        return;
+    }
+    CFNumberRef numZero = CFNumberCreate(NULL, kCFNumberSInt32Type, &zero);
+    if (!numZero)
+    {
+        LogMsg("UpdateDebugState: Could not create CFNumber zero");
+        CFRelease(numOne);
+        return;
+    }
+
+    if (mDNS_LoggingEnabled)
+        CFDictionarySetValue(dict, CFSTR("VerboseLogging"), numOne);
+    else
+        CFDictionarySetValue(dict, CFSTR("VerboseLogging"), numZero);
+
+    if (mDNS_PacketLoggingEnabled)
+        CFDictionarySetValue(dict, CFSTR("PacketLogging"), numOne);
+    else
+        CFDictionarySetValue(dict, CFSTR("PacketLogging"), numZero);
+
+    if (mDNS_McastLoggingEnabled)
+        CFDictionarySetValue(dict, CFSTR("McastLogging"), numOne);
+    else
+        CFDictionarySetValue(dict, CFSTR("McastLogging"), numZero);
+
+    if (mDNS_McastTracingEnabled)
+        CFDictionarySetValue(dict, CFSTR("McastTracing"), numOne);
+    else 
+        CFDictionarySetValue(dict, CFSTR("McastTracing"), numZero);
+
+    CFRelease(numOne);
+    CFRelease(numZero);
+    mDNSDynamicStoreSetConfig(kmDNSDebugState, mDNSNULL, dict);
+    CFRelease(dict);
+    // If we turned off USR1 logging, we need to reset the filter
+    DebugSetFilter();
+}
+
+#if TARGET_OS_EMBEDDED
+mDNSlocal void Prefschanged()
+{
+    mDNSBool mDNSProf_installed;
+    LogMsg("Prefschanged: mDNSResponder Managed Preferences have changed");
+    mDNSProf_installed = GetmDNSManagedPref(kmDNSEnableLoggingStr);
+    dispatch_async(dispatch_get_main_queue(), 
+        ^{ 
+            if (mDNSProf_installed)
+            {
+                mDNS_LoggingEnabled = mDNS_PacketLoggingEnabled = 1;
+            }
+            else
+            {
+                LogMsg("Prefschanged: mDNSDebugProfile is uninstalled -> Turning OFF USR1/USR2 Logging with SIGINFO o/p");
+                INFOCallback();
+                mDNS_LoggingEnabled = mDNS_PacketLoggingEnabled = 0;
+            }
+            UpdateDebugState();
+            // If Logging Enabled: Start Logging to com.apple.networking.mDNSResponder.log (has to be LogInfo)
+            LogInfo("Prefschanged: mDNSDebugProfile is installed -> Turned ON USR1/USR2 Logging");
+         });
+    return;
+}
+#endif //TARGET_OS_EMBEDDED
 
 #ifndef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 
@@ -1882,6 +1963,10 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
     KQueueLock(m);
     switch(msg_header->msgh_id)
     {
+    case SIGURG:
+        m->mDNSOppCaching = m->mDNSOppCaching ? mDNSfalse : mDNStrue;
+        LogMsg("SIGURG: Opportunistic Caching %s", m->mDNSOppCaching ? "Enabled" : "Disabled");
+        // FALL THROUGH to purge the cache so that we re-do the caching based on the new setting
     case SIGHUP:    {
         mDNSu32 slot;
         CacheGroup *cg;
@@ -1902,13 +1987,26 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
     case SIGUSR1:   mDNS_LoggingEnabled = mDNS_LoggingEnabled ? 0 : 1;
         LogMsg("SIGUSR1: Logging %s", mDNS_LoggingEnabled ? "Enabled" : "Disabled");
         WatchDogReportingThreshold = mDNS_LoggingEnabled ? 50 : 250;
+        UpdateDebugState();
+        // If Logging Enabled: Start Logging to com.apple.networking.mDNSResponder.log 
+        LogInfo("USR1 Logging Enabled: Start Logging to mDNSResponder Log file"); 
         break;
     case SIGUSR2:   mDNS_PacketLoggingEnabled = mDNS_PacketLoggingEnabled ? 0 : 1;
         LogMsg("SIGUSR2: Packet Logging %s", mDNS_PacketLoggingEnabled ? "Enabled" : "Disabled");
+        mDNS_McastTracingEnabled = (mDNS_PacketLoggingEnabled && mDNS_McastLoggingEnabled) ? mDNStrue : mDNSfalse;
+        LogInfo("SIGUSR2: Multicast Tracing is %s", mDNS_McastTracingEnabled ? "Enabled" : "Disabled");
+        UpdateDebugState();
         break;
-    case SIGIO:
-        m->mDNSHandlePeerEvents = m->mDNSHandlePeerEvents ? mDNSfalse : mDNStrue;
-        LogMsg("SIGIO: Handle AWDL Peer Events %s", m->mDNSHandlePeerEvents ? "Enabled" : "Disabled");
+    case SIGPROF:  mDNS_McastLoggingEnabled = mDNS_McastLoggingEnabled ? mDNSfalse : mDNStrue;
+        LogMsg("SIGPROF: Multicast Logging %s", mDNS_McastLoggingEnabled ? "Enabled" : "Disabled");
+        LogMcastStateInfo(m, mDNSfalse, mDNStrue, mDNStrue);
+        mDNS_McastTracingEnabled = (mDNS_PacketLoggingEnabled && mDNS_McastLoggingEnabled) ? mDNStrue : mDNSfalse;
+        LogMsg("SIGPROF: Multicast Tracing is %s", mDNS_McastTracingEnabled ? "Enabled" : "Disabled");
+        UpdateDebugState();
+        break;
+    case SIGTSTP:  mDNS_LoggingEnabled = mDNS_PacketLoggingEnabled = mDNS_McastLoggingEnabled = mDNS_McastTracingEnabled = mDNSfalse;
+        LogMsg("All mDNSResponder Debug Logging/Tracing Disabled (USR1/USR2/PROF)");
+        UpdateDebugState();
         break;
 
     default: LogMsg("SignalCallback: Unknown signal %d", msg_header->msgh_id); break;
@@ -1916,34 +2014,15 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
     KQueueUnlock(m, "Unix Signal");
 }
 
-// On 10.2 the MachServerName is DNSServiceDiscoveryServer
-// On 10.3 and later, the MachServerName is com.apple.mDNSResponder
+// MachServerName is com.apple.mDNSResponder (Supported only till 10.9.x)
 mDNSlocal kern_return_t mDNSDaemonInitialize(void)
 {
     mStatus err;
     CFMachPortRef s_port;
     CFRunLoopSourceRef s_rls;
     CFRunLoopSourceRef d_rls;
-
-    // If launchd already created our Mach port for us, then use that, else we create a new one of our own
-    if (m_port != MACH_PORT_NULL)
-        s_port = CFMachPortCreateWithPort(NULL, m_port, DNSserverCallback, NULL, NULL);
-    else
-    {
-        s_port = CFMachPortCreate(NULL, DNSserverCallback, NULL, NULL);
-        m_port = CFMachPortGetPort(s_port);
-        kern_return_t status = bootstrap_register(bootstrap_port, "com.apple.mDNSResponder", m_port);
-
-        if (status)
-        {
-            if (status == 1103)
-                LogMsg("bootstrap_register() failed: A copy of the daemon is apparently already running");
-            else
-                LogMsg("bootstrap_register() failed: %d %X %s", status, status, mach_error_string(status));
-            return(status);
-        }
-    }
-
+    
+    s_port = CFMachPortCreateWithPort(NULL, m_port, DNSserverCallback, NULL, NULL);
     CFMachPortRef d_port = CFMachPortCreate(NULL, ClientDeathCallback, NULL, NULL);
 
     err = mDNS_Init(&mDNSStorage, &PlatformStorage,
@@ -1954,7 +2033,7 @@ mDNSlocal kern_return_t mDNSDaemonInitialize(void)
     if (err) { LogMsg("Daemon start: mDNS_Init failed %d", err); return(err); }
 
     client_death_port = CFMachPortGetPort(d_port);
-
+	
     s_rls  = CFMachPortCreateRunLoopSource(NULL, s_port, 0);
     CFRunLoopAddSource(PlatformStorage.CFRunLoop, s_rls, kCFRunLoopDefaultMode);
     CFRelease(s_rls);
@@ -2008,9 +2087,11 @@ mDNSlocal void SignalDispatch(dispatch_source_t source)
     case SIGUSR1:   mDNS_LoggingEnabled = mDNS_LoggingEnabled ? 0 : 1;
         LogMsg("SIGUSR1: Logging %s", mDNS_LoggingEnabled ? "Enabled" : "Disabled");
         WatchDogReportingThreshold = mDNS_LoggingEnabled ? 50 : 250;
+        UpdateDebugState();
         break;
     case SIGUSR2:   mDNS_PacketLoggingEnabled = mDNS_PacketLoggingEnabled ? 0 : 1;
         LogMsg("SIGUSR2: Packet Logging %s", mDNS_PacketLoggingEnabled ? "Enabled" : "Disabled");
+        UpdateDebugState();
         break;
     default: LogMsg("SignalCallback: Unknown signal %d", sig); break;
     }
@@ -2039,28 +2120,8 @@ mDNSlocal void mDNSSetupSignal(dispatch_queue_t queue, int sig)
 mDNSlocal kern_return_t mDNSDaemonInitialize(void)
 {
     mStatus err;
-    CFMachPortRef s_port;
     dispatch_source_t mach_source;
     dispatch_queue_t queue = dispatch_get_main_queue();
-
-    // If launchd already created our Mach port for us, then use that, else we create a new one of our own
-    if (m_port != MACH_PORT_NULL)
-        s_port = CFMachPortCreateWithPort(NULL, m_port, DNSserverCallback, NULL, NULL);
-    else
-    {
-        s_port = CFMachPortCreate(NULL, DNSserverCallback, NULL, NULL);
-        m_port = CFMachPortGetPort(s_port);
-        kern_return_t status = bootstrap_register(bootstrap_port, "com.apple.mDNSResponder", m_port);
-
-        if (status)
-        {
-            if (status == 1103)
-                LogMsg("bootstrap_register() failed: A copy of the daemon is apparently already running");
-            else
-                LogMsg("bootstrap_register() failed: %d %X %s", status, status, mach_error_string(status));
-            return(status);
-        }
-    }
 
     err = mDNS_Init(&mDNSStorage, &PlatformStorage,
                     rrcachestorage, RR_CACHE_SIZE,
@@ -2083,7 +2144,7 @@ mDNSlocal kern_return_t mDNSDaemonInitialize(void)
     mDNSSetupSignal(queue, SIGINFO);
     mDNSSetupSignal(queue, SIGUSR1);
     mDNSSetupSignal(queue, SIGUSR2);
-    mDNSSetupSignal(queue, SIGIO);
+    mDNSSetupSignal(queue, SIGURG);
 
     // Create a custom handler for doing the housekeeping work. This is either triggered
     // by the timer or an event source
@@ -2427,6 +2488,16 @@ mDNSlocal mDNSBool AllowSleepNow(mDNS *const m, mDNSs32 now)
            m->p->SleepCookie, ready ? "ready for sleep" : "giving up", now, m->SleepLimit - now);
 
     m->SleepLimit = 0;  // Don't clear m->SleepLimit until after we've logged it above
+    m->TimeSlept = mDNSPlatformUTC();
+
+    // accumulate total time awake for this statistics gathering interval
+    if (m->StatStartTime)
+    {
+        m->ActiveStatTime += (m->TimeSlept - m->StatStartTime);
+
+        // indicate this value is invalid until reinitialzed on wakeup
+        m->StatStartTime = 0;
+    }
 
 #if !TARGET_OS_EMBEDDED && defined(kIOPMAcknowledgmentOptionSystemCapabilityRequirements)
     if (m->p->IOPMConnection) IOPMConnectionAcknowledgeEventWithOptions(m->p->IOPMConnection, m->p->SleepCookie, opts);
@@ -2668,21 +2739,16 @@ mDNSlocal void * KQueueLoop(void *m_param)
 
 mDNSlocal void LaunchdCheckin(void)
 {
-    launch_data_t msg  = launch_data_new_string(LAUNCH_KEY_CHECKIN);
-    launch_data_t resp = launch_msg(msg);
-    launch_data_free(msg);
-    if (!resp) { LogMsg("launch_msg returned NULL"); return; }
-
-    if (launch_data_get_type(resp) == LAUNCH_DATA_ERRNO)
-    {
-        int err = launch_data_get_errno(resp);
-        // When running on Tiger with "ServiceIPC = false", we get "err == EACCES" to tell us there's no launchdata to fetch
-        if (err != EACCES) LogMsg("launch_msg returned %d", err);
-        else LogInfo("Launchd provided no launchdata; will open Mach port and Unix Domain Socket explicitly...", err);
+    // Ask launchd for our socket
+    launch_data_t resp_sd = launch_socket_service_check_in();
+    if (!resp_sd)
+    { 
+        LogMsg("launch_socket_service_check_in returned NULL");
+        return; 
     }
     else
     {
-        launch_data_t skts = launch_data_dict_lookup(resp, LAUNCH_JOBKEY_SOCKETS);
+        launch_data_t skts = launch_data_dict_lookup(resp_sd, LAUNCH_JOBKEY_SOCKETS);
         if (!skts) LogMsg("launch_data_dict_lookup LAUNCH_JOBKEY_SOCKETS returned NULL");
         else
         {
@@ -2719,58 +2785,29 @@ mDNSlocal void LaunchdCheckin(void)
                 }
             }
         }
-
-        launch_data_t ports = launch_data_dict_lookup(resp, "MachServices");
-        if (!ports) LogMsg("launch_data_dict_lookup MachServices returned NULL");
-        else
-        {
-            launch_data_t p = launch_data_dict_lookup(ports, "com.apple.mDNSResponder");
-            if (!p) LogInfo("launch_data_dict_lookup(ports, \"com.apple.mDNSResponder\") returned NULL");
-            else
-            {
-                m_port = launch_data_get_fd(p);
-                LogInfo("Launchd Mach Port: %d", m_port);
-                if (m_port == ~0U) m_port = MACH_PORT_NULL;
-            }
-        }
     }
-    launch_data_free(resp);
+    launch_data_free(resp_sd);
 }
 
-mDNSlocal void DropPrivileges(void)
+static mach_port_t RegisterMachService(const char *service_name) 
 {
-    static const char login[] = "_mdnsresponder";
-    struct passwd *pwd = getpwnam(login);
-    if (NULL == pwd)
-        LogMsg("Could not find account name \"%s\". Running as root.", login);
-    else
-    {
-        uid_t uid = pwd->pw_uid;
-        gid_t gid = pwd->pw_gid;
+    mach_port_t port = MACH_PORT_NULL;
+    kern_return_t kr; 
 
-        LogMsg("Started as root. Switching to userid \"%s\".", login);
+    if (KERN_SUCCESS != (kr = bootstrap_check_in(bootstrap_port, (char *)service_name, &port)))
+    {   
+        LogMsg("RegisterMachService: %d %X %s", kr, kr, mach_error_string(kr));
+        return MACH_PORT_NULL;
+    }   
+    
+    if (KERN_SUCCESS != (kr = mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND)))
+    {   
+        LogMsg("RegisterMachService: %d %X %s", kr, kr, mach_error_string(kr));
+        mach_port_deallocate(mach_task_self(), port);
+        return MACH_PORT_NULL;
+    }   
 
-        if (unlink(MDNS_UDS_SERVERPATH) < 0 && errno != ENOENT) LogMsg("DropPrivileges: Could not unlink \"%s\": (%d) %s", MDNS_UDS_SERVERPATH, errno, strerror(errno));
-        else
-        {
-            static char path[] = "/var/run/mdns/mDNSResponder";
-            char *p = strrchr(path, '/');
-            *p = '\0';
-            if (mkdir(path, 0755) < 0 && errno != EEXIST) LogMsg("DropPrivileges: Could not create directory \"%s\": (%d) %s", path, errno, strerror(errno));
-            else if (chown(path, uid, gid) < 0) LogMsg("DropPrivileges: Could not chown directory \"%s\": (%d) %s", path, errno, strerror(errno));
-            else
-            {
-                *p = '/';
-                if (unlink(path) < 0 && errno != ENOENT) LogMsg("DropPrivileges: Could not unlink \"%s\": (%d) %s", path, errno, strerror(errno));
-                else if (symlink(path, MDNS_UDS_SERVERPATH) < 0) LogMsg("DropPrivileges: Could not symlink \"%s\" -> \"%s\": (%d) %s", MDNS_UDS_SERVERPATH, path, errno, strerror(errno));
-                else LogInfo("DropPrivileges: Created subdirectory and symlink");
-            }
-        }
-
-        if (0 != initgroups(login, gid)) LogMsg("initgroups(\"%s\", %lu) failed.  Continuing.", login,        (unsigned long)gid);
-        if (0 != setgid(gid)) LogMsg("setgid(%lu) failed.  Continuing with group %lu privileges.", (unsigned long)getegid());
-        if (0 != setuid(uid)) LogMsg("setuid(%lu) failed. Continuing as root after all.",          (unsigned long)uid);
-    }
+    return port;
 }
 
 extern int sandbox_init(const char *profile, uint64_t flags, char **errorbuf) __attribute__((weak_import));
@@ -2795,13 +2832,15 @@ mDNSexport int main(int argc, char **argv)
     LogMsg("block wastage       %d", 16*1024 - sizeof(CacheEntity) * RR_CACHE_SIZE);
 #endif
 
-    if (0 == geteuid()) DropPrivileges();
+    if (0 == geteuid())
+    {
+        LogMsg("mDNSResponder cannot be run as root !! Exiting..");
+        return -1;
+    }
 
     for (i=1; i<argc; i++)
     {
         if (!strcasecmp(argv[i], "-d"                        )) mDNS_DebugMode            = mDNStrue;
-        if (!strcasecmp(argv[i], "-launchd"                  )) started_via_launchdaemon  = mDNStrue;
-        if (!strcasecmp(argv[i], "-launchdaemon"             )) started_via_launchdaemon  = mDNStrue;
         if (!strcasecmp(argv[i], "-NoMulticastAdvertisements")) advertise                 = mDNS_Init_DontAdvertiseLocalAddresses;
         if (!strcasecmp(argv[i], "-DisableSleepProxyClient"  )) DisableSleepProxyClient   = mDNStrue;
         if (!strcasecmp(argv[i], "-DebugLogging"             )) mDNS_LoggingEnabled       = mDNStrue;
@@ -2821,34 +2860,21 @@ mDNSexport int main(int argc, char **argv)
 
     signal(SIGHUP,  HandleSIG);     // (Debugging) Purge the cache to check for cache handling bugs
     signal(SIGINT,  HandleSIG);     // Ctrl-C: Detach from Mach BootstrapService and exit cleanly
-    signal(SIGPIPE, SIG_IGN  );     // Don't want SIGPIPE signals -- we'll handle EPIPE errors directly
+    signal(SIGPIPE,   SIG_IGN);     // Don't want SIGPIPE signals -- we'll handle EPIPE errors directly
     signal(SIGTERM, HandleSIG);     // Machine shutting down: Detach from and exit cleanly like Ctrl-C
     signal(SIGINFO, HandleSIG);     // (Debugging) Write state snapshot to syslog
     signal(SIGUSR1, HandleSIG);     // (Debugging) Enable Logging
     signal(SIGUSR2, HandleSIG);     // (Debugging) Enable Packet Logging
-    signal(SIGIO, HandleSIG);       // (Debugging) Toggle AWDL Peer Event Handling
+    signal(SIGURG,  HandleSIG);     // (Debugging) Toggle Opportunistic Caching
+    signal(SIGPROF, HandleSIG);     // (Debugging) Toggle Multicast Logging
+    signal(SIGTSTP, HandleSIG);     // (Debugging) Disable all Debug Logging (USR1/USR2/PROF)
 
 #endif // MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 
     mDNSStorage.p = &PlatformStorage;   // Make sure mDNSStorage.p is set up, because validatelists uses it
+    // Need to Start XPC Server Before LaunchdCheckin() (Reason: rdar11023750)
+    xpc_server_init();
     LaunchdCheckin();
-
-    // Register the server with mach_init for automatic restart only during normal (non-debug) mode
-    if (!mDNS_DebugMode && !started_via_launchdaemon)
-    {
-        registerBootstrapService();
-        if (!restarting_via_mach_init) exit(0); // mach_init will restart us immediately as a daemon
-        int fd = open(_PATH_DEVNULL, O_RDWR, 0);
-        if (fd < 0) LogMsg("open(_PATH_DEVNULL, O_RDWR, 0) failed errno %d (%s)", errno, strerror(errno));
-        else
-        {
-            // Avoid unnecessarily duplicating a file descriptor to itself
-            if (fd != STDIN_FILENO) if (dup2(fd, STDIN_FILENO)  < 0) LogMsg("dup2(fd, STDIN_FILENO)  failed errno %d (%s)", errno, strerror(errno));
-            if (fd != STDOUT_FILENO) if (dup2(fd, STDOUT_FILENO) < 0) LogMsg("dup2(fd, STDOUT_FILENO) failed errno %d (%s)", errno, strerror(errno));
-            if (fd != STDERR_FILENO) if (dup2(fd, STDERR_FILENO) < 0) LogMsg("dup2(fd, STDERR_FILENO) failed errno %d (%s)", errno, strerror(errno));
-            if (fd != STDIN_FILENO && fd != STDOUT_FILENO && fd != STDERR_FILENO) (void)close(fd);
-        }
-    }
 
 #ifndef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 
@@ -2885,7 +2911,15 @@ mDNSexport int main(int argc, char **argv)
         uint64_t sandbox_flags = SANDBOX_NAMED;
 
         int sandbox_err = sandbox_init("mDNSResponder", sandbox_flags, &sandbox_msg);
-        if (sandbox_err) { LogMsg("WARNING: sandbox_init error %s", sandbox_msg); sandbox_free_error(sandbox_msg); }
+        if (sandbox_err)
+        {
+            LogMsg("WARNING: sandbox_init error %s", sandbox_msg);
+            // If we have errors in the sandbox during development, to prevent
+            // exiting, uncomment the following line.
+            //sandbox_free_error(sandbox_msg);
+
+            errx(EX_OSERR, "sandbox_init() failed: %s", sandbox_msg);
+        }
         else LogInfo("Now running under Apple Sandbox restrictions");
     }
 #endif // MDNS_NO_SANDBOX
@@ -2897,13 +2931,32 @@ mDNSexport int main(int argc, char **argv)
     vproc_transaction_t vt = vproc_transaction_begin(NULL);
     if (vt) vproc_transaction_end(NULL, vt);
 
+    m_port = RegisterMachService(kmDNSResponderServName);
+    // We should ALWAYS receive our Mach port from RegisterMachService() but sanity check before initializing daemon 
+    if (m_port == MACH_PORT_NULL)
+    {
+        LogMsg("! MACH PORT IS NULL ! bootstrap_checkin failed to give a mach port");
+        return -1;
+    }    
+
     status = mDNSDaemonInitialize();
     if (status) { LogMsg("Daemon start: mDNSDaemonInitialize failed"); goto exit; }
 
     status = udsserver_init(launchd_fds, launchd_fds_count);
     if (status) { LogMsg("Daemon start: udsserver_init failed"); goto exit; }
 
+    log_client = asl_open(NULL, "mDNSResponder", 0);
+    log_msg = asl_new(ASL_TYPE_MSG);
+	
+#if TARGET_OS_EMBEDDED
+    _scprefs_observer_watch(scprefs_observer_type_global, kmDNSResponderPrefIDStr, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),  
+                                                ^{   
+                                                    Prefschanged();
+                                                 });
+#endif
+
     mDNSMacOSXNetworkChanged(&mDNSStorage);
+    UpdateDebugState();
 
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
     LogInfo("Daemon Start: Using LibDispatch");
@@ -2925,7 +2978,6 @@ mDNSexport int main(int argc, char **argv)
     LogMsg("%s exiting", mDNSResponderVersionString);
 
 exit:
-    if (!mDNS_DebugMode && !started_via_launchdaemon) destroyBootstrapService();
     return(status);
 }
 

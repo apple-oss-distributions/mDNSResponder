@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2009 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2009-2013 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -215,8 +215,8 @@ enum DNSSDError
     kDNSSDError_BadKey                    = -65561,
     kDNSSDError_Transient                 = -65562,
     kDNSSDError_ServiceNotRunning         = -65563,  /* Background daemon not running */
-    kDNSSDError_NATPortMappingUnsupported = -65564,  /* NAT doesn't support NAT-PMP or UPnP */
-    kDNSSDError_NATPortMappingDisabled    = -65565,  /* NAT supports NAT-PMP or UPnP but it's disabled by the administrator */
+    kDNSSDError_NATPortMappingUnsupported = -65564,  /* NAT doesn't support PCP, NAT-PMP or UPnP */
+    kDNSSDError_NATPortMappingDisabled    = -65565,  /* NAT supports PCP, NAT-PMP or UPnP, but it's disabled by the administrator */
     kDNSSDError_NoRouter                  = -65566,  /* No router currently configured (probably no network connectivity) */
     kDNSSDError_PollingMode               = -65567
 } DNSSDError;

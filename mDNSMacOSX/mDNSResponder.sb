@@ -53,6 +53,8 @@
        (global-name "com.apple.SecurityServer")
        (global-name "com.apple.SystemConfiguration.configd")
        (global-name "com.apple.SystemConfiguration.SCNetworkReachability")
+       (global-name "com.apple.SystemConfiguration.DNSConfiguration")
+       (global-name "com.apple.SystemConfiguration.NetworkInformation")
        (global-name "com.apple.system.notification_center")
        (global-name "com.apple.system.logger")
        (global-name "com.apple.webcontentfilter.dns")
@@ -61,7 +63,12 @@
        (global-name "com.apple.networkd")
        (global-name "com.apple.securityd")
        (global-name "com.apple.wifi.manager")
-       (global-name "com.apple.blued"))
+       (global-name "com.apple.commcenter.cupolicy.xpc")
+       (global-name "com.apple.blued")
+       (global-name "com.apple.snhelper"))
+
+(allow mach-register
+       (global-name "com.apple.d2d.ipc"))
 
 ; Networking, including Unix Domain Sockets
 (allow network*)
@@ -99,12 +106,22 @@
        (literal "/Library/Preferences/SystemConfiguration/com.apple.PowerManagement.plist")
        (literal "/private/var/preferences/SystemConfiguration/preferences.plist"))
 
+; For MAC Address
+(allow system-info (info-type "net.link.addr"))
+
 ; We just need access to System.keychain. But we don't want errors logged if other keychains are
 ; accessed under /Library/Keychains. Other keychains may be accessed as part of setting up an SSL
 ; connection. Instead of adding access to it here (to things which we don't need), we disable any
 ; logging that might happen during the access
 (deny file-read-data (regex #"^/Library/Keychains/") (with no-log))
 (allow file-read-data (literal "/Library/Keychains/System.keychain"))
+
+; Access to mDNSResponder Managed Preferences profile
+; instead of using (mobile-preferences-read "com.apple.mDNSResponder") we use the lines below for OSX compatibility
+(allow file-read* (literal "/private/var/Managed Preferences/mobile"))
+(allow file-read* (literal "/private/var/Library/Preferences/"))
+(allow file-read* (literal "/Library/Managed Preferences"))
+(allow file-read* (literal "/private/var/Managed Preferences/mobile/com.apple.mDNSResponder.plist"))
 
 ; Our Module Directory Services cache
 (allow file-read-data
@@ -128,4 +145,6 @@
      (allow iokit-open
         (iokit-user-client-class "NVEthernetUserClientMDNS")
         (iokit-user-client-class "mDNSOffloadUserClient")
-        (iokit-user-client-class "RootDomainUserClient"))))
+        (iokit-user-client-class "wlDNSOffloadUserClient")
+        (iokit-user-client-class "RootDomainUserClient")
+        (iokit-user-client-class "AppleMobileFileIntegrityUserClient"))))

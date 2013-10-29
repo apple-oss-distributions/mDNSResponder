@@ -183,7 +183,7 @@ mDNSexport mDNSu32 AlgLength(AlgContext *ctx)
         return 0;
 }
 
-mDNSexport mStatus AlgAdd(AlgContext *ctx, void *data, mDNSu32 len)
+mDNSexport mStatus AlgAdd(AlgContext *ctx, const void *data, mDNSu32 len)
 {
     AlgFuncs *func = mDNSNULL;
 
@@ -253,4 +253,28 @@ mDNSexport mDNSu8* AlgEncode(AlgContext *ctx)
         return (func->Encode(ctx));
     else
         return mDNSNULL;
+}
+
+mDNSexport mStatus AlgFinal(AlgContext *ctx, void *data, mDNSu32 len)
+{
+    AlgFuncs *func = mDNSNULL;
+
+    if (ctx->type == CRYPTO_ALG)
+        func = CryptoAlgFuncs[ctx->alg];
+    else if (ctx->type == DIGEST_ALG)
+        func = DigestAlgFuncs[ctx->alg];
+    else if (ctx->type == ENC_ALG)
+        func = EncAlgFuncs[ctx->alg];
+
+    // This should never happen as AlgCreate would have failed
+    if (!func)
+    {
+        LogMsg("AlgEncode: ERROR!! func is NULL");
+        return mDNSNULL;
+    }
+
+    if (func->Final)
+        return (func->Final(ctx, data, len));
+    else
+        return mStatus_BadParamErr;
 }

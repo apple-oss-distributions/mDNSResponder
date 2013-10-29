@@ -196,7 +196,7 @@ int main(int argc, char **argv)
         MakeDomainNameFromDNSNameString(&type, gServiceType);
         MakeDomainNameFromDNSNameString(&domain, gServiceDomain);
 
-        status = mDNS_StartBrowse(&mDNSStorage, &question, &type, &domain, mDNSInterface_Any, 0, mDNSfalse, mDNSfalse, BrowseCallback, NULL);
+        status = mDNS_StartBrowse(&mDNSStorage, &question, &type, &domain, mDNSNULL, mDNSInterface_Any, 0, mDNSfalse, mDNSfalse, BrowseCallback, NULL);
 
         // Run the platform main event loop until the user types ^C.
         // The BrowseCallback routine is responsible for printing

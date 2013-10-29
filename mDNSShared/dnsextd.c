@@ -3104,8 +3104,10 @@ void mDNSCoreReceive(mDNS *const m, void *const msg, const mDNSu8 *const end,
                      const mDNSAddr *const srcaddr, const mDNSIPPort srcport,
                      const mDNSAddr *const dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID iid)
 { ( void ) m; ( void ) msg; ( void ) end; ( void ) srcaddr; ( void ) srcport; ( void ) dstaddr; ( void ) dstport; ( void ) iid; }
-DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSAddr *addr, const mDNSIPPort port, mDNSBool scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSu16 resGroupID)
-{ ( void ) m; ( void ) d; ( void ) interface; ( void ) addr; ( void ) port; ( void ) scoped; ( void ) timeout; (void) cellIntf; (void) resGroupID; return(NULL); }
+DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const int serviceID, const mDNSAddr *addr, const mDNSIPPort port, 
+                             mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSu16 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO)
+{ ( void ) m; ( void ) d; ( void ) interface; ( void ) serviceID; ( void ) addr; ( void ) port; ( void ) scoped; ( void ) timeout; (void) cellIntf; 
+ (void) resGroupID; (void) reqA; (void) reqAAAA; (void) reqDO; return(NULL); }
 void mDNS_AddSearchDomain(const domainname *const domain, mDNSInterfaceID InterfaceID) { (void)domain; (void) InterfaceID;}
 void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCallback *StatusCallback, const void *StatusContext)
 { ( void ) m; ( void ) fqdn; ( void ) StatusCallback; ( void ) StatusContext; }
@@ -3132,6 +3134,8 @@ mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
 mStatus mDNS_StopQuery(mDNS *const m, DNSQuestion *const question) { ( void ) m; ( void ) question; return 0; }
 void TriggerEventCompletion(void);
 void TriggerEventCompletion() {}
+int AnonInfoAnswersQuestion(const ResourceRecord *const rr, const DNSQuestion *const q);
+int AnonInfoAnswersQuestion(const ResourceRecord *const rr, const DNSQuestion *const q) { ( void ) rr; ( void ) q; return 1;}
 mDNS mDNSStorage;
 
 

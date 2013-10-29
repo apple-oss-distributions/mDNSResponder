@@ -23,7 +23,7 @@
 #undef AVAILABLE_MAC_OS_X_VERSION_10_2_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_10_3
 #define AVAILABLE_MAC_OS_X_VERSION_10_2_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_10_3
 
-#include "DNSServiceDiscovery.h"
+#include "../mDNSMacOSX/DNSServiceDiscovery.h"
 #include "DNSServiceDiscoveryDefines.h"
 #include "DNSServiceDiscoveryReplyServer.h"
 

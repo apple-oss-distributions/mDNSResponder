@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2013 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,8 +32,9 @@ extern "C" {
 //#define MAX_UCAST_POLL_INTERVAL (1 * 60 * mDNSPlatformOneSecond)
 #define LLQ_POLL_INTERVAL       (15 * 60 * mDNSPlatformOneSecond) // Polling interval for zones w/ an advertised LLQ port (ie not static zones) if LLQ fails due to NAT, etc.
 #define RESPONSE_WINDOW (60 * mDNSPlatformOneSecond)         // require server responses within one minute of request
-#define MAX_UCAST_UNANSWERED_QUERIES 2                       // the number of unanswered queries from any one uDNS server before trying another server
-#define DNSSERVER_PENALTY_TIME (60 * mDNSPlatformOneSecond) // number of seconds for which new questions don't pick this server
+#define MAX_DNSSEC_UNANSWERED_QUERIES 1                      // number of unanswered queries from any one uDNS server before turning off DNSSEC Validation
+#define MAX_UCAST_UNANSWERED_QUERIES 2                       // number of unanswered queries from any one uDNS server before trying another server
+#define DNSSERVER_PENALTY_TIME (60 * mDNSPlatformOneSecond)  // number of seconds for which new questions don't pick this server
 
 // On some interfaces, we want to delay the first retransmission to a minimum of 2 seconds
 // rather than the default (1 second).
@@ -45,6 +46,10 @@ extern "C" {
 #define QuestionIntervalStep2 (QuestionIntervalStep*QuestionIntervalStep)
 #define QuestionIntervalStep3 (QuestionIntervalStep*QuestionIntervalStep*QuestionIntervalStep)
 #define InitialQuestionInterval ((mDNSPlatformOneSecond + QuestionIntervalStep-1) / QuestionIntervalStep)
+#define MaxQuestionInterval         (3600 * mDNSPlatformOneSecond)
+
+// just move to MaxQuestionInterval once over this threshold
+#define QuestionIntervalThreshold   (QuestionIntervalStep3 * mDNSPlatformOneSecond)
 
 // For Unicast record registrations, we initialize the interval to 1 second. When we send any query for
 // the record registration e.g., GetZoneData, we always back off by QuestionIntervalStep
@@ -65,6 +70,11 @@ extern "C" {
 // For questions that are validating responses (q->ValidatingResponse == 1), use 10 seconds
 // which accomodates two DNS servers and two queries per DNS server.
 #define DEFAULT_UDNSSEC_TIMEOUT    10 // in seconds
+
+// If we are sending queries with EDNS0/DO option and we have no indications that the server
+// is DNSSEC aware and we have already reached MAX_DNSSEC_RETRANSMISSIONS, we disable
+// validation (for optional case only) for any questions that uses this server
+#define MAX_DNSSEC_RETRANSMISSIONS 3
 
 // Entry points into unicast-specific routines
 
@@ -104,14 +114,16 @@ extern void CheckNATMappings(mDNS *m);
 
 extern mStatus         uDNS_SetupDNSConfig(mDNS *const m);
 
-// uDNS_SetupSearchDomains by default adds search domains. It also can be called with one or
-// more values for "action" which does the following:
-//
-// -UDNS_START_WAB_QUERY - start Wide Area Bonjour (domain enumeration) queries
+// uDNS_SetupWABQueries reads search domains from the platform layer and starts the Wide Area Bonjour
+// (WAB) domain enumeration queries if necessary.
 
-#define UDNS_START_WAB_QUERY    0x00000001
+#define UDNS_WAB_BROWSE_QUERY    0x00000001 // Browse queries (b, db)
+#define UDNS_WAB_LBROWSE_QUERY   0x00000002 // Browse queries (lb)
+#define UDNS_WAB_REG_QUERY       0x00000004 // Registration queries (r and dr)
 
-extern mStatus         uDNS_SetupSearchDomains(mDNS *const m, int action);
+extern void uDNS_SetupWABQueries(mDNS *const m);
+extern void uDNS_StartWABQueries(mDNS *const m, int queryType);
+extern void uDNS_StopWABQueries(mDNS *const m, int queryType);
 extern domainname      *uDNS_GetNextSearchDomain(mDNS *const m, mDNSInterfaceID InterfaceID, mDNSs8 *searchIndex, mDNSBool ignoreDotLocal);
 
 typedef enum
@@ -128,9 +140,9 @@ extern DomainAuthInfo *GetAuthInfoForQuestion(mDNS *m, const DNSQuestion *const 
 extern void DisposeTCPConn(struct tcpInfo_t *tcp);
 
 // NAT traversal
-extern void uDNS_ReceiveNATPMPPacket(mDNS *m, const mDNSInterfaceID InterfaceID, mDNSu8 *pkt, mDNSu16 len); // Called for each received NAT-PMP packet
+extern void uDNS_ReceiveNATPacket(mDNS *m, const mDNSInterfaceID InterfaceID, mDNSu8 *pkt, mDNSu16 len); // Called for each received PCP or NAT-PMP packet
 extern void natTraversalHandleAddressReply(mDNS *const m, mDNSu16 err, mDNSv4Addr ExtAddr);
-extern void natTraversalHandlePortMapReply(mDNS *const m, NATTraversalInfo *n, const mDNSInterfaceID InterfaceID, mDNSu16 err, mDNSIPPort extport, mDNSu32 lease);
+extern void natTraversalHandlePortMapReply(mDNS *const m, NATTraversalInfo *n, const mDNSInterfaceID InterfaceID, mDNSu16 err, mDNSIPPort extport, mDNSu32 lease, NATTProtocol protocol);
 
 #ifdef  __cplusplus
 }

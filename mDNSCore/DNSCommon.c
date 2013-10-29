@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2013 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 #define mDNS_InstantiateInlines 1
 #include "DNSCommon.h"
 #include "CryptoAlg.h"
+#include "anonymous.h"
 
 // Disable certain benign warnings with Microsoft compilers
 #if (defined(_MSC_VER))
@@ -41,6 +42,7 @@ mDNSexport const mDNSInterfaceID mDNSInterfaceMark       = (mDNSInterfaceID)-1;
 mDNSexport const mDNSInterfaceID mDNSInterface_LocalOnly = (mDNSInterfaceID)-2;
 mDNSexport const mDNSInterfaceID mDNSInterface_Unicast   = (mDNSInterfaceID)-3;
 mDNSexport const mDNSInterfaceID mDNSInterface_P2P       = (mDNSInterfaceID)-4;
+mDNSexport const mDNSInterfaceID uDNSInterfaceMark       = (mDNSInterfaceID)-5;
 
 // Note: Microsoft's proposed "Link Local Multicast Name Resolution Protocol" (LLMNR) is essentially a limited version of
 // Multicast DNS, using the same packet formats, naming syntax, and record types as Multicast DNS, but on a different UDP
@@ -88,7 +90,7 @@ mDNSexport const mDNSEthAddr onesEthAddr       = { { 255, 255, 255, 255, 255, 25
 mDNSexport const mDNSAddr zeroAddr          = { mDNSAddrType_None, {{{ 0 }}} };
 
 mDNSexport const mDNSv4Addr AllDNSAdminGroup   = { { 239, 255, 255, 251 } };
-mDNSexport const mDNSv4Addr AllHosts_v4        = { { 224,   0,   0,   1 } };  // For NAT-PMP Annoucements
+mDNSexport const mDNSv4Addr AllHosts_v4        = { { 224,   0,   0,   1 } };  // For NAT-PMP & PCP Annoucements
 mDNSexport const mDNSv6Addr AllHosts_v6        = { { 0xFF,0x02,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x01 } };
 mDNSexport const mDNSv6Addr NDP_prefix         = { { 0xFF,0x02,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x01, 0xFF,0x00,0x00,0xFB } };  // FF02:0:0:0:0:1:FF00::/104
 mDNSexport const mDNSEthAddr AllHosts_v6_Eth    = { { 0x33, 0x33, 0x00, 0x00, 0x00, 0x01 } };
@@ -115,11 +117,32 @@ mDNSexport const mDNSOpaque64 zeroOpaque64    = { { 0 } };
 #endif
 
 // return true for RFC1918 private addresses
-mDNSexport mDNSBool mDNSv4AddrIsRFC1918(mDNSv4Addr *addr)
+mDNSexport mDNSBool mDNSv4AddrIsRFC1918(const mDNSv4Addr * const addr)
 {
     return ((addr->b[0] == 10) ||                                 // 10/8 prefix
             (addr->b[0] == 172 && (addr->b[1] & 0xF0) == 16) ||   // 172.16/12
             (addr->b[0] == 192 && addr->b[1] == 168));            // 192.168/16
+}
+
+mDNSexport void mDNSAddrMapIPv4toIPv6(mDNSv4Addr* in, mDNSv6Addr* out)
+{
+    out->l[0] = 0;
+    out->l[1] = 0;
+    out->w[4] = 0;
+    out->w[5] = 0xffff;
+    out->b[12] = in->b[0];
+    out->b[13] = in->b[1];
+    out->b[14] = in->b[2];
+    out->b[15] = in->b[3];
+}
+
+mDNSexport mDNSBool mDNSAddrIPv4FromMappedIPv6(mDNSv6Addr *in, mDNSv4Addr* out)
+{
+    if (in->l[0] != 0 || in->l[1] != 0 || in->w[4] != 0 || in->w[5] != 0xffff)
+        return mDNSfalse;
+
+    out->NotAnInteger = in->l[3];
+    return mDNStrue;
 }
 
 mDNSexport NetworkInterfaceInfo *GetFirstActiveInterface(NetworkInterfaceInfo *intf)
@@ -163,6 +186,8 @@ mDNSexport char *DNSTypeName(mDNSu16 rrtype)
     case kDNSType_SRV:  return("SRV");
     case kDNSType_OPT:  return("OPT");
     case kDNSType_NSEC: return("NSEC");
+    case kDNSType_NSEC3: return("NSEC3");
+    case kDNSType_NSEC3PARAM: return("NSEC3PARAM");
     case kDNSType_TSIG: return("TSIG");
     case kDNSType_RRSIG: return("RRSIG");
     case kDNSType_DNSKEY: return("DNSKEY");
@@ -199,11 +224,12 @@ mDNSlocal char *DNSSECDigestName(mDNSu8 digest)
     {
     case SHA1_DIGEST_TYPE: return "SHA1";
     case SHA256_DIGEST_TYPE: return "SHA256";
-    default: {
+    default:
+        {
         static char digbuffer[16];
         mDNS_snprintf(digbuffer, sizeof(digbuffer), "DIG%d", digest);
         return(digbuffer);
-    }
+        }
     }
 }
 
@@ -240,25 +266,98 @@ mDNSlocal mDNSu32 keytag(mDNSu8 *key, mDNSu32 keysize)
     return ac & 0xFFFF;
 }
 
-mDNSlocal int base64Encode(char *buffer, int blen, mDNSu8 *data, int len)
+mDNSexport int baseEncode(char *buffer, int blen, const mDNSu8 *data, int len, int encAlg)
 {
     AlgContext *ctx;
     mDNSu8 *outputBuffer;
     int length;
 
-    ctx = AlgCreate(ENC_ALG, ENC_BASE64);
+    ctx = AlgCreate(ENC_ALG, encAlg);
     if (!ctx)
     {
-        LogMsg("base64Encode: AlgCreate failed\n");
+        LogMsg("baseEncode: AlgCreate failed\n");
         return 0;
     }
     AlgAdd(ctx, data, len);
     outputBuffer = AlgEncode(ctx);
     length = 0;
     if (outputBuffer)
-        length = mDNS_snprintf(buffer, blen, "  %s", outputBuffer);
+    {
+        // Note: don't include any spaces in the format string below. This
+        // is also used by NSEC3 code for proving non-existence where it
+        // needs the base32 encoding without any spaces etc.
+        length = mDNS_snprintf(buffer, blen, "%s", outputBuffer);
+    }
     AlgDestroy(ctx);
     return length;
+}
+
+mDNSlocal void PrintTypeBitmap(const mDNSu8 *bmap, int bitmaplen, char *const buffer, mDNSu32 length)
+{
+    int win, wlen, type;
+
+    while (bitmaplen > 0)
+    {
+        int i;
+
+        if (bitmaplen < 3)
+        {
+            LogMsg("PrintTypeBitmap: malformed bitmap, bitmaplen %d short", bitmaplen);
+            break;
+        }
+
+        win = *bmap++;
+        wlen = *bmap++;
+        bitmaplen -= 2;
+        if (bitmaplen < wlen || wlen < 1 || wlen > 32)
+        {
+            LogInfo("PrintTypeBitmap: malformed nsec, bitmaplen %d wlen %d", bitmaplen, wlen);
+            break;
+        }
+        if (win < 0 || win >= 256)
+        {
+            LogInfo("PrintTypeBitmap: malformed nsec, bad window win %d", win);
+            break;
+        }
+        type = win * 256;
+        for (i = 0; i < wlen * 8; i++)
+        {
+            if (bmap[i>>3] & (128 >> (i&7)))
+                length += mDNS_snprintf(buffer+length, (MaxMsg - 1) - length, "%s ", DNSTypeName(type + i));
+        }
+        bmap += wlen;
+        bitmaplen -= wlen;
+    }
+}
+
+// Parse the fields beyond the base header. NSEC3 should have been validated.
+mDNSexport void NSEC3Parse(const ResourceRecord *const rr, mDNSu8 **salt, int *hashLength, mDNSu8 **nxtName, int *bitmaplen, mDNSu8 **bitmap)
+{
+	const RDataBody2 *const rdb = (RDataBody2 *)rr->rdata->u.data;
+	rdataNSEC3 *nsec3 = (rdataNSEC3 *)rdb->data;
+    mDNSu8 *p = (mDNSu8 *)&nsec3->salt;
+    int hlen;
+
+    if (salt)
+    {
+        if (nsec3->saltLength)
+            *salt = p;
+        else
+            *salt = mDNSNULL;
+    }
+    p += nsec3->saltLength;
+    // p is pointing at hashLength
+    hlen = (int)*p;
+    if (hashLength)
+        *hashLength = hlen;
+    p++;
+    if (nxtName)
+        *nxtName = p;
+    p += hlen;
+    if (bitmaplen)
+        *bitmaplen = rr->rdlength - (int)(p - rdb->data);
+    if (bitmap)
+        *bitmap = p;
 }
 
 // Note slight bug: this code uses the rdlength from the ResourceRecord object, to display
@@ -329,6 +428,10 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
                         length += mDNS_snprintf(buffer+length, RemSpc, " Password %.6a", opt->u.owner.password.b);
                 }
                 break;
+            case kDNSOpt_Trace:
+                length += mDNS_snprintf(buffer+length, RemSpc, " Platform %d",     opt->u.tracer.platf);
+                length += mDNS_snprintf(buffer+length, RemSpc, " mDNSVers %d",     opt->u.tracer.mDNSv);
+                break;
             default:
                 length += mDNS_snprintf(buffer+length, RemSpc, " Unknown %d",  opt->opt);
                 break;
@@ -340,7 +443,6 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
     case kDNSType_NSEC: {
         domainname *next = (domainname *)rd->data;
         int len, bitmaplen;
-        int win, wlen, type;
         mDNSu8 *bmap;
         len = DomainNameLength(next);
         bitmaplen = rr->rdlength - len;
@@ -348,39 +450,45 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
 
         if (UNICAST_NSEC(rr))
             length += mDNS_snprintf(buffer+length, RemSpc, "%##s ", next->c);
+        PrintTypeBitmap(bmap, bitmaplen, buffer, length);
 
-        while (bitmaplen > 0)
+    }
+    break;
+    case kDNSType_NSEC3: {
+        rdataNSEC3 *nsec3 = (rdataNSEC3 *)rd->data;
+        const mDNSu8 *p = (mDNSu8 *)&nsec3->salt;
+        int hashLength, bitmaplen, i;
+
+        length += mDNS_snprintf(buffer+length, RemSpc, "\t%s  %d  %d ", 
+                                DNSSECDigestName(nsec3->alg), nsec3->flags, swap16(nsec3->iterations));
+        
+        if (!nsec3->saltLength)
         {
-            int i;
-
-            if (bitmaplen < 3)
-            {
-                LogMsg("GetRRDisplayString_rdb: malformed nsec, bitmaplen %d short", bitmaplen);
-                break;
-            }
-
-            win = *bmap++;
-            wlen = *bmap++;
-            bitmaplen -= 2;
-            if (bitmaplen < wlen || wlen < 1 || wlen > 32)
-            {
-                LogInfo("GetRRDisplayString_rdb: malformed nsec, bitmaplen %d wlen %d", bitmaplen, wlen);
-                break;
-            }
-            if (win < 0 || win >= 256)
-            {
-                LogInfo("GetRRDisplayString_rdb: malformed nsec, bad window win %d", win);
-                break;
-            }
-            type = win * 256;
-            for (i = 0; i < wlen * 8; i++)
-            {
-                if (bmap[i>>3] & (128 >> (i&7)))
-                    length += mDNS_snprintf(buffer+length, RemSpc, "%s ", DNSTypeName(type + i));
-            }
-            bmap += wlen;
-            bitmaplen -= wlen;
+            length += mDNS_snprintf(buffer+length, RemSpc, "-");
         }
+        else
+        {
+            for (i = 0; i < nsec3->saltLength; i++)
+            {
+                length += mDNS_snprintf(buffer+length, RemSpc, "%x", p[i]);
+            }
+        }
+
+        // put a space at the end
+        length += mDNS_snprintf(buffer+length, RemSpc, " ");
+
+        p += nsec3->saltLength;
+        // p is pointing at hashLength
+        hashLength = (int)*p++;
+        
+        length += baseEncode(buffer + length, RemSpc, p, hashLength, ENC_BASE32);
+
+        // put a space at the end
+        length += mDNS_snprintf(buffer+length, RemSpc, " ");
+
+        p += hashLength;
+        bitmaplen = rr->rdlength - (int)(p - rd->data);
+        PrintTypeBitmap(p, bitmaplen, buffer, length);
     }
     break;
     case kDNSType_RRSIG:    {
@@ -397,21 +505,21 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
         inceptClock = (unsigned long)swap32(rrsig->sigInceptTime);
         mDNSPlatformFormatTime(inceptClock, inceptTimeBuf, sizeof(inceptTimeBuf));
 
-        length += mDNS_snprintf(buffer+length, RemSpc, "\t%s  %s  %d  %d  %s  %s  %d  %##s",
+        length += mDNS_snprintf(buffer+length, RemSpc, "\t%s  %s  %d  %d  %s  %s  %d  %##s ",
                                 DNSTypeName(swap16(rrsig->typeCovered)), DNSSECAlgName(rrsig->alg), rrsig->labels, swap32(rrsig->origTTL),
                                 expTimeBuf, inceptTimeBuf, swap16(rrsig->keyTag), ((domainname *)(&rrsig->signerName))->c);
 
         len = DomainNameLength((domainname *)&rrsig->signerName);
-        length += base64Encode(buffer + length, RemSpc, (mDNSu8 *)(rd->data + len + RRSIG_FIXED_SIZE),
-                               rr->rdlength - (len + RRSIG_FIXED_SIZE));
+        length += baseEncode(buffer + length, RemSpc, (const mDNSu8 *)(rd->data + len + RRSIG_FIXED_SIZE),
+                               rr->rdlength - (len + RRSIG_FIXED_SIZE), ENC_BASE64);
     }
     break;
     case kDNSType_DNSKEY:   {
         rdataDNSKey *rrkey = (rdataDNSKey *)rd->data;
-        length += mDNS_snprintf(buffer+length, RemSpc, "\t%d  %d  %s  %u", swap16(rrkey->flags), rrkey->proto,
+        length += mDNS_snprintf(buffer+length, RemSpc, "\t%d  %d  %s  %u ", swap16(rrkey->flags), rrkey->proto,
                                 DNSSECAlgName(rrkey->alg), (unsigned int)keytag((mDNSu8 *)rrkey, rr->rdlength));
-        length += base64Encode(buffer + length, RemSpc, (mDNSu8 *)(rd->data + DNSKEY_FIXED_SIZE),
-                               rr->rdlength - DNSKEY_FIXED_SIZE);
+        length += baseEncode(buffer + length, RemSpc, (const mDNSu8 *)(rd->data + DNSKEY_FIXED_SIZE),
+                               rr->rdlength - DNSKEY_FIXED_SIZE, ENC_BASE64);
     }
     break;
     case kDNSType_DS:       {
@@ -885,7 +993,7 @@ mDNSexport mDNSu8 *ConstructServiceName(domainname *const fqdn,
                 const mDNSu8 *s2 = s1 + 1 + s1[0];
                 if (s2[0] && s2[0] < 0x40 && s2[1+s2[0]] == 0)  // and we have three and only three labels
                 {
-                    static const mDNSu8 SubTypeLabel[5] = "\x04_sub";
+                    static const mDNSu8 SubTypeLabel[5] = mDNSSubTypeLabel;
                     src = s0;                                   // Copy the first label
                     len = *src;
                     for (i=0; i <= len;                      i++) *dst++ = *src++;
@@ -1020,6 +1128,83 @@ mDNSexport mDNSBool DeconstructServiceName(const domainname *const fqdn,
     *dst++ = 0;     // Put the null root label on the end
 
     return(mDNStrue);
+}
+
+mDNSexport mStatus DNSNameToLowerCase(domainname *d, domainname *result)
+{
+    const mDNSu8 *a = d->c;
+    mDNSu8 *b = result->c;
+    const mDNSu8 *const max = d->c + MAX_DOMAIN_NAME;
+    int i, len;
+
+    while (*a)
+    {
+        if (a + 1 + *a >= max)
+        {
+            LogMsg("DNSNameToLowerCase: ERROR!! Malformed Domain name");
+            return mStatus_BadParamErr;
+        }
+        len = *a++;
+        *b++ = len;
+        for (i = 0; i < len; i++)
+        {
+            mDNSu8 ac = *a++;
+            if (mDNSIsUpperCase(ac)) ac += 'a' - 'A';
+            *b++ = ac;
+        }
+    }
+    *b = 0;
+
+    return mStatus_NoError;
+}
+
+mDNSexport const mDNSu8 *NSEC3HashName(const domainname *name, rdataNSEC3 *nsec3, const mDNSu8 *AnonData, int AnonDataLen,
+    const mDNSu8 hash[NSEC3_MAX_HASH_LEN], int *dlen)
+{
+    AlgContext *ctx;
+    int i;
+    domainname lname;
+    mDNSu8 *p = (mDNSu8 *)&nsec3->salt;
+    const mDNSu8 *digest;
+    int digestlen;
+    mDNSBool first = mDNStrue;
+
+    if (DNSNameToLowerCase((domainname *)name, &lname) != mStatus_NoError)
+    {
+        LogMsg("NSEC3HashName: ERROR!! DNSNameToLowerCase failed");
+        return mDNSNULL;
+    }
+
+    digest = lname.c;
+    digestlen = DomainNameLength(&lname);
+
+    // Note that it is "i <=". The first iteration is for digesting the name and salt.
+    // The iteration count does not include that.
+    for (i = 0; i <= swap16(nsec3->iterations); i++)
+    {
+        ctx = AlgCreate(DIGEST_ALG, nsec3->alg);
+        if (!ctx)
+        {
+            LogMsg("NSEC3HashName: ERROR!! Cannot allocate context");
+            return mDNSNULL;
+        }
+
+        AlgAdd(ctx, digest, digestlen);
+        if (nsec3->saltLength)
+            AlgAdd(ctx, p, nsec3->saltLength);
+        if (AnonDataLen)
+            AlgAdd(ctx, AnonData, AnonDataLen);
+        if (first)
+        {
+            first = mDNSfalse;
+            digest = hash;
+            digestlen = AlgLength(ctx);
+        }
+        AlgFinal(ctx, (void *)digest, digestlen);
+        AlgDestroy(ctx);
+    }
+    *dlen = digestlen;
+    return digest;
 }
 
 // Notes on UTF-8:
@@ -1206,6 +1391,7 @@ mDNSexport void mDNS_SetupResourceRecord(AuthRecord *rr, RData *RDataStorage, mD
     rr->resrec.rrclass           = kDNSClass_IN;
     rr->resrec.rroriginalttl     = ttl;
     rr->resrec.rDNSServer        = mDNSNULL;
+    rr->resrec.AnonInfo          = mDNSNULL;
 //	rr->resrec.rdlength          = MUST set by client and/or in mDNS_Register_internal
 //	rr->resrec.rdestimate        = set in mDNS_Register_internal
 //	rr->resrec.rdata             = MUST be set by client
@@ -1235,6 +1421,7 @@ mDNSexport void mDNS_SetupResourceRecord(AuthRecord *rr, RData *RDataStorage, mD
     rr->TimeRcvd          = 0;
     rr->TimeExpire        = 0;
     rr->ARType            = artype;
+    rr->AuthFlags         = 0;
 
     // Field Group 3: Transient state for Authoritative Records (set in mDNS_Register_internal)
     // Field Group 4: Transient uDNS state for Authoritative Records (set in mDNS_Register_internal)
@@ -1282,10 +1469,15 @@ mDNSexport void mDNS_SetupQuestion(DNSQuestion *const q, const mDNSInterfaceID I
     q->RetryWithSearchDomains = mDNSfalse;
     q->TimeoutQuestion     = 0;
     q->WakeOnResolve       = 0;
-    q->UseBrackgroundTrafficClass = mDNSfalse;
+    q->UseBackgroundTrafficClass = mDNSfalse;
     q->ValidationRequired  = 0;
     q->ValidatingResponse  = 0;
+    q->ProxyQuestion       = 0;
     q->qnameOrig           = mDNSNULL;
+    q->AnonInfo            = mDNSNULL;
+    q->pid                 = mDNSPlatformGetPID();
+    q->DisallowPID         = mDNSfalse;
+    q->ServiceID           = -1;
     q->QuestionCallback    = callback;
     q->QuestionContext     = context;
 }
@@ -1425,32 +1617,20 @@ mDNSexport mDNSBool SameRDataBody(const ResourceRecord *const r1, const RDataBod
     }
 }
 
-// Don't call this function if the resource record is not NSEC. It will return false
-// which means that the type does not exist.
-mDNSexport mDNSBool RRAssertsExistence(const ResourceRecord *const rr, mDNSu16 type)
+mDNSexport mDNSBool BitmapTypeCheck(mDNSu8 *bmap, int bitmaplen, mDNSu16 type)
 {
-    const RDataBody2 *const rdb = (RDataBody2 *)rr->rdata->u.data;
-    mDNSu8 *nsec = (mDNSu8 *)rdb->data;
-    int len, bitmaplen;
     int win, wlen;
-    mDNSu8 *bmap;
     int wintype;
-
-    if (rr->rrtype != kDNSType_NSEC) return mDNSfalse;
-
-    len = DomainNameLength((domainname *)nsec);
 
     // The window that this type belongs to. NSEC has 256 windows that
     // comprises of 256 types.
     wintype = type >> 8;
 
-    bitmaplen = rr->rdlength - len;
-    bmap = nsec + len;
     while (bitmaplen > 0)
     {
         if (bitmaplen < 3)
         {
-            LogInfo("RRAssertsExistence: malformed nsec, bitmaplen %d short", bitmaplen);
+            LogInfo("BitmapTypeCheck: malformed nsec, bitmaplen %d short", bitmaplen);
             return mDNSfalse;
         }
 
@@ -1459,12 +1639,12 @@ mDNSexport mDNSBool RRAssertsExistence(const ResourceRecord *const rr, mDNSu16 t
         bitmaplen -= 2;
         if (bitmaplen < wlen || wlen < 1 || wlen > 32)
         {
-            LogInfo("RRAssertsExistence: malformed nsec, bitmaplen %d wlen %d, win %d", bitmaplen, wlen, win);
+            LogInfo("BitmapTypeCheck: malformed nsec, bitmaplen %d wlen %d, win %d", bitmaplen, wlen, win);
             return mDNSfalse;
         }
         if (win < 0 || win >= 256)
         {
-            LogInfo("RRAssertsExistence: malformed nsec, wlen %d", wlen);
+            LogInfo("BitmapTypeCheck: malformed nsec, wlen %d", wlen);
             return mDNSfalse;
         }
         if (win == wintype)
@@ -1490,6 +1670,24 @@ mDNSexport mDNSBool RRAssertsExistence(const ResourceRecord *const rr, mDNSu16 t
 }
 
 // Don't call this function if the resource record is not NSEC. It will return false
+// which means that the type does not exist.
+mDNSexport mDNSBool RRAssertsExistence(const ResourceRecord *const rr, mDNSu16 type)
+{
+    const RDataBody2 *const rdb = (RDataBody2 *)rr->rdata->u.data;
+    mDNSu8 *nsec = (mDNSu8 *)rdb->data;
+    int len, bitmaplen;
+    mDNSu8 *bmap;
+
+    if (rr->rrtype != kDNSType_NSEC) return mDNSfalse;
+
+    len = DomainNameLength((domainname *)nsec);
+
+    bitmaplen = rr->rdlength - len;
+    bmap = nsec + len;
+    return (BitmapTypeCheck(bmap, bitmaplen, type));
+}
+
+// Don't call this function if the resource record is not NSEC. It will return false
 // which means that the type exists.
 mDNSexport mDNSBool RRAssertsNonexistence(const ResourceRecord *const rr, mDNSu16 type)
 {
@@ -1509,6 +1707,22 @@ mDNSlocal mDNSBool DNSSECRecordAnswersQuestion(const ResourceRecord *const rr, c
     if (q->qtype == rr->rrtype)
         return mDNStrue;
 
+    // For DS and DNSKEY questions, the types should match i.e., don't answer using CNAME
+    // records as it answers any question type.
+    //
+    // - DS record comes from the parent zone where CNAME record cannot coexist and hence
+    //  cannot possibly answer it.
+    //
+    // - For DNSKEY, one could potentially follow CNAME but there could be a DNSKEY at
+    //   the "qname" itself. To keep it simple, we don't follow CNAME.
+
+    if ((q->qtype == kDNSType_DS || q->qtype == kDNSType_DNSKEY) && (q->qtype != rr->rrtype))
+    {
+        debugf("DNSSECRecordAnswersQuestion: %d type resource record matched question %##s (%s), ignoring", rr->rrtype,
+            q->qname.c, DNSTypeName(q->qtype));
+        return mDNSfalse;
+    }
+
     // If we are validating a response using DNSSEC, we might already have the records
     // for the "q->qtype" in the cache but we issued a query with DO bit set
     // to get the RRSIGs e.g., if you have two questions one of which does not require
@@ -1519,14 +1733,16 @@ mDNSlocal mDNSBool DNSSECRecordAnswersQuestion(const ResourceRecord *const rr, c
     {
         const RDataBody2 *const rdb = (RDataBody2 *)rr->rdata->u.data;
         rdataRRSig *rrsig = (rdataRRSig *)rdb->data;
-        if (q->qtype == kDNSType_CNAME || swap16(rrsig->typeCovered) != q->qtype)
+        mDNSu16 typeCovered = swap16(rrsig->typeCovered);
+        debugf("DNSSECRecordAnswersQuestion: Matching RRSIG typeCovered %s", DNSTypeName(typeCovered));
+        if (typeCovered != kDNSType_CNAME && typeCovered != q->qtype)
         {
-            debugf("DNSSECRecordAnswersQuestion: Question %##s (%s) did not match record %##s (RRSIG)", q->qname.c,
-                    DNSTypeName(q->qtype), rr->name->c);
+            debugf("DNSSECRecordAnswersQuestion: RRSIG did not match question %##s (%s)", q->qname.c,
+                    DNSTypeName(q->qtype));
             return mDNSfalse;
         }
-        LogInfo("DNSSECRecordAnswersQuestion: Question %##s (%s) matched record %##s (RRSIG)", q->qname.c,
-                DNSTypeName(q->qtype), rr->name->c);
+        LogInfo("DNSSECRecordAnswersQuestion: RRSIG matched question %##s (%s)", q->qname.c,
+                DNSTypeName(q->qtype));
         *checkType = mDNSfalse;
         return mDNStrue;
     }
@@ -1581,6 +1797,11 @@ mDNSexport mDNSBool SameNameRecordAnswersQuestion(const ResourceRecord *const rr
     // If ResourceRecord received via multicast, but question was unicast, then shouldn't use record to answer this question
     if (rr->InterfaceID && !mDNSOpaque16IsZero(q->TargetQID)) return(mDNSfalse);
 
+    // CNAME answers question of any type and a negative cache record should not prevent us from querying other
+    // valid types at the same name.
+    if (rr->rrtype == kDNSType_CNAME && rr->RecordType == kDNSRecordTypePacketNegative && rr->rrtype != q->qtype)
+        return mDNSfalse;
+
     // RR type CNAME matches any query type. QTYPE ANY matches any RR type. QCLASS ANY matches any RR class.
     if (checkType && !RRTypeAnswersQuestionType(rr,q->qtype)) return(mDNSfalse);
     if (rr->rrclass != q->qclass && q->qclass != kDNSQClass_ANY) return(mDNSfalse);
@@ -1589,6 +1810,9 @@ mDNSexport mDNSBool SameNameRecordAnswersQuestion(const ResourceRecord *const rr
     if (!mDNSPlatformValidRecordForQuestion(rr, q))
         return mDNSfalse;
 #endif // APPLE_OSX_mDNSResponder
+
+    if (!AnonInfoAnswersQuestion(rr, q))
+        return mDNSfalse;
 
     return(mDNStrue);
 }
@@ -1674,6 +1898,9 @@ mDNSexport mDNSBool LocalOnlyRecordAnswersQuestion(AuthRecord *const ar, const D
     if (!RRTypeAnswersQuestionType(rr,q->qtype)) return(mDNSfalse);
     if (rr->rrclass != q->qclass && q->qclass != kDNSQClass_ANY) return(mDNSfalse);
 
+    if (!AnonInfoAnswersQuestion(rr, q))
+        return mDNSfalse;
+
     return(rr->namehash == q->qnamehash && SameDomainName(rr->name, &q->qname));
 }
 
@@ -1704,6 +1931,9 @@ mDNSexport mDNSBool AnyTypeRecordAnswersQuestion(const ResourceRecord *const rr,
     if (rr->InterfaceID && !mDNSOpaque16IsZero(q->TargetQID)) return(mDNSfalse);
 
     if (rr->rrclass != q->qclass && q->qclass != kDNSQClass_ANY) return(mDNSfalse);
+
+    if (!AnonInfoAnswersQuestion(rr, q))
+        return mDNSfalse;
 
     return(rr->namehash == q->qnamehash && SameDomainName(rr->name, &q->qname));
 }
@@ -2069,9 +2299,13 @@ mDNSexport mDNSu8 *putRData(const DNSMessage *const msg, mDNSu8 *ptr, const mDNS
         int len = 0;
         const rdataOPT *opt;
         const rdataOPT *const end = (const rdataOPT *)&rr->rdata->u.data[rr->rdlength];
-        for (opt = &rr->rdata->u.opt[0]; opt < end; opt++) len += DNSOpt_Data_Space(opt);
-        if (ptr + len > limit) { LogMsg("ERROR: putOptRData - out of space"); return mDNSNULL; }
-
+        for (opt = &rr->rdata->u.opt[0]; opt < end; opt++) 
+            len += DNSOpt_Data_Space(opt);
+        if (ptr + len > limit) 
+        { 
+            LogMsg("ERROR: putOptRData - out of space"); 
+            return mDNSNULL; 
+        }
         for (opt = &rr->rdata->u.opt[0]; opt < end; opt++)
         {
             const int space = DNSOpt_Data_Space(opt);
@@ -2105,6 +2339,10 @@ mDNSexport mDNSu8 *putRData(const DNSMessage *const msg, mDNSu8 *ptr, const mDNS
                         ptr += space - DNSOpt_OwnerData_ID_Wake_Space;
                     }
                 }
+                break;
+            case kDNSOpt_Trace:
+                *ptr++ = opt->u.tracer.platf;
+                ptr    = putVal16(ptr, opt->u.tracer.mDNSv);
                 break;
             }
         }
@@ -2207,14 +2445,24 @@ mDNSexport mDNSu8 *PutResourceRecordTTLWithLimit(DNSMessage *const msg, mDNSu8 *
 
     if (rr->RecordType == kDNSRecordTypeUnregistered)
     {
-        LogMsg("PutResourceRecord ERROR! Attempt to put kDNSRecordTypeUnregistered %##s (%s)", rr->name->c, DNSTypeName(rr->rrtype));
+        LogMsg("PutResourceRecordTTLWithLimit ERROR! Attempt to put kDNSRecordTypeUnregistered %##s (%s)", rr->name->c, DNSTypeName(rr->rrtype));
         return(ptr);
     }
 
-    if (!ptr) { LogMsg("PutResourceRecordTTLWithLimit ptr is null"); return(mDNSNULL); }
+    if (!ptr)
+    {
+        LogMsg("PutResourceRecordTTLWithLimit ptr is null %##s (%s)", rr->name->c, DNSTypeName(rr->rrtype));
+        return(mDNSNULL);
+    }
 
     ptr = putDomainNameAsLabels(msg, ptr, limit, rr->name);
-    if (!ptr || ptr + 10 >= limit) return(mDNSNULL);    // If we're out-of-space, return mDNSNULL
+    // If we're out-of-space, return mDNSNULL
+    if (!ptr || ptr + 10 >= limit)
+    {
+        LogInfo("PutResourceRecordTTLWithLimit: can't put name, out of space %##s (%s), ptr %p, limit %p", rr->name->c,
+            DNSTypeName(rr->rrtype), ptr, limit);
+        return(mDNSNULL);
+    }
     ptr[0] = (mDNSu8)(rr->rrtype  >> 8);
     ptr[1] = (mDNSu8)(rr->rrtype  &  0xFF);
     ptr[2] = (mDNSu8)(rr->rrclass >> 8);
@@ -2226,7 +2474,12 @@ mDNSexport mDNSu8 *PutResourceRecordTTLWithLimit(DNSMessage *const msg, mDNSu8 *
     // ptr[8] and ptr[9] filled in *after* we find out how much space the rdata takes
 
     endofrdata = putRData(rdatacompressionbase, ptr+10, limit, rr);
-    if (!endofrdata) { verbosedebugf("Ran out of space in PutResourceRecord for %##s (%s)", rr->name->c, DNSTypeName(rr->rrtype)); return(mDNSNULL); }
+    if (!endofrdata)
+    {
+        LogInfo("PutResourceRecordTTLWithLimit: Ran out of space in PutResourceRecord for %##s (%s), ptr %p, limit %p", rr->name->c,
+            DNSTypeName(rr->rrtype), ptr+10, limit);
+        return(mDNSNULL);
+    }
 
     // Go back and fill in the actual number of data bytes we wrote
     // (actualLength can be less than rdlength when domain name compression is used)
@@ -2550,6 +2803,39 @@ mDNSexport const mDNSu8 *skipResourceRecord(const DNSMessage *msg, const mDNSu8 
     return(ptr + pktrdlength);
 }
 
+// Sanity check whether the NSEC/NSEC3 bitmap is good
+mDNSlocal mDNSu8 *SanityCheckBitMap(const mDNSu8 *bmap, const mDNSu8 *end, int len)
+{
+    int win, wlen;
+
+    while (bmap < end)
+    {
+        if (len < 3)
+        {
+            LogInfo("SanityCheckBitMap: invalid length %d", len);
+            return mDNSNULL;
+        }
+
+        win = *bmap++;
+        wlen = *bmap++;
+        len -= 2;
+        if (len < wlen || wlen < 1 || wlen > 32)
+        {
+            LogInfo("SanityCheckBitMap: invalid window length %d", wlen);
+            return mDNSNULL;
+        }
+        if (win < 0 || win >= 256)
+        {
+            LogInfo("SanityCheckBitMap: invalid window %d", win);
+            return mDNSNULL;
+        }
+
+        bmap += wlen;
+        len -= wlen;
+    }
+    return (mDNSu8 *)bmap;
+}
+
 // This function is called with "msg" when we receive a DNS message and needs to parse a single resource record
 // pointed to by "ptr". Some resource records like SOA, SRV are converted to host order and also expanded
 // (domainnames are expanded to 255 bytes) when stored in memory.
@@ -2782,7 +3068,6 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
         int savelen, len;
         domainname name;
         const mDNSu8 *orig = ptr;
-        const mDNSu8 *save;
 
         // Make sure the data is parseable and within the limits. DNSSEC code looks at
         // the domain name in the end for a valid domainname.
@@ -2822,7 +3107,6 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
             goto fail;
         }
 
-        save = ptr;
         savelen = ptr - orig;
 
         // RFC 2915 states that name compression is not allowed for this field. But RFC 3597
@@ -2910,6 +3194,14 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
                     opt++;
                 }
                 break;
+            case kDNSOpt_Trace:
+                if (opt->optlen == DNSOpt_TraceData_Space - 4)
+                {
+                    opt->u.tracer.platf  = ptr[0];
+                    opt->u.tracer.mDNSv  = (mDNSu16)((mDNSu16)ptr[1] <<  8 | ptr[2]);
+                    opt++;
+                }
+                break;
             }
             ptr += currentopt->optlen;
         }
@@ -2920,7 +3212,6 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
 
     case kDNSType_NSEC: {
         domainname name;
-        int win, wlen;
         int len = rdlength;
         int bmaplen, dlen;
         const mDNSu8 *orig = ptr;
@@ -2950,32 +3241,9 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
         len -= (ptr - orig);
         bmaplen = len;                  // Save the length of the bitmap
         bmap = ptr;
-        // Sanity check whether the bitmap is good
-        while (ptr < end)
-        {
-            if (len < 3)
-            {
-                LogInfo("SetRData: invalid length %d", len);
-                goto fail;
-            }
-
-            win = *ptr++;
-            wlen = *ptr++;
-            len -= 2;
-            if (len < wlen || wlen < 1 || wlen > 32)
-            {
-                LogInfo("SetRData: invalid window length %d", wlen);
-                goto fail;
-            }
-            if (win < 0 || win >= 256)
-            {
-                LogInfo("SetRData: invalid window %d", win);
-                goto fail;
-            }
-
-            ptr += wlen;
-            len -= wlen;
-        }
+        ptr = SanityCheckBitMap(bmap, end, len);
+        if (!ptr)
+            goto fail;
         if (ptr != end)
         {
             LogInfo("SetRData: Malformed NSEC length not right");
@@ -2995,6 +3263,56 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
         }
         AssignDomainName((domainname *)rdb->data, &name);
         mDNSPlatformMemCopy(rdb->data + dlen, bmap, bmaplen);
+        break;
+    }
+    case kDNSType_NSEC3:
+    {
+        rdataNSEC3 *nsec3 = (rdataNSEC3 *)ptr;
+        mDNSu8 *p = (mDNSu8 *)&nsec3->salt;
+        int hashLength, bitmaplen;
+
+        if (rdlength < NSEC3_FIXED_SIZE + 1)
+        {
+            LogInfo("SetRData: NSEC3 too small length %d", rdlength);
+            goto fail;
+        }
+        if (nsec3->alg != SHA1_DIGEST_TYPE)
+        {
+            LogInfo("SetRData: nsec3 alg %d not supported", nsec3->alg);
+            goto fail;
+        }
+        if (swap16(nsec3->iterations) > NSEC3_MAX_ITERATIONS)
+        {
+            LogInfo("SetRData: nsec3 iteration count %d too big", swap16(nsec3->iterations));
+            goto fail;
+        } 
+        p += nsec3->saltLength;
+        // There should at least be one byte beyond saltLength
+        if (p >= end)
+        {
+            LogInfo("SetRData: nsec3 too small, at saltlength %d, p %p, end %p", nsec3->saltLength, p, end);
+            goto fail;
+        }
+        // p is pointing at hashLength
+        hashLength = (int)*p++;
+        if (!hashLength)
+        {
+            LogInfo("SetRData: hashLength zero");
+            goto fail;
+        }
+        p += hashLength;
+        if (p > end)
+        {
+            LogInfo("SetRData: nsec3 too small, at hashLength %d, p %p, end %p", hashLength, p, end);
+            goto fail;
+        }
+
+        bitmaplen = rdlength - (int)(p - ptr);
+        p = SanityCheckBitMap(p, end, bitmaplen);
+        if (!p)
+            goto fail;
+        rr->resrec.rdlength = rdlength;
+        mDNSPlatformMemCopy(rdb->data, ptr, rdlength);
         break;
     }
     case kDNSType_TKEY:
@@ -3088,7 +3406,6 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
         mDNSPlatformMemCopy(rdb->data, ptr, rdlength);
         break;
     }
-
     default:
         debugf("SetRData: Warning! Reading resource type %d (%s) as opaque data",
                rr->resrec.rrtype, DNSTypeName(rr->resrec.rrtype));
@@ -3352,7 +3669,7 @@ mDNSexport void DumpPacket(mDNS *const m, mStatus status, mDNSBool sent, char *t
     DNSQuestion q;
     char tbuffer[64], sbuffer[64], dbuffer[64] = "";
     if (!status) tbuffer[mDNS_snprintf(tbuffer, sizeof(tbuffer), sent ? "Sent" : "Received"                        )] = 0;
-    else tbuffer[mDNS_snprintf(tbuffer, sizeof(tbuffer), "ERROR %d %sing", status, sent ? "Send" : "Receiv")] = 0;
+    else tbuffer[mDNS_snprintf(tbuffer, sizeof(tbuffer), "ERROR %d %sing", status, sent ? "Send" : "Receive")] = 0;
     if (sent) sbuffer[mDNS_snprintf(sbuffer, sizeof(sbuffer), "port "        )] = 0;
     else sbuffer[mDNS_snprintf(sbuffer, sizeof(sbuffer), "%#a:", srcaddr)] = 0;
     if (dstaddr || !mDNSIPPortIsZero(dstport))
@@ -3415,6 +3732,14 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
     mDNSu8 *newend;
     mDNSu8 *limit = msg->data + AbsoluteMaxDNSMessageData;
 
+#if APPLE_OSX_mDNSResponder
+    // maintain outbound packet statistics
+    if (mDNSOpaque16IsZero(msg->h.id))
+        m->MulticastPacketsSent++;
+    else
+        m->UnicastPacketsSent++;
+#endif // APPLE_OSX_mDNSResponder
+
     // Zero-length message data is okay (e.g. for a DNS Update ack, where all we need is an ID and an error code
     if (end < msg->data || end - msg->data > AbsoluteMaxDNSMessageData)
     {
@@ -3440,12 +3765,41 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
         {
             mDNSu16 msglen = (mDNSu16)(end - (mDNSu8 *)msg);
             mDNSu8 lenbuf[2] = { (mDNSu8)(msglen >> 8), (mDNSu8)(msglen & 0xFF) };
-            long nsent = mDNSPlatformWriteTCP(sock, (char*)lenbuf, 2);      // Should do scatter/gather here -- this is probably going out as two packets
-            if (nsent != 2) { LogMsg("mDNSSendDNSMessage: write msg length failed %d/%d", nsent, 2); status = mStatus_ConnFailed; }
+            char *buf;
+            long nsent;
+
+            // Try to send them in one packet if we can allocate enough memory
+            buf = mDNSPlatformMemAllocate(msglen + 2);
+            if (buf)
+            {
+                buf[0] = lenbuf[0];
+                buf[1] = lenbuf[1];
+                mDNSPlatformMemCopy(buf+2, msg, msglen);
+                nsent = mDNSPlatformWriteTCP(sock, buf, msglen+2);
+                if (nsent != (msglen + 2))
+                {
+                    LogMsg("mDNSSendDNSMessage: write message failed %d/%d", nsent, msglen);
+                    status = mStatus_ConnFailed;
+                }
+                mDNSPlatformMemFree(buf);
+            }
             else
             {
-                nsent = mDNSPlatformWriteTCP(sock, (char *)msg, msglen);
-                if (nsent != msglen) { LogMsg("mDNSSendDNSMessage: write msg body failed %d/%d", nsent, msglen); status = mStatus_ConnFailed; }
+                nsent = mDNSPlatformWriteTCP(sock, (char*)lenbuf, 2);
+                if (nsent != 2)
+                {
+                    LogMsg("mDNSSendDNSMessage: write msg length failed %d/%d", nsent, 2);
+                    status = mStatus_ConnFailed;
+                }
+                else
+                {
+                    nsent = mDNSPlatformWriteTCP(sock, (char *)msg, msglen);
+                    if (nsent != msglen)
+                    {
+                        LogMsg("mDNSSendDNSMessage: write msg body failed %d/%d", nsent, msglen);
+                        status = mStatus_ConnFailed;
+                    }
+                }
             }
         }
     }
@@ -3546,7 +3900,6 @@ mDNSlocal mDNSs32 GetNextScheduledEvent(const mDNS *const m)
     if (e - m->NextCacheCheck        > 0) e = m->NextCacheCheck;
     if (e - m->NextScheduledSPS      > 0) e = m->NextScheduledSPS;
     if (e - m->NextScheduledKA       > 0) e = m->NextScheduledKA;
-    if (m->clearIgnoreNA && (e - m->clearIgnoreNA > 0)) e = m->clearIgnoreNA;
 
     // NextScheduledSPRetry only valid when DelaySleep not set
     if (!m->DelaySleep && m->SleepLimit && e - m->NextScheduledSPRetry > 0) e = m->NextScheduledSPRetry;
@@ -3625,8 +3978,7 @@ mDNSexport void ShowTaskSchedulingError(mDNS *const m)
         LogMsg("Task Scheduling Error: m->NextScheduledProbe %d",    m->timenow - m->NextScheduledProbe);
     if (m->timenow - m->NextScheduledResponse >= 0)
         LogMsg("Task Scheduling Error: m->NextScheduledResponse %d", m->timenow - m->NextScheduledResponse);
-    if (m->clearIgnoreNA && m->timenow - m->clearIgnoreNA >= 0)
-        LogMsg("Task Scheduling Error: m->clearIgnoreNA %d", m->timenow - m->clearIgnoreNA);
+
     mDNS_Unlock(m);
 }
 

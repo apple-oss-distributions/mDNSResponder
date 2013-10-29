@@ -4,5 +4,19 @@
 <dict>
     <key>com.apple.wifi.manager-access</key>
     <true/>
+    <key>com.apple.SystemConfiguration.trailing-edge-agent</key>
+    <true/>
+    <key>com.apple.private.network.socket-delegate</key>
+    <true/>
+    <key>com.apple.networkd.cellular_blocked.notify</key>
+    <true/>
+    <key>com.apple.private.SCNetworkConnection-proxy-user</key>
+    <true/>
+    <key>com.apple.private.network.reserved-port</key>
+    <true/>
+    <key>com.apple.SystemConfiguration.SCDynamicStore-write-access</key>
+    <true/>
+    <key>com.apple.private.snhelper</key>
+    <true/>
 </dict>
 </plist>

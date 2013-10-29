@@ -725,8 +725,9 @@ mDNSlocal void DisplayResponse(mDNS *const m, const DNSMessage *const msg, const
         const mDNSu8 *ep = ptr;
         ptr = GetLargeResourceRecord(m, msg, ptr, end, InterfaceID, kDNSRecordTypePacketAuth, &pkt);
         if (!ptr) { DisplayError(srcaddr, ep, end, "AUTHORITY"); return; }
-        mprintf("%#-16a (?)  **** ERROR: SHOULD NOT HAVE AUTHORITY IN mDNS RESPONSE **** %-5s %##s\n",
-                srcaddr, DNSTypeName(pkt.r.resrec.rrtype), pkt.r.resrec.name->c);
+        if (pkt.r.resrec.rrtype != kDNSType_NSEC3)
+            mprintf("%#-16a (?)  **** ERROR: SHOULD NOT HAVE AUTHORITY IN mDNS RESPONSE **** %-5s %##s\n",
+                    srcaddr, DNSTypeName(pkt.r.resrec.rrtype), pkt.r.resrec.name->c);
     }
 
     for (i=0; i<msg->h.numAdditionals; i++)

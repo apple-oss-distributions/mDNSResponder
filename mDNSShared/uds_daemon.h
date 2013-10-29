@@ -34,6 +34,11 @@ extern mDNSs32 udsserver_idle(mDNSs32 nextevent);
 extern void udsserver_info(mDNS *const m);  // print out info about current state
 extern void udsserver_handle_configchange(mDNS *const m);
 extern int udsserver_exit(void);    // should be called prior to app exit
+extern void LogMcastStateInfo(mDNS *const m, mDNSBool mflag, mDNSBool start, mDNSBool mstatelog);
+#define LogMcastQ       (mDNS_McastLoggingEnabled == 0) ? ((void)0) : LogMcastQuestion
+#define LogMcastS       (mDNS_McastLoggingEnabled == 0) ? ((void)0) : LogMcastService
+#define LogMcast        (mDNS_McastLoggingEnabled == 0) ? ((void)0) : LogMsg
+#define LogMcastNoIdent (mDNS_McastLoggingEnabled == 0) ? ((void)0) : LogMsgNoIdent
 
 /* Routines that uds_daemon expects to link against: */
 
@@ -50,29 +55,35 @@ extern mDNS mDNSStorage;
 extern DNameListElem *AutoRegistrationDomains;
 extern DNameListElem *AutoBrowseDomains;
 
-extern mDNSs32 ChopSubTypes(char *regtype);
-extern AuthRecord *AllocateSubTypes(mDNSs32 NumSubTypes, char *p);
+extern mDNSs32 ChopSubTypes(char *regtype, char **AnonData);
+extern AuthRecord *AllocateSubTypes(mDNSs32 NumSubTypes, char *p, char **AnonData);
 extern int CountExistingRegistrations(domainname *srv, mDNSIPPort port);
 extern void FreeExtraRR(mDNS *const m, AuthRecord *const rr, mStatus result);
 extern int CountPeerRegistrations(mDNS *const m, ServiceRecordSet *const srs);
 
 #if APPLE_OSX_mDNSResponder
+
 extern void machserver_automatic_browse_domain_changed(const domainname *d, mDNSBool add);
 extern void machserver_automatic_registration_domain_changed(const domainname *d, mDNSBool add);
-// External support
+// D2D interface support
 extern void external_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, DNS_TypeValues qtype, DNSServiceFlags flags);
 extern void external_stop_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, DNS_TypeValues qtype, DNSServiceFlags flags);
 extern void external_start_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags);
 extern void external_stop_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags);
 extern void external_start_resolving_service(mDNSInterfaceID InterfaceID, const domainname *const fqdn, DNSServiceFlags flags);
 extern void external_stop_resolving_service(mDNSInterfaceID InterfaceID, const domainname *const fqdn, DNSServiceFlags flags);
-#else
+extern void external_connection_release(const domainname *instance);
+
+#else   // APPLE_OSX_mDNSResponder
+
 #define external_start_browsing_for_service(A,B,C,D) (void)(A)
 #define external_stop_browsing_for_service(A,B,C,D)  (void)(A)
 #define external_start_advertising_service(A,B)      (void)(A)
 #define external_stop_advertising_service(A,B)       (void)(A)
 #define external_start_resolving_service(A,B,C)      (void)(A)
 #define external_stop_resolving_service(A,B,C)       (void)(A)
+#define external_connection_release(A)               (void)(A)
+
 #endif // APPLE_OSX_mDNSResponder
 
 extern const char mDNSResponderVersionString_SCCS[];

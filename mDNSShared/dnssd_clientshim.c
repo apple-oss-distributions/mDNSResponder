@@ -412,7 +412,7 @@ DNSServiceErrorType DNSServiceBrowse
     x->q.QuestionContext = x;
 
     // Do the operation
-    err = mDNS_StartBrowse(&mDNSStorage, &x->q, &t, &d, mDNSInterface_Any, flags, (flags & kDNSServiceFlagsForceMulticast) != 0, (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0, FoundInstance, x);
+    err = mDNS_StartBrowse(&mDNSStorage, &x->q, &t, &d, mDNSNULL, mDNSInterface_Any, flags, (flags & kDNSServiceFlagsForceMulticast) != 0, (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0, FoundInstance, x);
     if (err) { mDNSPlatformMemFree(x); errormsg = "mDNS_StartBrowse"; goto fail; }
 
     // Succeeded: Wrap up and return
@@ -516,10 +516,13 @@ DNSServiceErrorType DNSServiceResolve
     x->qSRV.RetryWithSearchDomains = mDNSfalse;
     x->qSRV.TimeoutQuestion     = 0;
     x->qSRV.WakeOnResolve       = 0;
-    x->qSRV.UseBrackgroundTrafficClass = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
+    x->qSRV.UseBackgroundTrafficClass = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
     x->qSRV.ValidationRequired  = 0;
     x->qSRV.ValidatingResponse  = 0;
+    x->qSRV.ProxyQuestion       = 0;
     x->qSRV.qnameOrig           = mDNSNULL;
+    x->qSRV.AnonInfo            = mDNSNULL;
+    x->qSRV.pid                 = mDNSPlatformGetPID();
     x->qSRV.QuestionCallback    = FoundServiceInfo;
     x->qSRV.QuestionContext     = x;
 
@@ -540,10 +543,13 @@ DNSServiceErrorType DNSServiceResolve
     x->qTXT.RetryWithSearchDomains = mDNSfalse;
     x->qTXT.TimeoutQuestion     = 0;
     x->qTXT.WakeOnResolve       = 0;
-    x->qTXT.UseBrackgroundTrafficClass = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
+    x->qTXT.UseBackgroundTrafficClass = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
     x->qTXT.ValidationRequired  = 0;
     x->qTXT.ValidatingResponse  = 0;
+    x->qTXT.ProxyQuestion       = 0;
     x->qTXT.qnameOrig           = mDNSNULL;
+    x->qTXT.AnonInfo            = mDNSNULL;
+    x->qTXT.pid                 = mDNSPlatformGetPID();
     x->qTXT.QuestionCallback    = FoundServiceInfo;
     x->qTXT.QuestionContext     = x;
 
@@ -672,9 +678,15 @@ DNSServiceErrorType DNSServiceQueryRecord
     x->q.SearchListIndex     = 0;
     x->q.AppendSearchDomains = 0;
     x->q.RetryWithSearchDomains = mDNSfalse;
+    x->q.TimeoutQuestion     = 0;
     x->q.WakeOnResolve       = 0;
-    x->q.UseBrackgroundTrafficClass = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
+    x->q.UseBackgroundTrafficClass = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
+    x->q.ValidationRequired  = 0;
+    x->q.ValidatingResponse  = 0;
+    x->q.ProxyQuestion       = 0;
     x->q.qnameOrig           = mDNSNULL;
+    x->q.AnonInfo            = mDNSNULL;
+    x->q.pid                 = mDNSPlatformGetPID();
     x->q.QuestionCallback    = DNSServiceQueryRecordResponse;
     x->q.QuestionContext     = x;
 
@@ -794,4 +806,6 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
     (void)rdata;            // Unused
     return(kDNSServiceErr_Unsupported);
 }
-#endif
+
+
+#endif  // !MDNS_BUILDINGSTUBLIBRARY

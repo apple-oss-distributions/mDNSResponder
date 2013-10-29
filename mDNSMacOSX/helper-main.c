@@ -17,9 +17,6 @@
 
 #define _FORTIFY_SOURCE 2
 
-// We set VERSION_MIN_REQUIRED to 10.4 to avoid "bootstrap_register is deprecated" warnings from bootstrap.h
-#define MAC_OS_X_VERSION_MIN_REQUIRED MAC_OS_X_VERSION_10_4
-
 #include <CoreFoundation/CoreFoundation.h>
 #include <sys/cdefs.h>
 #include <sys/time.h>
@@ -45,10 +42,7 @@
 #include <vproc.h>
 
 #if TARGET_OS_EMBEDDED
-#include <bootstrap_priv.h>
 #define NO_SECURITYFRAMEWORK 1
-
-#define bootstrap_register(A,B,C) bootstrap_register2((A),(B),(C),0)
 #endif
 
 #ifndef LAUNCH_JOBKEY_MACHSERVICES
@@ -188,62 +182,25 @@ static int initialize_timer()
     return err;
 }
 
-static mach_port_t checkin(char *service_name)
-{
-    kern_return_t kr = KERN_SUCCESS;
-    mach_port_t port = MACH_PORT_NULL;
-    launch_data_t msg = NULL, reply = NULL, datum = NULL;
-
-    if (NULL == (msg = launch_data_new_string(LAUNCH_KEY_CHECKIN)))
-    { helplog(ASL_LEVEL_ERR, "Could not create checkin message for launchd."); goto fin; }
-    if (NULL == (reply = launch_msg(msg)))
-    { helplog(ASL_LEVEL_ERR, "Could not message launchd."); goto fin; }
-    if (LAUNCH_DATA_ERRNO == launch_data_get_type(reply))
-    {
-        if (launch_data_get_errno(reply) == EACCES) { launch_data_free(msg); launch_data_free(reply); return(MACH_PORT_NULL); }
-        helplog(ASL_LEVEL_ERR, "Launchd checkin failed: %s.", strerror(launch_data_get_errno(reply))); goto fin;
-    }
-    if (NULL == (datum = launch_data_dict_lookup(reply, LAUNCH_JOBKEY_MACHSERVICES)) || LAUNCH_DATA_DICTIONARY != launch_data_get_type(datum))
-    { helplog(ASL_LEVEL_ERR, "Launchd reply does not contain %s dictionary.", LAUNCH_JOBKEY_MACHSERVICES); goto fin; }
-    if (NULL == (datum = launch_data_dict_lookup(datum, service_name)) || LAUNCH_DATA_MACHPORT != launch_data_get_type(datum))
-    { helplog(ASL_LEVEL_ERR, "Launchd reply does not contain %s Mach port.", service_name); goto fin; }
-    if (MACH_PORT_NULL == (port = launch_data_get_machport(datum)))
-    { helplog(ASL_LEVEL_ERR, "Launchd gave me a null Mach port."); goto fin; }
-    if (KERN_SUCCESS != (kr = mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND)))
-    { helplog(ASL_LEVEL_ERR, "mach_port_insert_right: %d %X %s", kr, kr, mach_error_string(kr)); goto fin; }
-
-fin:
-    if (NULL != msg) launch_data_free(msg);
-    if (NULL != reply) launch_data_free(reply);
-    if (MACH_PORT_NULL == port) exit(EXIT_FAILURE);
-    return port;
-}
-
 static mach_port_t register_service(const char *service_name)
 {
     mach_port_t port = MACH_PORT_NULL;
     kern_return_t kr;
 
-    if (KERN_SUCCESS == (kr = bootstrap_check_in(bootstrap_port, (char *)service_name, &port)))
+    if (KERN_SUCCESS != (kr = bootstrap_check_in(bootstrap_port, (char *)service_name, &port)))
     {
-        if (KERN_SUCCESS != (kr = mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND)))
-            helplog(ASL_LEVEL_ERR, "mach_port_insert_right: %d %X %s", kr, kr, mach_error_string(kr));
-        else
-            return port;
+        helplog(ASL_LEVEL_ERR, "bootstrap_check_in: %d %X %s", kr, kr, mach_error_string(kr));
+        return MACH_PORT_NULL;
     }
-    if (KERN_SUCCESS != (kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &port)))
-    { helplog(ASL_LEVEL_ERR, "mach_port_allocate: %d %X %s", kr, kr, mach_error_string(kr)); goto error; }
+    
     if (KERN_SUCCESS != (kr = mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND)))
-    { helplog(ASL_LEVEL_ERR, "mach_port_insert_right: %d %X %s", kr, kr, mach_error_string(kr)); goto error; }
-
-    // XXX bootstrap_register does not modify its second argument, but the prototype does not include const.
-    if (KERN_SUCCESS != (kr = bootstrap_register(bootstrap_port, (char *)service_name, port)))
-    { helplog(ASL_LEVEL_ERR, "bootstrap_register failed: %s %d %X %s", service_name, kr, kr, mach_error_string(kr)); goto error; }
+    {
+        helplog(ASL_LEVEL_ERR, "mach_port_insert_right: %d %X %s", kr, kr, mach_error_string(kr));
+        mach_port_deallocate(mach_task_self(), port);
+        return MACH_PORT_NULL;
+    }
 
     return port;
-error:
-    if (MACH_PORT_NULL != port) mach_port_deallocate(mach_task_self(), port);
-    return MACH_PORT_NULL;
 }
 
 int main(int ac, char *av[])
@@ -281,12 +238,9 @@ int main(int ac, char *av[])
     // Explicitly ensure that our Keychain operations utilize the system domain.
     if (opt_debug) SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem);
 #endif
-    gPort = checkin(kmDNSHelperServiceName);
+    gPort = register_service(kmDNSHelperServiceName);
     if (!gPort)
-    {
-        helplog(ASL_LEVEL_ERR, "Launchd provided no launchdata; will open Mach port explicitly");
-        gPort = register_service(kmDNSHelperServiceName);
-    }
+        exit(EXIT_FAILURE);
 
     if (maxidle) actualidle = maxidle;
 

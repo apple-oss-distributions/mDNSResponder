@@ -190,7 +190,10 @@ mDNSexport void mDNSPlatformWriteLogMsg(const char *ident, const char *buffer, m
         if (ident && ident[0] && mDNSPlatformClockDivisor)
             syslog(syslog_level, "%8d.%03d: %s", (int)(t/1000), ms, buffer);
         else
-#endif
+#elif APPLE_OSX_mDNSResponder
+        mDNSPlatformLogToFile(syslog_level, buffer);
+#else
         syslog(syslog_level, "%s", buffer);
+#endif
     }
 }

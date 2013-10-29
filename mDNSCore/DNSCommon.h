@@ -101,6 +101,8 @@ extern mDNSu32 mDNSRandom(mDNSu32 max);     // Returns pseudo-random result from
 #pragma mark - Domain Name Utility Functions
 #endif
 
+#define mDNSSubTypeLabel   "\x04_sub"
+
 #define mDNSIsDigit(X)     ((X) >= '0' && (X) <= '9')
 #define mDNSIsUpperCase(X) ((X) >= 'A' && (X) <= 'Z')
 #define mDNSIsLowerCase(X) ((X) >= 'a' && (X) <= 'z')
@@ -169,6 +171,7 @@ extern mDNSBool ResourceRecordAnswersUnicastResponse(const ResourceRecord *const
 extern mDNSBool LocalOnlyRecordAnswersQuestion(AuthRecord *const rr, const DNSQuestion *const q);
 extern mDNSu16 GetRDLength(const ResourceRecord *const rr, mDNSBool estimate);
 extern mDNSBool ValidateRData(const mDNSu16 rrtype, const mDNSu16 rdlength, const RData *const rd);
+extern mStatus DNSNameToLowerCase(domainname *d, domainname *result);
 
 #define GetRRDomainNameTarget(RR) (                                                                          \
         ((RR)->rrtype == kDNSType_NS || (RR)->rrtype == kDNSType_CNAME || (RR)->rrtype == kDNSType_PTR || (RR)->rrtype == kDNSType_DNAME) ? &(RR)->rdata->u.name        : \
@@ -204,9 +207,9 @@ extern mDNSu8 *PutResourceRecordTTLWithLimit(DNSMessage *const msg, mDNSu8 *ptr,
 #define PutResourceRecord(MSG, P, C, RR) PutResourceRecordTTL((MSG), (P), (C), (RR), (RR)->rroriginalttl)
 
 // The PutRR_OS variants assume a local variable 'm', put build the packet at m->omsg,
-// and assume a local variable 'OwnerRecordSpace' indicating how many bytes (if any) to reserve to add an OWNER option at the end
+// and assume local variables 'OwnerRecordSpace' & 'TraceRecordSpace' indicating how many bytes (if any) to reserve to add an OWNER/TRACER option at the end
 #define PutRR_OS_TTL(ptr, count, rr, ttl) \
-    PutResourceRecordTTLWithLimit(&m->omsg, (ptr), (count), (rr), (ttl), m->omsg.data + AllowedRRSpace(&m->omsg) - OwnerRecordSpace)
+    PutResourceRecordTTLWithLimit(&m->omsg, (ptr), (count), (rr), (ttl), m->omsg.data + AllowedRRSpace(&m->omsg) - OwnerRecordSpace - TraceRecordSpace)
 
 #define PutRR_OS(P, C, RR) PutRR_OS_TTL((P), (C), (RR), (RR)->rroriginalttl)
 
@@ -221,7 +224,12 @@ extern mDNSu8 *putUpdateLease(DNSMessage *msg, mDNSu8 *end, mDNSu32 lease);
 extern mDNSu8 *putUpdateLeaseWithLimit(DNSMessage *msg, mDNSu8 *ptr, mDNSu32 lease, mDNSu8 *limit);
 
 extern mDNSu8 *putHINFO(const mDNS *const m, DNSMessage *const msg, mDNSu8 *ptr, DomainAuthInfo *authInfo, mDNSu8 *limit);
-mDNSexport mDNSu8 *putDNSSECOption(DNSMessage *msg, mDNSu8 *end, mDNSu8 *limit);
+extern mDNSu8 *putDNSSECOption(DNSMessage *msg, mDNSu8 *end, mDNSu8 *limit);
+extern int baseEncode(char *buffer, int blen, const mDNSu8 *data, int len, int encAlg);
+extern void NSEC3Parse(const ResourceRecord *const rr, mDNSu8 **salt, int *hashLength, mDNSu8 **nxtName, int *bitmaplen, mDNSu8 **bitmap);
+
+extern const mDNSu8 *NSEC3HashName(const domainname *name, rdataNSEC3 *nsec3, const mDNSu8 *AnonData, int AnonDataLen,
+    const mDNSu8 hash[NSEC3_MAX_HASH_LEN], int *dlen);
 
 // ***************************************************************************
 #if COMPILER_LIKES_PRAGMA_MARK
@@ -255,6 +263,7 @@ extern void DumpPacket(mDNS *const m, mStatus status, mDNSBool sent, char *trans
                        const mDNSAddr *dstaddr, mDNSIPPort dstport, const DNSMessage *const msg, const mDNSu8 *const end);
 extern mDNSBool RRAssertsNonexistence(const ResourceRecord *const rr, mDNSu16 type);
 extern mDNSBool RRAssertsExistence(const ResourceRecord *const rr, mDNSu16 type);
+extern mDNSBool BitmapTypeCheck(mDNSu8 *bmap, int bitmaplen, mDNSu16 type);
 
 extern mDNSu16 swap16(mDNSu16 x);
 extern mDNSu32 swap32(mDNSu32 x);

@@ -27,18 +27,23 @@
 #include "CryptoAlg.h"
 #include "CryptoSupport.h"
 #include "dnssec.h"
+#include "DNSSECSupport.h"
 
 #if TARGET_OS_IPHONE
 #include "SecRSAKey.h"                  // For RSA_SHA1 etc. verification
+#else
+#include <Security/Security.h>
+#endif
+
+#if !TARGET_OS_IPHONE
+mDNSlocal SecKeyRef SecKeyCreateRSAPublicKey_OSX(unsigned char *asn1, int length);
 #endif
 
 typedef struct
 {
-#if DISPATCH_API_VERSION >= 20111008
     dispatch_data_t encData;
     dispatch_data_t encMap;
     dispatch_data_t encNULL;
-#endif
 }encContext;
 
 mDNSlocal mStatus enc_create(AlgContext *ctx)
@@ -56,7 +61,6 @@ mDNSlocal mStatus enc_create(AlgContext *ctx)
         LogMsg("enc_create: Unsupported algorithm %d", ctx->alg);
         return mStatus_BadParamErr;
     }
-#if DISPATCH_API_VERSION >= 20111008
     ptr->encData = NULL;
     ptr->encMap = NULL;
     // The encoded data is not NULL terminated. So, we concatenate a null byte later when we encode and map
@@ -67,7 +71,6 @@ mDNSlocal mStatus enc_create(AlgContext *ctx)
         mDNSPlatformMemFree(ptr);
         return mStatus_NoMemoryErr;
     }
-#endif
     ctx->context = ptr;
     return mStatus_NoError;
 }
@@ -75,23 +78,20 @@ mDNSlocal mStatus enc_create(AlgContext *ctx)
 mDNSlocal mStatus enc_destroy(AlgContext *ctx)
 {
     encContext *ptr = (encContext *)ctx->context;
-#if DISPATCH_API_VERSION >= 20111008
     if (ptr->encData) dispatch_release(ptr->encData);
     if (ptr->encMap) dispatch_release(ptr->encMap);
     if (ptr->encNULL) dispatch_release(ptr->encNULL);
-#endif
     mDNSPlatformMemFree(ptr);
     return mStatus_NoError;
 }
 
-mDNSlocal mStatus enc_add(AlgContext *ctx, void *data, mDNSu32 len)
+mDNSlocal mStatus enc_add(AlgContext *ctx, const void *data, mDNSu32 len)
 {
     switch (ctx->alg)
     {
     case ENC_BASE32:
     case ENC_BASE64:
     {
-#if DISPATCH_API_VERSION >= 20111008
         encContext *ptr = (encContext *)ctx->context;
         dispatch_data_t src_data = dispatch_data_create(data, len, dispatch_get_global_queue(0, 0), ^{});
         if (!src_data)
@@ -100,7 +100,7 @@ mDNSlocal mStatus enc_add(AlgContext *ctx, void *data, mDNSu32 len)
             return mStatus_BadParamErr;
         }
         dispatch_data_t dest_data = dispatch_data_create_with_transform(src_data, DISPATCH_DATA_FORMAT_TYPE_NONE,
-                                                                        (ctx->alg == ENC_BASE32 ? DISPATCH_DATA_FORMAT_TYPE_BASE32 : DISPATCH_DATA_FORMAT_TYPE_BASE64));
+                                                                        (ctx->alg == ENC_BASE32 ? DISPATCH_DATA_FORMAT_TYPE_BASE32HEX : DISPATCH_DATA_FORMAT_TYPE_BASE64));
         dispatch_release(src_data);
         if (!dest_data)
         {
@@ -108,10 +108,7 @@ mDNSlocal mStatus enc_add(AlgContext *ctx, void *data, mDNSu32 len)
             return mStatus_BadParamErr;
         }
         ptr->encData = dest_data;
-#else
-        (void)data;
-        (void)len;
-#endif
+
         return mStatus_NoError;
     }
     default:
@@ -129,7 +126,6 @@ mDNSlocal mDNSu8* enc_encode(AlgContext *ctx)
     case ENC_BASE32:
     case ENC_BASE64:
     {
-#if DISPATCH_API_VERSION >= 20111008
         encContext *ptr = (encContext *)ctx->context;
         size_t size;
         dispatch_data_t dest_data = ptr->encData;
@@ -150,7 +146,7 @@ mDNSlocal mDNSu8* enc_encode(AlgContext *ctx)
         dispatch_release(dest_data);
         ptr->encData = data;
         ptr->encMap = map;
-#endif
+
         return (mDNSu8 *)result;
     }
     default:
@@ -202,7 +198,7 @@ mDNSlocal mDNSu32 sha_len(AlgContext *ctx)
     }
 }
 
-mDNSlocal mStatus sha_add(AlgContext *ctx, void *data, mDNSu32 len)
+mDNSlocal mStatus sha_add(AlgContext *ctx, const void *data, mDNSu32 len)
 {
     switch (ctx->alg)
     {
@@ -249,6 +245,34 @@ mDNSlocal mStatus sha_verify(AlgContext *ctx, mDNSu8 *key, mDNSu32 keylen, mDNSu
         return mStatus_NoError;
     else
         return mStatus_NoAuth;
+}
+
+mDNSlocal mStatus sha_final(AlgContext *ctx, void *digestOut, mDNSu32 dlen)
+{
+    mDNSu8 digest[CC_SHA512_DIGEST_LENGTH];
+    mDNSu32 digestLen;
+
+    switch (ctx->alg)
+    {
+    case SHA1_DIGEST_TYPE:
+        digestLen = CC_SHA1_DIGEST_LENGTH;
+        CC_SHA1_Final(digest, (CC_SHA1_CTX *)ctx->context);
+        break;
+    case SHA256_DIGEST_TYPE:
+        digestLen = CC_SHA256_DIGEST_LENGTH;
+        CC_SHA256_Final(digest, (CC_SHA256_CTX *)ctx->context);
+        break;
+    default:
+        LogMsg("sha_final: Unsupported algorithm %d", ctx->alg);
+        return mStatus_BadParamErr;
+    }
+    if (dlen != digestLen)
+    {
+        LogMsg("sha_final(Alg %d): digest len mismatch len %u, expected %u", ctx->alg, (unsigned int)dlen, (unsigned int)digestLen);
+        return mStatus_BadParamErr;
+    }
+    memcpy(digestOut, digest, digestLen);
+    return mStatus_NoError;
 }
 
 mDNSlocal mStatus rsa_sha_create(AlgContext *ctx)
@@ -303,7 +327,7 @@ mDNSlocal mDNSu32 rsa_sha_len(AlgContext *ctx)
     }
 }
 
-mDNSlocal mStatus rsa_sha_add(AlgContext *ctx, void *data, mDNSu32 len)
+mDNSlocal mStatus rsa_sha_add(AlgContext *ctx, const void *data, mDNSu32 len)
 {
     switch (ctx->alg)
     {
@@ -324,7 +348,6 @@ mDNSlocal mStatus rsa_sha_add(AlgContext *ctx, void *data, mDNSu32 len)
     return mStatus_NoError;
 }
 
-#if TARGET_OS_IPHONE
 mDNSlocal SecKeyRef rfc3110_import(const mDNSu8 *data, const mDNSu32 len)
 {
     static const int max_key_bytes = 4096 / 8;                // max DNSSEC supported modulus is 4096 bits
@@ -427,29 +450,38 @@ mDNSlocal SecKeyRef rfc3110_import(const mDNSu8 *data, const mDNSu32 len)
     for (i = 1; i <= exp_length; i++)
         asn1[index++] = data[i];
 
+#if TARGET_OS_IPHONE
     // index contains bytes written, use it for length
-    return SecKeyCreateRSAPublicKey(NULL, asn1, index, kSecKeyEncodingPkcs1);
+    return (SecKeyCreateRSAPublicKey(NULL, asn1, index, kSecKeyEncodingPkcs1));
+#else
+    return (SecKeyCreateRSAPublicKey_OSX(asn1, index));
+#endif
 }
 
+#if TARGET_OS_IPHONE
 mDNSlocal mStatus rsa_sha_verify(AlgContext *ctx, mDNSu8 *key, mDNSu32 keylen, mDNSu8 *signature, mDNSu32 siglen)
 {
     SecKeyRef keyref;
     OSStatus result;
     mDNSu8 digest[CC_SHA512_DIGEST_LENGTH];
     int digestlen;
+    int cryptoAlg;
 
     switch (ctx->alg)
     {
     case CRYPTO_RSA_NSEC3_SHA1:
     case CRYPTO_RSA_SHA1:
+        cryptoAlg = kSecPaddingPKCS1SHA1;
         digestlen = CC_SHA1_DIGEST_LENGTH;
         CC_SHA1_Final(digest, (CC_SHA1_CTX *)ctx->context);
         break;
     case CRYPTO_RSA_SHA256:
+        cryptoAlg = kSecPaddingPKCS1SHA256;
         digestlen = CC_SHA256_DIGEST_LENGTH;
         CC_SHA256_Final(digest, (CC_SHA256_CTX *)ctx->context);
         break;
     case CRYPTO_RSA_SHA512:
+        cryptoAlg = kSecPaddingPKCS1SHA512;
         digestlen = CC_SHA512_DIGEST_LENGTH;
         CC_SHA512_Final(digest, (CC_SHA512_CTX *)ctx->context);
         break;
@@ -459,34 +491,204 @@ mDNSlocal mStatus rsa_sha_verify(AlgContext *ctx, mDNSu8 *key, mDNSu32 keylen, m
     }
 
     keyref = rfc3110_import(key, keylen);
-    if (!key)
+    if (!keyref)
     {
         LogMsg("rsa_sha_verify: Error decoding rfc3110 key data");
         return mStatus_NoMemoryErr;
     }
-    // TBD: Use the right algorithm when the support becomes available
-    result = SecKeyRawVerify(keyref, kSecPaddingPKCS1SHA1, digest, digestlen, signature, siglen);
-    LogMsg("rsa_sha_verify: result: %s (%ld)", result == noErr ? "PASS" : "FAIL", result);
-    if (result == noErr)
-        return mStatus_NoError;
-    else
+    result = SecKeyRawVerify(keyref, cryptoAlg, digest, digestlen, signature, siglen);
+    CFRelease(keyref);
+    if (result != noErr)
+    {
+        LogMsg("rsa_sha_verify: Failed for alg %d", ctx->alg);
         return mStatus_BadParamErr;
+    }
+    else
+    {
+        LogInfo("rsa_sha_verify: Passed for alg %d", ctx->alg);
+        return mStatus_NoError;
+    }
 }
-#else
+#else // TARGET_OS_IPHONE
+
+mDNSlocal SecKeyRef SecKeyCreateRSAPublicKey_OSX(unsigned char *asn1, int length)
+{
+    SecKeyRef result = NULL;
+    
+    SecExternalFormat extFormat = kSecFormatBSAFE;
+    SecExternalItemType itemType = kSecItemTypePublicKey;
+    CFArrayRef outArray = NULL;
+
+    CFDataRef keyData = CFDataCreate(NULL, asn1, length);
+    if (!keyData)
+        return NULL;
+
+    OSStatus err =  SecItemImport(keyData, NULL, &extFormat, &itemType, 0, NULL, NULL, &outArray);
+    
+    CFRelease(keyData);
+    if (noErr != err || outArray == NULL)
+    {
+        if (outArray)
+            CFRelease(outArray);
+        return NULL;
+    }
+    
+    result = (SecKeyRef)CFArrayGetValueAtIndex(outArray, 0);
+    if (result == NULL)
+    {
+        CFRelease(outArray);
+        return NULL;
+    }
+    
+    CFRetain(result);
+    CFRelease(outArray);
+    return result;
+}
+
+mDNSlocal Boolean VerifyData(SecKeyRef key, CFStringRef digestStr, mDNSu8 *digest, int dlen, int digestlenAttr, mDNSu8 *sig, int siglen, CFStringRef digest_type)
+{
+    CFErrorRef error;
+    Boolean ret;
+    
+    CFDataRef signature = CFDataCreate(NULL, sig, siglen);
+    if (!signature)
+        return false;
+    
+    SecTransformRef verifyXForm = SecVerifyTransformCreate(key, signature, &error);
+    CFRelease(signature);
+    if (verifyXForm == NULL)
+    {
+        return false;
+    }
+    
+    // tell the transform what type of data it is geting
+    if (!SecTransformSetAttribute(verifyXForm, kSecInputIsAttributeName, digest_type, &error))
+    {
+        LogMsg("VerifyData: SecTransformSetAttribute digest_type");
+        goto err;
+    }
+    
+    if (!SecTransformSetAttribute(verifyXForm, kSecDigestTypeAttribute, digestStr, &error))
+    {
+        LogMsg("VerifyData: SecTransformSetAttribute digestStr");
+        goto err;
+    }
+    
+    CFNumberRef digestLengthRef = CFNumberCreate(kCFAllocatorDefault, kCFNumberCFIndexType, &digestlenAttr);
+    if (digestLengthRef == NULL)
+    {
+        LogMsg("VerifyData: CFNumberCreate failed");
+        goto err;
+    }
+    
+    ret = SecTransformSetAttribute(verifyXForm, kSecDigestLengthAttribute, digestLengthRef, &error);
+    CFRelease(digestLengthRef);
+    if (!ret)
+    {
+        LogMsg("VerifyData: SecTransformSetAttribute digestLengthRef");
+        goto err;
+    }
+    
+    CFDataRef dataToSign = CFDataCreate(NULL, digest, dlen);
+    if (dataToSign ==  NULL)
+    {
+        LogMsg("VerifyData: CFDataCreate failed");
+        goto err;
+    }
+
+    ret = SecTransformSetAttribute(verifyXForm, kSecTransformInputAttributeName, dataToSign, &error);
+    CFRelease(dataToSign);
+    if (!ret)
+    {
+        LogMsg("VerifyData: SecTransformSetAttribute TransformAttributeName");
+        goto err;
+    }
+    
+    CFBooleanRef boolRef = SecTransformExecute(verifyXForm, &error);
+    CFRelease(verifyXForm);
+
+    if (error != NULL)
+    {
+        CFStringRef errStr = CFErrorCopyDescription(error);
+        char errorbuf[128];
+        errorbuf[0] = 0;
+        if (errStr != NULL)
+        {
+            if (!CFStringGetCString(errStr, errorbuf, sizeof(errorbuf), kCFStringEncodingUTF8))
+            {
+                LogMsg("VerifyData: CFStringGetCString failed");
+            }
+        }
+        LogMsg("VerifyData: SecTransformExecute failed with %s", errorbuf);
+        return false;
+    }
+    return CFEqual(boolRef, kCFBooleanTrue);    
+err:
+    CFRelease(verifyXForm);
+    return false;
+}
+
 mDNSlocal mStatus rsa_sha_verify(AlgContext *ctx, mDNSu8 *key, mDNSu32 keylen, mDNSu8 *signature, mDNSu32 siglen)
 {
-    (void)ctx;
-    (void)key;
-    (void)keylen;
-    (void)signature;
-    (void)siglen;
-    return mStatus_NoError;
-}
-#endif
+    SecKeyRef keyref;
+    mDNSu8 digest[CC_SHA512_DIGEST_LENGTH];
+    int digestlen;
+    int digestlenAttr;
+    CFStringRef digestStr;
+    mDNSBool ret;
 
-AlgFuncs sha_funcs = {sha_create, sha_destroy, sha_len, sha_add, sha_verify, mDNSNULL};
-AlgFuncs rsa_sha_funcs = {rsa_sha_create, rsa_sha_destroy, rsa_sha_len, rsa_sha_add, rsa_sha_verify, mDNSNULL};
-AlgFuncs enc_funcs = {enc_create, enc_destroy, mDNSNULL, enc_add, mDNSNULL, enc_encode};
+    switch (ctx->alg)
+    {
+    case CRYPTO_RSA_NSEC3_SHA1:
+    case CRYPTO_RSA_SHA1:
+        digestStr = kSecDigestSHA1;
+        digestlen = CC_SHA1_DIGEST_LENGTH;
+        digestlenAttr = 0;
+        CC_SHA1_Final(digest, (CC_SHA1_CTX *)ctx->context);
+        break;
+    case CRYPTO_RSA_SHA256:
+        digestStr = kSecDigestSHA2;
+        digestlen = CC_SHA256_DIGEST_LENGTH;
+        digestlenAttr = 256;
+        CC_SHA256_Final(digest, (CC_SHA256_CTX *)ctx->context);
+        break;
+    case CRYPTO_RSA_SHA512:
+        digestStr = kSecDigestSHA2;
+        digestlen = CC_SHA512_DIGEST_LENGTH;
+        digestlenAttr = 512;
+        CC_SHA512_Final(digest, (CC_SHA512_CTX *)ctx->context);
+        break;
+    default:
+        LogMsg("rsa_sha_verify: Unsupported algorithm %d", ctx->alg);
+        return mStatus_BadParamErr;
+    }
+
+    keyref = rfc3110_import(key, keylen);
+    if (!keyref)
+    {
+        LogMsg("rsa_sha_verify: Error decoding rfc3110 key data");
+        return mStatus_NoMemoryErr;
+    }
+    ret = VerifyData(keyref, digestStr, digest, digestlen, digestlenAttr, signature, siglen, kSecInputIsDigest);
+    CFRelease(keyref);
+    if (!ret)
+    {
+        LogMsg("rsa_sha_verify: Failed for alg %d", ctx->alg);
+        return mStatus_BadParamErr;
+    }
+    else
+    {
+        LogInfo("rsa_sha_verify: Passed for alg %d", ctx->alg);
+        return mStatus_NoError;
+    }
+}
+#endif // TARGET_OS_IPHONE
+
+AlgFuncs sha_funcs = {sha_create, sha_destroy, sha_len, sha_add, sha_verify, mDNSNULL, sha_final};
+AlgFuncs rsa_sha_funcs = {rsa_sha_create, rsa_sha_destroy, rsa_sha_len, rsa_sha_add, rsa_sha_verify, mDNSNULL, mDNSNULL};
+AlgFuncs enc_funcs = {enc_create, enc_destroy, mDNSNULL, enc_add, mDNSNULL, enc_encode, mDNSNULL};
+
+#ifndef DNSSEC_DISABLED
 
 mDNSexport mStatus DNSSECCryptoInit(mDNS *const m)
 {
@@ -517,8 +719,20 @@ mDNSexport mStatus DNSSECCryptoInit(mDNS *const m)
     if (result != mStatus_NoError)
         return result;
 
-    m->TrustAnchors = mDNSNULL;
-    m->notifyToken  = 0;
+    result = DNSSECPlatformInit(m);
+
+    return result;
+}
+
+#else // !DNSSEC_DISABLED
+
+mDNSexport mStatus DNSSECCryptoInit(mDNS *const m)
+{
+    (void) m;
     
     return mStatus_NoError;
 }
+
+#endif // !DNSSEC_DISABLED
+
+

@@ -17,7 +17,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreFoundation/CFXPCBridge.h>
-#include <dns_sd.h>
+#include "dns_sd.h"
 #include <UserEventAgentInterface.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -855,8 +855,11 @@ NetBrowserInfo* NetBrowserInfoCreate(CFStringRef serviceType, CFStringRef domain
     if (domain)
     {
         CFIndex domainSize = CFStringGetMaximumSizeForEncoding(CFStringGetLength(domain), kCFStringEncodingUTF8);
-        cDomain = calloc(serviceSize, 1);
-        success = success && CFStringGetCString(domain, cDomain, domainSize, kCFStringEncodingUTF8);
+        if (domainSize)
+        {
+            cDomain = calloc(domainSize, 1);
+            success = success && CFStringGetCString(domain, cDomain, domainSize, kCFStringEncodingUTF8);
+        }
     }
 
     if (!success)

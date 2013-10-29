@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>PayloadIdentifier</key>
+    <string>com.apple.mDNSResponder</string>
+    <key>PayloadUUID</key>
+    <string>6D0962E1-558A-44FB-8FE0-1F4F0BD157F4</string>
+    <key>PayloadDescription</key>
+    <string>Turns on mDNSResponder Debug Logging</string>
+    <key>PayloadDisplayName</key>
+    <string>mDNSResponder Debug Logging</string>
+    <key>PayloadOrganization</key>
+    <string>Apple, Inc</string>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadVersion</key>
+    <integer>2</integer>
+
+    <key>ConsentText</key>
+    <dict>
+      <key>en</key>
+      <string>English consent text</string>
+      <key>jp</key>
+      <string>Japanese consent text</string>
+      <key>default</key>
+      <string>Default consent text - used if none of the other languages match</string>
+    </dict>
+
+    <key>PayloadContent</key>
+    <array>
+        <dict>
+            <key>PayloadUUID</key>
+            <string>6D0962E1-558A-44FB-8FE0-1F4F0BD157F4</string>
+            <key>PayloadIdentifier</key>
+            <string>com.apple.defaults.1</string>
+            <key>PayloadType</key>
+            <string>com.apple.defaults.managed</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+            <key>PayloadContent</key>
+            <array>
+                <dict>
+                    <key>DefaultsDomainName</key>
+                    <string>com.apple.mDNSResponder</string>
+                    <key>DefaultsData</key>
+                    <dict>
+                        <key>EnableLogging</key>
+                        <true/>
+                    </dict>
+                </dict>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
+

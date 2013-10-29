@@ -158,7 +158,7 @@
       <AdditionalIncludeDirectories>..;$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Link>
-      <RegisterOutput>true</RegisterOutput>
+      <RegisterOutput>false</RegisterOutput>
       <AdditionalOptions>/NXCOMPAT /DYNAMICBASE %(AdditionalOptions)</AdditionalOptions>
       <AdditionalDependencies>ws2_32.lib;../../mDNSWindows/DLLStub/$(Platform)/$(Configuration)/dnssdStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)dnssdX.dll</OutputFile>

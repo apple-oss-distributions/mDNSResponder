@@ -217,8 +217,11 @@ mDNSlocal mStatus StartQuery(DNSQuestion *q, char *qname, mDNSu16 qtype, const m
     q->ValidationRequired = 0;
     q->ValidatingResponse = 0;
     q->WakeOnResolve    = 0;
-    q->UseBrackgroundTrafficClass = mDNSfalse;
+    q->UseBackgroundTrafficClass = mDNSfalse;
+    q->ProxyQuestion    = 0;
     q->qnameOrig        = mDNSNULL;
+    q->AnonInfo         = mDNSNULL;
+    q->pid              = mDNSPlatformGetPID();
     q->QuestionCallback = callback;
     q->QuestionContext  = NULL;
 

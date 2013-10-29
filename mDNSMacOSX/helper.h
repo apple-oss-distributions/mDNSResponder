@@ -20,15 +20,6 @@
 
 #define kmDNSHelperServiceName "com.apple.mDNSResponderHelper"
 
-enum mDNSDynamicStoreSetConfigKey
-{
-    kmDNSMulticastConfig = 1,
-    kmDNSDynamicConfig,
-    kmDNSPrivateConfig,
-    kmDNSBackToMyMacConfig,
-    kmDNSSleepProxyServersState
-};
-
 enum mDNSPreferencesSetNameKey
 {
     kmDNSComputerName = 1,
@@ -72,11 +63,11 @@ enum mDNSHelperErrors
 
 extern const char *mDNSHelperError(int errornum);
 
+extern mStatus mDNSHelperInit(void);
 extern void mDNSRequestBPF(void);
 extern int  mDNSPowerRequest(int key, int interval);
 extern int  mDNSSetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const ethaddr_t eth);
 extern void mDNSNotify(const char *title, const char *msg);     // Both strings are UTF-8 text
-extern void mDNSDynamicStoreSetConfig(int key, const char *subkey, CFPropertyListRef value);
 extern void mDNSPreferencesSetName(int key, domainlabel *old, domainlabel *new);
 extern int  mDNSKeychainGetSecrets(CFArrayRef *secrets);
 extern void mDNSConfigureServer(int updown, const char *const prefix, const domainname *const fqdn);
@@ -85,7 +76,9 @@ extern int  mDNSAutoTunnelSetKeys(int replacedelete, v6addr_t local_inner,
                                   v6addr_t remote_outer, short remote_port, const char *const prefix, const domainname *const fqdn);
 extern void mDNSSendWakeupPacket(unsigned ifid, char *eth_addr, char *ip_addr, int iteration);
 extern void mDNSPacketFilterControl(uint32_t command, char * ifname, uint32_t count, pfArray_t portArray, pfArray_t protocolArray);
-extern int mDNSSendKeepalive(v6addr_t sadd, v6addr_t dadd, uint16_t lport, uint16_t rport, unsigned seq, unsigned ack, uint16_t win);
-extern int mDNSInterfaceAdvtIoctl(const char *ifname, int op);
+extern void mDNSSendKeepalive(v6addr_t sadd, v6addr_t dadd, uint16_t lport, uint16_t rport, unsigned seq, unsigned ack, uint16_t win);
+extern int  mDNSRetrieveTCPInfo(int family, v6addr_t laddr, uint16_t lport, v6addr_t raddr, uint16_t rport, uint32_t *seq, uint32_t *ack, uint16_t *win, int32_t *intfid);
+extern void mDNSGetRemoteMAC(mDNS *const m, int family, v6addr_t raddr);
+extern void mDNSStoreSPSMACAddress(int family, v6addr_t spsaddr, char *ifname);
 
 #endif /* H_HELPER_H */
