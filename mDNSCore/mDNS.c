@@ -2250,8 +2250,9 @@ mDNSlocal void SendNDP(mDNS *const m, const mDNSu8 op, const mDNSu8 flags, const
 
 mDNSlocal void SetupTracerOpt(const mDNS *const m, rdataOPT *const Trace)
 {
-    Trace->u.tracer.platf   = m->mDNS_plat;
-    Trace->u.tracer.mDNSv   = _DNS_SD_H/1000; 
+    mDNSu32 DNS_VERS = _DNS_SD_H;
+    Trace->u.tracer.platf    = m->mDNS_plat;
+    Trace->u.tracer.mDNSv    = DNS_VERS;
 
     Trace->opt              = kDNSOpt_Trace;
     Trace->optlen           = DNSOpt_TraceData_Space - 4;

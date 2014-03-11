@@ -934,8 +934,8 @@ typedef struct
 
 typedef struct
 {
-    mDNSu8    platf;       // Running platform (see enum Platform_t)
-    mDNSu16   mDNSv;       // mDNSResponder Version (defined in dns_sd.h)
+    mDNSu8    platf;      // Running platform (see enum Platform_t)
+    mDNSu32   mDNSv;      // mDNSResponder Version (DNS_SD_H defined in dns_sd.h)
 } TracerOptData;
 
 // Note: rdataOPT format may be repeated an arbitrary number of times in a single resource record
@@ -951,7 +951,7 @@ typedef packedstruct
 // LLQ   rdata    18  bytes (opt 2, len 2, vers 2, op 2, err 2, id 8, lease 4)
 // Lease rdata     8  bytes (opt 2, len 2, lease 4)
 // Owner rdata 12-24  bytes (opt 2, len 2, owner 8-20)
-// Trace rdata     7  bytes (opt 2, len 2, platf 1, mDNSv 2)
+// Trace rdata     9  bytes (opt 2, len 2, platf 1, mDNSv 4)
 
 
 #define DNSOpt_Header_Space                 11
@@ -961,7 +961,7 @@ typedef packedstruct
 #define DNSOpt_OwnerData_ID_Wake_Space     (4 + 2 + 6 + 6)
 #define DNSOpt_OwnerData_ID_Wake_PW4_Space (4 + 2 + 6 + 6 + 4)
 #define DNSOpt_OwnerData_ID_Wake_PW6_Space (4 + 2 + 6 + 6 + 6)
-#define DNSOpt_TraceData_Space             (4 + 1 + 2)
+#define DNSOpt_TraceData_Space             (4 + 1 + 4)
 
 #define ValidOwnerLength(X) (   (X) == DNSOpt_OwnerData_ID_Space          - 4 || \
                                 (X) == DNSOpt_OwnerData_ID_Wake_Space     - 4 || \

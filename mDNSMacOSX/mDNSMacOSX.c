@@ -240,9 +240,10 @@ mDNSlocal void PrintHex(mDNSu8 *data, mDNSu16 len);
 typedef struct D2DRecordListElem
 {
     struct D2DRecordListElem *next;
-    AuthRecord               ar;
     D2DServiceInstance       instanceHandle;
     D2DTransportType         transportType;
+    AuthRecord               ar;    // must be last in the structure to accomodate extra space
+                                    // allocated for large records.
 } D2DRecordListElem;
 
 static D2DRecordListElem *D2DRecords = NULL; // List of records returned with D2DServiceFound events
