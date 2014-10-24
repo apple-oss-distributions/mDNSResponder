@@ -934,8 +934,8 @@ typedef struct
 
 typedef struct
 {
-    mDNSu8    platf;       // Running platform (see enum Platform_t)
-    mDNSu16   mDNSv;       // mDNSResponder Version (defined in dns_sd.h)
+    mDNSu8    platf;      // Running platform (see enum Platform_t)
+    mDNSu32   mDNSv;      // mDNSResponder Version (DNS_SD_H defined in dns_sd.h)
 } TracerOptData;
 
 // Note: rdataOPT format may be repeated an arbitrary number of times in a single resource record
@@ -951,7 +951,7 @@ typedef packedstruct
 // LLQ   rdata    18  bytes (opt 2, len 2, vers 2, op 2, err 2, id 8, lease 4)
 // Lease rdata     8  bytes (opt 2, len 2, lease 4)
 // Owner rdata 12-24  bytes (opt 2, len 2, owner 8-20)
-// Trace rdata     7  bytes (opt 2, len 2, platf 1, mDNSv 2)
+// Trace rdata     9  bytes (opt 2, len 2, platf 1, mDNSv 4)
 
 
 #define DNSOpt_Header_Space                 11
@@ -961,7 +961,7 @@ typedef packedstruct
 #define DNSOpt_OwnerData_ID_Wake_Space     (4 + 2 + 6 + 6)
 #define DNSOpt_OwnerData_ID_Wake_PW4_Space (4 + 2 + 6 + 6 + 4)
 #define DNSOpt_OwnerData_ID_Wake_PW6_Space (4 + 2 + 6 + 6 + 6)
-#define DNSOpt_TraceData_Space             (4 + 1 + 2)
+#define DNSOpt_TraceData_Space             (4 + 1 + 4)
 
 #define ValidOwnerLength(X) (   (X) == DNSOpt_OwnerData_ID_Space          - 4 || \
                                 (X) == DNSOpt_OwnerData_ID_Wake_Space     - 4 || \
@@ -2138,6 +2138,8 @@ struct NetworkInterfaceInfo_struct
     mDNSu8 Loopback;                    // Set if this is the loopback interface
     mDNSu8 IgnoreIPv4LL;                // Set if IPv4 Link-Local addresses have to be ignored.
     mDNSu8 SendGoodbyes;                // Send goodbyes on this interface while sleeping
+    mDNSBool DirectLink;                // a direct link, indicating we can skip the probe for
+                                        // address records
 };
 
 #define SLE_DELETE                      0x00000001
@@ -3173,6 +3175,7 @@ extern void       mDNSPlatformSendKeepalive(mDNSAddr *sadd, mDNSAddr *dadd, mDNS
 extern mStatus    mDNSPlatformRetrieveTCPInfo(mDNS *const m, mDNSAddr *laddr, mDNSIPPort *lport, mDNSAddr *raddr,  mDNSIPPort *rport, mDNSTCPInfo *mti);
 extern mStatus    mDNSPlatformGetRemoteMacAddr(mDNS *const m, mDNSAddr *raddr);
 extern mStatus    mDNSPlatformStoreSPSMACAddr(mDNSAddr *spsaddr, char *ifname);
+extern mStatus    mDNSPlatformClearSPSMACAddr(void);
 
 // mDNSPlatformTLSSetupCerts/mDNSPlatformTLSTearDownCerts used by dnsextd
 extern mStatus    mDNSPlatformTLSSetupCerts(void);
@@ -3481,7 +3484,7 @@ extern void FindSPSInCache(mDNS *const m, const DNSQuestion *const q, const Cach
 #define ValidSPSName(X) ((X)[0] >= 5 && mDNSIsDigit((X)[1]) && mDNSIsDigit((X)[2]) && mDNSIsDigit((X)[4]) && mDNSIsDigit((X)[5]))
 #define SPSMetric(X) (!ValidSPSName(X) || PrototypeSPSName(X) ? 1000000 : \
                       ((X)[1]-'0') * 100000 + ((X)[2]-'0') * 10000 + ((X)[4]-'0') * 1000 + ((X)[5]-'0') * 100 + ((X)[7]-'0') * 10 + ((X)[8]-'0'))
-
+#define LocalSPSMetric(X) ( (X)->SPSType * 10000 + (X)->SPSPortability * 100 + (X)->SPSMarginalPower)
 #define SPSFeatures(X) ((X)[0] >= 13 && (X)[12] =='.' ? ((X)[13]-'0') : 0 )
 
 #define MD5_DIGEST_LENGTH   16          /* digest length in bytes */

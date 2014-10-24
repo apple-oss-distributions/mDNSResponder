@@ -3,7 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.apple.mDNSResponder</string>
+	<string>com.apple.networking.mDNSResponder</string>
+    <key>Disabled</key>
+    <true/>
 	<key>OnDemand</key>
 	<false/>
 	<key>InitGroups</key>

@@ -2250,8 +2250,9 @@ mDNSlocal void SendNDP(mDNS *const m, const mDNSu8 op, const mDNSu8 flags, const
 
 mDNSlocal void SetupTracerOpt(const mDNS *const m, rdataOPT *const Trace)
 {
-    Trace->u.tracer.platf   = m->mDNS_plat;
-    Trace->u.tracer.mDNSv   = _DNS_SD_H/1000; 
+    mDNSu32 DNS_VERS = _DNS_SD_H;
+    Trace->u.tracer.platf    = m->mDNS_plat;
+    Trace->u.tracer.mDNSv    = DNS_VERS;
 
     Trace->opt              = kDNSOpt_Trace;
     Trace->optlen           = DNSOpt_TraceData_Space - 4;
@@ -5561,12 +5562,25 @@ mDNSexport void mDNS_UpdateAllowSleep(mDNS *const m)
                     }
 
                     // Disallow sleep if there is no sleep proxy server
-                    if (FindSPSInCache1(m, &intf->NetWakeBrowse, mDNSNULL, mDNSNULL) == mDNSNULL)
+                    const CacheRecord *cr = FindSPSInCache1(m, &intf->NetWakeBrowse, mDNSNULL, mDNSNULL);
+                    if ( cr == mDNSNULL)
                     {
                         allowSleep = mDNSfalse;
                         mDNS_snprintf(reason, sizeof(reason), "No sleep proxy server on %s", intf->ifname);
                         LogInfo("mDNS_UpdateAllowSleep: Sleep disabled because %s has no sleep proxy server", intf->ifname);
                         break;
+                    }
+                    else if (m->SPSType != 0)
+                    {
+                        mDNSu32 mymetric = LocalSPSMetric(m);
+                        mDNSu32 metric   = SPSMetric(cr->resrec.rdata->u.name.c);
+                        if (metric >= mymetric)
+                        {
+                            allowSleep = mDNSfalse;
+                            mDNS_snprintf(reason, sizeof(reason), "No sleep proxy server with better metric on %s", intf->ifname);
+                            LogInfo("mDNS_UpdateAllowSleep: Sleep disabled because %s has no sleep proxy server with a better metric", intf->ifname);
+                            break;
+                        }
                     }
                 }
             }
@@ -5576,9 +5590,8 @@ mDNSexport void mDNS_UpdateAllowSleep(mDNS *const m)
     // Call the platform code to enable/disable sleep
     mDNSPlatformSetAllowSleep(m, allowSleep, reason);
 #else
-	(void) m;
+    (void) m;
 #endif /* !defined(IDLESLEEPCONTROL_DISABLED) */
-	
 }
 
 mDNSlocal mDNSBool mDNSUpdateOkToSend(mDNS *const m, AuthRecord *rr, NetworkInterfaceInfo *const intf, mDNSu32 scopeid)
@@ -6236,6 +6249,10 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
     else    // If we have at least one advertised service
     {
         NetworkInterfaceInfo *intf;
+
+        // Clear out the SCDynamic entry that stores the external SPS information
+        mDNSPlatformClearSPSMACAddr();
+
         for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
         {
             // Intialize it to false. These values make sense only when SleepState is set to Sleeping.
@@ -12446,8 +12463,15 @@ mDNSlocal void AdvertiseInterface(mDNS *const m, NetworkInterfaceInfo *set)
     primary = FindFirstAdvertisedInterface(m);
     if (!primary) primary = set; // If no existing advertised interface, this new NetworkInterfaceInfo becomes our new primary
 
+    // If interface is marked as a direct link, we can assume the address record is unique
+    // and does not need to go through the probe phase of the probe/announce packet sequence.
+    mDNSu8 recordType = (set->DirectLink ? kDNSRecordTypeKnownUnique : kDNSRecordTypeUnique);
+
+    if (set->DirectLink)
+        LogInfo("AdvertiseInterface: Marking address record as kDNSRecordTypeKnownUnique for %s", set->ifname);
+
     // Send dynamic update for non-linklocal IPv4 Addresses
-    mDNS_SetupResourceRecord(&set->RR_A,     mDNSNULL, set->InterfaceID, kDNSType_A,     kHostNameTTL, kDNSRecordTypeUnique,      AuthRecordAny, mDNS_HostNameCallback, set);
+    mDNS_SetupResourceRecord(&set->RR_A,     mDNSNULL, set->InterfaceID, kDNSType_A,     kHostNameTTL, recordType,      AuthRecordAny, mDNS_HostNameCallback, set);
     mDNS_SetupResourceRecord(&set->RR_PTR,   mDNSNULL, set->InterfaceID, kDNSType_PTR,   kHostNameTTL, kDNSRecordTypeKnownUnique, AuthRecordAny, mDNSNULL, mDNSNULL);
     mDNS_SetupResourceRecord(&set->RR_HINFO, mDNSNULL, set->InterfaceID, kDNSType_HINFO, kHostNameTTL, kDNSRecordTypeUnique,      AuthRecordAny, mDNSNULL, mDNSNULL);
 
@@ -12489,12 +12513,13 @@ mDNSlocal void AdvertiseInterface(mDNS *const m, NetworkInterfaceInfo *set)
 
     set->RR_A.RRSet = &primary->RR_A;           // May refer to self
 
-#if APPLE_OSX_mDNSResponder
-    D2D_start_advertising_interface(set);
-#endif // APPLE_OSX_mDNSResponder
-
     mDNS_Register_internal(m, &set->RR_A);
     mDNS_Register_internal(m, &set->RR_PTR);
+
+#if APPLE_OSX_mDNSResponder
+    // must be after the mDNS_Register_internal() calls so that records have complete rdata fields, etc
+    D2D_start_advertising_interface(set);
+#endif // APPLE_OSX_mDNSResponder
 
     if (!NO_HINFO && m->HIHardware.c[0] > 0 && m->HISoftware.c[0] > 0 && m->HIHardware.c[0] + m->HISoftware.c[0] <= 254)
     {

@@ -37,8 +37,6 @@
 
 #include "dnssd_ipc.h"
 
-static int gDaemonErr = kDNSServiceErr_NoError;
-
 #if defined(_WIN32)
 
     #define _SSIZE_T
@@ -308,6 +306,8 @@ static int more_bytes(dnssd_sock_t sd)
 // the next operation on this socket(recv/accept) is blocked since we depend on TCP to communicate with the system service.
 static int set_waitlimit(dnssd_sock_t sock, int timeout)
 {
+    int gDaemonErr = kDNSServiceErr_NoError;
+
     // To prevent stack corruption since select does not work with timeout if fds > FD_SETSIZE(1024)
     if (!gDaemonErr && sock < FD_SETSIZE)
     {
@@ -526,6 +526,11 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
         #ifdef SO_NOSIGPIPE
         const unsigned long optval = 1;
         #endif
+        #ifndef USE_TCP_LOOPBACK
+        char* uds_serverpath = getenv(MDNS_UDS_SERVERPATH_ENVVAR);
+        if (uds_serverpath == NULL)
+            uds_serverpath = MDNS_UDS_SERVERPATH;
+        #endif
         *ref = NULL;
         sdr->sockfd    = socket(AF_DNSSD, SOCK_STREAM, 0);
         sdr->validator = sdr->sockfd ^ ValidatorBits;
@@ -546,7 +551,7 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
         saddr.sin_port        = htons(MDNS_TCP_SERVERPORT);
         #else
         saddr.sun_family      = AF_LOCAL;
-        strcpy(saddr.sun_path, MDNS_UDS_SERVERPATH);
+        strcpy(saddr.sun_path, uds_serverpath);
         #if !defined(__ppc__) && defined(SO_DEFUNCTOK)
         {
             int defunct = 1;
@@ -573,8 +578,8 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
             }
             else 
             {
-                syslog(LOG_WARNING, "dnssd_clientstub ConnectToServer: connect() failed Socket:%d Err:%d Errno:%d %s", 
-                        sdr->sockfd, err, dnssd_errno, dnssd_strerror(dnssd_errno));
+                syslog(LOG_WARNING, "dnssd_clientstub ConnectToServer: connect() failed path:%s Socket:%d Err:%d Errno:%d %s", 
+                       uds_serverpath, sdr->sockfd, err, dnssd_errno, dnssd_strerror(dnssd_errno));
                 dnssd_close(sdr->sockfd); 
                 FreeDNSServiceOp(sdr); 
                 return kDNSServiceErr_ServiceNotRunning; 
@@ -1224,11 +1229,11 @@ fail:
     syslog(LOG_WARNING, "dnssd_clientstub handle_resolve_response: error reading result from daemon");
 }
 
-#if APPLE_OSX_mDNSResponder
+#if TARGET_OS_EMBEDDED
 
 static int32_t libSystemVersion = 0;
 
-// Return true if the application linked against a version of libsystem where P2P
+// Return true if the iOS application linked against a version of libsystem where P2P
 // interfaces were included by default when using kDNSServiceInterfaceIndexAny.
 // Using 160.0.0 == 0xa00000 as the version threshold.
 static int includeP2PWithIndexAny()
@@ -1242,15 +1247,15 @@ static int includeP2PWithIndexAny()
         return 0;
 }
 
-#else   // APPLE_OSX_mDNSResponder
+#else   // TARGET_OS_EMBEDDED
 
-// always return false for non Apple platforms
+// always return false for non iOS platforms
 static int includeP2PWithIndexAny()
 {
     return 0;
 }
 
-#endif  // APPLE_OSX_mDNSResponder
+#endif  // TARGET_OS_EMBEDDED
 
 DNSServiceErrorType DNSSD_API DNSServiceResolve
 (
@@ -1772,7 +1777,8 @@ DNSServiceErrorType DNSSD_API DNSServiceCreateDelegateConnection(DNSServiceRef *
     }
 
     if (pid && setsockopt((*sdRef)->sockfd, SOL_SOCKET, SO_DELEGATED, &pid, sizeof(pid)) == -1)
-    {  
+    { 
+        syslog(LOG_WARNING, "dnssdclientstub: Could not setsockopt() for PID[%d], no entitlements or process(pid) invalid errno:%d (%s)", pid, errno, strerror(errno)); 
         // Free the hdr in case we return before calling deliver_request() 
         if (hdr)
             free(hdr);
@@ -1783,6 +1789,7 @@ DNSServiceErrorType DNSSD_API DNSServiceCreateDelegateConnection(DNSServiceRef *
 
     if (!pid && setsockopt((*sdRef)->sockfd, SOL_SOCKET, SO_DELEGATED_UUID, uuid, sizeof(uuid_t)) == -1)
     {
+        syslog(LOG_WARNING, "dnssdclientstub: Could not setsockopt() for UUID, no entitlements or process(uuid) invalid errno:%d (%s) ", errno, strerror(errno));
         // Free the hdr in case we return before calling deliver_request()
         if (hdr)
             free(hdr);

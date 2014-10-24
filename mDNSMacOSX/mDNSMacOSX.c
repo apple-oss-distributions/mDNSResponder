@@ -209,9 +209,14 @@ mDNSexport void D2D_start_advertising_interface(NetworkInterfaceInfo *interface)
     // via the D2D interface layer.
     if (interface->InterfaceID == AWDLInterfaceID)
     {
-        LogInfo("D2D_start_advertising_interface: %s", interface->ifname);
-        external_start_advertising_service(&interface->RR_A.resrec, NULL);
-        external_start_advertising_service(&interface->RR_PTR.resrec, NULL);
+        // only log if we have a valid record to start advertising
+        if (interface->RR_A.resrec.RecordType || interface->RR_PTR.resrec.RecordType)
+            LogInfo("D2D_start_advertising_interface: %s", interface->ifname);
+
+        if (interface->RR_A.resrec.RecordType)
+            external_start_advertising_service(&interface->RR_A.resrec, NULL);
+        if (interface->RR_PTR.resrec.RecordType)
+            external_start_advertising_service(&interface->RR_PTR.resrec, NULL);
     }
 }
 
@@ -219,7 +224,10 @@ mDNSexport void D2D_stop_advertising_interface(NetworkInterfaceInfo *interface)
 {
     if (interface->InterfaceID == AWDLInterfaceID)
     {
-        LogInfo("D2D_stop_advertising_interface: %s", interface->ifname);
+        // only log if we have a valid record to stop advertising
+        if (interface->RR_A.resrec.RecordType || interface->RR_PTR.resrec.RecordType)
+            LogInfo("D2D_stop_advertising_interface: %s", interface->ifname);
+
         if (interface->RR_A.resrec.RecordType)
             external_stop_advertising_service(&interface->RR_A.resrec, NULL);
         if (interface->RR_PTR.resrec.RecordType)
@@ -240,9 +248,10 @@ mDNSlocal void PrintHex(mDNSu8 *data, mDNSu16 len);
 typedef struct D2DRecordListElem
 {
     struct D2DRecordListElem *next;
-    AuthRecord               ar;
     D2DServiceInstance       instanceHandle;
     D2DTransportType         transportType;
+    AuthRecord               ar;    // must be last in the structure to accomodate extra space
+                                    // allocated for large records.
 } D2DRecordListElem;
 
 static D2DRecordListElem *D2DRecords = NULL; // List of records returned with D2DServiceFound events
@@ -855,11 +864,6 @@ mDNSexport void external_start_advertising_service(const ResourceRecord *const r
     if (resourceRecord->rrtype == kDNSType_SRV)
         mDNSUpdatePacketFilter(NULL);
 
-    if (resourceRecord->rrtype == kDNSServiceType_A || resourceRecord->rrtype == kDNSServiceType_AAAA)
-    {
-        LogInfo("external_start_advertising_service: ignoring address record");
-        return;
-    }
     rhs = DNSNameCompressionBuildLHS(&lower, resourceRecord->rrtype);
     end = DNSNameCompressionBuildRHS(rhs, resourceRecord);
     PrintHelper(__func__, compression_lhs, rhs - compression_lhs, rhs, end - rhs);
@@ -894,11 +898,6 @@ mDNSexport void external_stop_advertising_service(const ResourceRecord *const re
     if (resourceRecord->rrtype == kDNSType_SRV)
         mDNSUpdatePacketFilter(resourceRecord);
 
-    if (resourceRecord->rrtype == kDNSServiceType_A || resourceRecord->rrtype == kDNSServiceType_AAAA)
-    {
-        LogInfo("external_stop_advertising_service: ignoring address record");
-        return;
-    }
     rhs = DNSNameCompressionBuildLHS(&lower, resourceRecord->rrtype);
     end = DNSNameCompressionBuildRHS(rhs, resourceRecord);
     PrintHelper(__func__, compression_lhs, rhs - compression_lhs, rhs, end - rhs);
@@ -1865,7 +1864,8 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
     if (err < 0)
     {
         static int MessageCount = 0;
-        // Don't report EHOSTDOWN (i.e. ARP failure), ENETDOWN, or no route to host for unicast destinations
+        LogInfo("mDNSPlatformSendUDP -> sendto(%d) failed to send packet on InterfaceID %p %5s/%d to %#a:%d skt %d error %d errno %d (%s) %lu",
+                s, InterfaceID, ifa_name, dst->type, dst, mDNSVal16(dstPort), s, err, errno, strerror(errno), (mDNSu32)(m->timenow));
         if (!mDNSAddressIsAllDNSLinkGroup(dst))
             if (errno == EHOSTDOWN || errno == ENETDOWN || errno == EHOSTUNREACH || errno == ENETUNREACH) return(mStatus_TransientErr);
         // Don't report EHOSTUNREACH in the first three minutes after boot
@@ -2089,11 +2089,13 @@ mDNSexport void myKQSocketCallBack(int s1, short filter, void *context)
 
         // Note: When handling multiple packets in a batch, MUST reset InterfaceID before handling each packet
         mDNSInterfaceID InterfaceID = mDNSNULL;
-        //NetworkInterfaceInfo *intf = m->HostInterfaces;
-        //while (intf && strcmp(intf->ifname, packetifname)) intf = intf->next;
-
         NetworkInterfaceInfoOSX *intf = m->p->InterfaceList;
-        while (intf && strcmp(intf->ifinfo.ifname, packetifname)) intf = intf->next;
+        while (intf) 
+        {
+            if (intf->Exists && !strcmp(intf->ifinfo.ifname, packetifname))
+                break;
+            intf = intf->next;
+        }
 
         // When going to sleep we deregister all our interfaces, but if the machine
         // takes a few seconds to sleep we may continue to receive multicasts
@@ -3312,6 +3314,25 @@ mDNSexport void mDNSPlatformSendKeepalive(mDNSAddr *sadd, mDNSAddr *dadd, mDNSIP
     mDNSSendKeepalive(sadd->ip.v6.b, dadd->ip.v6.b, lport->NotAnInteger, rport->NotAnInteger, seq, ack, win);
 }
 
+mDNSexport mStatus  mDNSPlatformClearSPSMACAddr(void)
+{
+    SCDynamicStoreRef store = NULL;
+    CFStringRef  entityname = NULL;
+
+    if ((store = SCDynamicStoreCreate(NULL, CFSTR("mDNSResponder:ClearSPSMACAddress"), NULL, NULL)))
+    {
+        if ((entityname = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("%s%s%s"), "State:/Network/Interface/", "[^/]", "/BonjourSleepProxyAddress")))
+        {
+            if (SCDynamicStoreRemoveValue(store, entityname) == false)
+                LogMsg("mDNSPlatformClearSPSMACAddr: Unable to remove key");
+        }
+    }
+
+    if (entityname) CFRelease(entityname);
+    if (store)      CFRelease(store);
+    return KERN_SUCCESS;
+}
+
 mDNSexport mStatus mDNSPlatformStoreSPSMACAddr(mDNSAddr *spsaddr, char *ifname)
 {
     int family = (spsaddr->type == mDNSAddrType_IPv4) ? AF_INET : AF_INET6;
@@ -4022,6 +4043,7 @@ mDNSlocal NetworkInterfaceInfoOSX *AddInterfaceToList(mDNS *const m, struct ifad
     i->ifinfo.McastTxRx   = mDNSfalse; // For now; will be set up later at the end of UpdateInterfaceList
     i->ifinfo.Loopback    = ((ifa->ifa_flags & IFF_LOOPBACK) != 0) ? mDNStrue : mDNSfalse;
     i->ifinfo.IgnoreIPv4LL = ((eflags & IFEF_ARPLL) != 0) ? mDNSfalse : mDNStrue;
+    i->ifinfo.DirectLink  = (eflags & IFEF_DIRECTLINK) ? mDNStrue: mDNSfalse;
 
     i->next            = mDNSNULL;
     i->m               = m;
@@ -4029,7 +4051,6 @@ mDNSlocal NetworkInterfaceInfoOSX *AddInterfaceToList(mDNS *const m, struct ifad
     i->Flashing        = mDNSfalse;
     i->Occulting       = mDNSfalse;
     i->D2DInterface    = (eflags & IFEF_LOCALNET_PRIVATE) ? mDNStrue: mDNSfalse;
-    i->DirectLink      = (eflags & IFEF_DIRECTLINK) ? mDNStrue: mDNSfalse;
     if (eflags & IFEF_AWDL)
     {
         AWDLInterfaceID = i->ifinfo.InterfaceID;
@@ -5411,7 +5432,7 @@ mDNSlocal int SetupActiveInterfaces(mDNS *const m, mDNSs32 utc)
                 // mDNS_RegisterInterface() changes the probe delay from 1/2 second to 5 seconds and
                 // logs a warning message to system.log noting frequent interface transitions.
                 // Same logic applies when IFEF_DIRECTLINK flag is set on the interface.
-                if ((strncmp(i->ifinfo.ifname, "p2p", 3) == 0) || i->DirectLink)
+                if ((strncmp(i->ifinfo.ifname, "p2p", 3) == 0) || i->ifinfo.DirectLink)
                 {
                     LogInfo("SetupActiveInterfaces: %s interface registering %s %s", i->ifinfo.ifname,
                             i->Flashing               ? " (Flashing)"  : "",
@@ -5533,7 +5554,7 @@ mDNSlocal int ClearInactiveInterfaces(mDNS *const m, mDNSs32 utc)
                 // stale data returned to the application even after the interface is removed. The application
                 // then starts to send data but the new interface is not yet created.
                 // Same logic applies when IFEF_DIRECTLINK flag is set on the interface.
-                if ((strncmp(i->ifinfo.ifname, "p2p", 3) == 0) || i->DirectLink)
+                if ((strncmp(i->ifinfo.ifname, "p2p", 3) == 0) || i->ifinfo.DirectLink)
                 {
                     LogInfo("ClearInactiveInterfaces: %s interface deregistering %s %s", i->ifinfo.ifname,
                             i->Flashing               ? " (Flashing)"  : "",
@@ -7111,6 +7132,25 @@ mDNSlocal void SetSPS(mDNS *const m)
     // If the launchd plist specifies an explicit value for the Intent Metric, then use that instead of the
     // computed value (currently 40 "Primary Network Infrastructure Software" or 80 "Incidentally Available Software")
     if (sps && OfferSleepProxyService && OfferSleepProxyService < 100) sps = OfferSleepProxyService;
+
+#ifdef NO_APPLETV_SLEEP_PROXY_ON_WIFI
+    // AppleTVs are not reliable sleep proxy servers on WiFi. Do not offer to be a BSP if the WiFi interface is active.
+    if (IsAppleTV())
+    {
+        NetworkInterfaceInfo *intf  = mDNSNULL;
+        mDNSEthAddr           bssid = zeroEthAddr;
+        for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
+        {
+            bssid = GetBSSID(intf->ifname);
+            if (!mDNSSameEthAddress(&bssid, &zeroEthAddr))
+            {
+                LogMsg("SetSPS: AppleTV on WiFi - not advertising BSP services");
+                sps = 0;
+                break;
+            }
+        }
+    }
+#endif  //  NO_APPLETV_SLEEP_PROXY_ON_WIFI
 
     mDNSCoreBeSleepProxyServer(m, sps, SPMetricPortability, SPMetricMarginalPower, SPMetricTotalPower, SPMetricFeatures);
 }

@@ -429,8 +429,8 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
                 }
                 break;
             case kDNSOpt_Trace:
-                length += mDNS_snprintf(buffer+length, RemSpc, " Platform %d",     opt->u.tracer.platf);
-                length += mDNS_snprintf(buffer+length, RemSpc, " mDNSVers %d",     opt->u.tracer.mDNSv);
+                length += mDNS_snprintf(buffer+length, RemSpc, " Platform %d",    opt->u.tracer.platf);
+                length += mDNS_snprintf(buffer+length, RemSpc, " mDNSVers %d",    opt->u.tracer.mDNSv);
                 break;
             default:
                 length += mDNS_snprintf(buffer+length, RemSpc, " Unknown %d",  opt->opt);
@@ -2342,7 +2342,7 @@ mDNSexport mDNSu8 *putRData(const DNSMessage *const msg, mDNSu8 *ptr, const mDNS
                 break;
             case kDNSOpt_Trace:
                 *ptr++ = opt->u.tracer.platf;
-                ptr    = putVal16(ptr, opt->u.tracer.mDNSv);
+                ptr    = putVal32(ptr, opt->u.tracer.mDNSv);
                 break;
             }
         }
@@ -3197,8 +3197,8 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
             case kDNSOpt_Trace:
                 if (opt->optlen == DNSOpt_TraceData_Space - 4)
                 {
-                    opt->u.tracer.platf  = ptr[0];
-                    opt->u.tracer.mDNSv  = (mDNSu16)((mDNSu16)ptr[1] <<  8 | ptr[2]);
+                    opt->u.tracer.platf   = ptr[0];
+                    opt->u.tracer.mDNSv   = (mDNSu32) ((mDNSu32)ptr[1] << 24 | (mDNSu32)ptr[2] << 16 | (mDNSu32)ptr[3] << 8 | ptr[4]);
                     opt++;
                 }
                 break;

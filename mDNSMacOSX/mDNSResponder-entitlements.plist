@@ -18,5 +18,7 @@
     <true/>
     <key>com.apple.private.snhelper</key>
     <true/>
+    <key>com.apple.telephony.cupolicy-monitor-access</key>
+    <true/>
 </dict>
 </plist>

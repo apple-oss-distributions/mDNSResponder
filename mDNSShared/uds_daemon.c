@@ -4958,7 +4958,7 @@ mDNSexport int udsserver_init(dnssd_sock_t skts[], mDNSu32 count)
     int ret;
     mDNSu32 i = 0;
 
-    LogInfo("udsserver_init: %d %d", _DNS_SD_H/10000, mDNSStorage.mDNS_plat);
+    LogInfo("udsserver_init: %d %d", _DNS_SD_H, mDNSStorage.mDNS_plat);
 
     // If a particular platform wants to opt out of having a PID file, define PID_FILE to be ""
     if (PID_FILE[0])

@@ -85,6 +85,7 @@ extern char *win32_strerror(int inErrorCode);
 #   ifndef MDNS_UDS_SERVERPATH
 #       define MDNS_UDS_SERVERPATH  "/var/run/mDNSResponder"
 #   endif
+#   define MDNS_UDS_SERVERPATH_ENVVAR "DNSSD_UDS_PATH"
 #   define LISTENQ              100
 // longest legal control path length
 #   define MAX_CTLPATH          256

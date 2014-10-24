@@ -54,19 +54,8 @@
  *              for the local network.
  */
 
-
-/* _DNS_SD_H contains the mDNSResponder version number for this header file, formatted as follows:
- *   Major part of the build number * 10000 +
- *   minor part of the build number *   100
- * For example, Mac OS X 10.4.9 has mDNSResponder-108.4, which would be represented as
- * version 1080400. This allows C code to do simple greater-than and less-than comparisons:
- * e.g. an application that requires the DNSServiceGetProperty() call (new in mDNSResponder-126) can check:
- *
- *   #if _DNS_SD_H+0 >= 1260000
- *   ... some C code that calls DNSServiceGetProperty() ...
- *   #endif
- *
- * The version defined in this header file symbol allows for compile-time
+/* _DNS_SD_H contains the API version number for this header file
+ * The API version defined in this header file symbol allows for compile-time
  * checking, so that C code building with earlier versions of the header file
  * can avoid compile errors trying to use functions that aren't even defined
  * in those earlier versions. Similar checks may also be performed at run-time:
@@ -77,7 +66,7 @@
  */
 
 #ifndef _DNS_SD_H
-#define _DNS_SD_H 5220111
+#define _DNS_SD_H 5610101
 
 #ifdef  __cplusplus
 extern "C" {
@@ -291,6 +280,7 @@ enum
      * ...
      * DNSServiceRefDeallocate(BrowseRef); // Terminate the browse operation
      * DNSServiceRefDeallocate(MainRef);   // Terminate the shared connection
+     * Also see Point 4.(Don't Double-Deallocate if the MainRef has been Deallocated) in Notes below:
      *
      * Notes:
      *
@@ -328,7 +318,7 @@ enum
      * DNSServiceRef's created by other calls like DNSServiceBrowse() or DNSServiceResolve()
      * cannot be shared by copying them and using kDNSServiceFlagsShareConnection.
      *
-     * 4. Don't Double-Deallocate
+     * 4. Don't Double-Deallocate if the MainRef has been Deallocated
      * Calling DNSServiceRefDeallocate(ref) for a particular operation's DNSServiceRef terminates
      * just that operation. Calling DNSServiceRefDeallocate(ref) for the main shared DNSServiceRef
      * (the parent DNSServiceRef, originally created by DNSServiceCreateConnection(&ref))
@@ -380,8 +370,7 @@ enum
 
     kDNSServiceFlagsBackgroundTrafficClass  = 0x80000,
     /*
-    * This flag is meaningful in DNSServiceBrowse, DNSServiceGetAddrInfo, DNSServiceQueryRecord, 
-    * and DNSServiceResolve. When set, it uses the background traffic 
+    * This flag is meaningful for Unicast DNS queries. When set, it uses the background traffic 
     * class for packets that service the request.
     */
 
@@ -495,6 +484,25 @@ enum
      * is only set in the callbacks and kDNSServiceFlagsThresholdOne is only set on
      * input to a DNSServiceBrowse call.
      */
+     kDNSServiceFlagsDenyCellular           = 0x8000000,
+    /*
+     * This flag is meaningful only for Unicast DNS queries. When set, the kernel will restrict
+     * DNS resolutions on the cellular interface for that request.
+     */
+
+     kDNSServiceFlagsServiceIndex           = 0x10000000,
+    /*
+     * This flag is meaningful only for DNSServiceGetAddrInfo() for Unicast DNS queries.
+     * When set, DNSServiceGetAddrInfo() will interpret the "interfaceIndex" argument of the call
+     * as the "serviceIndex".
+     */
+
+     kDNSServiceFlagsDenyExpensive          = 0x20000000
+    /*
+     * This flag is meaningful only for Unicast DNS queries. When set, the kernel will restrict
+     * DNS resolutions on interfaces defined as expensive for that request.
+     */
+
 };
 
 #define kDNSServiceOutputFlags (kDNSServiceFlagsValidate | kDNSServiceFlagsValidateOptional | kDNSServiceFlagsMoreComing | kDNSServiceFlagsAdd | kDNSServiceFlagsDefault)
@@ -804,22 +812,18 @@ DNSServiceErrorType DNSSD_API DNSServiceGetProperty
  * When requesting kDNSServiceProperty_DaemonVersion, the result pointer must point
  * to a 32-bit unsigned integer, and the size parameter must be set to sizeof(uint32_t).
  *
- * On return, the 32-bit unsigned integer contains the version number, formatted as follows:
- *   Major part of the build number * 10000 +
- *   minor part of the build number *   100
+ * On return, the 32-bit unsigned integer contains the API version number
  *
- * For example, Mac OS X 10.4.9 has mDNSResponder-108.4, which would be represented as
- * version 1080400. This allows applications to do simple greater-than and less-than comparisons:
- * e.g. an application that requires at least mDNSResponder-108.4 can check:
- *
+ * For example, Mac OS X 10.4.9 has API version 1080400.
+ * This allows applications to do simple greater-than and less-than comparisons:
+ * e.g. an application that requires at least API version 1080400 can check:
  *   if (version >= 1080400) ...
  *
  * Example usage:
- *
  * uint32_t version;
  * uint32_t size = sizeof(version);
  * DNSServiceErrorType err = DNSServiceGetProperty(kDNSServiceProperty_DaemonVersion, &version, &size);
- * if (!err) printf("Bonjour version is %d.%d\n", version / 10000, version / 100 % 100);
+ * if (!err) printf("DNS_SD API version is %d.%d\n", version / 10000, version / 100 % 100);
  */
 
 #define kDNSServiceProperty_DaemonVersion "DaemonVersion"
@@ -831,10 +835,10 @@ DNSServiceErrorType DNSSD_API DNSServiceGetProperty
 /* DNSServiceGetPID() Parameters:
  *
  * srcport:         Source port (in network byte order) of the UDP socket that was created by
- *                  mDNSResponder to send the DNS query on the wire.
+ *                  the daemon to send the DNS query on the wire.
  *
  * pid:             Process ID of the application that started the name resolution which triggered
- *                  mDNSResponder to send the query on the wire. The value can be -1 if the srcport
+ *                  the daemon to send the query on the wire. The value can be -1 if the srcport
  *                  cannot be mapped.
  *
  * return value:    Returns kDNSServiceErr_NoError on success, or kDNSServiceErr_ServiceNotRunning
@@ -857,7 +861,7 @@ DNSServiceErrorType DNSSD_API DNSServiceGetPID
  *
  * Access underlying Unix domain socket for an initialized DNSServiceRef.
  * The DNS Service Discovery implementation uses this socket to communicate between the client and
- * the mDNSResponder daemon. The application MUST NOT directly read from or write to this socket.
+ * the daemon. The application MUST NOT directly read from or write to this socket.
  * Access to the socket is provided so that it can be used as a kqueue event source, a CFRunLoop
  * event source, in a select() loop, etc. When the underlying event management subsystem (kqueue/
  * select/CFRunLoop etc.) indicates to the client that data is available for reading on the
@@ -867,6 +871,8 @@ DNSServiceErrorType DNSSD_API DNSServiceGetPID
  * a client can choose to fork a thread and have it loop calling "DNSServiceProcessResult(ref);"
  * If DNSServiceProcessResult() is called when no data is available for reading on the socket, it
  * will block until data does become available, and then process the data and return to the caller.
+ * The application is reponsible for checking the return value of DNSServiceProcessResult() to determine
+ * if the socket is valid and if it should continue to process data on the socket.
  * When data arrives on the socket, the client is responsible for calling DNSServiceProcessResult(ref)
  * in a timely fashion -- if the client allows a large backlog of data to build up the daemon
  * may terminate the connection.
@@ -1749,10 +1755,7 @@ typedef void (DNSSD_API *DNSServiceGetAddrInfoReply)
  *                  begins and will last indefinitely until the client terminates the query
  *                  by passing this DNSServiceRef to DNSServiceRefDeallocate().
  *
- * flags:           kDNSServiceFlagsForceMulticast or kDNSServiceFlagsLongLivedQuery.
- *                  Pass kDNSServiceFlagsLongLivedQuery to create a "long-lived" unicast
- *                  query to a unicast DNS server that implements the protocol. This flag
- *                  has no effect on link-local multicast queries.
+ * flags:           kDNSServiceFlagsForceMulticast
  *
  * interfaceIndex:  The interface on which to issue the query.  Passing 0 causes the query to be
  *                  sent on all active interfaces via Multicast or the primary interface via Unicast.
@@ -2551,7 +2554,7 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
  * If there is any error during the processing of events, the application callback will
  * be called with an error code. For shared connections, each subordinate DNSServiceRef
  * will get its own error callback. Currently these error callbacks only happen
- * if the mDNSResponder daemon is manually terminated or crashes, and the error
+ * if the daemon is manually terminated or crashes, and the error
  * code in this case is kDNSServiceErr_ServiceNotRunning. The application must call
  * DNSServiceRefDeallocate to free the DNSServiceRef when it gets such an error code.
  * These error callbacks are rare and should not normally happen on customer machines,

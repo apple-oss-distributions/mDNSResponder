@@ -18,7 +18,7 @@
 #include <net/if.h> // if_nametoindex()
 
 #include <dispatch/dispatch.h>
-#include "dns_services.h"
+#include "dns_services_mdns.h"
 
 //*************************************************************************************************************
 // Globals:
@@ -79,6 +79,7 @@ static void dnsproxy_reply(DNSXConnRef connRef, DNSXErrorType errCode)
         default                     :  printf("UNKNOWN ERR \n");
                                        DNSXRefDeAlloc(ClientRef);    break;
     }
+    fflush(NULL);
 
 }
 

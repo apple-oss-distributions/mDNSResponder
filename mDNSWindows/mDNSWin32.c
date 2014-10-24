@@ -2167,6 +2167,10 @@ mDNSexport  mStatus    mDNSPlatformStoreSPSMACAddr(mDNSAddr *spsaddr, char *ifna
 	(void) ifname;  // Unused
 	}
 
+mDNSexport  mStatus    mDNSPlatformClearSPSMACAddr(void)
+	{
+	}
+
 mDNSexport mStatus mDNSPlatformRetrieveTCPInfo(mDNS *const m, mDNSAddr *laddr, mDNSIPPort *lport, mDNSAddr *raddr, mDNSIPPort *rport, mDNSTCPInfo *mti)
 	{
 	(void) m;       // Unused
@@ -2188,7 +2192,7 @@ mDNSexport mDNSs32 mDNSPlatformGetServiceID(mDNS *const m, DNSQuestion *q)
     {
     (void) m;
     (void) q;
-    return 0;
+    return -1;
     }
 
 mDNSexport void mDNSPlatformSetDelegatePID(UDPSocket *src, const mDNSAddr *dst, DNSQuestion *q)
@@ -2878,6 +2882,10 @@ mDNSlocal mStatus	SetupInterface( mDNS * const inMDNS, const struct ifaddrs *inI
 		err = mDNSPollRegisterSocket( ifd->sock.fd, FD_READ, UDPSocketNotification, &ifd->sock );
 		require_noerr( err, exit );
 	}
+
+    // If interface is a direct link, address record will be marked as kDNSRecordTypeKnownUnique
+    // and skip the probe phase of the probe/announce packet sequence.
+    ifd->interfaceInfo.DirectLink = mDNSfalse;
 
 	err = mDNS_RegisterInterface( inMDNS, &ifd->interfaceInfo, mDNSfalse );
 	require_noerr( err, exit );

@@ -882,6 +882,10 @@ mDNSlocal int SetupOneInterface(mDNS *const m, struct sockaddr *intfAddr, struct
 #endif
     }
 
+    // If interface is a direct link, address record will be marked as kDNSRecordTypeKnownUnique
+    // and skip the probe phase of the probe/announce packet sequence.
+    intf->coreIntf.DirectLink = mDNSfalse;
+
     // The interface is all ready to go, let's register it with the mDNS core.
     if (err == 0)
         err = mDNS_RegisterInterface(m, &intf->coreIntf, mDNSfalse);
@@ -1521,6 +1525,11 @@ mDNSexport mStatus    mDNSPlatformStoreSPSMACAddr(mDNSAddr *spsaddr, char *ifnam
     return mStatus_NoError;
 }
 
+mDNSexport mStatus    mDNSPlatformClearSPSMACAddr(void)
+{
+    return mStatus_NoError;
+}
+
 mDNSexport mDNSu16 mDNSPlatformGetUDPPort(UDPSocket *sock)
 {
     (void) sock; // unused
@@ -1546,7 +1555,7 @@ mDNSexport mDNSs32 mDNSPlatformGetServiceID(mDNS *const m, DNSQuestion *q)
 {
     (void) m;
     (void) q;
-    return 0;
+    return -1;
 }
 
 mDNSexport void mDNSPlatformSetDelegatePID(UDPSocket *src, const mDNSAddr *dst, DNSQuestion *q)
