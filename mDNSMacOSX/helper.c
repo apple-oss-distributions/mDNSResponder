@@ -615,7 +615,7 @@ do_mDNSPreferencesSetName(__unused mach_port_t port, int key, const char* old, c
     }
 
     // If we are not showing the dialogue, we need to remember the first "old" value so that
-    // we maintain the same through the lifetime of the dialogue. Subsequence conflicts don't
+    // we maintain the same through the lifetime of the dialogue. Subsequent conflicts don't
     // update the "old" value.
     if (!user[0])
     {

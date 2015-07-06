@@ -169,6 +169,7 @@ struct mDNS_PlatformSupport_struct
 {
     NetworkInterfaceInfoOSX *InterfaceList;
     KQSocketSet permanentsockets;
+    int num_mcasts;                              // Number of multicasts received during this CPU scheduling period (used for CPU limiting)
     domainlabel userhostlabel;                  // The hostlabel as it was set in System Preferences the last time we looked
     domainlabel usernicelabel;                  // The nicelabel as it was set in System Preferences the last time we looked
     // Following four variables are used for optimization where the helper is not

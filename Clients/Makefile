@@ -1,6 +1,6 @@
 # -*- tab-width: 4 -*-
 #
-# Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2002-2004, 2015 Apple Computer, Inc. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,6 +20,10 @@
 # $+ means "The names of all the prerequisites, with spaces between them, exactly as given"
 # For more magic automatic variables, see
 # <http://www.gnu.org/software/make/manual/html_chapter/make_10.html#SEC111>
+#
+# This makefile uses $(CC) for compilation and linking, which is
+# an automatic implicit gcc variable that defaults to "cc"
+# <https://www.gnu.org/software/make/manual/html_node/Implicit-Variables.html>
 
 #############################################################################
 
@@ -42,10 +46,10 @@ build:
 	mkdir build
 
 build/dns-sd: build dns-sd.c ClientCommon.c
-	cc $(filter %.c %.o, $+) $(LIBS) -I../mDNSShared -Wall -o $@
+	$(CC) $(filter %.c %.o, $+) $(LIBS) -I../mDNSShared -Wall -o $@
 
 build/dns-sd64: build dns-sd.c ClientCommon.c
-	cc $(filter %.c %.o, $+) $(LIBS) -I../mDNSShared -Wall -o $@ -m64
+	$(CC) $(filter %.c %.o, $+) $(LIBS) -I../mDNSShared -Wall -o $@ -m64
 
 # Note, we can make a 'fat' version of dns-sd using 'lipo', as shown below, but we
 # don't, because we don't want or need a 'fat' version of dns-sd, because it will

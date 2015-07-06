@@ -96,6 +96,9 @@ extern "C" {
 #ifdef LIMITED_RESOURCES_TARGET
 // Don't support jumbo frames
 #define AbsoluteMaxDNSMessageData 	1500
+// By the time you add IPv6 header (40 bytes) UDP header (8 bytes) and DNS message header (12 bytes)
+// this makes 1560 which is 60 bytes over the standard Ethernet MTU. D'oh!
+
 // StandardAuthRDSize is 264 (256+8), which is large enough to hold a maximum-sized SRV record (6 + 256 bytes)
 #define MaximumRDSize				264
 // Don't cache anything
@@ -1980,10 +1983,12 @@ struct DNSQuestion_struct
     mDNSBool ForceMCast;                    // Set by client to force mDNS query, even for apparently uDNS names
     mDNSBool ReturnIntermed;                // Set by client to request callbacks for intermediate CNAME/NXDOMAIN results
     mDNSBool SuppressUnusable;              // Set by client to suppress unusable queries to be sent on the wire
+    mDNSBool DenyOnCellInterface;           // Set by client to suppress uDNS queries on cellular interface
+    mDNSBool DenyOnExpInterface;            // Set by client to suppress uDNS queries on expensive interface
     mDNSu8 RetryWithSearchDomains;          // Retry with search domains if there is no entry in the cache or AuthRecords
     mDNSu8 TimeoutQuestion;                 // Timeout this question if there is no reply in configured time
     mDNSu8 WakeOnResolve;                   // Send wakeup on resolve
-    mDNSu8 UseBackgroundTrafficClass;       // Use background traffic class for request
+    mDNSu8 UseBackgroundTrafficClass;       // Set by client to use background traffic class for request
     mDNSs8 SearchListIndex;                 // Index into SearchList; Used by the client layer but not touched by core
     mDNSs8 AppendSearchDomains;             // Search domains can be appended for this query
     mDNSs8 AppendLocalSearchDomains;        // Search domains ending in .local can be appended for this query
@@ -3333,7 +3338,7 @@ extern void mDNSPlatformSleepAssertion(mDNS *const m, double timeout);
 
 extern mDNSBool mDNSPlatformAllowPID(mDNS *const m, DNSQuestion *q);
 extern mDNSs32 mDNSPlatformGetServiceID(mDNS *const m, DNSQuestion *q);
-extern void mDNSPlatformSetDelegatePID(UDPSocket *src, const mDNSAddr *dst, DNSQuestion *q);
+extern void mDNSPlatformSetuDNSSocktOpt(UDPSocket *src, const mDNSAddr *dst, DNSQuestion *q);
 extern mDNSs32 mDNSPlatformGetPID(void);
 
 // ***************************************************************************

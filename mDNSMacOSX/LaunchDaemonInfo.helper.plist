@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.apple.mDNSResponderHelper</string>
+  <string>com.apple.mDNSResponderHelper.reloaded</string>
   <key>OnDemand</key>
   <true/>
   <key>ProgramArguments</key>

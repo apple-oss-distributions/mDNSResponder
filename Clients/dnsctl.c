@@ -18,7 +18,7 @@
 #include <net/if.h> // if_nametoindex()
 
 #include <dispatch/dispatch.h>
-#include "dns_services_mdns.h"
+#include "dns_services.h"
 
 //*************************************************************************************************************
 // Globals:

@@ -1112,6 +1112,7 @@ void DNSSD_API DNSServiceRefDeallocate(DNSServiceRef sdRef)
             // callbacks when we return from this function. Setting ProcessReply to NULL
             // provides extra protection.
             sdRef->ProcessReply = NULL;
+            shutdown(sdRef->sockfd, SHUT_WR);
             dispatch_source_cancel(sdRef->disp_source);
             dispatch_release(sdRef->disp_source);
             sdRef->disp_source = NULL;

@@ -6,7 +6,7 @@
  * Resides in /usr/lib/libdns_services.dylib
  */
 
-#include "dns_services_mdns.h"
+#include "dns_services.h"
 #include "dns_xpc.h"
 #include <xpc/xpc.h>
 #include <Block.h>

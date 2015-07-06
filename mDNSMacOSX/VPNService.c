@@ -23,13 +23,11 @@ mDNSexport mDNSs32 mDNSPlatformGetServiceID(mDNS *const m, DNSQuestion *q)
     int sid;
 
     if (q->pid)
-    {
         sid = VPNAppLayerGetMatchingServiceIdentifier(q->pid, NULL);
-    }
     else
-    {
         sid = VPNAppLayerGetMatchingServiceIdentifier(0, q->uuid);
-    }
+    
     LogInfo("mDNSPlatformGetServiceID: returning %d for %##s (%s)", sid, q->qname.c, DNSTypeName(q->qtype));
+    
     return sid;
 }

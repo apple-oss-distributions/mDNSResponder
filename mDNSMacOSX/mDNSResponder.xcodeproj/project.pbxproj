@@ -34,6 +34,7 @@
 				03067D6C0C83A3920022BE1F /* PBXTargetDependency */,
 				03067D6E0C83A39C0022BE1F /* PBXTargetDependency */,
 				84C5B3411665544B00C324A8 /* PBXTargetDependency */,
+				BD7833F01ABA5E3500EC51ED /* PBXTargetDependency */,
 			);
 			name = "Build Some";
 			productName = "Build Some";
@@ -200,7 +201,7 @@
 		848DA5D616547F7200D2E8B4 /* dns_xpc.h in Headers */ = {isa = PBXBuildFile; fileRef = 848DA5D516547F7200D2E8B4 /* dns_xpc.h */; };
 		848DA5D716547F7200D2E8B4 /* dns_xpc.h in Headers */ = {isa = PBXBuildFile; fileRef = 848DA5D516547F7200D2E8B4 /* dns_xpc.h */; };
 		84C5B33C166553F100C324A8 /* dns_services.c in Sources */ = {isa = PBXBuildFile; fileRef = 84C5B339166553AF00C324A8 /* dns_services.c */; };
-		84F4C090188F050200D1E1DE /* dns_services_mdns.h in Headers */ = {isa = PBXBuildFile; fileRef = 84F4C08F188F04CF00D1E1DE /* dns_services_mdns.h */; settings = {ATTRIBUTES = (Private, ); }; };
+		84F4C090188F050200D1E1DE /* dns_services.h in Headers */ = {isa = PBXBuildFile; fileRef = 84F4C08F188F04CF00D1E1DE /* dns_services.h */; settings = {ATTRIBUTES = (Private, ); }; };
 		D284BE530ADD80740027CCDF /* DNSServiceDiscoveryDefines.h in Headers */ = {isa = PBXBuildFile; fileRef = 6575FBFF022EAFBA00000109 /* DNSServiceDiscoveryDefines.h */; };
 		D284BE540ADD80740027CCDF /* dnssd_ipc.h in Headers */ = {isa = PBXBuildFile; fileRef = F5E11B5B04A28126019798ED /* dnssd_ipc.h */; };
 		D284BE560ADD80740027CCDF /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Client, ); }; };
@@ -435,6 +436,13 @@
 			remoteGlobalIDString = 84C5B3341665529800C324A8;
 			remoteInfo = dns_services;
 		};
+		BD7833EF1ABA5E3500EC51ED /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 08FB7793FE84155DC02AAC07 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 72FB545E166D5FB00090B2D9;
+			remoteInfo = dnsctl;
+		};
 		D284BF2B0ADD815A0027CCDF /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 08FB7793FE84155DC02AAC07 /* Project object */;
@@ -662,9 +670,9 @@
 		848DA5C6165477E000D2E8B4 /* xpc_services.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = xpc_services.c; path = Private/xpc_services.c; sourceTree = "<group>"; };
 		848DA5C9165477EB00D2E8B4 /* xpc_services.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = xpc_services.h; path = Private/xpc_services.h; sourceTree = "<group>"; };
 		848DA5D516547F7200D2E8B4 /* dns_xpc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dns_xpc.h; path = Private/dns_xpc.h; sourceTree = "<group>"; };
-		84C5B3351665529800C324A8 /* libdns_services_mdns.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libdns_services_mdns.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
+		84C5B3351665529800C324A8 /* libdns_services.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libdns_services.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
 		84C5B339166553AF00C324A8 /* dns_services.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = dns_services.c; path = Private/dns_services.c; sourceTree = "<group>"; };
-		84F4C08F188F04CF00D1E1DE /* dns_services_mdns.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dns_services_mdns.h; path = Private/dns_services_mdns.h; sourceTree = "<group>"; };
+		84F4C08F188F04CF00D1E1DE /* dns_services.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dns_services.h; path = Private/dns_services.h; sourceTree = "<group>"; };
 		D284BE730ADD80740027CCDF /* mDNSResponder */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = mDNSResponder; sourceTree = BUILT_PRODUCTS_DIR; };
 		D284BE950ADD80800027CCDF /* mDNSResponder.debug */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = mDNSResponder.debug; sourceTree = BUILT_PRODUCTS_DIR; };
 		D284BEB00ADD80920027CCDF /* dns-sd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "dns-sd"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -913,7 +921,7 @@
 		08FB7795FE84155DC02AAC07 /* mDNS Server Sources */ = {
 			isa = PBXGroup;
 			children = (
-				84F4C08F188F04CF00D1E1DE /* dns_services_mdns.h */,
+				84F4C08F188F04CF00D1E1DE /* dns_services.h */,
 				216D9ACD1720C9F5008066E1 /* VPNService.c */,
 				2120ABD416B71614007089B6 /* CUPolicy.c */,
 				72FB545A166D5F960090B2D9 /* dnsctl.c */,
@@ -1029,7 +1037,7 @@
 				2141DD1D123FFCDB0086D23E /* libdns_sd.a */,
 				2141DD24123FFD0F0086D23E /* libdns_sd_debug.a */,
 				2141DD2A123FFD2C0086D23E /* libdns_sd_profile.a */,
-				84C5B3351665529800C324A8 /* libdns_services_mdns.dylib */,
+				84C5B3351665529800C324A8 /* libdns_services.dylib */,
 				72FB545F166D5FB00090B2D9 /* dnsctl */,
 			);
 			name = Products;
@@ -1164,7 +1172,7 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				84F4C090188F050200D1E1DE /* dns_services_mdns.h in Headers */,
+				84F4C090188F050200D1E1DE /* dns_services.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1415,7 +1423,7 @@
 			);
 			name = dns_services;
 			productName = dns_services;
-			productReference = 84C5B3351665529800C324A8 /* libdns_services_mdns.dylib */;
+			productReference = 84C5B3351665529800C324A8 /* libdns_services.dylib */;
 			productType = "com.apple.product-type.library.dynamic";
 		};
 		D284BE500ADD80740027CCDF /* mDNSResponder */ = {
@@ -1770,7 +1778,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/sh;
-			shellScript = "DSTROOT=${DSTROOT}${INSTALL_PATH_PREFIX}\n\nmkdir -p \"$DSTROOT/usr/include\"\nsed 's/\\(^#define _DNS_SD_LIBDISPATCH \\)0$/\\1 1/' \"$SRCROOT/../mDNSShared/dns_sd.h\" > \"$DSTROOT/usr/include/dns_sd.h\"";
+			shellScript = "DSTROOT=${DSTROOT}\n\nmkdir -p \"$DSTROOT/usr/include\"\nsed 's/\\(^#define _DNS_SD_LIBDISPATCH \\)0$/\\1 1/' \"$SRCROOT/../mDNSShared/dns_sd.h\" > \"$DSTROOT/usr/include/dns_sd.h\"";
 		};
 		21DE714D115831CB00DD4BD1 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1782,8 +1790,8 @@
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 1;
-			shellPath = /bin/sh;
-			shellScript = "DSTROOT=${DSTROOT}${INSTALL_PATH_PREFIX}\nmkdir -p \"$DSTROOT/usr/include\"\nsed 's/\\(^#define _DNS_SD_LIBDISPATCH \\)0$/\\1 1/' \"$SRCROOT/../mDNSShared/dns_sd.h\" > \"$DSTROOT/usr/include/dns_sd.h\"";
+			shellPath = "/bin/bash -e -x";
+			shellScript = "DSTROOT=${DSTROOT}\nmkdir -p \"$DSTROOT/usr/include\"\nsed 's/\\(^#define _DNS_SD_LIBDISPATCH \\)0$/\\1 1/' \"$SRCROOT/../mDNSShared/dns_sd.h\" > \"$DSTROOT/usr/include/dns_sd.h\"\n\nif [[ \"${ACTION}\" == \"installhdrs\" ]]; then\n    exit 0\nfi\n\nif [[ \"${PLATFORM_NAME}\" =~ \"simulator\" ]]; then\n    ln -s libsystem_dnssd.dylib ${DSTROOT}${INSTALL_PATH}/libsystem_sim_dnssd.dylib\nfi\n";
 		};
 		4A4EE3A413CB8E82005C624B /* Build yacc file into derived source files */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1818,7 +1826,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/bash;
-			shellScript = "# Install mDNSResponder.bundle containing language localizations\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices\ncp -R ${SRCROOT}/mDNSResponder-bundle ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle\n\n# Remove unwanted CVS directories\nfind ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -depth -name CVS -exec rm -rf {} \\;\n\n# Expand UTF-8 files to UTF-16 (at one time this appeared to be necessary, but it's not, so we don't do it any more)\n#foreach file (`find ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -name Localizable.strings`)\n#iconv -f utf-8 -t utf-16 ${file} > ${file}.new\n#mv -f ${file}.new ${file}\n#end\n\n# Remove French localization (not wanted for Apple B&I builds)\nrm -rf ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle/Resources/French.lproj\n\n# Copy Sandbox profile\nif [ ! -z \"${IPHONEOS_DEPLOYMENT_TARGET}\" ] ; then\n  SANDBOXDST=\"${DSTROOT}/usr/local/share/sandbox/profiles/embedded/builtin\"\nelse\n  SANDBOXDST=\"${DSTROOT}/usr/share/sandbox\"\nfi\n(umask 022; mkdir -p -m 0755 \"$SANDBOXDST\")\ncp \"${SRCROOT}/mDNSResponder.sb\" \"${SANDBOXDST}/mDNSResponder.sb\"\n";
+			shellScript = "# Install mDNSResponder.bundle containing language localizations\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices\ncp -R ${SRCROOT}/mDNSResponder-bundle ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle\n\n# Remove unwanted CVS directories\nfind ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -depth -name CVS -exec rm -rf {} \\;\n\n# Expand UTF-8 files to UTF-16 (at one time this appeared to be necessary, but it's not, so we don't do it any more)\n#foreach file (`find ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -name Localizable.strings`)\n#iconv -f utf-8 -t utf-16 ${file} > ${file}.new\n#mv -f ${file}.new ${file}\n#end\n\n# Remove French localization (not wanted for Apple B&I builds)\nrm -rf ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle/Resources/French.lproj\n\n# Copy Sandbox profile\nif [ -z \"${IPHONEOS_DEPLOYMENT_TARGET}\" -a -z \"${TVOS_DEPLOYMENT_TARGET}\"  ] ; then\n    SANDBOXDST=\"${DSTROOT}/usr/share/sandbox\"\nelse\n    SANDBOXDST=\"${DSTROOT}/usr/local/share/sandbox/profiles/embedded/builtin\"\nfi\n(umask 022; mkdir -p -m 0755 \"$SANDBOXDST\")\ncp \"${SRCROOT}/mDNSResponder.sb\" \"${SANDBOXDST}/mDNSResponder.sb\"\n";
 		};
 		D284BE760ADD80800027CCDF /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1840,7 +1848,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/sh;
-			shellScript = "# Install plists to tell launchd how to start mDNSResponder and mDNSResponderHelper\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons\n\nif [ ! -z \"${IPHONEOS_DEPLOYMENT_TARGET}\" ] ; then\nplutil -convert binary1 ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponder.plist\nplutil -convert binary1 ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponderHelper.plist\nfi\n";
+			shellScript = "# Install plists to tell launchd how to start mDNSResponder and mDNSResponderHelper\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons\n\nif [ \"${MACOSX_DEPLOYMENT_TARGET}\" == \"10.4\" ] ; then\ncp ${SRCROOT}/LaunchDaemonInfo-Tiger.plist        ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponder.plist\ncp ${SRCROOT}/LaunchDaemonInfo-Tiger.helper.plist ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponderHelper.plist\nelse\ncp ${SRCROOT}/LaunchDaemonInfo.plist              ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponder.plist\ncp ${SRCROOT}/LaunchDaemonInfo.helper.plist       ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponderHelper.plist\nfi\n\nif [ ! -z \"${IPHONEOS_DEPLOYMENT_TARGET}\" ] ; then\nplutil -convert binary1 ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponder.plist\nplutil -convert binary1 ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponderHelper.plist\nfi\n";
 		};
 		FF37FAAD0BC581780044A5CF /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -2165,6 +2173,11 @@
 			target = 84C5B3341665529800C324A8 /* dns_services */;
 			targetProxy = 84C5B3401665544B00C324A8 /* PBXContainerItemProxy */;
 		};
+		BD7833F01ABA5E3500EC51ED /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 72FB545E166D5FB00090B2D9 /* dnsctl */;
+			targetProxy = BD7833EF1ABA5E3500EC51ED /* PBXContainerItemProxy */;
+		};
 		D284BF2C0ADD815A0027CCDF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = D284BEBF0ADD80A20027CCDF /* dnsextd */;
@@ -2250,7 +2263,7 @@
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_MODEL_TUNING = G5;
 				INFOPLIST_FILE = "BonjourEvents-Info.plist";
-				INSTALL_PATH_ACTUAL = /System/Library/UserEventPlugins/;
+				INSTALL_PATH = /System/Library/UserEventPlugins/;
 				PREBINDING = NO;
 				PRODUCT_NAME = BonjourEvents;
 				PROVISIONING_PROFILE = "";
@@ -2293,7 +2306,7 @@
 				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
 				INSTALLHDRS_COPY_PHASE = YES;
 				INSTALLHDRS_SCRIPT_PHASE = YES;
-				INSTALL_PATH_ACTUAL = /usr/local/lib/system;
+				INSTALL_PATH = /usr/local/lib/system;
 				PREBINDING = NO;
 				PRODUCT_NAME = dns_sd;
 				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
@@ -2313,7 +2326,7 @@
 					"__DARWIN_NON_CANCELABLE=1",
 				);
 				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
-				INSTALL_PATH_ACTUAL = /usr/local/lib/system;
+				INSTALL_PATH = /usr/local/lib/system;
 				PREBINDING = NO;
 				PRODUCT_NAME = dns_sd_debug;
 				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
@@ -2333,7 +2346,7 @@
 					"__DARWIN_NON_CANCELABLE=1",
 				);
 				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
-				INSTALL_PATH_ACTUAL = /usr/local/lib/system;
+				INSTALL_PATH = /usr/local/lib/system;
 				PREBINDING = NO;
 				PRODUCT_NAME = dns_sd_profile;
 				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
@@ -2356,9 +2369,7 @@
 					"$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders",
 					"$(SDKROOT)/usr/local/include",
 				);
-				INSTALL_PATH = "";
-				"INSTALL_PATH[sdk=macosx*]" = "";
-				INSTALL_PATH_ACTUAL = /usr/sbin;
+				INSTALL_PATH = /usr/sbin;
 				LD_MAP_FILE_PATH = "$(TARGET_TEMP_DIR)/$(PRODUCT_NAME)-LinkMap-$(CURRENT_VARIANT)-$(CURRENT_ARCH).txt";
 				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
 				MACOSX_DEPLOYMENT_TARGET = 10.5;
@@ -2418,7 +2429,7 @@
 				GCC_WARN_ABOUT_RETURN_TYPE = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				INSTALL_PATH_ACTUAL = /usr/bin;
+				INSTALL_PATH = /usr/local/bin;
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -2452,10 +2463,10 @@
 				GCC_WARN_ABOUT_RETURN_TYPE = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				INSTALL_PATH_ACTUAL = /usr/lib;
+				INSTALL_PATH = /usr/lib;
 				MACOSX_DEPLOYMENT_TARGET = 10.8;
 				ONLY_ACTIVE_ARCH = NO;
-				PRODUCT_NAME = "$(TARGET_NAME)_mdns";
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 			};
 			name = Development;
@@ -2497,7 +2508,6 @@
 					"-DUSE_SYSTEMCONFIGURATION_PRIVATE_HEADERS",
 					"-fwrapv",
 				);
-				"OTHER_LDFLAGS[sdk=macosx*]" = "";
 				PREBINDING = NO;
 				STRIP_STYLE = debugging;
 				WARNING_CFLAGS = (
@@ -2535,9 +2545,7 @@
 					"$(SDKROOT)/usr/include/libxml2",
 					"$(SDKROOT)/usr/local/include/",
 				);
-				INSTALL_PATH = "";
-				"INSTALL_PATH[sdk=macosx*]" = "";
-				INSTALL_PATH_ACTUAL = /usr/sbin;
+				INSTALL_PATH = /usr/sbin;
 				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
 				MACOSX_DEPLOYMENT_TARGET = 10.5;
 				ORDER_FILE = "${SRCROOT}/mDNSResponder.order";
@@ -2642,7 +2650,7 @@
 					../mDNSShared,
 					"${SYSTEM_LIBRARY_DIR}/Frameworks/System.framework/PrivateHeaders",
 				);
-				INSTALL_PATH_ACTUAL = /usr/bin;
+				INSTALL_PATH = /usr/bin;
 				OTHER_CFLAGS = "-no-cpp-precomp";
 				OTHER_LDFLAGS = "";
 				OTHER_REZFLAGS = "";
@@ -2669,7 +2677,7 @@
 					"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/1.3.1/Headers",
 					"${PROJECT_DERIVED_FILE_DIR}",
 				);
-				INSTALL_PATH_ACTUAL = /usr/lib/java;
+				INSTALL_PATH = /usr/lib/java;
 				LIBRARY_STYLE = DYNAMIC;
 				MACH_O_TYPE = mh_dylib;
 				OTHER_CFLAGS = "";
@@ -2695,7 +2703,7 @@
 					"${CONFIGURATION_TEMP_DIR}",
 					/System/Library/Frameworks/System.Framework/PrivateHeaders,
 				);
-				INSTALL_PATH_ACTUAL = /usr/sbin;
+				INSTALL_PATH = /usr/sbin;
 				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
 				MACOSX_DEPLOYMENT_TARGET = 10.5;
 				OTHER_CFLAGS = (
@@ -2717,7 +2725,7 @@
 				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				INSTALL_PATH_ACTUAL = "/Library/Application Support/Bonjour";
+				INSTALL_PATH = "/Library/Application Support/Bonjour";
 				MACOSX_DEPLOYMENT_TARGET = 10.5;
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "";
@@ -2741,7 +2749,7 @@
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
 				INFOPLIST_FILE = "PreferencePane/Info-PreferencePane.plist";
-				INSTALL_PATH_ACTUAL = /AppleInternal/Library/PreferencePanes;
+				INSTALL_PATH = /AppleInternal/Library/PreferencePanes;
 				MACOSX_DEPLOYMENT_TARGET = 10.5;
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "-twolevel_namespace";
@@ -2767,16 +2775,18 @@
 					"__DARWIN_NON_CANCELABLE=1",
 				);
 				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
-				INSTALL_PATH_ACTUAL = /usr/lib/system;
+				INSTALL_PATH = /usr/lib/system;
+				INTERPOSITION_SIM_SUFFIX = "";
+				"INTERPOSITION_SIM_SUFFIX[sdk=iphonesimulator*]" = _sim;
 				LINK_WITH_STANDARD_LIBRARIES = NO;
 				OTHER_LDFLAGS = (
 					"-Wl,-umbrella,System",
 					"-L/usr/lib/system",
 					"-ldyld",
 					"-lcompiler_rt",
-					"-lsystem_kernel",
-					"-lsystem_platform",
-					"-lsystem_pthread",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_kernel",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_platform",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_pthread",
 					"-lsystem_malloc",
 					"-lsystem_c",
 					"-lsystem_blocks",
@@ -2784,18 +2794,7 @@
 					"-llaunch",
 					"-lsystem_asl",
 				);
-				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
-					"-Wl,-umbrella,System",
-					"-L/usr/lib/system",
-					"-ldyld_sim",
-					"-lcompiler_rt_sim",
-					"-lsystem_sim_c",
-					"-lsystem_sim_blocks",
-					"-ldispatch",
-					"-Wl,-upward-lSystem",
-				);
 				PRODUCT_NAME = libsystem_dnssd_debug;
-				"PRODUCT_NAME[sdk=iphonesimulator*]" = libsystem_sim_dnssd_debug;
 			};
 			name = Development;
 		};
@@ -2815,16 +2814,18 @@
 				);
 				GENERATE_PROFILING_CODE = YES;
 				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
-				INSTALL_PATH_ACTUAL = /usr/lib/system;
+				INSTALL_PATH = /usr/lib/system;
+				INTERPOSITION_SIM_SUFFIX = "";
+				"INTERPOSITION_SIM_SUFFIX[sdk=iphonesimulator*]" = _sim;
 				LINK_WITH_STANDARD_LIBRARIES = NO;
 				OTHER_LDFLAGS = (
 					"-Wl,-umbrella,System",
 					"-L/usr/lib/system",
 					"-ldyld",
 					"-lcompiler_rt",
-					"-lsystem_kernel",
-					"-lsystem_platform",
-					"-lsystem_pthread",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_kernel",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_platform",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_pthread",
 					"-lsystem_malloc",
 					"-lsystem_c",
 					"-lsystem_blocks",
@@ -2832,18 +2833,7 @@
 					"-llaunch",
 					"-lsystem_asl",
 				);
-				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
-					"-Wl,-umbrella,System",
-					"-L/usr/lib/system",
-					"-ldyld_sim",
-					"-lcompiler_rt_sim",
-					"-lsystem_sim_c",
-					"-lsystem_sim_blocks",
-					"-ldispatch",
-					"-Wl,-upward-lSystem",
-				);
 				PRODUCT_NAME = libsystem_dnssd_profile;
-				"PRODUCT_NAME[sdk=iphonesimulator*]" = libsystem_sim_dnssd_profile;
 			};
 			name = Development;
 		};
@@ -2887,16 +2877,18 @@
 				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
 				INSTALLHDRS_COPY_PHASE = YES;
 				INSTALLHDRS_SCRIPT_PHASE = YES;
-				INSTALL_PATH_ACTUAL = /usr/lib/system;
+				INSTALL_PATH = /usr/lib/system;
+				INTERPOSITION_SIM_SUFFIX = "";
+				"INTERPOSITION_SIM_SUFFIX[sdk=iphonesimulator*]" = _sim;
 				LINK_WITH_STANDARD_LIBRARIES = NO;
 				OTHER_LDFLAGS = (
 					"-Wl,-umbrella,System",
 					"-L/usr/lib/system",
 					"-ldyld",
 					"-lcompiler_rt",
-					"-lsystem_kernel",
-					"-lsystem_platform",
-					"-lsystem_pthread",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_kernel",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_platform",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_pthread",
 					"-lsystem_malloc",
 					"-lsystem_c",
 					"-lsystem_blocks",
@@ -2904,18 +2896,7 @@
 					"-llaunch",
 					"-lsystem_asl",
 				);
-				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
-					"-Wl,-umbrella,System",
-					"-L/usr/lib/system",
-					"-ldyld_sim",
-					"-lcompiler_rt_sim",
-					"-lsystem_sim_c",
-					"-lsystem_sim_blocks",
-					"-ldispatch",
-					"-Wl,-upward-lSystem",
-				);
 				PRODUCT_NAME = libsystem_dnssd;
-				"PRODUCT_NAME[sdk=iphonesimulator*]" = libsystem_sim_dnssd;
 			};
 			name = Development;
 		};

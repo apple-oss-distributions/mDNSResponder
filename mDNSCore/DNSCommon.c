@@ -370,7 +370,7 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
     char *ptr = buffer;
     mDNSu32 length = mDNS_snprintf(buffer, MaxMsg-1, "%4d %##s %s ", rr->rdlength, rr->name->c, DNSTypeName(rr->rrtype));
     if (rr->RecordType == kDNSRecordTypePacketNegative) return(buffer);
-    if (!rr->rdlength) { mDNS_snprintf(buffer+length, RemSpc, "<< ZERO RDATA LENGTH >>"); return(buffer); }
+    if (!rr->rdlength && rr->rrtype != kDNSType_OPT) { mDNS_snprintf(buffer+length, RemSpc, "<< ZERO RDATA LENGTH >>"); return(buffer); }
 
     switch (rr->rrtype)
     {
@@ -408,6 +408,7 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
             switch(opt->opt)
             {
             case kDNSOpt_LLQ:
+                length += mDNS_snprintf(buffer+length, RemSpc, " LLQ");
                 length += mDNS_snprintf(buffer+length, RemSpc, " Vers %d",     opt->u.llq.vers);
                 length += mDNS_snprintf(buffer+length, RemSpc, " Op %d",       opt->u.llq.llqOp);
                 length += mDNS_snprintf(buffer+length, RemSpc, " Err/Port %d", opt->u.llq.err);
@@ -418,6 +419,7 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
                 length += mDNS_snprintf(buffer+length, RemSpc, " Lease %d",    opt->u.updatelease);
                 break;
             case kDNSOpt_Owner:
+                length += mDNS_snprintf(buffer+length, RemSpc, " Owner");
                 length += mDNS_snprintf(buffer+length, RemSpc, " Vers %d",     opt->u.owner.vers);
                 length += mDNS_snprintf(buffer+length, RemSpc, " Seq %3d", (mDNSu8)opt->u.owner.seq);                           // Display as unsigned
                 length += mDNS_snprintf(buffer+length, RemSpc, " MAC %.6a",    opt->u.owner.HMAC.b);
@@ -429,6 +431,7 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
                 }
                 break;
             case kDNSOpt_Trace:
+                length += mDNS_snprintf(buffer+length, RemSpc, " Trace");
                 length += mDNS_snprintf(buffer+length, RemSpc, " Platform %d",    opt->u.tracer.platf);
                 length += mDNS_snprintf(buffer+length, RemSpc, " mDNSVers %d",    opt->u.tracer.mDNSv);
                 break;
@@ -1464,6 +1467,8 @@ mDNSexport void mDNS_SetupQuestion(DNSQuestion *const q, const mDNSInterfaceID I
     q->ForceMCast          = mDNSfalse;
     q->ReturnIntermed      = mDNSfalse;
     q->SuppressUnusable    = mDNSfalse;
+    q->DenyOnCellInterface = mDNSfalse;
+    q->DenyOnExpInterface  = mDNSfalse;
     q->SearchListIndex     = 0;
     q->AppendSearchDomains = 0;
     q->RetryWithSearchDomains = mDNSfalse;
@@ -3199,6 +3204,12 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
                 {
                     opt->u.tracer.platf   = ptr[0];
                     opt->u.tracer.mDNSv   = (mDNSu32) ((mDNSu32)ptr[1] << 24 | (mDNSu32)ptr[2] << 16 | (mDNSu32)ptr[3] << 8 | ptr[4]);
+                    opt++;
+                }
+                else
+                {
+                    opt->u.tracer.platf   = 0xFF;
+                    opt->u.tracer.mDNSv   = 0xFFFFFFFF;
                     opt++;
                 }
                 break;

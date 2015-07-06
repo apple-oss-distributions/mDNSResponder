@@ -20,5 +20,13 @@
     <true/>
     <key>com.apple.telephony.cupolicy-monitor-access</key>
     <true/>
+    <key>com.apple.private.necp.match</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.private.network.awdl.restricted</key>
+    <true/>
 </dict>
 </plist>

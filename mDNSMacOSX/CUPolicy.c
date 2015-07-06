@@ -52,18 +52,22 @@ mDNSexport mDNSBool mDNSPlatformAllowPID(mDNS *const m, DNSQuestion *q)
         }
         else
         {
-            allowed = (mDNSBool) cellular_usage_policy_is_data_allowed_for_uuid(m->p->handle, q->uuid);
-            if (!allowed)
-            {
-                xpc_object_t uuidx = xpc_uuid_create(q->uuid);
-                if (uuidx)
-                {
-                    network_config_cellular_blocked_notify(NULL, uuidx, NULL);
-                    LogInfo("mDNSPlaformAllowPID: Notified UUID for %##s (%s)", q->qname.c, DNSTypeName(q->qtype));
-                    xpc_release(uuidx);
-                }
-            }
-        }
+           xpc_object_t uuidx = xpc_uuid_create(q->uuid);
+           if (uuidx)
+           {
+               allowed = (mDNSBool) cellular_usage_policy_is_data_allowed_for_uuid(m->p->handle, uuidx);
+               if (!allowed)
+               {
+                   network_config_cellular_blocked_notify(NULL, uuidx, NULL);
+                   LogInfo("mDNSPlaformAllowPID: Notified UUID for %##s (%s)", q->qname.c, DNSTypeName(q->qtype));
+               }
+               xpc_release(uuidx);
+           }
+           else
+           {
+               allowed = false;
+           }
+       }
         return allowed;
     }
     else

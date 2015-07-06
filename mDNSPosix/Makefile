@@ -1,6 +1,6 @@
 # -*- tab-width: 4 -*-
 #
-# Copyright (c) 2002-2004, Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2002-2004, 2015, Apple Computer, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without 
 # modification, are permitted provided that the following conditions are met:
@@ -30,8 +30,8 @@
 # If "make os=xxx" gives lots of errors like "Missing dependency operator",
 # then try typing "gmake os=xxx" instead.
 #
-# This Makefile builds an mDNSResponder daemon and a libdns_sd.so shared library 
-# for Linux. It also builds several example programs for embedded systems. 
+# This Makefile builds an mDNSResponder daemon and a libdns_sd.so shared library
+# for Linux. It also builds several example programs for embedded systems.
 #
 # Make with no arguments to build all production targets.
 # 'make DEBUG=1' to build debugging targets.
@@ -57,6 +57,7 @@ JDK = /usr/jdk
 CC = @cc
 BISON = @bison
 FLEX = @flex
+ST = @strip
 LD = ld -shared
 CP = cp
 RM = rm
@@ -71,18 +72,18 @@ JAVACFLAGS_OS = -fPIC -shared -ldns_sd
 # Set up diverging paths for debug vs. prod builds
 DEBUG=0
 ifeq ($(DEBUG),1)
-CFLAGS_DEBUG = -g -DMDNS_DEBUGMSGS=2 
+CFLAGS_DEBUG = -g -DMDNS_DEBUGMSGS=2
 OBJDIR = objects/debug
 BUILDDIR = build/debug
-STRIP = echo 
+STRIP = echo
 else
 # We use -Os for two reasons:
 # 1. We want to make small binaries, suitable for putting into hardware devices
 # 2. Some of the code analysis warnings only work when some form of optimization is enabled
-CFLAGS_DEBUG = -Os -DMDNS_DEBUGMSGS=0 
+CFLAGS_DEBUG = -Os -DMDNS_DEBUGMSGS=0
 OBJDIR ?= objects/prod
 BUILDDIR ?= build/prod
-STRIP = strip -S 
+STRIP = $(ST) -S
 endif
 
 # Configure per-OS peculiarities
@@ -95,14 +96,14 @@ LD = gcc -shared
 LINKOPTS = -lsocket -lnsl -lresolv
 JAVACFLAGS_OS += -I$(JDK)/include/solaris
 ifneq ($(DEBUG),1)
-STRIP = strip
+STRIP = $(ST)
 endif
 else
 
 # any target that contains the string "linux"
 ifeq ($(findstring linux,$(os)),linux)
 CFLAGS_OS = -D_GNU_SOURCE -DHAVE_IPV6 -DNOT_HAVE_SA_LEN -DUSES_NETLINK -DHAVE_LINUX -DTARGET_OS_LINUX -fno-strict-aliasing
-LD = gcc -shared
+LD = $(CC) -shared
 FLEXFLAGS_OS = -l
 JAVACFLAGS_OS += -I$(JDK)/include/linux
 
@@ -151,11 +152,11 @@ LD = $(CC) -dynamiclib
 LINKOPTS = -lSystem
 LDSUFFIX = dylib
 JDK = /System/Library/Frameworks/JavaVM.framework/Home
-JAVACFLAGS_OS = -dynamiclib -I/System/Library/Frameworks/JavaVM.framework/Headers -framework JavaVM 
+JAVACFLAGS_OS = -dynamiclib -I/System/Library/Frameworks/JavaVM.framework/Headers -framework JavaVM
 else
 
 $(error ERROR: Must specify target OS on command-line, e.g. "make os=x [target]".\
-Supported operating systems include: x, linux, linux-uclibc, netbsd, freebsd, openbsd, solaris) 
+Supported operating systems include: x, linux, linux-uclibc, netbsd, freebsd, openbsd, solaris)
 endif
 endif
 endif

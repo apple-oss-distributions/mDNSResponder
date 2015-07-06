@@ -1964,6 +1964,23 @@ mDNSlocal mDNSBool CheckForMixedRegistrations(domainname *regtype, domainname *d
     return mDNStrue;
 }
 
+// Returns true if the interfaceIndex value matches one of the pre-defined
+// special values listed in the switch statement below.
+mDNSlocal mDNSBool PreDefinedInterfaceIndex(mDNSu32 interfaceIndex)
+{
+    switch(interfaceIndex)
+    {
+        case kDNSServiceInterfaceIndexAny:
+        case kDNSServiceInterfaceIndexLocalOnly:
+        case kDNSServiceInterfaceIndexUnicast:
+        case kDNSServiceInterfaceIndexP2P:
+            return mDNStrue;
+            break;
+        default:
+            return mDNSfalse;
+    }
+}
+
 mDNSlocal mStatus handle_regservice_request(request_state *request)
 {
     char name[256]; // Lots of spare space for extra-long names that we'll auto-truncate down to 63 bytes
@@ -1987,8 +2004,23 @@ mDNSlocal mStatus handle_regservice_request(request_state *request)
     }
 
     InterfaceID = mDNSPlatformInterfaceIDfromInterfaceIndex(&mDNSStorage, interfaceIndex);
+
+    // The registration is scoped to a specific interface index, but the 
+    // interface is not currently in our list.
     if (interfaceIndex && !InterfaceID)
-    { LogMsg("ERROR: handle_regservice_request - Couldn't find interfaceIndex %d", interfaceIndex); return(mStatus_BadParamErr); }
+    {
+        // If it's one of the specially defined inteface index values, just return an error.
+        if (PreDefinedInterfaceIndex(interfaceIndex))
+        {
+            LogMsg("ERROR: handle_regservice_request: bad interfaceIndex %d", interfaceIndex);
+            return(mStatus_BadParamErr);
+        }
+
+        // Otherwise, use the specified interface index value and the registration will
+        // be applied to that interface when it comes up.
+        InterfaceID = (mDNSInterfaceID)(uintptr_t)interfaceIndex;
+        LogInfo("handle_regservice_request: registration pending for interface index %d", interfaceIndex);
+    }
 
     if (get_string(&request->msgptr, request->msgend, name, sizeof(name)) < 0 ||
         get_string(&request->msgptr, request->msgend, type_as_string, MAX_ESCAPED_DOMAIN_NAME) < 0 ||
@@ -2562,7 +2594,23 @@ mDNSlocal mStatus handle_browse_request(request_state *request)
     DNSServiceFlags flags = get_flags(&request->msgptr, request->msgend);
     mDNSu32 interfaceIndex = get_uint32(&request->msgptr, request->msgend);
     mDNSInterfaceID InterfaceID = mDNSPlatformInterfaceIDfromInterfaceIndex(&mDNSStorage, interfaceIndex);
-    if (interfaceIndex && !InterfaceID) return(mStatus_BadParamErr);
+
+    // The browse is scoped to a specific interface index, but the 
+    // interface is not currently in our list.
+    if (interfaceIndex && !InterfaceID)
+    {
+        // If it's one of the specially defined inteface index values, just return an error.
+        if (PreDefinedInterfaceIndex(interfaceIndex))
+        {
+            LogMsg("ERROR: handle_browse_request: bad interfaceIndex %d", interfaceIndex);
+            return(mStatus_BadParamErr);
+        }
+
+        // Otherwise, use the specified interface index value and the browse will
+        // be applied to that interface when it comes up.
+        InterfaceID = (mDNSInterfaceID)(uintptr_t)interfaceIndex;
+        LogInfo("handle_browse_request: browse pending for interface index %d", interfaceIndex);
+    }
 
     if (get_string(&request->msgptr, request->msgend, regtype, MAX_ESCAPED_DOMAIN_NAME) < 0 ||
         get_string(&request->msgptr, request->msgend, domain, MAX_ESCAPED_DOMAIN_NAME) < 0) return(mStatus_BadParamErr);
@@ -2744,8 +2792,23 @@ mDNSlocal mStatus handle_resolve_request(request_state *request)
     }
 
     InterfaceID = mDNSPlatformInterfaceIDfromInterfaceIndex(&mDNSStorage, interfaceIndex);
+
+    // The operation is scoped to a specific interface index, but the 
+    // interface is not currently in our list.
     if (interfaceIndex && !InterfaceID)
-    { LogMsg("ERROR: handle_resolve_request bad interfaceIndex %d", interfaceIndex); return(mStatus_BadParamErr); }
+    {
+        // If it's one of the specially defined inteface index values, just return an error.
+        if (PreDefinedInterfaceIndex(interfaceIndex))
+        {
+            LogMsg("ERROR: handle_resolve_request: bad interfaceIndex %d", interfaceIndex);
+            return(mStatus_BadParamErr);
+        }
+
+        // Otherwise, use the specified interface index value and the operation will
+        // be applied to that interface when it comes up.
+        InterfaceID = (mDNSInterfaceID)(uintptr_t)interfaceIndex;
+        LogInfo("handle_resolve_request: resolve pending for interface index %d", interfaceIndex);
+    }
 
     if (get_string(&request->msgptr, request->msgend, name, 256) < 0 ||
         get_string(&request->msgptr, request->msgend, regtype, MAX_ESCAPED_DOMAIN_NAME) < 0 ||
@@ -2773,6 +2836,8 @@ mDNSlocal mStatus handle_resolve_request(request_state *request)
     request->u.resolve.qsrv.ForceMCast       = (flags & kDNSServiceFlagsForceMulticast     ) != 0;
     request->u.resolve.qsrv.ReturnIntermed   = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
     request->u.resolve.qsrv.SuppressUnusable = mDNSfalse;
+    request->u.resolve.qsrv.DenyOnCellInterface = mDNSfalse;
+    request->u.resolve.qsrv.DenyOnExpInterface  = mDNSfalse;
     request->u.resolve.qsrv.SearchListIndex  = 0;
     request->u.resolve.qsrv.AppendSearchDomains = 0;
     request->u.resolve.qsrv.RetryWithSearchDomains = mDNSfalse;
@@ -2799,6 +2864,8 @@ mDNSlocal mStatus handle_resolve_request(request_state *request)
     request->u.resolve.qtxt.ForceMCast       = (flags & kDNSServiceFlagsForceMulticast     ) != 0;
     request->u.resolve.qtxt.ReturnIntermed   = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
     request->u.resolve.qtxt.SuppressUnusable = mDNSfalse;
+    request->u.resolve.qtxt.DenyOnCellInterface = mDNSfalse;
+    request->u.resolve.qtxt.DenyOnExpInterface  = mDNSfalse;
     request->u.resolve.qtxt.SearchListIndex  = 0;
     request->u.resolve.qtxt.AppendSearchDomains = 0;
     request->u.resolve.qtxt.RetryWithSearchDomains = mDNSfalse;
@@ -3626,7 +3693,23 @@ mDNSlocal mStatus handle_queryrecord_request(request_state *request)
     DNSServiceFlags flags = get_flags(&request->msgptr, request->msgend);
     mDNSu32 interfaceIndex = get_uint32(&request->msgptr, request->msgend);
     mDNSInterfaceID InterfaceID = mDNSPlatformInterfaceIDfromInterfaceIndex(&mDNSStorage, interfaceIndex);
-    if (interfaceIndex && !InterfaceID) return(mStatus_BadParamErr);
+
+    // The request is scoped to a specific interface index, but the 
+    // interface is not currently in our list.
+    if (interfaceIndex && !InterfaceID)
+    {
+        // If it's one of the specially defined inteface index values, just return an error.
+        if (PreDefinedInterfaceIndex(interfaceIndex))
+        {
+            LogMsg("ERROR: handle_queryrecord_request: bad interfaceIndex %d", interfaceIndex);
+            return(mStatus_BadParamErr);
+        }
+
+        // Otherwise, use the specified interface index value and the request will
+        // be applied to that interface when it comes up.
+        InterfaceID = (mDNSInterfaceID)(uintptr_t)interfaceIndex;
+        LogInfo("handle_queryrecord_request: query pending for interface index %d", interfaceIndex);
+    }
 
     if (get_string(&request->msgptr, request->msgend, name, 256) < 0) return(mStatus_BadParamErr);
     rrtype  = get_uint16(&request->msgptr, request->msgend);
@@ -3655,6 +3738,8 @@ mDNSlocal mStatus handle_queryrecord_request(request_state *request)
     q->TimeoutQuestion  = (flags & kDNSServiceFlagsTimeout            ) != 0;
     q->WakeOnResolve    = 0;
     q->UseBackgroundTrafficClass = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
+    q->DenyOnCellInterface = (flags & kDNSServiceFlagsDenyCellular)  != 0;
+    q->DenyOnExpInterface  = (flags & kDNSServiceFlagsDenyExpensive) != 0;
     if ((flags & kDNSServiceFlagsValidate) != 0)
         q->ValidationRequired = DNSSEC_VALIDATION_SECURE;
     else if ((flags & kDNSServiceFlagsValidateOptional) != 0)
@@ -4295,16 +4380,46 @@ mDNSlocal mStatus handle_addrinfo_request(request_state *request)
     char hostname[256];
     domainname d;
     mStatus err = 0;
-
+    mDNSs32 serviceIndex   = -1;  // default unscoped value for ServiceID is -1
+    
     DNSServiceFlags flags  = get_flags(&request->msgptr, request->msgend);
+    
     mDNSu32 interfaceIndex = get_uint32(&request->msgptr, request->msgend);
 
+    if (flags & kDNSServiceFlagsServiceIndex)
+    {
+        // NOTE: kDNSServiceFlagsServiceIndex flag can only be set for DNSServiceGetAddrInfo()
+        LogInfo("DNSServiceGetAddrInfo: kDNSServiceFlagsServiceIndex is SET by the client");
+        // if kDNSServiceFlagsServiceIndex is SET,
+        // interpret the interfaceID as the serviceId and set the interfaceID to 0.
+        serviceIndex   = interfaceIndex;
+        interfaceIndex = 0;
+    }
+    
     mDNSPlatformMemZero(&request->u.addrinfo, sizeof(request->u.addrinfo));
-    request->u.addrinfo.interface_id = mDNSPlatformInterfaceIDfromInterfaceIndex(&mDNSStorage, interfaceIndex);
+
+    mDNSInterfaceID InterfaceID = mDNSPlatformInterfaceIDfromInterfaceIndex(&mDNSStorage, interfaceIndex);
+
+    // The request is scoped to a specific interface index, but the 
+    // interface is not currently in our list.
+    if (interfaceIndex && !InterfaceID)
+    {
+        // If it's one of the specially defined inteface index values, just return an error.
+        if (PreDefinedInterfaceIndex(interfaceIndex))
+        {
+            LogMsg("ERROR: handle_addrinfo_request: bad interfaceIndex %d", interfaceIndex);
+            return(mStatus_BadParamErr);
+        }
+
+        // Otherwise, use the specified interface index value and the registration will
+        // be applied to that interface when it comes up.
+        InterfaceID = (mDNSInterfaceID)(uintptr_t)interfaceIndex;
+        LogInfo("handle_addrinfo_request: query pending for interface index %d", interfaceIndex);
+    }
+    request->u.addrinfo.interface_id = InterfaceID;
     request->u.addrinfo.flags        = flags;
     request->u.addrinfo.protocol     = get_uint32(&request->msgptr, request->msgend);
 
-    if (interfaceIndex && !request->u.addrinfo.interface_id) return(mStatus_BadParamErr);
     if (request->u.addrinfo.protocol > (kDNSServiceProtocol_IPv4|kDNSServiceProtocol_IPv6)) return(mStatus_BadParamErr);
 
     if (get_string(&request->msgptr, request->msgend, hostname, 256) < 0) return(mStatus_BadParamErr);
@@ -4325,6 +4440,7 @@ mDNSlocal mStatus handle_addrinfo_request(request_state *request)
     }
 
     request->u.addrinfo.q4.InterfaceID      = request->u.addrinfo.q6.InterfaceID      = request->u.addrinfo.interface_id;
+    request->u.addrinfo.q4.ServiceID        = request->u.addrinfo.q6.ServiceID        = serviceIndex;
     request->u.addrinfo.q4.flags            = request->u.addrinfo.q6.flags            = flags;
     request->u.addrinfo.q4.Target           = request->u.addrinfo.q6.Target           = zeroAddr;
     request->u.addrinfo.q4.qname            = request->u.addrinfo.q6.qname            = d;
@@ -4337,6 +4453,8 @@ mDNSlocal mStatus handle_addrinfo_request(request_state *request)
     request->u.addrinfo.q4.TimeoutQuestion  = request->u.addrinfo.q6.TimeoutQuestion  = (flags & kDNSServiceFlagsTimeout            ) != 0;
     request->u.addrinfo.q4.WakeOnResolve    = request->u.addrinfo.q6.WakeOnResolve    = 0;
     request->u.addrinfo.q4.UseBackgroundTrafficClass = request->u.addrinfo.q6.UseBackgroundTrafficClass  = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
+    request->u.addrinfo.q4.DenyOnCellInterface = request->u.addrinfo.q6.DenyOnCellInterface = (flags & kDNSServiceFlagsDenyCellular) != 0;
+    request->u.addrinfo.q4.DenyOnExpInterface = request->u.addrinfo.q6.DenyOnExpInterface = (flags & kDNSServiceFlagsDenyExpensive) != 0;
     if ((flags & kDNSServiceFlagsValidate) != 0)
         request->u.addrinfo.q4.ValidationRequired = request->u.addrinfo.q6.ValidationRequired = DNSSEC_VALIDATION_SECURE;
     else if ((flags & kDNSServiceFlagsValidateOptional) != 0)

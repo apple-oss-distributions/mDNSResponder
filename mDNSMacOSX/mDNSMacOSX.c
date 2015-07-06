@@ -115,7 +115,6 @@ D2DStatus D2DTerminate() __attribute__((weak_import));
 #include <IOKit/platform/IOPlatformSupportPrivate.h>
 #endif // APPLE_OSX_mDNSResponder && !TARGET_OS_EMBEDDED
 
-
 #define kInterfaceSpecificOption "interface="
 
 #define mDNS_IOREG_KEY               "mDNS_KEY"
@@ -1037,7 +1036,13 @@ mDNSexport void external_stop_resolving_service(const domainname *const fqdn, DN
 // Typically point-to-point interfaces are modems (including mobile-phone pseudo-modems), and we don't want
 // to run up the user's bill sending multicast traffic over a link where there's only a single device at the
 // other end, and that device (e.g. a modem bank) is probably not answering Multicast DNS queries anyway.
+
+// We also don't want to use multicast on *any* interface on very constrained devices.
+#if TARGET_OS_NANO
+#define MulticastInterface(i) (mDNSfalse)
+#else
 #define MulticastInterface(i) (((i)->ifa_flags & IFF_MULTICAST) && !((i)->ifa_flags & IFF_POINTOPOINT))
+#endif
 
 mDNSexport void NotifyOfElusiveBug(const char *title, const char *msg)  // Both strings are UTF-8 text
 {
@@ -1692,35 +1697,56 @@ mDNSlocal void setTrafficClass(int socketfd, mDNSBool useBackgroundTrafficClass)
     (void) setsockopt(socketfd, SOL_SOCKET, SO_TRAFFIC_CLASS, (void *)&traffic_class, sizeof(traffic_class));
 }
 
-mDNSexport void mDNSPlatformSetDelegatePID(UDPSocket *src, const mDNSAddr *dst, DNSQuestion *q)
+mDNSexport void mDNSPlatformSetuDNSSocktOpt(UDPSocket *src, const mDNSAddr *dst, DNSQuestion *q)
 {
     if (src)
     {
         int s;
 
         if (dst->type == mDNSAddrType_IPv4)
-        {
             s = src->ss.sktv4;
-        }
         else
-        {
             s = src->ss.sktv6;
-        }
 
         if (q->pid)
         {
             if (setsockopt(s, SOL_SOCKET, SO_DELEGATED, &q->pid, sizeof(q->pid)) == -1)
-            {
-                LogInfo("mDNSPlatformSetDelegatePID: Delegate PID failed %s for PID %d", strerror(errno), q->pid);
-            }
+                LogInfo("mDNSPlatformSetuDNSSocktOpt: Delegate PID failed %s for PID %d", strerror(errno), q->pid);
         }
         else
         {
             if (setsockopt(s, SOL_SOCKET, SO_DELEGATED_UUID, &q->uuid, sizeof(q->uuid)) == -1)
-            {
-                LogInfo("mDNSPlatformSetDelegatePID: Delegate UUID failed %s", strerror(errno));
-            }
+                LogInfo("mDNSPlatformSetuDNSSocktOpt: Delegate UUID failed %s", strerror(errno));
         }
+		
+#if defined(SO_NOWAKEFROMSLEEP)
+        int nowake = 1;
+        if (setsockopt(s, SOL_SOCKET, SO_NOWAKEFROMSLEEP, &nowake, sizeof(nowake)) == -1)
+            LogInfo("mDNSPlatformSetuDNSSocktOpt: SO_NOWAKEFROMSLEEP failed %s", strerror(errno));
+#endif
+	
+        if (q->DenyOnCellInterface || q->DenyOnExpInterface)
+        {
+#if defined(SO_RESTRICT_DENY_CELLULAR)
+            if (q->DenyOnCellInterface)
+            {
+                int restrictions = 0;
+                restrictions = SO_RESTRICT_DENY_CELLULAR;
+                if (setsockopt(s, SOL_SOCKET, SO_RESTRICTIONS, &restrictions, sizeof(restrictions)) == -1)
+                    LogInfo("mDNSPlatformSetuDNSSocktOpt: SO_RESTRICT_DENY_CELLULAR failed %s", strerror(errno));
+            }
+#endif
+#if defined(SO_RESTRICT_DENY_EXPENSIVE)
+            if (q->DenyOnExpInterface)
+            {
+                int restrictions = 0;
+                restrictions = SO_RESTRICT_DENY_EXPENSIVE;
+                if (setsockopt(s, SOL_SOCKET, SO_RESTRICTIONS, &restrictions, sizeof(restrictions)) == -1)
+                    LogInfo("mDNSPlatformSetuDNSSocktOpt: SO_RESTRICT_DENY_EXPENSIVE failed %s", strerror(errno));
+            }
+#endif
+		}
+		
     }
 }
 
@@ -2063,6 +2089,9 @@ mDNSexport void myKQSocketCallBack(int s1, short filter, void *context)
         mDNSu8 ttl;
         err = myrecvfrom(s1, &m->imsg, sizeof(m->imsg), (struct sockaddr *)&from, &fromlen, &destAddr, packetifname, &ttl);
         if (err < 0) break;
+
+        if ((destAddr.type == mDNSAddrType_IPv4 && (destAddr.ip.v4.b[0] & 0xF0) == 0xE0) ||
+            (destAddr.type == mDNSAddrType_IPv6 && (destAddr.ip.v6.b[0]         == 0xFF))) m->p->num_mcasts++;
 
         count++;
         if (from.ss_family == AF_INET)
@@ -3010,8 +3039,11 @@ mDNSlocal mStatus SetupSocket(KQSocketSet *cp, const mDNSIPPort port, u_short sa
 #endif // SO_RECV_ANYIF
 
     // ... with a shared UDP port, if it's for multicast receiving
-    if (mDNSSameIPPort(port, MulticastDNSPort) || mDNSSameIPPort(port, NATPMPAnnouncementPort)) err = setsockopt(skt, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
-    if (err < 0) { errstr = "setsockopt - SO_REUSEPORT"; goto fail; }
+    if (mDNSSameIPPort(port, MulticastDNSPort) || mDNSSameIPPort(port, NATPMPAnnouncementPort))
+    {
+        err = setsockopt(skt, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
+        if (err < 0) { errstr = "setsockopt - SO_REUSEPORT"; goto fail; }
+    }
 
     if (sa_family == AF_INET)
     {
@@ -5158,6 +5190,8 @@ mDNSexport void AddNewClientTunnel(mDNS *const m, DNSQuestion *const q)
     p->q.ForceMCast       = mDNSfalse;
     p->q.ReturnIntermed   = mDNStrue;
     p->q.SuppressUnusable = mDNSfalse;
+    p->q.DenyOnCellInterface = mDNSfalse;
+    p->q.DenyOnExpInterface  = mDNSfalse;
     p->q.SearchListIndex  = 0;
     p->q.AppendSearchDomains = 0;
     p->q.RetryWithSearchDomains = mDNSfalse;
@@ -5195,6 +5229,8 @@ mDNSlocal mStatus UpdateInterfaceList(mDNS *const m, mDNSs32 utc)
     int InfoSocket              = socket(AF_INET6, SOCK_DGRAM, 0);
     if (InfoSocket < 3 && errno != EAFNOSUPPORT) 
         LogMsg("UpdateInterfaceList: InfoSocket error %d errno %d (%s)", InfoSocket, errno, strerror(errno));
+
+    if (m->SleepState == SleepState_Sleeping) ifa = NULL;
 
     while (ifa)
     {
@@ -6074,7 +6110,7 @@ mDNSlocal void SetupDDNSDomains(domainname *const fqdn, DNameListElem **RegDomai
     char buf[MAX_ESCAPED_DOMAIN_NAME];  // Max legal C-string name, including terminating NUL
     domainname d;
 
-    SCDynamicStoreRef store = SCDynamicStoreCreate(NULL, CFSTR("mDNSResponder:mDNSPlatformSetDNSConfig"), NULL, NULL);
+    SCDynamicStoreRef store = SCDynamicStoreCreate(NULL, CFSTR("mDNSResponder:SetupDDNSDomains"), NULL, NULL);
     if (!store)
     {
         LogMsg("SetupDDNSDomains: SCDynamicStoreCreate failed: %s", SCErrorString(SCError()));
@@ -6199,7 +6235,7 @@ mDNSexport mDNSBool mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers,
     static mDNSu16 resolverGroupID = 0;
 
     // Need to set these here because we need to do this even if SCDynamicStoreCreate() or SCDynamicStoreCopyValue() below don't succeed
-    if (fqdn) fqdn->c[0]      = 0;
+    if (fqdn         ) fqdn->c[0]      = 0;
     if (RegDomains   ) *RegDomains     = NULL;
     if (BrowseDomains) *BrowseDomains  = NULL;
 
@@ -6271,7 +6307,8 @@ mDNSexport mDNSBool mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers,
         else
         {
             LogInfo("mDNSPlatformSetDNSConfig: config->n_resolver = %d, generation %llu", config->n_resolver, config->generation);
-            if (m->p->LastConfigGeneration == config->generation)
+			// SameDomainName check below is to fix <rdar://problem/18059009> Dynamic DNS hostname changes not noticed
+            if (m->p->LastConfigGeneration == config->generation && (!fqdn || (SameDomainName(fqdn, &m->FQDN))))
             {
                 LogInfo("mDNSPlatformSetDNSConfig: generation number %llu same, not processing", config->generation);
                 dns_configuration_free(config);
@@ -7903,13 +7940,16 @@ mDNSexport void mDNSMacOSXNetworkChanged(mDNS *const m)
 }
 
 // Called with KQueueLock & mDNS lock
+// SetNetworkChanged is allowed to extend (but not reduce) the pause while we wait for configuration changes to settle
 mDNSlocal void SetNetworkChanged(mDNS *const m, mDNSs32 delay)
 {
     if (!m->p->NetworkChanged || m->p->NetworkChanged - NonZeroTime(m->timenow + delay) < 0)
     {
         m->p->NetworkChanged = NonZeroTime(m->timenow + delay);
-        LogInfo("SetNetworkChanged: scheduling in %d msec", delay);
+        LogInfo("SetNetworkChanged: Scheduling in %d msec", delay);
     }
+    else
+        LogInfo("SetNetworkChanged: *NOT* reducing delay from %d to %d", m->p->NetworkChanged - m->timenow, delay);
 }
 
 // Called with KQueueLock & mDNS lock
@@ -7941,7 +7981,7 @@ mDNSlocal CFStringRef CopyNameFromKey(CFStringRef key)
 
 // Whether a key from a network change notification corresponds to
 // an IP service that is explicitly configured for IPv4 Link Local
-mDNSlocal mDNSBool ChangedKeysHaveIPv4LL(CFArrayRef inkeys)
+mDNSlocal int ChangedKeysHaveIPv4LL(CFArrayRef inkeys)
 {
     SCDynamicStoreRef store = NULL;
     CFDictionaryRef dict = NULL;
@@ -7949,7 +7989,7 @@ mDNSlocal mDNSBool ChangedKeysHaveIPv4LL(CFArrayRef inkeys)
     const void **keys = NULL, **vals = NULL;
     CFStringRef pattern = NULL;
     int i, ic, j, jc;
-    mDNSBool found = mDNSfalse;
+    int found = 0;
 
     jc = CFArrayGetCount(inkeys);
     if (!jc) goto done;
@@ -7986,7 +8026,8 @@ mDNSlocal mDNSBool ChangedKeysHaveIPv4LL(CFArrayRef inkeys)
     keys = mDNSPlatformMemAllocate(sizeof (void *) * ic);
     CFDictionaryGetKeysAndValues(dict, keys, vals);
 
-    for (j = 0; j < jc && !found; j++)
+    // For each key we were given...
+    for (j = 0; j < jc; j++)
     {
         CFStringRef key = CFArrayGetValueAtIndex(inkeys, j);
         CFStringRef ifname = NULL;
@@ -8003,6 +8044,7 @@ mDNSlocal mDNSBool ChangedKeysHaveIPv4LL(CFArrayRef inkeys)
             LogInfo("ChangedKeysHaveIPv4LL: potential ifname %s", buf);
         }
 
+        // Loop over the interfaces to find matching the ifname, and see if that one has kSCValNetIPv4ConfigMethodLinkLocal
         for (i = 0; i < ic; i++)
         {
             CFDictionaryRef ipv4dict;
@@ -8042,7 +8084,7 @@ mDNSlocal mDNSBool ChangedKeysHaveIPv4LL(CFArrayRef inkeys)
                 LogInfo("ChangedKeysHaveIPv4LL: configmethod %s", buf);
             }
 
-            if (CFEqual(configmethod, kSCValNetIPv4ConfigMethodLinkLocal)) { found = mDNStrue; break; }
+            if (CFEqual(configmethod, kSCValNetIPv4ConfigMethodLinkLocal)) { found++; break; }
         }
 
         CFRelease(ifname);
@@ -8060,7 +8102,6 @@ done:
 mDNSlocal void NetworkChanged(SCDynamicStoreRef store, CFArrayRef changedKeys, void *context)
 {
     (void)store;        // Parameter not used
-    mDNSBool changeNow = mDNSfalse;
     mDNS *const m = (mDNS *const)context;
     KQueueLock(m);
     mDNS_Lock(m);
@@ -8071,10 +8112,11 @@ mDNSlocal void NetworkChanged(SCDynamicStoreRef store, CFArrayRef changedKeys, v
     CFRange range = { 0, c };
     int c1 = (CFArrayContainsValue(changedKeys, range, NetworkChangedKey_Hostnames   ) != 0);
     int c2 = (CFArrayContainsValue(changedKeys, range, NetworkChangedKey_Computername) != 0);
-    int c3 = (CFArrayContainsValue(changedKeys, range, NetworkChangedKey_DynamicDNS  ) != 0);
-    int c4 = (CFArrayContainsValue(changedKeys, range, NetworkChangedKey_DNS         ) != 0);
-    if (c && c - c1 - c2 - c3 - c4 == 0)
-        delay = mDNSPlatformOneSecond/10;  // If these were the only changes, shorten delay
+    int c3 = (CFArrayContainsValue(changedKeys, range, NetworkChangedKey_DNS         ) != 0);
+    int c4 = (CFArrayContainsValue(changedKeys, range, NetworkChangedKey_DynamicDNS  ) != 0);
+    int c5 = (CFArrayContainsValue(changedKeys, range, NetworkChangedKey_BackToMyMac ) != 0);
+    int c6 = ChangedKeysHaveIPv4LL(changedKeys);
+    int c7 = 0;
 
     // Do immediate network changed processing for "p2p*" interfaces and
     // for interfaces with the IFEF_DIRECTLINK flag set.
@@ -8109,8 +8151,8 @@ mDNSlocal void NetworkChanged(SCDynamicStoreRef store, CFArrayRef changedKeys, v
                 if (CFStringGetCString(CFArrayGetValueAtIndex(labels, 3), buf, sizeof(buf), kCFStringEncodingUTF8)
                     && (strstr(buf, "p2p") || (getExtendedFlags(buf) & IFEF_DIRECTLINK)))
                 {
-                    LogInfo("NetworkChanged: interface %s, not delaying network change", buf);
-                    changeNow = mDNStrue;
+                    LogInfo("NetworkChanged: interface %s qualifies for reduced change handling delay", buf);
+                    c7++;
                     CFRelease(labels);
                     break;
                 }
@@ -8119,8 +8161,22 @@ mDNSlocal void NetworkChanged(SCDynamicStoreRef store, CFArrayRef changedKeys, v
         }
     }
 
-    mDNSBool btmmChanged = CFArrayContainsValue(changedKeys, range, NetworkChangedKey_BackToMyMac);
-    if (btmmChanged) delay = 0;
+    if (c && c - c1 - c2 - c3 - c4 - c5 - c6 - c7 == 0)
+        delay = mDNSPlatformOneSecond/10;  // If these were the only changes, shorten delay
+
+    // Immediately force a reconfig (esp. cache flush) if any of the following is true:
+    // 1. DNS Settings changed.
+    // 2  An interface changed that is explicitly IPv4 link local
+    // 3. There are P2P/IFEF_DIRECTLINK/IsCarPlaySSID changes
+    if (c3 || ChangedKeysHaveIPv4LL(changedKeys) || c7)
+    {
+        LogInfo("NetworkChanged: %s : Handling this change immediately",
+                c3 ? "DNS Settings Changed" :
+                c7 ? "P2P/IFEF_DIRECTLINK/IsCarPlaySSID Changed" :
+                "An interface changed that is explicitly IPv4 link local");
+        m->p->NetworkChanged = NonZeroTime(m->timenow);
+        delay = 0; // for the logs below.
+    }
 
     if (mDNS_LoggingEnabled)
     {
@@ -8131,31 +8187,30 @@ mDNSlocal void NetworkChanged(SCDynamicStoreRef store, CFArrayRef changedKeys, v
             if (!CFStringGetCString(CFArrayGetValueAtIndex(changedKeys, i), buf, sizeof(buf), kCFStringEncodingUTF8)) buf[0] = 0;
             LogInfo("***   NetworkChanged SC key: %s", buf);
         }
-        LogInfo("***   NetworkChanged   *** %d change%s %s%s%s%sdelay %d",
+        LogInfo("***   NetworkChanged   *** %d change%s %s%s%s%s%s%s%sdelay %d%s",
                 c, c>1 ? "s" : "",
                 c1 ? "(Local Hostname) " : "",
                 c2 ? "(Computer Name) "  : "",
-                c3 ? "(DynamicDNS) "     : "",
-                c4 ? "(DNS) "            : "",
-                changeNow ? 0 : delay);
+                c3 ? "(DNS) "            : "",
+                c4 ? "(DynamicDNS) "     : "",
+                c5 ? "(BTMM) "           : "",
+                c6 ? "(kSCValNetIPv4ConfigMethodLinkLocal) " : "",
+                c7 ? "(P2P/IFEF_DIRECTLINK/IsCarPlaySSID) "  : "",
+                delay,
+                (c4 || c5) ? " + SetKeyChainTimer" : "");
     }
 
-    if (!changeNow)
-        SetNetworkChanged(m, delay);
+    SetNetworkChanged(m, delay);
 
     // Other software might pick up these changes to register or browse in WAB or BTMM domains,
     // so in order for secure updates to be made to the server, make sure to read the keychain and
     // setup the DomainAuthInfo before handing the network change.
     // If we don't, then we will first try to register services in the clear, then later setup the
     // DomainAuthInfo, which is incorrect.
-    if (c3 || btmmChanged)
+    if (c4 || c5)
         SetKeyChainTimer(m, delay);
 
     mDNS_Unlock(m);
-
-    // If DNS settings changed, immediately force a reconfig (esp. cache flush)
-    // Similarly, if an interface changed that is explicitly IPv4 link local, immediately force a reconfig
-    if (c4 || ChangedKeysHaveIPv4LL(changedKeys) || changeNow) mDNSMacOSXNetworkChanged(m);
 
     KQueueUnlock(m, "NetworkChanged");
 }
@@ -8774,9 +8829,7 @@ mDNSlocal void PowerChanged(void *refcon, io_service_t service, natural_t messag
         // the System Configuration Framework "network changed" event that we expect
         // to receive some time shortly after the kIOMessageSystemWillPowerOn message
         mDNS_Lock(m);
-        if (!m->p->NetworkChanged ||
-            m->p->NetworkChanged - NonZeroTime(m->timenow + mDNSPlatformOneSecond * 2) < 0)
-            m->p->NetworkChanged = NonZeroTime(m->timenow + mDNSPlatformOneSecond * 2);
+        SetNetworkChanged(m, mDNSPlatformOneSecond * 2);
         mDNS_Unlock(m);
 
         break;
@@ -8832,13 +8885,16 @@ mDNSlocal void SnowLeopardPowerChanged(void *refcon, IOPMConnection connection, 
             m->SleepLimit = 0;
         }
         LogSPS("SnowLeopardPowerChanged: Waking up, Acking Wakeup, SleepLimit %d SleepState %d", m->SleepLimit, m->SleepState);
-        // If the network notifications have already come before we got the wakeup, we ignored them and
-        // in case we get no more, we need to trigger one.
-        mDNS_Lock(m);
-        SetNetworkChanged(m, 2 * mDNSPlatformOneSecond);
-        mDNS_Unlock(m);
         // CPU Waking. Note: Can get this message repeatedly, as other subsystems power up or down.
-        if (m->SleepState != SleepState_Awake) PowerOn(m);
+        if (m->SleepState != SleepState_Awake)
+        {
+			PowerOn(m);
+			// If the network notifications have already come before we got the wakeup, we ignored them and
+			// in case we get no more, we need to trigger one.
+			mDNS_Lock(m);
+			SetNetworkChanged(m, mDNSPlatformOneSecond * 2);
+			mDNS_Unlock(m);
+        }
         IOPMConnectionAcknowledgeEvent(connection, token);
     }
     else
@@ -10408,9 +10464,37 @@ mDNSexport void mDNSPlatformDispatchAsync(mDNS *const m, void *context, AsyncDis
 #define OSX_VER_LEN     strlen(OSX_VER) 
 #define VER_NUM_LEN     2  // 2 digits of version number added to base string
 
+#define MODEL_COLOR           "ecolor="
+#define MODEL_COLOR_LEN       strlen(MODEL_COLOR)
+#define MODEL_RGB_VALUE_LEN   strlen("255,255,255") // 'r,g,b'
+
 // Bytes available in TXT record for model name after subtracting space for other 
 // fixed size strings and their length bytes.
-#define MAX_MODEL_NAME_LEN   (256 - (DEVINFO_MODEL_LEN + 1) - (OSX_VER_LEN + VER_NUM_LEN + 1))
+#define MAX_MODEL_NAME_LEN   (256 - (DEVINFO_MODEL_LEN + 1) - (OSX_VER_LEN + VER_NUM_LEN + 1) - (MODEL_COLOR_LEN + MODEL_RGB_VALUE_LEN + 1))
+
+mDNSlocal mDNSBool getModelIconColors(char *color)
+{
+	mDNSBool hasColor = mDNSfalse;
+	mDNSPlatformMemZero(color, MODEL_RGB_VALUE_LEN + 1);
+	
+#if !TARGET_OS_EMBEDDED && defined(kIOPlatformDeviceEnclosureColorKey)
+	mDNSu8   red      = 0;
+	mDNSu8   green    = 0;
+	mDNSu8   blue     = 0;
+
+	IOReturn rGetDeviceColor = IOPlatformGetDeviceColor(kIOPlatformDeviceEnclosureColorKey,
+														&red, &green, &blue);
+	if (kIOReturnSuccess == rGetDeviceColor)
+	{
+		// IOKit was able to get enclosure color for the current device.
+		hasColor = true;
+		snprintf(color, MODEL_RGB_VALUE_LEN + 1, "%d,%d,%d", red, green, blue);
+	}
+#endif // !TARGET_OS_EMBEDDED && defined(kIOPlatformDeviceEnclosureColorKey)
+	
+	return hasColor;
+}
+
 
 // Initialize device-info TXT record contents and return total length of record data.
 mDNSexport mDNSu32 initializeDeviceInfoTXT(mDNS *m, mDNSu8 *ptr)
@@ -10437,7 +10521,24 @@ mDNSexport mDNSu32 initializeDeviceInfoTXT(mDNS *m, mDNSu8 *ptr)
         snprintf(ver_num, VER_NUM_LEN + 1, "%d", OSXVers);
         mDNSPlatformMemCopy(ptr, ver_num, VER_NUM_LEN);
         ptr += VER_NUM_LEN;
+		
+		char rgb[MODEL_RGB_VALUE_LEN + 1]; // RGB value + null written by snprintf
+		if (getModelIconColors(rgb))
+		{
+			len = strlen(rgb);
+			*ptr = MODEL_COLOR_LEN + len; // length byte
+			ptr++;
+		
+			mDNSPlatformMemCopy(ptr, MODEL_COLOR, MODEL_COLOR_LEN);
+			ptr += MODEL_COLOR_LEN;
+			
+			mDNSPlatformMemCopy(ptr, rgb, len);
+			ptr += len;
+		}
     }
 
     return (ptr - bufferStart);
 }
+
+
+

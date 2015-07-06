@@ -1632,7 +1632,7 @@ int main(int argc, char **argv)
     case 'C':   {
         uint16_t rrtype, rrclass;
         flags |= kDNSServiceFlagsReturnIntermediates;
-        if (operation == 'q') 
+        if (operation == 'q')
             flags |= kDNSServiceFlagsSuppressUnusable;
         if (argc < opi+1) 
             goto Fail;
@@ -1781,7 +1781,12 @@ int main(int argc, char **argv)
     default: goto Fail;
     }
 
-    if (!client || err != kDNSServiceErr_NoError) { fprintf(stderr, "DNSService call failed %ld\n", (long int)err); return (-1); }
+    if (!client || err != kDNSServiceErr_NoError)
+    {
+        fprintf(stderr, "DNSService call failed %ld%s\n", (long int)err,
+            (err == kDNSServiceErr_ServiceNotRunning) ? " (Service Not Running)" : "");
+        return (-1);
+    }
     printtimestamp();
     printf("...STARTING...\n");
     HandleEvents();

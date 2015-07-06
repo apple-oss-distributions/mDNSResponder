@@ -46,6 +46,7 @@
 ; These are needed for things like getpwnam, hostname changes, & keychain
 (allow mach-lookup
        (global-name "com.apple.bsd.dirhelper")
+       (global-name "com.apple.CoreServices.coreservicesd")
        (global-name "com.apple.distributed_notifications.2")
        (global-name "com.apple.ocspd")
        (global-name "com.apple.PowerManagement.control")
@@ -135,7 +136,10 @@
        (regex #"^/private/var/folders/[^/]+/[^/]+/C/mds(/|$)")
 
        ; Required on 10.5 and 10.6
-       (regex #"^/private/var/folders/[^/]+/[^/]+/-Caches-/mds(/|$)"))
+       (regex #"^/private/var/folders/[^/]+/[^/]+/-Caches-/mds(/|$)")
+
+       ; Required on 10.10.4
+       (regex #"^/private/var/folders/[^/]+/[^/]+/[0-9]+(/|$)"))
 
 ; CRL Cache for SSL/TLS connections
 (allow file-read-data (literal "/private/var/db/crls/crlcache.db"))
