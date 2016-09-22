@@ -23,6 +23,7 @@
 
 #include <DebugServices.h>
 #include "loclibrary.h"
+#include <strsafe.h>
 
 
 #ifdef _DEBUG
@@ -205,7 +206,7 @@ CCPApp::Register( LPCTSTR inClsidString, LPCTSTR inName, LPCTSTR inCanonicalName
 	n = sizeof_array( entries );
 	for( i = 0; i < n; ++i )
 	{
-		wsprintf( keyName, entries[ i ].subKey, inClsidString );		
+		StringCbPrintf( keyName, sizeof( keyName ), entries[ i ].subKey, inClsidString );
 		err = RegCreateKeyEx( entries[ i ].rootKey, keyName, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &key, NULL );
 		require_noerr( err, exit );
 		
@@ -232,10 +233,10 @@ CCPApp::Unregister( LPCTSTR clsidString )
 {
 	TCHAR keyName[ MAX_PATH * 2 ];
 
-	wsprintf( keyName, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ControlPanel\\NameSpace\\%s", clsidString );							
+	StringCbPrintf( keyName, sizeof( keyName ), L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ControlPanel\\NameSpace\\%s", clsidString );
 	MyRegDeleteKey( HKEY_LOCAL_MACHINE, keyName );
 
-	wsprintf( keyName, L"CLSID\\%s", clsidString );
+	StringCbPrintf( keyName, sizeof( keyName ), L"CLSID\\%s", clsidString );
 	MyRegDeleteKey( HKEY_CLASSES_ROOT, keyName );
 }
 
@@ -313,7 +314,7 @@ CCPApp::InitInstance()
 
 		require_noerr( err, exit );
 
-		wsprintf( iconPath, L"%s,-%d", exePath, IDR_APPLET );
+		StringCbPrintf( iconPath, sizeof( iconPath ), L"%s,-%d", exePath, IDR_APPLET );
 
 		localizedName.LoadString( IDS_APPLET_NAME );
 		toolTip.LoadString( IDS_APPLET_TOOLTIP );

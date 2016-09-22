@@ -1,4 +1,4 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
  *
  * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
@@ -20,7 +20,8 @@
 
 #include "helpermsg-types.h"
 
-enum {
+enum
+{
     PF_SET_RULES,
     PF_CLEAR_RULES
 };

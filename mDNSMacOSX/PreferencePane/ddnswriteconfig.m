@@ -87,18 +87,23 @@ WriteArrayToDynDNS(CFStringRef arrayKey, CFArrayRef domainArray)
 	require_action(true == SCPreferencesLock( store, true), LockFailed, err=coreFoundationUnknownErr;);
 
 	origDict = SCPreferencesPathGetValue(store, scKey);
-	if (origDict) {
+	if (origDict)
+	{
 		dict = CFDictionaryCreateMutableCopy(NULL, 0, origDict);
 	}
     
-	if (!dict) {
+	if (!dict)
+	{
 		dict = CFDictionaryCreateMutable(NULL, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 	}
 	require_action( dict != NULL, NoDict, err=memFullErr;);
 
-	if (CFArrayGetCount(domainArray) > 0) {
+	if (CFArrayGetCount(domainArray) > 0)
+	{
 		CFDictionarySetValue(dict, arrayKey, domainArray);
-	} else {
+	}
+	else
+	{
 		CFDictionaryRemoveValue(dict, arrayKey);
 	}
 	
@@ -138,10 +143,13 @@ readTaggedBlock(int fd, u_int32_t *pTag, u_int32_t *pLen, char **ppBuff)
 	require_action(*ppBuff != NULL, AllocFailed, result = -1;);
 
 	num = read(fd, *ppBuff, len);
-	if (num == (ssize_t)len) {
+	if (num == (ssize_t)len)
+	{
 		*pTag = tag;
 		*pLen = len;
-	} else {
+	}
+	else
+	{
 		free(*ppBuff);
 		result = -1;
 	}
@@ -166,7 +174,8 @@ SetAuthInfo( int fd)
 	require( len == sizeof(AuthorizationExternalForm), ReadParamsFailed);
 	require( len == kAuthorizationExternalFormLength, ReadParamsFailed);
 
-	if (gAuthRef != 0) {
+	if (gAuthRef != 0)
+	{
 		(void) AuthorizationFree(gAuthRef, kAuthorizationFlagDefaults);
 		gAuthRef = 0;
 	}
@@ -199,10 +208,15 @@ HandleWriteDomain(int fd, int domainType)
 
 	domainData = CFDataCreate(NULL, (UInt8 *)p, len);
 	domainArray = (CFArrayRef)[NSUnarchiver unarchiveObjectWithData:(NSData *)domainData];
+	CFRelease(domainData);
+	free(p);
 	
-    if (domainType) {
+    if (domainType)
+    {
         result = WriteArrayToDynDNS(SC_DYNDNS_REGDOMAINS_KEY, domainArray);
-    } else {
+    }
+    else
+    {
         result = WriteArrayToDynDNS(SC_DYNDNS_BROWSEDOMAINS_KEY, domainArray);
     }
 
@@ -232,6 +246,8 @@ HandleWriteHostname(int fd)
 	domainData = CFDataCreate(NULL, (const UInt8 *)p, len);
 	domainArray = (CFArrayRef)[NSUnarchiver unarchiveObjectWithData:(NSData *)domainData];
 	result = WriteArrayToDynDNS(SC_DYNDNS_HOSTNAMES_KEY, domainArray);
+	CFRelease(domainData);
+	free(p);
 	
 ReadParamsFailed:
 	return result;
@@ -341,6 +357,8 @@ SetKeychainEntry(int fd)
 
 	secretData = CFDataCreate(NULL, (UInt8 *)p, len);
 	secretDictionary = (CFDictionaryRef)[NSUnarchiver unarchiveObjectWithData:(NSData *)secretData];
+	CFRelease(secretData);
+	free(p);
 
 	keyNameString = (CFStringRef)CFDictionaryGetValue(secretDictionary, SC_DYNDNS_KEYNAME_KEY);
 	assert(keyNameString != NULL);
@@ -356,9 +374,11 @@ SetKeychainEntry(int fd)
 	CFStringGetCString(secretString,   secret, kDNSServiceMaxDomainName, kCFStringEncodingUTF8);
 
 	result = SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem);
-	if (result == noErr) {
+	if (result == noErr)
+	{
 		result = SecKeychainFindGenericPassword(NULL, strlen(domain), domain, 0, NULL, 0, NULL, &item);
-		if (result == noErr) {
+		if (result == noErr)
+		{
 			result = SecKeychainItemDelete(item);
 			if (result != noErr) fprintf(stderr, "SecKeychainItemDelete returned %d\n", result);
 		}

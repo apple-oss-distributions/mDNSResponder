@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2007 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2011 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,11 @@
 #ifndef H_HELPER_SERVER_H
 #define H_HELPER_SERVER_H
 
-extern void helplog(int, const char *, ...);
 extern void pause_idle_timer(void);
 extern void unpause_idle_timer(void);
 extern void update_idle_timer(void);
 extern uid_t mDNSResponderUID;
 extern uid_t mDNSResponderGID;
 extern CFRunLoopRef gRunLoop;
-#define debug(...) debug_(__func__, __VA_ARGS__)
-extern void debug_(const char *func, const char *fmt, ...);
 
 #endif /* H_HELPER_SERVER_H */

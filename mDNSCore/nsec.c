@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -611,7 +611,7 @@ mDNSlocal mDNSBool NSECNoDataError(mDNS *const m, ResourceRecord *rr, domainname
 {
     const domainname *oname = rr->name; // owner name
 
-    if (wildcard) *wildcard = mDNSNULL;
+    *wildcard = mDNSNULL;
     // RFC 4035
     //
     // section 3.1.3.1 : Name matches. Prove that the type does not exist and also CNAME is
@@ -676,10 +676,10 @@ mDNSlocal mDNSBool NSECNoDataError(mDNS *const m, ResourceRecord *rr, domainname
         // a subdomain e.g., y.x.example or z.y.x.example and so on.
         if (oname->c[0] == 1 && oname->c[1] == '*')
         {
-            int r, s;
+            int s;
             const domainname *ce = SkipLeadingLabels(oname, 1);
 
-            r = DNSSECCanonicalOrder(name, ce, &s);
+            DNSSECCanonicalOrder(name, ce, &s);
             if (s)
             {
                 if (RRAssertsExistence(rr, qtype) || RRAssertsExistence(rr, kDNSType_CNAME))
@@ -912,18 +912,18 @@ mDNSlocal void NoDataProof(mDNS *const m, DNSSECVerifier *dv, CacheRecord *ncr)
         // First verify wildcard NSEC and then when we are done, we
         // will verify the noname nsec
         dv->pendingNSEC = r;
-        LogDNSSEC("NoDataProof: Verifying wild and noname %s", RRDisplayString(m, nsec_wild));
+        LogDNSSEC("NoDataProof: Verifying wild and noname %s", nsec_wild ? RRDisplayString(m, nsec_wild) : "NULL");
         VerifyNSEC(m, nsec_wild, mDNSNULL, dv, ncr, NoDataNSECCallback);
     }
     else if ((dv->flags & WILDCARD_PROVES_NONAME_EXISTS) ||
              (dv->flags & NSEC_PROVES_NOTYPE_EXISTS))
     {
-        LogDNSSEC("NoDataProof: Verifying wild %s", RRDisplayString(m, nsec_wild));
+        LogDNSSEC("NoDataProof: Verifying wild %s", nsec_wild ? RRDisplayString(m, nsec_wild) : "NULL");
         VerifyNSEC(m, nsec_wild, mDNSNULL, dv, ncr, mDNSNULL);
     }
     else if (dv->flags & NSEC_PROVES_NONAME_EXISTS)
     {
-        LogDNSSEC("NoDataProof: Verifying noname %s", RRDisplayString(m, nsec_noname));
+        LogDNSSEC("NoDataProof: Verifying noname %s", nsec_noname ? RRDisplayString(m, nsec_noname) : "NULL");
         VerifyNSEC(m, nsec_noname, mDNSNULL, dv, ncr, mDNSNULL);
     }
     return;

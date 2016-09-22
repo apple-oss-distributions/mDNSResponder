@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 45;
+	objectVersion = 46;
 	objects = {
 
 /* Begin PBXAggregateTarget section */
@@ -25,16 +25,14 @@
 			isa = PBXAggregateTarget;
 			buildConfigurationList = 03067D730C83A3CB0022BE1F /* Build configuration list for PBXAggregateTarget "Build Some" */;
 			buildPhases = (
-				FF045B6A0C7E4AA600448140 /* ShellScript */,
 			);
 			dependencies = (
-				217A4C49138EE14C000A5BA8 /* PBXTargetDependency */,
 				03067D680C83A3830022BE1F /* PBXTargetDependency */,
-				03067D6A0C83A3890022BE1F /* PBXTargetDependency */,
-				03067D6C0C83A3920022BE1F /* PBXTargetDependency */,
 				03067D6E0C83A39C0022BE1F /* PBXTargetDependency */,
-				84C5B3411665544B00C324A8 /* PBXTargetDependency */,
+				03067D6C0C83A3920022BE1F /* PBXTargetDependency */,
 				BD7833F01ABA5E3500EC51ED /* PBXTargetDependency */,
+				84C5B3411665544B00C324A8 /* PBXTargetDependency */,
+				217A4C49138EE14C000A5BA8 /* PBXTargetDependency */,
 			);
 			name = "Build Some";
 			productName = "Build Some";
@@ -57,9 +55,9 @@
 			buildPhases = (
 			);
 			dependencies = (
+				215FFB19124002C100470DE1 /* PBXTargetDependency */,
 				215FFB1D124002CC00470DE1 /* PBXTargetDependency */,
 				215FFB1B124002C700470DE1 /* PBXTargetDependency */,
-				215FFB19124002C100470DE1 /* PBXTargetDependency */,
 			);
 			name = SystemLibrariesStatic;
 			productName = SystemLibrariesStatic;
@@ -93,78 +91,55 @@
 
 /* Begin PBXBuildFile section */
 		21070E5F16486B9000A69507 /* DNSSECSupport.c in Sources */ = {isa = PBXBuildFile; fileRef = 21070E5D16486B9000A69507 /* DNSSECSupport.c */; };
-		21070E6016486B9000A69507 /* DNSSECSupport.c in Sources */ = {isa = PBXBuildFile; fileRef = 21070E5D16486B9000A69507 /* DNSSECSupport.c */; };
 		21070E6116486B9000A69507 /* DNSSECSupport.h in Headers */ = {isa = PBXBuildFile; fileRef = 21070E5E16486B9000A69507 /* DNSSECSupport.h */; };
-		21070E6216486B9000A69507 /* DNSSECSupport.h in Headers */ = {isa = PBXBuildFile; fileRef = 21070E5E16486B9000A69507 /* DNSSECSupport.h */; };
-		2120ABD516B71614007089B6 /* CUPolicy.c in Sources */ = {isa = PBXBuildFile; fileRef = 2120ABD416B71614007089B6 /* CUPolicy.c */; };
-		2120ABD616B71614007089B6 /* CUPolicy.c in Sources */ = {isa = PBXBuildFile; fileRef = 2120ABD416B71614007089B6 /* CUPolicy.c */; };
 		2124FA2C1471E98C0021D7BB /* nsec.h in Headers */ = {isa = PBXBuildFile; fileRef = 2124FA2B1471E98C0021D7BB /* nsec.h */; };
-		2124FA2D1471E98C0021D7BB /* nsec.h in Headers */ = {isa = PBXBuildFile; fileRef = 2124FA2B1471E98C0021D7BB /* nsec.h */; };
 		2124FA301471E9B50021D7BB /* dnssec.h in Headers */ = {isa = PBXBuildFile; fileRef = 2124FA2F1471E9B50021D7BB /* dnssec.h */; };
-		2124FA311471E9B50021D7BB /* dnssec.h in Headers */ = {isa = PBXBuildFile; fileRef = 2124FA2F1471E9B50021D7BB /* dnssec.h */; };
 		2124FA331471E9DE0021D7BB /* nsec.c in Sources */ = {isa = PBXBuildFile; fileRef = 2124FA321471E9DE0021D7BB /* nsec.c */; };
-		2124FA341471E9DE0021D7BB /* nsec.c in Sources */ = {isa = PBXBuildFile; fileRef = 2124FA321471E9DE0021D7BB /* nsec.c */; };
 		2127A47715C3C7B900A857FC /* nsec3.c in Sources */ = {isa = PBXBuildFile; fileRef = 2127A47515C3C7B900A857FC /* nsec3.c */; };
-		2127A47815C3C7B900A857FC /* nsec3.c in Sources */ = {isa = PBXBuildFile; fileRef = 2127A47515C3C7B900A857FC /* nsec3.c */; };
 		2127A47915C3C7B900A857FC /* nsec3.h in Headers */ = {isa = PBXBuildFile; fileRef = 2127A47615C3C7B900A857FC /* nsec3.h */; };
-		2127A47A15C3C7B900A857FC /* nsec3.h in Headers */ = {isa = PBXBuildFile; fileRef = 2127A47615C3C7B900A857FC /* nsec3.h */; };
 		213BDC6D147319F400000896 /* dnssec.c in Sources */ = {isa = PBXBuildFile; fileRef = 213BDC6C147319F400000896 /* dnssec.c */; };
-		213BDC6E147319F400000896 /* dnssec.c in Sources */ = {isa = PBXBuildFile; fileRef = 213BDC6C147319F400000896 /* dnssec.c */; };
 		213FB23C12028C4A002B3A08 /* BonjourEvents.c in Sources */ = {isa = PBXBuildFile; fileRef = 213FB22C12028B53002B3A08 /* BonjourEvents.c */; };
 		213FB23D12028C5A002B3A08 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 09AB6884FE841BABC02AAC07 /* CoreFoundation.framework */; };
 		215FFAEE124000F900470DE1 /* dnssd_ipc.c in Sources */ = {isa = PBXBuildFile; fileRef = F5E11B5A04A28126019798ED /* dnssd_ipc.c */; };
 		215FFAEF124000F900470DE1 /* dnssd_clientlib.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38620AEEDB090065B80A /* dnssd_clientlib.c */; };
 		215FFAF0124000F900470DE1 /* dnssd_clientstub.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38640AEEDB130065B80A /* dnssd_clientstub.c */; };
-		215FFAF1124000F900470DE1 /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = FFA572480AF18FCC0055A0F1 /* DNSServiceDiscovery.c */; };
-		215FFAF2124000F900470DE1 /* DNSServiceDiscoveryRequest.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */; };
-		215FFAF3124000F900470DE1 /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Server, ); }; };
 		215FFAF41240011800470DE1 /* dnssd_ipc.c in Sources */ = {isa = PBXBuildFile; fileRef = F5E11B5A04A28126019798ED /* dnssd_ipc.c */; };
 		215FFAF51240011800470DE1 /* dnssd_clientlib.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38620AEEDB090065B80A /* dnssd_clientlib.c */; };
 		215FFAF61240011800470DE1 /* dnssd_clientstub.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38640AEEDB130065B80A /* dnssd_clientstub.c */; };
-		215FFAF71240011800470DE1 /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = FFA572480AF18FCC0055A0F1 /* DNSServiceDiscovery.c */; };
-		215FFAF81240011800470DE1 /* DNSServiceDiscoveryRequest.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */; };
-		215FFAF91240011800470DE1 /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Server, ); }; };
 		215FFAFA1240013400470DE1 /* dnssd_ipc.c in Sources */ = {isa = PBXBuildFile; fileRef = F5E11B5A04A28126019798ED /* dnssd_ipc.c */; };
 		215FFAFB1240013400470DE1 /* dnssd_clientlib.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38620AEEDB090065B80A /* dnssd_clientlib.c */; };
 		215FFAFC1240013400470DE1 /* dnssd_clientstub.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38640AEEDB130065B80A /* dnssd_clientstub.c */; };
-		215FFAFD1240013400470DE1 /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = FFA572480AF18FCC0055A0F1 /* DNSServiceDiscovery.c */; };
-		215FFAFE1240013400470DE1 /* DNSServiceDiscoveryRequest.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */; };
-		215FFAFF1240013400470DE1 /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Server, ); }; };
-		216D9ACE1720C9F5008066E1 /* VPNService.c in Sources */ = {isa = PBXBuildFile; fileRef = 216D9ACD1720C9F5008066E1 /* VPNService.c */; };
-		216D9ACF1720C9F5008066E1 /* VPNService.c in Sources */ = {isa = PBXBuildFile; fileRef = 216D9ACD1720C9F5008066E1 /* VPNService.c */; };
+		216D9ACE1720C9F5008066E1 /* uDNSPathEvalulation.c in Sources */ = {isa = PBXBuildFile; fileRef = 216D9ACD1720C9F5008066E1 /* uDNSPathEvalulation.c */; };
 		218E8E51156D8C0300720DA0 /* dnsproxy.c in Sources */ = {isa = PBXBuildFile; fileRef = 218E8E4F156D8C0300720DA0 /* dnsproxy.c */; };
-		218E8E52156D8C0300720DA0 /* dnsproxy.c in Sources */ = {isa = PBXBuildFile; fileRef = 218E8E4F156D8C0300720DA0 /* dnsproxy.c */; };
 		218E8E53156D8C0300720DA0 /* dnsproxy.h in Headers */ = {isa = PBXBuildFile; fileRef = 218E8E50156D8C0300720DA0 /* dnsproxy.h */; };
-		218E8E54156D8C0300720DA0 /* dnsproxy.h in Headers */ = {isa = PBXBuildFile; fileRef = 218E8E50156D8C0300720DA0 /* dnsproxy.h */; };
-		219D5542149ED645004464AE /* libxml2.2.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 219D5541149ED645004464AE /* libxml2.2.dylib */; };
-		219D5543149ED645004464AE /* libxml2.2.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 219D5541149ED645004464AE /* libxml2.2.dylib */; };
+		219D5542149ED645004464AE /* libxml2.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 219D5541149ED645004464AE /* libxml2.dylib */; };
 		21A57F4C145B2AE100939099 /* CryptoAlg.c in Sources */ = {isa = PBXBuildFile; fileRef = 21A57F4A145B2AE100939099 /* CryptoAlg.c */; };
-		21A57F4D145B2AE100939099 /* CryptoAlg.c in Sources */ = {isa = PBXBuildFile; fileRef = 21A57F4A145B2AE100939099 /* CryptoAlg.c */; };
 		21A57F4E145B2AE100939099 /* CryptoAlg.h in Headers */ = {isa = PBXBuildFile; fileRef = 21A57F4B145B2AE100939099 /* CryptoAlg.h */; };
-		21A57F4F145B2AE100939099 /* CryptoAlg.h in Headers */ = {isa = PBXBuildFile; fileRef = 21A57F4B145B2AE100939099 /* CryptoAlg.h */; };
 		21A57F53145B2B1400939099 /* CryptoSupport.c in Sources */ = {isa = PBXBuildFile; fileRef = 21A57F51145B2B1400939099 /* CryptoSupport.c */; };
-		21A57F54145B2B1400939099 /* CryptoSupport.c in Sources */ = {isa = PBXBuildFile; fileRef = 21A57F51145B2B1400939099 /* CryptoSupport.c */; };
 		21A57F55145B2B1400939099 /* CryptoSupport.h in Headers */ = {isa = PBXBuildFile; fileRef = 21A57F52145B2B1400939099 /* CryptoSupport.h */; };
-		21A57F56145B2B1400939099 /* CryptoSupport.h in Headers */ = {isa = PBXBuildFile; fileRef = 21A57F52145B2B1400939099 /* CryptoSupport.h */; };
 		21DCD05C1461B23700702FC8 /* CryptoAlg.c in Sources */ = {isa = PBXBuildFile; fileRef = 21A57F4A145B2AE100939099 /* CryptoAlg.c */; };
-		21DCD05D1461B23700702FC8 /* CryptoAlg.h in Sources */ = {isa = PBXBuildFile; fileRef = 21A57F4B145B2AE100939099 /* CryptoAlg.h */; };
 		21DD8FBF161E9A250033C8F8 /* anonymous.c in Sources */ = {isa = PBXBuildFile; fileRef = 21DD8FBD161E9A250033C8F8 /* anonymous.c */; };
-		21DD8FC0161E9A250033C8F8 /* anonymous.c in Sources */ = {isa = PBXBuildFile; fileRef = 21DD8FBD161E9A250033C8F8 /* anonymous.c */; };
 		21DD8FC1161E9A250033C8F8 /* anonymous.h in Headers */ = {isa = PBXBuildFile; fileRef = 21DD8FBE161E9A250033C8F8 /* anonymous.h */; };
-		21DD8FC2161E9A250033C8F8 /* anonymous.h in Headers */ = {isa = PBXBuildFile; fileRef = 21DD8FBE161E9A250033C8F8 /* anonymous.h */; };
 		21DED43515702C0F0060B6B9 /* DNSProxySupport.c in Sources */ = {isa = PBXBuildFile; fileRef = 21DED43415702C0F0060B6B9 /* DNSProxySupport.c */; };
-		21DED43615702C0F0060B6B9 /* DNSProxySupport.c in Sources */ = {isa = PBXBuildFile; fileRef = 21DED43415702C0F0060B6B9 /* DNSProxySupport.c */; };
+		21F51DC11B3541940070B05C /* com.apple.mDNSResponder.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 21F51DBF1B35412D0070B05C /* com.apple.mDNSResponder.plist */; };
+		21F51DC31B3541F50070B05C /* com.apple.mDNSResponderHelper.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 21F51DBE1B3541030070B05C /* com.apple.mDNSResponderHelper.plist */; };
+		21F51DC51B3542210070B05C /* com.apple.dnsextd.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 21F51DBD1B3540DB0070B05C /* com.apple.dnsextd.plist */; };
+		222A3C5B1C1B75F2003A6FFD /* DNSServiceDiscoveryDefines.h in Headers */ = {isa = PBXBuildFile; fileRef = 222A3C581C1B743B003A6FFD /* DNSServiceDiscoveryDefines.h */; };
+		222A3C6A1C1B7777003A6FFD /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = 222A3C561C1B7415003A6FFD /* DNSServiceDiscovery.c */; };
+		222A3C6B1C1B7778003A6FFD /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = 222A3C561C1B7415003A6FFD /* DNSServiceDiscovery.c */; };
+		222A3C6C1C1B7779003A6FFD /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = 222A3C561C1B7415003A6FFD /* DNSServiceDiscovery.c */; };
+		222A3C6D1C1B777A003A6FFD /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = 222A3C561C1B7415003A6FFD /* DNSServiceDiscovery.c */; };
+		222A3C6E1C1B777B003A6FFD /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = 222A3C561C1B7415003A6FFD /* DNSServiceDiscovery.c */; };
+		222A3C6F1C1B777C003A6FFD /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = 222A3C561C1B7415003A6FFD /* DNSServiceDiscovery.c */; };
+		2243AE391C90AECF0079023E /* CoreBluetooth.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2243AE381C90AECF0079023E /* CoreBluetooth.framework */; };
+		22448EA31C90A7BE004F25CC /* BLE.c in Sources */ = {isa = PBXBuildFile; fileRef = 22448EA11C90A7B5004F25CC /* BLE.c */; };
+		22448EA41C90A7CB004F25CC /* BLE.h in Headers */ = {isa = PBXBuildFile; fileRef = 22448EA21C90A7B5004F25CC /* BLE.h */; };
+		22448EA71C90A837004F25CC /* coreBLE.h in Headers */ = {isa = PBXBuildFile; fileRef = 22448EA51C90A82D004F25CC /* coreBLE.h */; };
+		227687F31C90AD580019382D /* coreBLE.m in Sources */ = {isa = PBXBuildFile; fileRef = 22448EA61C90A82D004F25CC /* coreBLE.m */; };
 		2E0405F50C3195F700F13B59 /* helper.c in Sources */ = {isa = PBXBuildFile; fileRef = 2E0405F40C3195F700F13B59 /* helper.c */; };
-		2E0405F60C31961100F13B59 /* helpermsg.defs in Sources */ = {isa = PBXBuildFile; fileRef = 2E0405EB0C3190DC00F13B59 /* helpermsg.defs */; settings = {ATTRIBUTES = (Client, Server, ); COMPILER_FLAGS = "-Wno-error"; }; };
 		2E0406150C3197CB00F13B59 /* libbsm.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 2E0406140C3197CB00F13B59 /* libbsm.dylib */; };
-		2E04061F0C3198B700F13B59 /* helpermsg.defs in Sources */ = {isa = PBXBuildFile; fileRef = 2E0405EB0C3190DC00F13B59 /* helpermsg.defs */; };
-		2E0406200C3198B700F13B59 /* helpermsg.defs in Sources */ = {isa = PBXBuildFile; fileRef = 2E0405EB0C3190DC00F13B59 /* helpermsg.defs */; };
 		2E04070A0C31EEEC00F13B59 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 09AB6884FE841BABC02AAC07 /* CoreFoundation.framework */; };
 		2E04070B0C31EEEC00F13B59 /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 65713D46025A293200000109 /* SystemConfiguration.framework */; };
-		2E3552900C3A95C100CA1CB7 /* helper-error.h in Headers */ = {isa = PBXBuildFile; fileRef = 2E35528F0C3A95C100CA1CB7 /* helper-error.h */; };
-		2E3552910C3A95C100CA1CB7 /* helper-error.h in Headers */ = {isa = PBXBuildFile; fileRef = 2E35528F0C3A95C100CA1CB7 /* helper-error.h */; };
-		2E3552920C3A95C100CA1CB7 /* helper-error.h in Headers */ = {isa = PBXBuildFile; fileRef = 2E35528F0C3A95C100CA1CB7 /* helper-error.h */; };
-		2E35529D0C3A9E7600CA1CB7 /* helper-error.h in Headers */ = {isa = PBXBuildFile; fileRef = 2E35528F0C3A95C100CA1CB7 /* helper-error.h */; };
 		2E35529E0C3A9E7600CA1CB7 /* helper-stubs.c in Sources */ = {isa = PBXBuildFile; fileRef = 2E96A52D0C39C1A50087C4D2 /* helper-stubs.c */; };
 		2E35529F0C3A9E7600CA1CB7 /* helper.h in Headers */ = {isa = PBXBuildFile; fileRef = 2E96A5250C39BE480087C4D2 /* helper.h */; };
 		2E4D9B050C38C19500480551 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F869685066EE02400D2A2DC /* Security.framework */; };
@@ -174,38 +149,40 @@
 		2E8165F90C59838100485EB2 /* libipsec.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 2E8165F60C59835F00485EB2 /* libipsec.dylib */; };
 		2E96A51D0C39BDAC0087C4D2 /* helper-main.c in Sources */ = {isa = PBXBuildFile; fileRef = 2E0406CA0C31E9AD00F13B59 /* helper-main.c */; };
 		2E96A5260C39BE480087C4D2 /* helper.h in Headers */ = {isa = PBXBuildFile; fileRef = 2E96A5250C39BE480087C4D2 /* helper.h */; };
-		2E96A5270C39BE480087C4D2 /* helper.h in Headers */ = {isa = PBXBuildFile; fileRef = 2E96A5250C39BE480087C4D2 /* helper.h */; };
-		2E96A5300C39C1A50087C4D2 /* helper-stubs.c in Sources */ = {isa = PBXBuildFile; fileRef = 2E96A52D0C39C1A50087C4D2 /* helper-stubs.c */; };
 		2E96A5320C39C1A50087C4D2 /* helper-stubs.c in Sources */ = {isa = PBXBuildFile; fileRef = 2E96A52D0C39C1A50087C4D2 /* helper-stubs.c */; };
-		2EAE955A0C31F4D30021F738 /* helpermsg.defs in Sources */ = {isa = PBXBuildFile; fileRef = 2E0405EB0C3190DC00F13B59 /* helpermsg.defs */; };
 		2EC8F8EC0C39CCAC003C9C48 /* helper.h in Headers */ = {isa = PBXBuildFile; fileRef = 2E96A5250C39BE480087C4D2 /* helper.h */; };
 		2ECC11A60C4FEC3800CB1885 /* helpermsg-types.h in Headers */ = {isa = PBXBuildFile; fileRef = 2ECC11A50C4FEC3800CB1885 /* helpermsg-types.h */; };
-		2ECC11A70C4FEC3800CB1885 /* helpermsg-types.h in Headers */ = {isa = PBXBuildFile; fileRef = 2ECC11A50C4FEC3800CB1885 /* helpermsg-types.h */; };
 		2ECC11A80C4FEC3800CB1885 /* helpermsg-types.h in Headers */ = {isa = PBXBuildFile; fileRef = 2ECC11A50C4FEC3800CB1885 /* helpermsg-types.h */; };
 		2EDC5E730C39EA640092701B /* helper-server.h in Headers */ = {isa = PBXBuildFile; fileRef = 2EDC5E720C39EA640092701B /* helper-server.h */; };
-		2EDC5E740C39EA640092701B /* helper-server.h in Headers */ = {isa = PBXBuildFile; fileRef = 2EDC5E720C39EA640092701B /* helper-server.h */; };
 		2EDC5E750C39EA640092701B /* helper-server.h in Headers */ = {isa = PBXBuildFile; fileRef = 2EDC5E720C39EA640092701B /* helper-server.h */; };
-		3F347CF6185D57CD00367B40 /* base.xcconfig in Resources */ = {isa = PBXBuildFile; fileRef = 3F347CF5185D57CD00367B40 /* base.xcconfig */; };
+		371D0FBC1BF545FA00E5DB26 /* InterfaceTest.c in Sources */ = {isa = PBXBuildFile; fileRef = 371D0FBA1BF545FA00E5DB26 /* InterfaceTest.c */; };
+		371D0FBF1BF666EB00E5DB26 /* ResourceRecordTest.c in Sources */ = {isa = PBXBuildFile; fileRef = 371D0FBD1BF666EB00E5DB26 /* ResourceRecordTest.c */; };
+		373202101BAB4444007DE806 /* DNSMessageTest.c in Sources */ = {isa = PBXBuildFile; fileRef = 3732020F1BAB4349007DE806 /* DNSMessageTest.c */; };
+		3771F67D1BA387DD0072355E /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 37DDE9351BA386E70092AC61 /* main.c */; };
+		37DDE9331BA383D30092AC61 /* unittest.c in Sources */ = {isa = PBXBuildFile; fileRef = 37DDE9271BA3825C0092AC61 /* unittest.c */; };
+		37FEBD581BC789AA00638EA4 /* DNSCommon.c in Sources */ = {isa = PBXBuildFile; fileRef = 7F18A9F60587CEF6001880B3 /* DNSCommon.c */; };
 		4A7B9E8014FDA25000B84CC1 /* mDNSResponder.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 4A7B9E7E14FDA1BB00B84CC1 /* mDNSResponder.plist */; };
 		4A7B9E8214FDA26C00B84CC1 /* mDNSResponder.txt in CopyFiles */ = {isa = PBXBuildFile; fileRef = 4A7B9E7C14FDA19F00B84CC1 /* mDNSResponder.txt */; };
 		4AAE0C9A0C68EA81003882A5 /* mDNSResponderHelper.8 in CopyFiles */ = {isa = PBXBuildFile; fileRef = 4AAE0C7A0C68E97F003882A5 /* mDNSResponderHelper.8 */; };
 		4BD2B63A134FE09F002B96D5 /* P2PPacketFilter.c in Sources */ = {isa = PBXBuildFile; fileRef = 4BD2B638134FE09F002B96D5 /* P2PPacketFilter.c */; };
 		4BD2B63B134FE09F002B96D5 /* P2PPacketFilter.h in Headers */ = {isa = PBXBuildFile; fileRef = 4BD2B639134FE09F002B96D5 /* P2PPacketFilter.h */; };
+		729DF4601CD40630005ECF70 /* com.apple.mDNSResponder.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 729DF45F1CD40630005ECF70 /* com.apple.mDNSResponder.plist */; };
 		72FB5467166D5FCA0090B2D9 /* dnsctl.c in Sources */ = {isa = PBXBuildFile; fileRef = 72FB545A166D5F960090B2D9 /* dnsctl.c */; };
 		8415A6571897109000BDBA26 /* libdns_services.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 8415A6561897109000BDBA26 /* libdns_services.dylib */; };
-		8418673E15AB8C2D00BB7F70 /* com.apple.networking.mDNSResponder in CopyFiles */ = {isa = PBXBuildFile; fileRef = 8418673A15AB8B6900BB7F70 /* com.apple.networking.mDNSResponder */; };
+		8417375C1B967D37000CD5C2 /* dnsctl_server.c in Sources */ = {isa = PBXBuildFile; fileRef = 8417375A1B967CBE000CD5C2 /* dnsctl_server.c */; };
 		848DA5C7165477E000D2E8B4 /* xpc_services.c in Sources */ = {isa = PBXBuildFile; fileRef = 848DA5C6165477E000D2E8B4 /* xpc_services.c */; };
-		848DA5C8165477E000D2E8B4 /* xpc_services.c in Sources */ = {isa = PBXBuildFile; fileRef = 848DA5C6165477E000D2E8B4 /* xpc_services.c */; };
 		848DA5CA165477EB00D2E8B4 /* xpc_services.h in Headers */ = {isa = PBXBuildFile; fileRef = 848DA5C9165477EB00D2E8B4 /* xpc_services.h */; };
-		848DA5CB165477EB00D2E8B4 /* xpc_services.h in Headers */ = {isa = PBXBuildFile; fileRef = 848DA5C9165477EB00D2E8B4 /* xpc_services.h */; };
 		848DA5D616547F7200D2E8B4 /* dns_xpc.h in Headers */ = {isa = PBXBuildFile; fileRef = 848DA5D516547F7200D2E8B4 /* dns_xpc.h */; };
-		848DA5D716547F7200D2E8B4 /* dns_xpc.h in Headers */ = {isa = PBXBuildFile; fileRef = 848DA5D516547F7200D2E8B4 /* dns_xpc.h */; };
 		84C5B33C166553F100C324A8 /* dns_services.c in Sources */ = {isa = PBXBuildFile; fileRef = 84C5B339166553AF00C324A8 /* dns_services.c */; };
 		84F4C090188F050200D1E1DE /* dns_services.h in Headers */ = {isa = PBXBuildFile; fileRef = 84F4C08F188F04CF00D1E1DE /* dns_services.h */; settings = {ATTRIBUTES = (Private, ); }; };
-		D284BE530ADD80740027CCDF /* DNSServiceDiscoveryDefines.h in Headers */ = {isa = PBXBuildFile; fileRef = 6575FBFF022EAFBA00000109 /* DNSServiceDiscoveryDefines.h */; };
+		BD03E88D1AD31278005E8A81 /* SymptomReporter.c in Sources */ = {isa = PBXBuildFile; fileRef = BD03E88C1AD31278005E8A81 /* SymptomReporter.c */; };
+		BDA3F08A1C48DB920054FB4B /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BDA3F0891C48DB910054FB4B /* Foundation.framework */; };
+		BDA3F08D1C48DBEA0054FB4B /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BDA3F0891C48DB910054FB4B /* Foundation.framework */; };
+		BDA3F08E1C48DCA50054FB4B /* Metrics.h in Headers */ = {isa = PBXBuildFile; fileRef = BDA3F0871C48DB6D0054FB4B /* Metrics.h */; };
+		BDA3F08F1C48DCA50054FB4B /* Metrics.m in Sources */ = {isa = PBXBuildFile; fileRef = BDA3F0881C48DB6D0054FB4B /* Metrics.m */; };
+		BDA9A7881B3A924C00523835 /* dns_sd_private.h in Headers */ = {isa = PBXBuildFile; fileRef = BDA9A7871B3A923600523835 /* dns_sd_private.h */; settings = {ATTRIBUTES = (Private, ); }; };
+		BDA9A7891B3A92A500523835 /* dns_sd_private.h in Headers */ = {isa = PBXBuildFile; fileRef = BDA9A7871B3A923600523835 /* dns_sd_private.h */; settings = {ATTRIBUTES = (Private, ); }; };
 		D284BE540ADD80740027CCDF /* dnssd_ipc.h in Headers */ = {isa = PBXBuildFile; fileRef = F5E11B5B04A28126019798ED /* dnssd_ipc.h */; };
-		D284BE560ADD80740027CCDF /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Client, ); }; };
-		D284BE570ADD80740027CCDF /* DNSServiceDiscoveryRequest.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */; settings = {ATTRIBUTES = (Server, ); }; };
 		D284BE580ADD80740027CCDF /* mDNS.c in Sources */ = {isa = PBXBuildFile; fileRef = 6575FBE9022EAF5A00000109 /* mDNS.c */; };
 		D284BE590ADD80740027CCDF /* uDNS.c in Sources */ = {isa = PBXBuildFile; fileRef = 7F18A9F70587CEF6001880B3 /* uDNS.c */; };
 		D284BE5A0ADD80740027CCDF /* DNSCommon.c in Sources */ = {isa = PBXBuildFile; fileRef = 7F18A9F60587CEF6001880B3 /* DNSCommon.c */; };
@@ -222,28 +199,6 @@
 		D284BE670ADD80740027CCDF /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00CA213D02786FC30CCA2C71 /* IOKit.framework */; };
 		D284BE680ADD80740027CCDF /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F869685066EE02400D2A2DC /* Security.framework */; };
 		D284BE6B0ADD80740027CCDF /* mDNSResponder.8 in CopyFiles */ = {isa = PBXBuildFile; fileRef = FF485D5105632E0000130380 /* mDNSResponder.8 */; };
-		D284BE780ADD80800027CCDF /* DNSServiceDiscoveryDefines.h in Headers */ = {isa = PBXBuildFile; fileRef = 6575FBFF022EAFBA00000109 /* DNSServiceDiscoveryDefines.h */; };
-		D284BE790ADD80800027CCDF /* dnssd_ipc.h in Headers */ = {isa = PBXBuildFile; fileRef = F5E11B5B04A28126019798ED /* dnssd_ipc.h */; };
-		D284BE7A0ADD80800027CCDF /* mDNSEmbeddedAPI.h in Headers */ = {isa = PBXBuildFile; fileRef = 654BE64F02B63B93000001D1 /* mDNSEmbeddedAPI.h */; };
-		D284BE7B0ADD80800027CCDF /* mDNSDebug.h in Headers */ = {isa = PBXBuildFile; fileRef = 654BE65002B63B93000001D1 /* mDNSDebug.h */; };
-		D284BE7C0ADD80800027CCDF /* mDNSMacOSX.h in Headers */ = {isa = PBXBuildFile; fileRef = 000753D303367C1C0CCA2C71 /* mDNSMacOSX.h */; };
-		D284BE7E0ADD80800027CCDF /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Client, ); }; };
-		D284BE7F0ADD80800027CCDF /* DNSServiceDiscoveryRequest.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */; settings = {ATTRIBUTES = (Server, ); }; };
-		D284BE800ADD80800027CCDF /* mDNS.c in Sources */ = {isa = PBXBuildFile; fileRef = 6575FBE9022EAF5A00000109 /* mDNS.c */; };
-		D284BE810ADD80800027CCDF /* uDNS.c in Sources */ = {isa = PBXBuildFile; fileRef = 7F18A9F70587CEF6001880B3 /* uDNS.c */; };
-		D284BE820ADD80800027CCDF /* DNSCommon.c in Sources */ = {isa = PBXBuildFile; fileRef = 7F18A9F60587CEF6001880B3 /* DNSCommon.c */; };
-		D284BE830ADD80800027CCDF /* DNSDigest.c in Sources */ = {isa = PBXBuildFile; fileRef = 7F461DB5062DBF2900672BF3 /* DNSDigest.c */; };
-		D284BE850ADD80800027CCDF /* mDNSDebug.c in Sources */ = {isa = PBXBuildFile; fileRef = DBAAFE29057E8F4D0085CAD0 /* mDNSDebug.c */; };
-		D284BE860ADD80800027CCDF /* uds_daemon.c in Sources */ = {isa = PBXBuildFile; fileRef = F525E72804AA167501F1CF4D /* uds_daemon.c */; };
-		D284BE870ADD80800027CCDF /* dnssd_ipc.c in Sources */ = {isa = PBXBuildFile; fileRef = F5E11B5A04A28126019798ED /* dnssd_ipc.c */; };
-		D284BE880ADD80800027CCDF /* PlatformCommon.c in Sources */ = {isa = PBXBuildFile; fileRef = FFCB6D73075D539900B8AF62 /* PlatformCommon.c */; };
-		D284BE890ADD80800027CCDF /* mDNSMacOSX.c in Sources */ = {isa = PBXBuildFile; fileRef = 6575FBEB022EAF7200000109 /* mDNSMacOSX.c */; };
-		D284BE8A0ADD80800027CCDF /* LegacyNATTraversal.c in Sources */ = {isa = PBXBuildFile; fileRef = 7FC8F9D406D14E66007E879D /* LegacyNATTraversal.c */; };
-		D284BE8B0ADD80800027CCDF /* daemon.c in Sources */ = {isa = PBXBuildFile; fileRef = 6575FBEC022EAF7200000109 /* daemon.c */; };
-		D284BE8D0ADD80800027CCDF /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 09AB6884FE841BABC02AAC07 /* CoreFoundation.framework */; };
-		D284BE8E0ADD80800027CCDF /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 65713D46025A293200000109 /* SystemConfiguration.framework */; };
-		D284BE8F0ADD80800027CCDF /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00CA213D02786FC30CCA2C71 /* IOKit.framework */; };
-		D284BE900ADD80800027CCDF /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F869685066EE02400D2A2DC /* Security.framework */; };
 		D284BEA80ADD80920027CCDF /* dns-sd.c in Sources */ = {isa = PBXBuildFile; fileRef = FF1C919F07021E3F001048AB /* dns-sd.c */; };
 		D284BEAC0ADD80920027CCDF /* dns-sd.1 in CopyFiles */ = {isa = PBXBuildFile; fileRef = FF1C919D07021D77001048AB /* dns-sd.1 */; };
 		D284BEB70ADD809A0027CCDF /* JNISupport.c in Sources */ = {isa = PBXBuildFile; fileRef = DB2CC44B0662DD1100335AB3 /* JNISupport.c */; };
@@ -263,7 +218,6 @@
 		D284BED20ADD80A20027CCDF /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F869685066EE02400D2A2DC /* Security.framework */; };
 		D284BED50ADD80A20027CCDF /* dnsextd.8 in CopyFiles */ = {isa = PBXBuildFile; fileRef = FFF4F63A06CFE4DD00459EFD /* dnsextd.8 */; };
 		D284BEDE0ADD80A70027CCDF /* ddnswriteconfig.m in Sources */ = {isa = PBXBuildFile; fileRef = FFFB0DAF07B43CBA00B88D48 /* ddnswriteconfig.m */; };
-		D284BEE00ADD80A70027CCDF /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFFB0DB407B43D2700B88D48 /* Foundation.framework */; };
 		D284BEE10ADD80A70027CCDF /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F869685066EE02400D2A2DC /* Security.framework */; };
 		D284BEE20ADD80A70027CCDF /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 65713D46025A293200000109 /* SystemConfiguration.framework */; };
 		D284BEE30ADD80A70027CCDF /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 09AB6884FE841BABC02AAC07 /* CoreFoundation.framework */; };
@@ -288,23 +242,16 @@
 		D284BF040ADD80B00027CCDF /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF2609FA07B4433800CE10E5 /* Cocoa.framework */; };
 		D284BF050ADD80B00027CCDF /* PreferencePanes.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF260A1F07B4436900CE10E5 /* PreferencePanes.framework */; };
 		D284BF060ADD80B00027CCDF /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 09AB6884FE841BABC02AAC07 /* CoreFoundation.framework */; };
+		FF3C72AA1CE3E62200CDF81E /* libicucore.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = FF3C72A91CE3E62200CDF81E /* libicucore.dylib */; };
 		FFA572330AF18F1C0055A0F1 /* dnssd_ipc.c in Sources */ = {isa = PBXBuildFile; fileRef = F5E11B5A04A28126019798ED /* dnssd_ipc.c */; };
 		FFA572340AF18F1C0055A0F1 /* dnssd_clientlib.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38620AEEDB090065B80A /* dnssd_clientlib.c */; };
 		FFA572350AF18F1C0055A0F1 /* dnssd_clientstub.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38640AEEDB130065B80A /* dnssd_clientstub.c */; };
 		FFA5723F0AF18F450055A0F1 /* dnssd_ipc.c in Sources */ = {isa = PBXBuildFile; fileRef = F5E11B5A04A28126019798ED /* dnssd_ipc.c */; };
 		FFA572400AF18F450055A0F1 /* dnssd_clientlib.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38620AEEDB090065B80A /* dnssd_clientlib.c */; };
 		FFA572410AF18F450055A0F1 /* dnssd_clientstub.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38640AEEDB130065B80A /* dnssd_clientstub.c */; };
-		FFA572490AF18FCC0055A0F1 /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = FFA572480AF18FCC0055A0F1 /* DNSServiceDiscovery.c */; };
-		FFA5724A0AF18FCC0055A0F1 /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = FFA572480AF18FCC0055A0F1 /* DNSServiceDiscovery.c */; };
-		FFA5724B0AF18FCC0055A0F1 /* DNSServiceDiscovery.c in Sources */ = {isa = PBXBuildFile; fileRef = FFA572480AF18FCC0055A0F1 /* DNSServiceDiscovery.c */; };
 		FFAE66F0105F0CD900162116 /* ddnswriteconfig in Resources */ = {isa = PBXBuildFile; fileRef = D284BEE80ADD80A70027CCDF /* ddnswriteconfig */; };
 		FFB437150EB165BD00E17C68 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00CA213D02786FC30CCA2C71 /* IOKit.framework */; };
-		FFC22AA20B00F42A00BAB070 /* DNSServiceDiscoveryRequest.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */; };
-		FFC22AA30B00F42B00BAB070 /* DNSServiceDiscoveryRequest.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */; };
-		FFC22AA40B00F42C00BAB070 /* DNSServiceDiscoveryRequest.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */; };
-		FFC22AA50B00F43000BAB070 /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Server, ); }; };
-		FFC22AA60B00F43100BAB070 /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Server, ); }; };
-		FFC22AA70B00F43100BAB070 /* DNSServiceDiscoveryReply.defs in Sources */ = {isa = PBXBuildFile; fileRef = 6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */; settings = {ATTRIBUTES = (Server, ); }; };
+		FFD52A9E1AF858DD00CAD3EC /* CryptoAlg.h in Headers */ = {isa = PBXBuildFile; fileRef = 21A57F4B145B2AE100939099 /* CryptoAlg.h */; };
 		FFF589B70E37F66800EF515C /* ClientCommon.c in Sources */ = {isa = PBXBuildFile; fileRef = FF5852100DD27BD300862BDF /* ClientCommon.c */; };
 		FFF589C10E37F67E00EF515C /* ClientCommon.c in Sources */ = {isa = PBXBuildFile; fileRef = FF5852100DD27BD300862BDF /* ClientCommon.c */; };
 		FFFA38630AEEDB090065B80A /* dnssd_clientlib.c in Sources */ = {isa = PBXBuildFile; fileRef = FFFA38620AEEDB090065B80A /* dnssd_clientlib.c */; };
@@ -345,13 +292,6 @@
 			remoteGlobalIDString = D284BE500ADD80740027CCDF;
 			remoteInfo = mDNSResponder;
 		};
-		03067D690C83A3890022BE1F /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 08FB7793FE84155DC02AAC07 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = D284BE750ADD80800027CCDF;
-			remoteInfo = "mDNSResponder debug";
-		};
 		03067D6B0C83A3920022BE1F /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 08FB7793FE84155DC02AAC07 /* Project object */;
@@ -372,6 +312,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 03067D640C83A3700022BE1F;
 			remoteInfo = "Build Some";
+		};
+		0C2AAB311B6929F300113637 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 08FB7793FE84155DC02AAC07 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 84C5B3341665529800C324A8;
+			remoteInfo = dns_services;
 		};
 		2130257012400E9300AC839F /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -502,6 +449,36 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		21F51DC01B35418C0070B05C /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 8;
+			dstPath = /System/Library/LaunchDaemons;
+			dstSubfolderSpec = 0;
+			files = (
+				21F51DC11B3541940070B05C /* com.apple.mDNSResponder.plist in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+		21F51DC21B3541F30070B05C /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 8;
+			dstPath = /System/Library/LaunchDaemons;
+			dstSubfolderSpec = 0;
+			files = (
+				21F51DC31B3541F50070B05C /* com.apple.mDNSResponderHelper.plist in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+		21F51DC41B35421A0070B05C /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 8;
+			dstPath = /System/Library/LaunchDaemons;
+			dstSubfolderSpec = 0;
+			files = (
+				21F51DC51B3542210070B05C /* com.apple.dnsextd.plist in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
 		4A7B9E7F14FDA21B00B84CC1 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 8;
@@ -544,10 +521,10 @@
 		8418673D15AB8BFF00BB7F70 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 8;
-			dstPath = /private/etc/asl/;
+			dstPath = /System/Library/Preferences/Logging/Subsystems;
 			dstSubfolderSpec = 0;
 			files = (
-				8418673E15AB8C2D00BB7F70 /* com.apple.networking.mDNSResponder in CopyFiles */,
+				729DF4601CD40630005ECF70 /* com.apple.mDNSResponder.plist in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 		};
@@ -599,7 +576,6 @@
 		09AB6884FE841BABC02AAC07 /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = /System/Library/Frameworks/CoreFoundation.framework; sourceTree = "<absolute>"; };
 		21070E5D16486B9000A69507 /* DNSSECSupport.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = DNSSECSupport.c; sourceTree = "<group>"; };
 		21070E5E16486B9000A69507 /* DNSSECSupport.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DNSSECSupport.h; sourceTree = "<group>"; };
-		2120ABD416B71614007089B6 /* CUPolicy.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = CUPolicy.c; sourceTree = "<group>"; };
 		2124FA2B1471E98C0021D7BB /* nsec.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = nsec.h; path = ../mDNSCore/nsec.h; sourceTree = "<group>"; };
 		2124FA2F1471E9B50021D7BB /* dnssec.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dnssec.h; path = ../mDNSCore/dnssec.h; sourceTree = "<group>"; };
 		2124FA321471E9DE0021D7BB /* nsec.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = nsec.c; path = ../mDNSCore/nsec.c; sourceTree = "<group>"; };
@@ -612,10 +588,10 @@
 		2141DD1D123FFCDB0086D23E /* libdns_sd.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libdns_sd.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		2141DD24123FFD0F0086D23E /* libdns_sd_debug.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libdns_sd_debug.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		2141DD2A123FFD2C0086D23E /* libdns_sd_profile.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libdns_sd_profile.a; sourceTree = BUILT_PRODUCTS_DIR; };
-		216D9ACD1720C9F5008066E1 /* VPNService.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = VPNService.c; sourceTree = "<group>"; };
+		216D9ACD1720C9F5008066E1 /* uDNSPathEvalulation.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = uDNSPathEvalulation.c; sourceTree = "<group>"; };
 		218E8E4F156D8C0300720DA0 /* dnsproxy.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = dnsproxy.c; path = ../mDNSCore/dnsproxy.c; sourceTree = "<group>"; };
 		218E8E50156D8C0300720DA0 /* dnsproxy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dnsproxy.h; path = ../mDNSCore/dnsproxy.h; sourceTree = "<group>"; };
-		219D5541149ED645004464AE /* libxml2.2.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libxml2.2.dylib; path = SDKs/MacOSX10.8.sdk/usr/lib/libxml2.2.dylib; sourceTree = DEVELOPER_DIR; };
+		219D5541149ED645004464AE /* libxml2.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libxml2.dylib; path = /usr/lib/libxml2.dylib; sourceTree = "<absolute>"; };
 		21A57F4A145B2AE100939099 /* CryptoAlg.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = CryptoAlg.c; path = ../mDNSCore/CryptoAlg.c; sourceTree = "<group>"; };
 		21A57F4B145B2AE100939099 /* CryptoAlg.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = CryptoAlg.h; path = ../mDNSCore/CryptoAlg.h; sourceTree = "<group>"; };
 		21A57F51145B2B1400939099 /* CryptoSupport.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = CryptoSupport.c; sourceTree = "<group>"; };
@@ -624,18 +600,38 @@
 		21DD8FBE161E9A250033C8F8 /* anonymous.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = anonymous.h; path = ../mDNSCore/anonymous.h; sourceTree = "<group>"; };
 		21DED43415702C0F0060B6B9 /* DNSProxySupport.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = DNSProxySupport.c; sourceTree = "<group>"; };
 		21F432971134AA6800581B69 /* WebFilterDNS.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebFilterDNS.framework; path = /System/Library/PrivateFrameworks/WebFilterDNS.framework; sourceTree = "<absolute>"; };
-		2E0405EB0C3190DC00F13B59 /* helpermsg.defs */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.mig; path = helpermsg.defs; sourceTree = "<group>"; };
+		21F51DBD1B3540DB0070B05C /* com.apple.dnsextd.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = com.apple.dnsextd.plist; sourceTree = "<group>"; };
+		21F51DBE1B3541030070B05C /* com.apple.mDNSResponderHelper.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = com.apple.mDNSResponderHelper.plist; sourceTree = "<group>"; };
+		21F51DBF1B35412D0070B05C /* com.apple.mDNSResponder.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = com.apple.mDNSResponder.plist; sourceTree = "<group>"; };
+		222A3C561C1B7415003A6FFD /* DNSServiceDiscovery.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = DNSServiceDiscovery.c; sourceTree = "<group>"; };
+		222A3C571C1B743B003A6FFD /* DNSServiceDiscovery.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DNSServiceDiscovery.h; sourceTree = "<group>"; };
+		222A3C581C1B743B003A6FFD /* DNSServiceDiscoveryDefines.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DNSServiceDiscoveryDefines.h; sourceTree = "<group>"; };
+		2243AE381C90AECF0079023E /* CoreBluetooth.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreBluetooth.framework; path = System/Library/Frameworks/CoreBluetooth.framework; sourceTree = SDKROOT; };
+		22448EA11C90A7B5004F25CC /* BLE.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = BLE.c; sourceTree = "<group>"; };
+		22448EA21C90A7B5004F25CC /* BLE.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = BLE.h; sourceTree = "<group>"; };
+		22448EA51C90A82D004F25CC /* coreBLE.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = coreBLE.h; sourceTree = "<group>"; };
+		22448EA61C90A82D004F25CC /* coreBLE.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = coreBLE.m; sourceTree = "<group>"; };
 		2E0405F00C31955500F13B59 /* mDNSResponderHelper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = mDNSResponderHelper; sourceTree = BUILT_PRODUCTS_DIR; };
 		2E0405F40C3195F700F13B59 /* helper.c */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.c; path = helper.c; sourceTree = "<group>"; };
 		2E0406140C3197CB00F13B59 /* libbsm.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libbsm.dylib; path = /usr/lib/libbsm.dylib; sourceTree = "<absolute>"; };
 		2E0406CA0C31E9AD00F13B59 /* helper-main.c */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.c; path = "helper-main.c"; sourceTree = "<group>"; };
-		2E35528F0C3A95C100CA1CB7 /* helper-error.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; path = "helper-error.h"; sourceTree = "<group>"; };
 		2E8165F60C59835F00485EB2 /* libipsec.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libipsec.dylib; path = /usr/lib/libipsec.dylib; sourceTree = "<absolute>"; };
 		2E96A5250C39BE480087C4D2 /* helper.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; path = helper.h; sourceTree = "<group>"; };
 		2E96A52D0C39C1A50087C4D2 /* helper-stubs.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = "helper-stubs.c"; sourceTree = "<group>"; };
 		2ECC11A50C4FEC3800CB1885 /* helpermsg-types.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "helpermsg-types.h"; sourceTree = "<group>"; };
 		2EDC5E720C39EA640092701B /* helper-server.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; path = "helper-server.h"; sourceTree = "<group>"; };
-		3F347CF5185D57CD00367B40 /* base.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = base.xcconfig; sourceTree = "<group>"; };
+		371D0FBA1BF545FA00E5DB26 /* InterfaceTest.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = InterfaceTest.c; path = ../unittests/InterfaceTest.c; sourceTree = "<group>"; };
+		371D0FBB1BF545FA00E5DB26 /* InterfaceTest.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = InterfaceTest.h; path = ../unittests/InterfaceTest.h; sourceTree = "<group>"; };
+		371D0FBD1BF666EB00E5DB26 /* ResourceRecordTest.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = ResourceRecordTest.c; path = ../unittests/ResourceRecordTest.c; sourceTree = "<group>"; };
+		371D0FBE1BF666EB00E5DB26 /* ResourceRecordTest.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ResourceRecordTest.h; path = ../unittests/ResourceRecordTest.h; sourceTree = "<group>"; };
+		3732020F1BAB4349007DE806 /* DNSMessageTest.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = DNSMessageTest.c; path = ../unittests/DNSMessageTest.c; sourceTree = "<group>"; };
+		373202111BAB63E8007DE806 /* DNSMessageTest.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = DNSMessageTest.h; path = ../unittests/DNSMessageTest.h; sourceTree = "<group>"; };
+		37AF802A1BF699AF00D657F6 /* DomainNameTest.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = DomainNameTest.c; path = ../unittests/DomainNameTest.c; sourceTree = "<group>"; };
+		37AF802B1BF699AF00D657F6 /* DomainNameTest.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = DomainNameTest.h; path = ../unittests/DomainNameTest.h; sourceTree = "<group>"; };
+		37DDE9271BA3825C0092AC61 /* unittest.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = unittest.c; path = ../unittests/unittest.c; sourceTree = "<group>"; };
+		37DDE9281BA382670092AC61 /* unittest.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = unittest.h; path = ../unittests/unittest.h; sourceTree = "<group>"; };
+		37DDE92D1BA383610092AC61 /* unittests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = unittests; sourceTree = BUILT_PRODUCTS_DIR; };
+		37DDE9351BA386E70092AC61 /* main.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = main.c; path = ../unittests/main.c; sourceTree = "<group>"; };
 		4A2E69DD0F5475A3004A87B0 /* uds_daemon.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = uds_daemon.h; path = ../mDNSShared/uds_daemon.h; sourceTree = SOURCE_ROOT; };
 		4A3600DF0F34F8CD00453EFB /* DeviceToDeviceManager.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = DeviceToDeviceManager.framework; path = /System/Library/PrivateFrameworks/DeviceToDeviceManager.framework; sourceTree = "<absolute>"; };
 		4A7B9E7C14FDA19F00B84CC1 /* mDNSResponder.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = mDNSResponder.txt; sourceTree = "<group>"; };
@@ -650,13 +646,10 @@
 		654BE64F02B63B93000001D1 /* mDNSEmbeddedAPI.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = mDNSEmbeddedAPI.h; path = ../mDNSCore/mDNSEmbeddedAPI.h; sourceTree = "<group>"; };
 		654BE65002B63B93000001D1 /* mDNSDebug.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = mDNSDebug.h; path = ../mDNSCore/mDNSDebug.h; sourceTree = "<group>"; };
 		65713D46025A293200000109 /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = /System/Library/Frameworks/SystemConfiguration.framework; sourceTree = "<absolute>"; };
-		6575FBE9022EAF5A00000109 /* mDNS.c */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.c; name = mDNS.c; path = ../mDNSCore/mDNS.c; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
-		6575FBEB022EAF7200000109 /* mDNSMacOSX.c */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.c; path = mDNSMacOSX.c; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
-		6575FBEC022EAF7200000109 /* daemon.c */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.c; path = daemon.c; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
-		6575FBFF022EAFBA00000109 /* DNSServiceDiscoveryDefines.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DNSServiceDiscoveryDefines.h; sourceTree = "<group>"; };
-		6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.mig; path = DNSServiceDiscoveryReply.defs; sourceTree = "<group>"; };
-		6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.mig; path = DNSServiceDiscoveryRequest.defs; sourceTree = "<group>"; };
-		6575FC20022EB7AA00000109 /* SamplemDNSClient.c */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.c; path = SamplemDNSClient.c; sourceTree = SOURCE_ROOT; tabWidth = 4; usesTabs = 0; };
+		6575FBE9022EAF5A00000109 /* mDNS.c */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.c; name = mDNS.c; path = ../mDNSCore/mDNS.c; sourceTree = "<group>"; tabWidth = 4; usesTabs = 0; };
+		6575FBEB022EAF7200000109 /* mDNSMacOSX.c */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.c; path = mDNSMacOSX.c; sourceTree = "<group>"; tabWidth = 4; usesTabs = 0; };
+		6575FBEC022EAF7200000109 /* daemon.c */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.c; path = daemon.c; sourceTree = "<group>"; tabWidth = 4; usesTabs = 0; };
+		729DF45F1CD40630005ECF70 /* com.apple.mDNSResponder.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = com.apple.mDNSResponder.plist; path = Private/com.apple.mDNSResponder.plist; sourceTree = "<group>"; };
 		72FB545A166D5F960090B2D9 /* dnsctl.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = dnsctl.c; path = ../Clients/dnsctl.c; sourceTree = "<group>"; };
 		72FB545F166D5FB00090B2D9 /* dnsctl */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = dnsctl; sourceTree = BUILT_PRODUCTS_DIR; };
 		7F18A9F60587CEF6001880B3 /* DNSCommon.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = DNSCommon.c; path = ../mDNSCore/DNSCommon.c; sourceTree = SOURCE_ROOT; };
@@ -664,23 +657,25 @@
 		7F461DB5062DBF2900672BF3 /* DNSDigest.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = DNSDigest.c; path = ../mDNSCore/DNSDigest.c; sourceTree = SOURCE_ROOT; };
 		7F869685066EE02400D2A2DC /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = /System/Library/Frameworks/Security.framework; sourceTree = "<absolute>"; };
 		7FC8F9D406D14E66007E879D /* LegacyNATTraversal.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LegacyNATTraversal.c; sourceTree = SOURCE_ROOT; };
-		8415A6561897109000BDBA26 /* libdns_services.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libdns_services.dylib; path = ../../../../../../../usr/lib/libdns_services.dylib; sourceTree = "<group>"; };
-		8418673A15AB8B6900BB7F70 /* com.apple.networking.mDNSResponder */ = {isa = PBXFileReference; lastKnownFileType = text; path = com.apple.networking.mDNSResponder; sourceTree = "<group>"; };
-		8418673C15AB8B8000BB7F70 /* mDNSResponderLogging.mobileconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = mDNSResponderLogging.mobileconfig; sourceTree = "<group>"; };
+		8415A6561897109000BDBA26 /* libdns_services.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libdns_services.dylib; path = /usr/lib/libdns_services.dylib; sourceTree = "<absolute>"; };
+		8417375A1B967CBE000CD5C2 /* dnsctl_server.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = dnsctl_server.c; path = Private/dnsctl_server.c; sourceTree = "<group>"; };
 		848DA5C6165477E000D2E8B4 /* xpc_services.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = xpc_services.c; path = Private/xpc_services.c; sourceTree = "<group>"; };
 		848DA5C9165477EB00D2E8B4 /* xpc_services.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = xpc_services.h; path = Private/xpc_services.h; sourceTree = "<group>"; };
 		848DA5D516547F7200D2E8B4 /* dns_xpc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dns_xpc.h; path = Private/dns_xpc.h; sourceTree = "<group>"; };
 		84C5B3351665529800C324A8 /* libdns_services.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libdns_services.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
 		84C5B339166553AF00C324A8 /* dns_services.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = dns_services.c; path = Private/dns_services.c; sourceTree = "<group>"; };
 		84F4C08F188F04CF00D1E1DE /* dns_services.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dns_services.h; path = Private/dns_services.h; sourceTree = "<group>"; };
+		BD03E88C1AD31278005E8A81 /* SymptomReporter.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = SymptomReporter.c; sourceTree = "<group>"; };
+		BDA3F0871C48DB6D0054FB4B /* Metrics.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Metrics.h; sourceTree = "<group>"; };
+		BDA3F0881C48DB6D0054FB4B /* Metrics.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Metrics.m; sourceTree = "<group>"; };
+		BDA3F0891C48DB910054FB4B /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
+		BDA9A7871B3A923600523835 /* dns_sd_private.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = dns_sd_private.h; path = Private/dns_sd_private.h; sourceTree = "<group>"; };
 		D284BE730ADD80740027CCDF /* mDNSResponder */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = mDNSResponder; sourceTree = BUILT_PRODUCTS_DIR; };
-		D284BE950ADD80800027CCDF /* mDNSResponder.debug */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = mDNSResponder.debug; sourceTree = BUILT_PRODUCTS_DIR; };
 		D284BEB00ADD80920027CCDF /* dns-sd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "dns-sd"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D284BEBE0ADD809A0027CCDF /* libjdns_sd.jnilib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libjdns_sd.jnilib; sourceTree = BUILT_PRODUCTS_DIR; };
 		D284BED90ADD80A20027CCDF /* dnsextd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = dnsextd; sourceTree = BUILT_PRODUCTS_DIR; };
 		D284BEE80ADD80A70027CCDF /* ddnswriteconfig */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ddnswriteconfig; sourceTree = BUILT_PRODUCTS_DIR; };
 		D284BF0C0ADD80B00027CCDF /* Bonjour.prefPane */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Bonjour.prefPane; sourceTree = BUILT_PRODUCTS_DIR; };
-		D284C04D0ADD95D30027CCDF /* Info-PreferencePane.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = "Info-PreferencePane.plist"; path = "PreferencePane/Info-PreferencePane.plist"; sourceTree = "<group>"; };
 		DB2CC4430662DD1100335AB3 /* BaseListener.java */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.java; name = BaseListener.java; path = ../mDNSShared/Java/BaseListener.java; sourceTree = SOURCE_ROOT; };
 		DB2CC4440662DD1100335AB3 /* BrowseListener.java */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.java; name = BrowseListener.java; path = ../mDNSShared/Java/BrowseListener.java; sourceTree = SOURCE_ROOT; };
 		DB2CC4450662DD1100335AB3 /* DNSRecord.java */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.java; name = DNSRecord.java; path = ../mDNSShared/Java/DNSRecord.java; sourceTree = SOURCE_ROOT; };
@@ -697,14 +692,14 @@
 		DB2CC4680662DFF500335AB3 /* JavaVM.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaVM.framework; path = /System/Library/Frameworks/JavaVM.framework; sourceTree = "<absolute>"; };
 		DBAAFE29057E8F4D0085CAD0 /* mDNSDebug.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = mDNSDebug.c; path = ../mDNSShared/mDNSDebug.c; sourceTree = SOURCE_ROOT; };
 		DBAAFE2C057E8F660085CAD0 /* GenLinkedList.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = GenLinkedList.c; path = ../mDNSShared/GenLinkedList.c; sourceTree = SOURCE_ROOT; };
-		F525E72804AA167501F1CF4D /* uds_daemon.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = uds_daemon.c; path = ../mDNSShared/uds_daemon.c; sourceTree = SOURCE_ROOT; };
+		F525E72804AA167501F1CF4D /* uds_daemon.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = uds_daemon.c; path = ../mDNSShared/uds_daemon.c; sourceTree = SOURCE_ROOT; usesTabs = 0; };
 		F5E11B5A04A28126019798ED /* dnssd_ipc.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = dnssd_ipc.c; path = ../mDNSShared/dnssd_ipc.c; sourceTree = SOURCE_ROOT; };
 		F5E11B5B04A28126019798ED /* dnssd_ipc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dnssd_ipc.h; path = ../mDNSShared/dnssd_ipc.h; sourceTree = SOURCE_ROOT; };
 		FF08480607CEB8E800AE6769 /* inprogress.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = inprogress.tiff; path = PreferencePane/Artwork/inprogress.tiff; sourceTree = SOURCE_ROOT; };
 		FF13FFEA0A5DA44A00897C81 /* dnsextd_lexer.l */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.lex; name = dnsextd_lexer.l; path = ../mDNSShared/dnsextd_lexer.l; sourceTree = SOURCE_ROOT; };
 		FF13FFEC0A5DA45500897C81 /* dnsextd_parser.y */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.yacc; name = dnsextd_parser.y; path = ../mDNSShared/dnsextd_parser.y; sourceTree = SOURCE_ROOT; };
 		FF1C919D07021D77001048AB /* dns-sd.1 */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.man; name = "dns-sd.1"; path = "../mDNSShared/dns-sd.1"; sourceTree = SOURCE_ROOT; };
-		FF1C919F07021E3F001048AB /* dns-sd.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = "dns-sd.c"; path = "../Clients/dns-sd.c"; sourceTree = SOURCE_ROOT; };
+		FF1C919F07021E3F001048AB /* dns-sd.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = "dns-sd.c"; path = "../Clients/dns-sd.c"; sourceTree = SOURCE_ROOT; usesTabs = 0; };
 		FF25794606C9A8BF00376F7B /* dnsextd.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = dnsextd.c; path = ../mDNSShared/dnsextd.c; sourceTree = SOURCE_ROOT; };
 		FF2609FA07B4433800CE10E5 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = /System/Library/Frameworks/Cocoa.framework; sourceTree = "<absolute>"; };
 		FF260A1F07B4436900CE10E5 /* PreferencePanes.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = PreferencePanes.framework; path = /System/Library/Frameworks/PreferencePanes.framework; sourceTree = "<absolute>"; };
@@ -722,14 +717,13 @@
 		FF2C5FB00A48B8680066DA11 /* DNSSDRecordRegistrar.java */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.java; name = DNSSDRecordRegistrar.java; path = ../mDNSShared/Java/DNSSDRecordRegistrar.java; sourceTree = SOURCE_ROOT; };
 		FF2C5FB20A48B86E0066DA11 /* RegisterRecordListener.java */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.java; name = RegisterRecordListener.java; path = ../mDNSShared/Java/RegisterRecordListener.java; sourceTree = SOURCE_ROOT; };
 		FF354EB108516C63007C00E1 /* installtool */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.perl; name = installtool; path = PreferencePane/installtool; sourceTree = SOURCE_ROOT; };
+		FF3C72A91CE3E62200CDF81E /* libicucore.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libicucore.dylib; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS10.0.Internal.sdk/usr/lib/libicucore.dylib; sourceTree = DEVELOPER_DIR; };
 		FF485D5105632E0000130380 /* mDNSResponder.8 */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = mDNSResponder.8; path = ../mDNSShared/mDNSResponder.8; sourceTree = SOURCE_ROOT; };
 		FF5852100DD27BD300862BDF /* ClientCommon.c */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.c; name = ClientCommon.c; path = ../Clients/ClientCommon.c; sourceTree = SOURCE_ROOT; };
 		FF85880B0BD599F40080D89F /* mDNSResponder.sb */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = mDNSResponder.sb; sourceTree = SOURCE_ROOT; };
 		FFA572390AF18F1C0055A0F1 /* libsystem_dnssd_debug.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libsystem_dnssd_debug.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
 		FFA572450AF18F450055A0F1 /* libsystem_dnssd_profile.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libsystem_dnssd_profile.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
-		FFA572480AF18FCC0055A0F1 /* DNSServiceDiscovery.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = DNSServiceDiscovery.c; sourceTree = "<group>"; };
-		FFA572600AF1908D0055A0F1 /* DNSServiceDiscovery.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DNSServiceDiscovery.h; sourceTree = "<group>"; };
-		FFA572630AF190C20055A0F1 /* dns_sd.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dns_sd.h; path = ../mDNSShared/dns_sd.h; sourceTree = SOURCE_ROOT; };
+		FFA572630AF190C20055A0F1 /* dns_sd.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dns_sd.h; path = ../mDNSShared/dns_sd.h; sourceTree = SOURCE_ROOT; usesTabs = 0; };
 		FFB765840AEED9C700583A2C /* libsystem_dnssd.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libsystem_dnssd.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
 		FFCB6D73075D539900B8AF62 /* PlatformCommon.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = PlatformCommon.c; path = ../mDNSShared/PlatformCommon.c; sourceTree = SOURCE_ROOT; };
 		FFE6935007C2CA7F00283007 /* ConfigurationAuthority.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ConfigurationAuthority.h; path = PreferencePane/ConfigurationAuthority.h; sourceTree = SOURCE_ROOT; };
@@ -742,7 +736,6 @@
 		FFFB0DAD07B43CBA00B88D48 /* PrivilegedOperations.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = PrivilegedOperations.c; sourceTree = "<group>"; };
 		FFFB0DAE07B43CBA00B88D48 /* ConfigurationAuthority.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = ConfigurationAuthority.c; sourceTree = "<group>"; };
 		FFFB0DAF07B43CBA00B88D48 /* ddnswriteconfig.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ddnswriteconfig.m; sourceTree = "<group>"; };
-		FFFB0DB407B43D2700B88D48 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = /System/Library/Frameworks/Foundation.framework; sourceTree = "<absolute>"; };
 		FFFF8F800C3307AC00722979 /* dnsextd.conf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = dnsextd.conf; path = ../mDNSShared/dnsextd.conf; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -788,6 +781,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		37DDE92A1BA383610092AC61 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		72FB545C166D5FB00090B2D9 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -807,23 +807,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2243AE391C90AECF0079023E /* CoreBluetooth.framework in Frameworks */,
 				D284BE650ADD80740027CCDF /* CoreFoundation.framework in Frameworks */,
-				D284BE660ADD80740027CCDF /* SystemConfiguration.framework in Frameworks */,
+				FF3C72AA1CE3E62200CDF81E /* libicucore.dylib in Frameworks */,
+				BDA3F08A1C48DB920054FB4B /* Foundation.framework in Frameworks */,
 				D284BE670ADD80740027CCDF /* IOKit.framework in Frameworks */,
 				D284BE680ADD80740027CCDF /* Security.framework in Frameworks */,
-				219D5542149ED645004464AE /* libxml2.2.dylib in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		D284BE8C0ADD80800027CCDF /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				D284BE8D0ADD80800027CCDF /* CoreFoundation.framework in Frameworks */,
-				D284BE8E0ADD80800027CCDF /* SystemConfiguration.framework in Frameworks */,
-				D284BE8F0ADD80800027CCDF /* IOKit.framework in Frameworks */,
-				D284BE900ADD80800027CCDF /* Security.framework in Frameworks */,
-				219D5543149ED645004464AE /* libxml2.2.dylib in Frameworks */,
+				D284BE660ADD80740027CCDF /* SystemConfiguration.framework in Frameworks */,
+				219D5542149ED645004464AE /* libxml2.dylib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -858,7 +849,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D284BEE00ADD80A70027CCDF /* Foundation.framework in Frameworks */,
+				BDA3F08D1C48DBEA0054FB4B /* Foundation.framework in Frameworks */,
 				D284BEE10ADD80A70027CCDF /* Security.framework in Frameworks */,
 				D284BEE20ADD80A70027CCDF /* SystemConfiguration.framework in Frameworks */,
 				D284BEE30ADD80A70027CCDF /* CoreFoundation.framework in Frameworks */,
@@ -904,16 +895,16 @@
 		08FB7794FE84155DC02AAC07 /* mDNSResponder */ = {
 			isa = PBXGroup;
 			children = (
-				8415A6561897109000BDBA26 /* libdns_services.dylib */,
-				3F347CF5185D57CD00367B40 /* base.xcconfig */,
+				2243AE381C90AECF0079023E /* CoreBluetooth.framework */,
+				729DF45F1CD40630005ECF70 /* com.apple.mDNSResponder.plist */,
 				08FB7795FE84155DC02AAC07 /* mDNS Server Sources */,
 				6575FC1F022EB78C00000109 /* Command-Line Clients */,
 				213FB20912028902002B3A08 /* Bonjour Events Plugin */,
-				6575FBFE022EAFA800000109 /* MIG files */,
 				DB2CC4420662DCE500335AB3 /* Java Support */,
 				FFFB0DA407B43BED00B88D48 /* PreferencePane */,
 				08FB779DFE84155DC02AAC07 /* External Frameworks and Libraries */,
 				19C28FBDFE9D53C911CA2CBB /* Products */,
+				37DDE9241BA382280092AC61 /* Unit Tests */,
 			);
 			name = mDNSResponder;
 			sourceTree = "<group>";
@@ -921,79 +912,86 @@
 		08FB7795FE84155DC02AAC07 /* mDNS Server Sources */ = {
 			isa = PBXGroup;
 			children = (
-				84F4C08F188F04CF00D1E1DE /* dns_services.h */,
-				216D9ACD1720C9F5008066E1 /* VPNService.c */,
-				2120ABD416B71614007089B6 /* CUPolicy.c */,
-				72FB545A166D5F960090B2D9 /* dnsctl.c */,
-				84C5B339166553AF00C324A8 /* dns_services.c */,
-				848DA5D516547F7200D2E8B4 /* dns_xpc.h */,
-				848DA5C9165477EB00D2E8B4 /* xpc_services.h */,
-				848DA5C6165477E000D2E8B4 /* xpc_services.c */,
-				21070E5D16486B9000A69507 /* DNSSECSupport.c */,
-				21070E5E16486B9000A69507 /* DNSSECSupport.h */,
+				22448EA51C90A82D004F25CC /* coreBLE.h */,
+				22448EA61C90A82D004F25CC /* coreBLE.m */,
+				22448EA11C90A7B5004F25CC /* BLE.c */,
+				22448EA21C90A7B5004F25CC /* BLE.h */,
+				222A3C571C1B743B003A6FFD /* DNSServiceDiscovery.h */,
+				222A3C581C1B743B003A6FFD /* DNSServiceDiscoveryDefines.h */,
+				222A3C561C1B7415003A6FFD /* DNSServiceDiscovery.c */,
 				21DD8FBD161E9A250033C8F8 /* anonymous.c */,
 				21DD8FBE161E9A250033C8F8 /* anonymous.h */,
-				2127A47515C3C7B900A857FC /* nsec3.c */,
-				2127A47615C3C7B900A857FC /* nsec3.h */,
-				8418673C15AB8B8000BB7F70 /* mDNSResponderLogging.mobileconfig */,
-				8418673A15AB8B6900BB7F70 /* com.apple.networking.mDNSResponder */,
-				21DED43415702C0F0060B6B9 /* DNSProxySupport.c */,
-				218E8E4F156D8C0300720DA0 /* dnsproxy.c */,
-				218E8E50156D8C0300720DA0 /* dnsproxy.h */,
-				213BDC6C147319F400000896 /* dnssec.c */,
-				2124FA321471E9DE0021D7BB /* nsec.c */,
-				2124FA2F1471E9B50021D7BB /* dnssec.h */,
-				2124FA2B1471E98C0021D7BB /* nsec.h */,
-				21A57F51145B2B1400939099 /* CryptoSupport.c */,
-				21A57F52145B2B1400939099 /* CryptoSupport.h */,
+				21F51DBD1B3540DB0070B05C /* com.apple.dnsextd.plist */,
+				21F51DBF1B35412D0070B05C /* com.apple.mDNSResponder.plist */,
+				21F51DBE1B3541030070B05C /* com.apple.mDNSResponderHelper.plist */,
 				21A57F4A145B2AE100939099 /* CryptoAlg.c */,
 				21A57F4B145B2AE100939099 /* CryptoAlg.h */,
-				4ADB5F230F6AB9F400B95BF3 /* helper-entitlements.plist */,
-				4A2E69DD0F5475A3004A87B0 /* uds_daemon.h */,
-				4AAE0C7A0C68E97F003882A5 /* mDNSResponderHelper.8 */,
-				2ECC11A50C4FEC3800CB1885 /* helpermsg-types.h */,
-				2E35528F0C3A95C100CA1CB7 /* helper-error.h */,
-				2E96A52D0C39C1A50087C4D2 /* helper-stubs.c */,
-				2EDC5E720C39EA640092701B /* helper-server.h */,
-				2E96A5250C39BE480087C4D2 /* helper.h */,
-				2E0405F40C3195F700F13B59 /* helper.c */,
-				2E0406CA0C31E9AD00F13B59 /* helper-main.c */,
-				4A8202510C56C36500DDFD48 /* ipsec_strerror.h */,
-				4A8202520C56C36500DDFD48 /* libpfkey.h */,
-				4A8202530C56C36600DDFD48 /* pfkey.c */,
-				7FC8F9D406D14E66007E879D /* LegacyNATTraversal.c */,
-				7F461DB5062DBF2900672BF3 /* DNSDigest.c */,
-				F525E72804AA167501F1CF4D /* uds_daemon.c */,
-				F5E11B5A04A28126019798ED /* dnssd_ipc.c */,
-				F5E11B5B04A28126019798ED /* dnssd_ipc.h */,
+				21A57F51145B2B1400939099 /* CryptoSupport.c */,
+				21A57F52145B2B1400939099 /* CryptoSupport.h */,
 				6575FBEC022EAF7200000109 /* daemon.c */,
-				6575FBE9022EAF5A00000109 /* mDNS.c */,
-				6575FBEB022EAF7200000109 /* mDNSMacOSX.c */,
-				654BE64F02B63B93000001D1 /* mDNSEmbeddedAPI.h */,
-				654BE65002B63B93000001D1 /* mDNSDebug.h */,
-				DBAAFE29057E8F4D0085CAD0 /* mDNSDebug.c */,
-				000753D303367C1C0CCA2C71 /* mDNSMacOSX.h */,
-				DBAAFE2C057E8F660085CAD0 /* GenLinkedList.c */,
-				FFCB6D73075D539900B8AF62 /* PlatformCommon.c */,
-				FF1C919D07021D77001048AB /* dns-sd.1 */,
-				FF485D5105632E0000130380 /* mDNSResponder.8 */,
-				FFF4F63A06CFE4DD00459EFD /* dnsextd.8 */,
-				FFFF8F800C3307AC00722979 /* dnsextd.conf */,
-				FF85880B0BD599F40080D89F /* mDNSResponder.sb */,
-				4A7B9E7C14FDA19F00B84CC1 /* mDNSResponder.txt */,
-				4A7B9E7E14FDA1BB00B84CC1 /* mDNSResponder.plist */,
+				FFA572630AF190C20055A0F1 /* dns_sd.h */,
+				BDA9A7871B3A923600523835 /* dns_sd_private.h */,
+				84C5B339166553AF00C324A8 /* dns_services.c */,
+				84F4C08F188F04CF00D1E1DE /* dns_services.h */,
+				848DA5D516547F7200D2E8B4 /* dns_xpc.h */,
 				7F18A9F60587CEF6001880B3 /* DNSCommon.c */,
-				7F18A9F70587CEF6001880B3 /* uDNS.c */,
-				FF25794606C9A8BF00376F7B /* dnsextd.c */,
+				7F461DB5062DBF2900672BF3 /* DNSDigest.c */,
 				FF13FFEA0A5DA44A00897C81 /* dnsextd_lexer.l */,
 				FF13FFEC0A5DA45500897C81 /* dnsextd_parser.y */,
+				FFF4F63A06CFE4DD00459EFD /* dnsextd.8 */,
+				FF25794606C9A8BF00376F7B /* dnsextd.c */,
+				FFFF8F800C3307AC00722979 /* dnsextd.conf */,
+				218E8E4F156D8C0300720DA0 /* dnsproxy.c */,
+				218E8E50156D8C0300720DA0 /* dnsproxy.h */,
+				21DED43415702C0F0060B6B9 /* DNSProxySupport.c */,
 				FFFA38620AEEDB090065B80A /* dnssd_clientlib.c */,
 				FFFA38640AEEDB130065B80A /* dnssd_clientstub.c */,
-				FFA572600AF1908D0055A0F1 /* DNSServiceDiscovery.h */,
-				FFA572480AF18FCC0055A0F1 /* DNSServiceDiscovery.c */,
-				FFA572630AF190C20055A0F1 /* dns_sd.h */,
+				F5E11B5A04A28126019798ED /* dnssd_ipc.c */,
+				F5E11B5B04A28126019798ED /* dnssd_ipc.h */,
+				213BDC6C147319F400000896 /* dnssec.c */,
+				2124FA2F1471E9B50021D7BB /* dnssec.h */,
+				21070E5D16486B9000A69507 /* DNSSECSupport.c */,
+				21070E5E16486B9000A69507 /* DNSSECSupport.h */,
+				DBAAFE2C057E8F660085CAD0 /* GenLinkedList.c */,
+				4ADB5F230F6AB9F400B95BF3 /* helper-entitlements.plist */,
+				2E0406CA0C31E9AD00F13B59 /* helper-main.c */,
+				2EDC5E720C39EA640092701B /* helper-server.h */,
+				2E96A52D0C39C1A50087C4D2 /* helper-stubs.c */,
+				2E0405F40C3195F700F13B59 /* helper.c */,
+				2E96A5250C39BE480087C4D2 /* helper.h */,
+				2ECC11A50C4FEC3800CB1885 /* helpermsg-types.h */,
+				4A8202510C56C36500DDFD48 /* ipsec_strerror.h */,
+				7FC8F9D406D14E66007E879D /* LegacyNATTraversal.c */,
+				4A8202520C56C36500DDFD48 /* libpfkey.h */,
+				6575FBE9022EAF5A00000109 /* mDNS.c */,
+				DBAAFE29057E8F4D0085CAD0 /* mDNSDebug.c */,
+				654BE65002B63B93000001D1 /* mDNSDebug.h */,
+				654BE64F02B63B93000001D1 /* mDNSEmbeddedAPI.h */,
+				6575FBEB022EAF7200000109 /* mDNSMacOSX.c */,
+				000753D303367C1C0CCA2C71 /* mDNSMacOSX.h */,
+				FF485D5105632E0000130380 /* mDNSResponder.8 */,
+				4A7B9E7E14FDA1BB00B84CC1 /* mDNSResponder.plist */,
+				FF85880B0BD599F40080D89F /* mDNSResponder.sb */,
+				4A7B9E7C14FDA19F00B84CC1 /* mDNSResponder.txt */,
+				4AAE0C7A0C68E97F003882A5 /* mDNSResponderHelper.8 */,
+				BDA3F0871C48DB6D0054FB4B /* Metrics.h */,
+				BDA3F0881C48DB6D0054FB4B /* Metrics.m */,
+				2124FA321471E9DE0021D7BB /* nsec.c */,
+				2124FA2B1471E98C0021D7BB /* nsec.h */,
+				2127A47515C3C7B900A857FC /* nsec3.c */,
+				2127A47615C3C7B900A857FC /* nsec3.h */,
 				4BD2B638134FE09F002B96D5 /* P2PPacketFilter.c */,
 				4BD2B639134FE09F002B96D5 /* P2PPacketFilter.h */,
+				4A8202530C56C36600DDFD48 /* pfkey.c */,
+				FFCB6D73075D539900B8AF62 /* PlatformCommon.c */,
+				BD03E88C1AD31278005E8A81 /* SymptomReporter.c */,
+				7F18A9F70587CEF6001880B3 /* uDNS.c */,
+				216D9ACD1720C9F5008066E1 /* uDNSPathEvalulation.c */,
+				F525E72804AA167501F1CF4D /* uds_daemon.c */,
+				4A2E69DD0F5475A3004A87B0 /* uds_daemon.h */,
+				8417375A1B967CBE000CD5C2 /* dnsctl_server.c */,
+				848DA5C6165477E000D2E8B4 /* xpc_services.c */,
+				848DA5C9165477EB00D2E8B4 /* xpc_services.h */,
 			);
 			name = "mDNS Server Sources";
 			sourceTree = "<group>";
@@ -1001,18 +999,20 @@
 		08FB779DFE84155DC02AAC07 /* External Frameworks and Libraries */ = {
 			isa = PBXGroup;
 			children = (
-				219D5541149ED645004464AE /* libxml2.2.dylib */,
-				4A3600DF0F34F8CD00453EFB /* DeviceToDeviceManager.framework */,
-				2E8165F60C59835F00485EB2 /* libipsec.dylib */,
-				65713D46025A293200000109 /* SystemConfiguration.framework */,
-				2E0406140C3197CB00F13B59 /* libbsm.dylib */,
-				7F869685066EE02400D2A2DC /* Security.framework */,
-				FFFB0DB407B43D2700B88D48 /* Foundation.framework */,
+				FF2609FA07B4433800CE10E5 /* Cocoa.framework */,
 				09AB6884FE841BABC02AAC07 /* CoreFoundation.framework */,
+				4A3600DF0F34F8CD00453EFB /* DeviceToDeviceManager.framework */,
+				BDA3F0891C48DB910054FB4B /* Foundation.framework */,
 				00CA213D02786FC30CCA2C71 /* IOKit.framework */,
 				DB2CC4680662DFF500335AB3 /* JavaVM.framework */,
-				FF2609FA07B4433800CE10E5 /* Cocoa.framework */,
+				2E0406140C3197CB00F13B59 /* libbsm.dylib */,
+				8415A6561897109000BDBA26 /* libdns_services.dylib */,
+				2E8165F60C59835F00485EB2 /* libipsec.dylib */,
+				219D5541149ED645004464AE /* libxml2.dylib */,
+				FF3C72A91CE3E62200CDF81E /* libicucore.dylib */,
 				FF260A1F07B4436900CE10E5 /* PreferencePanes.framework */,
+				7F869685066EE02400D2A2DC /* Security.framework */,
+				65713D46025A293200000109 /* SystemConfiguration.framework */,
 				21F432971134AA6800581B69 /* WebFilterDNS.framework */,
 			);
 			name = "External Frameworks and Libraries";
@@ -1021,24 +1021,23 @@
 		19C28FBDFE9D53C911CA2CBB /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				D284C04D0ADD95D30027CCDF /* Info-PreferencePane.plist */,
-				D284BE730ADD80740027CCDF /* mDNSResponder */,
-				D284BE950ADD80800027CCDF /* mDNSResponder.debug */,
-				D284BEB00ADD80920027CCDF /* dns-sd */,
-				D284BEBE0ADD809A0027CCDF /* libjdns_sd.jnilib */,
-				D284BED90ADD80A20027CCDF /* dnsextd */,
-				D284BEE80ADD80A70027CCDF /* ddnswriteconfig */,
 				D284BF0C0ADD80B00027CCDF /* Bonjour.prefPane */,
-				FFB765840AEED9C700583A2C /* libsystem_dnssd.dylib */,
-				FFA572390AF18F1C0055A0F1 /* libsystem_dnssd_debug.dylib */,
-				FFA572450AF18F450055A0F1 /* libsystem_dnssd_profile.dylib */,
-				2E0405F00C31955500F13B59 /* mDNSResponderHelper */,
 				213FB21812028A7A002B3A08 /* BonjourEvents.plugin */,
+				D284BEE80ADD80A70027CCDF /* ddnswriteconfig */,
+				D284BEB00ADD80920027CCDF /* dns-sd */,
+				72FB545F166D5FB00090B2D9 /* dnsctl */,
+				D284BED90ADD80A20027CCDF /* dnsextd */,
 				2141DD1D123FFCDB0086D23E /* libdns_sd.a */,
 				2141DD24123FFD0F0086D23E /* libdns_sd_debug.a */,
 				2141DD2A123FFD2C0086D23E /* libdns_sd_profile.a */,
 				84C5B3351665529800C324A8 /* libdns_services.dylib */,
-				72FB545F166D5FB00090B2D9 /* dnsctl */,
+				D284BEBE0ADD809A0027CCDF /* libjdns_sd.jnilib */,
+				FFB765840AEED9C700583A2C /* libsystem_dnssd.dylib */,
+				FFA572390AF18F1C0055A0F1 /* libsystem_dnssd_debug.dylib */,
+				FFA572450AF18F450055A0F1 /* libsystem_dnssd_profile.dylib */,
+				D284BE730ADD80740027CCDF /* mDNSResponder */,
+				2E0405F00C31955500F13B59 /* mDNSResponderHelper */,
+				37DDE92D1BA383610092AC61 /* unittests */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -1052,22 +1051,30 @@
 			name = "Bonjour Events Plugin";
 			sourceTree = "<group>";
 		};
-		6575FBFE022EAFA800000109 /* MIG files */ = {
+		37DDE9241BA382280092AC61 /* Unit Tests */ = {
 			isa = PBXGroup;
 			children = (
-				2E0405EB0C3190DC00F13B59 /* helpermsg.defs */,
-				6575FBFF022EAFBA00000109 /* DNSServiceDiscoveryDefines.h */,
-				6575FC00022EAFBA00000109 /* DNSServiceDiscoveryReply.defs */,
-				6575FC01022EAFBA00000109 /* DNSServiceDiscoveryRequest.defs */,
+				37AF802A1BF699AF00D657F6 /* DomainNameTest.c */,
+				37AF802B1BF699AF00D657F6 /* DomainNameTest.h */,
+				371D0FBD1BF666EB00E5DB26 /* ResourceRecordTest.c */,
+				371D0FBE1BF666EB00E5DB26 /* ResourceRecordTest.h */,
+				373202111BAB63E8007DE806 /* DNSMessageTest.h */,
+				3732020F1BAB4349007DE806 /* DNSMessageTest.c */,
+				37DDE9351BA386E70092AC61 /* main.c */,
+				37DDE9271BA3825C0092AC61 /* unittest.c */,
+				37DDE9281BA382670092AC61 /* unittest.h */,
+				371D0FBA1BF545FA00E5DB26 /* InterfaceTest.c */,
+				371D0FBB1BF545FA00E5DB26 /* InterfaceTest.h */,
 			);
-			name = "MIG files";
+			name = "Unit Tests";
 			sourceTree = "<group>";
 		};
 		6575FC1F022EB78C00000109 /* Command-Line Clients */ = {
 			isa = PBXGroup;
 			children = (
-				6575FC20022EB7AA00000109 /* SamplemDNSClient.c */,
+				FF1C919D07021D77001048AB /* dns-sd.1 */,
 				FF1C919F07021E3F001048AB /* dns-sd.c */,
+				72FB545A166D5F960090B2D9 /* dnsctl.c */,
 				FF5852100DD27BD300862BDF /* ClientCommon.c */,
 			);
 			name = "Command-Line Clients";
@@ -1137,6 +1144,7 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BDA9A7891B3A92A500523835 /* dns_sd_private.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1160,7 +1168,6 @@
 			files = (
 				2EC8F8EC0C39CCAC003C9C48 /* helper.h in Headers */,
 				2EDC5E730C39EA640092701B /* helper-server.h in Headers */,
-				2E3552920C3A95C100CA1CB7 /* helper-error.h in Headers */,
 				2ECC11A80C4FEC3800CB1885 /* helpermsg-types.h in Headers */,
 				2E8165E80C5980E300485EB2 /* libpfkey.h in Headers */,
 				2E8165EA0C5980F700485EB2 /* ipsec_strerror.h in Headers */,
@@ -1180,11 +1187,9 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D284BE530ADD80740027CCDF /* DNSServiceDiscoveryDefines.h in Headers */,
 				D284BE540ADD80740027CCDF /* dnssd_ipc.h in Headers */,
 				2E96A5260C39BE480087C4D2 /* helper.h in Headers */,
 				2EDC5E750C39EA640092701B /* helper-server.h in Headers */,
-				2E3552900C3A95C100CA1CB7 /* helper-error.h in Headers */,
 				2ECC11A60C4FEC3800CB1885 /* helpermsg-types.h in Headers */,
 				21A57F4E145B2AE100939099 /* CryptoAlg.h in Headers */,
 				21A57F55145B2B1400939099 /* CryptoSupport.h in Headers */,
@@ -1192,36 +1197,14 @@
 				2124FA301471E9B50021D7BB /* dnssec.h in Headers */,
 				218E8E53156D8C0300720DA0 /* dnsproxy.h in Headers */,
 				2127A47915C3C7B900A857FC /* nsec3.h in Headers */,
+				222A3C5B1C1B75F2003A6FFD /* DNSServiceDiscoveryDefines.h in Headers */,
 				21DD8FC1161E9A250033C8F8 /* anonymous.h in Headers */,
 				21070E6116486B9000A69507 /* DNSSECSupport.h in Headers */,
 				848DA5CA165477EB00D2E8B4 /* xpc_services.h in Headers */,
+				BDA3F08E1C48DCA50054FB4B /* Metrics.h in Headers */,
+				22448EA71C90A837004F25CC /* coreBLE.h in Headers */,
+				22448EA41C90A7CB004F25CC /* BLE.h in Headers */,
 				848DA5D616547F7200D2E8B4 /* dns_xpc.h in Headers */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		D284BE770ADD80800027CCDF /* Headers */ = {
-			isa = PBXHeadersBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				D284BE780ADD80800027CCDF /* DNSServiceDiscoveryDefines.h in Headers */,
-				D284BE790ADD80800027CCDF /* dnssd_ipc.h in Headers */,
-				D284BE7A0ADD80800027CCDF /* mDNSEmbeddedAPI.h in Headers */,
-				D284BE7B0ADD80800027CCDF /* mDNSDebug.h in Headers */,
-				D284BE7C0ADD80800027CCDF /* mDNSMacOSX.h in Headers */,
-				2E96A5270C39BE480087C4D2 /* helper.h in Headers */,
-				2EDC5E740C39EA640092701B /* helper-server.h in Headers */,
-				2E3552910C3A95C100CA1CB7 /* helper-error.h in Headers */,
-				2ECC11A70C4FEC3800CB1885 /* helpermsg-types.h in Headers */,
-				21A57F4F145B2AE100939099 /* CryptoAlg.h in Headers */,
-				21A57F56145B2B1400939099 /* CryptoSupport.h in Headers */,
-				2124FA2D1471E98C0021D7BB /* nsec.h in Headers */,
-				2124FA311471E9B50021D7BB /* dnssec.h in Headers */,
-				218E8E54156D8C0300720DA0 /* dnsproxy.h in Headers */,
-				2127A47A15C3C7B900A857FC /* nsec3.h in Headers */,
-				21DD8FC2161E9A250033C8F8 /* anonymous.h in Headers */,
-				21070E6216486B9000A69507 /* DNSSECSupport.h in Headers */,
-				848DA5CB165477EB00D2E8B4 /* xpc_services.h in Headers */,
-				848DA5D716547F7200D2E8B4 /* dns_xpc.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1243,8 +1226,8 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2E35529D0C3A9E7600CA1CB7 /* helper-error.h in Headers */,
 				2E35529F0C3A9E7600CA1CB7 /* helper.h in Headers */,
+				FFD52A9E1AF858DD00CAD3EC /* CryptoAlg.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1280,6 +1263,7 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BDA9A7881B3A924C00523835 /* dns_sd_private.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1382,6 +1366,7 @@
 				2E0405ED0C31955500F13B59 /* Sources */,
 				2E0405EE0C31955500F13B59 /* Frameworks */,
 				4AAE0C5A0C68E6EC003882A5 /* CopyFiles */,
+				21F51DC21B3541F30070B05C /* CopyFiles */,
 			);
 			buildRules = (
 			);
@@ -1390,6 +1375,23 @@
 			name = mDNSResponderHelper;
 			productName = mDNSResponderHelper;
 			productReference = 2E0405F00C31955500F13B59 /* mDNSResponderHelper */;
+			productType = "com.apple.product-type.tool";
+		};
+		37DDE92C1BA383610092AC61 /* unittests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 37DDE9311BA383610092AC61 /* Build configuration list for PBXNativeTarget "unittests" */;
+			buildPhases = (
+				37DDE9291BA383610092AC61 /* Sources */,
+				37DDE92A1BA383610092AC61 /* Frameworks */,
+				37DDE9341BA384000092AC61 /* ShellScript */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = unittests;
+			productName = unittests;
+			productReference = 37DDE92D1BA383610092AC61 /* unittests */;
 			productType = "com.apple.product-type.tool";
 		};
 		72FB545E166D5FB00090B2D9 /* dnsctl */ = {
@@ -1403,6 +1405,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				0C2AAB321B6929F300113637 /* PBXTargetDependency */,
 			);
 			name = dnsctl;
 			productName = dnsctl;
@@ -1434,12 +1437,12 @@
 				D284BE520ADD80740027CCDF /* Headers */,
 				D284BE550ADD80740027CCDF /* Sources */,
 				D284BE640ADD80740027CCDF /* Frameworks */,
-				D284BE690ADD80740027CCDF /* Rez */,
 				D284BE6A0ADD80740027CCDF /* CopyFiles */,
 				4A7B9E7F14FDA21B00B84CC1 /* CopyFiles */,
 				4A7B9E8114FDA25500B84CC1 /* CopyFiles */,
-				D284BE6C0ADD80740027CCDF /* ShellScript */,
+				D284BE6C0ADD80740027CCDF /* Run Script */,
 				8418673D15AB8BFF00BB7F70 /* CopyFiles */,
+				21F51DC01B35418C0070B05C /* CopyFiles */,
 			);
 			buildRules = (
 			);
@@ -1451,25 +1454,6 @@
 			productReference = D284BE730ADD80740027CCDF /* mDNSResponder */;
 			productType = "com.apple.product-type.tool";
 		};
-		D284BE750ADD80800027CCDF /* mDNSResponder debug */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = D284BE920ADD80800027CCDF /* Build configuration list for PBXNativeTarget "mDNSResponder debug" */;
-			buildPhases = (
-				D284BE760ADD80800027CCDF /* ShellScript */,
-				D284BE770ADD80800027CCDF /* Headers */,
-				D284BE7D0ADD80800027CCDF /* Sources */,
-				D284BE8C0ADD80800027CCDF /* Frameworks */,
-				D284BE910ADD80800027CCDF /* Rez */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = "mDNSResponder debug";
-			productName = mDNSResponder;
-			productReference = D284BE950ADD80800027CCDF /* mDNSResponder.debug */;
-			productType = "com.apple.product-type.tool";
-		};
 		D284BEA50ADD80920027CCDF /* dns-sd tool */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = D284BEAD0ADD80920027CCDF /* Build configuration list for PBXNativeTarget "dns-sd tool" */;
@@ -1477,7 +1461,6 @@
 				D284BEA60ADD80920027CCDF /* Headers */,
 				D284BEA70ADD80920027CCDF /* Sources */,
 				D284BEA90ADD80920027CCDF /* Frameworks */,
-				D284BEAA0ADD80920027CCDF /* Rez */,
 				D284BEAB0ADD80920027CCDF /* CopyFiles */,
 			);
 			buildRules = (
@@ -1497,7 +1480,6 @@
 				D284BEB50ADD809A0027CCDF /* Headers */,
 				D284BEB60ADD809A0027CCDF /* Sources */,
 				D284BEB80ADD809A0027CCDF /* Frameworks */,
-				D284BEBA0ADD809A0027CCDF /* Rez */,
 			);
 			buildRules = (
 			);
@@ -1521,7 +1503,7 @@
 				D284BECE0ADD80A20027CCDF /* Frameworks */,
 				D284BED40ADD80A20027CCDF /* CopyFiles */,
 				FFFF8F770C32F0FD00722979 /* CopyFiles */,
-				FF37FAAD0BC581780044A5CF /* ShellScript */,
+				21F51DC41B35421A0070B05C /* CopyFiles */,
 			);
 			buildRules = (
 				D284BFB80ADD8E510027CCDF /* PBXBuildRule */,
@@ -1542,7 +1524,6 @@
 				D284BEDC0ADD80A70027CCDF /* Headers */,
 				D284BEDD0ADD80A70027CCDF /* Sources */,
 				D284BEDF0ADD80A70027CCDF /* Frameworks */,
-				D284BEE40ADD80A70027CCDF /* Rez */,
 			);
 			buildRules = (
 			);
@@ -1562,7 +1543,6 @@
 				D284BEEE0ADD80B00027CCDF /* Resources */,
 				D284BEFD0ADD80B00027CCDF /* Sources */,
 				D284BF010ADD80B00027CCDF /* Frameworks */,
-				D284BF070ADD80B00027CCDF /* Rez */,
 			);
 			buildRules = (
 			);
@@ -1633,9 +1613,15 @@
 		08FB7793FE84155DC02AAC07 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
+				LastUpgradeCheck = 0700;
+				TargetAttributes = {
+					37DDE92C1BA383610092AC61 = {
+						CreatedOnToolsVersion = 7.0;
+					};
+				};
 			};
 			buildConfigurationList = D284BE2B0ADD78180027CCDF /* Build configuration list for PBXProject "mDNSResponder" */;
-			compatibilityVersion = "Xcode 3.1";
+			compatibilityVersion = "Xcode 3.2";
 			developmentRegion = English;
 			hasScannedForEncodings = 1;
 			knownRegions = (
@@ -1652,26 +1638,26 @@
 				03067D640C83A3700022BE1F /* Build Some */,
 				FFB7657B0AEED96B00583A2C /* Build All */,
 				D284BE500ADD80740027CCDF /* mDNSResponder */,
-				D284BE750ADD80800027CCDF /* mDNSResponder debug */,
 				2E0405EF0C31955500F13B59 /* mDNSResponderHelper */,
 				D284BEA50ADD80920027CCDF /* dns-sd tool */,
-				4AE471670EAFF81900A6C5AD /* dns_sd.jar */,
-				D284BEB20ADD809A0027CCDF /* libjdns_sd.jnilib */,
+				72FB545E166D5FB00090B2D9 /* dnsctl */,
 				D284BEBF0ADD80A20027CCDF /* dnsextd */,
 				D284BEDB0ADD80A70027CCDF /* ddnswriteconfig */,
 				D284BEEA0ADD80B00027CCDF /* PreferencePane */,
-				FFB765830AEED9C700583A2C /* libdns_sd_dynamic */,
-				FFA572300AF18F1C0055A0F1 /* libdns_sd_debug_dynamic */,
-				FFA5723C0AF18F450055A0F1 /* libdns_sd_profile_dynamic */,
-				FFA572650AF190F10055A0F1 /* SystemLibrariesDynamic */,
 				213FB21712028A7A002B3A08 /* BonjourEvents */,
 				2141DCF8123FFB5D0086D23E /* SystemLibraries */,
 				2141DD0B123FFC7F0086D23E /* SystemLibrariesStatic */,
+				FFA572650AF190F10055A0F1 /* SystemLibrariesDynamic */,
 				2141DD1C123FFCDB0086D23E /* libdns_sd_static */,
 				2141DD23123FFD0F0086D23E /* libdns_sd_debug_static */,
 				2141DD29123FFD2C0086D23E /* libdns_sd_profile_static */,
+				FFB765830AEED9C700583A2C /* libdns_sd_dynamic */,
+				FFA572300AF18F1C0055A0F1 /* libdns_sd_debug_dynamic */,
+				FFA5723C0AF18F450055A0F1 /* libdns_sd_profile_dynamic */,
 				84C5B3341665529800C324A8 /* dns_services */,
-				72FB545E166D5FB00090B2D9 /* dnsctl */,
+				D284BEB20ADD809A0027CCDF /* libjdns_sd.jnilib */,
+				4AE471670EAFF81900A6C5AD /* dns_sd.jar */,
+				37DDE92C1BA383610092AC61 /* unittests */,
 			);
 		};
 /* End PBXProject section */
@@ -1688,7 +1674,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				3F347CF6185D57CD00367B40 /* base.xcconfig in Resources */,
 				D284BEEF0ADD80B00027CCDF /* remove_idle.tiff in Resources */,
 				D284BEF00ADD80B00027CCDF /* add_pressed.tiff in Resources */,
 				D284BEF10ADD80B00027CCDF /* remove_disabled.tiff in Resources */,
@@ -1707,51 +1692,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXRezBuildPhase section */
-		D284BE690ADD80740027CCDF /* Rez */ = {
-			isa = PBXRezBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		D284BE910ADD80800027CCDF /* Rez */ = {
-			isa = PBXRezBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		D284BEAA0ADD80920027CCDF /* Rez */ = {
-			isa = PBXRezBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		D284BEBA0ADD809A0027CCDF /* Rez */ = {
-			isa = PBXRezBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		D284BEE40ADD80A70027CCDF /* Rez */ = {
-			isa = PBXRezBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		D284BF070ADD80B00027CCDF /* Rez */ = {
-			isa = PBXRezBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXRezBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
 		030BBED60CE11EEC00472F0C /* ShellScript */ = {
@@ -1793,6 +1733,21 @@
 			shellPath = "/bin/bash -e -x";
 			shellScript = "DSTROOT=${DSTROOT}\nmkdir -p \"$DSTROOT/usr/include\"\nsed 's/\\(^#define _DNS_SD_LIBDISPATCH \\)0$/\\1 1/' \"$SRCROOT/../mDNSShared/dns_sd.h\" > \"$DSTROOT/usr/include/dns_sd.h\"\n\nif [[ \"${ACTION}\" == \"installhdrs\" ]]; then\n    exit 0\nfi\n\nif [[ \"${PLATFORM_NAME}\" =~ \"simulator\" ]]; then\n    ln -s libsystem_dnssd.dylib ${DSTROOT}${INSTALL_PATH}/libsystem_sim_dnssd.dylib\nfi\n";
 		};
+		37DDE9341BA384000092AC61 /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(TARGET_BUILD_DIR)/$(TARGET_NAME)",
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/unittest_success",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "cd \"$TARGET_BUILD_DIR\"\n./\"$TARGET_NAME\"\n# touch unittest_success\nif [ ! -f unittest_success ] ; then exit -1; fi";
+		};
 		4A4EE3A413CB8E82005C624B /* Build yacc file into derived source files */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -1819,45 +1774,15 @@
 			shellPath = /bin/sh;
 			shellScript = "if [ -e \"${SDKROOT}/usr/local/include/dnsinfo.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/dnsinfo.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nelse\necho \"#define MDNS_NO_DNSINFO 1\" > ${CONFIGURATION_TEMP_DIR}/dnsinfo.h\ntouch \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfor i in ${ARCHS}\ndo\nccflags=\"-arch $i $ccflags\"\ndone\ncc ${ccflags} \"${CONFIGURATION_TEMP_DIR}/empty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfi\n\nif [ -e \"${SDKROOT}/usr/include/sandbox.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nelse\necho \"#define MDNS_NO_SANDBOX 1\" > \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nfi\n\nif [ -e \"${SDKROOT}/usr/local/include/vproc.h\" -o -e \"${SDKROOT}/usr/include/vproc.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/vproc.h\"\nelse\ntouch \"${CONFIGURATION_TEMP_DIR}/vproc.h\"\nfi\n\nif [ -e \"${SDKROOT}/System/Library/Frameworks/IOKit.framework/PrivateHeaders/pwr_mgt/IOPMLibPrivate.h\" ]\nthen\nrm -rf \"${CONFIGURATION_TEMP_DIR}/IOKit\"\nelse\nmkdir -p \"${CONFIGURATION_TEMP_DIR}/IOKit/pwr_mgt\"\ntouch \"${CONFIGURATION_TEMP_DIR}/IOKit/pwr_mgt/IOPMLibPrivate.h\"\nfi\n\nif [ -e \"${SDKROOT}/System/Library/PrivateFrameworks/DeviceToDeviceManager.framework/Headers/DeviceToDeviceManager.h\" ]\nthen\nrm -rf \"${CONFIGURATION_TEMP_DIR}/DeviceToDeviceManager\"\nelse\nmkdir -p \"${CONFIGURATION_TEMP_DIR}/DeviceToDeviceManager\"\necho \"#define NO_D2D 1\" > \"${CONFIGURATION_TEMP_DIR}/DeviceToDeviceManager/DeviceToDeviceManager.h\"\nfi\n\nif [ -e \"${SDKROOT}/System/Library/PrivateFrameworks/WebFilterDNS.framework/Headers/WebFilterDNS.h\" ]\nthen\nrm -rf \"${CONFIGURATION_TEMP_DIR}/WebFilterDNS\"\nelse\nmkdir -p \"${CONFIGURATION_TEMP_DIR}/WebFilterDNS\"\necho \"#define NO_WCF 1\" > \"${CONFIGURATION_TEMP_DIR}/WebFilterDNS/WebFilterDNS.h\"\nfi\n\nif [ -e \"${SDKROOT}/usr/local/include/AWACS.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/AWACS.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libAWACS.a\"\nelse\necho \"#define NO_AWACS 1\" > \"${CONFIGURATION_TEMP_DIR}/AWACS.h\"\ntouch \"${CONFIGURATION_TEMP_DIR}/AWACSempty.c\"\nfor i in ${ARCHS}\ndo\nccflags=\"-arch $i $ccflags\"\ndone\ncc ${ccflags} \"${CONFIGURATION_TEMP_DIR}/AWACSempty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libAWACS.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/AWACSempty.c\"\nfi\n";
 		};
-		D284BE6C0ADD80740027CCDF /* ShellScript */ = {
+		D284BE6C0ADD80740027CCDF /* Run Script */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 8;
 			files = (
 			);
+			name = "Run Script";
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/bash;
-			shellScript = "# Install mDNSResponder.bundle containing language localizations\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices\ncp -R ${SRCROOT}/mDNSResponder-bundle ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle\n\n# Remove unwanted CVS directories\nfind ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -depth -name CVS -exec rm -rf {} \\;\n\n# Expand UTF-8 files to UTF-16 (at one time this appeared to be necessary, but it's not, so we don't do it any more)\n#foreach file (`find ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -name Localizable.strings`)\n#iconv -f utf-8 -t utf-16 ${file} > ${file}.new\n#mv -f ${file}.new ${file}\n#end\n\n# Remove French localization (not wanted for Apple B&I builds)\nrm -rf ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle/Resources/French.lproj\n\n# Copy Sandbox profile\nif [ -z \"${IPHONEOS_DEPLOYMENT_TARGET}\" -a -z \"${TVOS_DEPLOYMENT_TARGET}\"  ] ; then\n    SANDBOXDST=\"${DSTROOT}/usr/share/sandbox\"\nelse\n    SANDBOXDST=\"${DSTROOT}/usr/local/share/sandbox/profiles/embedded/builtin\"\nfi\n(umask 022; mkdir -p -m 0755 \"$SANDBOXDST\")\ncp \"${SRCROOT}/mDNSResponder.sb\" \"${SANDBOXDST}/mDNSResponder.sb\"\n";
-		};
-		D284BE760ADD80800027CCDF /* ShellScript */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "if [ -e \"${SDKROOT}/usr/local/include/dnsinfo.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/dnsinfo.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nelse\necho \"#define MDNS_NO_DNSINFO 1\" > ${CONFIGURATION_TEMP_DIR}/dnsinfo.h\ntouch \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfor i in ${ARCHS}\ndo\nccflags=\"-arch $i $ccflags\"\ndone\ncc ${ccflags} \"${CONFIGURATION_TEMP_DIR}/empty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libdnsinfo.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/empty.c\"\nfi\n\nif [ -e \"${SDKROOT}/usr/include/sandbox.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nelse\necho \"#define MDNS_NO_SANDBOX 1\" > \"${CONFIGURATION_TEMP_DIR}/sandbox.h\"\nfi\n\nif [ -e \"${SDKROOT}/usr/local/include/vproc.h\" -o -e \"${SDKROOT}/usr/include/vproc.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/vproc.h\"\nelse\ntouch \"${CONFIGURATION_TEMP_DIR}/vproc.h\"\nfi\n\nif [ -e \"${SDKROOT}/System/Library/Frameworks/IOKit.framework/PrivateHeaders/pwr_mgt/IOPMLibPrivate.h\" ]\nthen\nrm -rf \"${CONFIGURATION_TEMP_DIR}/IOKit\"\nelse\nmkdir -p \"${CONFIGURATION_TEMP_DIR}/IOKit/pwr_mgt\"\ntouch \"${CONFIGURATION_TEMP_DIR}/IOKit/pwr_mgt/IOPMLibPrivate.h\"\nfi\n\nif [ -e \"${SDKROOT}/System/Library/PrivateFrameworks/DeviceToDeviceManager.framework/Headers/DeviceToDeviceManager.h\" ]\nthen\nrm -rf \"${CONFIGURATION_TEMP_DIR}/DeviceToDeviceManager\"\nelse\nmkdir -p \"${CONFIGURATION_TEMP_DIR}/DeviceToDeviceManager\"\necho \"#define NO_D2D 1\" > \"${CONFIGURATION_TEMP_DIR}/DeviceToDeviceManager/DeviceToDeviceManager.h\"\nfi\n\nif [ -e \"${SDKROOT}/System/Library/PrivateFrameworks/WebFilterDNS.framework/Headers/WebFilterDNS.h\" ]\nthen\nrm -rf \"${CONFIGURATION_TEMP_DIR}/WebFilterDNS\"\nelse\nmkdir -p \"${CONFIGURATION_TEMP_DIR}/WebFilterDNS\"\necho \"#define NO_WCF 1\" > \"${CONFIGURATION_TEMP_DIR}/WebFilterDNS/WebFilterDNS.h\"\nfi\n\nif [ -e \"${SDKROOT}/usr/local/include/AWACS.h\" ]\nthen\nrm -f \"${CONFIGURATION_TEMP_DIR}/AWACS.h\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/libAWACS.a\"\nelse\necho \"#define NO_AWACS 1\" > \"${CONFIGURATION_TEMP_DIR}/AWACS.h\"\ntouch \"${CONFIGURATION_TEMP_DIR}/AWACSempty.c\"\nfor i in ${ARCHS}\ndo\nccflags=\"-arch $i $ccflags\"\ndone\ncc ${ccflags} \"${CONFIGURATION_TEMP_DIR}/AWACSempty.c\" -c -o \"${CONFIGURATION_TEMP_DIR}/libAWACS.a\"\nrm -f \"${CONFIGURATION_TEMP_DIR}/AWACSempty.c\"\nfi";
-		};
-		FF045B6A0C7E4AA600448140 /* ShellScript */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 8;
-			files = (
-			);
-			inputPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 1;
-			shellPath = /bin/sh;
-			shellScript = "# Install plists to tell launchd how to start mDNSResponder and mDNSResponderHelper\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons\n\nif [ \"${MACOSX_DEPLOYMENT_TARGET}\" == \"10.4\" ] ; then\ncp ${SRCROOT}/LaunchDaemonInfo-Tiger.plist        ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponder.plist\ncp ${SRCROOT}/LaunchDaemonInfo-Tiger.helper.plist ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponderHelper.plist\nelse\ncp ${SRCROOT}/LaunchDaemonInfo.plist              ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponder.plist\ncp ${SRCROOT}/LaunchDaemonInfo.helper.plist       ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponderHelper.plist\nfi\n\nif [ ! -z \"${IPHONEOS_DEPLOYMENT_TARGET}\" ] ; then\nplutil -convert binary1 ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponder.plist\nplutil -convert binary1 ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.mDNSResponderHelper.plist\nfi\n";
-		};
-		FF37FAAD0BC581780044A5CF /* ShellScript */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 8;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 1;
-			shellPath = /bin/tcsh;
-			shellScript = "# Install plist to tell launchd how to start dnsextd\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons\ncp ${SRCROOT}/LaunchDaemonInfo.dnsextd.plist ${DSTROOT}${SYSTEM_LIBRARY_DIR}/LaunchDaemons/com.apple.dnsextd.plist\n";
+			shellScript = "# Install mDNSResponder.bundle containing language localizations\nmkdir -p ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices\ncp -R ${SRCROOT}/mDNSResponder-bundle ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle\n\n# Remove unwanted CVS directories\nfind ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -depth -name CVS -exec rm -rf {} \\;\n\n# Expand UTF-8 files to UTF-16 (at one time this appeared to be necessary, but it's not, so we don't do it any more)\n#foreach file (`find ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle -name Localizable.strings`)\n#iconv -f utf-8 -t utf-16 ${file} > ${file}.new\n#mv -f ${file}.new ${file}\n#end\n\n# Remove French localization (not wanted for Apple B&I builds)\nrm -rf ${DSTROOT}${SYSTEM_LIBRARY_DIR}/CoreServices/mDNSResponder.bundle/Resources/French.lproj\n\n# Copy Sandbox profile\nif [ -z \"${IPHONEOS_DEPLOYMENT_TARGET}\" -a -z \"${TVOS_DEPLOYMENT_TARGET}\"  -a -z \"${WATCHOS_DEPLOYMENT_TARGET}\"  ] ; then\n    SANDBOXDST=\"${DSTROOT}/usr/share/sandbox\"\nelse\n    SANDBOXDST=\"${DSTROOT}/usr/local/share/sandbox/profiles/embedded/builtin\"\nfi\n(umask 022; mkdir -p -m 0755 \"$SANDBOXDST\")\ncp \"${SRCROOT}/mDNSResponder.sb\" \"${SANDBOXDST}/mDNSResponder.sb\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -1876,10 +1801,8 @@
 			files = (
 				215FFAEE124000F900470DE1 /* dnssd_ipc.c in Sources */,
 				215FFAEF124000F900470DE1 /* dnssd_clientlib.c in Sources */,
+				222A3C6A1C1B7777003A6FFD /* DNSServiceDiscovery.c in Sources */,
 				215FFAF0124000F900470DE1 /* dnssd_clientstub.c in Sources */,
-				215FFAF1124000F900470DE1 /* DNSServiceDiscovery.c in Sources */,
-				215FFAF2124000F900470DE1 /* DNSServiceDiscoveryRequest.defs in Sources */,
-				215FFAF3124000F900470DE1 /* DNSServiceDiscoveryReply.defs in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1889,10 +1812,8 @@
 			files = (
 				215FFAF41240011800470DE1 /* dnssd_ipc.c in Sources */,
 				215FFAF51240011800470DE1 /* dnssd_clientlib.c in Sources */,
+				222A3C6B1C1B7778003A6FFD /* DNSServiceDiscovery.c in Sources */,
 				215FFAF61240011800470DE1 /* dnssd_clientstub.c in Sources */,
-				215FFAF71240011800470DE1 /* DNSServiceDiscovery.c in Sources */,
-				215FFAF81240011800470DE1 /* DNSServiceDiscoveryRequest.defs in Sources */,
-				215FFAF91240011800470DE1 /* DNSServiceDiscoveryReply.defs in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1902,10 +1823,8 @@
 			files = (
 				215FFAFA1240013400470DE1 /* dnssd_ipc.c in Sources */,
 				215FFAFB1240013400470DE1 /* dnssd_clientlib.c in Sources */,
+				222A3C6C1C1B7779003A6FFD /* DNSServiceDiscovery.c in Sources */,
 				215FFAFC1240013400470DE1 /* dnssd_clientstub.c in Sources */,
-				215FFAFD1240013400470DE1 /* DNSServiceDiscovery.c in Sources */,
-				215FFAFE1240013400470DE1 /* DNSServiceDiscoveryRequest.defs in Sources */,
-				215FFAFF1240013400470DE1 /* DNSServiceDiscoveryReply.defs in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1914,10 +1833,22 @@
 			buildActionMask = 2147483647;
 			files = (
 				2E0405F50C3195F700F13B59 /* helper.c in Sources */,
-				2E0405F60C31961100F13B59 /* helpermsg.defs in Sources */,
 				2E96A51D0C39BDAC0087C4D2 /* helper-main.c in Sources */,
 				2E8165E90C5980EE00485EB2 /* pfkey.c in Sources */,
 				4BD2B63A134FE09F002B96D5 /* P2PPacketFilter.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37DDE9291BA383610092AC61 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				371D0FBF1BF666EB00E5DB26 /* ResourceRecordTest.c in Sources */,
+				37FEBD581BC789AA00638EA4 /* DNSCommon.c in Sources */,
+				371D0FBC1BF545FA00E5DB26 /* InterfaceTest.c in Sources */,
+				373202101BAB4444007DE806 /* DNSMessageTest.c in Sources */,
+				3771F67D1BA387DD0072355E /* main.c in Sources */,
+				37DDE9331BA383D30092AC61 /* unittest.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1941,20 +1872,20 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D284BE560ADD80740027CCDF /* DNSServiceDiscoveryReply.defs in Sources */,
-				D284BE570ADD80740027CCDF /* DNSServiceDiscoveryRequest.defs in Sources */,
+				227687F31C90AD580019382D /* coreBLE.m in Sources */,
 				D284BE580ADD80740027CCDF /* mDNS.c in Sources */,
 				D284BE590ADD80740027CCDF /* uDNS.c in Sources */,
 				D284BE5A0ADD80740027CCDF /* DNSCommon.c in Sources */,
 				D284BE5B0ADD80740027CCDF /* DNSDigest.c in Sources */,
 				D284BE5D0ADD80740027CCDF /* mDNSDebug.c in Sources */,
 				D284BE5E0ADD80740027CCDF /* uds_daemon.c in Sources */,
+				22448EA31C90A7BE004F25CC /* BLE.c in Sources */,
 				D284BE5F0ADD80740027CCDF /* dnssd_ipc.c in Sources */,
 				D284BE600ADD80740027CCDF /* PlatformCommon.c in Sources */,
 				D284BE610ADD80740027CCDF /* mDNSMacOSX.c in Sources */,
+				BDA3F08F1C48DCA50054FB4B /* Metrics.m in Sources */,
 				D284BE620ADD80740027CCDF /* LegacyNATTraversal.c in Sources */,
 				D284BE630ADD80740027CCDF /* daemon.c in Sources */,
-				2E04061F0C3198B700F13B59 /* helpermsg.defs in Sources */,
 				2E96A5320C39C1A50087C4D2 /* helper-stubs.c in Sources */,
 				21A57F4C145B2AE100939099 /* CryptoAlg.c in Sources */,
 				21A57F53145B2B1400939099 /* CryptoSupport.c in Sources */,
@@ -1962,46 +1893,13 @@
 				213BDC6D147319F400000896 /* dnssec.c in Sources */,
 				218E8E51156D8C0300720DA0 /* dnsproxy.c in Sources */,
 				21DED43515702C0F0060B6B9 /* DNSProxySupport.c in Sources */,
-				216D9ACE1720C9F5008066E1 /* VPNService.c in Sources */,
+				216D9ACE1720C9F5008066E1 /* uDNSPathEvalulation.c in Sources */,
+				BD03E88D1AD31278005E8A81 /* SymptomReporter.c in Sources */,
 				2127A47715C3C7B900A857FC /* nsec3.c in Sources */,
 				21DD8FBF161E9A250033C8F8 /* anonymous.c in Sources */,
 				21070E5F16486B9000A69507 /* DNSSECSupport.c in Sources */,
 				848DA5C7165477E000D2E8B4 /* xpc_services.c in Sources */,
-				2120ABD516B71614007089B6 /* CUPolicy.c in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		D284BE7D0ADD80800027CCDF /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				D284BE7E0ADD80800027CCDF /* DNSServiceDiscoveryReply.defs in Sources */,
-				D284BE7F0ADD80800027CCDF /* DNSServiceDiscoveryRequest.defs in Sources */,
-				D284BE800ADD80800027CCDF /* mDNS.c in Sources */,
-				D284BE810ADD80800027CCDF /* uDNS.c in Sources */,
-				D284BE820ADD80800027CCDF /* DNSCommon.c in Sources */,
-				D284BE830ADD80800027CCDF /* DNSDigest.c in Sources */,
-				D284BE850ADD80800027CCDF /* mDNSDebug.c in Sources */,
-				D284BE860ADD80800027CCDF /* uds_daemon.c in Sources */,
-				D284BE870ADD80800027CCDF /* dnssd_ipc.c in Sources */,
-				D284BE880ADD80800027CCDF /* PlatformCommon.c in Sources */,
-				D284BE890ADD80800027CCDF /* mDNSMacOSX.c in Sources */,
-				D284BE8A0ADD80800027CCDF /* LegacyNATTraversal.c in Sources */,
-				D284BE8B0ADD80800027CCDF /* daemon.c in Sources */,
-				2E0406200C3198B700F13B59 /* helpermsg.defs in Sources */,
-				2E96A5300C39C1A50087C4D2 /* helper-stubs.c in Sources */,
-				21A57F4D145B2AE100939099 /* CryptoAlg.c in Sources */,
-				21A57F54145B2B1400939099 /* CryptoSupport.c in Sources */,
-				2124FA341471E9DE0021D7BB /* nsec.c in Sources */,
-				213BDC6E147319F400000896 /* dnssec.c in Sources */,
-				218E8E52156D8C0300720DA0 /* dnsproxy.c in Sources */,
-				21DED43615702C0F0060B6B9 /* DNSProxySupport.c in Sources */,
-				216D9ACF1720C9F5008066E1 /* VPNService.c in Sources */,
-				2127A47815C3C7B900A857FC /* nsec3.c in Sources */,
-				21DD8FC0161E9A250033C8F8 /* anonymous.c in Sources */,
-				21070E6016486B9000A69507 /* DNSSECSupport.c in Sources */,
-				848DA5C8165477E000D2E8B4 /* xpc_services.c in Sources */,
-				2120ABD616B71614007089B6 /* CUPolicy.c in Sources */,
+				8417375C1B967D37000CD5C2 /* dnsctl_server.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2027,7 +1925,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				21DCD05C1461B23700702FC8 /* CryptoAlg.c in Sources */,
-				21DCD05D1461B23700702FC8 /* CryptoAlg.h in Sources */,
 				D284BEC50ADD80A20027CCDF /* DNSCommon.c in Sources */,
 				D284BEC60ADD80A20027CCDF /* DNSDigest.c in Sources */,
 				D284BEC70ADD80A20027CCDF /* dnsextd.c in Sources */,
@@ -2037,7 +1934,6 @@
 				D284BECC0ADD80A20027CCDF /* dnsextd_parser.y in Sources */,
 				D284BECB0ADD80A20027CCDF /* dnsextd_lexer.l in Sources */,
 				D284BECD0ADD80A20027CCDF /* PlatformCommon.c in Sources */,
-				2EAE955A0C31F4D30021F738 /* helpermsg.defs in Sources */,
 				2E35529E0C3A9E7600CA1CB7 /* helper-stubs.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -2067,10 +1963,8 @@
 			files = (
 				FFA572330AF18F1C0055A0F1 /* dnssd_ipc.c in Sources */,
 				FFA572340AF18F1C0055A0F1 /* dnssd_clientlib.c in Sources */,
+				222A3C6E1C1B777B003A6FFD /* DNSServiceDiscovery.c in Sources */,
 				FFA572350AF18F1C0055A0F1 /* dnssd_clientstub.c in Sources */,
-				FFA5724A0AF18FCC0055A0F1 /* DNSServiceDiscovery.c in Sources */,
-				FFC22AA40B00F42C00BAB070 /* DNSServiceDiscoveryRequest.defs in Sources */,
-				FFC22AA60B00F43100BAB070 /* DNSServiceDiscoveryReply.defs in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2080,10 +1974,8 @@
 			files = (
 				FFA5723F0AF18F450055A0F1 /* dnssd_ipc.c in Sources */,
 				FFA572400AF18F450055A0F1 /* dnssd_clientlib.c in Sources */,
+				222A3C6F1C1B777C003A6FFD /* DNSServiceDiscovery.c in Sources */,
 				FFA572410AF18F450055A0F1 /* dnssd_clientstub.c in Sources */,
-				FFA5724B0AF18FCC0055A0F1 /* DNSServiceDiscovery.c in Sources */,
-				FFC22AA30B00F42B00BAB070 /* DNSServiceDiscoveryRequest.defs in Sources */,
-				FFC22AA70B00F43100BAB070 /* DNSServiceDiscoveryReply.defs in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2093,10 +1985,8 @@
 			files = (
 				FFFA38660AEEDB2B0065B80A /* dnssd_ipc.c in Sources */,
 				FFFA38630AEEDB090065B80A /* dnssd_clientlib.c in Sources */,
+				222A3C6D1C1B777A003A6FFD /* DNSServiceDiscovery.c in Sources */,
 				FFFA38650AEEDB130065B80A /* dnssd_clientstub.c in Sources */,
-				FFA572490AF18FCC0055A0F1 /* DNSServiceDiscovery.c in Sources */,
-				FFC22AA20B00F42A00BAB070 /* DNSServiceDiscoveryRequest.defs in Sources */,
-				FFC22AA50B00F43000BAB070 /* DNSServiceDiscoveryReply.defs in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2107,11 +1997,6 @@
 			isa = PBXTargetDependency;
 			target = D284BE500ADD80740027CCDF /* mDNSResponder */;
 			targetProxy = 03067D670C83A3830022BE1F /* PBXContainerItemProxy */;
-		};
-		03067D6A0C83A3890022BE1F /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = D284BE750ADD80800027CCDF /* mDNSResponder debug */;
-			targetProxy = 03067D690C83A3890022BE1F /* PBXContainerItemProxy */;
 		};
 		03067D6C0C83A3920022BE1F /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -2127,6 +2012,11 @@
 			isa = PBXTargetDependency;
 			target = 03067D640C83A3700022BE1F /* Build Some */;
 			targetProxy = 03067D850C849CC30022BE1F /* PBXContainerItemProxy */;
+		};
+		0C2AAB321B6929F300113637 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 84C5B3341665529800C324A8 /* dns_services */;
+			targetProxy = 0C2AAB311B6929F300113637 /* PBXContainerItemProxy */;
 		};
 		2130257112400E9300AC839F /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -2242,256 +2132,21 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
-		03067D740C83A3CB0022BE1F /* Development */ = {
+		03067D740C83A3CB0022BE1F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_OPTIMIZATION_LEVEL = s;
 				PRODUCT_NAME = "Build Some";
 			};
-			name = Development;
+			name = Release;
 		};
-		213FB21A12028A7B002B3A08 /* Development */ = {
+		0C419F121BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				BUNDLE_LOADER = /usr/libexec/UserEventAgent;
-				CODE_SIGN_IDENTITY = "-";
+				CONFIGURATION_BUILD_DIR = "$(BUILD_DIR)/Debug";
+				CONFIGURATION_TEMP_DIR = "$(PROJECT_TEMP_DIR)/Debug";
 				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_MODEL_TUNING = G5;
-				INFOPLIST_FILE = "BonjourEvents-Info.plist";
-				INSTALL_PATH = /System/Library/UserEventPlugins/;
-				PREBINDING = NO;
-				PRODUCT_NAME = BonjourEvents;
-				PROVISIONING_PROFILE = "";
-				WRAPPER_EXTENSION = plugin;
-			};
-			name = Development;
-		};
-		2141DCF9123FFB5D0086D23E /* Development */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				PRODUCT_NAME = SystemLibraries;
-			};
-			name = Development;
-		};
-		2141DD0C123FFC7F0086D23E /* Development */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_OPTIMIZATION_LEVEL = s;
-				PRODUCT_NAME = SystemLibrariesStatic;
-			};
-			name = Development;
-		};
-		2141DD1E123FFCDB0086D23E /* Development */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"__DARWIN_NON_CANCELABLE=1",
-				);
-				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
-				INSTALLHDRS_COPY_PHASE = YES;
-				INSTALLHDRS_SCRIPT_PHASE = YES;
-				INSTALL_PATH = /usr/local/lib/system;
-				PREBINDING = NO;
-				PRODUCT_NAME = dns_sd;
-				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
-			};
-			name = Development;
-		};
-		2141DD25123FFD100086D23E /* Development */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"__DARWIN_NON_CANCELABLE=1",
-				);
-				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
-				INSTALL_PATH = /usr/local/lib/system;
-				PREBINDING = NO;
-				PRODUCT_NAME = dns_sd_debug;
-				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
-			};
-			name = Development;
-		};
-		2141DD2B123FFD2C0086D23E /* Development */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"__DARWIN_NON_CANCELABLE=1",
-				);
-				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
-				INSTALL_PATH = /usr/local/lib/system;
-				PREBINDING = NO;
-				PRODUCT_NAME = dns_sd_profile;
-				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
-			};
-			name = Development;
-		};
-		2E0405F20C31955500F13B59 /* Development */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "helper-entitlements.plist";
-				CODE_SIGN_IDENTITY = "-";
-				CONFIGURATION_BUILD_DIR = "$(BUILD_DIR)";
-				CONFIGURATION_TEMP_DIR = "$(PROJECT_TEMP_DIR)";
-				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
-				GCC_WARN_CHECK_SWITCH_STATEMENTS = NO;
-				HEADER_SEARCH_PATHS = (
-					"${CONFIGURATION_TEMP_DIR}",
-					"$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders",
-					"$(SDKROOT)/usr/local/include",
-				);
-				INSTALL_PATH = /usr/sbin;
-				LD_MAP_FILE_PATH = "$(TARGET_TEMP_DIR)/$(PRODUCT_NAME)-LinkMap-$(CURRENT_VARIANT)-$(CURRENT_ARCH).txt";
-				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
-				MACOSX_DEPLOYMENT_TARGET = 10.5;
-				"OTHER_CFLAGS[sdk=iphoneos*][arch=*]" = "$(inherited)";
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-lipsec",
-				);
-				"OTHER_LDFLAGS[sdk=macosx*][arch=*]" = (
-					"-lipsec",
-					"-Wl,-pie",
-				);
-				PREBINDING = NO;
-				PRODUCT_NAME = mDNSResponderHelper;
-				PROVISIONING_PROFILE = "";
-			};
-			name = Development;
-		};
-		4AE471680EAFF81900A6C5AD /* Development */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				PRODUCT_NAME = dns_sd.jar;
-			};
-			name = Development;
-		};
-		72FB5466166D5FB00090B2D9 /* Development */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
-				CLANG_CXX_LIBRARY = "libc++";
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				"CODE_SIGN_ENTITLEMENTS[sdk=*]" = "dnsctl-entitlements.plist";
-				CODE_SIGN_IDENTITY = "-";
-				COPY_PHASE_STRIP = NO;
-				GCC_C_LANGUAGE_STANDARD = gnu99;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
-				GCC_OPTIMIZATION_LEVEL = s;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				GCC_STRICT_ALIASING = YES;
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
-				GCC_WARN_64_TO_32_BIT_CONVERSION = NO;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
-				INSTALL_PATH = /usr/local/bin;
-				MACOSX_DEPLOYMENT_TARGET = 10.9;
-				ONLY_ACTIVE_ARCH = NO;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE = "";
-				SDKROOT = macosx;
-			};
-			name = Development;
-		};
-		84C5B3371665529800C324A8 /* Development */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
-				CLANG_CXX_LIBRARY = "libc++";
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				COPY_PHASE_STRIP = NO;
-				EXECUTABLE_PREFIX = lib;
-				GCC_C_LANGUAGE_STANDARD = gnu99;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
-				GCC_OPTIMIZATION_LEVEL = s;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
-				GCC_WARN_64_TO_32_BIT_CONVERSION = NO;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
-				INSTALL_PATH = /usr/lib;
-				MACOSX_DEPLOYMENT_TARGET = 10.8;
-				ONLY_ACTIVE_ARCH = NO;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
-			};
-			name = Development;
-		};
-		D284BE290ADD78180027CCDF /* Development */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				OTHER_CFLAGS = "";
-				OTHER_LDFLAGS = "";
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = "Build All";
-				SECTORDER_FLAGS = "";
-			};
-			name = Development;
-		};
-		D284BE2C0ADD78180027CCDF /* Development */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = 3F347CF5185D57CD00367B40 /* base.xcconfig */;
-			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "$(BUILD_DIR)";
 				DEAD_CODE_STRIPPING = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"__APPLE_USE_RFC_3542=1",
 					"_DNS_SD_LIBDISPATCH=1",
@@ -2500,6 +2155,9 @@
 					"mDNSResponderVersion=${MVERS}",
 					_LEGACY_NAT_TRAVERSAL_,
 					"_BUILDING_XCODE_PROJECT_=1",
+					"DEBUG=1",
+					"BONJOUR_ON_DEMAND=1",
+					"USE_LIBIDN=1",
 				);
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = NO;
@@ -2508,8 +2166,10 @@
 					"-DUSE_SYSTEMCONFIGURATION_PRIVATE_HEADERS",
 					"-fwrapv",
 				);
-				PREBINDING = NO;
+				SDKROOT = macosx.internal;
+				STRIP_INSTALLED_PRODUCT = NO;
 				STRIP_STYLE = debugging;
+				SUPPORTED_PLATFORMS = "macosx iphoneos";
 				WARNING_CFLAGS = (
 					"-W",
 					"-Wall",
@@ -2517,24 +2177,47 @@
 					"-Wno-four-char-constants",
 					"-Wno-unknown-pragmas",
 					"-Wshadow",
+					"-Wno-format",
+					"-Wformat-security",
 				);
 				YACC_GENERATED_FILE_STEM = Standard;
 			};
-			name = Development;
+			name = Debug;
 		};
-		D284BE6E0ADD80740027CCDF /* Development */ = {
+		0C419F131BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				"CODE_SIGN_ENTITLEMENTS[sdk=*]" = "mDNSResponder-entitlements.plist";
+				PRODUCT_NAME = "Build All";
+			};
+			name = Debug;
+		};
+		0C419F141BA20DF600A70FF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "Build Some";
+			};
+			name = Debug;
+		};
+		0C419F151BA20DF600A70FF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "Build All";
+			};
+			name = Debug;
+		};
+		0C419F161BA20DF600A70FF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"APPLY_RULES_IN_COPY_FILES[sdk=appletvos*]" = YES;
+				"APPLY_RULES_IN_COPY_FILES[sdk=iphoneos*]" = YES;
+				"APPLY_RULES_IN_COPY_FILES[sdk=watchos*]" = YES;
+				CODE_SIGN_ENTITLEMENTS = "mDNSResponder-entitlements.plist";
 				CODE_SIGN_IDENTITY = "-";
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SDKROOT)/$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks",
+					"$(SDKROOT)$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks",
 				);
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(SDKROOT)/$(SYSTEM_LIBRARY_DIR)/Frameworks/Security.framework/PrivateHeaders",
@@ -2547,156 +2230,103 @@
 				);
 				INSTALL_PATH = /usr/sbin;
 				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
-				MACOSX_DEPLOYMENT_TARGET = 10.5;
+				MACOSX_DEPLOYMENT_TARGET = 10.10;
 				ORDER_FILE = "${SRCROOT}/mDNSResponder.order";
-				OTHER_CFLAGS = (
-					"$(inherited)",
-					"-no-cpp-precomp",
-				);
-				"OTHER_CFLAGS[sdk=iphoneos*][arch=*]" = "$(inherited)";
 				OTHER_LDFLAGS = "";
 				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = (
-					"-Wl,-pie",
 					"-weak_framework",
 					DeviceToDeviceManager,
 					"-lMobileGestalt",
-					"-lcupolicy",
 				);
 				"OTHER_LDFLAGS[sdk=macosx*][arch=*]" = (
-					"-Wl,-pie",
 					"-lAWACS",
 					"-weak_framework",
 					WebFilterDNS,
 					"-weak_framework",
 					DeviceToDeviceManager,
 				);
-				"OTHER_LDFLAGS[sdk=macosx10.6][arch=*]" = "-lAWACS";
-				OTHER_REZFLAGS = "";
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=appletvos*]" = binary;
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=iphoneos*]" = binary;
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=watchos*]" = binary;
 				PRODUCT_NAME = mDNSResponder;
 				PROVISIONING_PROFILE = "";
-				REZ_EXECUTABLE = YES;
 			};
-			name = Development;
+			name = Debug;
 		};
-		D284BE930ADD80800027CCDF /* Development */ = {
+		0C419F171BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(SDKROOT)/$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks",
-				);
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_OPTIMIZATION_LEVEL = s;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"MDNS_DEBUGMSGS=1",
-				);
+				"APPLY_RULES_IN_COPY_FILES[sdk=appletvos*]" = YES;
+				"APPLY_RULES_IN_COPY_FILES[sdk=iphoneos*]" = YES;
+				"APPLY_RULES_IN_COPY_FILES[sdk=watchos*]" = YES;
+				CODE_SIGN_ENTITLEMENTS = "helper-entitlements.plist";
+				CODE_SIGN_IDENTITY = "-";
 				HEADER_SEARCH_PATHS = (
-					"$(SDKROOT)/$(SYSTEM_LIBRARY_DIR)/Frameworks/Security.framework/PrivateHeaders",
-					../mDNSShared,
-					"${SYSTEM_LIBRARY_DIR}/Frameworks/System.framework/PrivateHeaders",
-					"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers",
 					"${CONFIGURATION_TEMP_DIR}",
-					"$(SDKROOT)/usr/include/libxml2",
+					"$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders",
 					"$(SDKROOT)/usr/local/include",
 				);
+				INSTALL_PATH = /usr/sbin;
 				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
-				MACOSX_DEPLOYMENT_TARGET = 10.5;
-				OTHER_CFLAGS = (
-					"$(inherited)",
-					"-no-cpp-precomp",
-				);
-				OTHER_LDFLAGS = "";
-				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = (
-					"-Wl,-pie",
-					"-weak_framework",
-					DeviceToDeviceManager,
-					"-lMobileGestalt",
-					"-lcupolicy",
-				);
-				"OTHER_LDFLAGS[sdk=macosx*][arch=*]" = (
-					"-Wl,-pie",
-					"-lAWACS",
-					"-weak_framework",
-					WebFilterDNS,
-					"-weak_framework",
-					DeviceToDeviceManager,
-				);
-				"OTHER_LDFLAGS[sdk=macosx10.6][arch=*]" = "-lAWACS";
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = mDNSResponder.debug;
-				REZ_EXECUTABLE = YES;
-				SECTORDER_FLAGS = (
-					"-sectorder",
-					__TEXT,
-					__text,
-					mDNSResponder.order,
-				);
-				SKIP_INSTALL = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.10;
+				OTHER_LDFLAGS = "-lipsec";
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=appletvos*]" = binary;
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=iphoneos*]" = binary;
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=watchos*]" = binary;
+				PRODUCT_NAME = mDNSResponderHelper;
+				PROVISIONING_PROFILE = "";
 			};
-			name = Development;
+			name = Debug;
 		};
-		D284BEAE0ADD80920027CCDF /* Development */ = {
+		0C419F181BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				HEADER_SEARCH_PATHS = (
 					../mDNSShared,
 					"${SYSTEM_LIBRARY_DIR}/Frameworks/System.framework/PrivateHeaders",
 				);
 				INSTALL_PATH = /usr/bin;
-				OTHER_CFLAGS = "-no-cpp-precomp";
-				OTHER_LDFLAGS = "";
-				OTHER_REZFLAGS = "";
 				PRODUCT_NAME = "dns-sd";
-				REZ_EXECUTABLE = YES;
-				SECTORDER_FLAGS = "";
 			};
-			name = Development;
+			name = Debug;
 		};
-		D284BEBC0ADD809A0027CCDF /* Development */ = {
+		0C419F191BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				DYLIB_COMPATIBILITY_VERSION = 1;
-				DYLIB_CURRENT_VERSION = 1;
-				EXECUTABLE_EXTENSION = jnilib;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
-				HEADER_SEARCH_PATHS = (
-					../mDNSShared,
-					"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/A/Headers",
-					"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/1.3.1/Headers",
-					"${PROJECT_DERIVED_FILE_DIR}",
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = "dnsctl-entitlements.plist";
+				CODE_SIGN_IDENTITY = "-";
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
 				);
-				INSTALL_PATH = /usr/lib/java;
-				LIBRARY_STYLE = DYNAMIC;
-				MACH_O_TYPE = mh_dylib;
-				OTHER_CFLAGS = "";
-				OTHER_LIBTOOL_FLAGS = "";
-				OTHER_REZFLAGS = "";
-				PRODUCT_NAME = libjdns_sd;
-				REZ_EXECUTABLE = YES;
-				SECTORDER_FLAGS = "";
+				GCC_STRICT_ALIASING = YES;
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = NO;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INSTALL_PATH = /usr/local/bin;
+				MACOSX_DEPLOYMENT_TARGET = 10.9;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE = "";
+				SDKROOT = macosx;
 			};
-			name = Development;
+			name = Debug;
 		};
-		D284BED70ADD80A20027CCDF /* Development */ = {
+		0C419F1A1BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				FRAMEWORK_SEARCH_PATHS = "";
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				HEADER_SEARCH_PATHS = (
 					"${SYSTEM_LIBRARY_DIR}/Frameworks/System.framework/PrivateHeaders",
 					"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers",
@@ -2705,71 +2335,155 @@
 				);
 				INSTALL_PATH = /usr/sbin;
 				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
-				MACOSX_DEPLOYMENT_TARGET = 10.5;
-				OTHER_CFLAGS = (
-					"-no-cpp-precomp",
-					"-UAPPLE_OSX_mDNSResponder",
-				);
-				OTHER_LDFLAGS = "";
-				"OTHER_LDFLAGS[sdk=macosx*][arch=*]" = "-Wl,-pie";
+				MACOSX_DEPLOYMENT_TARGET = 10.10;
+				OTHER_CFLAGS = "-UAPPLE_OSX_mDNSResponder";
 				PRODUCT_NAME = dnsextd;
-				SECTORDER_FLAGS = "";
 			};
-			name = Development;
+			name = Debug;
 		};
-		D284BEE60ADD80A70027CCDF /* Development */ = {
+		0C419F1B1BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				INSTALL_PATH = "/Library/Application Support/Bonjour";
-				MACOSX_DEPLOYMENT_TARGET = 10.5;
-				OTHER_CFLAGS = "";
-				OTHER_LDFLAGS = "";
-				"OTHER_LDFLAGS[sdk=macosx*]" = "-Wl,-pie";
-				OTHER_REZFLAGS = "";
+				MACOSX_DEPLOYMENT_TARGET = 10.6;
+				OTHER_LDFLAGS = "-Wl,-pie";
 				PRODUCT_NAME = ddnswriteconfig;
-				REZ_EXECUTABLE = YES;
-				SECTORDER_FLAGS = "";
 			};
-			name = Development;
+			name = Debug;
 		};
-		D284BF090ADD80B00027CCDF /* Development */ = {
+		0C419F1C1BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				EXPORTED_SYMBOLS_FILE = "";
-				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_ENABLE_OBJC_GC = supported;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
 				INFOPLIST_FILE = "PreferencePane/Info-PreferencePane.plist";
 				INSTALL_PATH = /AppleInternal/Library/PreferencePanes;
-				MACOSX_DEPLOYMENT_TARGET = 10.5;
-				OTHER_CFLAGS = "";
-				OTHER_LDFLAGS = "-twolevel_namespace";
-				OTHER_REZFLAGS = "";
+				MACOSX_DEPLOYMENT_TARGET = 10.6;
 				PRODUCT_NAME = Bonjour;
-				SECTORDER_FLAGS = "";
 				WRAPPER_EXTENSION = prefPane;
 			};
-			name = Development;
+			name = Debug;
 		};
-		FFA572380AF18F1C0055A0F1 /* Development */ = {
+		0C419F1D1BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				COPY_PHASE_STRIP = NO;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				BUNDLE_LOADER = /usr/libexec/UserEventAgent;
+				CODE_SIGN_IDENTITY = "-";
+				INFOPLIST_FILE = "BonjourEvents-Info.plist";
+				INSTALL_PATH = /System/Library/UserEventPlugins/;
+				PRODUCT_NAME = BonjourEvents;
+				PROVISIONING_PROFILE = "";
+				WRAPPER_EXTENSION = plugin;
+			};
+			name = Debug;
+		};
+		0C419F1E1BA20DF600A70FF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = SystemLibraries;
+			};
+			name = Debug;
+		};
+		0C419F1F1BA20DF600A70FF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = SystemLibrariesStatic;
+			};
+			name = Debug;
+		};
+		0C419F201BA20DF600A70FF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = SystemLibrariesDynamic;
+			};
+			name = Debug;
+		};
+		0C419F211BA20DF600A70FF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"__DARWIN_NON_CANCELABLE=1",
+				);
+				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
+				INSTALLHDRS_COPY_PHASE = YES;
+				INSTALLHDRS_SCRIPT_PHASE = YES;
+				INSTALL_PATH = /usr/local/lib/system;
+				PRODUCT_NAME = dns_sd;
+				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
+			};
+			name = Debug;
+		};
+		0C419F221BA20DF600A70FF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"__DARWIN_NON_CANCELABLE=1",
+				);
+				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
+				INSTALL_PATH = /usr/local/lib/system;
+				PRODUCT_NAME = dns_sd_debug;
+				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
+			};
+			name = Debug;
+		};
+		0C419F231BA20DF600A70FF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"__DARWIN_NON_CANCELABLE=1",
+				);
+				GENERATE_PROFILING_CODE = YES;
+				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
+				INSTALL_PATH = /usr/local/lib/system;
+				PRODUCT_NAME = dns_sd_profile;
+				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
+			};
+			name = Debug;
+		};
+		0C419F241BA20DF600A70FF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
 				DYLIB_CURRENT_VERSION = "$(RC_ProjectSourceVersion)";
 				EXECUTABLE_EXTENSION = dylib;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"__DARWIN_NON_CANCELABLE=1",
+				);
+				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
+				INSTALLHDRS_COPY_PHASE = YES;
+				INSTALLHDRS_SCRIPT_PHASE = YES;
+				INSTALL_PATH = /usr/lib/system;
+				INTERPOSITION_SIM_SUFFIX = "";
+				"INTERPOSITION_SIM_SUFFIX[sdk=iphonesimulator*]" = _sim;
+				LINK_WITH_STANDARD_LIBRARIES = NO;
+				OTHER_LDFLAGS = (
+					"-Wl,-umbrella,System",
+					"-L/usr/lib/system",
+					"-ldyld",
+					"-lcompiler_rt",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_kernel",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_platform",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_pthread",
+					"-lsystem_malloc",
+					"-lsystem_c",
+					"-lsystem_blocks",
+					"-ldispatch",
+					"-llaunch",
+					"-lsystem_asl",
+				);
+				PRODUCT_NAME = libsystem_dnssd;
+			};
+			name = Debug;
+		};
+		0C419F251BA20DF600A70FF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DYLIB_CURRENT_VERSION = "$(RC_ProjectSourceVersion)";
+				EXECUTABLE_EXTENSION = dylib;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
 					"__DARWIN_NON_CANCELABLE=1",
@@ -2796,17 +2510,13 @@
 				);
 				PRODUCT_NAME = libsystem_dnssd_debug;
 			};
-			name = Development;
+			name = Debug;
 		};
-		FFA572440AF18F450055A0F1 /* Development */ = {
+		0C419F261BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				COPY_PHASE_STRIP = NO;
 				DYLIB_CURRENT_VERSION = "$(RC_ProjectSourceVersion)";
 				EXECUTABLE_EXTENSION = dylib;
-				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -2835,45 +2545,554 @@
 				);
 				PRODUCT_NAME = libsystem_dnssd_profile;
 			};
-			name = Development;
+			name = Debug;
 		};
-		FFA5726F0AF191200055A0F1 /* Development */ = {
+		0C419F271BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				PRODUCT_NAME = SystemLibrariesDynamic;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				EXECUTABLE_PREFIX = lib;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = NO;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INSTALL_PATH = /usr/lib;
+				MACOSX_DEPLOYMENT_TARGET = 10.8;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
 			};
-			name = Development;
+			name = Debug;
 		};
-		FFB7657F0AEED99D00583A2C /* Development */ = {
+		0C419F281BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				PRODUCT_NAME = "Build All";
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				EXECUTABLE_EXTENSION = jnilib;
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				HEADER_SEARCH_PATHS = (
+					../mDNSShared,
+					"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/A/Headers",
+					"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/1.3.1/Headers",
+					"${PROJECT_DERIVED_FILE_DIR}",
+				);
+				INSTALL_PATH = /usr/lib/java;
+				LIBRARY_STYLE = DYNAMIC;
+				MACH_O_TYPE = mh_dylib;
+				PRODUCT_NAME = libjdns_sd;
 			};
-			name = Development;
+			name = Debug;
 		};
-		FFB7658A0AEED9FB00583A2C /* Development */ = {
+		0C419F291BA20DF600A70FF7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CONFIGURATION_BUILD_DIR = "${BUILD_DIR}";
-				CONFIGURATION_TEMP_DIR = "${BUILD_DIR}/mDNSResponder.build";
-				COPY_PHASE_STRIP = NO;
-				DYLIB_CURRENT_VERSION = "$(RC_ProjectSourceVersion)";
-				EXECUTABLE_EXTENSION = dylib;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				PRODUCT_NAME = dns_sd.jar;
+			};
+			name = Debug;
+		};
+		213FB21A12028A7B002B3A08 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				BUNDLE_LOADER = /usr/libexec/UserEventAgent;
+				CODE_SIGN_IDENTITY = "-";
+				INFOPLIST_FILE = "BonjourEvents-Info.plist";
+				INSTALL_PATH = /System/Library/UserEventPlugins/;
+				PRODUCT_NAME = BonjourEvents;
+				PROVISIONING_PROFILE = "";
+				WRAPPER_EXTENSION = plugin;
+			};
+			name = Release;
+		};
+		2141DCF9123FFB5D0086D23E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = SystemLibraries;
+			};
+			name = Release;
+		};
+		2141DD0C123FFC7F0086D23E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = SystemLibrariesStatic;
+			};
+			name = Release;
+		};
+		2141DD1E123FFCDB0086D23E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
 					"__DARWIN_NON_CANCELABLE=1",
 				);
+				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
+				INSTALLHDRS_COPY_PHASE = YES;
+				INSTALLHDRS_SCRIPT_PHASE = YES;
+				INSTALL_PATH = /usr/local/lib/system;
+				PRODUCT_NAME = dns_sd;
+				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
+			};
+			name = Release;
+		};
+		2141DD25123FFD100086D23E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"__DARWIN_NON_CANCELABLE=1",
+				);
+				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
+				INSTALL_PATH = /usr/local/lib/system;
+				PRODUCT_NAME = dns_sd_debug;
+				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
+			};
+			name = Release;
+		};
+		2141DD2B123FFD2C0086D23E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"__DARWIN_NON_CANCELABLE=1",
+				);
+				GENERATE_PROFILING_CODE = YES;
+				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
+				INSTALL_PATH = /usr/local/lib/system;
+				PRODUCT_NAME = dns_sd_profile;
+				"SKIP_INSTALL[sdk=iphonesimulator*]" = YES;
+			};
+			name = Release;
+		};
+		2E0405F20C31955500F13B59 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"APPLY_RULES_IN_COPY_FILES[sdk=appletvos*]" = YES;
+				"APPLY_RULES_IN_COPY_FILES[sdk=iphoneos*]" = YES;
+				"APPLY_RULES_IN_COPY_FILES[sdk=watchos*]" = YES;
+				CODE_SIGN_ENTITLEMENTS = "helper-entitlements.plist";
+				CODE_SIGN_IDENTITY = "-";
+				HEADER_SEARCH_PATHS = (
+					"${CONFIGURATION_TEMP_DIR}",
+					"$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders",
+					"$(SDKROOT)/usr/local/include",
+				);
+				INSTALL_PATH = /usr/sbin;
+				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
+				MACOSX_DEPLOYMENT_TARGET = 10.10;
+				OTHER_LDFLAGS = "-lipsec";
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=appletvos*]" = binary;
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=iphoneos*]" = binary;
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=watchos*]" = binary;
+				PRODUCT_NAME = mDNSResponderHelper;
+				PROVISIONING_PROFILE = "";
+			};
+			name = Release;
+		};
+		37AF80271BF6997A00D657F6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				PRODUCT_NAME = dns_sd.jar;
+			};
+			name = Release;
+		};
+		37AF80281BF6997A00D657F6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				PRODUCT_NAME = unittests;
+			};
+			name = Release;
+		};
+		37AF80291BF6997A00D657F6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COPY_PHASE_STRIP = NO;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				PRODUCT_NAME = unittests;
+			};
+			name = Debug;
+		};
+		37DDE9321BA383610092AC61 /* Development */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = "$(CLANG_WARN_SUSPICIOUS_IMPLICIT_CONVERSION)";
+				CLANG_WARN_CONSTANT_CONVERSION = "$(CLANG_WARN_SUSPICIOUS_IMPLICIT_CONVERSION)";
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_EMPTY_BODY = NO;
+				CLANG_WARN_ENUM_CONVERSION = "$(CLANG_WARN_SUSPICIOUS_IMPLICIT_CONVERSION)";
+				CLANG_WARN_INT_CONVERSION = "$(CLANG_WARN_SUSPICIOUS_IMPLICIT_CONVERSION)";
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_UNREACHABLE_CODE = NO;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = NO;
+				GCC_WARN_ABOUT_RETURN_TYPE = NO;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = NO;
+				GCC_WARN_UNUSED_FUNCTION = NO;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.11;
+				MTL_ENABLE_DEBUG_INFO = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRIP_INSTALLED_PRODUCT = NO;
+			};
+			name = Development;
+		};
+		72FB5466166D5FB00090B2D9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = "dnsctl-entitlements.plist";
+				CODE_SIGN_IDENTITY = "-";
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_STRICT_ALIASING = YES;
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = NO;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INSTALL_PATH = /usr/local/bin;
+				MACOSX_DEPLOYMENT_TARGET = 10.9;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE = "";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		84C5B3371665529800C324A8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				EXECUTABLE_PREFIX = lib;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = NO;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INSTALL_PATH = /usr/lib;
+				MACOSX_DEPLOYMENT_TARGET = 10.8;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		D284BE290ADD78180027CCDF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "Build All";
+			};
+			name = Release;
+		};
+		D284BE2C0ADD78180027CCDF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CONFIGURATION_BUILD_DIR = "$(BUILD_DIR)/Release";
+				CONFIGURATION_TEMP_DIR = "$(PROJECT_TEMP_DIR)/Release";
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"__APPLE_USE_RFC_3542=1",
+					"_DNS_SD_LIBDISPATCH=1",
+					"APPLE_OSX_mDNSResponder=1",
+					"__MigTypeCheck=1",
+					"mDNSResponderVersion=${MVERS}",
+					_LEGACY_NAT_TRAVERSAL_,
+					"_BUILDING_XCODE_PROJECT_=1",
+					"BONJOUR_ON_DEMAND=1",
+					"USE_LIBIDN=1",
+				);
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = NO;
+				MVERS = "\"(Engineering Build)\"";
+				OTHER_CFLAGS = (
+					"-DUSE_SYSTEMCONFIGURATION_PRIVATE_HEADERS",
+					"-fwrapv",
+				);
+				SDKROOT = macosx.internal;
+				STRIP_STYLE = debugging;
+				WARNING_CFLAGS = (
+					"-W",
+					"-Wall",
+					"-Wmissing-prototypes",
+					"-Wno-four-char-constants",
+					"-Wno-unknown-pragmas",
+					"-Wshadow",
+					"-Wno-format",
+					"-Wformat-security",
+				);
+				YACC_GENERATED_FILE_STEM = Standard;
+			};
+			name = Release;
+		};
+		D284BE6E0ADD80740027CCDF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"APPLY_RULES_IN_COPY_FILES[sdk=appletvos*]" = YES;
+				"APPLY_RULES_IN_COPY_FILES[sdk=iphoneos*]" = YES;
+				"APPLY_RULES_IN_COPY_FILES[sdk=watchos*]" = YES;
+				CODE_SIGN_ENTITLEMENTS = "mDNSResponder-entitlements.plist";
+				CODE_SIGN_IDENTITY = "-";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SDKROOT)/$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks",
+					"$(SDKROOT)$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks",
+				);
 				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(SDKROOT)/$(SYSTEM_LIBRARY_DIR)/Frameworks/Security.framework/PrivateHeaders",
+					../mDNSShared,
+					"${SYSTEM_LIBRARY_DIR}/Frameworks/System.framework/PrivateHeaders",
+					"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers",
+					"${CONFIGURATION_TEMP_DIR}",
+					"$(SDKROOT)/usr/include/libxml2",
+					"$(SDKROOT)/usr/local/include/",
+				);
+				INSTALL_PATH = /usr/sbin;
+				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
+				MACOSX_DEPLOYMENT_TARGET = 10.10;
+				ORDER_FILE = "${SRCROOT}/mDNSResponder.order";
+				OTHER_LDFLAGS = "";
+				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = (
+					"-weak_framework",
+					DeviceToDeviceManager,
+					"-lMobileGestalt",
+				);
+				"OTHER_LDFLAGS[sdk=macosx*][arch=*]" = (
+					"-lAWACS",
+					"-weak_framework",
+					WebFilterDNS,
+					"-weak_framework",
+					DeviceToDeviceManager,
+				);
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=appletvos*]" = binary;
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=iphoneos*]" = binary;
+				"PLIST_FILE_OUTPUT_FORMAT[sdk=watchos*]" = binary;
+				PRODUCT_NAME = mDNSResponder;
+				PROVISIONING_PROFILE = "";
+			};
+			name = Release;
+		};
+		D284BEAE0ADD80920027CCDF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				HEADER_SEARCH_PATHS = (
+					../mDNSShared,
+					"${SYSTEM_LIBRARY_DIR}/Frameworks/System.framework/PrivateHeaders",
+				);
+				INSTALL_PATH = /usr/bin;
+				PRODUCT_NAME = "dns-sd";
+			};
+			name = Release;
+		};
+		D284BEBC0ADD809A0027CCDF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				EXECUTABLE_EXTENSION = jnilib;
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				HEADER_SEARCH_PATHS = (
+					../mDNSShared,
+					"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/A/Headers",
+					"${SYSTEM_LIBRARY_DIR}/Frameworks/JavaVM.framework/Versions/1.3.1/Headers",
+					"${PROJECT_DERIVED_FILE_DIR}",
+				);
+				INSTALL_PATH = /usr/lib/java;
+				LIBRARY_STYLE = DYNAMIC;
+				MACH_O_TYPE = mh_dylib;
+				PRODUCT_NAME = libjdns_sd;
+			};
+			name = Release;
+		};
+		D284BED70ADD80A20027CCDF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				HEADER_SEARCH_PATHS = (
+					"${SYSTEM_LIBRARY_DIR}/Frameworks/System.framework/PrivateHeaders",
+					"${APPLE_INTERNAL_DEVELOPER_DIR}/Headers",
+					"${CONFIGURATION_TEMP_DIR}",
+					/System/Library/Frameworks/System.Framework/PrivateHeaders,
+				);
+				INSTALL_PATH = /usr/sbin;
+				LIBRARY_SEARCH_PATHS = "\"${CONFIGURATION_TEMP_DIR}\"";
+				MACOSX_DEPLOYMENT_TARGET = 10.10;
+				OTHER_CFLAGS = "-UAPPLE_OSX_mDNSResponder";
+				PRODUCT_NAME = dnsextd;
+			};
+			name = Release;
+		};
+		D284BEE60ADD80A70027CCDF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INSTALL_PATH = "/Library/Application Support/Bonjour";
+				MACOSX_DEPLOYMENT_TARGET = 10.6;
+				OTHER_LDFLAGS = "-Wl,-pie";
+				PRODUCT_NAME = ddnswriteconfig;
+			};
+			name = Release;
+		};
+		D284BF090ADD80B00027CCDF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_ENABLE_OBJC_GC = supported;
+				INFOPLIST_FILE = "PreferencePane/Info-PreferencePane.plist";
+				INSTALL_PATH = /AppleInternal/Library/PreferencePanes;
+				MACOSX_DEPLOYMENT_TARGET = 10.6;
+				PRODUCT_NAME = Bonjour;
+				WRAPPER_EXTENSION = prefPane;
+			};
+			name = Release;
+		};
+		FFA572380AF18F1C0055A0F1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DYLIB_CURRENT_VERSION = "$(RC_ProjectSourceVersion)";
+				EXECUTABLE_EXTENSION = dylib;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"__DARWIN_NON_CANCELABLE=1",
+				);
+				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
+				INSTALL_PATH = /usr/lib/system;
+				INTERPOSITION_SIM_SUFFIX = "";
+				"INTERPOSITION_SIM_SUFFIX[sdk=iphonesimulator*]" = _sim;
+				LINK_WITH_STANDARD_LIBRARIES = NO;
+				OTHER_LDFLAGS = (
+					"-Wl,-umbrella,System",
+					"-L/usr/lib/system",
+					"-ldyld",
+					"-lcompiler_rt",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_kernel",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_platform",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_pthread",
+					"-lsystem_malloc",
+					"-lsystem_c",
+					"-lsystem_blocks",
+					"-ldispatch",
+					"-llaunch",
+					"-lsystem_asl",
+				);
+				PRODUCT_NAME = libsystem_dnssd_debug;
+			};
+			name = Release;
+		};
+		FFA572440AF18F450055A0F1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DYLIB_CURRENT_VERSION = "$(RC_ProjectSourceVersion)";
+				EXECUTABLE_EXTENSION = dylib;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"__DARWIN_NON_CANCELABLE=1",
+				);
+				GENERATE_PROFILING_CODE = YES;
+				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
+				INSTALL_PATH = /usr/lib/system;
+				INTERPOSITION_SIM_SUFFIX = "";
+				"INTERPOSITION_SIM_SUFFIX[sdk=iphonesimulator*]" = _sim;
+				LINK_WITH_STANDARD_LIBRARIES = NO;
+				OTHER_LDFLAGS = (
+					"-Wl,-umbrella,System",
+					"-L/usr/lib/system",
+					"-ldyld",
+					"-lcompiler_rt",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_kernel",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_platform",
+					"-lsystem$(INTERPOSITION_SIM_SUFFIX)_pthread",
+					"-lsystem_malloc",
+					"-lsystem_c",
+					"-lsystem_blocks",
+					"-ldispatch",
+					"-llaunch",
+					"-lsystem_asl",
+				);
+				PRODUCT_NAME = libsystem_dnssd_profile;
+			};
+			name = Release;
+		};
+		FFA5726F0AF191200055A0F1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = SystemLibrariesDynamic;
+			};
+			name = Release;
+		};
+		FFB7657F0AEED99D00583A2C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "Build All";
+			};
+			name = Release;
+		};
+		FFB7658A0AEED9FB00583A2C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DYLIB_CURRENT_VERSION = "$(RC_ProjectSourceVersion)";
+				EXECUTABLE_EXTENSION = dylib;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"__DARWIN_NON_CANCELABLE=1",
+				);
 				HEADER_SEARCH_PATHS = "$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders/";
 				INSTALLHDRS_COPY_PHASE = YES;
 				INSTALLHDRS_SCRIPT_PHASE = YES;
@@ -2898,7 +3117,7 @@
 				);
 				PRODUCT_NAME = libsystem_dnssd;
 			};
-			name = Development;
+			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
@@ -2906,63 +3125,81 @@
 		03067D730C83A3CB0022BE1F /* Build configuration list for PBXAggregateTarget "Build Some" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				03067D740C83A3CB0022BE1F /* Development */,
+				03067D740C83A3CB0022BE1F /* Release */,
+				0C419F141BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		213FB21B12028A7C002B3A08 /* Build configuration list for PBXNativeTarget "BonjourEvents" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				213FB21A12028A7B002B3A08 /* Development */,
+				213FB21A12028A7B002B3A08 /* Release */,
+				0C419F1D1BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		2141DD08123FFB830086D23E /* Build configuration list for PBXAggregateTarget "SystemLibraries" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				2141DCF9123FFB5D0086D23E /* Development */,
+				2141DCF9123FFB5D0086D23E /* Release */,
+				0C419F1E1BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		2141DD18123FFC990086D23E /* Build configuration list for PBXAggregateTarget "SystemLibrariesStatic" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				2141DD0C123FFC7F0086D23E /* Development */,
+				2141DD0C123FFC7F0086D23E /* Release */,
+				0C419F1F1BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		2141DD1F123FFCF90086D23E /* Build configuration list for PBXNativeTarget "libdns_sd_static" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				2141DD1E123FFCDB0086D23E /* Development */,
+				2141DD1E123FFCDB0086D23E /* Release */,
+				0C419F211BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		2141DD35123FFD3B0086D23E /* Build configuration list for PBXNativeTarget "libdns_sd_debug_static" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				2141DD25123FFD100086D23E /* Development */,
+				2141DD25123FFD100086D23E /* Release */,
+				0C419F221BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		2141DD36123FFD3B0086D23E /* Build configuration list for PBXNativeTarget "libdns_sd_profile_static" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				2141DD2B123FFD2C0086D23E /* Development */,
+				2141DD2B123FFD2C0086D23E /* Release */,
+				0C419F231BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		2E0405F30C31956600F13B59 /* Build configuration list for PBXNativeTarget "mDNSResponderHelper" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				2E0405F20C31955500F13B59 /* Development */,
+				2E0405F20C31955500F13B59 /* Release */,
+				0C419F171BA20DF600A70FF7 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		37DDE9311BA383610092AC61 /* Build configuration list for PBXNativeTarget "unittests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				37DDE9321BA383610092AC61 /* Development */,
+				37AF80281BF6997A00D657F6 /* Release */,
+				37AF80291BF6997A00D657F6 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Development;
@@ -2970,138 +3207,146 @@
 		4AE471770EAFF84000A6C5AD /* Build configuration list for PBXLegacyTarget "dns_sd.jar" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				4AE471680EAFF81900A6C5AD /* Development */,
+				0C419F291BA20DF600A70FF7 /* Debug */,
+				37AF80271BF6997A00D657F6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		72FB5465166D5FB00090B2D9 /* Build configuration list for PBXNativeTarget "dnsctl" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				72FB5466166D5FB00090B2D9 /* Development */,
+				72FB5466166D5FB00090B2D9 /* Release */,
+				0C419F191BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		84C5B3361665529800C324A8 /* Build configuration list for PBXNativeTarget "dns_services" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				84C5B3371665529800C324A8 /* Development */,
+				84C5B3371665529800C324A8 /* Release */,
+				0C419F271BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		D284BE280ADD78180027CCDF /* Build configuration list for PBXAggregateTarget "Build More" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D284BE290ADD78180027CCDF /* Development */,
+				D284BE290ADD78180027CCDF /* Release */,
+				0C419F131BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		D284BE2B0ADD78180027CCDF /* Build configuration list for PBXProject "mDNSResponder" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D284BE2C0ADD78180027CCDF /* Development */,
+				D284BE2C0ADD78180027CCDF /* Release */,
+				0C419F121BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		D284BE6D0ADD80740027CCDF /* Build configuration list for PBXNativeTarget "mDNSResponder" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D284BE6E0ADD80740027CCDF /* Development */,
+				D284BE6E0ADD80740027CCDF /* Release */,
+				0C419F161BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
-		};
-		D284BE920ADD80800027CCDF /* Build configuration list for PBXNativeTarget "mDNSResponder debug" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				D284BE930ADD80800027CCDF /* Development */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		D284BEAD0ADD80920027CCDF /* Build configuration list for PBXNativeTarget "dns-sd tool" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D284BEAE0ADD80920027CCDF /* Development */,
+				D284BEAE0ADD80920027CCDF /* Release */,
+				0C419F181BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		D284BEBB0ADD809A0027CCDF /* Build configuration list for PBXNativeTarget "libjdns_sd.jnilib" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D284BEBC0ADD809A0027CCDF /* Development */,
+				D284BEBC0ADD809A0027CCDF /* Release */,
+				0C419F281BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		D284BED60ADD80A20027CCDF /* Build configuration list for PBXNativeTarget "dnsextd" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D284BED70ADD80A20027CCDF /* Development */,
+				D284BED70ADD80A20027CCDF /* Release */,
+				0C419F1A1BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		D284BEE50ADD80A70027CCDF /* Build configuration list for PBXNativeTarget "ddnswriteconfig" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D284BEE60ADD80A70027CCDF /* Development */,
+				D284BEE60ADD80A70027CCDF /* Release */,
+				0C419F1B1BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		D284BF080ADD80B00027CCDF /* Build configuration list for PBXNativeTarget "PreferencePane" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D284BF090ADD80B00027CCDF /* Development */,
+				D284BF090ADD80B00027CCDF /* Release */,
+				0C419F1C1BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		FFA572370AF18F1C0055A0F1 /* Build configuration list for PBXNativeTarget "libdns_sd_debug_dynamic" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				FFA572380AF18F1C0055A0F1 /* Development */,
+				FFA572380AF18F1C0055A0F1 /* Release */,
+				0C419F251BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		FFA572430AF18F450055A0F1 /* Build configuration list for PBXNativeTarget "libdns_sd_profile_dynamic" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				FFA572440AF18F450055A0F1 /* Development */,
+				FFA572440AF18F450055A0F1 /* Release */,
+				0C419F261BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		FFA5726E0AF191200055A0F1 /* Build configuration list for PBXAggregateTarget "SystemLibrariesDynamic" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				FFA5726F0AF191200055A0F1 /* Development */,
+				FFA5726F0AF191200055A0F1 /* Release */,
+				0C419F201BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		FFB7657E0AEED99D00583A2C /* Build configuration list for PBXAggregateTarget "Build All" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				FFB7657F0AEED99D00583A2C /* Development */,
+				FFB7657F0AEED99D00583A2C /* Release */,
+				0C419F151BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 		FFB765890AEED9FB00583A2C /* Build configuration list for PBXNativeTarget "libdns_sd_dynamic" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				FFB7658A0AEED9FB00583A2C /* Development */,
+				FFB7658A0AEED9FB00583A2C /* Release */,
+				0C419F241BA20DF600A70FF7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Development;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};

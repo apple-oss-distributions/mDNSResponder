@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2012-2015 Apple Inc. All rights reserved.
  *
  * xpc_services.c
  * mDNSResponder 
@@ -15,8 +15,7 @@
 
 #include "dnsproxy.h"        // DNSProxyInit/ProxyUDPCallback/ProxyTCPCallback
 #include "mDNSMacOSX.h"      // KQueueLock/KQueueUnlock
-#include <xpc/xpc.h>
-#include <xpc/private.h>     // xpc_connection_copy_entitlement_value 
+#include <xpc/private.h>     // xpc_connection_copy_entitlement_value
 
 // ***************************************************************************
 // Globals
@@ -87,10 +86,10 @@ mDNSlocal void handle_dps_request(xpc_object_t req)
         {
             LogMsg("handle_dps_request: A Client is already using DNS Proxy and your request cannot be handled at this time");
             // Return Engaged Status to the client
-            xpc_object_t reply = xpc_dictionary_create(NULL, NULL, 0); 
+            xpc_object_t reply = xpc_dictionary_create_reply(req); 
             if (reply)
             {   
-                xpc_dictionary_set_uint64(reply, kDNSDaemonReply, kDNSDaemonEngaged);
+                xpc_dictionary_set_uint64(reply, kDNSDaemonReply, kDNSMsg_Busy);
                 xpc_connection_send_message(remote_conn, reply);
                 xpc_release(reply);  
             }   
@@ -104,12 +103,13 @@ mDNSlocal void handle_dps_request(xpc_object_t req)
             return;   
         }
     }
-    
+ 
+ 
+    xpc_object_t response = xpc_dictionary_create_reply(req);
     // Return Success Status to the client
-    xpc_object_t response = xpc_dictionary_create(NULL, NULL, 0); 
     if (response)
     {
-        xpc_dictionary_set_uint64(response, kDNSDaemonReply, kDNSMsgReceived);
+        xpc_dictionary_set_uint64(response, kDNSDaemonReply, kDNSMsg_NoError);
         xpc_connection_send_message(remote_conn, response);
         xpc_release(response);  
     }
@@ -137,7 +137,7 @@ mDNSlocal void handle_dps_request(xpc_object_t req)
 }
 
 // Verify Client's Entitlement
-mDNSlocal mDNSBool IsEntitled(xpc_connection_t conn, const char *password)
+mDNSexport mDNSBool IsEntitled(xpc_connection_t conn, const char *password)
 {
     mDNSBool entitled = mDNSfalse;
     xpc_object_t ent = xpc_connection_copy_entitlement_value(conn, password);
@@ -155,21 +155,26 @@ mDNSlocal mDNSBool IsEntitled(xpc_connection_t conn, const char *password)
         LogMsg("IsEntitled: Client Entitlement is NULL");
     }
     
+    if (!entitled)
+        LogMsg("IsEntitled: Client is missing Entitlement!");
+    
     return entitled;
 }
 
 mDNSlocal void accept_dps_client(xpc_connection_t conn)
 {
-    uid_t euid;
-    euid = xpc_connection_get_euid(conn);
+    uid_t c_euid;
+    int   c_pid;
+    c_euid  = xpc_connection_get_euid(conn);
+    c_pid   = xpc_connection_get_pid(conn);
 
-    if (euid != 0 || !IsEntitled(conn, kDNSProxyService))
+    if (c_euid != 0 || !IsEntitled(conn, kDNSProxyService))
     {   
-        LogMsg("accept_dps_client: DNSProxyService Client Pid[%d] is missing Entitlement or is not root!", (int) xpc_connection_get_pid(conn));
+        LogMsg("accept_dps_client: DNSProxyService Client PID[%d] is missing Entitlement or is not running as root!", c_pid);
         xpc_connection_cancel(conn);
         return; 
     }
-
+    
     xpc_retain(conn);
     xpc_connection_set_target_queue(conn, dps_queue);
     xpc_connection_set_event_handler(conn, ^(xpc_object_t req_msg)
@@ -180,16 +185,16 @@ mDNSlocal void accept_dps_client(xpc_connection_t conn)
             {
                 handle_dps_request(req_msg);
             }
-            // We hit the case below only if Client Terminated DPS Connection OR Crashed
-            else
+            else // We hit this case ONLY if Client Terminated DPS Connection OR Crashed
             {
                 LogInfo("accept_dps_client: DPS Client %p teared down the connection or Crashed", (void *) conn);
                 // Only the Client that has activated DPS should be able to terminate it
-                if (((int)xpc_connection_get_pid(conn)) == dps_client_pid)
+                if (c_pid == dps_client_pid)
                     handle_dps_terminate(); 
                 xpc_release(conn);
             }
         });
+    
     xpc_connection_resume(conn);
                 
 }
@@ -215,8 +220,7 @@ mDNSlocal void init_dnsproxy_service(void)
                 LogInfo("init_dnsproxy_service: New DNSProxyService Client %p", eventmsg);
                 accept_dps_client(eventmsg);
             }
-            // Ideally, we would never hit the cases below
-            else if (type == XPC_TYPE_ERROR)
+            else if (type == XPC_TYPE_ERROR) // Ideally, we would never hit these cases
             {
                 LogMsg("init_dnsproxy_service: XPCError: %s", xpc_dictionary_get_string(eventmsg, XPC_ERROR_KEY_DESCRIPTION));
                 return;
@@ -227,6 +231,7 @@ mDNSlocal void init_dnsproxy_service(void)
                 return;
             }
         });
+    
     xpc_connection_resume(dps_listener);
 
 }
@@ -235,7 +240,9 @@ mDNSexport void xpc_server_init()
 {
     // Add XPC Services here
     init_dnsproxy_service();
+    init_dnsctl_service();
 }
+
 
 #else // !UNICAST_DISABLED
 

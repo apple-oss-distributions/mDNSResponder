@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2006-2011 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2006-2011 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,11 +23,6 @@
 
 extern YYSTYPE yylval;
 
-/* Mac OS X 10.4 has flex version 2.5.4, which doesn't define yylineno for us */
-/* Mac OS X 10.5 has flex version 2.5.33, which does define yylineno          */
-#if YY_FLEX_MAJOR_VERSION <= 2 && YY_FLEX_MINOR_VERSION <= 5 && YY_FLEX_SUBMINOR_VERSION <= 4
-int yylineno = 1;
-#endif
 #define YY_NO_INPUT 1
 int  yylex(void);
 

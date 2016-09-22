@@ -269,7 +269,7 @@ static void
 		DNSStatus				inStatusCode,
 		const DNSBrowserEvent *	inEvent );
 
-static char *	DNSNetworkAddressToString( const DNSNetworkAddress *inAddr, char *outString );
+static char *	DNSNetworkAddressToString( const DNSNetworkAddress *inAddr, size_t inLen, char *outString );
 
 static DWORD	UTF8StringToStringObject( const char *inUTF8, CString &inObject );
 static DWORD	StringObjectToUTF8String( CString &inObject, std::string &outUTF8 );
@@ -1273,8 +1273,8 @@ static void
 					serviceInstance->name 		= inEvent->data.resolved->name;
 					serviceInstance->type 		= inEvent->data.resolved->type;
 					serviceInstance->domain		= inEvent->data.resolved->domain;
-					serviceInstance->ip			= DNSNetworkAddressToString( &inEvent->data.resolved->address, s );
-					serviceInstance->ifIP		= DNSNetworkAddressToString( &inEvent->data.resolved->interfaceIP, s );
+					serviceInstance->ip			= DNSNetworkAddressToString( &inEvent->data.resolved->address, sizeof( s ), s );
+					serviceInstance->ifIP		= DNSNetworkAddressToString( &inEvent->data.resolved->interfaceIP, sizeof( s ), s );
 					serviceInstance->text 		= inEvent->data.resolved->textRecord;
 					serviceInstance->hostName	= inEvent->data.resolved->hostName;
 
@@ -1303,7 +1303,7 @@ static void
 //	Note: Currently only supports IPv4 network addresses.
 //===========================================================================================================================
 
-static char *	DNSNetworkAddressToString( const DNSNetworkAddress *inAddr, char *outString )
+static char *	DNSNetworkAddressToString( const DNSNetworkAddress *inAddr, size_t inLen, char *outString )
 {
 	const DNSUInt8 *		p;
 	DNSUInt16				port;
@@ -1312,11 +1312,11 @@ static char *	DNSNetworkAddressToString( const DNSNetworkAddress *inAddr, char *
 	port = ntohs( inAddr->u.ipv4.port.v16 );
 	if( port != kDNSPortInvalid )
 	{
-		sprintf( outString, "%u.%u.%u.%u:%u", p[ 0 ], p[ 1 ], p[ 2 ], p[ 3 ], port );
+		snprintf( outString, inLen, "%u.%u.%u.%u:%u", p[ 0 ], p[ 1 ], p[ 2 ], p[ 3 ], port );
 	}
 	else
 	{
-		sprintf( outString, "%u.%u.%u.%u", p[ 0 ], p[ 1 ], p[ 2 ], p[ 3 ] );
+		snprintf( outString, inLen, "%u.%u.%u.%u", p[ 0 ], p[ 1 ], p[ 2 ], p[ 3 ] );
 	}
 	return( outString );
 }

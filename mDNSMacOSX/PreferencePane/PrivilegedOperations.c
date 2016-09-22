@@ -3,9 +3,9 @@
 
     Abstract: Interface to "ddnswriteconfig" setuid root tool.
 
-    Copyright: (c) Copyright 2005 Apple Computer, Inc. All rights reserved.
+    Copyright: (c) Copyright 2005-2015 Apple Inc. All rights reserved.
 
-    Disclaimer: IMPORTANT: This Apple software is supplied to you by Apple Computer, Inc.
+    Disclaimer: IMPORTANT: This Apple software is supplied to you by Apple Inc.
     ("Apple") in consideration of your agreement to the following terms, and your
     use, installation, modification or redistribution of this Apple software
     constitutes acceptance of these terms.  If you do not agree with these terms,
@@ -19,7 +19,7 @@
     the Apple Software in its entirety and without modifications, you must retain
     this notice and the following text and disclaimers in all such redistributions of
     the Apple Software.  Neither the name, trademarks, service marks or logos of
-    Apple Computer, Inc. may be used to endorse or promote products derived from the
+    Apple Inc. may be used to endorse or promote products derived from the
     Apple Software without specific prior written permission from Apple.  Except as
     expressly stated in this notice, no other rights or licenses, express or implied,
     are granted by Apple herein, including but not limited to any patent rights that
@@ -48,24 +48,23 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <unistd.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <AssertMacros.h>
 #include <Security/Security.h>
 
+extern char **environ;
 Boolean gToolApproved = false;
 
-static pid_t    execTool(const char *args[])
-// fork/exec and return new pid
+static pid_t execTool(const char *args[])
 {
     pid_t child;
 
-    child = vfork();
-    if (child == 0)
+    int err = posix_spawn(&child, args[0], NULL, NULL, (char *const *)args, environ);
+    if (err)
     {
-        execv(args[0], (char *const *)args);
-        printf("exec of %s failed; errno = %d\n", args[0], errno);
-        _exit(-1);      // exec failed
+        printf("exec of %s failed; err = %d\n", args[0], err);
+        return -1;
     }
     else
         return child;
@@ -76,7 +75,7 @@ OSStatus EnsureToolInstalled(void)
 {
     CFURLRef bundleURL;
     pid_t toolPID;
-    int status;
+    int status = 0;
     OSStatus err = noErr;
     const char      *args[] = { kToolPath, "0", "V", NULL };
     char toolSourcePath[PATH_MAX] = {};
@@ -99,8 +98,10 @@ OSStatus EnsureToolInstalled(void)
     if (bundleURL != NULL)
     {
         CFURLGetFileSystemRepresentation(bundleURL, false, (UInt8*) toolSourcePath, sizeof toolSourcePath);
-        if (strlcat(toolSourcePath,    "/Contents/Resources/" kToolName,      sizeof toolSourcePath   ) >= sizeof toolSourcePath   ) return(-1);
         CFURLGetFileSystemRepresentation(bundleURL, false, (UInt8*) toolInstallerPath, sizeof toolInstallerPath);
+        CFRelease(bundleURL);
+
+        if (strlcat(toolSourcePath,    "/Contents/Resources/" kToolName,      sizeof toolSourcePath   ) >= sizeof toolSourcePath   ) return(-1);
         if (strlcat(toolInstallerPath, "/Contents/Resources/" kToolInstaller, sizeof toolInstallerPath) >= sizeof toolInstallerPath) return(-1);
     }
     else
@@ -119,11 +120,14 @@ OSStatus EnsureToolInstalled(void)
         {
             char *installerargs[] = { toolSourcePath, NULL };
             err = AuthorizationExecuteWithPrivileges(authRef, toolInstallerPath, 0, installerargs, (FILE**) NULL);
-            if (err == noErr) {
+            if (err == noErr)
+            {
                 int pid = wait(&status);
-                if (pid > 0 && WIFEXITED(status)) {
+                if (pid > 0 && WIFEXITED(status))
+                {
                     err = WEXITSTATUS(status);
-                    if (err == noErr) {
+                    if (err == noErr)
+                    {
                         gToolApproved = true;
                     }
                 } else {
@@ -162,7 +166,7 @@ static OSStatus ExecWithCmdAndParam(const char *subCmd, CFDataRef paramData)
     }
 
     commFD = fileno(tmpfile());
-    sprintf(fileNum, "%d", commFD);
+    snprintf(fileNum, sizeof(fileNum), "%d", commFD);
     args[1] = fileNum;
     args[3] = subCmd;
 
@@ -181,8 +185,9 @@ static OSStatus ExecWithCmdAndParam(const char *subCmd, CFDataRef paramData)
     write(commFD, buff, len);
 
     child = execTool(args);
-    if (child > 0) {
-        int status;
+    if (child > 0)
+    {
+        int status = 0;
         waitpid(child, &status, 0);
         if (WIFEXITED(status))
             err = WEXITSTATUS(status);

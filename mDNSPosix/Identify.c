@@ -330,8 +330,10 @@ mDNSexport int main(int argc, char **argv)
             if (StopNow == 2) break;
         }
 #endif
-        else {
-            if (strlen(arg) >= sizeof(hostname)) {
+        else
+        {
+            if (strlen(arg) >= sizeof(hostname))
+            {
                 fprintf(stderr, "hostname must be < %d characters\n", (int)sizeof(hostname));
                 goto usage;
             }

@@ -183,7 +183,7 @@ void CFourthPage::OnBnClickedPowerManagement()
 
 
 
-	sprintf( buf, "check box: %d", m_checkBox.GetCheck() );
+	snprintf( buf, sizeof( buf ), "check box: %d", m_checkBox.GetCheck() );
 
 	OutputDebugStringA( buf );
 

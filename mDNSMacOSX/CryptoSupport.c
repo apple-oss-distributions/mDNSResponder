@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -350,18 +350,18 @@ mDNSlocal mStatus rsa_sha_add(AlgContext *ctx, const void *data, mDNSu32 len)
 
 mDNSlocal SecKeyRef rfc3110_import(const mDNSu8 *data, const mDNSu32 len)
 {
-    static const int max_key_bytes = 4096 / 8;                // max DNSSEC supported modulus is 4096 bits
-    static const int max_exp_bytes = 3;                       // DNSSEC supports 1 or 3 bytes for exponent
-    static const int asn1_cmd_bytes = 3;                      // since there is an ASN1 SEQ and two INTs
-    //static const int asn1_max_len_bytes = asn1_cmd_bytes * 3; // capped at 3 due to max payload size
-    static const int asn1_max_len_bytes = 3 * 3; // capped at 3 due to max payload size
-    unsigned char asn1[max_key_bytes + 1 + max_exp_bytes + asn1_cmd_bytes + asn1_max_len_bytes]; // +1 is for leading 0 for non negative asn1 number
+    static const int max_modulus_bytes = 512;    // Modulus is limited to 4096 bits (512 octets) in length.
+    static const int max_exp_bytes = 512;        // Exponent is limited to 4096 bits (512 octets) in length.
+    static const int asn1_type_bytes = 3;        // Since there is an ASN1 SEQ and two INTs.
+    static const int asn1_max_len_bytes = 3 * 3; // Capped at 3 due to max payload size.
+    unsigned char asn1[max_modulus_bytes + 1 + max_exp_bytes + asn1_type_bytes + asn1_max_len_bytes]; // +1 is for leading 0 for non negative asn1 number
     const mDNSu8 *modulus;
     unsigned int modulus_length;
+    const mDNSu8 *exponent;
     unsigned int exp_length;
+    unsigned int num_length_bytes;
     mDNSu32 index = 0;
     mDNSu32 asn1_length = 0;
-    unsigned int i;
 
     // Validate Input
     if (!data)
@@ -372,16 +372,33 @@ mDNSlocal SecKeyRef rfc3110_import(const mDNSu8 *data, const mDNSu32 len)
         return NULL;
 
     // Parse Modulus and Exponent
-    exp_length = data[0];
 
-    // we have to have at least len byte + size of exponent
-    if (len < 1+exp_length)
+    // If the first byte is zero, then the exponent length is in the three-byte format, otherwise the length is in the first byte.
+    if (data[0] == 0)
+    {
+        if (len < 3)
+            return NULL;
+        exp_length = (data[1] << 8) | data[2];
+        num_length_bytes = 3;
+    }
+    else
+    {
+        exp_length = data[0];
+        num_length_bytes = 1;
+    }
+
+    // RFC3110 limits the exponent length to 4096 bits (512 octets).
+    if (exp_length > 512)
         return NULL;
 
-    // -1 is for the exp_length byte
-    modulus_length = len - 1 - exp_length;
+    // We have to have at least len bytes + size of exponent.
+    if (len < (num_length_bytes + exp_length))
+        return NULL;
 
-    // rfc3110 limits modulus to 4096 bits
+    // The modulus is the remaining space.
+    modulus_length = len - (num_length_bytes + exp_length);
+
+    // RFC3110 limits the modulus length to 4096 bits (512 octets).
     if (modulus_length > 512)
         return NULL;
 
@@ -391,18 +408,30 @@ mDNSlocal SecKeyRef rfc3110_import(const mDNSu8 *data, const mDNSu32 len)
     // add 1 to modulus length for pre-ceding 0 t make ASN1 value non-negative
     ++modulus_length;
 
-    // 1 is to skip exp_length byte
-    modulus = &data[1+exp_length];
+    exponent = &data[num_length_bytes];
+    modulus = &data[num_length_bytes + exp_length];
 
     // 2 bytes for commands since first doesn't count
     // 2 bytes for min 1 byte length field
     asn1_length = modulus_length + exp_length + 2 + 2;
 
-    // account for modulus length causing INT length field to grow
-    if (modulus_length > 0xFF)
-        asn1_length += 2;
-    else if (modulus_length >= 128)
-        ++asn1_length;
+    // Account for modulus length causing INT length field to grow.
+    if (modulus_length >= 128)
+    {
+        if (modulus_length > 255)
+            asn1_length += 2;
+        else
+            asn1_length += 1;
+    }
+
+    // Account for exponent length causing INT length field to grow.
+    if (exp_length >= 128)
+    {
+        if (exp_length > 255)
+            asn1_length += 2;
+        else
+            asn1_length += 1;
+    }
 
     // Construct ASN1 formatted public key
     // Write ASN1 SEQ byte
@@ -415,8 +444,8 @@ mDNSlocal SecKeyRef rfc3110_import(const mDNSu8 *data, const mDNSu32 len)
     }
     else
     {
-        asn1[index++] = (0x80 | ((asn1_length & 0xFF00) ? 2 : 1));
-        if (asn1_length & 0xFF00)
+        asn1[index++] = (0x80 | ((asn1_length > 255) ? 2 : 1));
+        if (asn1_length > 255)
             asn1[index++] = (asn1_length & 0xFF00) >> 8;
         asn1[index++] = asn1_length & 0xFF;
     }
@@ -426,12 +455,12 @@ mDNSlocal SecKeyRef rfc3110_import(const mDNSu8 *data, const mDNSu32 len)
     // Write ASN1 length for INT
     if (modulus_length < 128)
     {
-        asn1[index++] = asn1_length & 0xFF;
+        asn1[index++] = modulus_length & 0xFF;
     }
     else
     {
-        asn1[index++] = 0x80 | ((modulus_length & 0xFF00) ? 2 : 1);
-        if (modulus_length & 0xFF00)
+        asn1[index++] = 0x80 | ((modulus_length > 255) ? 2 : 1);
+        if (modulus_length > 255)
             asn1[index++] = (modulus_length & 0xFF00) >> 8;
         asn1[index++] = modulus_length & 0xFF;
     }
@@ -439,16 +468,26 @@ mDNSlocal SecKeyRef rfc3110_import(const mDNSu8 *data, const mDNSu32 len)
     // Write preceding 0 so our integer isn't negative
     asn1[index++] = 0x00;
     // Write actual modulus (-1 for preceding 0)
-    memcpy(&asn1[index], (void *)modulus, modulus_length-1);
-    index += modulus_length-1;
+    memcpy(&asn1[index], modulus, modulus_length - 1);
+    index += (modulus_length - 1);
 
     // Write ASN1 INT for exponent
     asn1[index++] = 0x02;
     // Write ASN1 length for INT
-    asn1[index++] = exp_length & 0xFF;
+    if (exp_length < 128)
+    {
+        asn1[index++] = exp_length & 0xFF;
+    }
+    else
+    {
+        asn1[index++] = 0x80 | ((exp_length > 255) ? 2 : 1);
+        if (exp_length > 255)
+            asn1[index++] = (exp_length & 0xFF00) >> 8;
+        asn1[index++] = exp_length & 0xFF;
+    }
     // Write exponent bytes
-    for (i = 1; i <= exp_length; i++)
-        asn1[index++] = data[i];
+    memcpy(&asn1[index], exponent, exp_length);
+    index += exp_length;
 
 #if TARGET_OS_IPHONE
     // index contains bytes written, use it for length
@@ -605,6 +644,8 @@ mDNSlocal Boolean VerifyData(SecKeyRef key, CFStringRef digestStr, mDNSu8 *diges
     }
     
     CFBooleanRef boolRef = SecTransformExecute(verifyXForm, &error);
+    ret = boolRef ? CFBooleanGetValue(boolRef) : false;
+    if (boolRef) CFRelease(boolRef);
     CFRelease(verifyXForm);
 
     if (error != NULL)
@@ -618,11 +659,12 @@ mDNSlocal Boolean VerifyData(SecKeyRef key, CFStringRef digestStr, mDNSu8 *diges
             {
                 LogMsg("VerifyData: CFStringGetCString failed");
             }
+            CFRelease(errStr);
         }
         LogMsg("VerifyData: SecTransformExecute failed with %s", errorbuf);
         return false;
     }
-    return CFEqual(boolRef, kCFBooleanTrue);    
+    return ret;
 err:
     CFRelease(verifyXForm);
     return false;

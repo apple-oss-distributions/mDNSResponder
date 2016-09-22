@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2015 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -138,7 +138,7 @@ mDNSlocal void SockAddrTomDNSAddr(const struct sockaddr *const sa, mDNSAddr *ipA
 
 // mDNS core calls this routine when it needs to send a packet.
 mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const msg, const mDNSu8 *const end,
-                                       mDNSInterfaceID InterfaceID, UDPSocket *src, const mDNSAddr *dst, 
+                                       mDNSInterfaceID InterfaceID, UDPSocket *src, const mDNSAddr *dst,
                                        mDNSIPPort dstPort, mDNSBool useBackgroundTrafficClass)
 {
     int err = 0;
@@ -309,13 +309,6 @@ mDNSlocal void SocketDataReady(mDNS *const m, PosixNetworkInterface *intf, int s
     if (packetLen >= 0)
         mDNSCoreReceive(m, &packet, (mDNSu8 *)&packet + packetLen,
                         &senderAddr, senderPort, &destAddr, MulticastDNSPort, InterfaceID);
-}
-
-mDNSexport mDNSBool mDNSPlatformPeekUDP(mDNS *const m, UDPSocket *src)
-{
-    (void)m;    // unused
-    (void)src;  // unused
-    return mDNSfalse;
 }
 
 mDNSexport TCPSocket *mDNSPlatformTCPSocket(mDNS * const m, TCPSocketFlags flags, mDNSIPPort * port, mDNSBool useBackgroundTrafficClass)
@@ -516,6 +509,7 @@ mDNSexport int ParseDNSServers(mDNS *m, const char *filePath)
             numOfServers++;
         }
     }
+	fclose(fp);
     return (numOfServers > 0) ? 0 : -1;
 }
 
@@ -639,10 +633,22 @@ mDNSlocal int SetupSocket(struct sockaddr *intfAddr, mDNSIPPort port, int interf
     // ... with a shared UDP port, if it's for multicast receiving
     if (err == 0 && port.NotAnInteger)
     {
-        #if defined(SO_REUSEPORT)
-        err = setsockopt(*sktPtr, SOL_SOCKET, SO_REUSEPORT, &kOn, sizeof(kOn));
-        #elif defined(SO_REUSEADDR)
+        // <rdar://problem/20946253>
+        // We test for SO_REUSEADDR first, as suggested by Jonny Törnbom from Axis Communications
+        // Linux kernel versions 3.9 introduces support for socket option
+        // SO_REUSEPORT, however this is not implemented the same as on *BSD
+        // systems. Linux version implements a "port hijacking" prevention
+        // mechanism, limiting processes wanting to bind to an already existing
+        // addr:port to have the same effective UID as the first who bound it. What
+        // this meant for us was that the daemon ran as one user and when for
+        // instance mDNSClientPosix was executed by another user, it wasn't allowed
+        // to bind to the socket. Our suggestion was to switch the order in which
+        // SO_REUSEPORT and SO_REUSEADDR was tested so that SO_REUSEADDR stays on
+        // top and SO_REUSEPORT to be used only if SO_REUSEADDR doesn't exist.
+        #if defined(SO_REUSEADDR) && !defined(__MAC_OS_X_VERSION_MIN_REQUIRED)
         err = setsockopt(*sktPtr, SOL_SOCKET, SO_REUSEADDR, &kOn, sizeof(kOn));
+        #elif defined(SO_REUSEPORT)
+        err = setsockopt(*sktPtr, SOL_SOCKET, SO_REUSEPORT, &kOn, sizeof(kOn));
         #else
             #error This platform has no way to avoid address busy errors on multicast.
         #endif
@@ -855,7 +861,7 @@ mDNSlocal int SetupOneInterface(mDNS *const m, struct sockaddr *intfAddr, struct
     assert(intfMask != NULL);
 
     // Allocate the interface structure itself.
-    intf = (PosixNetworkInterface*)malloc(sizeof(*intf));
+    intf = (PosixNetworkInterface*)calloc(1, sizeof(*intf));
     if (intf == NULL) { assert(0); err = ENOMEM; }
 
     // And make a copy of the intfName.
@@ -907,9 +913,10 @@ mDNSlocal int SetupOneInterface(mDNS *const m, struct sockaddr *intfAddr, struct
     // and skip the probe phase of the probe/announce packet sequence.
     intf->coreIntf.DirectLink = mDNSfalse;
 #ifdef DIRECTLINK_INTERFACE_NAME
-	if (strcmp(intfName, STRINGIFY(DIRECTLINK_INTERFACE_NAME)) == 0)
-		intf->coreIntf.DirectLink = mDNStrue;
+    if (strcmp(intfName, STRINGIFY(DIRECTLINK_INTERFACE_NAME)) == 0)
+        intf->coreIntf.DirectLink = mDNStrue;
 #endif
+    intf->coreIntf.SupportsUnicastMDNSResponse = mDNStrue;
 
     // The interface is all ready to go, let's register it with the mDNS core.
     if (err == 0)
@@ -1366,14 +1373,36 @@ mDNSexport void    mDNSPlatformUnlock (const mDNS *const m)
 // On the Posix platform this maps directly to the ANSI C strcpy.
 mDNSexport void    mDNSPlatformStrCopy(void *dst, const void *src)
 {
-    strcpy((char *)dst, (char *)src);
+    strcpy((char *)dst, (const char *)src);
+}
+
+mDNSexport mDNSu32  mDNSPlatformStrLCopy(void *dst, const void *src, mDNSu32 len)
+{
+#if HAVE_STRLCPY
+    return ((mDNSu32)strlcpy((char *)dst, (const char *)src, len));
+#else
+    size_t srcLen;
+
+    srcLen = strlen((const char *)src);
+    if (srcLen < len)
+    {
+        memcpy(dst, src, srcLen + 1);
+    }
+    else if (len > 0)
+    {
+        memcpy(dst, src, len - 1);
+        ((char *)dst)[len - 1] = '\0';
+    }
+
+    return ((mDNSu32)srcLen);
+#endif
 }
 
 // mDNS core calls this routine to get the length of a C string.
 // On the Posix platform this maps directly to the ANSI C strlen.
 mDNSexport mDNSu32  mDNSPlatformStrLen (const void *src)
 {
-    return strlen((char*)src);
+    return strlen((const char*)src);
 }
 
 // mDNS core calls this routine to copy memory.
@@ -1505,10 +1534,10 @@ mDNSexport void mDNSPlatformSendWakeupPacket(mDNS *const m, mDNSInterfaceID Inte
     (void) iteration;
 }
 
-mDNSexport mDNSBool mDNSPlatformValidRecordForInterface(AuthRecord *rr, const NetworkInterfaceInfo *intf)
+mDNSexport mDNSBool mDNSPlatformValidRecordForInterface(const AuthRecord *rr, mDNSInterfaceID InterfaceID)
 {
     (void) rr;
-    (void) intf;
+    (void) InterfaceID;
 
     return 1;
 }
@@ -1567,43 +1596,38 @@ mDNSexport mStatus    mDNSPlatformStoreSPSMACAddr(mDNSAddr *spsaddr, char *ifnam
     return mStatus_NoError;
 }
 
-mDNSexport mStatus    mDNSPlatformClearSPSMACAddr(void)
+mDNSexport mStatus    mDNSPlatformClearSPSData(void)
 {
     return mStatus_NoError;
+}
+
+mDNSexport mStatus mDNSPlatformStoreOwnerOptRecord(char *ifname, DNSMessage *msg, int length)
+{
+    (void) ifname; // Unused
+    (void) msg;    // Unused
+    (void) length; // Unused
+    return mStatus_UnsupportedErr;
 }
 
 mDNSexport mDNSu16 mDNSPlatformGetUDPPort(UDPSocket *sock)
 {
     (void) sock; // unused
- 
+
     return (mDNSu16)-1;
 }
 
 mDNSexport mDNSBool mDNSPlatformInterfaceIsD2D(mDNSInterfaceID InterfaceID)
 {
     (void) InterfaceID; // unused
-    
+
     return mDNSfalse;
 }
 
-mDNSexport mDNSBool mDNSPlatformAllowPID(mDNS *const m, DNSQuestion *q)
+mDNSexport void mDNSPlatformSetSocktOpt(void *sock, mDNSTransport_Type transType, mDNSAddr_Type addrType, DNSQuestion *q)
 {
-    (void) m;
-    (void) q;
-    return mDNStrue;
-}
-
-mDNSexport mDNSs32 mDNSPlatformGetServiceID(mDNS *const m, DNSQuestion *q)
-{
-    (void) m;
-    (void) q;
-    return -1;
-}
-
-mDNSexport void mDNSPlatformSetDelegatePID(UDPSocket *src, const mDNSAddr *dst, DNSQuestion *q)
-{
-    (void) src;
-    (void) dst;
+    (void) sock;
+    (void) transType;
+    (void) addrType;
     (void) q;
 }
 

@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2010-2015 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -291,7 +291,8 @@ void * UserEventAgentFactory(CFAllocatorRef allocator, CFUUIDRef typeID)
     (void)allocator;
     BonjourUserEventsPlugin * result = NULL;
 
-    if (typeID && CFEqual(typeID, kUserEventAgentTypeID)) {
+    if (typeID && CFEqual(typeID, kUserEventAgentTypeID))
+    {
         result = Alloc(kUserEventAgentFactoryID);
     }
 
@@ -603,8 +604,6 @@ NetBrowserInfo* CreateBrowser(BonjourUserEventsPlugin* plugin, CFStringRef type,
 
         // Add the dictionary to the browsers dictionary.
         CFDictionarySetValue(plugin->_browsers, browser, browserDict);
-
-        NetBrowserInfoRelease(NULL, browser);
 
         // Release Memory
         CFRelease(browserDict);

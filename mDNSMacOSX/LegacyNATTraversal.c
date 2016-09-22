@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2004-2013 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2004-2015 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@
 #include "assert.h"         // For assert()
 
 #if defined( WIN32 )
+#   include "CommonServices.h"
 #   include <winsock2.h>
 #   include <ws2tcpip.h>
 #   define strcasecmp   _stricmp
@@ -82,8 +83,11 @@ mDNSlocal mStatus SendPortMapRequest(mDNS *m, NATTraversalInfo *n);
 mDNSlocal void AllocAndCopy(mDNSu8 **const dst, const mDNSu8 *const src)
 {
     if (src == mDNSNULL) return;
-    if ((*dst = mDNSPlatformMemAllocate((mDNSu32)strlen((char*)src) + 1)) == mDNSNULL)
-    { LogMsg("AllocAndCopy: can't allocate string"); return; }
+    if ((strlen((char*)src)) >= UINT32_MAX || (*dst = mDNSPlatformMemAllocate((mDNSu32)strlen((char*)src) + 1)) == mDNSNULL)
+    {
+        LogMsg("AllocAndCopy: can't allocate string");
+        return;
+    }
     strcpy((char*)*dst, (char*)src);
 }
 
@@ -279,7 +283,7 @@ mDNSlocal void handleLNTDeviceDescriptionResponse(tcpLNTInfo *tcpInfo)
             LogInfo("handleLNTDeviceDescriptionResponse: found URLBase");
             ptr += 8; // skip over "URLBase>"
             // find the end of the URLBase element
-            for (stop = ptr; stop < end; stop++) { if (*stop == '<') { end = stop; break; } }
+            for (stop = ptr; stop < end; stop++) { if (stop && *stop == '<') { end = stop; break; } }
             if (ParseHttpUrl(ptr, end, &m->UPnPSOAPAddressString, &m->UPnPSOAPPort, mDNSNULL) != mStatus_NoError)
             {
                 LogInfo("handleLNTDeviceDescriptionResponse: failed to parse URLBase");
@@ -412,8 +416,6 @@ mDNSlocal void tcpConnectionCallback(TCPSocket *sock, void *context, mDNSBool Co
     long nsent   = 0;
     static int LNTERRORcount = 0;
 
-    if (tcpInfo == mDNSNULL) { LogInfo("tcpConnectionCallback: no tcpInfo context"); status = mStatus_Invalid; goto exit; }
-    
     if (tcpInfo->sock != sock)
     {
         LogMsg("tcpConnectionCallback: WARNING- tcpInfo->sock(%p) != sock(%p) !!! Printing tcpInfo struct", tcpInfo->sock, sock);
@@ -793,7 +795,7 @@ mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID Interface
 {
     const mDNSu8 *ptr = data;
     const mDNSu8 *end = data + len;
-    const mDNSu8 *stop = ptr;
+    const mDNSu8 *stop;
 
     if (!mDNSIPPortIsZero(m->UPnPRouterPort)) return; // already have the info we need
 

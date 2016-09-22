@@ -4,5 +4,7 @@
 <dict>
     <key>com.apple.mDNSResponder.dnsproxy</key>
     <true/>
+    <key>com.apple.mDNSResponder.dnsctl</key>
+    <true/>
 </dict>
 </plist>

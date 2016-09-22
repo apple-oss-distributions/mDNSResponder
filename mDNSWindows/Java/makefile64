@@ -34,7 +34,7 @@
 COREDIR = ..\..\mDNSCore
 SHAREDDIR = ..\..\mDNSShared
 
-JDK = $(JAVA_HOME)
+JDK = "$(JAVA_HOME)"
 
 CC = cl
 RC = rc

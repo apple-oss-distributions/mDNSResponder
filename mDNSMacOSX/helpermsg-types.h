@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2007 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2011 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ typedef uint8_t ethaddr_t[ 6];
 typedef uint8_t v6addr_t [16];
 typedef const char *string_t;
 
-#define PFPortArraySize 16
+#define PFPortArraySize 4
 typedef uint16_t pfArray_t [PFPortArraySize];
 
 #endif /* H_HELPERMSG_TYPES_H */

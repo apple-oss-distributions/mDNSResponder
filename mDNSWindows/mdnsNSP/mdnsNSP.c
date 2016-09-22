@@ -1847,7 +1847,7 @@ InHostsTable( const char * name )
 		HostsFile		*	hFile;
 
 		GetSystemDirectory( systemDirectory, sizeof( systemDirectory ) );
-		sprintf( hFileName, "%s\\drivers\\etc\\hosts", systemDirectory );
+		snprintf( hFileName, sizeof( hFileName ), "%s\\drivers\\etc\\hosts", systemDirectory );
 		err = HostsFileOpen( &hFile, hFileName );
 		require_noerr( err, exit );
 
@@ -2072,6 +2072,7 @@ HostsFileNext( HostsFile * self, HostsFileInfo ** hInfo )
 	int					idx;
 	int					i;
 	short				family;
+	size_t				len;
 	OSStatus			err = kNoErr;
 
 	check( self );
@@ -2146,9 +2147,10 @@ HostsFileNext( HostsFile * self, HostsFileInfo ** hInfo )
 
 		// Now we have the name
 
-		(*hInfo)->m_host.h_name = (char*) malloc( strlen( tok ) + 1 );
+		len = strlen( tok ) + 1;
+		(*hInfo)->m_host.h_name = (char*) malloc( len );
 		require_action( (*hInfo)->m_host.h_name, exit, err = kNoMemoryErr );
-		strcpy( (*hInfo)->m_host.h_name, tok );
+		strcpy_s( (*hInfo)->m_host.h_name, len, tok );
 
 		// Now create the address (IPv6/IPv4)
 
@@ -2220,10 +2222,11 @@ HostsFileNext( HostsFile * self, HostsFileInfo ** hInfo )
 				require_action( (*hInfo)->m_host.h_aliases, exit, err = kNoMemoryErr );
 			}
 
-			(*hInfo)->m_host.h_aliases[i] = (char*) malloc( strlen( tok ) + 1 );
+			len = strlen( tok ) + 1;
+			(*hInfo)->m_host.h_aliases[i] = (char*) malloc( len );
 			require_action( (*hInfo)->m_host.h_aliases[i], exit, err = kNoMemoryErr );
 
-			strcpy( (*hInfo)->m_host.h_aliases[i], tok );
+			strcpy_s( (*hInfo)->m_host.h_aliases[i], len, tok );
 
 			if (( tok = strpbrk( tok, " \t")) != NULL )
 			{

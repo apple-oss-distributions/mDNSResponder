@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2007 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2012 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@
 #include <mach/mach.h>
 #include <mach/mach_error.h>
 #include <servers/bootstrap.h>
-#include <asl.h>
 #include <launch.h>
 #include <pwd.h>
 #include <pthread.h>
@@ -37,9 +36,7 @@
 #include <Security/Security.h>
 #include "helper.h"
 #include "helper-server.h"
-#include "helpermsg.h"
-#include "helpermsgServer.h"
-#include <vproc.h>
+#include <xpc/private.h>
 
 #if TARGET_OS_EMBEDDED
 #define NO_SECURITYFRAMEWORK 1
@@ -51,14 +48,11 @@
 #define launch_data_get_machport launch_data_get_fd
 #endif
 
-union max_msg_size
-{
-    union __RequestUnion__proxy_helper_subsystem req;
-    union __ReplyUnion__proxy_helper_subsystem rep;
-};
 
-static const mach_msg_size_t MAX_MSG_SIZE = sizeof(union max_msg_size) + MAX_TRAILER_SIZE;
-static aslclient logclient = NULL;
+int mDNSHelperLogEnabled = 0;
+os_log_t  log_handle = NULL;
+
+static dispatch_queue_t xpc_queue = NULL;
 static int opt_debug;
 static pthread_t idletimer_thread;
 
@@ -68,45 +62,24 @@ unsigned long actualidle = 3600;
 CFRunLoopRef gRunLoop = NULL;
 CFRunLoopTimerRef gTimer = NULL;
 
-mach_port_t gPort = MACH_PORT_NULL;
-
-static void helplogv(int level, const char *fmt, va_list ap)
-{
-    if (NULL == logclient) { vfprintf(stderr, fmt, ap); fflush(stderr); }
-    else asl_vlog(logclient, NULL, level, fmt, ap);
-}
-
-void helplog(int level, const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    helplogv(level, fmt, ap);
-    va_end(ap);
-}
-
-// for safe_vproc
-void LogMsgWithLevel(mDNSLogLevel_t logLevel, const char *fmt, ...)
-{
-    (void)logLevel;
-    va_list ap;
-    va_start(ap, fmt);
-    // safe_vproc only calls LogMsg, so assume logLevel maps to ASL_LEVEL_ERR
-    helplog(ASL_LEVEL_ERR, fmt, ap);
-    va_end(ap);
-}
 
 static void handle_sigterm(int sig)
 {
-    // debug("entry sig=%d", sig);	Can't use syslog from within a signal handler
+    // os_log_debug(log_handle,"entry sig=%d", sig);	Can't use syslog from within a signal handler
     assert(sig == SIGTERM);
-    (void)proxy_mDNSExit(gPort);
+    helper_exit();
 }
 
 static void initialize_logging(void)
 {
-    logclient = asl_open(NULL, kmDNSHelperServiceName, (opt_debug ? ASL_OPT_STDERR : 0));
-    if (NULL == logclient) { fprintf(stderr, "Could not initialize ASL logging.\n"); fflush(stderr); return; }
-    if (opt_debug) asl_set_filter(logclient, ASL_FILTER_MASK_UPTO(ASL_LEVEL_DEBUG));
+    log_handle   = os_log_create("com.apple.mDNSResponderHelper", "INFO");
+    
+    if (!log_handle)
+    {
+        // OS_LOG_DEFAULT is the default logging object, if you are not creating a custom subsystem/category
+        os_log_error(OS_LOG_DEFAULT, "Could NOT create log handle in mDNSResponderHelper");
+    }
+    
 }
 
 static void initialize_id(void)
@@ -117,22 +90,29 @@ static void initialize_id(void)
     hardcode.pw_uid = 65;
     hardcode.pw_gid = 65;
 
-    if (!pwd) { helplog(ASL_LEVEL_ERR, "Could not find account name `%s'.  I will only help root.", login); return; }
+    if (!pwd)
+    {
+        os_log(log_handle, "Could not find account name `%s'.  I will only help root.", login);
+        return;
+    }
     mDNSResponderUID = pwd->pw_uid;
     mDNSResponderGID = pwd->pw_gid;
 }
 
 static void diediedie(CFRunLoopTimerRef timer, void *context)
 {
-    debug("entry %p %p %d", timer, context, maxidle);
+    os_log_info(log_handle, "entry %p %p %lu", timer, context, actualidle);
+    
     assert(gTimer == timer);
-    if (maxidle)
-        (void)proxy_mDNSExit(gPort);
+    os_log_info(log_handle, "mDNSResponderHelper exiting after [%lu] seconds", actualidle);
+    
+    if (actualidle)
+        helper_exit();
 }
 
 void pause_idle_timer(void)
 {
-    debug("entry");
+    os_log_debug(log_handle,"entry");
     assert(gTimer);
     assert(gRunLoop);
     CFRunLoopRemoveTimer(gRunLoop, gTimer, kCFRunLoopDefaultMode);
@@ -140,7 +120,7 @@ void pause_idle_timer(void)
 
 void unpause_idle_timer(void)
 {
-    debug("entry");
+    os_log_debug(log_handle,"entry");
     assert(gRunLoop);
     assert(gTimer);
     CFRunLoopAddTimer(gRunLoop, gTimer, kCFRunLoopDefaultMode);
@@ -148,21 +128,21 @@ void unpause_idle_timer(void)
 
 void update_idle_timer(void)
 {
-    debug("entry");
+    os_log_debug(log_handle,"entry");
     assert(gTimer);
     CFRunLoopTimerSetNextFireDate(gTimer, CFAbsoluteTimeGetCurrent() + actualidle);
 }
 
 static void *idletimer(void *context)
 {
-    debug("entry context=%p", context);
-    gRunLoop = CFRunLoopGetCurrent();
+    os_log_debug(log_handle,"entry context=%p", context);
+    gRunLoop = CFRunLoopGetMain();
 
     unpause_idle_timer();
 
     for (;;)
     {
-        debug("Running CFRunLoop");
+        // os_log_debug(log_handle,"Running CFRunLoop");
         CFRunLoopRun();
         sleep(1);
     }
@@ -174,111 +154,504 @@ static int initialize_timer()
 {
     gTimer = CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + actualidle, actualidle, 0, 0, diediedie, NULL);
     int err = 0;
+    os_log_info(log_handle, "mDNSResponderHelper initialize_timer() started");
 
-    debug("entry");
     if (0 != (err = pthread_create(&idletimer_thread, NULL, idletimer, NULL)))
-        helplog(ASL_LEVEL_ERR, "Could not start idletimer thread: %s", strerror(err));
+        os_log(log_handle, "Could not start idletimer thread: %s", strerror(err));
 
     return err;
 }
 
-static mach_port_t register_service(const char *service_name)
-{
-    mach_port_t port = MACH_PORT_NULL;
-    kern_return_t kr;
+/* 
+ Reads the user's program arguments for mDNSResponderHelper
+ For now we have only one option: mDNSHelperDebugLogging which is used to turn on mDNSResponderHelperLogging
+ 
+ To turn ON mDNSResponderHelper Verbose Logging,
+ 1] sudo defaults write /Library/Preferences/com.apple.mDNSResponderHelper.plist mDNSHelperDebugLogging -bool YES
+ 2] sudo reboot
+ 
+ To turn OFF mDNSResponderHelper Logging,
+ 1] sudo defaults delete /Library/Preferences/com.apple.mDNSResponderHelper.plist
 
-    if (KERN_SUCCESS != (kr = bootstrap_check_in(bootstrap_port, (char *)service_name, &port)))
+ To view the current options set,
+ 1] plutil -p /Library/Preferences/com.apple.mDNSResponderHelper.plist
+ OR
+ 1] sudo defaults read /Library/Preferences/com.apple.mDNSResponderHelper.plist
+*/
+
+static mDNSBool HelperPrefsGetValueBool(CFStringRef key, mDNSBool defaultVal)
+{
+    CFBooleanRef boolean;
+    mDNSBool result = defaultVal;
+    
+    boolean = CFPreferencesCopyAppValue(key, kmDNSHelperProgramArgs);
+    if (boolean)
     {
-        helplog(ASL_LEVEL_ERR, "bootstrap_check_in: %d %X %s", kr, kr, mach_error_string(kr));
-        return MACH_PORT_NULL;
+        if (CFGetTypeID(boolean) == CFBooleanGetTypeID())
+            result = CFBooleanGetValue(boolean) ? mDNStrue : mDNSfalse;
+        CFRelease(boolean);
     }
     
-    if (KERN_SUCCESS != (kr = mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND)))
-    {
-        helplog(ASL_LEVEL_ERR, "mach_port_insert_right: %d %X %s", kr, kr, mach_error_string(kr));
-        mach_port_deallocate(mach_task_self(), port);
-        return MACH_PORT_NULL;
-    }
-
-    return port;
+    return result;
 }
+
+
+// Verify Client's Entitlement
+static mDNSBool check_entitlement(xpc_connection_t conn, const char *password)
+{
+    mDNSBool entitled = mDNSfalse;
+    xpc_object_t ent = xpc_connection_copy_entitlement_value(conn, password);
+    
+    if (ent)
+    {
+        if (xpc_get_type(ent) == XPC_TYPE_BOOL && xpc_bool_get_value(ent))
+        {
+            entitled = mDNStrue;
+        }
+        xpc_release(ent);
+    }
+    else
+    {
+        os_log(log_handle, "client entitlement is NULL");
+    }
+    
+    if (!entitled)
+        os_log(log_handle, "entitlement check failed -> client is missing entitlement!");
+    
+    return entitled;
+}
+
+
+static void handle_request(xpc_object_t req)
+{
+    mDNSu32 helper_mode = 0;
+    int error_code = 0;
+    
+    xpc_connection_t remote_conn = xpc_dictionary_get_remote_connection(req);
+    xpc_object_t response = xpc_dictionary_create_reply(req);
+    
+    // switch here based on dictionary to handle different requests from mDNSResponder
+    if ((xpc_dictionary_get_uint64(req, kHelperMode)))
+    {
+        os_log_info(log_handle, "Getting mDNSResponder request mode");
+        helper_mode = (mDNSu32)(xpc_dictionary_get_uint64(req, kHelperMode));
+    }
+   
+    switch (helper_mode)
+    {
+        case bpf_request:
+        {
+            os_log_info(log_handle, "Calling new RequestBPF()");
+            RequestBPF();
+            break;
+        }
+            
+        case set_name:
+        {
+            const char *old_name;
+            const char *new_name;
+            int pref_key = 0;
+            
+            pref_key = (int)(xpc_dictionary_get_uint64(req, kPrefsNameKey));
+            old_name = xpc_dictionary_get_string(req, kPrefsOldName);
+            new_name = xpc_dictionary_get_string(req, kPrefsNewName);
+            
+            os_log_info(log_handle, "Calling new SetName() oldname: %s newname: %s key:%d", old_name, new_name, pref_key);
+            PreferencesSetName(pref_key, old_name, new_name);
+            break;
+        }
+            
+        case p2p_packetfilter:
+        {
+            pfArray_t pfports;
+            pfArray_t pfprotocols;
+            const char *if_name;
+            uint32_t cmd;
+            uint32_t count;
+            
+            cmd = xpc_dictionary_get_uint64(req, "pf_opcode");
+            if_name = xpc_dictionary_get_string(req, "pf_ifname");
+            count = xpc_dictionary_get_uint64(req, "pf_count");
+            
+            pfports[0]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_port0");
+            pfports[1]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_port1");
+            pfports[2]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_port2");
+            pfports[3]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_port3");
+            
+            pfprotocols[0]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_protocol0");
+            pfprotocols[1]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_protocol1");
+            pfprotocols[2]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_protocol2");
+            pfprotocols[3]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_protocol3");
+            
+            os_log_info(log_handle,"Calling new PacketFilterControl()");
+            PacketFilterControl(cmd, if_name, count, pfports, pfprotocols);
+            break;
+        }
+            
+        case user_notify:
+        {
+            const char *title;
+            const char *msg;
+            title = xpc_dictionary_get_string(req, "notify_title");
+            msg   = xpc_dictionary_get_string(req, "notify_msg");
+            
+            os_log_info(log_handle,"Calling new UserNotify() title:%s msg:%s", title, msg);
+            UserNotify(title, msg);
+            break;
+        }
+            
+        case power_req:
+        {
+            int key, interval;
+            key        = xpc_dictionary_get_uint64(req, "powerreq_key");
+            interval   = xpc_dictionary_get_uint64(req, "powerreq_interval");
+            
+            os_log_info(log_handle,"Calling new PowerRequest() key[%d] interval[%d]", key, interval);
+            PowerRequest(key, interval, &error_code);
+            break;
+        }
+            
+        case send_wakepkt:
+        {
+            const char *ether_addr;
+            const char *ip_addr;
+            int iteration;
+            unsigned int if_id;
+            
+            if_id = (unsigned int)xpc_dictionary_get_uint64(req, "interface_index");
+            ether_addr = xpc_dictionary_get_string(req, "ethernet_address");
+            ip_addr = xpc_dictionary_get_string(req, "ip_address");
+            iteration = (int)xpc_dictionary_get_uint64(req, "swp_iteration");
+            
+            os_log_info(log_handle, "Calling new SendWakeupPacket() ether_addr[%s] ip_addr[%s] if_id[%d] iteration[%d]",
+                           ether_addr, ip_addr, if_id, iteration);
+            SendWakeupPacket(if_id, ether_addr, ip_addr, iteration);
+            break;
+        }
+            
+        case set_localaddr_cacheentry:
+        {
+            int if_index, family;
+            
+            if_index = xpc_dictionary_get_uint64(req, "slace_ifindex");
+            family   = xpc_dictionary_get_uint64(req, "slace_family");
+            
+            const uint8_t* ip  = xpc_dictionary_get_data(req, "slace_ip", NULL);
+            const uint8_t* eth = xpc_dictionary_get_data(req, "slace_eth", NULL);
+            
+            os_log_info(log_handle, "Calling new SetLocalAddressCacheEntry() if_index[%d] family[%d] ", if_index, family);
+
+            SetLocalAddressCacheEntry(if_index, family, ip, eth, &error_code);
+            
+            /*
+            static int v6addr_to_string(const v6addr_t addr, char *buf, size_t buflen)
+            {
+                if (NULL == inet_ntop(AF_INET6, addr, buf, buflen))
+                {
+                    os_log(log_handle, "inet_ntop failed: %s", strerror(errno));
+                    return -1;
+                }
+                else
+                {
+                    return 0;
+                }
+            }
+
+            ethaddr_t eth = { 0x33, 0x33, 0x00, 0x00, 0x00, 0x01 } ;
+            const uint8_t* slace_ip = NULL;
+            v6addr_t addr_ipv6;
+            size_t ip_len;
+            slace_ip = xpc_dictionary_get_data(req, "slace_ip", &ip_len);
+            if (slace_ip && (ip_len == sizeof(v6addr_t)))
+            {
+                os_log(log_handle, "mDNSResponderHelper: doing memcpy()");
+                memcpy(&addr_ipv6, slace_ip, ip_len);
+            }
+            char test_ipv6_str[46];
+            v6addr_to_string(addr_ipv6, test_ipv6_str, sizeof(test_ipv6_str));
+            os_log(log_handle, "mDNSResponderHelper: handle_request: set_localaddr_cacheentry: test_ipv6_str is %s", test_ipv6_str);
+            */
+                        
+            break;
+        }
+            
+        case send_keepalive:
+        {
+            uint16_t lport, rport, win;
+            uint32_t seq, ack;
+            
+            lport = xpc_dictionary_get_uint64(req, "send_keepalive_lport");
+            rport = xpc_dictionary_get_uint64(req, "send_keepalive_rport");
+            seq   = xpc_dictionary_get_uint64(req, "send_keepalive_seq");
+            ack   = xpc_dictionary_get_uint64(req, "send_keepalive_ack");
+            win   = xpc_dictionary_get_uint64(req, "send_keepalive_win");
+            
+            const uint8_t* sadd6 = xpc_dictionary_get_data(req, "send_keepalive_sadd", NULL);
+            const uint8_t* dadd6 = xpc_dictionary_get_data(req, "send_keepalive_dadd", NULL);
+            
+            os_log_info(log_handle, "helper-main: handle_request: send_keepalive: lport is[%d] rport is[%d] seq is[%d] ack is[%d] win is[%d]",
+                           lport, rport, seq, ack, win);
+            
+            SendKeepalive(sadd6, dadd6, lport, rport, seq, ack, win);
+            break;
+        }
+    
+        case retreive_tcpinfo:
+        {
+            uint16_t lport, rport;
+            int family;
+            uint32_t seq, ack;
+            uint16_t win;
+            int32_t  intfid;
+            
+            lport    = xpc_dictionary_get_uint64(req, "retreive_tcpinfo_lport");
+            rport    = xpc_dictionary_get_uint64(req, "retreive_tcpinfo_rport");
+            family   = xpc_dictionary_get_uint64(req, "retreive_tcpinfo_family");
+            
+            const uint8_t* laddr = xpc_dictionary_get_data(req, "retreive_tcpinfo_laddr", NULL);
+            const uint8_t* raddr = xpc_dictionary_get_data(req, "retreive_tcpinfo_raddr", NULL);
+            
+            os_log_info(log_handle, "helper-main: handle_request: retreive_tcpinfo: lport is[%d] rport is[%d] family is [%d]",
+                           lport, rport, family);
+            
+            RetrieveTCPInfo(family, laddr, lport, raddr, rport, &seq, &ack, &win, &intfid, &error_code);
+            
+            if (response)
+            {
+                xpc_dictionary_set_uint64(response, "retreive_tcpinfo_seq",  seq);
+                xpc_dictionary_set_uint64(response, "retreive_tcpinfo_ack",  ack);
+                xpc_dictionary_set_uint64(response, "retreive_tcpinfo_win",  win);
+                xpc_dictionary_set_uint64(response, "retreive_tcpinfo_ifid", intfid);
+            }
+            
+            os_log_info(log_handle, "helper-main: handle_request: retreive_tcpinfo: seq is[%d] ack is[%d] win is [%d] intfid is [%d]",
+                           seq, ack, win, intfid);
+
+            break;
+        }
+            
+        case autotunnel_setkeys:
+        {
+            uint16_t lport, rport;
+            int replace_del;
+            const char *fqdnstr;
+            
+            lport        = xpc_dictionary_get_uint64(req, "autotunnelsetkeys_lport");
+            rport        = xpc_dictionary_get_uint64(req, "autotunnelsetkeys_rport");
+            replace_del  = xpc_dictionary_get_uint64(req, "autotunnelsetkeys_repdel");
+
+            const uint8_t* local_inner  =  xpc_dictionary_get_data(req, "autotunnelsetkeys_localinner", NULL);
+            const uint8_t* local_outer  =  xpc_dictionary_get_data(req, "autotunnelsetkeys_localouter", NULL);
+            const uint8_t* remote_inner =  xpc_dictionary_get_data(req, "autotunnelsetkeys_remoteinner", NULL);
+            const uint8_t* remote_outer =  xpc_dictionary_get_data(req, "autotunnelsetkeys_remoteouter", NULL);
+            
+            fqdnstr = xpc_dictionary_get_string(req, "autotunnelsetkeys_fqdnStr");
+            
+            os_log_info(log_handle, "helper-main: handle_request: autotunnel_setkeys: lport is[%d] rport is[%d] replace_del is [%d]",
+                        lport, rport, replace_del);
+            
+
+            HelperAutoTunnelSetKeys(replace_del, local_inner, local_outer, lport, remote_inner, remote_outer, rport, fqdnstr, &error_code);
+
+            break;
+        }
+
+        
+        case keychain_getsecrets:
+        {
+            unsigned int num_sec  = 0;
+            unsigned long secrets = 0;
+            unsigned int sec_cnt  = 0;
+            
+            os_log_info(log_handle,"Calling new KeyChainGetSecrets()");
+            
+            KeychainGetSecrets(&num_sec, &secrets, &sec_cnt, &error_code);
+            
+            if (response)
+            {
+                xpc_dictionary_set_uint64(response, "keychain_num_secrets",   num_sec);
+                xpc_dictionary_set_data(response, "keychain_secrets", (void *)secrets, sec_cnt);
+                xpc_dictionary_set_uint64(response, "keychain_secrets_count", sec_cnt);
+            }
+            
+            os_log_info(log_handle,"helper-main: handle_request: keychain_getsecrets: num_secrets is %d, secrets is %lu, secrets_Cnt is %d",
+                           num_sec, secrets, sec_cnt);
+            
+            if (secrets)
+                vm_deallocate(mach_task_self(), secrets, sec_cnt);
+            
+            break;
+        }
+            
+        default:
+        {
+            os_log(log_handle, "handle_request: Unrecognized mode!");
+            error_code  = kHelperErr_UndefinedMode;
+            break;
+        }
+    }
+    
+    // Return Response Status back to the client (essentially ACKing the request)
+    if (response)
+    {
+        xpc_dictionary_set_uint64(response, kHelperReplyStatus, kHelperReply_ACK);
+        xpc_dictionary_set_int64(response, kHelperErrCode, error_code);
+        xpc_connection_send_message(remote_conn, response);
+        xpc_release(response);
+    }
+    else
+    {
+        os_log(log_handle, "handle_requests: Response Dictionary could not be created!");
+        return;
+    }
+    
+}
+
+static void accept_client(xpc_connection_t conn)
+{
+    int c_pid = xpc_connection_get_pid(conn);
+    
+    if (!(check_entitlement(conn, kHelperService)))
+    {
+        os_log(log_handle, "accept_client: Helper Client PID[%d] is missing Entitlement. Cancelling connection", c_pid);
+        xpc_connection_cancel(conn);
+        return;
+    }
+    
+    xpc_retain(conn);
+    xpc_connection_set_target_queue(conn, xpc_queue);
+    xpc_connection_set_event_handler(conn, ^(xpc_object_t req_msg)
+    {
+        xpc_type_t type = xpc_get_type(req_msg);
+                                         
+        if (type == XPC_TYPE_DICTIONARY)
+        {
+            os_log_info(log_handle,"accept_client:conn:[%p] client[%d](mDNSResponder) requesting service", (void *) conn, c_pid);
+            handle_request(req_msg);
+        }
+        else // We hit this case ONLY if Client Terminated Connection OR Crashed
+        {
+            os_log(log_handle, "accept_client:conn:[%p] client[%d](mDNSResponder) teared down the connection (OR Crashed)", (void *) conn, c_pid);
+            // handle_termination();
+            xpc_release(conn);
+        }
+    });
+    
+    xpc_connection_resume(conn);
+}
+
+
+static void init_helper_service(const char *service_name)
+{
+    
+    xpc_connection_t xpc_listener = xpc_connection_create_mach_service(service_name, NULL, XPC_CONNECTION_MACH_SERVICE_LISTENER);
+    if (!xpc_listener || xpc_get_type(xpc_listener) != XPC_TYPE_CONNECTION)
+    {
+        os_log(log_handle, "init_helper_service: Error Creating XPC Listener for mDNSResponderHelperService !!");
+        return;
+    }
+    
+    os_log_info(log_handle,"init_helper_service: XPC Listener for mDNSResponderHelperService Listening");
+    
+    xpc_queue = dispatch_queue_create("com.apple.mDNSHelper.service_queue", NULL);
+    
+    xpc_connection_set_event_handler(xpc_listener, ^(xpc_object_t eventmsg)
+    {
+        xpc_type_t type = xpc_get_type(eventmsg);
+                                         
+        if (type == XPC_TYPE_CONNECTION)
+        {
+            os_log_info(log_handle,"init_helper_service: new mDNSResponderHelper Client %p", eventmsg);
+            accept_client(eventmsg);
+        }
+        else if (type == XPC_TYPE_ERROR) // Ideally, we would never hit these cases below
+        {
+            os_log(log_handle, "init_helper_service: XPCError: %s", xpc_dictionary_get_string(eventmsg, XPC_ERROR_KEY_DESCRIPTION));
+            return;
+        }
+        else
+        {
+            os_log(log_handle, "init_helper_service: Unknown EventMsg type");
+            return;
+        }
+    });
+    
+    xpc_connection_resume(xpc_listener);
+}
+
 
 int main(int ac, char *av[])
 {
     char *p = NULL;
-    kern_return_t kr = KERN_FAILURE;
     long n;
     int ch;
-    mach_msg_header_t hdr;
 
     while ((ch = getopt(ac, av, "dt:")) != -1)
+    {
         switch (ch)
         {
-        case 'd': opt_debug = 1; break;
-        case 't':
-            n = strtol(optarg, &p, 0);
-            if ('\0' == optarg[0] || '\0' != *p || n > LONG_MAX || n < 0)
-            { fprintf(stderr, "Invalid idle timeout: %s\n", optarg); exit(EXIT_FAILURE); }
-            maxidle = n;
-            break;
-        case '?':
-        default:
-            fprintf(stderr, "Usage: mDNSResponderHelper [-d] [-t maxidle]\n");
-            exit(EXIT_FAILURE);
+            case 'd':
+                opt_debug = 1;
+                break;
+            case 't':
+                n = strtol(optarg, &p, 0);
+                if ('\0' == optarg[0] || '\0' != *p || n > LONG_MAX || n < 0)
+                {
+                    fprintf(stderr, "Invalid idle timeout: %s\n", optarg);
+                    exit(EXIT_FAILURE);
+                }
+                maxidle = n;
+                break;
+            case '?':
+            default:
+                fprintf(stderr, "Usage: mDNSResponderHelper [-d] [-t maxidle]\n");
+                exit(EXIT_FAILURE);
         }
+    }
     ac -= optind;
     av += optind;
+    (void)ac; // Unused
+    (void)av; // Unused
 
     initialize_logging();
-    helplog(ASL_LEVEL_INFO, "Starting");
     initialize_id();
+
+    mDNSHelperLogEnabled = HelperPrefsGetValueBool(kPreferencesKey_mDNSHelperLog, mDNSHelperLogEnabled);
+
+// Currently on Fuji/Whitetail releases we are keeping the logging always enabled.
+// Hence mDNSHelperLogEnabled is set to true below by default.
+    mDNSHelperLogEnabled      = 1;
+
+    os_log_info(log_handle,"mDNSResponderHelper Starting to run");
 
 #ifndef NO_SECURITYFRAMEWORK
     // We should normally be running as a system daemon.  However, that might not be the case in some scenarios (e.g. debugging).
     // Explicitly ensure that our Keychain operations utilize the system domain.
-    if (opt_debug) SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem);
+    if (opt_debug)
+        SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem);
 #endif
-    gPort = register_service(kmDNSHelperServiceName);
-    if (!gPort)
-        exit(EXIT_FAILURE);
 
-    if (maxidle) actualidle = maxidle;
+    if (maxidle)
+        actualidle = maxidle;
 
     signal(SIGTERM, handle_sigterm);
 
-    // We use BeginTransactionAtShutdown in the plist that ensures that we will
-    // receive a SIGTERM during shutdown rather than a SIGKILL. But launchd (due to some
-    // limitation) currently requires us to still start and end the transaction for
-    // its proper initialization.
-    vproc_transaction_t vt = vproc_transaction_begin(NULL);
-    if (vt) vproc_transaction_end(NULL, vt);
-
-    if (initialize_timer()) exit(EXIT_FAILURE);
-    for (n=0; n<100000; n++) if (!gRunLoop) usleep(100);
+    if (initialize_timer())
+        exit(EXIT_FAILURE);
+    for (n=0; n<100000; n++)
+        if (!gRunLoop)
+            usleep(100);
+    
     if (!gRunLoop)
     {
-        helplog(ASL_LEVEL_ERR, "gRunLoop not set after waiting");
+        os_log(log_handle, "gRunLoop not set after waiting");
         exit(EXIT_FAILURE);
     }
 
-    for(;;)
-    {
-        hdr.msgh_bits = 0;
-        hdr.msgh_local_port = gPort;
-        hdr.msgh_remote_port = MACH_PORT_NULL;
-        hdr.msgh_size = sizeof(hdr);
-        hdr.msgh_id = 0;
-        kr = mach_msg(&hdr, MACH_RCV_LARGE | MACH_RCV_MSG, 0, hdr.msgh_size, gPort, 0, 0);
-        if (MACH_RCV_TOO_LARGE != kr)
-            helplog(ASL_LEVEL_ERR, "main MACH_RCV_MSG error: %d %X %s", kr, kr, mach_error_string(kr));
-
-        kr = mach_msg_server_once(helper_server, MAX_MSG_SIZE, gPort,
-                                  MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AUDIT) | MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0));
-        if (KERN_SUCCESS != kr)
-        { helplog(ASL_LEVEL_ERR, "mach_msg_server: %d %X %s", kr, kr, mach_error_string(kr)); exit(EXIT_FAILURE); }
-
-    }
-    exit(EXIT_SUCCESS);
+    init_helper_service(kHelperService);
+    os_log_info(log_handle,"mDNSResponderHelper is now running");
+    dispatch_main();
+    
 }
 
 // Note: The C preprocessor stringify operator ('#') makes a string from its argument, without macro expansion

@@ -87,7 +87,7 @@ typedef struct
     DNSQuestion q;
 } mDNS_DirectOP_QueryRecord;
 
-int DNSServiceRefSockFD(DNSServiceRef sdRef)
+dnssd_sock_t DNSServiceRefSockFD(DNSServiceRef sdRef)
 {
     (void)sdRef;    // Unused
     return(0);

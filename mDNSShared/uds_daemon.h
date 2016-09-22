@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2013 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,13 +13,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-
-    File:		uds_daemon.h
-
-    Contains:	Interfaces necessary to talk to uds_daemon.c.
-
-    Version:	1.0
-
  */
 
 #include "mDNSEmbeddedAPI.h"
@@ -28,6 +21,8 @@
 /* Client interface: */
 
 #define SRS_PORT(S) mDNSVal16((S)->RR_SRV.resrec.rdata->u.srv.port)
+
+#define LogTimer(MSG,T) LogMsgNoIdent( MSG " %08X %11d  %08X %11d", (T), (T), (T)-now, (T)-now)
 
 extern int udsserver_init(dnssd_sock_t skts[], mDNSu32 count);
 extern mDNSs32 udsserver_idle(mDNSs32 nextevent);
@@ -58,15 +53,14 @@ extern DNameListElem *AutoBrowseDomains;
 extern mDNSs32 ChopSubTypes(char *regtype, char **AnonData);
 extern AuthRecord *AllocateSubTypes(mDNSs32 NumSubTypes, char *p, char **AnonData);
 extern int CountExistingRegistrations(domainname *srv, mDNSIPPort port);
+extern mDNSBool callExternalHelpers(mDNSInterfaceID InterfaceID, const domainname *const domain, DNSServiceFlags flags);
 extern void FreeExtraRR(mDNS *const m, AuthRecord *const rr, mStatus result);
 extern int CountPeerRegistrations(mDNS *const m, ServiceRecordSet *const srs);
 
 #if APPLE_OSX_mDNSResponder
 
-extern void machserver_automatic_browse_domain_changed(const domainname *d, mDNSBool add);
-extern void machserver_automatic_registration_domain_changed(const domainname *d, mDNSBool add);
 // D2D interface support
-extern void external_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, DNS_TypeValues qtype, DNSServiceFlags flags);
+extern void external_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, DNS_TypeValues qtype, DNSServiceFlags flags, DNSQuestion * q);
 extern void external_stop_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, DNS_TypeValues qtype, DNSServiceFlags flags);
 extern void external_start_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags);
 extern void external_stop_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags);
@@ -74,12 +68,17 @@ extern void external_start_resolving_service(mDNSInterfaceID InterfaceID, const 
 extern void external_stop_resolving_service(mDNSInterfaceID InterfaceID, const domainname *const fqdn, DNSServiceFlags flags);
 extern void external_connection_release(const domainname *instance);
 
+extern void internal_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, DNS_TypeValues qtype, DNSServiceFlags flags);
+extern void internal_stop_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, DNS_TypeValues qtype, DNSServiceFlags flags);
+extern void internal_start_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags);
+extern void internal_stop_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags);
+
 #else   // APPLE_OSX_mDNSResponder
 
-#define external_start_browsing_for_service(A,B,C,D) (void)(A)
+#define external_start_browsing_for_service(A,B,C,D,E) (void)(A)
 #define external_stop_browsing_for_service(A,B,C,D)  (void)(A)
 #define external_start_advertising_service(A,B)      (void)(A)
-#define external_stop_advertising_service(A,B)       (void)(A)
+#define external_stop_advertising_service(A,B)       do { (void)(A); (void)(B); } while (0)
 #define external_start_resolving_service(A,B,C)      (void)(A)
 #define external_stop_resolving_service(A,B,C)       (void)(A)
 #define external_connection_release(A)               (void)(A)
@@ -88,3 +87,8 @@ extern void external_connection_release(const domainname *instance);
 
 extern const char mDNSResponderVersionString_SCCS[];
 #define mDNSResponderVersionString (mDNSResponderVersionString_SCCS+5)
+
+#if DEBUG
+extern void SetDebugBoundPath(void);
+extern int IsDebugSocketInUse(void);
+#endif

@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "mDNSEmbeddedAPI.h"
 #include "DNSSECSupport.h"
 #include "DNSCommon.h"
@@ -86,6 +87,7 @@ mDNSlocal mDNSBool TrustedKeyPresent(mDNS *const m, DNSSECVerifier *dv);
 mDNSlocal mStatus ValidateDS(DNSSECVerifier *dv);
 mDNSlocal void DNSSECNegativeValidationCB(mDNS *const m, DNSSECVerifier *dv, CacheGroup *cg, ResourceRecord *answer, DNSSECStatus status);
 mDNSlocal RRVerifier* CopyRRVerifier(RRVerifier *from);
+mDNSlocal void FreeDNSSECAuthChainInfo(AuthChain *ac);
 
 // Currently we use this to convert a RRVerifier to resource record so that we can
 // use the standard DNS utility functions
@@ -299,6 +301,8 @@ mDNSlocal AuthChain *AuthChainCopy(AuthChain *ae)
         if (!ac)
         {
             LogMsg("AuthChainCopy: AuthChain alloc failure");
+            if (retac)
+                FreeDNSSECAuthChainInfo(retac);
             return mDNSfalse;
         }
 
@@ -309,7 +313,7 @@ mDNSlocal AuthChain *AuthChainCopy(AuthChain *ae)
 
         rvfrom = ae->rrset;
         rvto = &ac->rrset;
-        while (rvfrom)
+        while (rvfrom && rvto)
         {
             *rvto = CopyRRVerifier(rvfrom);
             rvfrom = rvfrom->next;
@@ -318,7 +322,7 @@ mDNSlocal AuthChain *AuthChainCopy(AuthChain *ae)
 
         rvfrom = ae->rrsig;
         rvto = &ac->rrsig;
-        while (rvfrom)
+        while (rvfrom && rvto)
         {
             *rvto = CopyRRVerifier(rvfrom);
             rvfrom = rvfrom->next;
@@ -327,7 +331,7 @@ mDNSlocal AuthChain *AuthChainCopy(AuthChain *ae)
 
         rvfrom = ae->key;
         rvto = &ac->key;
-        while (rvfrom)
+        while (rvfrom && rvto)
         {
             *rvto = CopyRRVerifier(rvfrom);
             rvfrom = rvfrom->next;
@@ -1065,7 +1069,6 @@ mDNSlocal mStatus CheckDSForKey(mDNS *const m, DNSSECVerifier *dv, CacheRecord *
         return mStatus_NoError;
     else
         return mStatus_NoSuchRecord;
-    return (dv->ds ? mStatus_NoError : mStatus_NoSuchRecord);
 }
 
 // It returns mDNStrue if we have all the rrsets for verification and mDNSfalse otherwise.
@@ -2335,8 +2338,6 @@ mDNSlocal void SetTTLRRSet(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus statu
     rdataRRSig *rrsig;
     mDNSu32 slot;
     CacheGroup *cg;
-    int sigNameLen, len;
-    mDNSu8 *ptr;
     mDNSu32 rrTTL, rrsigTTL, rrsigOrigTTL, rrsigTimeTTL;
     domainname *qname;
     mDNSu16 qtype;
@@ -2400,17 +2401,11 @@ mDNSlocal void SetTTLRRSet(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus statu
     {
         rrsigv = dv->ac->rrsig;
         rrsig = (rdataRRSig *)rrsigv->rdata;
-        sigNameLen = DomainNameLength((domainname *)&rrsig->signerName);
-        // pointer to signature and the length
-        ptr = (mDNSu8 *)(rrsigv->rdata + sigNameLen + RRSIG_FIXED_SIZE);
-        len = rrsigv->rdlength - RRSIG_FIXED_SIZE - sigNameLen;
     }
     else
     {
         rrsigv = mDNSNULL;
         rrsig = mDNSNULL;
-        ptr = mDNSNULL;
-        sigNameLen = len = 0;
     }
 
     rrsigRR = mDNSNULL;
@@ -2531,7 +2526,9 @@ mDNSlocal void FinishDNSSECVerification(mDNS *const m, DNSSECVerifier *dv)
     LogDNSSEC("FinishDNSSECVerification: all rdata sets available for sig verification for %##s (%s)",
               dv->origName.c, DNSTypeName(dv->origType));
 
-    mDNS_StopQuery(m, &dv->q);
+    // Stop outstanding query if one exists
+    if (dv->q.ThisQInterval != -1)
+        mDNS_StopQuery(m, &dv->q);
     if (ValidateSignature(dv, &resultKey, &resultRRSig) == mStatus_NoError)
     {
         rdataDNSKey *key;
@@ -3187,13 +3184,10 @@ mDNSexport void VerifySignature(mDNS *const m, DNSSECVerifier *dv, DNSQuestion *
 
 mDNSlocal mDNSBool TrustedKeyPresent(mDNS *const m, DNSSECVerifier *dv)
 {
-    rdataRRSig *rrsig;
     rdataDS *ds;
     rdataDNSKey *key;
     TrustAnchor *ta;
     RRVerifier *keyv;
-
-    rrsig = (rdataRRSig *)dv->rrsig->rdata;
 
     // Walk all our trusted DS Records to see if we have a matching DNS KEY record that verifies
     // the hash. If we find one, verify that this key was used to sign the KEY rrsets in

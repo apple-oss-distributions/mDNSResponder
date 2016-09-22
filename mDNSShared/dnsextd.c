@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2015 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -560,6 +560,7 @@ mDNSlocal mDNSBool IsLLQRequest(PktMsg *pkt)
     ptr = LocateAdditionals(&pkt->msg, end);
     if (!ptr) goto end;
 
+    bzero(&lcr, sizeof(lcr));
     // find last Additional info.
     for (i = 0; i < pkt->msg.h.numAdditionals; i++)
     {
@@ -628,7 +629,6 @@ SetZone
 )
 {
     domainname zname;
-    mDNSu8 QR_OP;
     const mDNSu8    *   ptr = pkt->msg.data;
     mDNSBool exception = mDNSfalse;
 
@@ -640,15 +640,13 @@ SetZone
 
     // Figure out what type of packet this is
 
-    QR_OP = ( mDNSu8 ) ( pkt->msg.h.flags.b[0] & kDNSFlag0_QROP_Mask );
-
     if ( IsQuery( pkt ) )
     {
         DNSQuestion question;
 
         // It's a query
 
-        ptr = getQuestion( &pkt->msg, ptr, ( ( mDNSu8* ) &pkt->msg ) + pkt->len, NULL, &question );
+        getQuestion( &pkt->msg, ptr, ( ( mDNSu8* ) &pkt->msg ) + pkt->len, NULL, &question );
 
         AppendDomainName( &zname, &question.qname );
 
@@ -661,7 +659,7 @@ SetZone
         // It's an update.  The format of the zone section is the same as the format for the question section
         // according to RFC 2136, so we'll just treat this as a question so we can get at the zone.
 
-        ptr = getQuestion( &pkt->msg, ptr, ( ( mDNSu8* ) &pkt->msg ) + pkt->len, NULL, &question );
+        getQuestion( &pkt->msg, ptr, ( ( mDNSu8* ) &pkt->msg ) + pkt->len, NULL, &question );
 
         AppendDomainName( &zname, &question.qname );
 
@@ -1373,8 +1371,7 @@ mDNSlocal void DeleteRecords(DaemonInfo *d, mDNSBool DeleteAll)
 // Add, delete, or refresh records in table based on contents of a successfully completed dynamic update
 mDNSlocal void UpdateLeaseTable(PktMsg *pkt, DaemonInfo *d, mDNSs32 lease)
 {
-    RRTableElem **rptr, *tmp;
-    int i, allocsize, bucket;
+    int i, allocsize;
     LargeCacheRecord lcr;
     ResourceRecord *rr = &lcr.r.resrec;
     const mDNSu8 *ptr, *end;
@@ -1397,8 +1394,8 @@ mDNSlocal void UpdateLeaseTable(PktMsg *pkt, DaemonInfo *d, mDNSs32 lease)
 
         ptr = GetLargeResourceRecord(NULL, &pkt->msg, ptr, end, 0, kDNSRecordTypePacketAns, &lcr);
         if (!ptr || lcr.r.resrec.RecordType == kDNSRecordTypePacketNegative) { Log("UpdateLeaseTable: GetLargeResourceRecord failed"); goto cleanup; }
-        bucket = rr->namehash % d->nbuckets;
-        rptr = &d->table[bucket];
+        int bucket = rr->namehash % d->nbuckets;
+        RRTableElem *tmp, **rptr = &d->table[bucket];
 
         // handle deletions
         if (rr->rrtype == kDNSQType_ANY && !rr->rroriginalttl && rr->rrclass == kDNSQClass_ANY && !rr->rdlength)
@@ -1444,7 +1441,6 @@ mDNSlocal void UpdateLeaseTable(PktMsg *pkt, DaemonInfo *d, mDNSs32 lease)
                 {
                     RehashTable(d);
                     bucket = rr->namehash % d->nbuckets;
-                    rptr = &d->table[bucket];
                 }
                 if (gettimeofday(&tv, NULL)) { LogErr("UpdateLeaseTable", "gettimeofday"); goto cleanup; }
                 allocsize = sizeof(RRTableElem);
@@ -1475,12 +1471,11 @@ cleanup:
 // Replies are currently not signed !!!KRS change this
 mDNSlocal PktMsg *FormatLeaseReply(DaemonInfo *d, PktMsg *orig, mDNSu32 lease)
 {
-    PktMsg *reply;
-    mDNSu8 *ptr, *end;
+    PktMsg *const reply = malloc(sizeof(*reply));
+    mDNSu8 *ptr;
     mDNSOpaque16 flags;
-
     (void)d;  //unused
-    reply = malloc(sizeof(*reply));
+    
     if (!reply) { LogErr("FormatLeaseReply", "malloc"); return NULL; }
     flags.b[0] = kDNSFlag0_QR_Response | kDNSFlag0_OP_Update;
     flags.b[1] = 0;
@@ -1488,9 +1483,7 @@ mDNSlocal PktMsg *FormatLeaseReply(DaemonInfo *d, PktMsg *orig, mDNSu32 lease)
     InitializeDNSMessage(&reply->msg.h, orig->msg.h.id, flags);
     reply->src.sin_addr.s_addr = zerov4Addr.NotAnInteger;            // unused except for log messages
     reply->src.sin_family = AF_INET;
-    ptr = reply->msg.data;
-    end = (mDNSu8 *)&reply->msg + sizeof(DNSMessage);
-    ptr = putUpdateLease(&reply->msg, ptr, lease);
+    ptr = putUpdateLease(&reply->msg, reply->msg.data, lease);
     if (!ptr) { Log("FormatLeaseReply: putUpdateLease failed"); free(reply); return NULL; }
     reply->len = ptr - (mDNSu8 *)&reply->msg;
     HdrHToN(reply);
@@ -2401,6 +2394,7 @@ mDNSlocal mDNSBool IsAuthorized( DaemonInfo * d, PktMsg * pkt, DomainAuthInfo **
     HdrNToH(pkt);
 
     *key = NULL;
+    bzero(&lcr, sizeof(lcr));
 
     if ( pkt->msg.h.numAdditionals )
     {

@@ -1746,8 +1746,8 @@ DEBUG_EXPORT const char *   DebugGetErrorString( int_least32_t inErrorCode, char
         CaseErrorStringifyHardCode( -65548, mStatus_NameConflict );
         CaseErrorStringifyHardCode( -65549, mStatus_Invalid );
         CaseErrorStringifyHardCode( -65550, mStatus_GrowCache );
-        CaseErrorStringifyHardCode( -65551, mStatus_BadInterfaceErr );
-        CaseErrorStringifyHardCode( -65552, mStatus_Incompatible );
+        CaseErrorStringifyHardCode( -65551, mStatus_Incompatible );
+        CaseErrorStringifyHardCode( -65552, mStatus_BadInterfaceErr );
         CaseErrorStringifyHardCode( -65791, mStatus_ConfigChanged );
         CaseErrorStringifyHardCode( -65792, mStatus_MemFree );
 

@@ -1,4 +1,4 @@
-/*
+/* -*- Mode: C; tab-width: 4 -*-
  *
  * Copyright (c) 2011 Apple Inc. All rights reserved.
  *
@@ -228,7 +228,9 @@ static void initPortRule( struct pfioc_rule * pr,
 int P2PPacketFilterAddBonjourRuleSet(const char * interfaceName, u_int32_t count, pfArray_t portArray, pfArray_t protocolArray )
 {
     int result;
-    u_int32_t i, ticket, poolTicket;
+    u_int32_t i;
+    u_int32_t ticket = 0;
+    u_int32_t poolTicket = 0;
     int devFD = -1;
     char * anchorPath = MDNS_ANCHOR_PATH;
 
@@ -250,7 +252,8 @@ int P2PPacketFilterAddBonjourRuleSet(const char * interfaceName, u_int32_t count
     require( result == 0, exit );
 
     // open inbound port for each service
-    for (i = 0; i < count; i++) {
+    for (i = 0; i < count; i++)
+    {
         initPortRule( &pr, interfaceName, ticket, poolTicket, anchorPath, portArray[i], protocolArray[i] );
         result = addRule( devFD, &pr );
         require( result == 0, exit );
@@ -277,7 +280,7 @@ int P2PPacketFilterClearBonjourRules()
 {
     int result;
     int pfDev = -1;
-    u_int32_t ticket;
+    u_int32_t ticket = 0;
     char * anchorPath = MDNS_ANCHOR_PATH;
 
     result = openPFDevice( &pfDev );

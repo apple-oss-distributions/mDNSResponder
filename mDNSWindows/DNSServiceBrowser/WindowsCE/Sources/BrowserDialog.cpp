@@ -204,7 +204,7 @@ void
 			{
 				char		ip[ 64 ];
 
-				sprintf( ip, "%u.%u.%u.%u:%u", 
+				snprintf( ip, sizeof( ip ), "%u.%u.%u.%u:%u", 
 					inEvent->data.resolved->address.u.ipv4.addr.v8[ 0 ], 
 					inEvent->data.resolved->address.u.ipv4.addr.v8[ 1 ], 
 					inEvent->data.resolved->address.u.ipv4.addr.v8[ 2 ], 

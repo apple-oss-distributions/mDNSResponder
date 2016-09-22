@@ -786,7 +786,7 @@ static void	ReportStatus( int inType, const char *inFormat, ... )
 			BOOL				ok;
 			const char *		array[ 1 ];
 			
-			vsprintf( s, inFormat, args );
+			vsnprintf( s, sizeof( s ), inFormat, args );
 			array[ 0 ] = s;
 			ok = ReportEventA( gServiceEventSource, (WORD) inType, 0, MDNSRESPONDER_LOG, NULL, 1, 0, array, NULL );
 			check_translated_errno( ok, GetLastError(), kUnknownErr );

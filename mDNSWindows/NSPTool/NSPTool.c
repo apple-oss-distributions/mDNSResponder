@@ -38,7 +38,7 @@ DEBUG_LOCAL OSStatus	ListNameSpaces( void );
 DEBUG_LOCAL OSStatus	ReorderNameSpaces( void );
 
 DEBUG_LOCAL WCHAR *		CharToWCharString( const char *inCharString, WCHAR *outWCharString );
-DEBUG_LOCAL char *		GUIDtoString( const GUID *inGUID, char *outString );
+DEBUG_LOCAL char *		GUIDtoString( const GUID *inGUID, size_t inLen, char *outString );
 DEBUG_LOCAL OSStatus	StringToGUID( const char *inCharString, GUID *outGUID );
 
 DEBUG_LOCAL BOOL gToolQuietMode = FALSE;
@@ -390,7 +390,7 @@ DEBUG_LOCAL OSStatus	ListNameSpaces( void )
 	for( i = 0; i < n; ++i )
 	{
 		fprintf( stdout, "Name Space %d\n", i + 1 );
-		fprintf( stdout, "    NSProviderId:   %s\n", GUIDtoString( &array[ i ].NSProviderId, s ) );
+		fprintf( stdout, "    NSProviderId:   %s\n", GUIDtoString( &array[ i ].NSProviderId, sizeof( s ), s ) );
 		fprintf( stdout, "    dwNameSpace:    %d\n", array[ i ].dwNameSpace );
 		fprintf( stdout, "    fActive:        %s\n", array[ i ].fActive ? "YES" : "NO" );
 		fprintf( stdout, "    dwVersion:      %d\n", array[ i ].dwVersion );
@@ -536,12 +536,12 @@ DEBUG_LOCAL WCHAR *	CharToWCharString( const char *inCharString, WCHAR *outWChar
 //	GUIDtoString
 //===========================================================================================================================
 
-DEBUG_LOCAL char *	GUIDtoString( const GUID *inGUID, char *outString )
+DEBUG_LOCAL char *	GUIDtoString( const GUID *inGUID, size_t inLen, char *outString )
 {
 	check( inGUID );
 	check( outString );
 	
-	sprintf( outString, "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x", 
+	_snprintf( outString, inLen, "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
 		inGUID->Data1, inGUID->Data2, inGUID->Data3, 
 		inGUID->Data4[ 0 ], inGUID->Data4[ 1 ], inGUID->Data4[ 2 ], inGUID->Data4[ 3 ], 
 		inGUID->Data4[ 4 ], inGUID->Data4[ 5 ], inGUID->Data4[ 6 ], inGUID->Data4[ 7 ] );

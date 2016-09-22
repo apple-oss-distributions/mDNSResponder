@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2012 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2012-2013 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,6 +44,8 @@
 // When we can't fetch the root TA due to network errors etc., we start off a timer
 // to fire at 60 seconds and then keep doubling it till we fetch it
 #define InitialTAFetchInterval 60
+#define DNSSECProbePercentage 1
+
 
 #if !TARGET_OS_IPHONE
 DNSQuestion DNSSECProbeQuestion;
@@ -165,7 +167,7 @@ mDNSlocal mDNSu8 *ConvertDigest(char *digest, int digestType, int *diglen)
         int l, h;
         l = HexVal(digest[i]);
         h = HexVal(digest[i+1]);
-        if (l<0 || h<0) { LogMsg("ConvertDigest: Cannot convert digest"); return NULL;}
+        if (l<0 || h<0) { LogMsg("ConvertDigest: Cannot convert digest"); mDNSPlatformMemFree(dig); return NULL;}
         dig[j++] = (mDNSu8)((l << 4) | h);
     }
     return dig;
@@ -449,9 +451,13 @@ mDNSlocal void FetchRootTA(mDNS *const m)
         return;
     }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     // If we can't fetch the XML file e.g., network problems, trigger a timer. All other failures
     // should hardly happen in practice for which schedule the normal interval to refetch the TA.
-    if (!CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault, url, &xmlData, NULL, NULL, NULL))
+    Boolean success = CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault, url, &xmlData, NULL, NULL, NULL);
+#pragma clang diagnostic pop
+    if (!success)
     {
         LogInfo("FetchRootTA: CFURLCreateDataAndPropertiesFromResource error");
         CFRelease(url);
@@ -479,7 +485,8 @@ mDNSlocal void FetchRootTA(mDNS *const m)
     xmlDocPtr tadoc = xmlReadMemory((const char*)CFDataGetBytePtr(xmlData),
         (int)CFDataGetLength(xmlData), xmlFileName, NULL, 0);        
 
-    CFRelease(fileRef);
+    if (fileRef)
+        CFRelease(fileRef);
     CFRelease(url);
     CFRelease(xmlData);
 
@@ -555,8 +562,8 @@ mDNSexport void DNSSECProbe(mDNS *const m)
         return;
     
     rand = mDNSRandom(0x3FFFFFFF) % 100;
-    // Probe 5% of the time
-    if (rand > 5)
+    // Probe 1% of the time
+    if (rand >= DNSSECProbePercentage)
         return;
     
     mDNS_DropLockBeforeCallback();

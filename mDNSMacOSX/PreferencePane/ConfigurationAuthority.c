@@ -112,7 +112,7 @@ OSStatus InitConfigAuthority(void)
                                           CFSTR("Describes operation that requires user authorization"));
         require_action( rightInfo != NULL, GetStrFailed, err=coreFoundationUnknownErr;);
         dict = CreateRightsDict(rightInfo);
-        require_action( dict != NULL, GetStrFailed, err=coreFoundationUnknownErr;);
+        require_action( dict != NULL, GetStrFailed, err=coreFoundationUnknownErr; CFRelease(rightInfo));
 
         err = AuthorizationRightSet(gAuthRef, UPDATE_SC_RIGHT, dict, (CFStringRef) NULL,
                                     (CFBundleRef) NULL, (CFStringRef) NULL);
@@ -128,7 +128,7 @@ OSStatus InitConfigAuthority(void)
                                            CFSTR("Describes operation that requires user authorization"));
         require_action( rightInfo != NULL, GetStrFailed, err=coreFoundationUnknownErr;);
         dict = CreateRightsDict( rightInfo);
-        require_action( dict != NULL, GetStrFailed, err=coreFoundationUnknownErr;);
+        require_action( dict != NULL, GetStrFailed, err=coreFoundationUnknownErr; CFRelease(rightInfo));
 
         err = AuthorizationRightSet(gAuthRef, EDIT_SYS_KEYCHAIN_RIGHT, dict, (CFStringRef) NULL,
                                     (CFBundleRef) NULL, (CFStringRef) NULL);

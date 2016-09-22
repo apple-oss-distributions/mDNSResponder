@@ -80,12 +80,12 @@ DLLStub::GetProcAddress( FARPROC * func, LPCSTR lpProcName )
 }
 
 
-int DNSSD_API
+dnssd_sock_t DNSSD_API
 DNSServiceRefSockFD(DNSServiceRef sdRef)
 {
 	typedef int (DNSSD_API * Func)(DNSServiceRef sdRef);
 	static Func func = NULL;
-	int ret = -1;
+	int ret = INVALID_SOCKET;
 
 	if ( DLLStub::GetProcAddress( ( FARPROC* ) &func, __FUNCTION__ ) )
 	{

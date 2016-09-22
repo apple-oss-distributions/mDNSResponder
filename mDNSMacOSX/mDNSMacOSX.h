@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2015 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ extern "C" {
 #include "mDNSEmbeddedAPI.h"  // for domain name structure
 
 #include <net/if.h>
+#include <os/log.h>
 
 //#define MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
@@ -41,21 +42,13 @@ extern "C" {
 #if TARGET_OS_EMBEDDED
 #define NO_SECURITYFRAMEWORK 1
 #define NO_CFUSERNOTIFICATION 1
-#include <MobileGestalt.h> // for IsAppleTV() 
-#include <SystemConfiguration/scprefs_observer.h> // for _scprefs_observer_watch()
-extern mDNSBool GetmDNSManagedPref(CFStringRef key);
+#include <MobileGestalt.h> // for IsAppleTV()
 #endif
 
 #ifndef NO_SECURITYFRAMEWORK
 #include <Security/SecureTransport.h>
 #include <Security/Security.h>
 #endif /* NO_SECURITYFRAMEWORK */
-
-#if TARGET_OS_IPHONE
-#include "cellular_usage_policy.h"
-#endif
-
-#define kmDNSResponderServName "com.apple.mDNSResponder"
 
 enum mDNSDynamicStoreSetConfigKey
 {
@@ -141,8 +134,6 @@ struct NetworkInterfaceInfoOSX_struct
     mDNSu8 Occulting;                           // Set if interface vanished for less than 60 seconds and then came back
     mDNSu8 D2DInterface;                        // IFEF_LOCALNET_PRIVATE flag indicates we should call
                                                 // D2D plugin for operations over this interface
-    mDNSu8 DirectLink;                          // IFEF_DIRECTLINK flag is set for interface
-
     mDNSs32 AppearanceTime;                     // Time this interface appeared most recently in getifaddrs list
                                                 // i.e. the first time an interface is seen, AppearanceTime is set.
                                                 // If an interface goes away temporarily and then comes back then
@@ -169,7 +160,7 @@ struct mDNS_PlatformSupport_struct
 {
     NetworkInterfaceInfoOSX *InterfaceList;
     KQSocketSet permanentsockets;
-    int num_mcasts;                              // Number of multicasts received during this CPU scheduling period (used for CPU limiting)
+    int num_mcasts;                             // Number of multicasts received during this CPU scheduling period (used for CPU limiting)
     domainlabel userhostlabel;                  // The hostlabel as it was set in System Preferences the last time we looked
     domainlabel usernicelabel;                  // The nicelabel as it was set in System Preferences the last time we looked
     // Following four variables are used for optimization where the helper is not
@@ -181,10 +172,8 @@ struct mDNS_PlatformSupport_struct
     domainlabel prevnewnicelabel;               // Previous m->nicelabel
     mDNSs32 NotifyUser;
     mDNSs32 HostNameConflict;                   // Time we experienced conflict on our link-local host name
-    mDNSs32 NetworkChanged;
     mDNSs32 KeyChainTimer;
 
-    CFRunLoopRef CFRunLoop;
     SCDynamicStoreRef Store;
     CFRunLoopSourceRef StoreRLS;
     CFRunLoopSourceRef PMRLS;
@@ -216,9 +205,6 @@ struct mDNS_PlatformSupport_struct
     TCPSocket TCPProxy;
     ProxyCallback *UDPProxyCallback;
     ProxyCallback *TCPProxyCallback;
-#if TARGET_OS_IPHONE
-    cellular_usage_policy_client_t handle;
-#endif
 };
 
 extern int OfferSleepProxyService;

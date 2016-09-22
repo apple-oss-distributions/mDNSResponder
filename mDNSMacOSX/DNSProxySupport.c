@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,12 +14,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "mDNSEmbeddedAPI.h"
 #include "mDNSMacOSX.h"
 
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/event.h>
+#include <netinet/tcp.h>
 
 #define ValidSocket(s) ((s) >= 0)
 
@@ -100,6 +102,9 @@ mDNSlocal void ProxyTCPSocketCallBack(int s1, short filter, void *context)
     ProxyTCPInfo_t *ti = (ProxyTCPInfo_t *)context;
     TCPSocket *sock = &ti->sock;
     KQSocketSet *kq = &sock->ss;
+    struct tcp_info tcp_if;
+    socklen_t size = sizeof(tcp_if);
+    int32_t intf_id = 0;
 
     (void) filter;
 
@@ -134,6 +139,12 @@ mDNSlocal void ProxyTCPSocketCallBack(int s1, short filter, void *context)
         mDNSPlatformDisposeProxyContext(ti);
         return;
     }
+    if (getsockopt(s1, IPPROTO_TCP, TCP_INFO, &tcp_if, &size) != 0)
+    {
+        LogMsg("ProxyTCPReceive: getsockopt for TCP_INFO failed (fd=%d) errno %d", s1, errno);
+        return;
+    }
+    intf_id = tcp_if.tcpi_last_outif;
 
     if (from.ss_family == AF_INET)
     {
@@ -147,7 +158,8 @@ mDNSlocal void ProxyTCPSocketCallBack(int s1, short filter, void *context)
         destAddr.type = mDNSAddrType_IPv4;
         destAddr.ip.v4.NotAnInteger = s->sin_addr.s_addr;
 
-        LogInfo("ProxyTCPReceive received IPv4 packet(len %d) from %#-15a to %#-15a on skt %d %s", ti->replyLen, &senderAddr, &destAddr, s1, NULL);
+        LogInfo("ProxyTCPReceive received IPv4 packet(len %d) from %#-15a to %#-15a on skt %d %s ifindex %d",
+                ti->replyLen, &senderAddr, &destAddr, s1, NULL, intf_id);
     }
     else if (from.ss_family == AF_INET6)
     {
@@ -160,7 +172,8 @@ mDNSlocal void ProxyTCPSocketCallBack(int s1, short filter, void *context)
         destAddr.type = mDNSAddrType_IPv6;
         destAddr.ip.v6 = *(mDNSv6Addr*)&sin6->sin6_addr;
 
-        LogInfo("ProxyTCPReceive received IPv6 packet(len %d) from %#-15a to %#-15a on skt %d %s", ti->replyLen, &senderAddr, &destAddr, s1, NULL);
+        LogInfo("ProxyTCPReceive received IPv6 packet(len %d) from %#-15a to %#-15a on skt %d %s ifindex %d",
+                ti->replyLen, &senderAddr, &destAddr, s1, NULL, intf_id);
     }
     else
     {
@@ -173,7 +186,7 @@ mDNSlocal void ProxyTCPSocketCallBack(int s1, short filter, void *context)
     // In the UDP case, there is just a single socket and nothing to free. Hence, the context (last argument)
     // would be NULL.
     kq->m->p->TCPProxyCallback(kq->m, sock, ti->reply, (mDNSu8 *)ti->reply + ti->replyLen, &senderAddr, senderPort, &destAddr,
-        UnicastDNSPort, 0, ti);
+        UnicastDNSPort, (mDNSInterfaceID)(uintptr_t)intf_id, ti);
 }
 
 mDNSlocal void ProxyTCPAccept(int s1, short filter, void *context)
@@ -203,6 +216,7 @@ mDNSlocal void ProxyTCPAccept(int s1, short filter, void *context)
             return;
         }
         mDNSPlatformMemZero(ti, sizeof(ProxyTCPInfo_t));
+        
         TCPSocket *sock = &ti->sock;
 
         kq = &sock->ss;
@@ -221,6 +235,7 @@ mDNSlocal void ProxyTCPAccept(int s1, short filter, void *context)
             {
                 LogMsg("ProxyTCPAccept: IP_RECVIF %d errno %d (%s)", newfd, errno, strerror(errno));
                 mDNSPlatformDisposeProxyContext(ti);
+                close(newfd);
                 return;
             }
         }
@@ -234,6 +249,7 @@ mDNSlocal void ProxyTCPAccept(int s1, short filter, void *context)
             {
                 LogMsg("ProxyTCPAccept: IP_RECVPKTINFO %d errno %d (%s)", newfd, errno, strerror(errno));
                 mDNSPlatformDisposeProxyContext(ti);
+                close(newfd);
                 return;
             }
         }
@@ -243,7 +259,6 @@ mDNSlocal void ProxyTCPAccept(int s1, short filter, void *context)
         // Instead of remembering the address family, we remember the right fd.
         sock->fd = newfd;
         sock->kqEntry = k;
-
         k->KQcallback = ProxyTCPSocketCallBack;
         k->KQcontext  = ti;
         k->KQtask     = "TCP Proxy packet reception";
@@ -261,11 +276,9 @@ mDNSlocal mStatus SetupUDPProxySocket(mDNS *const m, int skt, KQSocketSet *cp, u
     int         *s        = (sa_family == AF_INET) ? &cp->sktv4 : &cp->sktv6;
     KQueueEntry *k        = (sa_family == AF_INET) ? &cp->kqsv4 : &cp->kqsv6;
     const int on = 1;
-    mDNSIPPort port;
     mStatus err = mStatus_NoError;
 
     cp->m = m;
-    port = cp->port;
     cp->closeFlag = mDNSNULL;
 
     // set default traffic class
@@ -339,11 +352,9 @@ mDNSlocal mStatus SetupTCPProxySocket(mDNS *const m, int skt, KQSocketSet *cp, u
 {
     int         *s        = (sa_family == AF_INET) ? &cp->sktv4 : &cp->sktv6;
     KQueueEntry *k        = (sa_family == AF_INET) ? &cp->kqsv4 : &cp->kqsv6;
-    mDNSIPPort port;
     mStatus err;
 
     cp->m = m;
-    port = cp->port;
     // XXX may not be used by the TCP codepath 
     cp->closeFlag = mDNSNULL;
 
@@ -384,7 +395,7 @@ mDNSlocal void BindDPSocket(int fd, int sa_family)
 
         err = setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
         if (err < 0) 
-            LogMsg("BindDPSocket: setsockopt SO_REUSEPORT failed for V4 %d errno %d (%s)", fd, errno, strerror(errno));
+            LogMsg("BindDPSocket: setsockopt SO_REUSEPORT failed for IPv4 %d errno %d (%s)", fd, errno, strerror(errno));
 
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
