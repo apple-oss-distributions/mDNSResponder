@@ -7756,7 +7756,6 @@ mDNSlocal void UpdateSPSStatus(mDNS *const m, DNSQuestion *question, const Resou
     CFRelease(ifname);
 }
 
-#if !TARGET_OS_EMBEDDED
 mDNSlocal mDNSs32 GetSystemSleepTimerSetting(void)
 {
     mDNSs32 val = -1;
@@ -7806,6 +7805,7 @@ mDNSlocal void SetSPS(mDNS *const m)
         mDNSEthAddr           bssid = zeroEthAddr;
         for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
         {
+            if (intf->InterfaceID == AWDLInterfaceID) continue;
             bssid = GetBSSID(intf->ifname);
             if (!mDNSSameEthAddress(&bssid, &zeroEthAddr))
             {
@@ -7819,7 +7819,6 @@ mDNSlocal void SetSPS(mDNS *const m)
 
     mDNSCoreBeSleepProxyServer(m, sps, SPMetricPortability, SPMetricMarginalPower, SPMetricTotalPower, SPMetricFeatures);
 }
-#endif // !TARGET_OS_EMBEDDED
 
 // The definitions below should eventually come from some externally-supplied header file.
 // However, since these definitions can't really be changed without breaking binary compatibility,
@@ -8120,10 +8119,15 @@ mDNSlocal mDNSu8 SystemWakeForNetworkAccess(void)
     mDNSs32 val = 0;
     mDNSu8  ret = (mDNSu8)mDNS_NoWake;
 
+#if TARGET_OS_IOS
+    LogSPS("SystemWakeForNetworkAccess: Sleep Proxy Client disabled by command-line option");
+    return ret;
+#endif
+
     if (DisableSleepProxyClient)
     {
        LogSPS("SystemWakeForNetworkAccess: Sleep Proxy Client disabled by command-line option");
-       return mDNSfalse;
+       return ret;
     }
 
     GetCurrentPMSetting(CFSTR("Wake On LAN"), &val);
@@ -8545,8 +8549,8 @@ mDNSexport void mDNSMacOSXNetworkChanged(mDNS *const m)
     ClearInactiveInterfaces(m, utc);
     SetupActiveInterfaces(m, utc);
 
-#if APPLE_OSX_mDNSResponder && !TARGET_OS_EMBEDDED
-
+#if APPLE_OSX_mDNSResponder
+#if !TARGET_OS_EMBEDDED
     mDNS_Lock(m);
     ProcessConndConfigChanges(m);
     mDNS_Unlock(m);
@@ -8595,6 +8599,7 @@ mDNSexport void mDNSMacOSXNetworkChanged(mDNS *const m)
                 }
             }
         }
+#endif //!TARGET_OS_EMBEDDED
 
     SetSPS(m);
 
@@ -9491,11 +9496,10 @@ mDNSlocal void PowerChanged(void *refcon, io_service_t service, natural_t messag
     default:                                LogSPS("PowerChanged unknown message %X", messageType); break;
     }
 
-    if ((messageType == kIOMessageSystemWillSleep) || (messageType== kIOMessageCanSystemSleep))
-    {
+    if (messageType == kIOMessageSystemWillSleep)
         m->p->SleepCookie = (long)messageArgument;
+    else if (messageType == kIOMessageCanSystemSleep)
         IOAllowPowerChange(m->p->PowerConnection, (long)messageArgument);
-    }
 
     KQueueUnlock(m, "PowerChanged Sleep/Wake");
 }

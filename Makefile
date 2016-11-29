@@ -16,7 +16,7 @@
 
 include $(MAKEFILEPATH)/pb_makefiles/platform.make
 
-MVERS = "mDNSResponder-765.1.2"
+MVERS = "mDNSResponder-765.20.4"
 
 DDNSWRITECONFIG = "$(DSTROOT)/Library/Application Support/Bonjour/ddnswriteconfig"
 VER = 

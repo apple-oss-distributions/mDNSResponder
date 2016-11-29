@@ -1890,7 +1890,7 @@ DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
     if ((interfaceIndex == kDNSServiceInterfaceIndexAny) && includeP2PWithIndexAny())
         flags |= kDNSServiceFlagsIncludeP2P;
 
-    if (!sdRef || !RecordRef || !fullname || !rdata || !callBack)
+    if (!sdRef || !RecordRef || !fullname || (!rdata && rdlen) || !callBack)
     {
         syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRegisterRecord called with NULL parameter");
         return kDNSServiceErr_BadParam;
@@ -1975,7 +1975,7 @@ DNSServiceErrorType DNSSD_API DNSServiceAddRecord
     DNSRecordRef rref;
     DNSRecord **p;
 
-    if (!sdRef || !RecordRef || !rdata)
+    if (!sdRef || !RecordRef || (!rdata && rdlen))
     {
         syslog(LOG_WARNING, "dnssd_clientstub DNSServiceAddRecord called with NULL parameter");
         return kDNSServiceErr_BadParam;
@@ -2039,7 +2039,7 @@ DNSServiceErrorType DNSSD_API DNSServiceUpdateRecord
     size_t len = 0;
     char *ptr;
 
-    if (!sdRef || !rdata)
+    if (!sdRef || (!rdata && rdlen))
     {
         syslog(LOG_WARNING, "dnssd_clientstub DNSServiceUpdateRecord called with NULL parameter");
         return kDNSServiceErr_BadParam;
@@ -2125,7 +2125,7 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
     ipc_msg_hdr *hdr;
     DNSServiceOp *tmp;
 
-    if (!fullname || !rdata) return kDNSServiceErr_BadParam;
+    if (!fullname || (!rdata && rdlen)) return kDNSServiceErr_BadParam;
 
     err = ConnectToServer(&tmp, flags, reconfirm_record_request, NULL, NULL, NULL);
     if (err) return err;
