@@ -195,6 +195,8 @@ mDNSlocal mDNSu8 *AddResourceRecords(mDNS *const m, DNSProxyClient *pc, mDNSu8 *
     CacheRecord *soa = mDNSNULL;
     CacheRecord *cname = mDNSNULL;
     mDNSu8 *limit;
+    domainname tempQName;
+    mDNSu32 tempQNameHash;
 
     *error = mStatus_NoError;
     *prevptr = mDNSNULL;
@@ -222,20 +224,17 @@ mDNSlocal mDNSu8 *AddResourceRecords(mDNS *const m, DNSProxyClient *pc, mDNSu8 *
     }
     LogInfo("AddResourceRecords: Limit is %d", limit - m->omsg.data);
 
-    if (!SameDomainName(&pc->qname, &pc->q.qname))
-    {
-        AssignDomainName(&pc->q.qname, &pc->qname);
-        pc->q.qnamehash = DomainNameHashValue(&pc->q.qname);
-    }
+    AssignDomainName(&tempQName, &pc->qname);
+    tempQNameHash = DomainNameHashValue(&tempQName);
 
 again:
     nsec = soa = cname = mDNSNULL;
-    slot = HashSlot(&pc->q.qname);
-        
-    cg = CacheGroupForName(m, slot, pc->q.qnamehash, &pc->q.qname);
+    slot = HashSlot(&tempQName);
+
+    cg = CacheGroupForName(m, slot, tempQNameHash, &tempQName);
     if (!cg)
     {
-        LogInfo("AddResourceRecords: CacheGroup not found");
+        LogInfo("AddResourceRecords: CacheGroup not found for %##s", tempQName.c);
         *error = mStatus_NoSuchRecord;
         return mDNSNULL;
     }
@@ -344,8 +343,8 @@ again:
     }
     if (cname)
     {
-        AssignDomainName(&pc->q.qname, &cname->resrec.rdata->u.name);
-        pc->q.qnamehash = DomainNameHashValue(&pc->q.qname);
+        AssignDomainName(&tempQName, &cname->resrec.rdata->u.name);
+        tempQNameHash = DomainNameHashValue(&tempQName);
         goto again;
     }
     if (!ptr)

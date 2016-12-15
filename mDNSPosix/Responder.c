@@ -503,6 +503,7 @@ static mStatus RegisterServicesInFile(const char *filePath)
 {
     mStatus status = mStatus_NoError;
     FILE *      fp = fopen(filePath, "r");
+    int rv;
 
     if (fp == NULL) {
         return mStatus_UnknownErr;
@@ -603,7 +604,8 @@ static mStatus RegisterServicesInFile(const char *filePath)
         status = mStatus_UnknownErr;
     }
 
-    assert(0 == fclose(fp));
+    rv = fclose(fp);
+    assert(rv == 0);
 
     return status;
 }

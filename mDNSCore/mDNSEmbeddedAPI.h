@@ -3376,7 +3376,7 @@ extern mDNSu8 *DNSProxySetAttributes(DNSQuestion *q, DNSMessageHeader *h, DNSMes
 #if APPLE_OSX_mDNSResponder
 extern void mDNSPlatformGetDNSRoutePolicy(mDNS *const m, DNSQuestion *q, mDNSBool *isBlocked);
 #endif
-extern void mDNSPlatformSetSocktOpt(void *sock, mDNSTransport_Type transType, mDNSAddr_Type addrType, DNSQuestion *q);
+extern void mDNSPlatformSetSocktOpt(void *sock, mDNSTransport_Type transType, mDNSAddr_Type addrType, const DNSQuestion *q);
 extern mDNSs32 mDNSPlatformGetPID(void);
 extern mDNSBool mDNSValidKeepAliveRecord(AuthRecord *rr);
 

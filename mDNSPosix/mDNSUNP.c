@@ -199,7 +199,9 @@ gotError:
     }
 done:
     if (sockfd != -1) {
-        assert(close(sockfd) == 0);
+        int rv;
+        rv = close(sockfd);
+        assert(rv == 0);
     }
     if (fp != NULL) {
         fclose(fp);

@@ -1835,7 +1835,7 @@ mDNSlocal int mDNSPlatformGetSocktFd(void *sockCxt, mDNSTransport_Type transType
     }
 }
 
-mDNSexport void mDNSPlatformSetSocktOpt(void *sockCxt, mDNSTransport_Type transType, mDNSAddr_Type addrType, DNSQuestion *q)
+mDNSexport void mDNSPlatformSetSocktOpt(void *sockCxt, mDNSTransport_Type transType, mDNSAddr_Type addrType, const DNSQuestion *q)
 {
     int sockfd;
     char unenc_name[MAX_ESCAPED_DOMAIN_NAME];
@@ -6966,7 +6966,19 @@ mDNSexport mDNSBool mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers,
         else
         {
             LogInfo("mDNSPlatformSetDNSConfig: config->n_resolver = %d, generation %llu, last %llu", config->n_resolver, config->generation, m->p->LastConfigGeneration);
-            if (m->p->LastConfigGeneration == config->generation)
+
+            // For every network change, the search domain list is updated.
+            // This update is done without regard for generation number because it is
+            // not an expensive update and it keeps the search domain list in sync (even when
+            // a network change occurs, while currently processing a network
+            // change).
+            //
+            // For every DNS configuration change, the DNS server list is updated.
+            // This update is NOT done every network change because it may involve
+            // updating cache entries which worst-case is expensive. Setting the generation
+            // per DNS server list change keeps the list in sync with configd.
+
+            if (setservers &&  m->p->LastConfigGeneration == config->generation)
             {
                 LogInfo("mDNSPlatformSetDNSConfig: generation number %llu same, not processing", config->generation);
                 dns_configuration_free(config);
@@ -6992,21 +7004,13 @@ mDNSexport mDNSBool mDNSPlatformSetDNSConfig(mDNS *const m, mDNSBool setservers,
 
             ConfigResolvers(m, config, kScopeServiceID, setsearch, setservers, &sdc, resolverGroupID);
 
-            // Acking provides a hint that we processed this current configuration and
-            // we will use that from now on, assuming we don't get another one immediately
-            // after we return from here.
+            // Acking provides a hint to other processes that the current DNS configuration has completed
+            // its update.  When configd receives the ack, it publishes a notification.
+            // Applications monitoring the notification then know when to re-issue their DNS queries
+            // after a network change occurs.
             if (ackConfig)
             {
                 // Note: We have to set the generation number here when we are acking.
-                // For every DNS configuration change, we do the following:
-                //
-                // 1) Copy dns configuration, handle search domains change
-                // 2) Copy dns configuration, handle dns server change
-                //
-                // If we update the generation number at step (1), we won't process the
-                // DNS servers the second time because generation number would be the same.
-                // As we ack only when we process dns servers, we set the generation number
-                // during acking.
                 m->p->LastConfigGeneration = config->generation;
                 LogInfo("mDNSPlatformSetDNSConfig: Acking configuration setservers %d, setsearch %d", setservers, setsearch);
                 AckConfigd(m, config);

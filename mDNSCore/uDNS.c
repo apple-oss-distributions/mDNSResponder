@@ -4737,7 +4737,10 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
                     {
                         q->LocalSocket = mDNSPlatformUDPSocket(m, zeroIPPort);
                         if (q->LocalSocket)
-                            mDNSPlatformSetSocktOpt(q->LocalSocket, mDNSTransport_UDP, q->qDNSServer->addr.type, q);
+                        {
+                            mDNSPlatformSetSocktOpt(q->LocalSocket, mDNSTransport_UDP, mDNSAddrType_IPv4, q);
+                            mDNSPlatformSetSocktOpt(q->LocalSocket, mDNSTransport_UDP, mDNSAddrType_IPv6, q);
+                        }
                     }
                     if (!q->LocalSocket) err = mStatus_NoMemoryErr; // If failed to make socket (should be very rare), we'll try again next time
                     else

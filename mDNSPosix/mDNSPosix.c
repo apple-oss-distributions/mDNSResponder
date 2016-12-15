@@ -575,11 +575,20 @@ mDNSexport mDNSu32 mDNSPlatformInterfaceIndexfromInterfaceID(mDNS *const m, mDNS
 // interface must have already been deregistered with the mDNS core.
 mDNSlocal void FreePosixNetworkInterface(PosixNetworkInterface *intf)
 {
+    int rv;
     assert(intf != NULL);
     if (intf->intfName != NULL) free((void *)intf->intfName);
-    if (intf->multicastSocket4 != -1) assert(close(intf->multicastSocket4) == 0);
+    if (intf->multicastSocket4 != -1)
+    {
+        rv = close(intf->multicastSocket4);
+        assert(rv == 0);
+    }
 #if HAVE_IPV6
-    if (intf->multicastSocket6 != -1) assert(close(intf->multicastSocket6) == 0);
+    if (intf->multicastSocket6 != -1)
+    {
+        rv = close(intf->multicastSocket6);
+        assert(rv == 0);
+    }
 #endif
 
     // Move interface to the RecentInterfaces list for a minute
@@ -842,7 +851,13 @@ mDNSlocal int SetupSocket(struct sockaddr *intfAddr, mDNSIPPort port, int interf
     }
 
     // Clean up
-    if (err != 0 && *sktPtr != -1) { assert(close(*sktPtr) == 0); *sktPtr = -1; }
+    if (err != 0 && *sktPtr != -1)
+    {
+        int rv;
+        rv = close(*sktPtr);
+        assert(rv == 0);
+        *sktPtr = -1;
+    }
     assert((err == 0) == (*sktPtr != -1));
     return err;
 }
@@ -1322,11 +1337,20 @@ mDNSexport mStatus mDNSPlatformInit(mDNS *const m)
 // In our case all we need to do is to tear down every network interface.
 mDNSexport void mDNSPlatformClose(mDNS *const m)
 {
+    int rv;
     assert(m != NULL);
     ClearInterfaceList(m);
-    if (m->p->unicastSocket4 != -1) assert(close(m->p->unicastSocket4) == 0);
+    if (m->p->unicastSocket4 != -1)
+    {
+        rv = close(m->p->unicastSocket4);
+        assert(rv == 0);
+    }
 #if HAVE_IPV6
-    if (m->p->unicastSocket6 != -1) assert(close(m->p->unicastSocket6) == 0);
+    if (m->p->unicastSocket6 != -1)
+    {
+        rv = close(m->p->unicastSocket6);
+        assert(rv == 0);
+    }
 #endif
 }
 
@@ -1623,7 +1647,7 @@ mDNSexport mDNSBool mDNSPlatformInterfaceIsD2D(mDNSInterfaceID InterfaceID)
     return mDNSfalse;
 }
 
-mDNSexport void mDNSPlatformSetSocktOpt(void *sock, mDNSTransport_Type transType, mDNSAddr_Type addrType, DNSQuestion *q)
+mDNSexport void mDNSPlatformSetSocktOpt(void *sock, mDNSTransport_Type transType, mDNSAddr_Type addrType, const DNSQuestion *q)
 {
     (void) sock;
     (void) transType;
