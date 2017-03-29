@@ -72,7 +72,9 @@
        (global-name "com.apple.wifi.manager")
        (global-name "com.apple.blued")
        (global-name "com.apple.mobilegestalt.xpc")
-       (global-name "com.apple.snhelper"))
+       (global-name "com.apple.snhelper")
+       (global-name "com.apple.nehelper")
+       (global-name "com.apple.networkserviceproxy"))
 
 (allow mach-register
        (global-name "com.apple.d2d.ipc"))

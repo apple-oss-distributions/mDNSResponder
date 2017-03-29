@@ -1925,51 +1925,40 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
         sin_to->sin_addr.s_addr    = dst->ip.v4.NotAnInteger;
         s = (src ? src->ss : m->p->permanentsockets).sktv4;
 
-        if (info)   // Specify outgoing interface
+        if (!mDNSAddrIsDNSMulticast(dst))
         {
-            if (!mDNSAddrIsDNSMulticast(dst))
+        #ifdef IP_BOUND_IF
+            const mDNSu32 ifindex = info ? info->scope_id : IFSCOPE_NONE;
+            setsockopt(s, IPPROTO_IP, IP_BOUND_IF, &ifindex, sizeof(ifindex));
+        #else
+            static int displayed = 0;
+            if (displayed < 1000)
             {
-                #ifdef IP_BOUND_IF
-                if (info->scope_id == 0)
-                    LogInfo("IP_BOUND_IF socket option not set -- info %p (%s) scope_id is zero", info, ifa_name);
-                else
-                    setsockopt(s, IPPROTO_IP, IP_BOUND_IF, &info->scope_id, sizeof(info->scope_id));
-                #else
-                {
-                    static int displayed = 0;
-                    if (displayed < 1000)
-                    {
-                        displayed++;
-                        LogInfo("IP_BOUND_IF socket option not defined -- cannot specify interface for unicast packets");
-                    }
-                }
-                #endif
+                displayed++;
+                LogInfo("IP_BOUND_IF socket option not defined -- cannot specify interface for unicast packets");
             }
-            else
-                #ifdef IP_MULTICAST_IFINDEX
+        #endif
+        }
+        else if (info)
+        {
+        #ifdef IP_MULTICAST_IFINDEX
+            err = setsockopt(s, IPPROTO_IP, IP_MULTICAST_IFINDEX, &info->scope_id, sizeof(info->scope_id));
+            // We get an error when we compile on a machine that supports this option and run the binary on
+            // a different machine that does not support it
+            if (err < 0)
             {
-                err = setsockopt(s, IPPROTO_IP, IP_MULTICAST_IFINDEX, &info->scope_id, sizeof(info->scope_id));
-                // We get an error when we compile on a machine that supports this option and run the binary on
-                // a different machine that does not support it
-                if (err < 0)
-                {
-                    if (errno != ENOPROTOOPT) LogInfo("mDNSPlatformSendUDP: setsockopt: IP_MUTLTICAST_IFINDEX returned %d", errno);
-                    err = setsockopt(s, IPPROTO_IP, IP_MULTICAST_IF, &info->ifa_v4addr, sizeof(info->ifa_v4addr));
-                    if (err < 0 && !m->NetworkChanged)
-                        LogMsg("setsockopt - IP_MULTICAST_IF error %.4a %d errno %d (%s)", &info->ifa_v4addr, err, errno, strerror(errno));
-                }
-            }
-                #else
-            {
+                if (errno != ENOPROTOOPT) LogInfo("mDNSPlatformSendUDP: setsockopt: IP_MUTLTICAST_IFINDEX returned %d", errno);
                 err = setsockopt(s, IPPROTO_IP, IP_MULTICAST_IF, &info->ifa_v4addr, sizeof(info->ifa_v4addr));
                 if (err < 0 && !m->NetworkChanged)
                     LogMsg("setsockopt - IP_MULTICAST_IF error %.4a %d errno %d (%s)", &info->ifa_v4addr, err, errno, strerror(errno));
-
             }
-                #endif
+        #else
+            err = setsockopt(s, IPPROTO_IP, IP_MULTICAST_IF, &info->ifa_v4addr, sizeof(info->ifa_v4addr));
+            if (err < 0 && !m->NetworkChanged)
+                LogMsg("setsockopt - IP_MULTICAST_IF error %.4a %d errno %d (%s)", &info->ifa_v4addr, err, errno, strerror(errno));
+        #endif
         }
     }
-
     else if (dst->type == mDNSAddrType_IPv6)
     {
         struct sockaddr_in6 *sin6_to = (struct sockaddr_in6*)&to;
@@ -2273,12 +2262,12 @@ mDNSexport void myKQSocketCallBack(int s1, short filter, void *context)
 
         if (ss->proxy)
         {
-            m->p->UDPProxyCallback(m, &m->p->UDPProxy, (unsigned char *)&m->imsg, (unsigned char*)&m->imsg + err, &senderAddr,
+            m->p->UDPProxyCallback(m, &m->p->UDPProxy, &m->imsg.m, (unsigned char*)&m->imsg + err, &senderAddr,
                 senderPort, &destAddr, ss->port, InterfaceID, NULL);
         }
         else
         {
-            mDNSCoreReceive(m, &m->imsg, (unsigned char*)&m->imsg + err, &senderAddr, senderPort, &destAddr, ss->port, InterfaceID);
+            mDNSCoreReceive(m, &m->imsg.m, (unsigned char*)&m->imsg + err, &senderAddr, senderPort, &destAddr, ss->port, InterfaceID);
         }
 
         // if we didn't close, we can safely dereference the socketset, and should to

@@ -4109,13 +4109,13 @@ mDNSexport void DNSPushNotificationGotZoneData(mDNS *const m, mStatus err, const
     }
     else
     {
+        q->dnsPushState = DNSPUSH_NOSERVER;
         StartLLQPolling(m,q);
         if (err == mStatus_NoSuchNameErr)
         {
             // this actually failed, so mark it by setting address to all ones
             q->servAddr.type  = mDNSAddrType_IPv4;
             q->servAddr.ip.v4 = onesIPv4Addr;
-            q->dnsPushState   = DNSPUSH_NOSERVER;
         }
     }
     mDNS_Unlock(m);

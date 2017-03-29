@@ -6628,6 +6628,9 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
                     // which is okay because with no outstanding resolves, or updates in flight,
                     // mDNSCoreReadyForSleep() will conclude correctly that all the updates have already completed
 
+                    // Setting this flag activates the SleepLimit which delays sleep by 5 seconds and
+                    // will allow the system to deregister any BTMM records.
+                    m->NextScheduledSPRetry  = m->timenow + (5 * mDNSPlatformOneSecond);
                     registeredIntfIDS[registeredCount] = intf->InterfaceID;
                     registeredCount++;
                 }
@@ -10524,12 +10527,12 @@ mDNSexport void MakeNegativeCacheRecord(mDNS *const m, CacheRecord *const cr,
     cr->responseFlags      = ResponseFlags;
 }
 
-mDNSexport void mDNSCoreReceive(mDNS *const m, void *const pkt, const mDNSu8 *const end,
+mDNSexport void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNSu8 *const end,
                                 const mDNSAddr *const srcaddr, const mDNSIPPort srcport, const mDNSAddr *dstaddr, const mDNSIPPort dstport,
                                 const mDNSInterfaceID InterfaceID)
 {
     mDNSInterfaceID ifid = InterfaceID;
-    DNSMessage  *msg  = (DNSMessage *)pkt;
+    const mDNSu8 *const pkt = (mDNSu8 *)msg;
     const mDNSu8 StdQ = kDNSFlag0_QR_Query    | kDNSFlag0_OP_StdQuery;
     const mDNSu8 StdR = kDNSFlag0_QR_Response | kDNSFlag0_OP_StdQuery;
     const mDNSu8 UpdQ = kDNSFlag0_QR_Query    | kDNSFlag0_OP_Update;
@@ -10546,7 +10549,7 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, void *const pkt, const mDNSu8 *co
         if (mDNSSameIPPort(srcport, SSDPPort) || (m->SSDPSocket && mDNSSameIPPort(dstport, m->SSDPSocket->port)))
         {
             mDNS_Lock(m);
-            LNT_ConfigureRouterInfo(m, InterfaceID, pkt, (mDNSu16)(end - (mDNSu8 *)pkt));
+            LNT_ConfigureRouterInfo(m, InterfaceID, (mDNSu8 *)msg, (mDNSu16)(end - pkt));
             mDNS_Unlock(m);
             return;
         }
@@ -10554,7 +10557,7 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, void *const pkt, const mDNSu8 *co
         if (mDNSSameIPPort(srcport, NATPMPPort))
         {
             mDNS_Lock(m);
-            uDNS_ReceiveNATPacket(m, InterfaceID, pkt, (mDNSu16)(end - (mDNSu8 *)pkt));
+            uDNS_ReceiveNATPacket(m, InterfaceID, (mDNSu8 *)msg, (mDNSu16)(end - pkt));
             mDNS_Unlock(m);
             return;
         }
@@ -10564,9 +10567,9 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, void *const pkt, const mDNSu8 *co
 #endif
 
 #endif
-    if ((unsigned)(end - (mDNSu8 *)pkt) < sizeof(DNSMessageHeader))
+    if ((unsigned)(end - pkt) < sizeof(DNSMessageHeader))
     {
-        LogMsg("DNS Message from %#a:%d to %#a:%d length %d too short", srcaddr, mDNSVal16(srcport), dstaddr, mDNSVal16(dstport), end - (mDNSu8 *)pkt);
+        LogMsg("DNS Message from %#a:%d to %#a:%d length %d too short", srcaddr, mDNSVal16(srcport), dstaddr, mDNSVal16(dstport), (int)(end - pkt));
         return;
     }
     QR_OP = (mDNSu8)(msg->h.flags.b[0] & kDNSFlag0_QROP_Mask);
@@ -10624,12 +10627,12 @@ mDNSexport void mDNSCoreReceive(mDNS *const m, void *const pkt, const mDNSu8 *co
                 msgCount++;
                 int i = 0;
                 LogInfo("Unknown DNS packet type %02X%02X from %#-15a:%-5d to %#-15a:%-5d length %d on %p (ignored)",
-                        msg->h.flags.b[0], msg->h.flags.b[1], srcaddr, mDNSVal16(srcport), dstaddr, mDNSVal16(dstport), end - (mDNSu8 *)pkt, InterfaceID);
-                while (i<end - (mDNSu8 *)pkt)
+                        msg->h.flags.b[0], msg->h.flags.b[1], srcaddr, mDNSVal16(srcport), dstaddr, mDNSVal16(dstport), (int)(end - pkt), InterfaceID);
+                while (i < (int)(end - pkt))
                 {
                     char buffer[128];
                     char *p = buffer + mDNS_snprintf(buffer, sizeof(buffer), "%04X", i);
-                    do if (i<end - (mDNSu8 *)pkt) p += mDNS_snprintf(p, sizeof(buffer), " %02X", ((mDNSu8 *)pkt)[i]);while (++i & 15);
+                    do if (i < (int)(end - pkt)) p += mDNS_snprintf(p, sizeof(buffer), " %02X", pkt[i]);while (++i & 15);
                     LogInfo("%s", buffer);
                 }
             }
@@ -13826,8 +13829,9 @@ mDNSlocal void mDNSCoreReceiveRawARP(mDNS *const m, const ARP_EthIP *const arp, 
                 const char *const msg = mDNSSameEthAddress(&arp->sha, &rr->WakeUp.IMAC) ? msg1 :
                                         (rr->AnnounceCount == InitialAnnounceCount)     ? msg2 :
                                         mDNSSameEthAddress(&arp->sha, &intf->MAC)       ? msg3 : msg4;
-                LogSPS("%-7s %s %.6a %.4a for %.4a -- H-MAC %.6a I-MAC %.6a %s",
-                       intf->ifname, msg, &arp->sha, &arp->spa, &arp->tpa, &rr->WakeUp.HMAC, &rr->WakeUp.IMAC, ARDisplayString(m, rr));
+                LogMsg("Arp %-7s %s %.6a %.4a for %.4a -- H-MAC %.6a I-MAC %.6a %s",
+                       intf->ifname, msg, arp->sha.b, arp->spa.b, arp->tpa.b,
+                       &rr->WakeUp.HMAC, &rr->WakeUp.IMAC, ARDisplayString(m, rr));
                 if (msg == msg1)
                 {
                     if ( rr->ProbeRestartCount < MAX_PROBE_RESTARTS)
@@ -13841,7 +13845,7 @@ mDNSlocal void mDNSCoreReceiveRawARP(mDNS *const m, const ARP_EthIP *const arp, 
                 }
                 else if (msg == msg4)
                 {
-                    SendARP(m, 2, rr, &arp->tpa, &arp->sha, &arp->spa, &arp->sha);
+                    SendARP(m, 2, rr, (mDNSv4Addr *)arp->tpa.b, &arp->sha, (mDNSv4Addr *)arp->spa.b, &arp->sha);
                 }
             }
     }
@@ -13855,7 +13859,7 @@ mDNSlocal void mDNSCoreReceiveRawARP(mDNS *const m, const ARP_EthIP *const arp, 
     //   If the sender hardware address is the original owner this is benign, so we just suppress our own proxy answering for a while longer.
     //   If the sender hardware address is *not* the original owner, then this is a conflict, and we need to wake the sleeping machine to handle it.
     if (mDNSSameEthAddress(&arp->sha, &intf->MAC))
-        debugf("ARP from self for %.4a", &arp->tpa);
+        debugf("ARP from self for %.4a", arp->tpa.b);
     else
     {
         if (!mDNSSameIPv4Address(arp->spa, zerov4Addr))
@@ -13865,22 +13869,22 @@ mDNSlocal void mDNSCoreReceiveRawARP(mDNS *const m, const ARP_EthIP *const arp, 
                 {
                     if (mDNSSameEthAddress(&zeroEthAddr, &rr->WakeUp.HMAC))
                     {
-                        LogSPS("%-7s ARP from %.6a %.4a for %.4a -- Invalid H-MAC %.6a I-MAC %.6a %s", intf->ifname,
-                                &arp->sha, &arp->spa, &arp->tpa, &rr->WakeUp.HMAC, &rr->WakeUp.IMAC, ARDisplayString(m, rr));
+                        LogMsg("%-7s ARP from %.6a %.4a for %.4a -- Invalid H-MAC %.6a I-MAC %.6a %s", intf->ifname,
+                                arp->sha.b, arp->spa.b, arp->tpa.b, &rr->WakeUp.HMAC, &rr->WakeUp.IMAC, ARDisplayString(m, rr));
                     }
                     else
                     {
                         RestartARPProbing(m, rr);
                         if (mDNSSameEthAddress(&arp->sha, &rr->WakeUp.IMAC))
                         {
-                            LogSPS("%-7s ARP %s from owner %.6a %.4a for %-15.4a -- re-starting probing for %s", intf->ifname,
+                            LogMsg("%-7s ARP %s from owner %.6a %.4a for %-15.4a -- re-starting probing for %s", intf->ifname,
                                     mDNSSameIPv4Address(arp->spa, arp->tpa) ? "Announcement " : mDNSSameOpaque16(arp->op, ARP_op_request) ? "Request      " : "Response     ",
-                                    &arp->sha, &arp->spa, &arp->tpa, ARDisplayString(m, rr));
+                                    arp->sha.b, arp->spa.b, arp->tpa.b, ARDisplayString(m, rr));
                         }
                         else
                         {
                             LogMsg("%-7s Conflicting ARP from %.6a %.4a for %.4a -- waking H-MAC %.6a I-MAC %.6a %s", intf->ifname,
-                                    &arp->sha, &arp->spa, &arp->tpa, &rr->WakeUp.HMAC, &rr->WakeUp.IMAC, ARDisplayString(m, rr));
+                                    arp->sha.b, arp->spa.b, arp->tpa.b, &rr->WakeUp.HMAC, &rr->WakeUp.IMAC, ARDisplayString(m, rr));
                             ScheduleWakeup(m, rr->resrec.InterfaceID, &rr->WakeUp.HMAC);
                         }
                     }
@@ -14576,7 +14580,8 @@ mDNSlocal void PurgeOrReconfirmCacheRecord(mDNS *const m, CacheRecord *cr, const
     mDNSBool purge = cr->resrec.RecordType == kDNSRecordTypePacketNegative ||
                      cr->resrec.rrtype     == kDNSType_A ||
                      cr->resrec.rrtype     == kDNSType_AAAA ||
-                     cr->resrec.rrtype     == kDNSType_SRV;
+                     cr->resrec.rrtype     == kDNSType_SRV ||
+                     cr->resrec.rrtype     == kDNSType_CNAME;
 
     (void) lameduck;
     (void) ptr;

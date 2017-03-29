@@ -2355,7 +2355,7 @@ mDNSlocal int RecvLLQ( DaemonInfo *d, PktMsg *pkt, TCPSocket *sock )
     {
         qptr = getQuestion(&pkt->msg, qptr, end, 0, &q);
         if (!qptr) { Log("Malformatted LLQ from %s: cannot read question %d", addr, i); goto end; }
-        llq = (LLQOptData *)&opt.r.resrec.rdata->u.opt[0].u.llq + i; // point into OptData at index i
+        llq = &opt.r.resrec.rdata->u.opt[i].u.llq; // point into OptData at index i
         if (llq->vers != kLLQ_Vers) { Log("LLQ from %s contains bad version %d (expected %d)", addr, llq->vers, kLLQ_Vers); goto end; }
 
         e = LookupLLQ(d, pkt->src, &q.qname, q.qtype, &llq->id);
@@ -3094,7 +3094,7 @@ int main(int argc, char *argv[])
 void mDNSCoreInitComplete( mDNS * const m, mStatus result) { ( void ) m; ( void ) result; }
 void mDNS_ConfigChanged(mDNS *const m)  { ( void ) m; }
 void mDNSCoreMachineSleep(mDNS * const m, mDNSBool wake) { ( void ) m; ( void ) wake; }
-void mDNSCoreReceive(mDNS *const m, void *const msg, const mDNSu8 *const end,
+void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNSu8 *const end,
                      const mDNSAddr *const srcaddr, const mDNSIPPort srcport,
                      const mDNSAddr *const dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID iid)
 { ( void ) m; ( void ) msg; ( void ) end; ( void ) srcaddr; ( void ) srcport; ( void ) dstaddr; ( void ) dstport; ( void ) iid; }

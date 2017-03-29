@@ -32,6 +32,7 @@
 #include <SystemConfiguration/SCDynamicStoreCopyDHCPInfo.h>
 #include <err.h>
 #include <sysexits.h>
+#include <dlfcn.h>
 
 #include "uDNS.h"
 #include "DNSCommon.h"
@@ -1440,6 +1441,18 @@ mDNSlocal void init_logging(void)
 }
 #endif
 
+#if TARGET_OS_IPHONE || TARGET_IPHONE_SIMULATOR
+mDNSlocal mDNSBool initialize_networkserviceproxy(void)
+{
+    void *NSPImage = dlopen("/System/Library/PrivateFrameworks/NetworkServiceProxy.framework/NetworkServiceProxy", RTLD_LAZY | RTLD_LOCAL);
+    if (NSPImage == NULL) {
+        os_log_error(OS_LOG_DEFAULT, "dlopen NetworkServiceProxy.framework failed");
+        return mDNSfalse;
+    }
+    return mDNStrue;
+}
+#endif
+
 mDNSexport int main(int argc, char **argv)
 {
     int i;
@@ -1610,6 +1623,12 @@ mDNSexport int main(int argc, char **argv)
 
     mDNSMacOSXNetworkChanged(&mDNSStorage);
     UpdateDebugState();
+
+#if TARGET_OS_IPHONE || TARGET_IPHONE_SIMULATOR
+    if (initialize_networkserviceproxy() == mDNSfalse) {
+        LogMsg("Failed to initialize NetworkServiceProxy");
+    }
+#endif
 
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
     LogInfo("Daemon Start: Using LibDispatch");

@@ -482,7 +482,7 @@ typedef struct UDPSocket_struct UDPSocket;
 #define mDNS_numPrereqs numAnswers
 #define mDNS_numUpdates numAuthorities
 
-typedef packedstruct
+typedef struct
 {
     mDNSOpaque16 id;
     mDNSOpaque16 flags;
@@ -499,7 +499,7 @@ typedef packedstruct
 #define AbsoluteMaxDNSMessageData 8940
 #endif
 #define NormalMaxDNSMessageData 1440
-typedef packedstruct
+typedef struct
 {
     DNSMessageHeader h;                     // Note: Size 12 bytes
     mDNSu8 data[AbsoluteMaxDNSMessageData]; // 40 (IPv6) + 8 (UDP) + 12 (DNS header) + 8940 (data) = 9000
@@ -617,7 +617,7 @@ typedef packedstruct
     mDNSu16 checksum;
 } UDPHeader;                // 8 bytes; IP protocol type 0x11
 
-typedef packedstruct
+typedef struct
 {
     mDNSu8 type;            // 0x87 == Neighbor Solicitation, 0x88 == Neighbor Advertisement
     mDNSu8 code;
@@ -816,7 +816,7 @@ typedef struct TrustAnchor
 
 //size of rdataRRSIG excluding signerName and signature (which are variable fields)
 #define RRSIG_FIXED_SIZE      18
-typedef packedstruct
+typedef struct
 {
     mDNSu16 typeCovered;
     mDNSu8 alg;
@@ -825,7 +825,7 @@ typedef packedstruct
     mDNSu32 sigExpireTime;
     mDNSu32 sigInceptTime;
     mDNSu16 keyTag;
-    mDNSu8 *signerName;
+    mDNSu8  signerName[1]; // signerName is a dynamically-sized array
     // mDNSu8 *signature
 } rdataRRSig;
 
@@ -938,7 +938,7 @@ typedef struct
 } TracerOptData;
 
 // Note: rdataOPT format may be repeated an arbitrary number of times in a single resource record
-typedef packedstruct
+typedef struct
 {
     mDNSu16 opt;
     mDNSu16 optlen;
@@ -1182,7 +1182,7 @@ typedef enum
     PCPResult_ExcesRemotePeer = 13
 } PCPResult_t;
 
-typedef packedstruct
+typedef struct
 {
     mDNSu8       version;
     mDNSu8       opCode;
@@ -1197,7 +1197,7 @@ typedef packedstruct
     mDNSv6Addr   extAddress;
 } PCPMapRequest;
 
-typedef packedstruct
+typedef struct
 {
     mDNSu8     version;
     mDNSu8     opCode;
@@ -3296,7 +3296,7 @@ extern void     mDNS_DeactivateNetWake_internal(mDNS *const m, NetworkInterfaceI
 extern mStatus  mDNS_RegisterInterface  (mDNS *const m, NetworkInterfaceInfo *set, mDNSBool flapping);
 extern void     mDNS_DeregisterInterface(mDNS *const m, NetworkInterfaceInfo *set, mDNSBool flapping);
 extern void     mDNSCoreInitComplete(mDNS *const m, mStatus result);
-extern void     mDNSCoreReceive(mDNS *const m, void *const msg, const mDNSu8 *const end,
+extern void     mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNSu8 *const end,
                                 const mDNSAddr *const srcaddr, const mDNSIPPort srcport,
                                 const mDNSAddr *dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID InterfaceID);
 extern void     mDNSCoreRestartQueries(mDNS *const m);
@@ -3366,7 +3366,7 @@ extern mStatus SymptomReporterDNSServerReachable(mDNS *const m, const mDNSAddr *
 extern mStatus SymptomReporterDNSServerUnreachable(DNSServer *s);
 #endif
 
-typedef void ProxyCallback (mDNS *const m, void *socket, void *const msg, const mDNSu8 *const end, const mDNSAddr *const srcaddr,
+typedef void ProxyCallback (mDNS *const m, void *socket, DNSMessage *const msg, const mDNSu8 *const end, const mDNSAddr *const srcaddr,
     const mDNSIPPort srcport, const mDNSAddr *dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID InterfaceID, void *context);
 extern void mDNSPlatformInitDNSProxySkts(mDNS *const m, ProxyCallback *UDPCallback, ProxyCallback *TCPCallback);
 extern void mDNSPlatformCloseDNSProxySkts(mDNS *const m);
@@ -3586,6 +3586,11 @@ struct CompileTimeAssertionChecks_mDNS
     char assertK[(sizeof(UDPHeader     )   ==    8                         ) ? 1 : -1];
     char assertL[(sizeof(IKEHeader     )   ==   28                         ) ? 1 : -1];
     char assertM[(sizeof(TCPHeader     )   ==   20                         ) ? 1 : -1];
+	char assertN[(sizeof(rdataOPT)		   ==   24                         ) ? 1 : -1];
+	char assertO[(sizeof(rdataRRSig)	   ==   20                         ) ? 1 : -1];
+	char assertP[(sizeof(PCPMapRequest)    ==   60                         ) ? 1 : -1];
+	char assertQ[(sizeof(PCPMapReply)      ==   60                         ) ? 1 : -1];
+
 
     // Check our structures are reasonable sizes. Including overly-large buffers, or embedding
     // other overly-large structures instead of having a pointer to them, can inadvertently

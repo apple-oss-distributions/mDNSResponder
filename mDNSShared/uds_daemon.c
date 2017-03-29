@@ -1283,6 +1283,10 @@ mDNSlocal void handle_cancel_request(request_state *request)
 mDNSlocal mStatus handle_regrecord_request(request_state *request)
 {
     mStatus err = mStatus_BadParamErr;
+
+    if (request->terminate != connection_termination)
+    { LogMsg("%3d: DNSServiceRegisterRecord(not a shared connection ref)", request->sd); return(err); }
+
     AuthRecord *rr = read_rr_from_ipc_msg(request, 1, 1);
     if (rr)
     {
@@ -4173,6 +4177,10 @@ mDNSlocal void handle_connection_delegate_request(request_state *request)
     mDNSs32 pid;
     socklen_t len;
 
+    LogOperation("%3d: DNSServiceCreateDelegateConnection START PID[%d](%s)",
+                 request->sd, request->process_id, request->pid_name);
+    request->terminate = connection_termination;
+
     len = 0;
     pid = get_uint32(&request->msgptr, request->msgend);
 #ifdef LOCAL_PEEREPID
@@ -4955,13 +4963,6 @@ mDNSlocal void request_callback(int fd, short filter, void *info)
             AbortUnlinkAndFree(req);
             return;
         }
-        if (req->hdr.version != VERSION)
-        {
-            LogMsg("request_callback: ERROR: client IPC version %d incompatible with daemon IPC version %d PID[%d][%s]",
-                   req->hdr.version, VERSION, req->process_id, req->pid_name);
-            AbortUnlinkAndFree(req);
-            return;
-        }
 
         switch(req->hdr.op)            //          Interface       + other data
         {
@@ -5062,12 +5063,7 @@ mDNSlocal void request_callback(int fd, short filter, void *info)
                                 req->sd, req->process_id, req->pid_name);
                             req->terminate = connection_termination;
                             break;
-                case connection_delegate_request:
-                            LogOperation("%3d: DNSServiceCreateDelegateConnection START PID[%d](%s)",
-                                req->sd, req->process_id, req->pid_name);
-                            req->terminate = connection_termination;
-                            handle_connection_delegate_request(req);
-                            break;
+                case connection_delegate_request:        handle_connection_delegate_request(req); break;
                 case resolve_request:              err = handle_resolve_request     (req);  break;
                 case query_request:                err = handle_queryrecord_request (req);  break;
                 case browse_request:               err = handle_browse_request      (req);  break;
