@@ -1322,6 +1322,19 @@ mDNSlocal int SetupSocket(struct sockaddr *intfAddr, mDNSIPPort port, int interf
     return err;
 }
 
+// Clean up any interfaces that have been hanging around on the RecentInterfaces list for more than a minute
+mDNSlocal void CleanRecentInterfaces(void)
+{
+    PosixNetworkInterface **ri = &gRecentInterfaces;
+    const mDNSs32 utc = mDNSPlatformUTC();
+    while (*ri)
+    {
+        PosixNetworkInterface *pi = *ri;
+        if (utc - pi->LastSeen < 60) ri = (PosixNetworkInterface **)&pi->coreIntf.next;
+        else { *ri = (PosixNetworkInterface *)pi->coreIntf.next; mdns_free(pi); }
+    }
+}
+
 // Creates a PosixNetworkInterface for the interface whose IP address is
 // intfAddr and whose name is intfName and registers it with mDNS core.
 mDNSlocal int SetupOneInterface(mDNS *const m, struct sockaddr *intfAddr, struct sockaddr *intfMask,
@@ -1559,16 +1572,7 @@ mDNSlocal int SetupInterfaceList(mDNS *const m)
 
     // Clean up.
     if (intfList != NULL) freeifaddrs(intfList);
-
-    // Clean up any interfaces that have been hanging around on the RecentInterfaces list for more than a minute
-    PosixNetworkInterface **ri = &gRecentInterfaces;
-    const mDNSs32 utc = mDNSPlatformUTC();
-    while (*ri)
-    {
-        PosixNetworkInterface *pi = *ri;
-        if (utc - pi->LastSeen < 60) ri = (PosixNetworkInterface **)&pi->coreIntf.next;
-        else { *ri = (PosixNetworkInterface *)pi->coreIntf.next; mdns_free(pi); }
-    }
+    CleanRecentInterfaces();
 
     return err;
 }
