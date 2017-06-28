@@ -1043,6 +1043,19 @@ mDNSlocal void FreePosixNetworkInterface(PosixNetworkInterface *intf)
     gRecentInterfaces = intf;
 }
 
+mDNSlocal void TearDownInterface(mDNS *const m, PosixNetworkInterface *intf)
+{
+    mDNS_DeregisterInterface(m, &intf->coreIntf, NormalActivation);
+    if (gMDNSPlatformPosixVerboseLevel > 0) fprintf(stderr, "Deregistered interface %s\n", intf->intfName);
+    FreePosixNetworkInterface(intf);
+
+    num_registered_interfaces--;
+    if (num_registered_interfaces == 0) {
+        num_pkts_accepted = 0;
+        num_pkts_rejected = 0;
+    }
+}
+
 // Grab the first interface, deregister it, free it, and repeat until done.
 mDNSlocal void ClearInterfaceList(mDNS *const m)
 {
@@ -1051,13 +1064,10 @@ mDNSlocal void ClearInterfaceList(mDNS *const m)
     while (m->HostInterfaces)
     {
         PosixNetworkInterface *intf = (PosixNetworkInterface*)(m->HostInterfaces);
-        mDNS_DeregisterInterface(m, &intf->coreIntf, NormalActivation);
-        if (gMDNSPlatformPosixVerboseLevel > 0) fprintf(stderr, "Deregistered interface %s\n", intf->intfName);
-        FreePosixNetworkInterface(intf);
+        TearDownInterface(m, intf);
     }
-    num_registered_interfaces = 0;
-    num_pkts_accepted = 0;
-    num_pkts_rejected = 0;
+
+    assert(num_registered_interfaces == 0);
 }
 
 mDNSlocal int SetupIPv6Socket(int fd)
