@@ -19,6 +19,7 @@
 #define __mDNSPlatformPosix_h
 
 #include <signal.h>
+#include <sys/socket.h>
 #include <sys/time.h>
 
 #ifdef  __cplusplus
@@ -40,6 +41,7 @@ struct PosixNetworkInterface
     char *                  intfName;
     PosixNetworkInterface * aliasIntf;
     int index;
+    sa_family_t sa_family;
     int multicastSocket4;
 #if HAVE_IPV6
     int multicastSocket6;

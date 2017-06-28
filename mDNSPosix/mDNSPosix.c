@@ -1415,6 +1415,7 @@ mDNSlocal int SetupOneInterface(mDNS *const m, struct sockaddr *intfAddr, struct
         // Set up the extra fields in PosixNetworkInterface.
         assert(intf->intfName != NULL);         // intf->intfName already set up above
         intf->index                = intfIndex;
+        intf->sa_family            = intfAddr->sa_family;
         intf->multicastSocket4     = -1;
 #if HAVE_IPV6
         intf->multicastSocket6     = -1;
