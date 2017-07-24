@@ -1788,14 +1788,43 @@ mDNSlocal void          ProcessRoutingNotification(int sd, GenLinkedList *change
 
 #endif // USES_NETLINK
 
+// Test whether the given PosixNetworkInterface matches the given struct ifaddrs
+mDNSlocal mDNSBool InterfacesMatch(PosixNetworkInterface *intf, struct ifaddrs *ifi)
+{
+    mDNSBool match = mDNSfalse;
+    mDNSAddr ip, mask;
+    int if_index;
+
+    if_index = if_nametoindex(ifi->ifa_name);
+    if (if_index == 0)
+        return mDNSfalse;
+
+    if((intf->index == if_index) &&
+       (intf->sa_family == ifi->ifa_addr->sa_family) &&
+       (strcmp(intf->coreIntf.ifname, ifi->ifa_name) == 0))
+        {
+        SockAddrTomDNSAddr(ifi->ifa_addr,    &ip,   NULL);
+        SockAddrTomDNSAddr(ifi->ifa_netmask, &mask, NULL);
+
+        match = mDNSSameAddress(&intf->coreIntf.ip, &ip) &&
+                mDNSSameAddress(&intf->coreIntf.mask, &mask);
+        }
+
+    return match;
+}
+
 // Called when data appears on interface change notification socket
 mDNSlocal void InterfaceChangeCallback(int fd, void *context)
 {
     IfChangeRec     *pChgRec = (IfChangeRec*) context;
+    mDNS            *m = pChgRec->mDNS;
     fd_set readFDs;
     GenLinkedList changedInterfaces;
     NetworkInterfaceIndex *changedInterface;
     struct timeval zeroTimeout = { 0, 0 };
+    struct ifaddrs *ifa_list, **ifi, *ifa_loop4 = NULL;
+    PosixNetworkInterface *intf, *intfNext;
+    mDNSBool found, foundav4;
 
     (void)fd; // Unused
 
@@ -1810,12 +1839,149 @@ mDNSlocal void InterfaceChangeCallback(int fd, void *context)
     }
     while (0 < select(pChgRec->NotifySD + 1, &readFDs, (fd_set*) NULL, (fd_set*) NULL, &zeroTimeout));
 
-    // Currently we rebuild the entire interface list whenever any interface change is
-    // detected. If this ever proves to be a performance issue in a multi-homed
-    // configuration, more care should be paid to changedInterfaces.
-    if (changedInterfaces.Head != NULL)
-        mDNSPlatformPosixRefreshInterfaceList(pChgRec->mDNS);
+    CleanRecentInterfaces();
 
+    if (changedInterfaces.Head == NULL) goto cleanup;
+
+    if (getifaddrs(&ifa_list) < 0) goto cleanup;
+
+    for (intf = (PosixNetworkInterface*)(m->HostInterfaces); intf != NULL; intf = intfNext)
+    {
+        intfNext = (PosixNetworkInterface*)(intf->coreIntf.next);
+
+        // Loopback interface(s) are handled later
+        if (intf->coreIntf.Loopback) continue;
+
+        found = mDNSfalse;
+        for (ifi = &ifa_list; *ifi != NULL; ifi = &(*ifi)->ifa_next)
+        {
+            if (InterfacesMatch(intf, *ifi))
+            {
+                found = mDNStrue;
+                break;
+            }
+        }
+
+        // Removes changed and old interfaces from m->HostInterfaces
+        if (!found) TearDownInterface(m, intf);
+    }
+
+    // Add new and changed interfaces in ifa_list
+    // Save off loopback interface in case it is needed later
+    for (ifi = &ifa_list; *ifi != NULL; ifi = &(*ifi)->ifa_next)
+    {
+        found = mDNSfalse;
+        for (intf = (PosixNetworkInterface*)(m->HostInterfaces); intf != NULL; intf = intfNext)
+        {
+            intfNext = (PosixNetworkInterface*)(intf->coreIntf.next);
+
+            // Loopback interface(s) are handled later
+            if (intf->coreIntf.Loopback) continue;
+
+            if (InterfacesMatch(intf, *ifi))
+            {
+                found = mDNStrue;
+                break;
+            }
+
+            // Removes changed and old interfaces from m->HostInterfaces
+        }
+        if (found)
+	    continue;
+
+        if ((ifa_loop4 == NULL) &&
+            ((*ifi)->ifa_addr->sa_family == AF_INET) &&
+            ((*ifi)->ifa_flags & IFF_UP) &&
+            ((*ifi)->ifa_flags & IFF_LOOPBACK))
+        {
+            ifa_loop4 = *ifi;
+            continue;
+        }
+
+        if (     (((*ifi)->ifa_addr->sa_family == AF_INET)
+#if HAVE_IPV6
+                  || ((*ifi)->ifa_addr->sa_family == AF_INET6)
+#endif
+                  ) && ((*ifi)->ifa_flags & IFF_UP)
+                    && !((*ifi)->ifa_flags & IFF_POINTOPOINT)
+                    && !((*ifi)->ifa_flags & IFF_LOOPBACK))
+        {
+            struct ifaddrs *i = *ifi;
+
+#define ethernet_addr_len 6
+            uint8_t hwaddr[ethernet_addr_len];
+            int hwaddr_len = 0;
+
+#if defined(TARGET_OS_LINUX) && TARGET_OS_LINUX
+            struct ifreq ifr;
+            int sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
+            if (sockfd >= 0)
+            {
+                /* Add hardware address */
+                memcpy(ifr.ifr_name, i->ifa_name, IFNAMSIZ);
+                if (ioctl(sockfd, SIOCGIFHWADDR, &ifr) != -1)
+                {
+                    if (ifr.ifr_hwaddr.sa_family == ARPHRD_ETHER)
+                    {
+                        memcpy(hwaddr, ifr.ifr_hwaddr.sa_data, ethernet_addr_len);
+                        hwaddr_len = ethernet_addr_len;
+                    }
+                }
+                close(sockfd);
+            }
+            else
+            {
+                memset(hwaddr, 0, sizeof(hwaddr));
+            }
+#endif // TARGET_OS_LINUX
+            SetupOneInterface(m, i->ifa_addr, i->ifa_netmask,
+                              hwaddr, hwaddr_len, i->ifa_name, if_nametoindex(i->ifa_name), i->ifa_flags);
+        }
+    }
+
+    // Determine if there is at least one non-loopback IPv4 interface. This is to work around issues
+    // with multicast loopback on IPv6 interfaces -- see corresponding logic in SetupInterfaceList().
+    foundav4 = mDNSfalse;
+    for (intf = (PosixNetworkInterface*)(m->HostInterfaces); intf != NULL; intf = (PosixNetworkInterface*)(intf->coreIntf.next))
+    {
+        if (intf->sa_family == AF_INET && !intf->coreIntf.Loopback)
+        {
+            foundav4 = mDNStrue;
+            break;
+        }
+    }
+
+    if (foundav4)
+    {
+        for (intf = (PosixNetworkInterface*)(m->HostInterfaces); intf != NULL; intf = intfNext)
+        {
+            intfNext = (PosixNetworkInterface*)(intf->coreIntf.next);
+            if (intf->coreIntf.Loopback) TearDownInterface(m, intf);
+        }
+    }
+    else
+    {
+        found = mDNSfalse;
+
+        for (intf = (PosixNetworkInterface*)(m->HostInterfaces); intf != NULL; intf = (PosixNetworkInterface*)(intf->coreIntf.next))
+        {
+            if (intf->coreIntf.Loopback)
+            {
+                found = mDNStrue;
+                break;
+            }
+        }
+
+        if (!found && (ifa_loop4 != NULL))
+        {
+            SetupOneInterface(m, ifa_loop4->ifa_addr, ifa_loop4->ifa_netmask,
+                              NULL, 0, ifa_loop4->ifa_name, if_nametoindex(ifa_loop4->ifa_name), ifa_loop4->ifa_flags);
+        }
+    }
+
+    if (ifa_list != NULL) freeifaddrs(ifa_list);
+
+cleanup:
     while ((changedInterface = (NetworkInterfaceIndex*)changedInterfaces.Head) != NULL)
     {
         RemoveFromList(&changedInterfaces, changedInterface);
@@ -1947,15 +2113,11 @@ mDNSexport void mDNSPlatformClose(mDNS *const m)
 #endif
 }
 
-// This is used internally by InterfaceChangeCallback.
-// It's also exported so that the Standalone Responder (mDNSResponderPosix)
+// This is exported so that the Standalone Responder (mDNSResponderPosix)
 // can call it in response to a SIGHUP (mainly for debugging purposes).
 mDNSexport mStatus mDNSPlatformPosixRefreshInterfaceList(mDNS *const m)
 {
     int err;
-    // This is a pretty heavyweight way to process interface changes --
-    // destroying the entire interface list and then making fresh one from scratch.
-    // We should make it like the OS X version, which leaves unchanged interfaces alone.
     ClearInterfaceList(m);
     err = SetupInterfaceList(m);
     return PosixErrorToStatus(err);
