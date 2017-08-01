@@ -1348,7 +1348,7 @@ mDNSlocal void CleanRecentInterfaces(void)
 // Creates a PosixNetworkInterface for the interface whose IP address is
 // intfAddr and whose name is intfName and registers it with mDNS core.
 mDNSlocal int SetupOneInterface(mDNS *const m, struct sockaddr *intfAddr, struct sockaddr *intfMask,
-    const mDNSu8 *intfHaddr, mDNSu16 intfHlen, const char *intfName, int intfIndex)
+    const mDNSu8 *intfHaddr, mDNSu16 intfHlen, const char *intfName, int intfIndex, int intfFlags)
 {
     int err = 0;
     PosixNetworkInterface *intf;
@@ -1411,6 +1411,7 @@ mDNSlocal int SetupOneInterface(mDNS *const m, struct sockaddr *intfAddr, struct
 
         intf->coreIntf.Advertise = m->AdvertiseLocalAddresses;
         intf->coreIntf.McastTxRx = mDNStrue;
+        intf->coreIntf.Loopback = ((intfFlags & IFF_LOOPBACK) != 0) ? mDNStrue : mDNSfalse;
 
         // Set up the extra fields in PosixNetworkInterface.
         assert(intf->intfName != NULL);         // intf->intfName already set up above
@@ -1561,7 +1562,7 @@ mDNSlocal int SetupInterfaceList(mDNS *const m)
                     }
 #endif
                     if (SetupOneInterface(m, i->ifa_addr, i->ifa_netmask,
-                                          hwaddr, hwaddr_len, i->ifa_name, ifIndex) == 0)
+                                          hwaddr, hwaddr_len, i->ifa_name, ifIndex, i->ifa_flags) == 0)
                     {
                         if (i->ifa_addr->sa_family == AF_INET)
                             foundav4 = mDNStrue;
@@ -1578,7 +1579,7 @@ mDNSlocal int SetupInterfaceList(mDNS *const m)
         // if ((m->HostInterfaces == NULL) && (firstLoopback != NULL))
         if (!foundav4 && firstLoopback)
             (void) SetupOneInterface(m, firstLoopback->ifa_addr, firstLoopback->ifa_netmask,
-                NULL, 0, firstLoopback->ifa_name, firstLoopbackIndex);
+                NULL, 0, firstLoopback->ifa_name, firstLoopbackIndex, firstLoopback->ifa_flags);
     }
 
     // Clean up.
