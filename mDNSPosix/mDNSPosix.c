@@ -1677,7 +1677,7 @@ mDNSlocal void          ProcessRoutingNotification(int sd, GenLinkedList *change
 // Read through the messages on sd and if any indicate that any interface records should
 // be torn down and rebuilt, return affected indices as a bitmask. Otherwise return 0.
 {
-    ssize_t readCount;
+    ssize_t readVal, readCount;
     char buff[4096];
     struct nlmsghdr         *pNLMsg = (struct nlmsghdr*) buff;
 
@@ -1686,7 +1686,10 @@ mDNSlocal void          ProcessRoutingNotification(int sd, GenLinkedList *change
     // enough to hold all pending data and so avoid message fragmentation.
     // (Note that FIONREAD is not supported on AF_NETLINK.)
 
-    readCount = read(sd, buff, sizeof buff);
+    readVal = read(sd, buff, sizeof buff);
+    if (readVal < 0) return;
+    readCount = readVal;
+
     while (1)
     {
         // Make sure we've got an entire nlmsghdr in the buffer, and payload, too.
@@ -1702,7 +1705,9 @@ mDNSlocal void          ProcessRoutingNotification(int sd, GenLinkedList *change
                 pNLMsg = (struct nlmsghdr*) buff;
 
                 // read more data
-                readCount += read(sd, buff + readCount, sizeof buff - readCount);
+                readVal = read(sd, buff + readCount, sizeof buff - readCount);
+                if (readVal < 0) return;
+                readCount += readVal;
                 continue;                   // spin around and revalidate with new readCount
             }
             else
@@ -2017,6 +2022,7 @@ mDNSlocal mDNSBool mDNSPlatformInit_CanReceiveUnicast(void)
     int err;
     int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     struct sockaddr_in s5353;
+    if (s < 0) return mDNSfalse;
     s5353.sin_family      = AF_INET;
     s5353.sin_port        = MulticastDNSPort.NotAnInteger;
     s5353.sin_addr.s_addr = 0;
