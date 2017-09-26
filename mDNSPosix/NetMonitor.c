@@ -22,7 +22,7 @@
 // We want to use much of the functionality provided by "mDNS.c",
 // except we'll steal the packets that would be sent to normal mDNSCoreReceive() routine
 #define mDNSCoreReceive __NOT__mDNSCoreReceive__NOT__
-#include "mDNS.c"
+#include "../mDNSCore/mDNS.c"
 #undef mDNSCoreReceive
 
 //*************************************************************************************************************
@@ -128,6 +128,8 @@ static int NumProbes, NumGoodbyes, NumQuestions, NumLegacy, NumAnswers, NumAddit
 static ActivityStat *stats;
 
 #define OPBanner "Total Ops   Probe   Goodbye  BrowseQ  BrowseA ResolveQ ResolveA"
+
+mDNSexport void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNSu8 *const end, const mDNSAddr *const srcaddr, const mDNSIPPort srcport, const mDNSAddr *dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID InterfaceID);
 
 //*************************************************************************************************************
 // Utilities
@@ -312,7 +314,7 @@ mDNSlocal void SendUnicastQuery(mDNS *const m, HostEntry *entry, domainname *nam
         InterfaceID = mDNSInterface_Any;    // Send query from our unicast reply socket
     }
 
-    mDNSSendDNSMessage(&mDNSStorage, &query, qptr, InterfaceID, mDNSNULL, target, MulticastDNSPort, mDNSNULL, mDNSNULL, mDNSfalse);
+    mDNSSendDNSMessage(m, &query, qptr, InterfaceID, mDNSNULL, target, MulticastDNSPort, mDNSNULL, mDNSNULL, mDNSfalse);
 }
 
 mDNSlocal void AnalyseHost(mDNS *const m, HostEntry *entry, const mDNSInterfaceID InterfaceID)
@@ -372,7 +374,7 @@ mDNSlocal void ShowSortedHostList(HostList *list, int max)
 //*************************************************************************************************************
 // Receive and process packets
 
-mDNSexport mDNSBool ExtractServiceType(const domainname *const fqdn, domainname *const srvtype)
+mDNSlocal mDNSBool ExtractServiceType(const domainname *const fqdn, domainname *const srvtype)
 {
     int i, len;
     const mDNSu8 *src = fqdn->c;
@@ -436,11 +438,11 @@ mDNSlocal void printstats(int max)
     if (!stats) return;
     for (i=0; i<max; i++)
     {
-        int max = 0;
+        int max_val = 0;
         ActivityStat *s, *m = NULL;
         for (s = stats; s; s=s->next)
-            if (!s->printed && max < s->totalops)
-            { m = s; max = s->totalops; }
+            if (!s->printed && max_val < s->totalops)
+            { m = s; max_val = s->totalops; }
         if (!m) return;
         m->printed = mDNStrue;
         if (i==0) mprintf("%-25s%s\n", "Service Type", OPBanner);
@@ -890,7 +892,7 @@ mDNSlocal mStatus mDNSNetMonitor(void)
 
     do
     {
-        struct timeval timeout = { 0x3FFFFFFF, 0 };     // wait until SIGINT or SIGTERM
+        struct timeval timeout = { FutureTime, 0 };     // wait until SIGINT or SIGTERM
         mDNSBool gotSomething;
         mDNSPosixRunEventLoopOnce(&mDNSStorage, &timeout, &signals, &gotSomething);
     }
@@ -973,11 +975,16 @@ mDNSexport int main(int argc, char **argv)
 
     for (i=1; i<argc; i++)
     {
-        if (i+1 < argc && !strcmp(argv[i], "-i") && atoi(argv[i+1]))
+		if (i+1 < argc && !strcmp(argv[i], "-i"))
         {
-            FilterInterface = atoi(argv[i+1]);
-            i += 1;
-            printf("Monitoring interface %d\n", FilterInterface);
+			FilterInterface = if_nametoindex(argv[i+1]);
+			if (!FilterInterface) FilterInterface = atoi(argv[i+1]);
+			if (!FilterInterface) {
+				fprintf(stderr, "Unknown interface %s\n", argv[i+1]);
+				goto usage;
+			}
+            printf("Monitoring interface %d/%s\n", FilterInterface, argv[i+1]);
+			i += 1;
         }
         else if (!strcmp(argv[i], "-6"))
         {
@@ -1019,8 +1026,9 @@ mDNSexport int main(int argc, char **argv)
 
 usage:
     fprintf(stderr, "\nmDNS traffic monitor\n");
-    fprintf(stderr, "Usage: %s [-i index] [host]\n", progname);
+    fprintf(stderr, "Usage: %s [-i index] [-6] [host]\n", progname);
     fprintf(stderr, "Optional [-i index] parameter displays only packets from that interface index\n");
+	fprintf(stderr, "Optional [-6] parameter displays only ipv6 packets (defaults to only ipv4 packets)\n");
     fprintf(stderr, "Optional [host] parameter displays only packets from that host\n");
 
     fprintf(stderr, "\nPer-packet header output:\n");

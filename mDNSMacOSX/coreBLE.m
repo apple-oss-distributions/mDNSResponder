@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+#if ENABLE_BLE_TRIGGERED_BONJOUR
+
 #include "mDNSEmbeddedAPI.h"
 #include "DNSCommon.h"
 
@@ -28,29 +30,49 @@
 static coreBLE * coreBLEptr;
 
 // Call Bluetooth subsystem to start/stop the the Bonjour BLE beacon and
-// beacon scanning based on the current browse and registration hashes.
-void updateBLEBeaconAndScan(serviceHash_t browseHash, serviceHash_t registeredHash)
+// beacon scanning based on the current Bloom filter.
+void updateBLEBeacon(serviceHash_t bloomFilter)
 {
     if (coreBLEptr == 0)
         coreBLEptr = [[coreBLE alloc] init];
 
-    LogInfo("updateBLEBeaconAndScan: browseHash = 0x%x, registeredHash = 0x%x", browseHash, registeredHash);
+    LogInfo("updateBLEBeacon: bloomFilter = 0x%lx", bloomFilter);
 
-    [coreBLEptr advertiseBrowses:browseHash andRegistrations: registeredHash];
-    [coreBLEptr updateScan:(browseHash || registeredHash)];
+    [coreBLEptr updateBeacon:bloomFilter];
 }
 
 // Stop the current BLE beacon.
 void stopBLEBeacon(void)
 {
     if (coreBLEptr == 0)
-    {
-        LogInfo("stopBLEBeacon called before BLE scan initialized ??");
-        return;
-    }
+        coreBLEptr = [[coreBLE alloc] init];
 
-    LogInfo("stopBLEBeacon Stopping beacon");
     [coreBLEptr stopBeacon];
+}
+
+bool currentlyBeaconing(void)
+{
+    if (coreBLEptr == 0)
+        coreBLEptr = [[coreBLE alloc] init];
+
+    return [coreBLEptr isBeaconing];
+}
+
+// Start the scan.
+void startBLEScan(void)
+{
+    if (coreBLEptr == 0)
+        coreBLEptr = [[coreBLE alloc] init];
+    [coreBLEptr startScan];
+}
+
+// Stop the scan.
+void stopBLEScan(void)
+{
+    if (coreBLEptr == 0)
+        coreBLEptr = [[coreBLE alloc] init];
+
+    [coreBLEptr stopScan];
 }
 
 @implementation coreBLE
@@ -60,9 +82,11 @@ void stopBLEBeacon(void)
 
     NSData               *_currentlyAdvertisedData;
 
-    // [_centralManager isScanning] is only avilable on iOS and not OSX,
+    // [_centralManager isScanning] is only available on iOS and not OSX,
     // so track scanning state locally.
     BOOL                 _isScanning;
+    BOOL                 _centralManagerIsOn;
+    BOOL                 _peripheralManagerIsOn;
 }
 
 - (id)init
@@ -75,6 +99,8 @@ void stopBLEBeacon(void)
         _peripheralManager  = [[CBPeripheralManager alloc] initWithDelegate:self queue:dispatch_get_main_queue()];
         _currentlyAdvertisedData = nil;
         _isScanning = NO;
+        _centralManagerIsOn = NO;
+        _peripheralManagerIsOn = NO;
 
         if (_centralManager == nil || _peripheralManager == nil )
         {
@@ -82,7 +108,7 @@ void stopBLEBeacon(void)
         } 
         else
         {
-            LogInfo("coreBLE initialised");
+            LogInfo("coreBLE initialized");
         }
     }
 
@@ -92,7 +118,7 @@ void stopBLEBeacon(void)
 #define ADVERTISEMENTDATALENGTH 28 // 31 - 3 (3 bytes for flags)
 
 // TODO: 
-// DBDeviceTypeBonjour should eventually be added to the DBDeviceType definitions in WirelessProximity
+// Define DBDeviceTypeBonjour for prototyping until we move to the TDS beacon format.
 // The Bluetooth team recommended using a value < 32 for prototyping, since 32 is the number of
 // beacon types they can track in their duplicate beacon filtering logic.
 #define DBDeviceTypeBonjour     26
@@ -106,27 +132,31 @@ extern mDNSInterfaceID AWDLInterfaceID;
 // Transmit the last beacon indicating we are no longer advertising or browsing any services for two seconds.
 #define LastBeaconTime 2
 
-- (void) advertiseBrowses:(serviceHash_t) browseHash andRegistrations:(serviceHash_t) registeredHash
+- (void) updateBeacon:(serviceHash_t) bloomFilter
 {
     uint8_t advertisingData[ADVERTISEMENTDATALENGTH] = {0, 0xff, 0x4c, 0x00 };
     uint8_t advertisingLength = 4;
 
-    // TODO: If we have been transmitting a beacon, we probably want to continue transmitting
-    // for a few seconds after both hashes are zero so that that any devices scanning 
-    // can see the beacon indicating we have stopped all browses and advertisements.
-
-    // Stop the beacon if there is no data to advertise.
-    if (browseHash == 0 && registeredHash == 0)
+    // If no longer browsing or advertising, beacon this state for 'LastBeaconTime' seconds
+    // so that peers have a chance to notice the state change.
+    if (bloomFilter == 0)
     {
-        LogInfo("advertiseBrowses:andRegistrations Stopping beacon in %d seconds", LastBeaconTime);
-        if (mDNSStorage.NextBLEServiceTime)
-            LogInfo("advertiseBrowses:andRegistrations: NextBLEServiceTime already set ??");
+        LogInfo("updateBeacon: Stopping beacon in %d seconds", LastBeaconTime);
 
-        mDNSStorage.NextBLEServiceTime = NonZeroTime(mDNS_TimeNow_NoLock(& mDNSStorage) + LastBeaconTime * mDNSPlatformOneSecond);
+        if (mDNSStorage.timenow == 0)
+        {
+            // This should never happen since all calling code paths should have called mDNS_Lock(), which
+            // initializes the mDNSStorage.timenow value.
+            LogMsg("updateBeacon: NOTE, timenow == 0 ??");
+        }
+
+        mDNSStorage.NextBLEServiceTime = NonZeroTime(mDNSStorage.timenow + (LastBeaconTime * mDNSPlatformOneSecond));
+        finalBeacon = true;
     }
     else
     {
-        mDNSStorage.NextBLEServiceTime = 0;
+        // Cancel any pending final beacon processing.
+        finalBeacon = false;
     }
 
     // The beacon type.
@@ -135,17 +165,14 @@ extern mDNSInterfaceID AWDLInterfaceID;
     // Flags and Version field
     advertisingData[advertisingLength++] = BonjourBLEVersion;
 
-    memcpy(& advertisingData[advertisingLength], & browseHash, sizeof(serviceHash_t));
+    memcpy(& advertisingData[advertisingLength], & bloomFilter, sizeof(serviceHash_t));
     advertisingLength += sizeof(serviceHash_t);
-    memcpy(& advertisingData[advertisingLength], & registeredHash, sizeof(serviceHash_t));
-    advertisingLength += sizeof(serviceHash_t);
-
 
     // Add the MAC address of the awdl0 interface.  Don't cache it since
     // it can get updated periodically.
     if (AWDLInterfaceID)
     {
-        NetworkInterfaceInfoOSX *intf = IfindexToInterfaceInfoOSX(& mDNSStorage, AWDLInterfaceID);
+        NetworkInterfaceInfoOSX *intf = IfindexToInterfaceInfoOSX(AWDLInterfaceID);
         if (intf)
             memcpy(& advertisingData[advertisingLength], & intf->ifinfo.MAC, sizeof(mDNSEthAddr));
         else 
@@ -153,63 +180,129 @@ extern mDNSInterfaceID AWDLInterfaceID;
     }
     else
     {
-        // just use zero if not avaiblable
+        // Just use zero if not avaiblable.
        memset( & advertisingData[advertisingLength], 0, sizeof(mDNSEthAddr));
     }
     advertisingLength += sizeof(mDNSEthAddr);
 
-    // Total length of data advertised, minus this lenght byte.
+    // Total length of data advertised, minus this length byte.
     advertisingData[0] = (advertisingLength - 1);
 
-    LogInfo("advertiseBrowses:andRegistrations advertisingLength = %d", advertisingLength);
+    LogInfo("updateBeacon: advertisingLength = %d", advertisingLength);
 
-    NSData* data = [NSData dataWithBytes:advertisingData length:advertisingLength];
+    if (_currentlyAdvertisedData)
+        [_currentlyAdvertisedData release];
+    _currentlyAdvertisedData = [[NSData alloc] initWithBytes:advertisingData length:advertisingLength];
+    [self startBeacon];
+}
 
-    if([_peripheralManager isAdvertising] && [data isEqualToData: _currentlyAdvertisedData])
+- (void) startBeacon
+{
+    if (!_peripheralManagerIsOn)
     {
-        // No need to restart the advertisement if it is already active with the same data.
-        LogInfo("advertiseBrowses:andRegistrations: No change in advertised data");
+        LogInfo("startBeacon: Not starting beacon, CBPeripheralManager not powered on");
+        return;
     }
-    else
+
+    if (_currentlyAdvertisedData == nil)
     {
-        _currentlyAdvertisedData = data;
-
-        if ([_peripheralManager isAdvertising])
-        {
-            LogInfo("advertiseBrowses:andRegistrations: Stop current advertisement before restarting");
-            [_peripheralManager stopAdvertising];
-        }
-        LogInfo("advertiseBrowses:andRegistrations: Starting beacon");
-
-        [_peripheralManager startAdvertising:@{ CBAdvertisementDataAppleMfgData : _currentlyAdvertisedData, CBCentralManagerScanOptionIsPrivilegedDaemonKey : @YES, @"kCBAdvOptionUseFGInterval" : @YES }];
+        LogInfo("startBeacon: Not starting beacon, no data to advertise");
+        return;
     }
+
+    if ([_peripheralManager isAdvertising])
+    {
+        LogInfo("startBeacon: Stop current beacon transmission before restarting");
+        [_peripheralManager stopAdvertising];
+    }
+    LogInfo("startBeacon: Starting beacon");
+
+#if 0   // Move to this code during Fall 2018 develelopment if still using these APIs.
+    [_peripheralManager startAdvertising:@{ CBAdvertisementDataAppleMfgData : _currentlyAdvertisedData, CBManagerIsPrivilegedDaemonKey : @YES, @"kCBAdvOptionUseFGInterval" : @YES }];
+#else
+    // While CBCentralManagerScanOptionIsPrivilegedDaemonKey is deprecated in current MobileBluetooth project, it's still defined in the current and
+    // previous train SDKs.  Suppress deprecated warning for now since we intend to move to a different Bluetooth API to manage the BLE Triggered Bonjour 
+    // beacons when this code is enabled by default.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    [_peripheralManager startAdvertising:@{ CBAdvertisementDataAppleMfgData : _currentlyAdvertisedData, CBCentralManagerScanOptionIsPrivilegedDaemonKey : @YES, @"kCBAdvOptionUseFGInterval" : @YES }];
+#pragma GCC diagnostic pop
+#endif
+}
+
+- (bool) isBeaconing
+{
+    return (_currentlyAdvertisedData != nil);
 }
 
 - (void) stopBeacon
 {
-    [_peripheralManager stopAdvertising];
+    if (!_peripheralManagerIsOn)
+    {
+        LogInfo("stopBeacon: CBPeripheralManager is not powered on");
+        return;
+    }
+
+    // Only beaconing if we have advertised data to send.
+    if (_currentlyAdvertisedData)
+    {
+        LogInfo("stoptBeacon: Stopping beacon");
+        [_peripheralManager stopAdvertising];
+        [_currentlyAdvertisedData release];
+        _currentlyAdvertisedData = nil;
+    }
+    else
+        LogInfo("stoptBeacon: Note currently beaconing");
 }
 
-- (void) updateScan:(bool) start
+- (void) startScan
 {
+    if (!_centralManagerIsOn)
+    {
+        LogInfo("startScan: Not starting scan, CBCentralManager is not powered on");
+        return;
+    }
+
     if (_isScanning)
     {
-        if (!start)
-        {
-            LogInfo("updateScan: stopping scan");
-            [_centralManager stopScan];
-            _isScanning = NO;
-        }
+        LogInfo("startScan: already scanning, stopping scan before restarting");
+        [_centralManager stopScan];
+    }
+
+    LogInfo("startScan: Starting scan");
+
+    _isScanning = YES;
+
+#if 0   // Move to this code during Fall 2018 develelopment if still using these APIs.
+    [_centralManager scanForPeripheralsWithServices:nil options:@{ CBCentralManagerScanOptionAllowDuplicatesKey : @YES , CBManagerIsPrivilegedDaemonKey : @YES}];
+#else
+    // While CBCentralManagerScanOptionIsPrivilegedDaemonKey is deprecated in current MobileBluetooth project, it's still defined in the current and
+    // previous train SDKs.  Suppress deprecated warning for now since we intend to move to a different Bluetooth API to manage the BLE Triggered Bonjour 
+    // beacons when this code is enabled by default.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    [_centralManager scanForPeripheralsWithServices:nil options:@{ CBCentralManagerScanOptionAllowDuplicatesKey : @YES , CBCentralManagerScanOptionIsPrivilegedDaemonKey : @YES}];
+#pragma GCC diagnostic pop
+#endif
+}
+
+- (void) stopScan
+{
+    if (!_centralManagerIsOn)
+    {
+        LogInfo("stopScan: Not stopping scan, CBCentralManager is not powered on");
+        return;
+    }
+
+    if (_isScanning)
+    {
+        LogInfo("stopScan: Stopping scan");
+        [_centralManager stopScan];
+        _isScanning = NO;
     }
     else
     {
-        if (start)
-        {
-            LogInfo("updateScan: starting scan");
-
-            _isScanning = YES;
-            [_centralManager scanForPeripheralsWithServices:nil options:@{ CBCentralManagerScanOptionAllowDuplicatesKey : @NO }];
-        }
+        LogInfo("stopScan: Not currently scanning");
     }
 }
 
@@ -218,28 +311,40 @@ extern mDNSInterfaceID AWDLInterfaceID;
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central
 {
     switch (central.state) {
-        case CBCentralManagerStateUnknown:
-            LogInfo("centralManagerDidUpdateState: CBCentralManagerStateUnknown");
+        case CBManagerStateUnknown:
+            LogInfo("centralManagerDidUpdateState: CBManagerStateUnknown");
             break;
 
-        case CBCentralManagerStateResetting:
-            LogInfo("centralManagerDidUpdateState: CBCentralManagerStateResetting");
+        case CBManagerStateResetting:
+            LogInfo("centralManagerDidUpdateState: CBManagerStateResetting");
             break;
 
-        case CBCentralManagerStateUnsupported:
-            LogInfo("centralManagerDidUpdateState: CBCentralManagerStateUnsupported");
+        case CBManagerStateUnsupported:
+            LogInfo("centralManagerDidUpdateState: CBManagerStateUnsupported");
             break;
 
-        case CBCentralManagerStateUnauthorized:
-            LogInfo("centralManagerDidUpdateState: CBCentralManagerStateUnauthorized");
+        case CBManagerStateUnauthorized:
+            LogInfo("centralManagerDidUpdateState: CBManagerStateUnauthorized");
             break;
 
-        case CBCentralManagerStatePoweredOff:
-            LogInfo("centralManagerDidUpdateState: CBCentralManagerStatePoweredOff");
+        case CBManagerStatePoweredOff:
+            LogInfo("centralManagerDidUpdateState: CBManagerStatePoweredOff");
             break;
 
-        case CBCentralManagerStatePoweredOn:
-            LogInfo("centralManagerDidUpdateState: CBCentralManagerStatePoweredOn");
+        case CBManagerStatePoweredOn:
+            // Hold lock to synchronize with main thread from this callback thread.
+            KQueueLock();
+
+            LogInfo("centralManagerDidUpdateState: CBManagerStatePoweredOn");
+            _centralManagerIsOn = YES;
+            // Only start scan if we have data we will be transmitting or if "suppressBeacons"
+            // is set, indicating we should be scanning, but not beaconing.
+            if (_currentlyAdvertisedData || suppressBeacons)
+                [self startScan];
+            else
+                LogInfo("centralManagerDidUpdateState:: Not starting scan");
+
+            KQueueUnlock("CBManagerStatePoweredOn");
             break;
 
         default:
@@ -248,8 +353,8 @@ extern mDNSInterfaceID AWDLInterfaceID;
     }
 }
 
-// offset of beacon type in recieved CBAdvertisementDataManufacturerDataKey bytes
-#define beaconTypeByteIndex 2
+#define beaconTypeByteIndex  2   // Offset of beacon type in received CBAdvertisementDataManufacturerDataKey byte array.
+#define beaconDataLength    18  // Total number of bytes in the CBAdvertisementDataManufacturerDataKey.
 
 - (void)centralManager:(CBCentralManager *)central didDiscoverPeripheral:(CBPeripheral *)peripheral advertisementData:(NSDictionary<NSString *, id> *)advertisementData RSSI:(NSNumber *)RSSI
 {
@@ -259,7 +364,9 @@ extern mDNSInterfaceID AWDLInterfaceID;
 
     NSData *data = [advertisementData objectForKey:CBAdvertisementDataManufacturerDataKey];
    
-    if (!data) {
+    // Just return if the beacon data does not match what we are looking for.
+    if (!data || ([data length] != beaconDataLength))
+    {
         return;
     }
 
@@ -268,8 +375,8 @@ extern mDNSInterfaceID AWDLInterfaceID;
     // Just parse the DBDeviceTypeBonjour beacons.
     if (bytes[beaconTypeByteIndex] == DBDeviceTypeBonjour)
     {
-        serviceHash_t browseHash, registeredHash;
-        mDNSEthAddr senderMAC;
+        serviceHash_t peerBloomFilter;
+        mDNSEthAddr   peerMAC;
         unsigned char flagsAndVersion;
         unsigned char *ptr;
 
@@ -279,41 +386,25 @@ extern mDNSInterfaceID AWDLInterfaceID;
 #endif // VERBOSE_BLE_DEBUG
 
         // The DBDeviceTypeBonjour beacon bytes will be:
-        // x4C, 0x0, 0x2A, flags_and_version_byte,, browseHash, advertisingServices_hash_bytes,
-        // 6_bytes_of_sender_AWDL_MAC_address
+        // 0x4C (1 byte), 0x0 (1 byte), DBDeviceTypeBonjour byte, flags and version byte, 8 byte Bloom filter,
+        // 6 byte sender AWDL MAC address
 
         ptr = & bytes[beaconTypeByteIndex + 1];
         flagsAndVersion = *ptr++;
-        memcpy(& browseHash, ptr, sizeof(serviceHash_t));
+        memcpy(& peerBloomFilter, ptr, sizeof(serviceHash_t));
         ptr += sizeof(serviceHash_t);
-        memcpy(& registeredHash, ptr, sizeof(serviceHash_t));
-        ptr += sizeof(serviceHash_t);
-        memcpy(& senderMAC, ptr, sizeof(senderMAC));
+        memcpy(& peerMAC, ptr, sizeof(peerMAC));
 
 #if VERBOSE_BLE_DEBUG
-        LogInfo("didDiscoverPeripheral: version = 0x%x, browseHash = 0x%x, registeredHash = 0x%x",
-                flagsAndVersion, browseHash, registeredHash);
+        LogInfo("didDiscoverPeripheral: version = 0x%x, peerBloomFilter = 0x%x",
+                flagsAndVersion, peerBloomFilter);
         LogInfo("didDiscoverPeripheral: sender MAC = 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x",
-            senderMAC.b[0], senderMAC.b[1], senderMAC.b[2], senderMAC.b[3], senderMAC.b[4], senderMAC.b[5]);
+            peerMAC.b[0], peerMAC.b[1], peerMAC.b[2], peerMAC.b[3], peerMAC.b[4], peerMAC.b[5]);
 #else
         (void)flagsAndVersion; // Unused
 #endif  // VERBOSE_BLE_DEBUG
 
-        responseReceived(browseHash, registeredHash, & senderMAC);
-
-#if VERBOSE_BLE_DEBUG
-        // Log every 4th package during debug
-        static int pkgsIn = 0;
-
-        if (((pkgsIn++) & 3) == 0)
-        {
-            LogInfo("0x%x 0x%x 0x%x 0x%x 0x%x", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]);
-//            LogInfo("0x%x 0x%x 0x%x 0x%x 0x%x", bytes[5], bytes[6], bytes[7], bytes[9], bytes[9]);
-//            LogInfo("0x%x 0x%x 0x%x 0x%x 0x%x", bytes[10], bytes[11], bytes[12], bytes[13], bytes[14]);
-//            LogInfo("0x%x 0x%x 0x%x 0x%x 0x%x", bytes[15], bytes[16], bytes[17], bytes[18], bytes[19]);
-        }
-#endif  // VERBOSE_BLE_DEBUG
-
+        responseReceived(peerBloomFilter, & peerMAC);
     }
 }
 
@@ -323,28 +414,38 @@ extern mDNSInterfaceID AWDLInterfaceID;
 {
 
     switch (peripheral.state) {
-        case CBPeripheralManagerStateUnknown:
-            LogInfo("peripheralManagerDidUpdateState: CBPeripheralManagerStateUnknown");
+        case CBManagerStateUnknown:
+            LogInfo("peripheralManagerDidUpdateState: CBManagerStateUnknown");
             break;
 
-        case CBPeripheralManagerStateResetting:
-            LogInfo("peripheralManagerDidUpdateState: CBPeripheralManagerStateResetting");
+        case CBManagerStateResetting:
+            LogInfo("peripheralManagerDidUpdateState: CBManagerStateResetting");
             break;
 
-        case CBPeripheralManagerStateUnsupported:
-            LogInfo("peripheralManagerDidUpdateState: CBPeripheralManagerStateUnsupported");
+        case CBManagerStateUnsupported:
+            LogInfo("peripheralManagerDidUpdateState: CBManagerStateUnsupported");
             break;
 
-        case CBPeripheralManagerStateUnauthorized:
-            LogInfo("peripheralManagerDidUpdateState: CBPeripheralManagerStateUnauthorized");
+        case CBManagerStateUnauthorized:
+            LogInfo("peripheralManagerDidUpdateState: CBManagerStateUnauthorized");
             break;
 
-        case CBPeripheralManagerStatePoweredOff:
-            LogInfo("peripheralManagerDidUpdateState: CBPeripheralManagerStatePoweredOff");
+        case CBManagerStatePoweredOff:
+            LogInfo("peripheralManagerDidUpdateState: CBManagerStatePoweredOff");
             break;
 
-        case CBPeripheralManagerStatePoweredOn:
-            LogInfo("peripheralManagerDidUpdateState: CBPeripheralManagerStatePoweredOn");
+        case CBManagerStatePoweredOn:
+            // Hold lock to synchronize with main thread from this callback thread.
+            KQueueLock();
+
+            LogInfo("peripheralManagerDidUpdateState: CBManagerStatePoweredOn");
+            _peripheralManagerIsOn = YES;
+
+            // Start beaconing if we have initialized beacon data to send.
+            if (_currentlyAdvertisedData)
+                [self startBeacon];
+
+            KQueueUnlock("CBManagerStatePoweredOn");
             break;
 
         default:
@@ -369,3 +470,4 @@ extern mDNSInterfaceID AWDLInterfaceID;
 }
 
 @end
+#endif  // ENABLE_BLE_TRIGGERED_BONJOUR

@@ -1093,7 +1093,7 @@ mDNSlocal int   SetupActiveInterfaces( mDNS *const inMDNS, mDNSs32 inUTC )
             // If it's is an old one that went away and came back in less than a minute, we're in a flapping scenario.
 
             flapping = ( ( inUTC - i->lastSeen ) > 0 ) && ( ( inUTC - i->lastSeen ) < 60 );
-            mDNS_RegisterInterface( inMDNS, n, flapping );
+            mDNS_RegisterInterface( inMDNS, n, (flapping ? SlowActivation : NormalActivation));
             if( mDNSAddressIsNonLinkLocalIPv4( &i->ifinfo.ip ) ) ++count;
 
             dmsg( kDebugLevelInfo, DEBUG_NAME "%s:   Registered    %8s(%u) InterfaceID %#p %#a%s%s\n", __ROUTINE__,
@@ -1176,7 +1176,7 @@ mDNSlocal int   ClearInactiveInterfaces( mDNS *const inMDNS, mDNSs32 inUTC, mDNS
                   i->ifinfo.ifname, i->scopeID, i->ifinfo.InterfaceID, &i->ifinfo.ip,
                   i->ifinfo.InterfaceActive ? " (Primary)" : "" );
 
-            mDNS_DeregisterInterface( inMDNS, &i->ifinfo, mDNSfalse );
+            mDNS_DeregisterInterface( inMDNS, &i->ifinfo, NormalActivation );
             i->ifinfo.InterfaceID = NULL;
             if( mDNSAddressIsNonLinkLocalIPv4( &i->ifinfo.ip ) ) ++count;
         }

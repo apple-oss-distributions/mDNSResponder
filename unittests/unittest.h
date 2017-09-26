@@ -20,7 +20,9 @@
 #include <unistd.h>
 #include <assert.h>
 #include <signal.h>
+#include "unittest_common.h"
 
+#include <MacTypes.h>
 #ifndef _UNITTEST_H_
 #define _UNITTEST_H_
 
@@ -38,7 +40,8 @@ typedef struct __test_item_
     int        iter_count;
 }   __test_item;
 
-    
+int run_tests(void);
+
 #define UNITTEST_HEADER(X) int X() { int __success = 1; __test_item* __i = NULL;
 
 #define UNITTEST_GROUP(X) { printf("== %s ==\n", #X); __success = X() && __success; }
@@ -61,9 +64,14 @@ void _unittest_print_list(__test_item* __i);
                               signal(SIGPIPE, SIG_IGN); \
                               FILE* fp; \
                               unlink("unittest_success"); \
-                              if (!run_tests()) return -1; \
+                              if (!run_tests()) \
+                              { \
+                                  printf("unit test FAILED\n"); \
+                                  return -1; \
+                              } \
                               fp = fopen("unittest_success", "w"); \
                               if (!fp) return -2; \
+                              fprintf(fp, "unit test %s\n", "SUCCEEDED"); \
                               fclose(fp); \
                               printf("unit test SUCCESS\n"); \
                               if (argc != 1) \
@@ -74,6 +82,38 @@ void _unittest_print_list(__test_item* __i);
                               } \
                               return 0; \
                           }
+#define UNITTEST_SENDDNSMESSAGE mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNSu8 *end,  \
+	mDNSInterfaceID InterfaceID, UDPSocket *src, const mDNSAddr *dst,  \
+	mDNSIPPort dstport, TCPSocket *sock, DomainAuthInfo *authInfo,  \
+	mDNSBool useBackgroundTrafficClass) \
+	{ \
+		(void)(m); \
+		(void)(msg); \
+		(void)(end); \
+		(void)(InterfaceID); \
+		(void)(src); \
+		(void)(dst); \
+		(void)(dstport); \
+		(void)(sock); \
+		(void)(authInfo); \
+		(void)(useBackgroundTrafficClass); \
+		return 0; \
+	}
+
+#define UNITTEST_SETSOCKOPT void mDNSPlatformSetSocktOpt(void *sockCxt, mDNSTransport_Type transType, \
+    mDNSAddr_Type addrType, const DNSQuestion *q) \
+    { \
+        (void)(sockCxt); \
+        (void)(transType); \
+        (void)(addrType); \
+        (void)(q); \
+        return; \
+    }
+
+#define UNITTEST_UDPCLOSE void mDNSPlatformUDPClose(UDPSocket *sock) \
+    { \
+        (void)(sock); \
+    }
 
 #define UNITTEST_FAIL_ASSERT { assert(((void*)__func__) == 0); }
 

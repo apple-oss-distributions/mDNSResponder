@@ -45,6 +45,7 @@
 ; Mach communications
 ; These are needed for things like getpwnam, hostname changes, & keychain
 (allow mach-lookup
+       (global-name "com.apple.analyticsd")
        (global-name "com.apple.awdd")
        (global-name "com.apple.bsd.dirhelper")
        (global-name "com.apple.CoreServices.coreservicesd")
@@ -66,12 +67,17 @@
        (global-name "com.apple.usymptomsd")
        (global-name "com.apple.webcontentfilter.dns")
        (global-name "com.apple.server.bluetooth")
+       (global-name "com.apple.server.bluetooth.le.att.xpc")
        (global-name "com.apple.awacs")
        (global-name "com.apple.networkd")
        (global-name "com.apple.securityd")
        (global-name "com.apple.wifi.manager")
+       ; "com.apple.blued" is the name used in pre Lobo builds,
+       ; leave it in place while still running roots on pre Lobo targets
        (global-name "com.apple.blued")
+       (global-name "com.apple.bluetoothd")
        (global-name "com.apple.mobilegestalt.xpc")
+       (global-name "com.apple.ReportCrash.SimulateCrash")
        (global-name "com.apple.snhelper"))
 
 (allow mach-register
@@ -98,6 +104,13 @@
 ; Our socket
 (allow file-read* file-write* (literal "/private/var/run/mDNSResponder"))
 
+; BPF control for sleep proxy server
+(allow file-ioctl (prefix "/dev/bpf"))
+
+; Used by CoreCrypto AES routines.
+(allow file-read* file-write-data file-ioctl
+           (literal "/dev/aes_0"))
+
 ; System version, settings, and other miscellaneous necessary file system accesses
 (allow file-read-data
        ; Needed for CFCopyVersionDictionary()
@@ -115,6 +128,8 @@
        (literal "/private/var/preferences/SystemConfiguration/preferences.plist")
        (subpath "/System/Library/Preferences/Logging")
        (subpath "/AppleInternal/Library/Preferences/Logging")
+       (subpath "/private/var/preferences/Logging/Subsystems")
+       (subpath "/private/var/db/timezone")
        (subpath "/Library/Preferences/Logging"))
 
 
@@ -154,3 +169,9 @@
         (iokit-user-client-class "wlDNSOffloadUserClient")
         (iokit-user-client-class "RootDomainUserClient")
         (iokit-user-client-class "AppleMobileFileIntegrityUserClient"))))
+
+; Internal builds only
+(with-filter (system-attribute apple-internal)
+    (allow sysctl-read sysctl-write
+        (sysctl-name "vm.footprint_suspend"))) ; dyld performance reporting
+

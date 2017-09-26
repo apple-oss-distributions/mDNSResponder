@@ -1002,7 +1002,7 @@ mDNSlocal mStatus   SetupInterface( mDNS * const inMDNS, const struct ifaddrs *i
     item->hostSet.Advertise               = inMDNS->AdvertiseLocalAddresses;
     item->hostSet.McastTxRx               = mDNStrue;
 
-    err = mDNS_RegisterInterface( inMDNS, &item->hostSet, mDNSfalse );
+    err = mDNS_RegisterInterface( inMDNS, &item->hostSet, NormalActivation );
     require_noerr( err, exit );
     item->hostRegistered = mDNStrue;
 
@@ -1044,7 +1044,7 @@ mDNSlocal mStatus   TearDownInterface( mDNS * const inMDNS, MDNSInterfaceItem *i
     if( inItem->hostRegistered )
     {
         inItem->hostRegistered = mDNSfalse;
-        mDNS_DeregisterInterface( inMDNS, &inItem->hostSet, mDNSfalse );
+        mDNS_DeregisterInterface( inMDNS, &inItem->hostSet, NormalActivation );
     }
 
     // Close the multicast socket.

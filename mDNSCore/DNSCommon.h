@@ -240,8 +240,7 @@ extern const mDNSu8 *NSEC3HashName(const domainname *name, rdataNSEC3 *nsec3, co
 #pragma mark - DNS Message Parsing Functions
 #endif
 
-#define AuthHashSlot(X) (DomainNameHashValue(X) % AUTH_HASH_SLOTS)
-#define HashSlot(X) (DomainNameHashValue(X) % CACHE_HASH_SLOTS)
+#define HashSlotFromNameHash(X) ((X) % CACHE_HASH_SLOTS)
 extern mDNSu32 DomainNameHashValue(const domainname *const name);
 extern void SetNewRData(ResourceRecord *const rr, RData *NewRData, mDNSu16 rdlength);
 extern const mDNSu8 *skipDomainName(const DNSMessage *const msg, const mDNSu8 *ptr, const mDNSu8 *const end);
@@ -260,7 +259,7 @@ extern const mDNSu8 *LocateAuthorities(const DNSMessage *const msg, const mDNSu8
 extern const mDNSu8 *LocateAdditionals(const DNSMessage *const msg, const mDNSu8 *const end);
 extern const mDNSu8 *LocateOptRR(const DNSMessage *const msg, const mDNSu8 *const end, int minsize);
 extern const rdataOPT *GetLLQOptData(mDNS *const m, const DNSMessage *const msg, const mDNSu8 *const end);
-extern mDNSu32 GetPktLease(mDNS *m, DNSMessage *msg, const mDNSu8 *end);
+extern mDNSBool GetPktLease(mDNS *const m, const DNSMessage *const msg, const mDNSu8 *const end, mDNSu32 *const lease);
 extern void DumpPacket(mDNS *const m, mStatus status, mDNSBool sent, char *transport,
                        const mDNSAddr *srcaddr, mDNSIPPort srcport,
                        const mDNSAddr *dstaddr, mDNSIPPort dstport, const DNSMessage *const msg, const mDNSu8 *const end);

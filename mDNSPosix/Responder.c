@@ -503,6 +503,7 @@ static mStatus RegisterServicesInFile(const char *filePath)
 {
     mStatus status = mStatus_NoError;
     FILE *      fp = fopen(filePath, "r");
+    int rv;
 
     if (fp == NULL) {
         return mStatus_UnknownErr;
@@ -603,7 +604,8 @@ static mStatus RegisterServicesInFile(const char *filePath)
         status = mStatus_UnknownErr;
     }
 
-    assert(0 == fclose(fp));
+    rv = fclose(fp);
+    assert(rv == 0);
 
     return status;
 }
@@ -721,7 +723,7 @@ int main(int argc, char **argv)
         // 2. Set up the timeout.
         // This example client has no other work it needs to be doing,
         // so we set an effectively infinite timeout
-        timeout.tv_sec = 0x3FFFFFFF;
+        timeout.tv_sec = FutureTime;
         timeout.tv_usec = 0;
 
         // 3. Give the mDNSPosix layer a chance to add its information to the fd_set and timeout

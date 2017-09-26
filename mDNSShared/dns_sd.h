@@ -66,7 +66,7 @@
  */
 
 #ifndef _DNS_SD_H
-#define _DNS_SD_H 7650102
+#define _DNS_SD_H 8780101
 
 #ifdef  __cplusplus
 extern "C" {
@@ -511,29 +511,24 @@ enum
      * is only set in the callbacks and kDNSServiceFlagsThresholdOne is only set on
      * input to a DNSServiceBrowse call.
      */
-     kDNSServiceFlagsDenyCellular           = 0x8000000,
+     kDNSServiceFlagsPrivateOne          = 0x8000000,
     /*
-     * This flag is meaningful only for Unicast DNS queries. When set, the kernel will restrict
-     * DNS resolutions on the cellular interface for that request.
+     * This flag is private and should not be used.
      */
 
-     kDNSServiceFlagsServiceIndex           = 0x10000000,
+     kDNSServiceFlagsPrivateTwo           = 0x10000000,
     /*
-     * This flag is meaningful only for DNSServiceGetAddrInfo() for Unicast DNS queries.
-     * When set, DNSServiceGetAddrInfo() will interpret the "interfaceIndex" argument of the call
-     * as the "serviceIndex".
+     * This flag is private and should not be used.
      */
 
-     kDNSServiceFlagsDenyExpensive          = 0x20000000,
+     kDNSServiceFlagsPrivateThree         = 0x20000000,
     /*
-     * This flag is meaningful only for Unicast DNS queries. When set, the kernel will restrict
-     * DNS resolutions on interfaces defined as expensive for that request.
+     * This flag is private and should not be used.
      */
 
-     kDNSServiceFlagsPathEvaluationDone     = 0x40000000
+     kDNSServiceFlagsPrivateFour       = 0x40000000
     /*
-     * This flag is meaningful for only Unicast DNS queries.
-     * When set, it indicates that Network PathEvaluation has already been performed.
+     * This flag is private and should not be used.
      */
 
 };
@@ -762,7 +757,7 @@ enum
  * full DNS name, the helper function DNSServiceConstructFullName() is provided.
  *
  * The following (highly contrived) example illustrates the escaping process.
- * Suppose you have an service called "Dr. Smith\Dr. Johnson", of type "_ftp._tcp"
+ * Suppose you have a service called "Dr. Smith\Dr. Johnson", of type "_ftp._tcp"
  * in subdomain "4th. Floor" of subdomain "Building 2" of domain "apple.com."
  * The full (escaped) DNS name of this service's SRV record would be:
  * Dr\.\032Smith\\Dr\.\032Johnson._ftp._tcp.4th\.\032Floor.Building\0322.apple.com.
@@ -805,6 +800,12 @@ enum
  * moment in time, then the reply will return an immediate negative answer. If
  * local records are subsequently created that answer the question, then those
  * answers will be delivered, for as long as the question is still active.
+ *
+ * If the kDNSServiceFlagsTimeout and kDNSServiceInterfaceIndexLocalOnly flags
+ * are set simultaneously when either DNSServiceQueryRecord or DNSServiceGetAddrInfo
+ * is called then both flags take effect. However, if DNSServiceQueryRecord is called
+ * with both the kDNSServiceFlagsSuppressUnusable and kDNSServiceInterfaceIndexLocalOnly
+ * flags set, then the kDNSServiceFlagsSuppressUnusable flag is ignored.
  *
  * Clients explicitly wishing to discover *only* LocalOnly services during a
  * browse may do this, without flags, by inspecting the interfaceIndex of each
@@ -1131,13 +1132,13 @@ typedef void (DNSSD_API *DNSServiceRegisterReply)
  *                  and the registration will remain active indefinitely until the client
  *                  terminates it by passing this DNSServiceRef to DNSServiceRefDeallocate().
  *
+ * flags:           Indicates the renaming behavior on name conflict (most applications
+ *                  will pass 0). See flag definitions above for details.
+ *
  * interfaceIndex:  If non-zero, specifies the interface on which to register the service
  *                  (the index for a given interface is determined via the if_nametoindex()
  *                  family of calls.) Most applications will pass 0 to register on all
  *                  available interfaces. See "Constants for specifying an interface index" for more details.
- *
- * flags:           Indicates the renaming behavior on name conflict (most applications
- *                  will pass 0). See flag definitions above for details.
  *
  * name:            If non-NULL, specifies the service name to be registered.
  *                  Most applications will not specify a name, in which case the computer
@@ -1361,7 +1362,7 @@ DNSServiceErrorType DNSSD_API DNSServiceUpdateRecord
 /* DNSServiceRemoveRecord
  *
  * Remove a record previously added to a service record set via DNSServiceAddRecord(), or deregister
- * an record registered individually via DNSServiceRegisterRecord().
+ * a record registered individually via DNSServiceRegisterRecord().
  *
  * Parameters:
  *
@@ -1669,7 +1670,9 @@ DNSServiceErrorType DNSSD_API DNSServiceResolve
  *                  only applies to clients that cancel the asynchronous operation when
  *                  they get a result. Clients that leave the asynchronous operation
  *                  running can safely assume that the data remains valid until they
- *                  get another callback telling them otherwise.
+ *                  get another callback telling them otherwise. The ttl value is not
+ *                  updated when the daemon answers from the cache, hence relying on
+ *                  the accuracy of the ttl value is not recommended.
  *
  * context:         The context pointer that was passed to the callout.
  *
@@ -1775,7 +1778,9 @@ DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
  *                  only applies to clients that cancel the asynchronous operation when
  *                  they get a result. Clients that leave the asynchronous operation
  *                  running can safely assume that the data remains valid until they
- *                  get another callback telling them otherwise.
+ *                  get another callback telling them otherwise. The ttl value is not
+ *                  updated when the daemon answers from the cache, hence relying on
+ *                  the accuracy of the ttl value is not recommended.
  *
  * context:         The context pointer that was passed to the callout.
  *

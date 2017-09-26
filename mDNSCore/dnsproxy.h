@@ -21,11 +21,11 @@
 #include "mDNSEmbeddedAPI.h"
 #include "DNSCommon.h"
 
-extern void ProxyUDPCallback(mDNS *const m, void *socket, void *const pkt, const mDNSu8 *const end, const mDNSAddr *const srcaddr,
+extern void ProxyUDPCallback(void *socket, DNSMessage *const msg, const mDNSu8 *const end, const mDNSAddr *const srcaddr,
                              const mDNSIPPort srcport, const mDNSAddr *dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID InterfaceID, void *context);
-extern void ProxyTCPCallback(mDNS *const m, void *socket, void *const pkt, const mDNSu8 *const end, const mDNSAddr *const srcaddr,
+extern void ProxyTCPCallback(void *socket, DNSMessage *const msg, const mDNSu8 *const end, const mDNSAddr *const srcaddr,
                              const mDNSIPPort srcport, const mDNSAddr *dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID InterfaceID, void *context);                          
-extern void DNSProxyInit(mDNS *const m, mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf);
-extern void DNSProxyTerminate(mDNS *const m);
+extern void DNSProxyInit(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf);
+extern void DNSProxyTerminate(void);
 
 #endif // __DNS_PROXY_H

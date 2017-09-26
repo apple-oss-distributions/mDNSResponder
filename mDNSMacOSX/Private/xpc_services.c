@@ -41,11 +41,11 @@ mDNSlocal void ActivateDNSProxy(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf, mDNSBool p
     LogInfo("ActivateDNSProxy: InterfaceIndex List by Client: Input[%d, %d, %d, %d, %d] Output[%d] ", IpIfArr[0], IpIfArr[1],
              IpIfArr[2], IpIfArr[3], IpIfArr[4], OpIf);
  
-    KQueueLock(&mDNSStorage); 
-    DNSProxyInit(&mDNSStorage, IpIfArr, OpIf);
+    KQueueLock();
+    DNSProxyInit(IpIfArr, OpIf);
     if (proxy_off) // Open skts only if proxy was OFF else we may end up opening extra skts
-        mDNSPlatformInitDNSProxySkts(&mDNSStorage, ProxyUDPCallback, ProxyTCPCallback);
-    KQueueUnlock(&mDNSStorage, "DNSProxy Activated");
+        mDNSPlatformInitDNSProxySkts(ProxyUDPCallback, ProxyTCPCallback);
+    KQueueUnlock("DNSProxy Activated");
 }
 
 mDNSlocal void handle_dps_terminate()
@@ -55,11 +55,11 @@ mDNSlocal void handle_dps_terminate()
     // Clear the Client's PID, so that we can now accept new DPS requests
     dps_client_pid = 0;
 
-    KQueueLock(&mDNSStorage);
+    KQueueLock();
     mDNSPlatformCloseDNSProxySkts(&mDNSStorage);
     // TBD: Close TCP Sockets
-    DNSProxyTerminate(&mDNSStorage);
-    KQueueUnlock(&mDNSStorage, "DNSProxy Deactivated");
+    DNSProxyTerminate();
+    KQueueUnlock("DNSProxy Deactivated");
 }
 
 mDNSlocal void handle_dps_request(xpc_object_t req)

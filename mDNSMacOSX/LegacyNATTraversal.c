@@ -27,7 +27,6 @@
 #   include <ws2tcpip.h>
 #   define strcasecmp   _stricmp
 #   define strncasecmp  _strnicmp
-#   define mDNSASLLog( UUID, SUBDOMAIN, RESULT, SIGNATURE, FORMAT, ... ) ;
 
 static int
 inet_pton( int family, const char * addr, void * dst )
@@ -80,7 +79,7 @@ mDNSlocal mStatus SendPortMapRequest(mDNS *m, NATTraversalInfo *n);
 #define RequestedPortNum(n) (mDNSVal16(mDNSIPPortIsZero((n)->RequestedPort) ? (n)->IntPort : (n)->RequestedPort) + (mDNSu16)(n)->tcpInfo.retries)
 
 // Note that this function assumes src is already NULL terminated
-mDNSlocal void AllocAndCopy(mDNSu8 **const dst, const mDNSu8 *const src)
+mDNSlocal void AllocAndCopy(char **const dst, const char *const src)
 {
     if (src == mDNSNULL) return;
     if ((strlen((char*)src)) >= UINT32_MAX || (*dst = mDNSPlatformMemAllocate((mDNSu32)strlen((char*)src) + 1)) == mDNSNULL)
@@ -93,7 +92,7 @@ mDNSlocal void AllocAndCopy(mDNSu8 **const dst, const mDNSu8 *const src)
 
 // This function does a simple parse of an HTTP URL that may include a hostname, port, and path
 // If found in the URL, addressAndPort and path out params will point to newly allocated space (and will leak if they were previously pointing at allocated space)
-mDNSlocal mStatus ParseHttpUrl(const mDNSu8 *ptr, const mDNSu8 *const end, mDNSu8 **const addressAndPort, mDNSIPPort *const port, mDNSu8 **const path)
+mDNSlocal mStatus ParseHttpUrl(const mDNSu8 *ptr, const mDNSu8 *const end, char **const addressAndPort, mDNSIPPort *const port, char **const path)
 {
     // if the data begins with "http://", we assume there is a hostname and possibly a port number
     if (end - ptr >= 7 && strncasecmp((char*)ptr, "http://", 7) == 0)
@@ -210,7 +209,7 @@ mDNSlocal void handleLNTDeviceDescriptionResponse(tcpLNTInfo *tcpInfo)
     if (http_result == HTTPCode_404) LNT_ClearState(m);
     if (http_result != HTTPCode_200)
     {
-        mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.DeviceDescription", "noop", "HTTP Result", "HTTP code: %d", http_result);
+        LogInfo("handleLNTDeviceDescriptionResponse: HTTP Result code: %d", http_result);
         return;
     }
 
@@ -318,7 +317,7 @@ mDNSlocal void handleLNTGetExternalAddressResponse(tcpLNTInfo *tcpInfo)
     if (http_result == HTTPCode_404) LNT_ClearState(m);
     if (http_result != HTTPCode_200)
     {
-        mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.AddressRequest", "noop", "HTTP Result", "HTTP code: %d", http_result);
+        LogInfo("handleLNTGetExternalAddressResponse: HTTP Result code: %d", http_result);
         return;
     }
 
@@ -336,7 +335,6 @@ mDNSlocal void handleLNTGetExternalAddressResponse(tcpLNTInfo *tcpInfo)
 
     if (inet_pton(AF_INET, (char*)ptr, &ExtAddr) <= 0)
     {
-        mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.AddressRequest", "noop", "inet_pton", "");
         LogMsg("handleLNTGetExternalAddressResponse: Router returned bad address %s", ptr);
         err = NATErr_NetFail;
         ExtAddr = zerov4Addr;
@@ -380,12 +378,11 @@ mDNSlocal void handleLNTPortMappingResponse(tcpLNTInfo *tcpInfo)
                 if (tcpInfo->retries < 100)
                 {
                     tcpInfo->retries++; SendPortMapRequest(tcpInfo->m, natInfo);
-                    mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.PortMapRequest", "noop", "Conflict", "Retry %d", tcpInfo->retries);
+                    LogInfo("handleLNTPortMappingResponse: Conflict retry %d", tcpInfo->retries);
                 }
                 else
                 {
                     LogMsg("handleLNTPortMappingResponse too many conflict retries %d %d", mDNSVal16(natInfo->IntPort), mDNSVal16(natInfo->RequestedPort));
-                    mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.PortMapRequest", "noop", "Conflict - too many retries", "Retries: %d", tcpInfo->retries);
                     natTraversalHandlePortMapReply(m, natInfo, m->UPnPInterfaceID, NATErr_Res, zeroIPPort, 0, NATTProtocolUPNPIGD);
                 }
                 return;
@@ -397,7 +394,7 @@ mDNSlocal void handleLNTPortMappingResponse(tcpLNTInfo *tcpInfo)
     else if (http_result == HTTPCode_Other) LogMsg("handleLNTPortMappingResponse got unexpected response code");
     else if (http_result == HTTPCode_404) LNT_ClearState(m);
     if (http_result != HTTPCode_200 && http_result != HTTPCode_500)
-        mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.PortMapRequest", "noop", "HTTP Result", "HTTP code: %d", http_result);
+        LogInfo("handleLNTPortMappingResponse: HTTP Result code: %d", http_result);
 }
 
 mDNSlocal void DisposeInfoFromUnmapList(mDNS *m, tcpLNTInfo *tcpInfo)
@@ -479,20 +476,17 @@ exit:
 
         switch (tcpInfo->op)
         {
-        case LNTDiscoveryOp:     if (m->UPnPSOAPAddressString == mDNSNULL)
-                mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.DeviceDescription", "failure", "SOAP Address", "");
-            if (m->UPnPSOAPURL == mDNSNULL)
-                mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.DeviceDescription", "failure", "SOAP path", "");
-            if (m->UPnPSOAPAddressString && m->UPnPSOAPURL)
-                mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.DeviceDescription", "success", "success", "");
+        case LNTDiscoveryOp:
+            LogInfo("tcpConnectionCallback: DeviceDescription SOAP address %s SOAP path %s",
+                m->UPnPSOAPAddressString ? m->UPnPSOAPAddressString : "NULL", m->UPnPSOAPURL ? m->UPnPSOAPURL : "NULL");
             break;
-        case LNTExternalAddrOp:  mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.AddressRequest",
-                                            mDNSIPv4AddressIsZero(m->ExtAddress) ? "failure" : "success",
-                                            mDNSIPv4AddressIsZero(m->ExtAddress) ? "failure" : "success", "");
+        case LNTExternalAddrOp:
+            LogInfo("tcpConnectionCallback: AddressRequest %s", mDNSIPv4AddressIsZero(m->ExtAddress) ? "failure" : "success");
             break;
-        case LNTPortMapOp:       if (tcpInfo->parentNATInfo)
-                mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.PortMapRequest", (tcpInfo->parentNATInfo->Result) ? "failure" : "success",
-                           (tcpInfo->parentNATInfo->Result) ? "failure" : "success", "Result: %d", tcpInfo->parentNATInfo->Result);
+        case LNTPortMapOp:
+            if (tcpInfo->parentNATInfo)
+                LogInfo("tcpConnectionCallback: PortMapRequest %s result %d",
+                    (tcpInfo->parentNATInfo->Result) ? "failure" : "success", tcpInfo->parentNATInfo->Result);
             break;
         case LNTPortMapDeleteOp: break;
         default:                 break;
@@ -530,7 +524,7 @@ mDNSlocal mStatus MakeTCPConnection(mDNS *const m, tcpLNTInfo *info, const mDNSA
     else if ((info->Reply = mDNSPlatformMemAllocate(LNT_MAXBUFSIZE)) == mDNSNULL) { LogInfo("can't allocate reply buffer"); return (mStatus_NoMemoryErr); }
 
     if (info->sock) { LogInfo("MakeTCPConnection: closing previous open connection"); mDNSPlatformTCPCloseConnection(info->sock); info->sock = mDNSNULL; }
-    info->sock = mDNSPlatformTCPSocket(m, kTCPSocketFlags_Zero, &srcport, mDNSfalse);
+    info->sock = mDNSPlatformTCPSocket(kTCPSocketFlags_Zero, &srcport, mDNSfalse);
     if (!info->sock) { LogMsg("LNT MakeTCPConnection: unable to create TCP socket"); mDNSPlatformMemFree(info->Reply); info->Reply = mDNSNULL; return(mStatus_NoMemoryErr); }
     LogInfo("MakeTCPConnection: connecting to %#a:%d", &info->Address, mDNSVal16(info->Port));
     err = mDNSPlatformTCPConnect(info->sock, Addr, Port, mDNSNULL, 0, tcpConnectionCallback, info);
@@ -828,7 +822,7 @@ mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID Interface
     }
     if (ptr == mDNSNULL || ptr == end)
     {
-        mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.ssdp", "failure", "Location", "");
+        LogInfo("LNT_ConfigureRouterInfo: Location field not found");
         return; // not a message we care about
     }
     ptr += 9; //Skip over 'Location:'
@@ -856,7 +850,7 @@ mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID Interface
     // the Router URL should look something like "/dyndev/uuid:0013-108c-4b3f0000f3dc"
     if (ParseHttpUrl(ptr, end, &m->UPnPRouterAddressString, &m->UPnPRouterPort, &m->UPnPRouterURL) != mStatus_NoError)
     {
-        mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.ssdp", "failure", "Parse URL", "");
+        LogInfo("LNT_ConfigureRouterInfo: Failed to parse URL");
         return;
     }
 
@@ -864,14 +858,12 @@ mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID Interface
 
     if (m->UPnPRouterAddressString == mDNSNULL)
     {
-        mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.ssdp", "failure", "Router address", "");
         LogMsg("LNT_ConfigureRouterInfo: UPnPRouterAddressString is NULL");
     }
     else LogInfo("LNT_ConfigureRouterInfo: Router address string [%s]", m->UPnPRouterAddressString);
 
     if (m->UPnPRouterURL == mDNSNULL)
     {
-        mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.ssdp", "failure", "Router path", "");
         LogMsg("LNT_ConfigureRouterInfo: UPnPRouterURL is NULL");
     }
     else LogInfo("LNT_ConfigureRouterInfo: Router URL [%s]", m->UPnPRouterURL);
@@ -882,7 +874,6 @@ mDNSexport void LNT_ConfigureRouterInfo(mDNS *m, const mDNSInterfaceID Interface
     // Don't need the SSDP socket anymore
     if (m->SSDPSocket) { debugf("LNT_ConfigureRouterInfo destroying SSDPSocket %p", &m->SSDPSocket); mDNSPlatformUDPClose(m->SSDPSocket); m->SSDPSocket = mDNSNULL; }
 
-    mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.legacy.ssdp", "success", "success", "");
     // now send message to get the device description
     GetDeviceDescription(m, &m->tcpDeviceInfo);
 }
@@ -917,7 +908,7 @@ mDNSexport void LNT_SendDiscoveryMsg(mDNS *m)
 
     if (!mDNSIPv4AddressIsZero(m->Router.ip.v4))
     {
-        if (!m->SSDPSocket) { m->SSDPSocket = mDNSPlatformUDPSocket(m, zeroIPPort); debugf("LNT_SendDiscoveryMsg created SSDPSocket %p", &m->SSDPSocket); }
+        if (!m->SSDPSocket) { m->SSDPSocket = mDNSPlatformUDPSocket(zeroIPPort); debugf("LNT_SendDiscoveryMsg created SSDPSocket %p", &m->SSDPSocket); }
         mDNSPlatformSendUDP(m, buf, buf + bufLen, 0, m->SSDPSocket, &m->Router,     SSDPPort, mDNSfalse);
         mDNSPlatformSendUDP(m, buf, buf + bufLen, 0, m->SSDPSocket, &multicastDest, SSDPPort, mDNSfalse);
     }

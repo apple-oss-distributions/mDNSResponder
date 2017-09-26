@@ -707,7 +707,6 @@ mDNSexport void ValidateRRSIG(DNSSECVerifier *dv, RRVerifierSet type, const Reso
 
 mDNSlocal mStatus CheckRRSIGForRRSet(mDNS *const m, DNSSECVerifier *dv, CacheRecord **negcr)
 {
-    mDNSu32 slot;
     CacheGroup *cg;
     CacheRecord *cr;
     RRVerifier *rv;
@@ -722,8 +721,7 @@ mDNSlocal mStatus CheckRRSIGForRRSet(mDNS *const m, DNSSECVerifier *dv, CacheRec
     }
 
     rv = dv->rrset;
-    slot = HashSlot(&rv->name);
-    cg = CacheGroupForName(m, slot, rv->namehash, &rv->name);
+    cg = CacheGroupForName(m, rv->namehash, &rv->name);
     if (!cg)
     {
         debugdnssec("CheckRRSIGForRRSet: cg null");
@@ -807,7 +805,6 @@ mDNSlocal void CheckOneKeyForRRSIG(DNSSECVerifier *dv, const ResourceRecord *con
 
 mDNSlocal mStatus CheckKeyForRRSIG(mDNS *const m, DNSSECVerifier *dv, CacheRecord **negcr)
 {
-    mDNSu32 slot;
     mDNSu32 namehash;
     CacheGroup *cg;
     CacheRecord *cr;
@@ -825,9 +822,8 @@ mDNSlocal mStatus CheckKeyForRRSIG(mDNS *const m, DNSSECVerifier *dv, CacheRecor
     rrsig = (rdataRRSig *)dv->rrsig->rdata;
     name = (domainname *)&rrsig->signerName;
 
-    slot = HashSlot(name);
     namehash = DomainNameHashValue(name);
-    cg = CacheGroupForName(m, slot, namehash, name);
+    cg = CacheGroupForName(m, namehash, name);
     if (!cg)
     {
         debugdnssec("CheckKeyForRRSIG: cg null for %##s", name->c);
@@ -887,7 +883,6 @@ mDNSlocal void CheckOneRRSIGForKey(DNSSECVerifier *dv, const ResourceRecord *con
 
 mDNSlocal mStatus CheckRRSIGForKey(mDNS *const m, DNSSECVerifier *dv, CacheRecord **negcr)
 {
-    mDNSu32 slot;
     mDNSu32 namehash;
     CacheGroup *cg;
     CacheRecord *cr;
@@ -909,9 +904,8 @@ mDNSlocal mStatus CheckRRSIGForKey(mDNS *const m, DNSSECVerifier *dv, CacheRecor
     rrsig = (rdataRRSig *)dv->rrsig->rdata;
     name = (domainname *)&rrsig->signerName;
 
-    slot = HashSlot(name);
     namehash = DomainNameHashValue(name);
-    cg = CacheGroupForName(m, slot, namehash, name);
+    cg = CacheGroupForName(m, namehash, name);
     if (!cg)
     {
         debugdnssec("CheckRRSIGForKey: cg null %##s", name->c);
@@ -1010,7 +1004,6 @@ mDNSlocal void CheckOneDSForKey(DNSSECVerifier *dv, const ResourceRecord *const 
 
 mDNSlocal mStatus CheckDSForKey(mDNS *const m, DNSSECVerifier *dv, CacheRecord **negcr)
 {
-    mDNSu32 slot;
     mDNSu32 namehash;
     CacheGroup *cg;
     CacheRecord *cr;
@@ -1030,9 +1023,8 @@ mDNSlocal mStatus CheckDSForKey(mDNS *const m, DNSSECVerifier *dv, CacheRecord *
     }
     rrsig = (rdataRRSig *)dv->rrsig->rdata;
     name = (domainname *)&rrsig->signerName;
-    slot = HashSlot(name);
     namehash = DomainNameHashValue(name);
-    cg = CacheGroupForName(m, slot, namehash, name);
+    cg = CacheGroupForName(m, namehash, name);
     if (!cg)
     {
         debugdnssec("CheckDSForKey: cg null for %s", name->c);
@@ -2336,7 +2328,6 @@ mDNSlocal void SetTTLRRSet(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus statu
     CacheRecord *rr;
     RRVerifier *rrsigv;
     rdataRRSig *rrsig;
-    mDNSu32 slot;
     CacheGroup *cg;
     mDNSu32 rrTTL, rrsigTTL, rrsigOrigTTL, rrsigTimeTTL;
     domainname *qname;
@@ -2368,8 +2359,7 @@ mDNSlocal void SetTTLRRSet(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus statu
 
     question.ThisQInterval = -1;
     InitializeQuestion(m, &question, dv->InterfaceID, qname, qtype, mDNSNULL, mDNSNULL);
-    slot = HashSlot(&question.qname);
-    cg = CacheGroupForName(m, slot, question.qnamehash, &question.qname);
+    cg = CacheGroupForName(m, question.qnamehash, &question.qname);
 
     if (!cg)
     {
@@ -2691,7 +2681,7 @@ mDNSlocal void DNSSECNoResponse(mDNS *const m, DNSSECVerifier *dv)
 {
     CacheGroup *cg;
     CacheRecord *cr;
-    mDNSu32 slot, namehash;
+    mDNSu32 namehash;
     ResourceRecord *answer = mDNSNULL;
 
     LogDNSSEC("DNSSECNoResponse: called");
@@ -2704,10 +2694,9 @@ mDNSlocal void DNSSECNoResponse(mDNS *const m, DNSSECVerifier *dv)
 
     BumpDNSSECStats(m, kStatsActionSet, kStatsTypeStatus, DNSSEC_NoResponse);
 
-    slot = HashSlot(&dv->origName);
     namehash = DomainNameHashValue(&dv->origName);
 
-    cg = CacheGroupForName(m, (const mDNSu32)slot, namehash, &dv->origName);
+    cg = CacheGroupForName(m, namehash, &dv->origName);
     if (!cg)
     {
         LogDNSSEC("DNSSECNoResponse: cg NULL for %##s (%s)", dv->origName.c, DNSTypeName(dv->origType));
@@ -3033,7 +3022,7 @@ done:
 
 mDNSlocal void DNSSECValidationCB(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus status)
 {
-    mDNSu32 slot, namehash;
+    mDNSu32 namehash;
     CacheGroup *cg;
     CacheRecord *cr;
 
@@ -3053,10 +3042,9 @@ mDNSlocal void DNSSECValidationCB(mDNS *const m, DNSSECVerifier *dv, DNSSECStatu
         ProveInsecure(m, dv, mDNSNULL, mDNSNULL);
         return;
     }
-    slot = HashSlot(&dv->origName);
     namehash = DomainNameHashValue(&dv->origName);
 
-    cg = CacheGroupForName(m, (const mDNSu32)slot, namehash, &dv->origName);
+    cg = CacheGroupForName(m, namehash, &dv->origName);
     if (!cg)
     {
         LogDNSSEC("DNSSECValidationCB: cg NULL for %##s (%s)", dv->origName.c, DNSTypeName(dv->origType));
@@ -3082,8 +3070,7 @@ mDNSlocal void DNSSECValidationCB(mDNS *const m, DNSSECVerifier *dv, DNSSECStatu
 
 mDNSexport void VerifySignature(mDNS *const m, DNSSECVerifier *dv, DNSQuestion *q)
 {
-    mDNSu32 slot = HashSlot(&q->qname);
-    CacheGroup *const cg = CacheGroupForName(m, slot, q->qnamehash, &q->qname);
+    CacheGroup *const cg = CacheGroupForName(m, q->qnamehash, &q->qname);
     CacheRecord *rr;
     mDNSBool first = mDNSfalse;
     static mDNSBool TrustAnchorsUpdated = mDNSfalse;
@@ -3319,14 +3306,12 @@ mDNSlocal mStatus TrustedKey(mDNS *const m, DNSSECVerifier *dv)
 
 mDNSlocal CacheRecord* NegativeCacheRecordForRR(mDNS *const m, const ResourceRecord *const rr)
 {
-    mDNSu32 slot;
     mDNSu32 namehash;
     CacheGroup *cg;
     CacheRecord *cr;
 
-    slot = HashSlot(rr->name);
     namehash = DomainNameHashValue(rr->name);
-    cg = CacheGroupForName(m, slot, namehash, rr->name);
+    cg = CacheGroupForName(m, namehash, rr->name);
     if (!cg)
     {
         LogMsg("NegativeCacheRecordForRR: cg null %##s", rr->name->c);

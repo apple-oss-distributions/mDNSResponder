@@ -240,6 +240,12 @@ mDNSexport void SetAnonData(DNSQuestion *q, ResourceRecord *rr, mDNSBool ForQues
     debugf("SetAnonData: question %##s(%p), rr %##s(%p)", q->qname.c, q->AnonInfo, rr->name->c, rr->AnonInfo);
     if (ForQuestion)
     {
+        if (q->AnonInfo->AnonDataLen < rr->AnonInfo->AnonDataLen)
+        {
+            mDNSPlatformMemFree(q->AnonInfo->AnonData);
+            q->AnonInfo->AnonData = mDNSNULL;
+        }
+
         if (!q->AnonInfo->AnonData)
         {
             q->AnonInfo->AnonData = mDNSPlatformMemAllocate(rr->AnonInfo->AnonDataLen);
@@ -251,6 +257,12 @@ mDNSexport void SetAnonData(DNSQuestion *q, ResourceRecord *rr, mDNSBool ForQues
     }
     else
     {
+        if (rr->AnonInfo->AnonDataLen < q->AnonInfo->AnonDataLen)
+        {
+            mDNSPlatformMemFree(rr->AnonInfo->AnonData);
+            rr->AnonInfo->AnonData = mDNSNULL;
+        }
+
         if (!rr->AnonInfo->AnonData)
         {
             rr->AnonInfo->AnonData = mDNSPlatformMemAllocate(q->AnonInfo->AnonDataLen);

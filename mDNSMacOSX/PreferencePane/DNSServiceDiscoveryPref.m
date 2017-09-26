@@ -42,15 +42,46 @@
  */
 
 #import "DNSServiceDiscoveryPref.h"
-#import "ConfigurationAuthority.h"
-#import "PrivilegedOperations.h"
-#import <unistd.h>
+#import "CNDomainBrowserView.h"
+#import "BonjourSCStore.h"
+#import "BonjourPrefTool.h"
+#import <Foundation/NSXPCConnection_Private.h>
 
 #include "../../Clients/ClientCommon.h"
 
-#ifndef NSINTEGER_DEFINED
-#define NSInteger int
+#pragma mark - BonjourPrefTool
+
+static OSStatus
+DNSPrefTool_SetKeychainEntry(NSDictionary * secretDictionary)
+{
+    __block OSStatus result;
+    BonjourPrefTool * prefTool;
+    
+    NSXPCConnection * _connectionToTool = [[NSXPCConnection alloc] initWithServiceName:@"com.apple.preference.bonjour.tool"];
+    _connectionToTool.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(BonjourPrefToolProtocol)];
+    [_connectionToTool resume];
+    
+#if 0
+    prefTool = [_connectionToTool remoteObjectProxyWithErrorHandler:^(NSError * _Nonnull error) {
+        NSLog( @"Cannot connect to BonjourPrefTool: %@.", error);
+        result = error.code;
+    }];
+#else
+    prefTool = [_connectionToTool synchronousRemoteObjectProxyWithErrorHandler:^(NSError * _Nonnull error) {
+        NSLog( @"Cannot connect to BonjourPrefTool: %@.", error);
+        result = error.code;
+    }];
 #endif
+    [prefTool setKeychainEntry: secretDictionary withStatus: ^(OSStatus status){
+        result = status;
+    }];
+
+    [_connectionToTool invalidate];
+
+    return (result);
+}
+
+#pragma mark -
 
 @implementation DNSServiceDiscoveryPref
 
@@ -75,160 +106,11 @@ static void NetworkChanged(SCDynamicStoreRef store, CFArrayRef changedKeys, void
 {
 	(void)store; // Unused
 	(void)changedKeys; // Unused
-    DNSServiceDiscoveryPref * me = (DNSServiceDiscoveryPref *)context;
+    DNSServiceDiscoveryPref * me = (__bridge DNSServiceDiscoveryPref *)context;
     assert(me != NULL);
     
     [me setupInitialValues];
 }
-
-
-static void ServiceDomainEnumReply( DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex,
-    DNSServiceErrorType errorCode, const char *replyDomain, void *context, DNSServiceFlags enumType)
-{    
-	(void)sdRef; // Unused
-	(void)interfaceIndex; // Unused
-	(void)errorCode; // Unused
-    if (strcmp(replyDomain, "local.") == 0) return;  // local domain is not interesting
-
-	DNSServiceDiscoveryPref * me = (DNSServiceDiscoveryPref *)context;
- 	BOOL moreComing = (BOOL)(flags & kDNSServiceFlagsMoreComing);
-    NSMutableArray * domainArray;
-    NSMutableArray * defaultBrowseDomainsArray = nil;
-    NSComboBox * domainComboBox;
-    NSString * domainString;
-    char decodedDomainString[kDNSServiceMaxDomainName] = "\0";
-    char nextLabel[256] = "\0";
-    char * buffer = (char *)replyDomain;
-    
-	while (*buffer) {
-        buffer = (char *)GetNextLabel(buffer, nextLabel);
-        strcat(decodedDomainString, nextLabel);
-        strcat(decodedDomainString, ".");
-    }
-    
-    // Remove trailing dot from domain name.
-    decodedDomainString[strlen(decodedDomainString)-1] = '\0';
-    
-    domainString = [[[NSString alloc] initWithUTF8String:(const char *)decodedDomainString] autorelease];
-
-    if (enumType & kDNSServiceFlagsRegistrationDomains) {
-        domainArray    = [me registrationDataSource];
-        domainComboBox = [me regDomainsComboBox];
-    } else { 
-        domainArray    = [me browseDataSource];
-        domainComboBox = [me browseDomainsComboBox];
-        defaultBrowseDomainsArray = [me defaultBrowseDomainsArray];
-    }
-    
-	if (flags & kDNSServiceFlagsAdd) {
-		[domainArray removeObject:domainString];  // How can I check if an object is in the array?
-		[domainArray addObject:domainString];
-        if ((flags & kDNSServiceFlagsDefault) && (enumType & kDNSServiceFlagsRegistrationDomains)) {
-			[me setDefaultRegDomain:domainString];
-			if ([[domainComboBox stringValue] length] == 0) [domainComboBox setStringValue:domainString];
-		} else if ((flags & kDNSServiceFlagsDefault) && !(enumType & kDNSServiceFlagsRegistrationDomains)) {
-			[defaultBrowseDomainsArray removeObject:domainString];
-			[defaultBrowseDomainsArray addObject:domainString];
-		}
-	}
-    
-    if (moreComing == NO) {
-        [domainArray sortUsingFunction:MyArrayCompareFunction context:nil];
-        [domainComboBox reloadData];
-    }    
-}
-
-
-static void
-browseDomainReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex,
-    DNSServiceErrorType errorCode, const char *replyDomain, void *context)
-{
-    ServiceDomainEnumReply(sdRef, flags, interfaceIndex, errorCode, replyDomain, context, kDNSServiceFlagsBrowseDomains);
-}
-
-
-static void
-registrationDomainReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex,
-    DNSServiceErrorType errorCode, const char *replyDomain, void *context)
-{
-    ServiceDomainEnumReply(sdRef, flags, interfaceIndex, errorCode, replyDomain, context, kDNSServiceFlagsRegistrationDomains);
-}
-
-
-
-static void
-MyDNSServiceCleanUp(MyDNSServiceState * query)
-{
-    /* Remove the CFRunLoopSource from the current run loop. */
-    CFRunLoopRemoveSource(CFRunLoopGetCurrent(), query->source, kCFRunLoopCommonModes);
-    CFRelease(query->source);
-    
-    /* Invalidate the CFSocket. */
-    CFSocketInvalidate(query->socket);
-    CFRelease(query->socket);
-    
-    /* Workaround that gives time to CFSocket's select thread so it can remove the socket from its FD set
-    before we close the socket by calling DNSServiceRefDeallocate. <rdar://problem/3585273> */
-    usleep(1000);
-    
-    /* Terminate the connection with the mDNSResponder daemon, which cancels the query. */
-    DNSServiceRefDeallocate(query->service);
-}
-
-
-
-static void
-MySocketReadCallback(CFSocketRef s, CFSocketCallBackType type, CFDataRef address, const void * data, void * info)
-{
-    #pragma unused(s)
-    #pragma unused(type)
-    #pragma unused(address)
-    #pragma unused(data)
-    
-    DNSServiceErrorType err;
- 
-    MyDNSServiceState * query = (MyDNSServiceState *)info;  // context passed in to CFSocketCreateWithNative().
-    assert(query != NULL);
-    
-    /* Read a reply from the mDNSResponder.  */
-    err= DNSServiceProcessResult(query->service);
-    if (err != kDNSServiceErr_NoError) {
-        fprintf(stderr, "DNSServiceProcessResult returned %d\n", err);
-        
-        /* Terminate the query operation and release the CFRunLoopSource and CFSocket. */
-        MyDNSServiceCleanUp(query);
-    }
-}
-
-
-
-static void
-MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
-{
-    CFSocketNativeHandle sock;
-    CFOptionFlags        sockFlags;
-    CFSocketContext      context = { 0, query, NULL, NULL, NULL };  // Use MyDNSServiceState as context data.
-    
-    /* Access the underlying Unix domain socket to communicate with the mDNSResponder daemon. */
-    sock = DNSServiceRefSockFD(query->service);
-    assert(sock != -1);
-    
-    /* Create a CFSocket using the Unix domain socket. */
-    query->socket = CFSocketCreateWithNative(NULL, sock, kCFSocketReadCallBack, MySocketReadCallback, &context);
-    assert(query->socket != NULL);
-    
-    /* Prevent CFSocketInvalidate from closing DNSServiceRef's socket. */
-    sockFlags = CFSocketGetSocketFlags(query->socket);
-    CFSocketSetSocketFlags(query->socket, sockFlags & (~kCFSocketCloseOnInvalidate));
-    
-    /* Create a CFRunLoopSource from the CFSocket. */
-    query->source = CFSocketCreateRunLoopSource(NULL, query->socket, 0);
-    assert(query->source != NULL);
-
-    /* Add the CFRunLoopSource to the current run loop. */
-    CFRunLoopAddSource(CFRunLoopGetCurrent(), query->source, kCFRunLoopCommonModes);
-}
-
 
 
 -(void)updateStatusImageView
@@ -242,7 +124,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 
 - (void)watchForPreferenceChanges
 {
-	SCDynamicStoreContext context = { 0, self, NULL, NULL, NULL };
+	SCDynamicStoreContext context = { 0, (__bridge void * _Nullable)(self), NULL, NULL, NULL };
 	SCDynamicStoreRef     store   = SCDynamicStoreCreate(NULL, CFSTR("watchForPreferenceChanges"), NetworkChanged, &context);
 	CFMutableArrayRef     keys    = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
     CFRunLoopSourceRef    rls;
@@ -274,31 +156,15 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
     
     assert(store != NULL);
         
-    NSDictionary *dynamicDNS = (NSDictionary *)SCDynamicStoreCopyValue(store, SC_DYNDNS_STATE_KEY);
+    NSDictionary *dynamicDNS = (NSDictionary *)CFBridgingRelease(SCDynamicStoreCopyValue(store, SC_DYNDNS_STATE_KEY));
     if (dynamicDNS) {
         NSDictionary *hostNames = [dynamicDNS objectForKey:(NSString *)SC_DYNDNS_HOSTNAMES_KEY];
         NSDictionary *infoDict  = [hostNames objectForKey:lowercaseDomain];
         if (infoDict) status = [[infoDict objectForKey:(NSString*)SC_DYNDNS_STATUS_KEY] intValue];
-        CFRelease(dynamicDNS);
 	}
     CFRelease(store);
 
     return status;
-}
-
-
-- (void)startDomainBrowsing
-{
-    DNSServiceFlags flags;
-    OSStatus err = noErr;
-    
-    flags = kDNSServiceFlagsRegistrationDomains;
-    err = DNSServiceEnumerateDomains(&regQuery.service, flags, 0, registrationDomainReply, (void *)self);
-    if (err == kDNSServiceErr_NoError) MyDNSServiceAddServiceToRunLoop(&regQuery);
-
-    flags = kDNSServiceFlagsBrowseDomains;
-    err = DNSServiceEnumerateDomains(&browseQuery.service, flags, 0, browseDomainReply, (void *)self);
-    if (err == kDNSServiceErr_NoError) MyDNSServiceAddServiceToRunLoop(&browseQuery);
 }
 
 
@@ -308,32 +174,31 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
     NSArray      *regDomainArray;
     NSArray      *hostArray;
 
-    if (currentRegDomain)          [currentRegDomain release];
-    if (currentBrowseDomainsArray) [currentBrowseDomainsArray release];
-    if (currentHostName)           [currentHostName release];
+    if (currentRegDomain)          currentRegDomain = nil;
+    if (currentBrowseDomainsArray) currentBrowseDomainsArray = nil;
+    if (currentHostName)           currentHostName = nil;
 
 	SCDynamicStoreRef store = SCDynamicStoreCreate(NULL, CFSTR("com.apple.preference.bonjour"), NULL, NULL);
-	origDict = (NSDictionary *)SCDynamicStoreCopyValue(store, SC_DYNDNS_SETUP_KEY);
+	origDict = (NSDictionary *)CFBridgingRelease(SCDynamicStoreCopyValue(store, SC_DYNDNS_SETUP_KEY));
 
 	regDomainArray = [origDict objectForKey:(NSString *)SC_DYNDNS_REGDOMAINS_KEY];
 	if (regDomainArray && [regDomainArray count] > 0) {
 		currentRegDomain = [[[regDomainArray objectAtIndex:0] objectForKey:(NSString *)SC_DYNDNS_DOMAIN_KEY] copy];
 		currentWideAreaState = [[[regDomainArray objectAtIndex:0] objectForKey:(NSString *)SC_DYNDNS_ENABLED_KEY] intValue];
     } else {
-		currentRegDomain = [[NSString alloc] initWithString:@""];
+		currentRegDomain = @"";
 		currentWideAreaState = NO;
 	}
 
-	currentBrowseDomainsArray = [[origDict objectForKey:(NSString *)SC_DYNDNS_BROWSEDOMAINS_KEY] retain];
+	currentBrowseDomainsArray = [origDict objectForKey:(NSString *)SC_DYNDNS_BROWSEDOMAINS_KEY];
 
     hostArray = [origDict objectForKey:(NSString *)SC_DYNDNS_HOSTNAMES_KEY];
 	if (hostArray && [hostArray count] > 0) {
 		currentHostName = [[[hostArray objectAtIndex:0] objectForKey:(NSString *)SC_DYNDNS_DOMAIN_KEY] copy];
 	} else {
-		currentHostName = [[NSString alloc] initWithString:@""];
+		currentHostName = @"";
     }
 
-    if (origDict) CFRelease((CFDictionaryRef)origDict);
     if (store) CFRelease(store);
 }
 
@@ -344,27 +209,14 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 }
 
 
-- (void)setBrowseDomainsComboBox
-{
-	NSString * domain = nil;
-	
-	if ([defaultBrowseDomainsArray count] > 0) {
-		NSEnumerator * arrayEnumerator = [defaultBrowseDomainsArray objectEnumerator];
-		while ((domain = [arrayEnumerator nextObject]) != NULL) {
-			if ([self domainAlreadyInList:domain] == NO) break;
-		}
-	}
-	if (domain) [browseDomainsComboBox setStringValue:domain];
-	else        [browseDomainsComboBox setStringValue:@""];
-}
-
-
 - (IBAction)addBrowseDomainClicked:(id)sender
 {
-	[self setBrowseDomainsComboBox];
+    NSWindow *  window = (([NSEvent modifierFlags] & NSAlternateKeyMask) == NSAlternateKeyMask) ? addBrowseDomainManualWindow : addBrowseDomainWindow;
+    [browseDomainTextField setStringValue: [NSString string]];
 
-	[NSApp beginSheet:addBrowseDomainWindow modalForWindow:mainWindow modalDelegate:self
-		didEndSelector:@selector(addBrowseDomainSheetDidEnd:returnCode:contextInfo:) contextInfo:sender];
+    [self disableControls];
+	[NSApp beginSheet:window modalForWindow:mainWindow modalDelegate:self
+		didEndSelector:@selector(addBrowseDomainSheetDidEnd:returnCode:contextInfo:) contextInfo:(__bridge void * _Null_unspecified)(sender)];
 
 	[browseDomainList deselectAll:sender];
 	[self updateApplyButtonState];
@@ -385,15 +237,14 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 {
 	NSTableView *tableView = sender;
     NSMutableDictionary *browseDomainDict;
-	int value;
+	NSInteger value;
 	
 	browseDomainDict = [[browseDomainsArray objectAtIndex:[tableView clickedRow]] mutableCopy];
 	value = [[browseDomainDict objectForKey:(NSString *)SC_DYNDNS_ENABLED_KEY] intValue];
-	[browseDomainDict setObject:[[[NSNumber alloc] initWithInt:(!value)] autorelease] forKey:(NSString *)SC_DYNDNS_ENABLED_KEY];
+	[browseDomainDict setObject:[NSNumber numberWithInt:(!value)] forKey:(NSString *)SC_DYNDNS_ENABLED_KEY];
 	[browseDomainsArray replaceObjectAtIndex:[tableView clickedRow] withObject:browseDomainDict];
 	[tableView reloadData];
 	[self updateApplyButtonState];
-	[browseDomainDict release];
 }
 
 
@@ -431,7 +282,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 			if ([[tableColumn identifier] isEqualTo:(NSString *)SC_DYNDNS_ENABLED_KEY]) {
 				value = [browseDomainDict objectForKey:(NSString *)SC_DYNDNS_ENABLED_KEY];
 			} else if ([[tableColumn identifier] isEqualTo:(NSString *)SC_DYNDNS_DOMAIN_KEY]) {
-				value = [browseDomainDict objectForKey:(NSString *)SC_DYNDNS_DOMAIN_KEY];
+                value = [browseDomainDict objectForKey:(NSString *)SC_DYNDNS_DOMAIN_KEY];
 			}
 		}
 	}
@@ -449,7 +300,6 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 	}
 	
 	if (browseDomainsArray) {
-		[browseDomainsArray release];
 		browseDomainsArray = nil;
 	}
 	
@@ -458,9 +308,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 		if (browseDomainsArray) {
 			[browseDomainsArray sortUsingFunction:MyDomainArrayCompareFunction context:nil];
 			if ([browseDomainsArray isEqualToArray:currentBrowseDomainsArray] == NO) {
-				OSStatus err = WriteBrowseDomain((CFDataRef)[self dataForDomainArray:browseDomainsArray]);
-				if (err != noErr) NSLog(@"WriteBrowseDomain returned %d\n", (int32_t)err);
-				[currentBrowseDomainsArray release];
+                [BonjourSCStore setObject: browseDomainsArray forKey: (NSString *)SC_DYNDNS_BROWSEDOMAINS_KEY];
 				currentBrowseDomainsArray = [browseDomainsArray copy];
 			}
 		}
@@ -470,11 +318,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 	[browseDomainList reloadData];
 	
     if (currentRegDomain && ([currentRegDomain length] > 0)) {
-        [regDomainsComboBox setStringValue:currentRegDomain];
-        [registrationDataSource removeObject:currentRegDomain];
-        [registrationDataSource addObject:currentRegDomain];
-        [registrationDataSource sortUsingFunction:MyArrayCompareFunction context:nil];
-        [regDomainsComboBox reloadData];
+        regDomainView.domain = currentRegDomain;
     }
     
     if (currentWideAreaState) {
@@ -484,12 +328,10 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
     }
 
     if (hostNameSharedSecretValue) {
-        [hostNameSharedSecretValue release];
         hostNameSharedSecretValue = nil;
     }
     
     if (regSharedSecretValue) {
-        [regSharedSecretValue release];
         regSharedSecretValue = nil;
     }
     
@@ -502,11 +344,8 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 
 
 - (void)awakeFromNib
-{        
-    OSStatus err;
-    
+{
     prefsNeedUpdating         = NO;
-    toolInstalled             = NO;
 	browseDomainListEnabled   = NO;
 	defaultRegDomain          = nil;
     currentRegDomain          = nil;
@@ -515,35 +354,40 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
     hostNameSharedSecretValue = nil;
     regSharedSecretValue      = nil;
 	browseDomainsArray        = nil;
-    justStartedEditing        = YES;
     currentWideAreaState      = NO;
 	NSString *successPath     = [[NSBundle bundleForClass:[self class]] pathForResource:@"success"    ofType:@"tiff"];
 	NSString *inprogressPath  = [[NSBundle bundleForClass:[self class]] pathForResource:@"inprogress" ofType:@"tiff"];
 	NSString *failurePath     = [[NSBundle bundleForClass:[self class]] pathForResource:@"failure"    ofType:@"tiff"];
 
     registrationDataSource    = [[NSMutableArray alloc] init];
-    browseDataSource          = [[NSMutableArray alloc] init];
-	defaultBrowseDomainsArray = [[NSMutableArray alloc] init];
 	successImage              = [[NSImage alloc] initWithContentsOfFile:successPath];
 	inprogressImage           = [[NSImage alloc] initWithContentsOfFile:inprogressPath];
 	failureImage              = [[NSImage alloc] initWithContentsOfFile:failurePath];
 
     [tabView selectFirstTabViewItem:self];
     [self setupInitialValues];
-    [self startDomainBrowsing];
     [self watchForPreferenceChanges];
-	
-    InitConfigAuthority();
-    err = EnsureToolInstalled();
-    if (err == noErr) toolInstalled = YES;
-    else { long int tmp = err; fprintf(stderr, "EnsureToolInstalled returned %ld\n", tmp); }
     
 }
 
+- (void)willSelect
+{
+    [super willSelect];
+    [bonjourBrowserView startBrowse];
+    [registrationBrowserView startBrowse];
+    
+}
+
+- (void)willUnselect
+{
+    [super willUnselect];
+    [bonjourBrowserView stopBrowse];
+    [registrationBrowserView stopBrowse];
+}
 
 - (IBAction)closeMyCustomSheet:(id)sender
 {
-    BOOL result = [sender isEqualTo:browseOKButton] || [sender isEqualTo:secretOKButton];
+    BOOL result = [sender tag];
 
     if (result) [NSApp endSheet:[sender window] returnCode:NSOKButton];
     else        [NSApp endSheet:[sender window] returnCode:NSCancelButton];
@@ -552,7 +396,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 
 - (void)sharedSecretSheetDidEnd:(NSWindow *)sheet returnCode:(int)returnCode contextInfo:(void *)contextInfo
 {
-    NSButton * button = (NSButton *)contextInfo;
+    NSButton * button = (__bridge NSButton *)contextInfo;
     [sheet orderOut:self];
     [self enableControls];
     
@@ -587,7 +431,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 
 - (NSString *)trimCharactersFromDomain:(NSString *)domain
 {
-	NSMutableCharacterSet * trimSet = [[[NSCharacterSet whitespaceCharacterSet] mutableCopy] autorelease];
+	NSMutableCharacterSet * trimSet = [NSMutableCharacterSet whitespaceCharacterSet];
 	[trimSet formUnionWithCharacterSet:[NSCharacterSet punctuationCharacterSet]];
 	return [domain stringByTrimmingCharactersInSet:trimSet];	
 }
@@ -600,15 +444,16 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
     [self enableControls];
     
     if (returnCode == NSOKButton) {
-		NSString * newBrowseDomainString = [self trimCharactersFromDomain:[browseDomainsComboBox stringValue]];
+        NSString * newBrowseDomainString;
+        if(sheet == addBrowseDomainManualWindow)    newBrowseDomainString = [self trimCharactersFromDomain:[browseDomainTextField stringValue]];
+        else                                        newBrowseDomainString = [self trimCharactersFromDomain:bonjourBrowserView.selectedDNSDomain];
 		NSMutableDictionary *newBrowseDomainDict;
-		
 		if (browseDomainsArray == nil) browseDomainsArray = [[NSMutableArray alloc] initWithCapacity:0];
 		if ([self domainAlreadyInList:newBrowseDomainString] == NO) {
-			newBrowseDomainDict = [[[NSMutableDictionary alloc] initWithCapacity:2] autorelease];
+			newBrowseDomainDict = [[NSMutableDictionary alloc] initWithCapacity:2];
 
 			[newBrowseDomainDict setObject:newBrowseDomainString forKey:(NSString *)SC_DYNDNS_DOMAIN_KEY];
-			[newBrowseDomainDict setObject:[[[NSNumber alloc] initWithBool:YES] autorelease] forKey:(NSString *)SC_DYNDNS_ENABLED_KEY];
+			[newBrowseDomainDict setObject:[NSNumber numberWithBool:YES] forKey:(NSString *)SC_DYNDNS_ENABLED_KEY];
 			
 			[browseDomainsArray addObject:newBrowseDomainDict];
 			[browseDomainsArray sortUsingFunction:MyDomainArrayCompareFunction context:nil];
@@ -618,12 +463,10 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
     }
 }
 
-
 -(void)validateTextFields
 {
     [hostName validateEditing];
-    [browseDomainsComboBox validateEditing];
-    [regDomainsComboBox validateEditing];    
+    [browseDomainTextField validateEditing];
 }
 
 
@@ -650,11 +493,11 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
     } else {        
         if (regSharedSecretValue) {
 			[sharedSecretValue setStringValue:regSharedSecretValue];
-        } else if ((keyName = [self sharedSecretKeyName:[regDomainsComboBox stringValue]]) != NULL) {
+        } else if ((keyName = [self sharedSecretKeyName:regDomainView.domain]) != NULL) {
 			[sharedSecretName setStringValue:keyName];
             [sharedSecretValue setStringValue:@"****************"];
 		} else {
-			[sharedSecretName setStringValue:[regDomainsComboBox stringValue]];
+			[sharedSecretName setStringValue:regDomainView.domain];
             [sharedSecretValue setStringValue:@""];
         }
     }
@@ -665,9 +508,36 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
     else                                             [sharedSecretWindow makeFirstResponder:sharedSecretName];
     
     [NSApp beginSheet:sharedSecretWindow modalForWindow:mainWindow modalDelegate:self
-            didEndSelector:@selector(sharedSecretSheetDidEnd:returnCode:contextInfo:) contextInfo:sender];
+            didEndSelector:@selector(sharedSecretSheetDidEnd:returnCode:contextInfo:) contextInfo:(__bridge void * _Null_unspecified)(sender)];
 }
 
+
+- (IBAction)selectWideAreaDomainButtonPressed:(id)sender
+{
+	NSWindow *  window = (([NSEvent modifierFlags] & NSAlternateKeyMask) == NSAlternateKeyMask) ? selectRegistrationDomainManualWindow : selectRegistrationDomainWindow;
+	regDomainTextField.stringValue = regDomainView.domain;
+	
+    [self disableControls];
+	[NSApp beginSheet:window modalForWindow:mainWindow modalDelegate:self
+	   didEndSelector:@selector(selectWideAreaDomainSheetDidEnd:returnCode:contextInfo:) contextInfo:(__bridge void * _Null_unspecified)(sender)];
+	
+	[self updateApplyButtonState];
+}
+
+- (void)selectWideAreaDomainSheetDidEnd:(NSWindow *)sheet returnCode:(int)returnCode contextInfo:(void *)contextInfo
+{
+	(void)contextInfo; // Unused
+	[sheet orderOut:self];
+	[self enableControls];
+	
+	if (returnCode == NSOKButton) {
+		NSString * newRegDomainString;
+		if(sheet == selectRegistrationDomainManualWindow) newRegDomainString = [self trimCharactersFromDomain:[regDomainTextField stringValue]];
+		else                                              newRegDomainString = [self trimCharactersFromDomain:registrationBrowserView.selectedDNSDomain];
+        regDomainView.domain = newRegDomainString;
+        [self updateApplyButtonState];
+	}
+}
 
 - (IBAction)wideAreaCheckBoxChanged:(id)sender
 {    
@@ -677,10 +547,11 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 }
 
 
+
 - (void)updateApplyButtonState
 {
     NSString *hostNameString  = [hostName stringValue];
-    NSString *regDomainString = [regDomainsComboBox stringValue];
+    NSString *regDomainString = regDomainView.domain;
     if ((currentHostName && ([hostNameString compare:currentHostName] != NSOrderedSame)) ||
         (currentRegDomain && ([regDomainString compare:currentRegDomain] != NSOrderedSame) && ([wideAreaCheckBox state])) ||
         (currentHostName == nil && ([hostNameString length]) > 0) ||
@@ -697,44 +568,10 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 }
 
 
-
 - (void)controlTextDidChange:(NSNotification *)notification
 {
 	(void)notification; // Unused
     [self updateApplyButtonState];
-}
-
-
-
-- (IBAction)comboAction:(id)sender
-{
-	(void)sender; // Unused
-    [self updateApplyButtonState];
-}
-
-
-- (id)comboBox:(NSComboBox *)aComboBox objectValueForItemAtIndex:(int)ind
-{
-    NSString *domain = nil;
-    if      ([aComboBox isEqualTo:browseDomainsComboBox]) domain = [browseDataSource objectAtIndex:ind];
-    else if ([aComboBox isEqualTo:regDomainsComboBox])    domain = [registrationDataSource objectAtIndex:ind];
-    return domain;
-}
-
-
-
-- (int)numberOfItemsInComboBox:(NSComboBox *)aComboBox
-{
-    int count = 0;
-    if      ([aComboBox isEqualTo:browseDomainsComboBox]) count = [browseDataSource count];
-    else if ([aComboBox isEqualTo:regDomainsComboBox])    count = [registrationDataSource count];
-    return count;
-}
-
-
-- (NSMutableArray *)browseDataSource
-{
-    return browseDataSource;
 }
 
 
@@ -744,27 +581,9 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 }
 
 
-- (NSComboBox *)browseDomainsComboBox
-{
-    return browseDomainsComboBox;
-}
-
-
-- (NSComboBox *)regDomainsComboBox
-{
-    return regDomainsComboBox;
-}
-
-
 - (NSString *)currentRegDomain
 {
     return currentRegDomain;
-}
-
-
-- (NSMutableArray *)defaultBrowseDomainsArray
-{
-    return defaultBrowseDomainsArray;
 }
 
 
@@ -788,9 +607,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 
 - (void)setDefaultRegDomain:(NSString *)domain
 {
-	[defaultRegDomain release];
 	defaultRegDomain = domain;
-	[defaultRegDomain retain];
 }
 
 
@@ -800,13 +617,12 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
     mainWindow = [[self mainView] window];
 }
 
-
 - (void)mainViewDidLoad
-{	
+{
     [comboAuthButton setString:"system.preferences"];
     [comboAuthButton setDelegate:self];
-    [comboAuthButton updateStatus:nil];
     [comboAuthButton setAutoupdate:YES];
+    [super mainViewDidLoad];
 }
 
 
@@ -821,12 +637,9 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 - (void)applyCurrentState
 {
     [self validateTextFields];
-
-    if (toolInstalled == YES) {
-        [self savePreferences];
-        [self disableApplyButton];
-        [mainWindow makeFirstResponder:nil];
-    }
+    [self savePreferences];
+    [self disableApplyButton];
+    [mainWindow makeFirstResponder:nil];
 }
 
 
@@ -849,7 +662,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 - (void)toggleWideAreaBonjour:(BOOL)state
 {
 	[wideAreaCheckBox setState:state];
-	[regDomainsComboBox setEnabled:state];
+	[registrationSelectButton setEnabled:state];
 	[registrationSharedSecretButton setEnabled:state];
 }
 
@@ -871,7 +684,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 - (void)savePanelWillClose:(NSWindow *)sheet returnCode:(int)returnCode contextInfo:(void *)contextInfo
 {
 	(void)sheet; // Unused
-    DNSServiceDiscoveryPref * me = (DNSServiceDiscoveryPref *)contextInfo;
+    DNSServiceDiscoveryPref * me = (__bridge DNSServiceDiscoveryPref *)contextInfo;
     
     if (returnCode == NSAlertDefaultReturn) {
         [me applyCurrentState];
@@ -942,7 +755,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
         }
 		CFRelease(itemRef);
 	}
-    return [keyName autorelease];
+    return keyName;
 }
 
 
@@ -957,7 +770,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
         ptr = (char *)GetNextLabel(ptr, text);
         domainName = [[NSString alloc] initWithUTF8String:(const char *)ptr];             
     }
-    return ([domainName autorelease]);
+    return (domainName);
 }
 
 
@@ -967,11 +780,11 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 	NSMutableDictionary *domainDict = nil;
 	
 	if (domainName && [domainName length] > 0) {
-		domainDict= [[[NSMutableDictionary alloc] initWithCapacity:2] autorelease];
+		domainDict= [NSMutableDictionary dictionaryWithCapacity:2];
 		[domainDict setObject:domainName forKey:(NSString *)SC_DYNDNS_DOMAIN_KEY];
-		[domainDict setObject:[[[NSNumber alloc] initWithBool:enabled] autorelease] forKey:(NSString *)SC_DYNDNS_ENABLED_KEY];
+		[domainDict setObject:[NSNumber numberWithBool:enabled] forKey:(NSString *)SC_DYNDNS_ENABLED_KEY];
 	}
-	domainsArray = [[[NSMutableArray alloc] initWithCapacity:1] autorelease];
+	domainsArray = [NSMutableArray arrayWithCapacity:1];
 	if (domainDict) [domainsArray addObject:domainDict];
 	return [NSArchiver archivedDataWithRootObject:domainsArray];
 }
@@ -983,26 +796,25 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 }
 
 
-- (NSData *)dataForSharedSecret:(NSString *)secret domain:(NSString *)domainName key:(NSString *)keyName
+- (NSDictionary *)dictionaryForSharedSecret:(NSString *)secret domain:(NSString *)domainName key:(NSString *)keyName
 {
-	NSMutableDictionary *sharedSecretDict = [[[NSMutableDictionary alloc] initWithCapacity:3] autorelease];
+	NSMutableDictionary *sharedSecretDict = [NSMutableDictionary dictionaryWithCapacity:3];
 	[sharedSecretDict setObject:secret forKey:(NSString *)SC_DYNDNS_SECRET_KEY];
 	[sharedSecretDict setObject:[domainName lowercaseString] forKey:(NSString *)SC_DYNDNS_DOMAIN_KEY];
 	[sharedSecretDict setObject:keyName forKey:(NSString *)SC_DYNDNS_KEYNAME_KEY];
-	return [NSArchiver archivedDataWithRootObject:sharedSecretDict];
+	return sharedSecretDict;
 }
 
 
 -(void)savePreferences
 {
     NSString      *hostNameString               = [hostName stringValue];
-    NSString      *regDomainString              = [regDomainsComboBox stringValue];
+    NSString      *regDomainString              = regDomainView.domain;
     NSString      *tempHostNameSharedSecretName = hostNameSharedSecretName;
     NSString      *tempRegSharedSecretName      = regSharedSecretName;
-	NSData        *browseDomainData             = nil;
     BOOL          regSecretWasSet               = NO;
     BOOL          hostSecretWasSet              = NO;
-    OSStatus      err                           = noErr;
+    BOOL          updateHostname                = NO;
 
 	hostNameString                = [self trimCharactersFromDomain:hostNameString];
 	regDomainString               = [self trimCharactersFromDomain:regDomainString];
@@ -1010,7 +822,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 	tempRegSharedSecretName       = [self trimCharactersFromDomain:tempRegSharedSecretName];
 	
 	[hostName setStringValue:hostNameString];
-	[regDomainsComboBox setStringValue:regDomainString];
+	regDomainView.domain = regDomainString;
     
     // Convert Shared Secret account names to lowercase.
     tempHostNameSharedSecretName = [tempHostNameSharedSecretName lowercaseString];
@@ -1018,46 +830,48 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
     
     // Save hostname shared secret.
     if ([hostNameSharedSecretName length] > 0 && ([hostNameSharedSecretValue length] > 0)) {
-		SetKeyForDomain((CFDataRef)[self dataForSharedSecret:hostNameSharedSecretValue domain:hostNameString key:tempHostNameSharedSecretName]);
-        [hostNameSharedSecretValue release];
+        DNSPrefTool_SetKeychainEntry([self dictionaryForSharedSecret:hostNameSharedSecretValue domain:hostNameString key:tempHostNameSharedSecretName]);
         hostNameSharedSecretValue = nil;
         hostSecretWasSet = YES;
     }
     
     // Save registration domain shared secret.
     if (([regSharedSecretName length] > 0) && ([regSharedSecretValue length] > 0)) {
-		SetKeyForDomain((CFDataRef)[self dataForSharedSecret:regSharedSecretValue domain:regDomainString key:tempRegSharedSecretName]);
-        [regSharedSecretValue release];
+        DNSPrefTool_SetKeychainEntry([self dictionaryForSharedSecret:regSharedSecretValue domain:regDomainString key:tempRegSharedSecretName]);
         regSharedSecretValue = nil;
         regSecretWasSet = YES;
     }
 
     // Save hostname.
     if ((currentHostName == NULL) || [currentHostName compare:hostNameString] != NSOrderedSame) {
-		err = WriteHostname((CFDataRef)[self dataForDomain:hostNameString isEnabled:YES]);
-		if (err != noErr) NSLog(@"WriteHostname returned %d\n", (int32_t)err);
         currentHostName = [hostNameString copy];
+        updateHostname = YES;
     } else if (hostSecretWasSet) {
-		WriteHostname((CFDataRef)[self dataForDomain:@"" isEnabled:NO]);
-		usleep(200000);  // Temporary hack
-        if ([currentHostName length] > 0) WriteHostname((CFDataRef)[self dataForDomain:(NSString *)currentHostName isEnabled:YES]);
+        currentHostName = @"";
+        updateHostname = YES;
+    }
+
+    if (updateHostname) {
+        [BonjourSCStore setObject: currentHostName.length ? @[@{
+                                                                   (NSString *)SC_DYNDNS_DOMAIN_KEY  : currentHostName,
+                                                                   (NSString *)SC_DYNDNS_ENABLED_KEY : @YES
+                                                                   }] : nil
+                           forKey: (NSString *)SC_DYNDNS_HOSTNAMES_KEY];
     }
     
     // Save browse domain.
 	if (browseDomainsArray && [browseDomainsArray isEqualToArray:currentBrowseDomainsArray] == NO) {
-		browseDomainData = [self dataForDomainArray:browseDomainsArray];
-		err = WriteBrowseDomain((CFDataRef)browseDomainData);
-		if (err != noErr) NSLog(@"WriteBrowseDomain returned %d\n", (int32_t)err);
+        [BonjourSCStore setObject: browseDomainsArray forKey: (NSString *)SC_DYNDNS_BROWSEDOMAINS_KEY];
 		currentBrowseDomainsArray = [browseDomainsArray copy];
     }
 	
     // Save registration domain.
     if ((currentRegDomain == NULL) || ([currentRegDomain compare:regDomainString] != NSOrderedSame) || (currentWideAreaState != [wideAreaCheckBox state])) {
-
-		err = WriteRegistrationDomain((CFDataRef)[self dataForDomain:regDomainString isEnabled:[wideAreaCheckBox state]]);
-		if (err != noErr) NSLog(@"WriteRegistrationDomain returned %d\n", (int32_t)err);
-        
-		if (currentRegDomain) CFRelease(currentRegDomain);
+        [BonjourSCStore setObject: @[@{
+                                         (NSString *)SC_DYNDNS_DOMAIN_KEY  : regDomainString,
+                                         (NSString *)SC_DYNDNS_ENABLED_KEY : [wideAreaCheckBox state] ? @YES : @NO
+                                         }]
+                           forKey: (NSString *)SC_DYNDNS_REGDOMAINS_KEY];
         currentRegDomain = [regDomainString copy];
 
         if ([currentRegDomain length] > 0) {
@@ -1065,16 +879,25 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
             [registrationDataSource removeObject:regDomainString];
             [registrationDataSource addObject:currentRegDomain];
             [registrationDataSource sortUsingFunction:MyArrayCompareFunction context:nil];
-            [regDomainsComboBox reloadData];
+ //           [regDomainsComboBox reloadData];
         } else {
 			currentWideAreaState = NO;
 			[self toggleWideAreaBonjour:NO];
-            if (defaultRegDomain != nil) [regDomainsComboBox setStringValue:defaultRegDomain];
+            if (defaultRegDomain != nil) regDomainView.domain = defaultRegDomain;
 		}
     } else if (regSecretWasSet) {
-        WriteRegistrationDomain((CFDataRef)[self dataForDomain:@"" isEnabled:NO]);
-		usleep(200000);  // Temporary hack
-        if ([currentRegDomain length] > 0) WriteRegistrationDomain((CFDataRef)[self dataForDomain:currentRegDomain isEnabled:currentWideAreaState]);
+        [BonjourSCStore setObject: @[@{
+                                         (NSString *)SC_DYNDNS_DOMAIN_KEY  : @"",
+                                         (NSString *)SC_DYNDNS_ENABLED_KEY : @NO
+                                         }]
+                           forKey: (NSString *)SC_DYNDNS_REGDOMAINS_KEY];
+        if ([currentRegDomain length] > 0) {
+            [BonjourSCStore setObject: @[@{
+                                             (NSString *)SC_DYNDNS_DOMAIN_KEY  : currentRegDomain,
+                                             (NSString *)SC_DYNDNS_ENABLED_KEY : currentWideAreaState ? @YES : @NO
+                                             }]
+                               forKey: (NSString *)SC_DYNDNS_REGDOMAINS_KEY];
+        }
     }
 }   
 
@@ -1095,7 +918,7 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
                     self,
                     @selector( savePanelWillClose:returnCode:contextInfo: ),
                     NULL,
-                    (void *) self, // sender,
+                    (__bridge void *) self, // sender,
                     @"" );
         return NSUnselectLater;
     }
@@ -1109,11 +932,10 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 {
     [hostName setEnabled:NO];
     [hostNameSharedSecretButton setEnabled:NO];
-    [browseDomainsComboBox setEnabled:NO];
     [applyButton setEnabled:NO];
     [revertButton setEnabled:NO];
     [wideAreaCheckBox setEnabled:NO];
-    [regDomainsComboBox setEnabled:NO];
+	[registrationSelectButton setEnabled: NO];
     [registrationSharedSecretButton setEnabled:NO];
     [statusImageView setEnabled:NO];
 	
@@ -1138,8 +960,8 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 {
     [hostName setEnabled:YES];
     [hostNameSharedSecretButton setEnabled:YES];
-    [browseDomainsComboBox setEnabled:YES];
     [wideAreaCheckBox setEnabled:YES];
+	[registrationSelectButton setEnabled: YES];
     [registrationSharedSecretButton setEnabled:YES];
     [self toggleWideAreaBonjour:[wideAreaCheckBox state]];
     [statusImageView setEnabled:YES];
@@ -1157,14 +979,14 @@ MyDNSServiceAddServiceToRunLoop(MyDNSServiceState * query)
 
 - (void)authorizationViewDidAuthorize:(SFAuthorizationView *)view
 {
-	(void)view; // Unused
+    (void)view; //  unused
     [self enableControls];
 }
 
 
 - (void)authorizationViewDidDeauthorize:(SFAuthorizationView *)view
 {    
-	(void)view; // Unused
+    (void)view; //  unused
     [self disableControls];
 }
 

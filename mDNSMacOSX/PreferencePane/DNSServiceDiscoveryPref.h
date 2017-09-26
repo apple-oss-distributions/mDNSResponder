@@ -41,70 +41,62 @@
     ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import <Cocoa/Cocoa.h>
 #import <PreferencePanes/PreferencePanes.h>
-#import <CoreFoundation/CoreFoundation.h>
 #import <SecurityInterface/SFAuthorizationView.h>
-#import <SystemConfiguration/SystemConfiguration.h>
 #import <dns_sd.h>
 
-typedef struct MyDNSServiceState {
-    DNSServiceRef service;
-    CFRunLoopSourceRef source;
-    CFSocketRef socket;
-} MyDNSServiceState;
-
+@class CNBonjourDomainView;
+@class CNDomainBrowserView;
 
 @interface DNSServiceDiscoveryPref : NSPreferencePane
 {
-    IBOutlet NSTextField         *hostName;
-    IBOutlet NSTextField         *sharedSecretName;
-    IBOutlet NSSecureTextField   *sharedSecretValue;
-    IBOutlet NSComboBox          *browseDomainsComboBox;
-    IBOutlet NSComboBox          *regDomainsComboBox;
-    IBOutlet NSButton            *wideAreaCheckBox;
-    IBOutlet NSButton            *hostNameSharedSecretButton;
-    IBOutlet NSButton            *registrationSharedSecretButton;
-    IBOutlet NSButton            *applyButton;
-    IBOutlet NSButton            *revertButton;
-    IBOutlet NSWindow            *sharedSecretWindow;
-    IBOutlet NSWindow            *addBrowseDomainWindow;
-    IBOutlet NSButton            *addBrowseDomainButton;
-    IBOutlet NSButton            *removeBrowseDomainButton;
-    IBOutlet NSButton            *browseOKButton;
-    IBOutlet NSButton            *browseCancelButton;
-    IBOutlet NSButton            *secretOKButton;
-    IBOutlet NSButton            *secretCancelButton;
-    IBOutlet NSImageView         *statusImageView;
-    IBOutlet NSTabView           *tabView;
-    IBOutlet NSTableView         *browseDomainList;
-    IBOutlet SFAuthorizationView *comboAuthButton;
+    IBOutlet NSTextField          *hostName;
+    IBOutlet NSTextField          *sharedSecretName;
+    IBOutlet NSSecureTextField    *sharedSecretValue;
+    IBOutlet NSTextField          *browseDomainTextField;
+	IBOutlet NSTextField          *regDomainTextField;
+	IBOutlet CNBonjourDomainView  *regDomainView;
+    IBOutlet NSButton             *wideAreaCheckBox;
+    IBOutlet NSButton             *hostNameSharedSecretButton;
+	IBOutlet NSButton             *registrationSelectButton;
+	IBOutlet NSButton             *registrationSharedSecretButton;
+    IBOutlet NSButton             *applyButton;
+    IBOutlet NSButton             *revertButton;
+    IBOutlet NSWindow             *sharedSecretWindow;
+	IBOutlet NSWindow             *addBrowseDomainWindow;
+	IBOutlet NSWindow             *addBrowseDomainManualWindow;
+	IBOutlet NSWindow             *selectRegistrationDomainWindow;
+	IBOutlet NSWindow             *selectRegistrationDomainManualWindow;
+    IBOutlet NSButton             *addBrowseDomainButton;
+    IBOutlet NSButton             *removeBrowseDomainButton;
+    IBOutlet NSButton             *secretOKButton;
+    IBOutlet NSButton             *secretCancelButton;
+    IBOutlet NSImageView          *statusImageView;
+    IBOutlet NSTabView            *tabView;
+	IBOutlet NSTableView          *browseDomainList;
+	IBOutlet CNDomainBrowserView  *bonjourBrowserView;
+	IBOutlet CNDomainBrowserView  *registrationBrowserView;
+    IBOutlet SFAuthorizationView  *comboAuthButton;
 
-    NSWindow       *mainWindow;
-    NSString       *currentHostName;
-    NSString       *currentRegDomain;
-    NSArray        *currentBrowseDomainsArray;
-    NSMutableArray *browseDomainsArray;
-    NSMutableArray *defaultBrowseDomainsArray;
-    NSString       *defaultRegDomain;
+    NSWindow            *mainWindow;
+    NSString            *currentHostName;
+    NSString            *currentRegDomain;
+    NSArray             *currentBrowseDomainsArray;
+    NSMutableArray      *browseDomainsArray;
+    NSString            *defaultRegDomain;
 
-    NSString       *hostNameSharedSecretName;
-    NSString       *hostNameSharedSecretValue;
-    NSString       *regSharedSecretName;
-    NSString       *regSharedSecretValue;
-    BOOL currentWideAreaState;
-    BOOL prefsNeedUpdating;
-    BOOL toolInstalled;
-    BOOL browseDomainListEnabled;
-    BOOL justStartedEditing;
-    NSImage        *successImage;
-    NSImage        *inprogressImage;
-    NSImage        *failureImage;
+    NSString            *hostNameSharedSecretName;
+    NSString            *hostNameSharedSecretValue;
+    NSString            *regSharedSecretName;
+    NSString            *regSharedSecretValue;
+    BOOL                currentWideAreaState;
+    BOOL                prefsNeedUpdating;
+    BOOL                browseDomainListEnabled;
+    NSImage             *successImage;
+    NSImage             *inprogressImage;
+    NSImage             *failureImage;
 
-    MyDNSServiceState regQuery;
-    MyDNSServiceState browseQuery;
-    NSMutableArray    *browseDataSource;
-    NSMutableArray    *registrationDataSource;
+    NSMutableArray      *registrationDataSource;
 }
 
 -(IBAction)applyClicked : (id)sender;
@@ -114,29 +106,21 @@ typedef struct MyDNSServiceState {
 -(IBAction)revertClicked : (id)sender;
 -(IBAction)changeButtonPressed : (id)sender;
 -(IBAction)closeMyCustomSheet : (id)sender;
--(IBAction)comboAction : (id)sender;
 -(IBAction)wideAreaCheckBoxChanged : (id)sender;
 
 
--(NSMutableArray *)browseDataSource;
 -(NSMutableArray *)registrationDataSource;
--(NSComboBox *)browseDomainsComboBox;
--(NSComboBox *)regDomainsComboBox;
 -(NSString *)currentRegDomain;
--(NSMutableArray *)defaultBrowseDomainsArray;
 -(NSArray *)currentBrowseDomainsArray;
 -(NSString *)currentHostName;
 -(NSString *)defaultRegDomain;
 -(void)setDefaultRegDomain : (NSString *)domain;
 
 
-
 -(void)enableApplyButton;
 -(void)disableApplyButton;
 -(void)applyCurrentState;
--(void)setBrowseDomainsComboBox;
 -(void)setupInitialValues;
--(void)startDomainBrowsing;
 -(void)toggleWideAreaBonjour : (BOOL)state;
 -(void)updateApplyButtonState;
 -(void)enableControls;
@@ -154,7 +138,7 @@ typedef struct MyDNSServiceState {
 -(int)statusForHostName : (NSString * )domain;
 -(NSData *)dataForDomainArray : (NSArray *)domainArray;
 -(NSData *)dataForDomain : (NSString *)domainName isEnabled : (BOOL)enabled;
--(NSData *)dataForSharedSecret : (NSString *)secret domain : (NSString *)domainName key : (NSString *)keyName;
+-(NSDictionary *)dictionaryForSharedSecret : (NSString *)secret domain : (NSString *)domainName key : (NSString *)keyName;
 -(BOOL)domainAlreadyInList : (NSString *)domainString;
 -(NSString *)trimCharactersFromDomain : (NSString *)domain;
 
@@ -163,8 +147,6 @@ typedef struct MyDNSServiceState {
 -(void)authorizationViewDidAuthorize : (SFAuthorizationView *)view;
 -(void)authorizationViewDidDeauthorize : (SFAuthorizationView *)view;
 -(void)mainViewDidLoad;
--(int)numberOfItemsInComboBox : (NSComboBox *)aComboBox;
--(id)comboBox : (NSComboBox *)aComboBox objectValueForItemAtIndex : (int)index;
 -(void)controlTextDidChange : (NSNotification *) notification;
 
 @end

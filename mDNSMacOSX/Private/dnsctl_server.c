@@ -23,7 +23,7 @@ static dispatch_queue_t dnsctlserver_queue = NULL;
 
 mDNSlocal void handle_logging(mDNSu32 log_level)
 {
-    KQueueLock(&mDNSStorage);
+    KQueueLock();
     
     switch (log_level)
     {
@@ -55,12 +55,12 @@ mDNSlocal void handle_logging(mDNSu32 log_level)
     }
     UpdateDebugState();
     
-    KQueueUnlock(&mDNSStorage, "LogLevel changed");
+    KQueueUnlock("LogLevel changed");
 }
 
 mDNSlocal void handle_stateinfo(mDNSu32 state_level)
 {
-    KQueueLock(&mDNSStorage);
+    KQueueLock();
     
     switch (state_level)
     {
@@ -73,13 +73,13 @@ mDNSlocal void handle_stateinfo(mDNSu32 state_level)
             break;
     }
     
-    KQueueUnlock(&mDNSStorage, "StateInfo dumped");
+    KQueueUnlock("StateInfo dumped");
 }
 
 
 mDNSlocal void handle_test_mode(mDNSu32 test_mode)
 {
-    KQueueLock(&mDNSStorage);
+    KQueueLock();
     
     switch (test_mode)
     {
@@ -99,7 +99,7 @@ mDNSlocal void handle_test_mode(mDNSu32 test_mode)
             break;
     }
     
-    KQueueUnlock(&mDNSStorage, "Test Msg to mDNSResponderHelper");
+    KQueueUnlock("Test Msg to mDNSResponderHelper");
 }
 
 mDNSlocal void handle_terminate()

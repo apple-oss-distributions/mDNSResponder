@@ -21,7 +21,7 @@
 #include <UserEventAgentInterface.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <asl.h>
+#include <os/log.h>
 #include <xpc/xpc.h>
 
 
@@ -344,19 +344,19 @@ static void ManageEventsCallback(UserEventAgentLaunchdAction action, CFNumberRef
             return;
         }
         // Launchd wants us to add a launch event for this token and matching dictionary.
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s calling AddEventToPlugin", sPluginIdentifier, __FUNCTION__);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s calling AddEventToPlugin", sPluginIdentifier, __FUNCTION__);
         AddEventToPlugin((BonjourUserEventsPlugin*)vContext, token, (CFDictionaryRef)eventMatchDict);
     }
     else if (action == kUserEventAgentLaunchdRemove)
     {
         // Launchd wants us to remove the event hook we setup for this token / matching dictionary.
         // Note: eventMatchDict can be NULL for Remove.
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s calling RemoveEventToPlugin", sPluginIdentifier, __FUNCTION__);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s calling RemoveEventToPlugin", sPluginIdentifier, __FUNCTION__);
         RemoveEventFromPlugin((BonjourUserEventsPlugin*)vContext, token);
     }
     else
     {
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s unknown callback event\n", sPluginIdentifier, __FUNCTION__);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s unknown callback event\n", sPluginIdentifier, __FUNCTION__);
     }
 }
 
@@ -443,13 +443,13 @@ void AddEventToPlugin(BonjourUserEventsPlugin* plugin, CFNumberRef launchdToken,
     // Add to the correct dictionary.
     if (onAdd)
     {
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: Adding browser to AddEvents", sPluginIdentifier, __FUNCTION__);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s: Adding browser to AddEvents", sPluginIdentifier, __FUNCTION__);
         AddEventDictionary(eventDictionary, plugin->_onAddEvents, browser);
     }
 
     if (onRemove)
     {
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: Adding browser to RemoveEvents", sPluginIdentifier, __FUNCTION__);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s: Adding browser to RemoveEvents", sPluginIdentifier, __FUNCTION__);
         AddEventDictionary(eventDictionary, plugin->_onRemoveEvents, browser);
     }
 
@@ -484,26 +484,26 @@ void RemoveEventFromPlugin(BonjourUserEventsPlugin* plugin, CFNumberRef launchdT
 
     if (onAddEvents)
     {
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: Calling RemoveEventFromArray for OnAddEvents", sPluginIdentifier, __FUNCTION__);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s: Calling RemoveEventFromArray for OnAddEvents", sPluginIdentifier, __FUNCTION__);
         RemoveEventFromArray(onAddEvents, launchdToken);
 
         // Is the array now empty, clean up
         if (CFArrayGetCount(onAddEvents) == 0)
         {
-            asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: Removing the browser from AddEvents", sPluginIdentifier, __FUNCTION__);
+            os_log_info(OS_LOG_DEFAULT, "%s:%s: Removing the browser from AddEvents", sPluginIdentifier, __FUNCTION__);
             CFDictionaryRemoveValue(plugin->_onAddEvents, browser);
         }
     }
 
     if (onRemoveEvents)
     {
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: Calling RemoveEventFromArray for OnRemoveEvents", sPluginIdentifier, __FUNCTION__);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s: Calling RemoveEventFromArray for OnRemoveEvents", sPluginIdentifier, __FUNCTION__);
         RemoveEventFromArray(onRemoveEvents, launchdToken);
 
         // Is the array now empty, clean up
         if (CFArrayGetCount(onRemoveEvents) == 0)
         {
-            asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: Removing the browser from RemoveEvents", sPluginIdentifier, __FUNCTION__);
+            os_log_info(OS_LOG_DEFAULT, "%s:%s: Removing the browser from RemoveEvents", sPluginIdentifier, __FUNCTION__);
             CFDictionaryRemoveValue(plugin->_onRemoveEvents, browser);
         }
     }
@@ -531,12 +531,12 @@ void RemoveEventFromPlugin(BonjourUserEventsPlugin* plugin, CFNumberRef launchdT
     // If no one else is useing our browser, clean up!
     if (!othersUsingBrowser)
     {
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: Removing browser %p from _browsers", sPluginIdentifier, __FUNCTION__, browser);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s: Removing browser %p from _browsers", sPluginIdentifier, __FUNCTION__, browser);
         CFDictionaryRemoveValue(plugin->_browsers, browser); // This triggers release and dealloc of the browser
     }
     else
     {
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: Decrementing browsers %p count", sPluginIdentifier, __FUNCTION__, browser);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s: Decrementing browsers %p count", sPluginIdentifier, __FUNCTION__, browser);
         // Decrement my reference count (it was incremented when it was added to _browsers in CreateBrowser)
         NetBrowserInfoRelease(NULL, browser);
     }
@@ -575,7 +575,7 @@ NetBrowserInfo* CreateBrowser(BonjourUserEventsPlugin* plugin, CFStringRef type,
         if ((CFStringCompare(browserType, type, kCFCompareCaseInsensitive) == kCFCompareEqualTo) &&
             (CFStringCompare(browserDomain, domain, kCFCompareCaseInsensitive) == kCFCompareEqualTo))
         {
-            asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: found a duplicate browser\n", sPluginIdentifier, __FUNCTION__);
+            os_log_info(OS_LOG_DEFAULT, "%s:%s: found a duplicate browser\n", sPluginIdentifier, __FUNCTION__);
             browser = browsers[i];
             NetBrowserInfoRetain(NULL, browser);
             break;
@@ -663,11 +663,11 @@ void AddEventDictionary(CFDictionaryRef eventDict, CFMutableDictionaryRef allEve
     {
         eventsForBrowser = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
         CFDictionarySetValue(allEventsDictionary, key, eventsForBrowser);
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s creating a new array", sPluginIdentifier, __FUNCTION__);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s creating a new array", sPluginIdentifier, __FUNCTION__);
     }
     else
     {
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s Incrementing refcount", sPluginIdentifier, __FUNCTION__);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s Incrementing refcount", sPluginIdentifier, __FUNCTION__);
         CFRetain(eventsForBrowser);
     }
 
@@ -695,7 +695,7 @@ void RemoveEventFromArray(CFMutableArrayRef array, CFNumberRef launchdToken)
 
         if (CFEqual(token, launchdToken)) // This is the same event?
         {
-            asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s found token", sPluginIdentifier, __FUNCTION__);
+            os_log_info(OS_LOG_DEFAULT, "%s:%s found token", sPluginIdentifier, __FUNCTION__);
             CFArrayRemoveValueAtIndex(array, i);    // Remove the event,
             break; // The token should only exist once, so it makes no sense to continue.
         }
@@ -704,7 +704,7 @@ void RemoveEventFromArray(CFMutableArrayRef array, CFNumberRef launchdToken)
             ++i; // If it's not us, advance.
         }
     }
-    if (i == count) asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s did not find token", sPluginIdentifier, __FUNCTION__);
+    if (i == count) os_log_info(OS_LOG_DEFAULT, "%s:%s did not find token", sPluginIdentifier, __FUNCTION__);
 }
 
 #pragma mark -
@@ -751,7 +751,7 @@ void ServiceBrowserCallback (DNSServiceRef sdRef,
         static int msgCount = 0;
         if (msgCount < 1000)
         {
-            asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s Can not create CFString for serviceName %s", sPluginIdentifier, __FUNCTION__, serviceName);
+            os_log_info(OS_LOG_DEFAULT, "%s:%s Can not create CFString for serviceName %s", sPluginIdentifier, __FUNCTION__, serviceName);
             msgCount++;
         }
         return;
@@ -759,12 +759,12 @@ void ServiceBrowserCallback (DNSServiceRef sdRef,
 
     if (flags & kDNSServiceFlagsAdd)
     {
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s calling HandleTemporaryEventsForService Add\n", sPluginIdentifier, __FUNCTION__);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s calling HandleTemporaryEventsForService Add\n", sPluginIdentifier, __FUNCTION__);
         HandleTemporaryEventsForService(plugin, browser, cfServiceName, plugin->_onAddEvents);
     }
     else
     {
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s calling HandleTemporaryEventsForService Remove\n", sPluginIdentifier, __FUNCTION__);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s calling HandleTemporaryEventsForService Remove\n", sPluginIdentifier, __FUNCTION__);
         HandleTemporaryEventsForService(plugin, browser, cfServiceName, plugin->_onRemoveEvents);
     }
 
@@ -804,7 +804,7 @@ void HandleTemporaryEventsForService(BonjourUserEventsPlugin* plugin, NetBrowser
             // Signal Event: This is edge trigger. When the action has been taken, it will not
             // be remembered anymore.
 
-            asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s HandleTemporaryEventsForService signal\n", sPluginIdentifier, __FUNCTION__);
+            os_log_info(OS_LOG_DEFAULT, "%s:%s HandleTemporaryEventsForService signal\n", sPluginIdentifier, __FUNCTION__);
             CFNumberGetValue(token, kCFNumberLongLongType, &tokenUint64);
 
             xpc_object_t jobRequest = _CFXPCCreateXPCObjectFromCFObject(dict);
@@ -903,7 +903,7 @@ NetBrowserInfo* NetBrowserInfoCreate(CFStringRef serviceType, CFStringRef domain
     outObj->refCount = 1;
     outObj->browserRef = browserRef;
 
-    asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: created new object %p", sPluginIdentifier, __FUNCTION__, outObj);
+    os_log_info(OS_LOG_DEFAULT, "%s:%s: created new object %p", sPluginIdentifier, __FUNCTION__, outObj);
 
     free(cServiceType);
 
@@ -927,7 +927,7 @@ const void* NetBrowserInfoRetain(CFAllocatorRef allocator, const void* info)
         return NULL;
 
     ++obj->refCount;
-    asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: Incremented ref count on %p, count %d", sPluginIdentifier, __FUNCTION__, obj->browserRef, (int)obj->refCount);
+    os_log_info(OS_LOG_DEFAULT, "%s:%s: Incremented ref count on %p, count %d", sPluginIdentifier, __FUNCTION__, obj->browserRef, (int)obj->refCount);
 
     return obj;
 }
@@ -947,14 +947,14 @@ void NetBrowserInfoRelease(CFAllocatorRef allocator, const void* info)
 
     if (obj->refCount == 1)
     {
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: DNSServiceRefDeallocate %p", sPluginIdentifier, __FUNCTION__, obj->browserRef);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s: DNSServiceRefDeallocate %p", sPluginIdentifier, __FUNCTION__, obj->browserRef);
         DNSServiceRefDeallocate(obj->browserRef);
         free(obj);
     }
     else
     {
         --obj->refCount;
-        asl_log(NULL, NULL, ASL_LEVEL_INFO, "%s:%s: Decremented ref count on %p, count %d", sPluginIdentifier, __FUNCTION__, obj->browserRef, (int)obj->refCount);
+        os_log_info(OS_LOG_DEFAULT, "%s:%s: Decremented ref count on %p, count %d", sPluginIdentifier, __FUNCTION__, obj->browserRef, (int)obj->refCount);
     }
 
 }

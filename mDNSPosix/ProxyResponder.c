@@ -275,7 +275,7 @@ mDNSexport int main(int argc, char **argv)
 
     do
     {
-        struct timeval timeout = { 0x3FFFFFFF, 0 };     // wait until SIGINT or SIGTERM
+        struct timeval timeout = { FutureTime, 0 };     // wait until SIGINT or SIGTERM
         mDNSBool gotSomething;
         mDNSPosixRunEventLoopOnce(&mDNSStorage, &timeout, &signals, &gotSomething);
     }

@@ -561,7 +561,7 @@ mDNSexport void DNSSECProbe(mDNS *const m)
     if (DNSSECProbeQuestion.ThisQInterval != -1)
         return;
     
-    rand = mDNSRandom(0x3FFFFFFF) % 100;
+    rand = mDNSRandom(FutureTime) % 100;
     // Probe 1% of the time
     if (rand >= DNSSECProbePercentage)
         return;

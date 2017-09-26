@@ -61,7 +61,7 @@ mDNSexport void ExampleClientEventLoop(mDNS *const m)
         // 2. Set up the timeout.
         // This example client has no other work it needs to be doing,
         // so we set an effectively infinite timeout
-        timeout.tv_sec = 0x3FFFFFFF;
+        timeout.tv_sec = FutureTime;
         timeout.tv_usec = 0;
 
         // 3. Give the mDNSPosix layer a chance to add its information to the fd_set and timeout

@@ -45,12 +45,12 @@ mDNSexport SearchListElem *SearchList = mDNSNULL;
 mDNSBool StrictUnicastOrdering = mDNSfalse;
 
 // We keep track of the number of unicast DNS servers and log a message when we exceed 64.
-// Currently the unicast queries maintain a 64 bit map to track the valid DNS servers for that
+// Currently the unicast queries maintain a 128 bit map to track the valid DNS servers for that
 // question. Bit position is the index into the DNS server list. This is done so to try all
 // the servers exactly once before giving up. If we could allocate memory in the core, then
-// arbitrary limitation of 64 DNSServers can be removed.
+// arbitrary limitation of 128 DNSServers can be removed.
 mDNSu8 NumUnicastDNSServers = 0;
-#define MAX_UNICAST_DNS_SERVERS 64
+#define MAX_UNICAST_DNS_SERVERS 128
 #if APPLE_OSX_mDNSResponder
 mDNSu8 NumUnreachableDNSServers = 0;
 #endif
@@ -112,8 +112,8 @@ mDNSlocal void SetRecordRetry(mDNS *const m, AuthRecord *rr, mDNSu32 random)
 #endif
 
 mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSs32 serviceID, const mDNSAddr *addr,
-                                        const mDNSIPPort port, mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSu16 resGroupID, mDNSBool reqA,
-                                        mDNSBool reqAAAA, mDNSBool reqDO)
+                                        const mDNSIPPort port, mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSBool isExpensive, mDNSu16 resGroupID,
+                                        mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO)
 {
     DNSServer **p = &m->DNSServers;
     DNSServer *tmp = mDNSNULL;
@@ -127,9 +127,9 @@ mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, cons
     if (!d)
         d = (const domainname *)"";
 
-    LogInfo("mDNS_AddDNSServer(%d): Adding %#a for %##s, InterfaceID %p, serviceID %u, scoped %d, resGroupID %d req_A is %s req_AAAA is %s cell %s req_DO is %s",
+    LogInfo("mDNS_AddDNSServer(%d): Adding %#a for %##s, InterfaceID %p, serviceID %u, scoped %d, resGroupID %d req_A is %s req_AAAA is %s cell %s isExpensive %s req_DO is %s",
         NumUnicastDNSServers, addr, d->c, interface, serviceID, scoped, resGroupID, reqA ? "True" : "False", reqAAAA ? "True" : "False",
-        cellIntf ? "True" : "False", reqDO ? "True" : "False");
+        cellIntf ? "True" : "False", isExpensive ? "True" : "False", reqDO ? "True" : "False");
 
     mDNS_CheckLock(m);
 
@@ -186,17 +186,18 @@ mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, cons
         }
         else
         {
-            (*p)->scoped    = scoped;
-            (*p)->interface = interface;
-            (*p)->serviceID = serviceID;
-            (*p)->addr      = *addr;
-            (*p)->port      = port;
-            (*p)->flags     = DNSServer_FlagNew;
-            (*p)->timeout   = timeout;
-            (*p)->cellIntf  = cellIntf;
-            (*p)->req_A     = reqA;
-            (*p)->req_AAAA  = reqAAAA;
-            (*p)->req_DO    = reqDO;
+            (*p)->scoped      = scoped;
+            (*p)->interface   = interface;
+            (*p)->serviceID   = serviceID;
+            (*p)->addr        = *addr;
+            (*p)->port        = port;
+            (*p)->flags       = DNSServer_FlagNew;
+            (*p)->timeout     = timeout;
+            (*p)->cellIntf    = cellIntf;
+            (*p)->isExpensive = isExpensive;
+            (*p)->req_A       = reqA;
+            (*p)->req_AAAA    = reqAAAA;
+            (*p)->req_DO      = reqDO;
             // We start off assuming that the DNS server is not DNSSEC aware and
             // when we receive the first response to a DNSSEC question, we set
             // it to true.
@@ -485,7 +486,7 @@ mDNSlocal mStatus uDNS_RequestAddress(mDNS *m)
 
     if (!m->NATTraversals)
     {
-        m->retryGetAddr = NonZeroTime(m->timenow + 0x78000000);
+        m->retryGetAddr = NonZeroTime(m->timenow + FutureTime);
         LogInfo("uDNS_RequestAddress: Setting retryGetAddr to future");
     }
     else if (m->timenow - m->retryGetAddr >= 0)
@@ -1554,7 +1555,7 @@ mDNSlocal tcpInfo_t *MakeTCPConn(mDNS *const m, const DNSMessage *const msg, con
     mDNSPlatformMemZero(info, sizeof(tcpInfo_t));
 
     info->m          = m;
-    info->sock       = mDNSPlatformTCPSocket(m, flags, &srcport, useBackgroundTrafficClass);
+    info->sock       = mDNSPlatformTCPSocket(flags, &srcport, useBackgroundTrafficClass);
     info->requestLen = 0;
     info->question   = question;
     info->rr         = rr;
@@ -1720,7 +1721,7 @@ mDNSexport const domainname *GetServiceTarget(mDNS *m, AuthRecord *const rr)
         DomainAuthInfo *AuthInfo = GetAuthInfoForName_internal(m, rr->resrec.name);
         if (AuthInfo && AuthInfo->AutoTunnel)
         {
-            StartServerTunnel(m, AuthInfo);
+            StartServerTunnel(AuthInfo);
             if (AuthInfo->AutoTunnelHostRecord.namestorage.c[0] == 0) return(mDNSNULL);
             debugf("GetServiceTarget: Returning %##s", AuthInfo->AutoTunnelHostRecord.namestorage.c);
             return(&AuthInfo->AutoTunnelHostRecord.namestorage);
@@ -2759,7 +2760,6 @@ mDNSexport void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr, co
         m->NextSRVUpdate = NonZeroTime(m->timenow);
 
 #if APPLE_OSX_mDNSResponder
-        if (RouterChanged) uuid_generate(m->asl_uuid);
         UpdateAutoTunnelDomainStatuses(m);
 #endif
     }
@@ -3034,7 +3034,6 @@ exit:
 mDNSlocal mDNSBool IsRecordMergeable(mDNS *const m, AuthRecord *rr, mDNSs32 time)
 {
     DomainAuthInfo *info;
-    (void) m; //unused
     // A record is eligible for merge, if the following properties are met.
     //
     // 1. uDNS Resource Record
@@ -3697,9 +3696,7 @@ mDNSlocal void uDNS_ReceiveNATPMPPacket(mDNS *m, const mDNSInterfaceID Interface
     if (AddrReply->opcode == NATOp_AddrResponse)
     {
 #if APPLE_OSX_mDNSResponder
-        static char msgbuf[16];
-        mDNS_snprintf(msgbuf, sizeof(msgbuf), "%d", AddrReply->err);
-        mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.natpmp.AddressRequest", AddrReply->err ? "failure" : "success", msgbuf, "");
+        LogInfo("uDNS_ReceiveNATPMPPacket: AddressRequest %s error %d", AddrReply->err ? "failure" : "success", AddrReply->err);
 #endif
         if (!AddrReply->err && len < sizeof(NATAddrReply)) { LogMsg("NAT-PMP AddrResponse message too short (%d bytes)", len); return; }
         natTraversalHandleAddressReply(m, AddrReply->err, AddrReply->ExtAddr);
@@ -3708,9 +3705,8 @@ mDNSlocal void uDNS_ReceiveNATPMPPacket(mDNS *m, const mDNSInterfaceID Interface
     {
         mDNSu8 Protocol = AddrReply->opcode & 0x7F;
 #if APPLE_OSX_mDNSResponder
-        static char msgbuf[16];
-        mDNS_snprintf(msgbuf, sizeof(msgbuf), "%s - %d", AddrReply->opcode == NATOp_MapUDPResponse ? "UDP" : "TCP", PortMapReply->err);
-        mDNSASLLog((uuid_t *)&m->asl_uuid, "natt.natpmp.PortMapRequest", PortMapReply->err ? "failure" : "success", msgbuf, "");
+        LogInfo("uDNS_ReceiveNATPMPPacket: PortMapRequest %s %s - error %d",
+            PortMapReply->err ? "failure" : "success", (AddrReply->opcode == NATOp_MapUDPResponse) ? "UDP" : "TCP", PortMapReply->err);
 #endif
         if (!PortMapReply->err)
         {
@@ -3921,7 +3917,9 @@ mDNSexport void uDNS_ReceiveMsg(mDNS *const m, DNSMessage *const msg, const mDNS
 
     if (QR_OP == UpdateR)
     {
-        mDNSu32 lease = GetPktLease(m, msg, end);
+        mDNSu32 pktlease = 0;
+        mDNSBool gotlease = GetPktLease(m, msg, end, &pktlease);
+        mDNSu32 lease = gotlease ? pktlease : 60 * 60; // If lease option missing, assume one hour
         mDNSs32 expire = m->timenow + (mDNSs32)lease * mDNSPlatformOneSecond;
         mDNSu32 random = mDNSRandom((mDNSs32)lease * mDNSPlatformOneSecond/10);
 
@@ -4088,6 +4086,7 @@ mDNSexport void LLQGotZoneData(mDNS *const m, mStatus err, const ZoneData *zoneI
     mDNS_Unlock(m);
 }
 
+#ifdef DNS_PUSH_ENABLED
 mDNSexport void DNSPushNotificationGotZoneData(mDNS *const m, mStatus err, const ZoneData *zoneInfo)
 {
     DNSQuestion *q = (DNSQuestion *)zoneInfo->ZoneDataContext;
@@ -4109,18 +4108,18 @@ mDNSexport void DNSPushNotificationGotZoneData(mDNS *const m, mStatus err, const
     }
     else
     {
+        q->dnsPushState = DNSPUSH_NOSERVER;
         StartLLQPolling(m,q);
         if (err == mStatus_NoSuchNameErr)
         {
             // this actually failed, so mark it by setting address to all ones
             q->servAddr.type  = mDNSAddrType_IPv4;
             q->servAddr.ip.v4 = onesIPv4Addr;
-            q->dnsPushState   = DNSPUSH_NOSERVER;
         }
     }
     mDNS_Unlock(m);
 }
-
+#endif // DNS_PUSH_ENABLED
 
 // Called in normal callback context (i.e. mDNS_busy and mDNS_reentrancy are both 1)
 mDNSlocal void PrivateQueryGotZoneData(mDNS *const m, mStatus err, const ZoneData *zoneInfo)
@@ -4625,9 +4624,11 @@ mDNSlocal void handle_unanswered_query(mDNS *const m)
 
 mDNSlocal void uDNS_HandleLLQState(mDNS *const m, DNSQuestion *q)
 {
+#ifdef DNS_PUSH_ENABLED
     // First attempt to use DNS Push Notification.
     if (q->dnsPushState == DNSPUSH_INIT)
         DiscoverDNSPushNotificationServer(m, q);
+#endif // DNS_PUSH_ENABLED
     switch (q->state)
     {
         case LLQ_InitialRequest:   startLLQHandshake(m, q); break;
@@ -4733,11 +4734,25 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
                     debugf("uDNS_CheckCurrentQuestion sending %p %##s (%s) %#a:%d UnansweredQueries %d",
                            q, q->qname.c, DNSTypeName(q->qtype),
                            q->qDNSServer ? &q->qDNSServer->addr : mDNSNULL, mDNSVal16(q->qDNSServer ? q->qDNSServer->port : zeroIPPort), q->unansweredQueries);
+#if APPLE_OSX_mDNSResponder
+                    // When a DNS proxy network extension initiates the close of a UDP flow (this usually happens when a DNS
+                    // proxy gets disabled or crashes), mDNSResponder's corresponding UDP socket will be marked with the
+                    // SS_CANTRCVMORE state flag. Reading from such a socket is no longer possible, so close the current
+                    // socket pair so that we can create a new pair.
+                    if (q->LocalSocket && mDNSPlatformUDPSocketEncounteredEOF(q->LocalSocket))
+                    {
+                        mDNSPlatformUDPClose(q->LocalSocket);
+                        q->LocalSocket = mDNSNULL;
+                    }
+#endif
                     if (!q->LocalSocket)
                     {
-                        q->LocalSocket = mDNSPlatformUDPSocket(m, zeroIPPort);
+                        q->LocalSocket = mDNSPlatformUDPSocket(zeroIPPort);
                         if (q->LocalSocket)
-                            mDNSPlatformSetSocktOpt(q->LocalSocket, mDNSTransport_UDP, q->qDNSServer->addr.type, q);
+                        {
+                            mDNSPlatformSetSocktOpt(q->LocalSocket, mDNSTransport_UDP, mDNSAddrType_IPv4, q);
+                            mDNSPlatformSetSocktOpt(q->LocalSocket, mDNSTransport_UDP, mDNSAddrType_IPv6, q);
+                        }
                     }
                     if (!q->LocalSocket) err = mStatus_NoMemoryErr; // If failed to make socket (should be very rare), we'll try again next time
                     else
@@ -4774,8 +4789,18 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
                 }
 
                 newServer = GetServerForQuestion(m, q);
-                DNSServerChangeForQuestion(m, q, newServer);
-
+                if (!newServer)
+                {
+                    q->triedAllServersOnce = 1;
+                    SetValidDNSServers(m, q);
+                    newServer = GetServerForQuestion(m, q);
+                }
+                if (newServer)
+                {
+                    LogInfo("uDNS_checkCurrentQuestion: Retrying question %p %##s (%s) DNS Server %#a:%u ThisQInterval %d",
+                        q, q->qname.c, DNSTypeName(q->qtype), newServer ? &newServer->addr : mDNSNULL, mDNSVal16(newServer ? newServer->port : zeroIPPort), q->ThisQInterval);
+                    DNSServerChangeForQuestion(m, q, newServer);
+                }
                 if (q->triedAllServersOnce)
                 {
                     q->LastQTime = m->timenow;
@@ -4786,7 +4811,6 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
                     q->LastQTime     = m->timenow - q->ThisQInterval;
                 }
                 q->unansweredQueries = 0;
-                q->noServerResponse  = 1;
             }
             else
             {
@@ -4836,20 +4860,20 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
             // passed to uDNS_CheckCurrentQuestion -- we only want one set of query packets hitting the wire --
             // but we want *all* of the questions to get answer callbacks.)
             CacheRecord *rr;
-            const mDNSu32 slot = HashSlot(&q->qname);
-            CacheGroup *const cg = CacheGroupForName(m, slot, q->qnamehash, &q->qname);
+            const mDNSu32 slot = HashSlotFromNameHash(q->qnamehash);
+            CacheGroup *const cg = CacheGroupForName(m, q->qnamehash, &q->qname);
 
             if (!q->qDNSServer)
             {
-                if (!mDNSOpaque64IsZero(&q->validDNSServers))
-                    LogMsg("uDNS_CheckCurrentQuestion: ERROR!!: valid DNSServer bits not zero 0x%x, 0x%x for question %##s (%s)",
-                           q->validDNSServers.l[1], q->validDNSServers.l[0], q->qname.c, DNSTypeName(q->qtype));
+                if (!mDNSOpaque128IsZero(&q->validDNSServers))
+                    LogMsg("uDNS_CheckCurrentQuestion: ERROR!!: valid DNSServer bits not zero 0x%x, 0x%x 0x%x 0x%x for question %##s (%s)",
+                           q->validDNSServers.l[3], q->validDNSServers.l[2], q->validDNSServers.l[1], q->validDNSServers.l[0], q->qname.c, DNSTypeName(q->qtype));
                 // If we reached the end of list while picking DNS servers, then we don't want to deactivate the
                 // question. Try after 60 seconds. We find this by looking for valid DNSServers for this question,
                 // if we find any, then we must have tried them before we came here. This avoids maintaining
                 // another state variable to see if we had valid DNS servers for this question.
                 SetValidDNSServers(m, q);
-                if (mDNSOpaque64IsZero(&q->validDNSServers))
+                if (mDNSOpaque128IsZero(&q->validDNSServers))
                 {
                     LogInfo("uDNS_CheckCurrentQuestion: no DNS server for %##s (%s)", q->qname.c, DNSTypeName(q->qtype));
                     q->ThisQInterval = 0;
@@ -4913,7 +4937,7 @@ mDNSexport void CheckNATMappings(mDNS *m)
 {
     mDNSBool rfc1918 = mDNSv4AddrIsRFC1918(&m->AdvertisedV4.ip.v4);
     mDNSBool HaveRoutable = !rfc1918 && !mDNSIPv4AddressIsZero(m->AdvertisedV4.ip.v4);
-    m->NextScheduledNATOp = m->timenow + 0x3FFFFFFF;
+    m->NextScheduledNATOp = m->timenow + FutureTime;
 
     if (HaveRoutable) m->ExtAddress = m->AdvertisedV4.ip.v4;
 
@@ -4923,7 +4947,7 @@ mDNSexport void CheckNATMappings(mDNS *m)
         {
             // we need to log a message if we can't get our socket, but only the first time (after success)
             static mDNSBool needLog = mDNStrue;
-            m->NATMcastRecvskt = mDNSPlatformUDPSocket(m, NATPMPAnnouncementPort);
+            m->NATMcastRecvskt = mDNSPlatformUDPSocket(NATPMPAnnouncementPort);
             if (!m->NATMcastRecvskt)
             {
                 if (needLog)
@@ -5044,7 +5068,7 @@ mDNSexport void CheckNATMappings(mDNS *m)
 mDNSlocal mDNSs32 CheckRecordUpdates(mDNS *m)
 {
     AuthRecord *rr;
-    mDNSs32 nextevent = m->timenow + 0x3FFFFFFF;
+    mDNSs32 nextevent = m->timenow + FutureTime;
 
     CheckGroupRecordUpdates(m);
 
@@ -5102,7 +5126,7 @@ mDNSexport void uDNS_Tasks(mDNS *const m)
     mDNSs32 nexte;
     DNSServer *d;
 
-    m->NextuDNSEvent = m->timenow + 0x3FFFFFFF;
+    m->NextuDNSEvent = m->timenow + FutureTime;
 
     nexte = CheckRecordUpdates(m);
     if (m->NextuDNSEvent - nexte > 0)
@@ -5397,7 +5421,7 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
     // Make sure we have the search domains from the platform layer so that if we start the WAB
     // queries below, we have the latest information.
     mDNS_Lock(m);
-    if (!mDNSPlatformSetDNSConfig(m, mDNSfalse, mDNStrue, mDNSNULL, mDNSNULL, mDNSNULL, mDNSfalse))
+    if (!mDNSPlatformSetDNSConfig(mDNSfalse, mDNStrue, mDNSNULL, mDNSNULL, mDNSNULL, mDNSfalse))
     {
         // If the configuration did not change, clear the flag so that we don't free the searchlist.
         // We still have to start the domain enumeration queries as we may not have started them
@@ -5645,11 +5669,10 @@ mDNSexport void uDNS_StopWABQueries(mDNS *const m, int queryType)
     uDNS_SetupWABQueries(m);
 }
 
-mDNSexport domainname  *uDNS_GetNextSearchDomain(mDNS *const m, mDNSInterfaceID InterfaceID, mDNSs8 *searchIndex, mDNSBool ignoreDotLocal)
+mDNSexport domainname  *uDNS_GetNextSearchDomain(mDNSInterfaceID InterfaceID, mDNSs8 *searchIndex, mDNSBool ignoreDotLocal)
 {
     SearchListElem *p = SearchList;
     int count = *searchIndex;
-    (void) m; // unused
 
     if (count < 0) { LogMsg("uDNS_GetNextSearchDomain: count %d less than zero", count); return mDNSNULL; }
 
@@ -5772,10 +5795,15 @@ struct CompileTimeAssertionChecks_uDNS
 #pragma mark - DNS Push Notification functions
 #endif
 
+#ifdef DNS_PUSH_ENABLED
 mDNSlocal tcpInfo_t * GetTCPConnectionToPushServer(mDNS *m, DNSQuestion *q)
 {
+    DNSPushNotificationZone   *zone;
+    DNSPushNotificationServer *server;
+    DNSPushNotificationZone   *newZone;
+    DNSPushNotificationServer *newServer;
+
     // If we already have a question for this zone and if the server is the same, reuse it
-    DNSPushNotificationZone *zone = mDNSNULL;
     for (zone = m->DNSPushZones; zone != mDNSNULL; zone = zone->next)
     {
         if (SameDomainName(&q->nta->ChildName, &zone->zoneName))
@@ -5794,12 +5822,11 @@ mDNSlocal tcpInfo_t * GetTCPConnectionToPushServer(mDNS *m, DNSQuestion *q)
     }
 
     // If we have a connection to this server but it is for a differnt zone, create a new zone entry and reuse the connection
-    DNSPushNotificationServer *server = mDNSNULL;
     for (server = m->DNSPushServers; server != mDNSNULL; server = server->next)
     {
         if (mDNSSameAddress(&q->dnsPushServerAddr, &server->serverAddr))
         {
-            DNSPushNotificationZone *newZone = mDNSPlatformMemAllocate(sizeof(DNSPushNotificationZone));
+            newZone = mDNSPlatformMemAllocate(sizeof(DNSPushNotificationZone));
             newZone->numberOfQuestions = 1;
             newZone->zoneName = q->nta->ChildName;
             newZone->servers = server;
@@ -5814,8 +5841,8 @@ mDNSlocal tcpInfo_t * GetTCPConnectionToPushServer(mDNS *m, DNSQuestion *q)
     }
 
     // If we do not have any existing connections, create a new connection
-    DNSPushNotificationServer *newServer = mDNSPlatformMemAllocate(sizeof(DNSPushNotificationServer));
-    DNSPushNotificationZone   *newZone   = mDNSPlatformMemAllocate(sizeof(DNSPushNotificationZone));
+    newServer = mDNSPlatformMemAllocate(sizeof(DNSPushNotificationServer));
+    newZone   = mDNSPlatformMemAllocate(sizeof(DNSPushNotificationZone));
 
     newServer->numberOfQuestions = 1;
     newServer->serverAddr = q->dnsPushServerAddr;
@@ -5927,6 +5954,9 @@ mDNSlocal  void reconcileDNSPushConnection(mDNS *m, DNSQuestion *q)
 {
     DNSPushNotificationZone   *zone;
     DNSPushNotificationServer *server;
+    DNSPushNotificationServer *nextServer;
+    DNSPushNotificationZone   *nextZone;
+
     // Update the counts
     for (zone = m->DNSPushZones; zone != mDNSNULL; zone = zone->next)
     {
@@ -5943,7 +5973,7 @@ mDNSlocal  void reconcileDNSPushConnection(mDNS *m, DNSQuestion *q)
 
     // Now prune the lists
     server = m->DNSPushServers;
-    DNSPushNotificationServer *nextServer = mDNSNULL;
+    nextServer = mDNSNULL;
     while(server != mDNSNULL)
     {
         nextServer = server->next;
@@ -5959,7 +5989,7 @@ mDNSlocal  void reconcileDNSPushConnection(mDNS *m, DNSQuestion *q)
     }
 
     zone = m->DNSPushZones;
-    DNSPushNotificationZone *nextZone = mDNSNULL;
+    nextZone = mDNSNULL;
     while(zone != mDNSNULL)
     {
         nextZone = zone->next;
@@ -5991,6 +6021,7 @@ mDNSexport void UnSubscribeToDNSPushNotificationServer(mDNS *m, DNSQuestion *q)
     reconcileDNSPushConnection(m, q);
 }
 
+#endif // DNS_PUSH_ENABLED
 #if COMPILER_LIKES_PRAGMA_MARK
 #pragma mark -
 #endif
@@ -6116,9 +6147,8 @@ mDNSexport mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info, const 
     return mStatus_UnsupportedErr;
 }
 
-mDNSexport domainname  *uDNS_GetNextSearchDomain(mDNS *const m, mDNSInterfaceID InterfaceID, mDNSs8 *searchIndex, mDNSBool ignoreDotLocal)
+mDNSexport domainname  *uDNS_GetNextSearchDomain(mDNSInterfaceID InterfaceID, mDNSs8 *searchIndex, mDNSBool ignoreDotLocal)
 {
-    (void) m;
     (void) InterfaceID;
     (void) searchIndex;
     (void) ignoreDotLocal;
@@ -6151,8 +6181,8 @@ mDNSexport mStatus mDNS_StopNATOperation(mDNS *const m, NATTraversalInfo *traver
 }
 
 mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSs32 serviceID, const mDNSAddr *addr,
-                                        const mDNSIPPort port, mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSu16 resGroupID, mDNSBool reqA,
-                                        mDNSBool reqAAAA, mDNSBool reqDO)
+                                        const mDNSIPPort port, mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSBool isExpensive, mDNSu16 resGroupID,
+                                        mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO)
 {
     (void) m;
     (void) d;
@@ -6163,6 +6193,7 @@ mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, cons
     (void) scoped;
     (void) timeout;
     (void) cellIntf;
+    (void) isExpensive;
     (void) resGroupID;
     (void) reqA;
     (void) reqAAAA;

@@ -56,12 +56,10 @@ mDNSlocal CacheRecord *NSECParentForQuestion(mDNS *const m, DNSQuestion *q)
 {
     CacheGroup *cg;
     CacheRecord *cr;
-    mDNSu32 slot;
     mDNSu32 namehash;
 
-    slot = HashSlot(&q->qname);
     namehash = DomainNameHashValue(&q->qname);
-    cg = CacheGroupForName(m, slot, namehash, &q->qname);
+    cg = CacheGroupForName(m, namehash, &q->qname);
     if (!cg)
     {
         LogDNSSEC("NSECParentForQuestion: Cannot find cg for %##s (%s)", q->qname.c, DNSTypeName(q->qtype));
@@ -1050,12 +1048,11 @@ mDNSexport CacheRecord *NSECRecordIsDelegation(mDNS *const m, domainname *name, 
 {
     CacheGroup *cg;
     CacheRecord *cr;
-    mDNSu32 slot, namehash;
+    mDNSu32 namehash;
 
-    slot = HashSlot(name);
     namehash = DomainNameHashValue(name);
 
-    cg = CacheGroupForName(m, (const mDNSu32)slot, namehash, name);
+    cg = CacheGroupForName(m, namehash, name);
     if (!cg)
     {
         LogDNSSEC("NSECRecordForName: cg NULL for %##s", name);

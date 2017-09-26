@@ -18,37 +18,51 @@
 #ifndef _BLE_H_
 #define _BLE_H_
 
+#if ENABLE_BLE_TRIGGERED_BONJOUR
+
 #include "dns_sd.h"
-#include "dns_sd_private.h"
+#include "dns_sd_internal.h"
 
-typedef unsigned int serviceHash_t;
+typedef unsigned long serviceHash_t;
 
-void start_BLE_browse(DNSQuestion * q, const domainname *const typeDomain, DNS_TypeValues type, DNSServiceFlags flags,
+bool shouldUseBLE(mDNSInterfaceID interfaceID,  DNS_TypeValues rrtype, domainname *serviceType, domainname *domain);
+
+void start_BLE_browse(mDNSInterfaceID InterfaceID, const domainname *const domain, DNS_TypeValues type, DNSServiceFlags flags,
                        mDNSu8 *key, size_t keySize);
-bool stop_BLE_browse(const domainname *const typeDomain, DNS_TypeValues type, DNSServiceFlags flags);
+bool stop_BLE_browse(mDNSInterfaceID InterfaceID, const domainname *const domain, DNS_TypeValues type, DNSServiceFlags flags);
 
-void start_BLE_advertise(ServiceRecordSet * serviceRecordSet, const domainname *const domain, DNS_TypeValues type, DNSServiceFlags flags);
-void stop_BLE_advertise(const domainname *const typeDomain, DNS_TypeValues type, DNSServiceFlags flags);
+void start_BLE_advertise(const ResourceRecord *const resourceRecord, const domainname *const domain, DNS_TypeValues type, DNSServiceFlags flags);
+void stop_BLE_advertise(const domainname *const domain, DNS_TypeValues type, DNSServiceFlags flags);
 
-void responseReceived(serviceHash_t browseHash, serviceHash_t registeredHash, mDNSEthAddr *ptrToMAC);
+void responseReceived(serviceHash_t peerBloomFilter, mDNSEthAddr *ptrToMAC);
 
 void serviceBLE(void);
 
 // C interfaces to Objective-C beacon management code.
-void updateBLEBeaconAndScan(serviceHash_t browseHash, serviceHash_t registeredHash);
+void updateBLEBeacon(serviceHash_t bloomFilter);
 void stopBLEBeacon(void);
+void startBLEScan(void);
+void stopBLEScan(void);
+bool currentlyBeaconing(void);
+
+extern bool suppressBeacons;
+extern bool finalBeacon;
 
 extern mDNS mDNSStorage;
 extern mDNSBool EnableBLEBasedDiscovery;
+extern mDNSBool DefaultToBLETriggered;
 
-// TODO: Add the following to a local D2D.h file
-#include <DeviceToDeviceManager/DeviceToDeviceManager.h>
+extern mDNSInterfaceID AWDLInterfaceID;
+#define applyToBLE(interface, flags) ((interface == mDNSInterface_BLE) || (((interface == mDNSInterface_Any) || (interface == AWDLInterfaceID)) && (flags & kDNSServiceFlagsAutoTrigger)))
 
-// Just define as the current max value for now.  
-// TODO: Will need to define in DeviceToDeviceManager.framework if we convert this
-// BLE discovery code to a D2D plugin.
-#define D2DBLETransport D2DTransportMax
+#ifdef UNIT_TEST
+#pragma mark - Unit test declarations
 
-#define applyToBLE(interface, flags) ((interface == mDNSInterface_BLE) || ((interface == mDNSInterface_Any) && (flags & kDNSServiceFlagsAutoTrigger)))
+// Unit test entry points, which are not used in the mDNSResponder runtime code paths.
+void BLE_unitTest(void);
+
+#endif  //  UNIT_TEST
+
+#endif  // ENABLE_BLE_TRIGGERED_BONJOUR
 
 #endif /* _BLE_H_ */

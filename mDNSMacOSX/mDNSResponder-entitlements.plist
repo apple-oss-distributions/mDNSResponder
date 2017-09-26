@@ -32,5 +32,9 @@
     <true/>
     <key>com.apple.BTServer.appleMfgDataScanner</key>
     <true/>
+    <key>com.apple.BTServer.le.att</key>
+    <true/>
+    <key>com.apple.private.network.delegation-whitelist</key>
+    <true/>
 </dict>
 </plist>

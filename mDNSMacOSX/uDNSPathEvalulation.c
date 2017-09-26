@@ -18,11 +18,11 @@
 #include "mDNSMacOSX.h"
 #include <libproc.h>
 #include <network/private.h>
+#include "dns_sd_internal.h"
 
 //Gets the DNSPolicy from NW PATH EVALUATOR
-mDNSexport void mDNSPlatformGetDNSRoutePolicy(mDNS *const m, DNSQuestion *q, mDNSBool *isBlocked)
+mDNSexport void mDNSPlatformGetDNSRoutePolicy(DNSQuestion *q, mDNSBool *isBlocked)
 {
-    (void) m;
     q->ServiceID = -1; // initialize the ServiceID to default value of -1
 
     // Return for non-unicast DNS queries, invalid pid, if NWPathEvaluation is already done by the client, or NWPathEvaluation not available on this OS
@@ -57,6 +57,7 @@ mDNSexport void mDNSPlatformGetDNSRoutePolicy(mDNS *const m, DNSQuestion *q, mDN
         || (q->InterfaceID == mDNSInterface_LocalOnly)
         || (q->InterfaceID == mDNSInterfaceMark)
         || (q->InterfaceID == mDNSInterface_P2P)
+        || (q->InterfaceID == mDNSInterface_BLE)
         || (q->InterfaceID == uDNSInterfaceMark))
     {
         client_ifindex = 0;

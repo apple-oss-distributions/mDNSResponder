@@ -302,7 +302,7 @@ mDNSlocal TCPSocket *ConnectToServer(DaemonInfo *d)
         mDNSIPPort port = zeroIPPort;
         int fd;
 
-        TCPSocket *sock = mDNSPlatformTCPSocket( NULL, 0, &port, mDNSfalse );
+        TCPSocket *sock = mDNSPlatformTCPSocket(0, &port, mDNSfalse );
         if ( !sock ) { LogErr("ConnectToServer", "socket");  return NULL; }
         fd = mDNSPlatformTCPGetFD( sock );
         if (!connect( fd, (struct sockaddr *)&d->ns_addr, sizeof(d->ns_addr))) return sock;
@@ -1506,13 +1506,14 @@ HandleRequest
     char addrbuf[32];
     TCPSocket * sock = NULL;
     mStatus err;
-    mDNSs32 lease = 0;
+    mDNSu32 lease = 0;
+    mDNSBool gotlease;
     if ((request->msg.h.flags.b[0] & kDNSFlag0_QROP_Mask) == kDNSFlag0_OP_Update)
     {
         int i, adds = 0, dels = 0;
         const mDNSu8 *ptr, *end = (mDNSu8 *)&request->msg + request->len;
         HdrNToH(request);
-        lease = GetPktLease(&mDNSStorage, &request->msg, end);
+        gotlease = GetPktLease(&mDNSStorage, &request->msg, end, &lease);
         ptr = LocateAuthorities(&request->msg, end);
         for (i = 0; i < request->msg.h.mDNS_numUpdates; i++)
         {
@@ -1521,7 +1522,7 @@ HandleRequest
             if (lcr.r.resrec.RecordType != kDNSRecordTypePacketNegative && lcr.r.resrec.rroriginalttl) adds++;else dels++;
         }
         HdrHToN(request);
-        if (adds && !lease)
+        if (adds && !gotlease)
         {
             static const mDNSOpaque16 UpdateRefused = { { kDNSFlag0_QR_Response | kDNSFlag0_OP_Update, kDNSFlag1_RC_Refused } };
             Log("Rejecting Update Request with %d additions but no lease", adds);
@@ -2355,7 +2356,7 @@ mDNSlocal int RecvLLQ( DaemonInfo *d, PktMsg *pkt, TCPSocket *sock )
     {
         qptr = getQuestion(&pkt->msg, qptr, end, 0, &q);
         if (!qptr) { Log("Malformatted LLQ from %s: cannot read question %d", addr, i); goto end; }
-        llq = (LLQOptData *)&opt.r.resrec.rdata->u.opt[0].u.llq + i; // point into OptData at index i
+        llq = &opt.r.resrec.rdata->u.opt[i].u.llq; // point into OptData at index i
         if (llq->vers != kLLQ_Vers) { Log("LLQ from %s contains bad version %d (expected %d)", addr, llq->vers, kLLQ_Vers); goto end; }
 
         e = LookupLLQ(d, pkt->src, &q.qname, q.qtype, &llq->id);
@@ -3094,13 +3095,13 @@ int main(int argc, char *argv[])
 void mDNSCoreInitComplete( mDNS * const m, mStatus result) { ( void ) m; ( void ) result; }
 void mDNS_ConfigChanged(mDNS *const m)  { ( void ) m; }
 void mDNSCoreMachineSleep(mDNS * const m, mDNSBool wake) { ( void ) m; ( void ) wake; }
-void mDNSCoreReceive(mDNS *const m, void *const msg, const mDNSu8 *const end,
+void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNSu8 *const end,
                      const mDNSAddr *const srcaddr, const mDNSIPPort srcport,
                      const mDNSAddr *const dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID iid)
 { ( void ) m; ( void ) msg; ( void ) end; ( void ) srcaddr; ( void ) srcport; ( void ) dstaddr; ( void ) dstport; ( void ) iid; }
 DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const int serviceID, const mDNSAddr *addr, const mDNSIPPort port, 
-                             mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSu16 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO)
-{ ( void ) m; ( void ) d; ( void ) interface; ( void ) serviceID; ( void ) addr; ( void ) port; ( void ) scoped; ( void ) timeout; (void) cellIntf; 
+                             mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSBool isExpensive, mDNSu16 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO)
+{ ( void ) m; ( void ) d; ( void ) interface; ( void ) serviceID; ( void ) addr; ( void ) port; ( void ) scoped; ( void ) timeout; (void) cellIntf; (void) isExpensive;
  (void) resGroupID; (void) reqA; (void) reqAAAA; (void) reqDO; return(NULL); }
 void mDNS_AddSearchDomain(const domainname *const domain, mDNSInterfaceID InterfaceID) { (void)domain; (void) InterfaceID;}
 void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCallback *StatusCallback, const void *StatusContext)
@@ -3108,15 +3109,15 @@ void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCallback 
 mDNSs32 mDNS_Execute   (mDNS *const m) { ( void ) m; return 0; }
 mDNSs32 mDNS_TimeNow(const mDNS *const m) { ( void ) m; return 0; }
 mStatus mDNS_Deregister(mDNS *const m, AuthRecord *const rr) { ( void ) m; ( void ) rr; return 0; }
-void mDNS_DeregisterInterface(mDNS *const m, NetworkInterfaceInfo *set, mDNSBool flapping)
-{ ( void ) m; ( void ) set; ( void ) flapping; }
+void mDNS_DeregisterInterface(mDNS *const m, NetworkInterfaceInfo *set, InterfaceActivationSpeed activationSpeed)
+{ ( void ) m; ( void ) set; ( void ) activationSpeed; }
 const char * const mDNS_DomainTypeNames[1] = {};
 mStatus mDNS_GetDomains(mDNS *const m, DNSQuestion *const question, mDNS_DomainType DomainType, const domainname *dom,
                         const mDNSInterfaceID InterfaceID, mDNSQuestionCallback *Callback, void *Context)
 { ( void ) m; ( void ) question; ( void ) DomainType; ( void ) dom; ( void ) InterfaceID; ( void ) Callback; ( void ) Context; return 0; }
 mStatus mDNS_Register(mDNS *const m, AuthRecord *const rr) { ( void ) m; ( void ) rr; return 0; }
-mStatus mDNS_RegisterInterface(mDNS *const m, NetworkInterfaceInfo *set, mDNSBool flapping)
-{ ( void ) m; ( void ) set; ( void ) flapping; return 0; }
+mStatus mDNS_RegisterInterface(mDNS *const m, NetworkInterfaceInfo *set, InterfaceActivationSpeed activationSpeed)
+{ ( void ) m; ( void ) set; ( void ) activationSpeed; return 0; }
 void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn) { ( void ) m; ( void ) fqdn; }
 void mDNS_SetFQDN(mDNS * const m) { ( void ) m; }
 void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const mDNSAddr *v6addr, const mDNSAddr *router)

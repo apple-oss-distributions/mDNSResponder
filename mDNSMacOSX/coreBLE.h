@@ -18,15 +18,22 @@
 #ifndef _coreBLE_H_
 #define _coreBLE_H_
 
+#if ENABLE_BLE_TRIGGERED_BONJOUR
+
 #include "BLE.h"
 
 @interface coreBLE : NSObject <CBCentralManagerDelegate, CBPeripheralManagerDelegate, CBPeripheralDelegate>
 
 - (id)init;
-- (void) advertiseBrowses:(serviceHash_t) browseHash andRegistrations:(serviceHash_t) registeredHash;
+- (void) updateBeacon:(serviceHash_t) bloomFilter;
+- (void) startBeacon;
+- (bool) isBeaconing;
 - (void) stopBeacon;
-- (void) updateScan:(bool) start;
+- (void) startScan;
+- (void) stopScan;
 
 @end
+
+#endif  // ENABLE_BLE_TRIGGERED_BONJOUR
 
 #endif /* _coreBLE_H_ */

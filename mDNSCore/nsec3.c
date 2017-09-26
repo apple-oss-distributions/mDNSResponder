@@ -675,12 +675,11 @@ mDNSexport CacheRecord *NSEC3RecordIsDelegation(mDNS *const m, domainname *name,
     CacheGroup *cg;
     CacheRecord *cr;
     CacheRecord *ncr;
-    mDNSu32 slot, namehash;
+    mDNSu32 namehash;
 
-    slot = HashSlot(name);
     namehash = DomainNameHashValue(name);
 
-    cg = CacheGroupForName(m, (const mDNSu32)slot, namehash, name);
+    cg = CacheGroupForName(m, namehash, name);
     if (!cg)
     {
         LogDNSSEC("NSEC3RecordForName: cg NULL for %##s", name);
