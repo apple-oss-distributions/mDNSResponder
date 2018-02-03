@@ -661,6 +661,7 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
     struct sockaddr_storage to;
     int s = -1, err;
     mStatus result = mStatus_NoError;
+    int sendto_errno;
 
     if (InterfaceID)
     {
@@ -736,9 +737,10 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
             err = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_IF, &info->scope_id, sizeof(info->scope_id));
             if (err < 0)
             {
+                const int setsockopt_errno = errno;
                 char name[IFNAMSIZ];
                 if (if_indextoname(info->scope_id, name) != NULL)
-                    LogMsg("setsockopt - IPV6_MULTICAST_IF error %d errno %d (%s)", err, errno, strerror(errno));
+                    LogMsg("setsockopt - IPV6_MULTICAST_IF error %d errno %d (%s)", err, setsockopt_errno, strerror(setsockopt_errno));
                 else
                     LogInfo("setsockopt - IPV6_MUTLICAST_IF scopeid %d, not a valid interface", info->scope_id);
             }
@@ -779,6 +781,7 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
         setTrafficClass(s, useBackgroundTrafficClass);
 
     err = sendto(s, msg, (UInt8*)end - (UInt8*)msg, 0, (struct sockaddr *)&to, to.ss_len);
+    sendto_errno = (err < 0) ? errno : 0;
 
     // set traffic class back to default value
     if (useBackgroundTrafficClass)
@@ -788,30 +791,30 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
     {
         static int MessageCount = 0;
         LogInfo("mDNSPlatformSendUDP -> sendto(%d) failed to send packet on InterfaceID %p %5s/%d to %#a:%d skt %d error %d errno %d (%s) %lu",
-                s, InterfaceID, ifa_name, dst->type, dst, mDNSVal16(dstPort), s, err, errno, strerror(errno), (mDNSu32)(m->timenow));
+                s, InterfaceID, ifa_name, dst->type, dst, mDNSVal16(dstPort), s, err, sendto_errno, strerror(sendto_errno), (mDNSu32)(m->timenow));
         if (!mDNSAddressIsAllDNSLinkGroup(dst))
         {
-            if (errno == EHOSTUNREACH) return(mStatus_HostUnreachErr);
-            if (errno == EHOSTDOWN || errno == ENETDOWN || errno == ENETUNREACH) return(mStatus_TransientErr);
+            if (sendto_errno == EHOSTUNREACH) return(mStatus_HostUnreachErr);
+            if (sendto_errno == EHOSTDOWN || sendto_errno == ENETDOWN || sendto_errno == ENETUNREACH) return(mStatus_TransientErr);
         }
         // Don't report EHOSTUNREACH in the first three minutes after boot
         // This is because mDNSResponder intentionally starts up early in the boot process (See <rdar://problem/3409090>)
         // but this means that sometimes it starts before configd has finished setting up the multicast routing entries.
-        if (errno == EHOSTUNREACH && (mDNSu32)(mDNSPlatformRawTime()) < (mDNSu32)(mDNSPlatformOneSecond * 180)) return(mStatus_TransientErr);
+        if (sendto_errno == EHOSTUNREACH && (mDNSu32)(mDNSPlatformRawTime()) < (mDNSu32)(mDNSPlatformOneSecond * 180)) return(mStatus_TransientErr);
         // Don't report EADDRNOTAVAIL ("Can't assign requested address") if we're in the middle of a network configuration change
-        if (errno == EADDRNOTAVAIL && m->NetworkChanged) return(mStatus_TransientErr);
-        if (errno == EHOSTUNREACH || errno == EADDRNOTAVAIL || errno == ENETDOWN)
+        if (sendto_errno == EADDRNOTAVAIL && m->NetworkChanged) return(mStatus_TransientErr);
+        if (sendto_errno == EHOSTUNREACH || sendto_errno == EADDRNOTAVAIL || sendto_errno == ENETDOWN)
             LogInfo("mDNSPlatformSendUDP sendto(%d) failed to send packet on InterfaceID %p %5s/%d to %#a:%d skt %d error %d errno %d (%s) %lu",
-                    s, InterfaceID, ifa_name, dst->type, dst, mDNSVal16(dstPort), s, err, errno, strerror(errno), (mDNSu32)(m->timenow));
+                    s, InterfaceID, ifa_name, dst->type, dst, mDNSVal16(dstPort), s, err, sendto_errno, strerror(sendto_errno), (mDNSu32)(m->timenow));
         else
         {
             MessageCount++;
             if (MessageCount < 50)  // Cap and ensure NO spamming of LogMsgs
                 LogMsg("mDNSPlatformSendUDP: sendto(%d) failed to send packet on InterfaceID %p %5s/%d to %#a:%d skt %d error %d errno %d (%s) %lu MessageCount is %d",
-                       s, InterfaceID, ifa_name, dst->type, dst, mDNSVal16(dstPort), s, err, errno, strerror(errno), (mDNSu32)(m->timenow), MessageCount);
+                       s, InterfaceID, ifa_name, dst->type, dst, mDNSVal16(dstPort), s, err, sendto_errno, strerror(sendto_errno), (mDNSu32)(m->timenow), MessageCount);
             else  // If logging is enabled, remove the cap and log aggressively
                 LogInfo("mDNSPlatformSendUDP: sendto(%d) failed to send packet on InterfaceID %p %5s/%d to %#a:%d skt %d error %d errno %d (%s) %lu MessageCount is %d",
-                        s, InterfaceID, ifa_name, dst->type, dst, mDNSVal16(dstPort), s, err, errno, strerror(errno), (mDNSu32)(m->timenow), MessageCount);
+                        s, InterfaceID, ifa_name, dst->type, dst, mDNSVal16(dstPort), s, err, sendto_errno, strerror(sendto_errno), (mDNSu32)(m->timenow), MessageCount);
         }
 
         result = mStatus_UnknownErr;
@@ -1071,7 +1074,7 @@ mDNSexport void myKQSocketCallBack(int s1, short filter, void *context, mDNSBool
         // Find out about other socket parameter that can help understand why select() says the socket is ready for read
         // All of this is racy, as data may have arrived after the call to select()
         static unsigned int numLogMessages = 0;
-        int save_errno = errno;
+        const int save_errno = errno;
         int so_error = -1;
         int so_nread = -1;
         int fionread = -1;
@@ -1912,6 +1915,7 @@ mDNSlocal mStatus SetupSocket(KQSocketSet *cp, const mDNSIPPort port, u_short sa
     mStatus err = mStatus_NoError;
     char *errstr = mDNSNULL;
     const int mtu = 0;
+    int saved_errno;
 
     cp->closeFlag = mDNSNULL;
 
@@ -2044,12 +2048,13 @@ mDNSlocal mStatus SetupSocket(KQSocketSet *cp, const mDNSIPPort port, u_short sa
     return(mStatus_NoError);
 
 fail:
+    saved_errno = errno;
     // For "bind" failures, only write log messages for our shared mDNS port, or for binding to zero
     if (strcmp(errstr, "bind") || mDNSSameIPPort(port, MulticastDNSPort) || mDNSIPPortIsZero(port))
-        LogMsg("%s skt %d port %d error %d errno %d (%s)", errstr, skt, mDNSVal16(port), err, errno, strerror(errno));
+        LogMsg("%s skt %d port %d error %d errno %d (%s)", errstr, skt, mDNSVal16(port), err, saved_errno, strerror(saved_errno));
 
     // If we got a "bind" failure of EADDRINUSE, inform the caller as it might need to try another random port
-    if (!strcmp(errstr, "bind") && errno == EADDRINUSE)
+    if (!strcmp(errstr, "bind") && saved_errno == EADDRINUSE)
     {
         err = EADDRINUSE;
         if (mDNSSameIPPort(port, MulticastDNSPort))
@@ -2325,8 +2330,9 @@ cp += len;                  \
     sock = socket(PF_ROUTE, SOCK_RAW, 0);
     if (sock < 0)
     {
-        LogMsg("getMACAddress: Can not open the socket - %s", strerror(errno));
-        return errno;
+        const int socket_errno = errno;
+        LogMsg("getMACAddress: Can not open the socket - %s", strerror(socket_errno));
+        return socket_errno;
     }
     
     rtm->rtm_addrs   |= RTA_DST | RTA_GATEWAY;
@@ -2358,9 +2364,10 @@ cp += len;                  \
     
     if (write(sock, (char *)&m_rtmsg, rlen) < 0)
     {
-        LogMsg("getMACAddress: writing to routing socket: %s", strerror(errno));
+        const int write_errno = errno;
+        LogMsg("getMACAddress: writing to routing socket: %s", strerror(write_errno));
         close(sock);
-        return errno;
+        return write_errno;
     }
     
     do
@@ -3235,7 +3242,11 @@ mDNSlocal  mDNSBool InterfaceSupportsKeepAlive(NetworkInterfaceInfo *const intf)
 mDNSlocal mDNSBool NetWakeInterface(NetworkInterfaceInfoOSX *i)
 {
     // We only use Sleep Proxy Service on multicast-capable interfaces, except loopback and D2D.
-    if (!SPSInterface(i)) return(mDNSfalse);
+    if (!MulticastInterface(i) || (i->ifa_flags & IFF_LOOPBACK) || i->D2DInterface)
+    {
+        LogSPS("NetWakeInterface: returning false for %s", i->ifinfo.ifname);
+        return(mDNSfalse);
+    }
 
     // If the interface supports TCPKeepalive, it is capable of waking up for a magic packet
     // This check is needed since the SIOCGIFWAKEFLAGS ioctl returns wrong values for WOMP capability
@@ -3253,15 +3264,16 @@ mDNSlocal mDNSBool NetWakeInterface(NetworkInterfaceInfoOSX *i)
     strlcpy(ifr.ifr_name, i->ifinfo.ifname, sizeof(ifr.ifr_name));
     if (ioctl(s, SIOCGIFWAKEFLAGS, &ifr) < 0)
     {
+        const int ioctl_errno = errno;
         // For some strange reason, in /usr/include/sys/errno.h, EOPNOTSUPP is defined to be
         // 102 when compiling kernel code, and 45 when compiling user-level code. Since this
         // error code is being returned from the kernel, we need to use the kernel version.
         #define KERNEL_EOPNOTSUPP 102
-        if (errno != KERNEL_EOPNOTSUPP) // "Operation not supported on socket", the expected result on Leopard and earlier
-            LogMsg("NetWakeInterface SIOCGIFWAKEFLAGS %s errno %d (%s)", i->ifinfo.ifname, errno, strerror(errno));
+        if (ioctl_errno != KERNEL_EOPNOTSUPP) // "Operation not supported on socket", the expected result on Leopard and earlier
+            LogMsg("NetWakeInterface SIOCGIFWAKEFLAGS %s errno %d (%s)", i->ifinfo.ifname, ioctl_errno, strerror(ioctl_errno));
         // If on Leopard or earlier, we get EOPNOTSUPP, so in that case
         // we enable WOL if this interface is not AirPort and "Wake for Network access" is turned on.
-        ifr.ifr_wake_flags = (errno == KERNEL_EOPNOTSUPP && !(i)->BSSID.l[0] && i->m->SystemWakeOnLANEnabled) ? IF_WAKE_ON_MAGIC_PACKET : 0;
+        ifr.ifr_wake_flags = (ioctl_errno == KERNEL_EOPNOTSUPP && !(i)->BSSID.l[0] && i->m->SystemWakeOnLANEnabled) ? IF_WAKE_ON_MAGIC_PACKET : 0;
     }
 
     close(s);

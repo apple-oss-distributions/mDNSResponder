@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2016 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2016-2017 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,18 +16,19 @@
 
 #import "Metrics.h"
 
-#if (TARGET_OS_EMBEDDED)
+#if (TARGET_OS_IOS)
 #import <CoreUtils/SoftLinking.h>
 #import <WirelessDiagnostics/AWDDNSDomainStats.h>
+#import <WirelessDiagnostics/AWDMDNSResponderDNSMessageSizeStats.h>
 #import <WirelessDiagnostics/AWDMDNSResponderDNSStatistics.h>
 #import <WirelessDiagnostics/AWDMDNSResponderResolveStats.h>
 #import <WirelessDiagnostics/AWDMDNSResponderResolveStatsDNSServer.h>
 #import <WirelessDiagnostics/AWDMDNSResponderResolveStatsDomain.h>
 #import <WirelessDiagnostics/AWDMDNSResponderResolveStatsHostname.h>
 #import <WirelessDiagnostics/AWDMDNSResponderResolveStatsResult.h>
+#import <WirelessDiagnostics/AWDMDNSResponderServicesStats.h>
 #import <WirelessDiagnostics/AWDMetricIds_MDNSResponder.h>
 #import <WirelessDiagnostics/WirelessDiagnostics.h>
-#import <WirelessDiagnostics/AWDMDNSResponderServicesStats.h>
 
 #import "DNSCommon.h"
 #import "mDNSMacOSX.h"
@@ -40,25 +40,45 @@
 
 SOFT_LINK_FRAMEWORK(PrivateFrameworks, WirelessDiagnostics)
 
-SOFT_LINK_CLASS(WirelessDiagnostics, AWDDNSDomainStats)
+// AWDServerConnection class
+
+SOFT_LINK_CLASS(WirelessDiagnostics, AWDServerConnection)
+
+#define AWDServerConnectionSoft     getAWDServerConnectionClass()
+
+// Classes for query stats
+
 SOFT_LINK_CLASS(WirelessDiagnostics, AWDMDNSResponderDNSStatistics)
+SOFT_LINK_CLASS(WirelessDiagnostics, AWDDNSDomainStats)
+
+#define AWDMDNSResponderDNSStatisticsSoft       getAWDMDNSResponderDNSStatisticsClass()
+#define AWDDNSDomainStatsSoft                   getAWDDNSDomainStatsClass()
+
+// Classes for resolve stats
+
 SOFT_LINK_CLASS(WirelessDiagnostics, AWDMDNSResponderResolveStats)
 SOFT_LINK_CLASS(WirelessDiagnostics, AWDMDNSResponderResolveStatsDNSServer)
 SOFT_LINK_CLASS(WirelessDiagnostics, AWDMDNSResponderResolveStatsDomain)
 SOFT_LINK_CLASS(WirelessDiagnostics, AWDMDNSResponderResolveStatsHostname)
 SOFT_LINK_CLASS(WirelessDiagnostics, AWDMDNSResponderResolveStatsResult)
-SOFT_LINK_CLASS(WirelessDiagnostics, AWDServerConnection)
-SOFT_LINK_CLASS(WirelessDiagnostics, AWDMetricManager)
 
-#define AWDDNSDomainStatsSoft                           getAWDDNSDomainStatsClass()
-#define AWDMDNSResponderDNSStatisticsSoft               getAWDMDNSResponderDNSStatisticsClass()
 #define AWDMDNSResponderResolveStatsSoft                getAWDMDNSResponderResolveStatsClass()
-#define AWDMDNSResponderResolveStatsResultSoft          getAWDMDNSResponderResolveStatsResultClass()
 #define AWDMDNSResponderResolveStatsDNSServerSoft       getAWDMDNSResponderResolveStatsDNSServerClass()
 #define AWDMDNSResponderResolveStatsDomainSoft          getAWDMDNSResponderResolveStatsDomainClass()
 #define AWDMDNSResponderResolveStatsHostnameSoft        getAWDMDNSResponderResolveStatsHostnameClass()
-#define AWDServerConnectionSoft                         getAWDServerConnectionClass()
-#define AWDMetricManagerSoft                            getAWDMetricManagerClass()
+#define AWDMDNSResponderResolveStatsResultSoft          getAWDMDNSResponderResolveStatsResultClass()
+
+// Classes for services stats
+
+SOFT_LINK_CLASS(WirelessDiagnostics, AWDMetricManager)
+
+#define AWDMetricManagerSoft        getAWDMetricManagerClass()
+
+// Classes for DNS message size stats
+
+SOFT_LINK_CLASS(WirelessDiagnostics, AWDMDNSResponderDNSMessageSizeStats)
+
+#define AWDMDNSResponderDNSMessageSizeStatsSoft     getAWDMDNSResponderDNSMessageSizeStatsClass()
 
 //===========================================================================================================================
 //  Macros
@@ -82,31 +102,26 @@ SOFT_LINK_CLASS(WirelessDiagnostics, AWDMetricManager)
 //  Data structures
 //===========================================================================================================================
 
-typedef struct
+// Data structures for query stats.
+
+typedef struct QueryStats       QueryStats;
+typedef struct DNSHistSet       DNSHistSet;
+typedef mDNSBool                (*QueryNameTest_f)(const QueryStats *inStats, const domainname *inQueryName);
+
+struct QueryStats
 {
-    const char *            cstr;       // Name of domain as a c-string.
-    const domainname *      name;       // Name of domain as length-prefixed labels.
-    int                     labelCount; // Number of labels in domain name. Used for domain name comparisons.
-
-}   Domain;
-
-// Important: Do not add to this list without getting privacy approval beforehand. See <rdar://problem/24155761&26397203>.
-// If you get approval and do add a domain to this list, make sure it passes ValidateDNSStatsDomains() below.
-
-static const Domain     kQueryStatsDomains[] =
-{
-    { ".",              (domainname *)"",                            0 },
-    { "apple.com.",     (domainname *)"\x5" "apple"     "\x3" "com", 2 },
-    { "icloud.com.",    (domainname *)"\x6" "icloud"    "\x3" "com", 2 },
-    { "mzstatic.com.",  (domainname *)"\x8" "mzstatic"  "\x3" "com", 2 },
-    { "google.com.",    (domainname *)"\x6" "google"    "\x3" "com", 2 },
-    { "facebook.com.",  (domainname *)"\x8" "facebook"  "\x3" "com", 2 },
-    { "baidu.com.",     (domainname *)"\x5" "baidu"     "\x3" "com", 2 },
-    { "yahoo.com.",     (domainname *)"\x5" "yahoo"     "\x3" "com", 2 },
-    { "qq.com.",        (domainname *)"\x2" "qq"        "\x3" "com", 2 },
+    QueryStats *        next;           // Pointer to next domain stats in list.
+    const char *        domainStr;      // Domain (see below) as a C string.
+    uint8_t *           domain;         // Domain for which these stats are collected.
+    const char *        altDomainStr;   // Alt domain string to use in the AWD version of the stats instead of domainStr.
+    DNSHistSet *        nonCellular;    // Query stats for queries sent over non-cellular interfaces.
+    DNSHistSet *        cellular;       // Query stats for queries sent over cellular interfaces.
+    QueryNameTest_f     test;           // Function that tests whether a given query's stats belong based on the query name.
+    int                 labelCount;     // Number of labels in domain name. Used for domain name comparisons.
+    mDNSBool            terminal;       // If true and test passes, then no other QueryStats on the list should be visited.
 };
 
-check_compile_time(countof(kQueryStatsDomains) == 9);
+check_compile_time(sizeof(QueryStats) <= 64);
 
 // DNSHist contains the per domain per network type histogram data that goes in a DNSDomainStats protobuf message. See
 // <rdar://problem/23980546> MDNSResponder.proto update.
@@ -164,30 +179,29 @@ check_compile_time(countof_field(DNSHist, unansweredQueryDurationBins) == (count
 check_compile_time(countof_field(DNSHist, responseLatencyBins)         == (countof(kResponseLatencyMsLimits) + 1));
 check_compile_time(countof_field(DNSHist, negResponseLatencyBins)      == (countof(kResponseLatencyMsLimits) + 1));
 
-typedef struct
+struct DNSHistSet
 {
     DNSHist *       histA;      // Histogram data for queries for A resource records.
     DNSHist *       histAAAA;   // Histogram data for queries for AAAA resource records.
-
-}   DNSHistSet;
-
-typedef struct DNSDomainStats       DNSDomainStats;
-struct DNSDomainStats
-{
-    DNSDomainStats *        next;           // Pointer to next domain stats in list.
-    const Domain *          domain;         // Domain for which these stats are collected.
-    DNSHistSet *            nonCellular;    // Query stats for queries sent over non-cellular interfaces.
-    DNSHistSet *            cellular;       // Query stats for queries sent over cellular interfaces.
 };
 
-check_compile_time(sizeof(struct DNSDomainStats) <= 32);
-
-static const Domain     kResolveStatsDomains[] =
+typedef struct
 {
-    { "apple.com.",     (domainname *)"\x5" "apple"    "\x3" "com", 2 },
-    { "icloud.com.",    (domainname *)"\x6" "icloud"   "\x3" "com", 2 },
-    { "mzstatic.com.",  (domainname *)"\x8" "mzstatic" "\x3" "com", 2 },
-    { "me.com.",        (domainname *)"\x2" "me"       "\x3" "com", 2 },
+    const char *        domainStr;
+    const char *        altDomainStr;
+    QueryNameTest_f     test;
+    mDNSBool            terminal;
+
+}   QueryStatsArgs;
+
+// Data structures for resolve stats.
+
+static const char * const       kResolveStatsDomains[] =
+{
+    "apple.com.",
+    "icloud.com.",
+    "mzstatic.com.",
+    "me.com."
 };
 
 check_compile_time(countof(kResolveStatsDomains) == 4);
@@ -202,9 +216,13 @@ typedef struct ResolveStatsNegAAAASet       ResolveStatsNegAAAASet;
 struct ResolveStatsDomain
 {
     ResolveStatsDomain *        next;           // Next domain object in list.
+    const char *                domainStr;
+    uint8_t *                   domain;         // Domain for which these stats are collected.
+    int                         labelCount;     // Number of labels in domain name. Used for domain name comparisons.
     ResolveStatsHostname *      hostnameList;   // List of hostname objects in this domain.
-    const Domain *              domainInfo;     // Pointer to domain info.
 };
+
+check_compile_time(sizeof(ResolveStatsDomain) <= 40);
 
 struct ResolveStatsHostname
 {
@@ -290,27 +308,52 @@ typedef struct
 
 }   Response;
 
-//===========================================================================================================================
-//  Globals
-//===========================================================================================================================
+// Data structures for DNS message size stats.
 
-static DNSDomainStats *             gDomainStatsList            = NULL;
-static ResolveStatsDomain *         gResolveStatsList           = NULL;
-static ResolveStatsDNSServer *      gResolveStatsServerList     = NULL;
-static unsigned int                 gResolveStatsNextServerID   = 0;
-static int                          gResolveStatsObjCount       = 0;
-static AWDServerConnection *        gAWDServerConnection        = nil;
+#define kQuerySizeBinWidth      16
+#define kQuerySizeBinMax        512
+#define kQuerySizeBinCount      ((kQuerySizeBinMax / kQuerySizeBinWidth) + 1)
+
+check_compile_time(kQuerySizeBinWidth > 0);
+check_compile_time(kQuerySizeBinCount > 0);
+check_compile_time((kQuerySizeBinMax % kQuerySizeBinWidth) == 0);
+
+#define kResponseSizeBinWidth       16
+#define kResponseSizeBinMax         512
+#define kResponseSizeBinCount       ((kResponseSizeBinMax / kResponseSizeBinWidth) + 1)
+
+check_compile_time(kResponseSizeBinWidth > 0);
+check_compile_time(kResponseSizeBinCount > 0);
+check_compile_time((kResponseSizeBinMax % kResponseSizeBinWidth) == 0);
+
+typedef struct
+{
+    uint16_t    querySizeBins[kQuerySizeBinCount];
+    uint16_t    responseSizeBins[kResponseSizeBinCount];
+
+}   DNSMessageSizeStats;
+
+check_compile_time(sizeof(DNSMessageSizeStats) <= 132);
 
 //===========================================================================================================================
 //  Local Prototypes
 //===========================================================================================================================
 
-mDNSlocal mStatus   DNSDomainStatsCreate(const Domain *inDomain, DNSDomainStats **outStats);
-mDNSlocal void      DNSDomainStatsFree(DNSDomainStats *inStats);
-mDNSlocal void      DNSDomainStatsFreeList(DNSDomainStats *inList);
-mDNSlocal mStatus   DNSDomainStatsUpdate(DNSDomainStats *inStats, int inType, const ResourceRecord *inRR, mDNSu32 inQuerySendCount, mDNSu32 inLatencyMs, mDNSBool inForCell);
+// Query stats
 
-mDNSlocal mStatus   ResolveStatsDomainCreate(const Domain *inDomain, ResolveStatsDomain **outDomain);
+mDNSlocal mStatus       QueryStatsCreate(const char *inDomainStr, const char *inAltDomainStr, QueryNameTest_f inTest, mDNSBool inTerminal, QueryStats **outStats);
+mDNSlocal void          QueryStatsFree(QueryStats *inStats);
+mDNSlocal void          QueryStatsFreeList(QueryStats *inList);
+mDNSlocal mStatus       QueryStatsUpdate(QueryStats *inStats, int inType, const ResourceRecord *inRR, mDNSu32 inQuerySendCount, mDNSu32 inLatencyMs, mDNSBool inForCell);
+mDNSlocal const char *  QueryStatsGetDomainString(const QueryStats *inStats);
+mDNSlocal mDNSBool      QueryStatsDomainTest(const QueryStats *inStats, const domainname *inQueryName);
+mDNSlocal mDNSBool      QueryStatsHostnameTest(const QueryStats *inStats, const domainname *inQueryName);
+mDNSlocal mDNSBool      QueryStatsContentiCloudTest(const QueryStats *inStats, const domainname *inQueryName);
+mDNSlocal mDNSBool      QueryStatsCourierPushTest(const QueryStats *inStats, const domainname *inQueryName);
+
+// Resolve stats
+
+mDNSlocal mStatus   ResolveStatsDomainCreate(const char *inDomainStr, ResolveStatsDomain **outDomain);
 mDNSlocal void      ResolveStatsDomainFree(ResolveStatsDomain *inDomain);
 mDNSlocal mStatus   ResolveStatsDomainUpdate(ResolveStatsDomain *inDomain, const domainname *inHostname, const Response *inResp, const mDNSAddr *inDNSAddr, mDNSBool inForCell);
 mDNSlocal mStatus   ResolveStatsDomainCreateAWDVersion(const ResolveStatsDomain *inDomain, AWDMDNSResponderResolveStatsDomain **outDomain);
@@ -334,22 +377,58 @@ mDNSlocal mStatus   ResolveStatsNegAAAASetCreate(ResolveStatsNegAAAASet **outSet
 mDNSlocal void      ResolveStatsNegAAAASetFree(ResolveStatsNegAAAASet *inSet);
 mDNSlocal mStatus   ResolveStatsGetServerID(const mDNSAddr *inServerAddr, mDNSBool inForCell, uint8_t *outServerID);
 
-mDNSlocal mStatus   CreateDomainStatsList(DNSDomainStats **outList);
+// DNS message size stats
+
+mDNSlocal mStatus   DNSMessageSizeStatsCreate(DNSMessageSizeStats **outStats);
+mDNSlocal void      DNSMessageSizeStatsFree(DNSMessageSizeStats *inStats);
+
+mDNSlocal mStatus   CreateQueryStatsList(QueryStats **outList);
 mDNSlocal mStatus   CreateResolveStatsList(ResolveStatsDomain **outList);
 mDNSlocal void      FreeResolveStatsList(ResolveStatsDomain *inList);
 mDNSlocal void      FreeResolveStatsServerList(ResolveStatsDNSServer *inList);
 mDNSlocal mStatus   SubmitAWDMetric(UInt32 inMetricID);
 mDNSlocal mStatus   SubmitAWDMetricQueryStats(void);
 mDNSlocal mStatus   SubmitAWDMetricResolveStats(void);
+mDNSlocal mStatus   SubmitAWDMetricDNSMessageSizeStats(void);
 mDNSlocal mStatus   CreateAWDDNSDomainStats(DNSHist *inHist, const char *inDomain, mDNSBool inForCell, AWDDNSDomainStats_RecordType inType, AWDDNSDomainStats **outStats);
-mDNSlocal mStatus   AddAWDDNSDomainStats(AWDMDNSResponderDNSStatistics *inMetric, DNSHistSet *inSet, const char *inDomain, mDNSBool inForCell);
 mDNSlocal void      LogDNSHistSet(const DNSHistSet *inSet, const char *inDomain, mDNSBool inForCell);
 mDNSlocal void      LogDNSHist(const DNSHist *inHist, const char *inDomain, mDNSBool inForCell, const char *inType);
 mDNSlocal void      LogDNSHistSendCounts(const uint16_t inSendCountBins[kQueryStatsSendCountBinCount]);
 mDNSlocal void      LogDNSHistLatencies(const uint16_t inLatencyBins[kQueryStatsLatencyBinCount]);
-#if (METRICS_VALIDATE_DNS_STATS_DOMAINS)
-mDNSlocal void      ValidateDNSStatsDomains(void);
-#endif
+mDNSlocal void      LogDNSMessageSizeStats(const uint16_t *inBins, size_t inBinCount, unsigned int inBinWidth);
+
+mDNSlocal size_t    CopyHistogramBins(uint32_t *inDstBins, uint16_t *inSrcBins, size_t inBinCount);
+
+//===========================================================================================================================
+//  Globals
+//===========================================================================================================================
+
+static AWDServerConnection *        gAWDServerConnection        = nil;
+static QueryStats *                 gQueryStatsList             = NULL;
+static ResolveStatsDomain *         gResolveStatsList           = NULL;
+static ResolveStatsDNSServer *      gResolveStatsServerList     = NULL;
+static unsigned int                 gResolveStatsNextServerID   = 0;
+static int                          gResolveStatsObjCount       = 0;
+static DNSMessageSizeStats *        gDNSMessageSizeStats        = NULL;
+
+// Important: Do not add to this list without getting privacy approval. See <rdar://problem/24155761&26397203&34763471>.
+
+static const QueryStatsArgs     kQueryStatsArgs[] =
+{
+    { ".",                      NULL,                               QueryStatsDomainTest,           mDNSfalse },
+    { "",                       "alt:*-courier.push.apple.com.",    QueryStatsCourierPushTest,      mDNSfalse },
+    { "apple.com.",             NULL,                               QueryStatsDomainTest,           mDNStrue  },
+    { "gateway.icloud.com.",    "alt:gateway.icloud.com",           QueryStatsHostnameTest,         mDNSfalse },
+    { "",                       "alt:*-content.icloud.com.",        QueryStatsContentiCloudTest,    mDNSfalse },
+    { "icloud.com.",            NULL,                               QueryStatsDomainTest,           mDNStrue  },
+    { "mzstatic.com.",          NULL,                               QueryStatsDomainTest,           mDNStrue  },
+    { "google.com.",            NULL,                               QueryStatsDomainTest,           mDNStrue  },
+    { "baidu.com.",             NULL,                               QueryStatsDomainTest,           mDNStrue  },
+    { "yahoo.com.",             NULL,                               QueryStatsDomainTest,           mDNStrue  },
+    { "qq.com.",                NULL,                               QueryStatsDomainTest,           mDNStrue  }
+};
+
+check_compile_time(countof(kQueryStatsArgs) == 11);
 
 //===========================================================================================================================
 //  MetricsInit
@@ -357,10 +436,6 @@ mDNSlocal void      ValidateDNSStatsDomains(void);
 
 mStatus MetricsInit(void)
 {
-#if (METRICS_VALIDATE_DNS_STATS_DOMAINS)
-    ValidateDNSStatsDomains();
-#endif
-
     @autoreleasepool
     {
         gAWDServerConnection = [[AWDServerConnectionSoft alloc]
@@ -389,6 +464,13 @@ mStatus MetricsInit(void)
                     SubmitAWDMetric(inMetricID);
                 }
                 forIdentifier: (UInt32)AWDMetricId_MDNSResponder_ServicesStats];
+
+            [gAWDServerConnection
+                registerQueriableMetricCallback: ^(UInt32 inMetricID)
+                {
+                    SubmitAWDMetric(inMetricID);
+                }
+                forIdentifier: (UInt32)AWDMetricId_MDNSResponder_DNSMessageSizeStats];
         }
         else
         {
@@ -398,56 +480,33 @@ mStatus MetricsInit(void)
 
     if( gAWDServerConnection )
     {
-        CreateDomainStatsList(&gDomainStatsList);
+        CreateQueryStatsList(&gQueryStatsList);
         CreateResolveStatsList(&gResolveStatsList);
+        DNSMessageSizeStatsCreate(&gDNSMessageSizeStats);
     }
 
     return (mStatus_NoError);
 }
 
 //===========================================================================================================================
-//  MetricsUpdateUDNSQueryStats
+//  MetricsUpdateDNSQueryStats
 //===========================================================================================================================
 
-mDNSexport void MetricsUpdateUDNSQueryStats(const domainname *inQueryName, mDNSu16 inType, const ResourceRecord *inRR, mDNSu32 inSendCount, mDNSu32 inLatencyMs, mDNSBool inForCell)
+mDNSexport void MetricsUpdateDNSQueryStats(const domainname *inQueryName, mDNSu16 inType, const ResourceRecord *inRR, mDNSu32 inSendCount, mDNSu32 inLatencyMs, mDNSBool inForCell)
 {
-    DNSDomainStats *        stats;
-    int                     queryLabelCount;
-    const domainname *      queryParentDomain;
-    mDNSBool                isQueryInDomain;
-    int                     skipCount;
-    int                     skipCountLast = -1;
+    QueryStats *        stats;
+    mDNSBool            match;
 
     require_quiet(gAWDServerConnection, exit);
     require_quiet((inType == kDNSType_A) || (inType == kDNSType_AAAA), exit);
 
-    queryLabelCount = CountLabels(inQueryName);
-
-    for (stats = gDomainStatsList; stats; stats = stats->next)
+    for (stats = gQueryStatsList; stats; stats = stats->next)
     {
-        isQueryInDomain = mDNSfalse;
-        if (strcmp(stats->domain->cstr, ".") == 0)
+        match = stats->test(stats, inQueryName);
+        if (match)
         {
-            // All queries are in the root domain.
-            isQueryInDomain = mDNStrue;
-        }
-        else
-        {
-            skipCount = queryLabelCount - stats->domain->labelCount;
-            if (skipCount >= 0)
-            {
-                if (skipCount != skipCountLast)
-                {
-                    queryParentDomain = SkipLeadingLabels(inQueryName, skipCount);
-                    skipCountLast = skipCount;
-                }
-                isQueryInDomain = SameDomainName(queryParentDomain, stats->domain->name);
-            }
-        }
-
-        if (isQueryInDomain)
-        {
-            DNSDomainStatsUpdate(stats, inType, inRR, inSendCount, inLatencyMs, inForCell);
+            QueryStatsUpdate(stats, inType, inRR, inSendCount, inLatencyMs, inForCell);
+            if (stats->terminal) break;
         }
     }
 
@@ -456,12 +515,12 @@ exit:
 }
 
 //===========================================================================================================================
-//  MetricsUpdateUDNSResolveStats
+//  MetricsUpdateDNSResolveStats
 //===========================================================================================================================
 
-mDNSexport void MetricsUpdateUDNSResolveStats(const domainname *inQueryName, const ResourceRecord *inRR, mDNSBool inForCell)
+mDNSexport void MetricsUpdateDNSResolveStats(const domainname *inQueryName, const ResourceRecord *inRR, mDNSBool inForCell)
 {
-    ResolveStatsDomain *        domain;
+    ResolveStatsDomain *        domainStats;
     domainname                  hostname;
     size_t                      hostnameLen;
     mDNSBool                    isQueryInDomain;
@@ -477,10 +536,10 @@ mDNSexport void MetricsUpdateUDNSResolveStats(const domainname *inQueryName, con
 
     queryLabelCount = CountLabels(inQueryName);
 
-    for (domain = gResolveStatsList; domain; domain = domain->next)
+    for (domainStats = gResolveStatsList; domainStats; domainStats = domainStats->next)
     {
         isQueryInDomain = mDNSfalse;
-        skipCount = queryLabelCount - domain->domainInfo->labelCount;
+        skipCount = queryLabelCount - domainStats->labelCount;
         if (skipCount >= 0)
         {
             if (skipCount != skipCountLast)
@@ -488,7 +547,7 @@ mDNSexport void MetricsUpdateUDNSResolveStats(const domainname *inQueryName, con
                 queryParentDomain = SkipLeadingLabels(inQueryName, skipCount);
                 skipCountLast = skipCount;
             }
-            isQueryInDomain = SameDomainName(queryParentDomain, domain->domainInfo->name);
+            isQueryInDomain = SameDomainName(queryParentDomain, (const domainname *)domainStats->domain);
         }
         if (!isQueryInDomain) continue;
 
@@ -508,11 +567,43 @@ mDNSexport void MetricsUpdateUDNSResolveStats(const domainname *inQueryName, con
             response.type = (inRR->rrtype == kDNSType_A) ? kResponseType_IPv4Addr : kResponseType_IPv6Addr;
             response.data = (inRR->rrtype == kDNSType_A) ? inRR->rdata->u.ipv4.b : inRR->rdata->u.ipv6.b;
         }
-        ResolveStatsDomainUpdate(domain, &hostname, &response, &inRR->rDNSServer->addr, inForCell);
+        ResolveStatsDomainUpdate(domainStats, &hostname, &response, &inRR->rDNSServer->addr, inForCell);
     }
 
 exit:
     return;
+}
+
+//===========================================================================================================================
+//  MetricsUpdateDNSQuerySize
+//===========================================================================================================================
+
+mDNSlocal void UpdateMessageSizeCounts(uint16_t *inBins, size_t inBinCount, unsigned int inBinWidth, uint32_t inSize);
+
+mDNSexport void MetricsUpdateDNSQuerySize(mDNSu32 inSize)
+{
+    if (!gDNSMessageSizeStats) return;
+    UpdateMessageSizeCounts(gDNSMessageSizeStats->querySizeBins, kQuerySizeBinCount, kQuerySizeBinWidth, inSize);
+}
+
+mDNSlocal void UpdateMessageSizeCounts(uint16_t *inBins, size_t inBinCount, unsigned int inBinWidth, uint32_t inSize)
+{
+    size_t      i;
+
+    if (inSize == 0) return;
+    i = (inSize - 1) / inBinWidth;
+    if (i >= inBinCount) i = inBinCount - 1;
+    increment_saturate(inBins[i], UINT16_MAX);
+}
+
+//===========================================================================================================================
+//  MetricsUpdateDNSResponseSize
+//===========================================================================================================================
+
+mDNSexport void MetricsUpdateDNSResponseSize(mDNSu32 inSize)
+{
+    if (!gDNSMessageSizeStats) return;
+    UpdateMessageSizeCounts(gDNSMessageSizeStats->responseSizeBins, kResponseSizeBinCount, kResponseSizeBinWidth, inSize);
 }
 
 //===========================================================================================================================
@@ -521,7 +612,7 @@ exit:
 
 mDNSexport void LogMetrics(void)
 {
-    DNSDomainStats *                    stats;
+    QueryStats *                        stats;
     const ResolveStatsDomain *          domain;
     const ResolveStatsHostname *        hostname;
     const ResolveStatsDNSServer *       server;
@@ -538,15 +629,15 @@ mDNSexport void LogMetrics(void)
     LogMsgNoIdent("gAWDServerConnection %p", gAWDServerConnection);
     LogMsgNoIdent("---- DNS query stats by domain -----");
 
-    for (stats = gDomainStatsList; stats; stats = stats->next)
+    for (stats = gQueryStatsList; stats; stats = stats->next)
     {
         if (!stats->nonCellular && !stats->cellular)
         {
-            LogMsgNoIdent("No data for %s", stats->domain->cstr);
+            LogMsgNoIdent("No data for %s", QueryStatsGetDomainString(stats));
             continue;
         }
-        if (stats->nonCellular) LogDNSHistSet(stats->nonCellular, stats->domain->cstr, mDNSfalse);
-        if (stats->cellular)    LogDNSHistSet(stats->cellular,    stats->domain->cstr, mDNStrue);
+        if (stats->nonCellular) LogDNSHistSet(stats->nonCellular, QueryStatsGetDomainString(stats), mDNSfalse);
+        if (stats->cellular)    LogDNSHistSet(stats->cellular,    QueryStatsGetDomainString(stats), mDNStrue);
     }
 
     LogMsgNoIdent("---- DNS resolve stats by domain -----");
@@ -565,7 +656,7 @@ mDNSexport void LogMetrics(void)
         for (hostname = domain->hostnameList; hostname; hostname = hostname->next) { hostnameCount++; }
         hostnameObjCount += hostnameCount;
 
-        LogMsgNoIdent("%##s (%d hostname%s)", domain->domainInfo->name, hostnameCount, (hostnameCount == 1) ? "" : "s");
+        LogMsgNoIdent("%s (%d hostname%s)", domain->domainStr, hostnameCount, (hostnameCount == 1) ? "" : "s");
 
         for (hostname = domain->hostnameList; hostname; hostname = hostname->next)
         {
@@ -622,39 +713,96 @@ mDNSexport void LogMetrics(void)
     }
     LogMsgNoIdent("Total object count: %3d (server %d hostname %d address %d)",
         serverObjCount + hostnameObjCount + addrObjCount, serverObjCount, hostnameObjCount, addrObjCount);
-    
+
     LogMsgNoIdent("---- Num of Services Registered -----");
     LogMsgNoIdent("Current_number_of_services_registered :[%d], Max_number_of_services_registered :[%d]",
                   curr_num_regservices, max_num_regservices);
+
+    if (gDNSMessageSizeStats)
+    {
+        LogMsgNoIdent("---- DNS query size stats ---");
+        LogDNSMessageSizeStats(gDNSMessageSizeStats->querySizeBins, kQuerySizeBinCount, kQuerySizeBinWidth);
+
+        LogMsgNoIdent("-- DNS response size stats --");
+        LogDNSMessageSizeStats(gDNSMessageSizeStats->responseSizeBins, kResponseSizeBinCount, kResponseSizeBinWidth);
+    }
+    else
+    {
+        LogMsgNoIdent("No DNS message size stats.");
+    }
 }
 
 //===========================================================================================================================
-//  DNSDomainStatsCreate
+//  QueryStatsCreate
 //===========================================================================================================================
 
-mDNSlocal mStatus DNSDomainStatsCreate(const Domain *inDomain, DNSDomainStats **outStats)
-{
-    mStatus                 err;
-    DNSDomainStats *        obj;
+mDNSlocal mStatus StringToDomainName(const char *inString, uint8_t **outDomainName);
 
-    obj = (DNSDomainStats *)calloc(1, sizeof(*obj));
+mDNSlocal mStatus QueryStatsCreate(const char *inDomainStr, const char *inAltDomainStr, QueryNameTest_f inTest, mDNSBool inTerminal, QueryStats **outStats)
+{
+    mStatus             err;
+    QueryStats *        obj;
+
+    obj = (QueryStats *)calloc(1, sizeof(*obj));
     require_action_quiet(obj, exit, err = mStatus_NoMemoryErr);
 
-    obj->domain = inDomain;
+    obj->domainStr = inDomainStr;
+    err = StringToDomainName(obj->domainStr, &obj->domain);
+    require_noerr_quiet(err, exit);
+
+    obj->altDomainStr   = inAltDomainStr;
+    obj->test           = inTest;
+    obj->labelCount     = CountLabels((const domainname *)obj->domain);
+    obj->terminal       = inTerminal;
 
     *outStats = obj;
+    obj = NULL;
     err = mStatus_NoError;
 
 exit:
+    if (obj) QueryStatsFree(obj);
     return (err);
 }
 
+mDNSlocal mStatus StringToDomainName(const char *inString, uint8_t **outDomainName)
+{
+    mStatus             err;
+    uint8_t *           domainPtr = NULL;
+    size_t              domainLen;
+    const mDNSu8 *      ptr;
+    domainname          domain;
+
+    if (strcmp(inString, ".") == 0)
+    {
+        domain.c[0] = 0;
+    }
+    else
+    {
+        ptr = MakeDomainNameFromDNSNameString(&domain, inString);
+        require_action_quiet(ptr, exit, err = mStatus_BadParamErr);
+    }
+    domainLen = DomainNameLength(&domain);
+
+    domainPtr = (uint8_t *)malloc(domainLen);
+    require_action_quiet(domainPtr, exit, err = mStatus_NoMemoryErr);
+
+    memcpy(domainPtr, domain.c, domainLen);
+
+    *outDomainName = domainPtr;
+    domainPtr = NULL;
+    err = mStatus_NoError;
+
+exit:
+    return(err);
+}
+
 //===========================================================================================================================
-//  DNSDomainStatsFree
+//  QueryStatsFree
 //===========================================================================================================================
 
-mDNSlocal void DNSDomainStatsFree(DNSDomainStats *inStats)
+mDNSlocal void QueryStatsFree(QueryStats *inStats)
 {
+    ForgetMem(&inStats->domain);
     if (inStats->nonCellular)
     {
         ForgetMem(&inStats->nonCellular->histA);
@@ -673,25 +821,25 @@ mDNSlocal void DNSDomainStatsFree(DNSDomainStats *inStats)
 }
 
 //===========================================================================================================================
-//  DNSDomainStatsFreeList
+//  QueryStatsFreeList
 //===========================================================================================================================
 
-mDNSlocal void DNSDomainStatsFreeList(DNSDomainStats *inList)
+mDNSlocal void QueryStatsFreeList(QueryStats *inList)
 {
-    DNSDomainStats *        stats;
+    QueryStats *        stats;
 
     while ((stats = inList) != NULL)
     {
         inList = stats->next;
-        DNSDomainStatsFree(stats);
+        QueryStatsFree(stats);
     }
 }
 
 //===========================================================================================================================
-//  DNSDomainStatsUpdate
+//  QueryStatsUpdate
 //===========================================================================================================================
 
-mDNSlocal mStatus DNSDomainStatsUpdate(DNSDomainStats *inStats, int inType, const ResourceRecord *inRR, mDNSu32 inQuerySendCount, mDNSu32 inLatencyMs, mDNSBool inForCell)
+mDNSlocal mStatus QueryStatsUpdate(QueryStats *inStats, int inType, const ResourceRecord *inRR, mDNSu32 inQuerySendCount, mDNSu32 inLatencyMs, mDNSBool inForCell)
 {
     mStatus             err;
     DNSHistSet *        set;
@@ -751,10 +899,141 @@ exit:
 }
 
 //===========================================================================================================================
+//  QueryStatsGetDomainString
+//===========================================================================================================================
+
+mDNSlocal const char * QueryStatsGetDomainString(const QueryStats *inStats)
+{
+    return (inStats->altDomainStr ? inStats->altDomainStr : inStats->domainStr);
+}
+
+//===========================================================================================================================
+//  QueryStatsDomainTest
+//===========================================================================================================================
+
+mDNSlocal mDNSBool QueryStatsDomainTest(const QueryStats *inStats, const domainname *inQueryName)
+{
+    const domainname *      parentDomain;
+    int                     labelCount;
+
+    if (inStats->domain[0] == 0) return (mDNStrue);
+
+    labelCount = CountLabels(inQueryName);
+    if (labelCount < inStats->labelCount) return (mDNSfalse);
+
+    parentDomain = SkipLeadingLabels(inQueryName, labelCount - inStats->labelCount);
+    return (SameDomainName(parentDomain, (const domainname *)inStats->domain));
+}
+
+//===========================================================================================================================
+//  QueryStatsHostnameTest
+//===========================================================================================================================
+
+mDNSlocal mDNSBool QueryStatsHostnameTest(const QueryStats *inStats, const domainname *inQueryName)
+{
+    return (SameDomainName(inQueryName, (const domainname *)inStats->domain));
+}
+
+//===========================================================================================================================
+//  QueryStatsContentiCloudTest
+//===========================================================================================================================
+
+mDNSlocal const uint8_t *LocateLabelSuffix(const uint8_t *inLabel, const uint8_t *inSuffixPtr, size_t inSuffixLen);
+
+#define kContentSuffixStr       "-content"
+
+mDNSlocal mDNSBool QueryStatsContentiCloudTest(const QueryStats *inStats, const domainname *inQueryName)
+{
+    const mDNSu8 * const    firstLabel = inQueryName->c;
+    const uint8_t *         suffix;
+    const domainname *      parentDomain;
+    int                     labelCount;
+
+    (void) inStats; // Unused.
+
+    labelCount = CountLabels(inQueryName);
+    if (labelCount != 3) return (mDNSfalse);
+
+    suffix = LocateLabelSuffix(firstLabel, (const uint8_t *)kContentSuffixStr, sizeof_string(kContentSuffixStr));
+    if (suffix && (suffix > &firstLabel[1]))
+    {
+        parentDomain = SkipLeadingLabels(inQueryName, 1);
+        if (SameDomainName(parentDomain, (const domainname *)"\x6" "icloud" "\x3" "com"))
+        {
+            return (mDNStrue);
+        }
+    }
+
+    return (mDNSfalse);
+}
+
+mDNSlocal const uint8_t *LocateLabelSuffix(const uint8_t *inLabel, const uint8_t *inSuffixPtr, size_t inSuffixLen)
+{
+    const uint8_t *     ptr;
+    const uint8_t *     lp;
+    const uint8_t *     sp;
+    size_t              len;
+    const size_t        labelLen = inLabel[0];
+
+    if (labelLen < inSuffixLen) return (NULL);
+
+    ptr = &inLabel[1 + labelLen - inSuffixLen];
+    lp  = ptr;
+    sp  = inSuffixPtr;
+    for (len = inSuffixLen; len > 0; --len)
+    {
+        if (tolower(*lp) != tolower(*sp)) return (NULL);
+        ++lp;
+        ++sp;
+    }
+
+    return (ptr);
+}
+
+//===========================================================================================================================
+//  QueryStatsCourierPushTest
+//===========================================================================================================================
+
+#define kCourierSuffixStr       "-courier"
+
+mDNSlocal mDNSBool QueryStatsCourierPushTest(const QueryStats *inStats, const domainname *inQueryName)
+{
+    const mDNSu8 * const    firstLabel = inQueryName->c;
+    const uint8_t *         suffix;
+    const uint8_t *         ptr;
+    const domainname *      parentDomain;
+    int                     labelCount;
+
+    (void) inStats; // Unused.
+
+    labelCount = CountLabels(inQueryName);
+    if (labelCount != 4) return (mDNSfalse);
+
+    suffix = LocateLabelSuffix(firstLabel, (const mDNSu8 *)kCourierSuffixStr, sizeof_string(kCourierSuffixStr));
+    if (suffix && (suffix > &firstLabel[1]))
+    {
+        for (ptr = &firstLabel[1]; ptr < suffix; ++ptr)
+        {
+            if (!isdigit(*ptr)) break;
+        }
+        if (ptr == suffix)
+        {
+            parentDomain = SkipLeadingLabels(inQueryName, 1);
+            if (SameDomainName(parentDomain, (const domainname *)"\x4" "push" "\x5" "apple" "\x3" "com"))
+            {
+                return (mDNStrue);
+            }
+        }
+    }
+
+    return (mDNSfalse);
+}
+
+//===========================================================================================================================
 //  ResolveStatsDomainCreate
 //===========================================================================================================================
 
-mDNSlocal mStatus ResolveStatsDomainCreate(const Domain *inDomain, ResolveStatsDomain **outDomain)
+mDNSlocal mStatus ResolveStatsDomainCreate(const char *inDomainStr, ResolveStatsDomain **outDomain)
 {
     mStatus                     err;
     ResolveStatsDomain *        obj;
@@ -762,12 +1041,18 @@ mDNSlocal mStatus ResolveStatsDomainCreate(const Domain *inDomain, ResolveStatsD
     obj = (ResolveStatsDomain *)calloc(1, sizeof(*obj));
     require_action_quiet(obj, exit, err = mStatus_NoMemoryErr);
 
-    obj->domainInfo = inDomain;
+    obj->domainStr = inDomainStr;
+    err = StringToDomainName(obj->domainStr, &obj->domain);
+    require_noerr_quiet(err, exit);
+
+    obj->labelCount = CountLabels((const domainname *)obj->domain);
 
     *outDomain = obj;
+    obj = NULL;
     err = mStatus_NoError;
 
 exit:
+    if (obj) ResolveStatsDomainFree(obj);
     return (err);
 }
 
@@ -779,6 +1064,7 @@ mDNSlocal void ResolveStatsDomainFree(ResolveStatsDomain *inDomain)
 {
     ResolveStatsHostname *      hostname;
 
+    ForgetMem(&inDomain->domain);
     while ((hostname = inDomain->hostnameList) != NULL)
     {
         inDomain->hostnameList = hostname->next;
@@ -862,7 +1148,7 @@ mDNSlocal mStatus ResolveStatsDomainCreateAWDVersion(const ResolveStatsDomain *i
     domain = [[AWDMDNSResponderResolveStatsDomainSoft alloc] init];
     require_action_quiet(domain, exit, err = mStatus_UnknownErr);
 
-    name = [[NSString alloc] initWithUTF8String:inDomain->domainInfo->cstr];
+    name = [[NSString alloc] initWithUTF8String:inDomain->domainStr];
     require_action_quiet(name, exit, err = mStatus_UnknownErr);
 
     domain.name = name;
@@ -1357,7 +1643,7 @@ mDNSlocal mStatus ResolveStatsGetServerID(const mDNSAddr *inServerAddr, mDNSBool
         require_noerr_quiet(err, exit);
         gResolveStatsObjCount++;
 
-        server->id   = gResolveStatsNextServerID++;
+        server->id   = (uint8_t)gResolveStatsNextServerID++;
         server->next = gResolveStatsServerList;
         gResolveStatsServerList = server;
     }
@@ -1376,21 +1662,50 @@ exit:
 }
 
 //===========================================================================================================================
-//  CreateDomainStatsList
+//  DNSMessageSizeStatsCreate
 //===========================================================================================================================
 
-mDNSlocal mStatus CreateDomainStatsList(DNSDomainStats **outList)
+mDNSlocal mStatus DNSMessageSizeStatsCreate(DNSMessageSizeStats **outStats)
 {
-    mStatus                 err;
-    int                     i;
-    DNSDomainStats *        stats;
-    DNSDomainStats **       p;
-    DNSDomainStats *        list = NULL;
+    mStatus                     err;
+    DNSMessageSizeStats *       stats;
+
+    stats = (DNSMessageSizeStats *)calloc(1, sizeof(*stats));
+    require_action_quiet(stats, exit, err = mStatus_NoMemoryErr);
+
+    *outStats = stats;
+    err = mStatus_NoError;
+
+exit:
+    return (err);
+}
+
+//===========================================================================================================================
+//  DNSMessageSizeStatsFree
+//===========================================================================================================================
+
+mDNSlocal void DNSMessageSizeStatsFree(DNSMessageSizeStats *inStats)
+{
+    free(inStats);
+}
+
+//===========================================================================================================================
+//  CreateQueryStatsList
+//===========================================================================================================================
+
+mDNSlocal mStatus CreateQueryStatsList(QueryStats **outList)
+{
+    mStatus                             err;
+    QueryStats **                       p;
+    QueryStats *                        stats;
+    const QueryStatsArgs *              args;
+    const QueryStatsArgs * const        end     = kQueryStatsArgs + countof(kQueryStatsArgs);
+    QueryStats *                        list    = NULL;
 
     p = &list;
-    for (i = 0; i < (int)countof(kQueryStatsDomains); ++i)
+    for (args = kQueryStatsArgs; args < end; ++args)
     {
-        err = DNSDomainStatsCreate(&kQueryStatsDomains[i], &stats);
+        err = QueryStatsCreate(args->domainStr, args->altDomainStr, args->test, args->terminal, &stats);
         require_noerr_quiet(err, exit);
 
         *p = stats;
@@ -1399,9 +1714,10 @@ mDNSlocal mStatus CreateDomainStatsList(DNSDomainStats **outList)
 
     *outList = list;
     list = NULL;
+    err = mStatus_NoError;
 
 exit:
-    DNSDomainStatsFreeList(list);
+    QueryStatsFreeList(list);
     return (err);
 }
 
@@ -1412,15 +1728,15 @@ exit:
 mDNSlocal mStatus CreateResolveStatsList(ResolveStatsDomain **outList)
 {
     mStatus                     err;
-    int                         i;
+    unsigned int                i;
     ResolveStatsDomain *        domain;
     ResolveStatsDomain **       p;
     ResolveStatsDomain *        list = NULL;
 
     p = &list;
-    for (i = 0; i < (int)countof(kResolveStatsDomains); ++i)
+    for (i = 0; i < (unsigned int)countof(kResolveStatsDomains); ++i)
     {
-        err = ResolveStatsDomainCreate(&kResolveStatsDomains[i], &domain);
+        err = ResolveStatsDomainCreate(kResolveStatsDomains[i], &domain);
         require_noerr_quiet(err, exit);
 
         *p = domain;
@@ -1429,6 +1745,7 @@ mDNSlocal mStatus CreateResolveStatsList(ResolveStatsDomain **outList)
 
     *outList = list;
     list = NULL;
+    err = mStatus_NoError;
 
 exit:
     FreeResolveStatsList(list);
@@ -1491,7 +1808,11 @@ mDNSlocal mStatus SubmitAWDMetric(UInt32 inMetricID)
             KQueueUnlock("SubmitAWDSimpleMetricServiceStats");
             err = mStatus_NoError;
             break;
-            
+
+        case AWDMetricId_MDNSResponder_DNSMessageSizeStats:
+            err = SubmitAWDMetricDNSMessageSizeStats();
+            break;
+
         default:
             err = mStatus_UnsupportedErr;
             break;
@@ -1505,22 +1826,25 @@ mDNSlocal mStatus SubmitAWDMetric(UInt32 inMetricID)
 //  SubmitAWDMetricQueryStats
 //===========================================================================================================================
 
+mDNSlocal mStatus   AddQueryStats(AWDMDNSResponderDNSStatistics *inMetric, const QueryStats *inStats);
+mDNSlocal mStatus   AddDNSHistSet(AWDMDNSResponderDNSStatistics *inMetric, DNSHistSet *inSet, const char *inDomain, mDNSBool inForCell);
+
 mDNSlocal mStatus SubmitAWDMetricQueryStats(void)
 {
     mStatus                             err;
     BOOL                                success;
-    DNSDomainStats *                    stats;
-    DNSDomainStats *                    newDomainStatsList;
-    DNSDomainStats *                    domainStatsList = NULL;
-    AWDMetricContainer *                container       = nil;
-    AWDMDNSResponderDNSStatistics *     metric          = nil;
+    QueryStats *                        stats;
+    QueryStats *                        statsList;
+    QueryStats *                        newStatsList;
+    AWDMetricContainer *                container   = nil;
+    AWDMDNSResponderDNSStatistics *     metric      = nil;
 
-    err = CreateDomainStatsList(&newDomainStatsList);
-    require_noerr_quiet(err, exit);
+    newStatsList = NULL;
+    CreateQueryStatsList(&newStatsList);
 
     KQueueLock();
-    domainStatsList = gDomainStatsList;
-    gDomainStatsList = newDomainStatsList;
+    statsList       = gQueryStatsList;
+    gQueryStatsList = newStatsList;
     KQueueUnlock("SubmitAWDMetricQueryStats");
 
     container = [gAWDServerConnection newMetricContainerWithIdentifier:AWDMetricId_MDNSResponder_DNSStatistics];
@@ -1529,31 +1853,71 @@ mDNSlocal mStatus SubmitAWDMetricQueryStats(void)
     metric = [[AWDMDNSResponderDNSStatisticsSoft alloc] init];
     require_action_quiet(metric, exit, err = mStatus_UnknownErr);
 
-    while ((stats = domainStatsList) != NULL)
+    while ((stats = statsList) != NULL)
     {
-        if (stats->nonCellular)
-        {
-            err = AddAWDDNSDomainStats(metric, stats->nonCellular, stats->domain->cstr, mDNSfalse);
-            require_noerr_quiet(err, exit);
-        }
-        if (stats->cellular)
-        {
-            err = AddAWDDNSDomainStats(metric, stats->cellular, stats->domain->cstr, mDNStrue);
-            require_noerr_quiet(err, exit);
-        }
-        domainStatsList = stats->next;
-        DNSDomainStatsFree(stats);
+        err = AddQueryStats(metric, stats);
+        require_noerr_quiet(err, exit);
+
+        statsList = stats->next;
+        QueryStatsFree(stats);
     }
 
     container.metric = metric;
     success = [gAWDServerConnection submitMetric:container];
-    LogMsg("SubmitAWDMetricQueryStats: metric submission %s.", success ? "succeeded" : "failed" );
+    LogMsg("SubmitAWDMetricQueryStats: metric submission %s.", success ? "succeeded" : "failed");
     err = success ? mStatus_NoError : mStatus_UnknownErr;
 
 exit:
     [metric release];
     [container release];
-    DNSDomainStatsFreeList(domainStatsList);
+    QueryStatsFreeList(statsList);
+    return (err);
+}
+
+mDNSlocal mStatus AddQueryStats(AWDMDNSResponderDNSStatistics *inMetric, const QueryStats *inStats)
+{
+    mStatus     err;
+
+    if (inStats->nonCellular)
+    {
+        err = AddDNSHistSet(inMetric, inStats->nonCellular, QueryStatsGetDomainString(inStats), mDNSfalse);
+        require_noerr_quiet(err, exit);
+    }
+    if (inStats->cellular)
+    {
+        err = AddDNSHistSet(inMetric, inStats->cellular, QueryStatsGetDomainString(inStats), mDNStrue);
+        require_noerr_quiet(err, exit);
+    }
+    err = mStatus_NoError;
+
+exit:
+    return (err);
+}
+
+mDNSlocal mStatus AddDNSHistSet(AWDMDNSResponderDNSStatistics *inMetric, DNSHistSet *inSet, const char *inDomain, mDNSBool inForCell)
+{
+    mStatus                 err;
+    AWDDNSDomainStats *     awdStats;
+
+    if (inSet->histA)
+    {
+        err = CreateAWDDNSDomainStats(inSet->histA, inDomain, inForCell, AWDDNSDomainStats_RecordType_A, &awdStats);
+        require_noerr_quiet(err, exit);
+
+        [inMetric addStats:awdStats];
+        [awdStats release];
+    }
+    if (inSet->histAAAA)
+    {
+        err = CreateAWDDNSDomainStats(inSet->histAAAA, inDomain, inForCell, AWDDNSDomainStats_RecordType_AAAA, &awdStats);
+        require_noerr_quiet(err, exit);
+
+        [inMetric addStats:awdStats];
+        [awdStats release];
+    }
+    err = mStatus_NoError;
+
+exit:
     return (err);
 }
 
@@ -1619,7 +1983,7 @@ mDNSlocal mStatus SubmitAWDMetricResolveStats(void)
 
     container.metric = metric;
     success = [gAWDServerConnection submitMetric:container];
-    LogMsg("SubmitAWDMetricResolveStats: metric submission %s.", success ? "succeeded" : "failed" );
+    LogMsg("SubmitAWDMetricResolveStats: metric submission %s.", success ? "succeeded" : "failed");
     err = success ? mStatus_NoError : mStatus_UnknownErr;
 
 exit:
@@ -1627,6 +1991,61 @@ exit:
     [container release];
     FreeResolveStatsList(domainList);
     FreeResolveStatsServerList(serverList);
+    return (err);
+}
+
+//===========================================================================================================================
+//  SubmitAWDMetricDNSMessageSizeStats
+//===========================================================================================================================
+
+mDNSlocal mStatus SubmitAWDMetricDNSMessageSizeStats(void)
+{
+    mStatus                                     err;
+    DNSMessageSizeStats *                       stats;
+    DNSMessageSizeStats *                       newStats;
+    AWDMetricContainer *                        container;
+    AWDMDNSResponderDNSMessageSizeStats *       metric = nil;
+    BOOL                                        success;
+
+    newStats = NULL;
+    DNSMessageSizeStatsCreate(&newStats);
+
+    KQueueLock();
+    stats                   = gDNSMessageSizeStats;
+    gDNSMessageSizeStats    = newStats;
+    KQueueUnlock("SubmitAWDMetricDNSMessageSizeStats");
+
+    container = [gAWDServerConnection newMetricContainerWithIdentifier:AWDMetricId_MDNSResponder_DNSMessageSizeStats];
+    require_action_quiet(container, exit, err = mStatus_UnknownErr);
+
+    metric = [[AWDMDNSResponderDNSMessageSizeStatsSoft alloc] init];
+    require_action_quiet(metric, exit, err = mStatus_UnknownErr);
+
+    if (stats)
+    {
+        size_t          binCount;
+        uint32_t        bins[Max(kQuerySizeBinCount, kResponseSizeBinCount)];
+
+        // Set query size counts.
+
+        binCount = CopyHistogramBins(bins, stats->querySizeBins, kQuerySizeBinCount);
+        [metric setQuerySizeCounts:bins count:(NSUInteger)binCount];
+
+        // Set response size counts.
+
+        binCount = CopyHistogramBins(bins, stats->responseSizeBins, kResponseSizeBinCount);
+        [metric setResponseSizeCounts:bins count:(NSUInteger)binCount];
+    }
+
+    container.metric = metric;
+    success = [gAWDServerConnection submitMetric:container];
+    LogMsg("SubmitAWDMetricDNSMessageSizeStats: metric submission %s.", success ? "succeeded" : "failed");
+    err = success ? mStatus_NoError : mStatus_UnknownErr;
+
+exit:
+    [metric release];
+    [container release];
+    if (stats) DNSMessageSizeStatsFree(stats);
     return (err);
 }
 
@@ -1639,12 +2058,9 @@ mDNSlocal mStatus CreateAWDDNSDomainStats(DNSHist *inHist, const char *inDomain,
     mStatus                 err;
     AWDDNSDomainStats *     awdStats    = nil;
     NSString *              domain      = nil;
+    size_t                  binCount;
     uint32_t                sendCountBins[kQueryStatsSendCountBinCount];
     uint32_t                latencyBins[kQueryStatsLatencyBinCount];
-    int                     i;
-    unsigned int            totalAnswered;
-    unsigned int            totalNegAnswered;
-    unsigned int            totalUnanswered;
 
     awdStats = [[AWDDNSDomainStatsSoft alloc] init];
     require_action_quiet(awdStats, exit, err = mStatus_UnknownErr);
@@ -1656,55 +2072,40 @@ mDNSlocal mStatus CreateAWDDNSDomainStats(DNSHist *inHist, const char *inDomain,
     awdStats.networkType = inForCell ? AWDDNSDomainStats_NetworkType_Cellular : AWDDNSDomainStats_NetworkType_NonCellular;
     awdStats.recordType  = inType;
 
-    totalAnswered = 0;
-    for (i = 0; i < kQueryStatsSendCountBinCount; ++i)
-    {
-        sendCountBins[i] = inHist->answeredQuerySendCountBins[i];
-        totalAnswered   += inHist->answeredQuerySendCountBins[i];
-    }
-    [awdStats setAnsweredQuerySendCounts:sendCountBins count:kQueryStatsSendCountBinCount];
+    // Positively answered query send counts
 
-    totalNegAnswered = 0;
-    for (i = 0; i < kQueryStatsSendCountBinCount; ++i)
-    {
-        sendCountBins[i]  = inHist->negAnsweredQuerySendCountBins[i];
-        totalNegAnswered += inHist->negAnsweredQuerySendCountBins[i];
-    }
-    [awdStats setNegAnsweredQuerySendCounts:sendCountBins count:kQueryStatsSendCountBinCount];
+    binCount = CopyHistogramBins(sendCountBins, inHist->answeredQuerySendCountBins, kQueryStatsSendCountBinCount);
+    [awdStats setAnsweredQuerySendCounts:sendCountBins count:(NSUInteger)binCount];
 
-    totalUnanswered = 0;
-    for (i = 0; i < kQueryStatsSendCountBinCount; ++i)
-    {
-        sendCountBins[i] = inHist->unansweredQuerySendCountBins[i];
-        totalUnanswered += inHist->unansweredQuerySendCountBins[i];
-    }
-    [awdStats setUnansweredQuerySendCounts:sendCountBins count:kQueryStatsSendCountBinCount];
+    // binCount > 1 means that at least one of the non-zero send count bins had a non-zero count, i.e., at least one query
+    // was sent out on the wire. In that case, include the associated latency bins as well.
 
-    if (totalAnswered > inHist->answeredQuerySendCountBins[0])
+    if (binCount > 1)
     {
-        for (i = 0; i < kQueryStatsLatencyBinCount; ++i)
-        {
-            latencyBins[i] = inHist->responseLatencyBins[i];
-        }
-        [awdStats setResponseLatencyMs:latencyBins count:kQueryStatsLatencyBinCount];
+        binCount = CopyHistogramBins(latencyBins, inHist->responseLatencyBins, kQueryStatsLatencyBinCount);
+        [awdStats setResponseLatencyMs:latencyBins count:(NSUInteger)binCount];
     }
 
-    if (totalNegAnswered > inHist->negAnsweredQuerySendCountBins[0])
+    // Negatively answered query send counts
+
+    binCount = CopyHistogramBins(sendCountBins, inHist->negAnsweredQuerySendCountBins, kQueryStatsSendCountBinCount);
+    [awdStats setNegAnsweredQuerySendCounts:sendCountBins count:(NSUInteger)binCount];
+
+    if (binCount > 1)
     {
-        for (i = 0; i < kQueryStatsLatencyBinCount; ++i)
-        {
-            latencyBins[i] = inHist->negResponseLatencyBins[i];
-        }
-        [awdStats setNegResponseLatencyMs:latencyBins count:kQueryStatsLatencyBinCount];
+        binCount = CopyHistogramBins(latencyBins, inHist->negResponseLatencyBins, kQueryStatsLatencyBinCount);
+        [awdStats setNegResponseLatencyMs:latencyBins count:(NSUInteger)binCount];
     }
 
-    if (totalUnanswered > 0)
+    // Unanswered query send counts
+
+    binCount = CopyHistogramBins(sendCountBins, inHist->unansweredQuerySendCountBins, kQueryStatsSendCountBinCount);
+    [awdStats setUnansweredQuerySendCounts:sendCountBins count:(NSUInteger)binCount];
+
+    if (binCount > 1)
     {
-        for (i = 0; i < kQueryStatsLatencyBinCount; ++i)
-        {
-            latencyBins[i] = inHist->unansweredQueryDurationBins[i];
-        }
-        [awdStats setUnansweredQueryDurationMs:latencyBins count:kQueryStatsLatencyBinCount];
+        binCount = CopyHistogramBins(latencyBins, inHist->unansweredQueryDurationBins, kQueryStatsLatencyBinCount);
+        [awdStats setUnansweredQueryDurationMs:latencyBins count:(NSUInteger)binCount];
     }
 
     *outStats = awdStats;
@@ -1714,37 +2115,6 @@ mDNSlocal mStatus CreateAWDDNSDomainStats(DNSHist *inHist, const char *inDomain,
 exit:
     [domain release];
     [awdStats release];
-    return (err);
-}
-
-//===========================================================================================================================
-//  AddAWDDNSDomainStats
-//===========================================================================================================================
-
-mDNSlocal mStatus AddAWDDNSDomainStats(AWDMDNSResponderDNSStatistics *inMetric, DNSHistSet *inSet, const char *inDomain, mDNSBool inForCell)
-{
-    mStatus                 err;
-    AWDDNSDomainStats *     awdStats;
-
-    if (inSet->histA)
-    {
-        err = CreateAWDDNSDomainStats(inSet->histA, inDomain, inForCell, AWDDNSDomainStats_RecordType_A, &awdStats);
-        require_noerr_quiet(err, exit);
-
-        [inMetric addStats:awdStats];
-        [awdStats release];
-    }
-    if (inSet->histAAAA)
-    {
-        err = CreateAWDDNSDomainStats(inSet->histAAAA, inDomain, inForCell, AWDDNSDomainStats_RecordType_AAAA, &awdStats);
-        require_noerr_quiet(err, exit);
-
-        [inMetric addStats:awdStats];
-        [awdStats release];
-    }
-    err = mStatus_NoError;
-
-exit:
     return (err);
 }
 
@@ -1762,7 +2132,7 @@ mDNSlocal void LogDNSHistSet(const DNSHistSet *inSet, const char *inDomain, mDNS
 //  LogDNSHist
 //===========================================================================================================================
 
-#define Percent(N, D)       ((N) * 100) / (D), (((N) * 10000) / (D)) % 100
+#define Percent(N, D)       (((N) * 100) / (D)), ((((N) * 10000) / (D)) % 100)
 #define PercentFmt          "%3u.%02u"
 #define LogStat(LABEL, COUNT, ACCUMULATOR, TOTAL) \
     LogMsgNoIdent("%s %5u " PercentFmt " " PercentFmt, (LABEL), (COUNT), Percent(COUNT, TOTAL), Percent(ACCUMULATOR, TOTAL))
@@ -1903,63 +2273,72 @@ mDNSlocal void LogDNSHistLatencies(const uint16_t inLatencyBins[kQueryStatsLaten
 }
 
 //===========================================================================================================================
-//  ValidateDNSStatsDomains
+//  LogDNSMessageSizeStats
 //===========================================================================================================================
 
-#if (METRICS_VALIDATE_DNS_STATS_DOMAINS)
-#warning "Do not include ValidateDNSStatsDomains() in customer release!"
-mDNSlocal void ValidateDNSStatsDomains(void)
+mDNSlocal void LogDNSMessageSizeStats(const uint16_t *inBins, size_t inBinCount, unsigned int inBinWidth)
 {
-    int                 i;
-    const Domain *      domain;
-    mDNSu8 *            ptr;
-    domainname          domainNameExpected;
-    int                 labelCountExpected;
-    mDNSBool            domainNamesEqual;
-    mDNSBool            failed = mDNSfalse;
+    size_t          i;
+    uint32_t        total;
 
-    for (i = 0; i < countof(kQueryStatsDomains); ++i)
+    total = 0;
+    for (i = 0; i < inBinCount; ++i)
     {
-        domain = &kQueryStatsDomains[i];
-
-        if (strcmp(domain->cstr, ".") == 0)
-        {
-            domainNameExpected.c[0] = 0;
-        }
-        else
-        {
-            ptr = MakeDomainNameFromDNSNameString(&domainNameExpected, domain->cstr);
-            if (!ptr)
-            {
-                LogMsg("ValidateDNSStatsDomains: Failed to make domain name for \"%s\".", domain->cstr);
-                failed = mDNStrue;
-                goto exit;
-            }
-        }
-
-        domainNamesEqual = SameDomainName(domain->name, &domainNameExpected);
-        labelCountExpected = CountLabels(&domainNameExpected);
-        if (domainNamesEqual && (domain->labelCount == labelCountExpected))
-        {
-            LogMsg("ValidateDNSStatsDomains: \"%s\" passed.", domain->cstr);
-        }
-        else
-        {
-            if (!domainNamesEqual)
-            {
-                LogMsg("ValidateDNSStatsDomains: \"%s\" failed: incorrect domain name.", domain->cstr);
-            }
-            if (domain->labelCount != labelCountExpected)
-            {
-                LogMsg("ValidateDNSStatsDomains: \"%s\" failed: incorrect label count. Actual %d, expected %d.",
-                    domain->cstr, domain->labelCount, labelCountExpected);
-            }
-            failed = mDNStrue;
-        }
+        total += inBins[i];
     }
 
-exit:
-    if (failed) abort();
+    if (total > 0)
+    {
+        uint32_t            accumulator;
+        unsigned int        lower, upper;
+        char                label[16];
+
+        accumulator = 0;
+        upper       = 0;
+        for (i = 0; i < inBinCount; ++i)
+        {
+            accumulator += inBins[i];
+            lower = upper + 1;
+            if (i < (inBinCount - 1))
+            {
+                upper += inBinWidth;
+                snprintf(label, sizeof(label), "%3u - %-3u", lower, upper);
+            }
+            else
+            {
+                snprintf(label, sizeof(label), "%3u+     ", lower);
+            }
+            LogStat(label, inBins[i], accumulator, total);
+            if (accumulator == total) break;
+        }
+    }
+    else
+    {
+        LogMsgNoIdent("No data.");
+    }
 }
-#endif
-#endif // TARGET_OS_EMBEDDED
+
+//===========================================================================================================================
+//  CopyHistogramBins
+//
+//  Note: The return value is the size (in number of elements) of the smallest contiguous sub-array that contains the first
+//  bin and all bins with non-zero values.
+//===========================================================================================================================
+
+mDNSlocal size_t CopyHistogramBins(uint32_t *inDstBins, uint16_t *inSrcBins, size_t inBinCount)
+{
+    size_t      i;
+    size_t      minCount;
+
+    if (inBinCount == 0) return (0);
+
+    minCount = 1;
+    for (i = 0; i < inBinCount; ++i)
+    {
+        inDstBins[i] = inSrcBins[i];
+        if (inDstBins[i] > 0) minCount = i + 1;
+    }
+
+    return (minCount);
+}
+#endif // TARGET_OS_IOS

@@ -45,7 +45,7 @@
 #include "xpc_services.h"           // Interface to XPC services
 #include "helper.h"
 
-#if TARGET_OS_EMBEDDED
+#if AWD_METRICS
 #include "Metrics.h"
 #endif
 
@@ -558,7 +558,7 @@ mDNSexport void INFOCallback(void)
         LogMsgNoIdent("%##s", mDNSStorage.FQDN.c);
     }
 
-#if TARGET_OS_EMBEDDED
+#if AWD_METRICS
     LogMetrics();
 #endif
     LogMsgNoIdent("Timenow 0x%08lX (%d)", (mDNSu32)now, now);
@@ -1360,9 +1360,10 @@ mDNSlocal void * KQueueLoop(void *m_param)
         {
             if (events_found > kEventsToReadAtOnce || (events_found < 0 && errno != EINTR))
             {
+                const int kevent_errno = errno;
                 // Not sure what to do here, our kqueue has failed us - this isn't ideal
-                LogMsg("ERROR: KQueueLoop - kevent failed errno %d (%s)", errno, strerror(errno));
-                exit(errno);
+                LogMsg("ERROR: KQueueLoop - kevent failed errno %d (%s)", kevent_errno, strerror(kevent_errno));
+                exit(kevent_errno);
             }
 
             numevents += events_found;
@@ -1390,7 +1391,7 @@ mDNSlocal size_t LaunchdCheckin(void)
 {
     // Ask launchd for our socket
     int result = launch_activate_socket("Listeners", &launchd_fds, &launchd_fds_count);
-    if (result != 0) { LogMsg("launch_activate_socket() failed errno %d (%s)", errno, strerror(errno)); }
+    if (result != 0) { LogMsg("launch_activate_socket() failed error %d (%s)", result, strerror(result)); }
     return launchd_fds_count;
 }
 
@@ -1620,14 +1621,26 @@ mDNSexport int main(int argc, char **argv)
 
     // Create the kqueue, mutex and thread to support KQSockets
     KQueueFD = kqueue();
-    if (KQueueFD == -1) { LogMsg("kqueue() failed errno %d (%s)", errno, strerror(errno)); status = errno; goto exit; }
+    if (KQueueFD == -1)
+    {
+        const int kqueue_errno = errno;
+        LogMsg("kqueue() failed errno %d (%s)", kqueue_errno, strerror(kqueue_errno));
+        status = kqueue_errno;
+        goto exit;
+    }
 
     i = pthread_mutex_init(&PlatformStorage.BigMutex, NULL);
-    if (i == -1) { LogMsg("pthread_mutex_init() failed errno %d (%s)", errno, strerror(errno)); status = errno; goto exit; }
+    if (i != 0) { LogMsg("pthread_mutex_init() failed error %d (%s)", i, strerror(i)); status = i; goto exit; }
 
     int fdpair[2] = {0, 0};
     i = socketpair(AF_UNIX, SOCK_STREAM, 0, fdpair);
-    if (i == -1) { LogMsg("socketpair() failed errno %d (%s)", errno, strerror(errno)); status = errno; goto exit; }
+    if (i == -1)
+    {
+        const int socketpair_errno = errno;
+        LogMsg("socketpair() failed errno %d (%s)", socketpair_errno, strerror(socketpair_errno));
+        status = socketpair_errno;
+        goto exit;
+    }
 
     // Socket pair returned us two identical sockets connected to each other
     // We will use the first socket to send the second socket. The second socket
@@ -1644,7 +1657,7 @@ mDNSexport int main(int argc, char **argv)
 #endif
     SandboxProcess();
 
-#if TARGET_OS_EMBEDDED
+#if AWD_METRICS
     status = MetricsInit();
     if (status) { LogMsg("Daemon start: MetricsInit failed (%d)", status); }
 #endif
@@ -1666,7 +1679,7 @@ mDNSexport int main(int argc, char **argv)
       // Start the kqueue thread
     pthread_t KQueueThread;
     i = pthread_create(&KQueueThread, NULL, KQueueLoop, &mDNSStorage);
-    if (i == -1) { LogMsg("pthread_create() failed errno %d (%s)", errno, strerror(errno)); status = errno; goto exit; }
+    if (i != 0) { LogMsg("pthread_create() failed error %d (%s)", i, strerror(i)); status = i; goto exit; }
     if (status == 0)
     {
         CFRunLoopRun();

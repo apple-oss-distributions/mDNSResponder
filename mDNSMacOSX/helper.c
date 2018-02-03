@@ -1456,15 +1456,17 @@ void RetrieveTCPInfo(int family, const v6addr_t laddr, uint16_t lport, const v6a
     sz = sizeof(mib)/sizeof(mib[0]);
     if (sysctlnametomib("net.inet.tcp.info", mib, &sz) == -1)
     {
-        os_log(log_handle, "RetrieveTCPInfo: sysctlnametomib failed %d, %s", errno, strerror(errno));
-        *err = errno;
+        const int sysctl_errno = errno;
+        os_log(log_handle, "RetrieveTCPInfo: sysctlnametomib failed %d, %s", sysctl_errno, strerror(sysctl_errno));
+        *err = sysctl_errno;
     }
     miblen = (unsigned int)sz;
     len    = sizeof(struct tcp_info);
     if (sysctl(mib, miblen, &ti, &len, &itpl, sizeof(struct info_tuple)) == -1)
     {
-        os_log(log_handle, "RetrieveTCPInfo: sysctl failed %d, %s", errno, strerror(errno));
-        *err = errno;
+        const int sysctl_errno = errno;
+        os_log(log_handle, "RetrieveTCPInfo: sysctl failed %d, %s", sysctl_errno, strerror(sysctl_errno));
+        *err = sysctl_errno;
     }
     
     *seq    = ti.tcpi_snd_nxt - 1;
@@ -1745,8 +1747,9 @@ static int startRacoon(void)
         }
         else if (result < 0)
         {
-            os_log_debug(log_handle, "select returned %d errno %d %s", result, errno, strerror(errno));
-            if (errno != EINTR) break;
+            const int select_errno = errno;
+            os_log_debug(log_handle, "select returned %d errno %d %s", result, select_errno, strerror(select_errno));
+            if (select_errno != EINTR) break;
         }
     }
     
@@ -1827,7 +1830,7 @@ static int setupTunnelRoute(const v6addr_t local, const v6addr_t remote)
     /* send message, ignore error when route already exists */
     if (0 > write(s, &msg, msg.hdr.rtm_msglen))
     {
-        int errno_ = errno;
+        const int errno_ = errno;
         
         os_log_info(log_handle,"write to routing socket failed: %s", strerror(errno_));
         if (EEXIST != errno_)
@@ -1872,7 +1875,7 @@ static int teardownTunnelRoute(const v6addr_t remote)
     memcpy(&msg.dst.sin6_addr, remote, sizeof(msg.dst.sin6_addr));
     if (0 > write(s, &msg, msg.hdr.rtm_msglen))
     {
-        int errno_ = errno;
+        const int errno_ = errno;
         
         os_log_debug(log_handle,"write to routing socket failed: %s", strerror(errno_));
         
