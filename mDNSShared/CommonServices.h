@@ -879,7 +879,11 @@ typedef unsigned long int uintptr_t;
         #define false   0
     #endif
 #else
-    #define COMMON_SERVICES_NEEDS_BOOL          ( !defined( __cplusplus ) && !__bool_true_false_are_defined )
+    #if ( !defined( __cplusplus ) && !__bool_true_false_are_defined )
+        #define COMMON_SERVICES_NEEDS_BOOL      1
+    #else
+        #define COMMON_SERVICES_NEEDS_BOOL      0
+    #endif
 #endif
 
 #if ( COMMON_SERVICES_NEEDS_BOOL )

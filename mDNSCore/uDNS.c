@@ -550,7 +550,7 @@ mDNSlocal mStatus uDNS_RequestAddress(mDNS *m)
     return err;
 }
 
-mDNSlocal mStatus uDNS_SendNATMsg(mDNS *m, NATTraversalInfo *info, mDNSBool usePCP)
+mDNSlocal mStatus uDNS_SendNATMsg(mDNS *m, NATTraversalInfo *info, mDNSBool usePCP, mDNSBool unmapping)
 {
     mStatus err = mStatus_NoError;
 
@@ -649,19 +649,25 @@ mDNSlocal mStatus uDNS_SendNATMsg(mDNS *m, NATTraversalInfo *info, mDNSBool useP
             info->sentNATPMP = mDNSfalse;
 
 #ifdef _LEGACY_NAT_TRAVERSAL_
-            if (mDNSIPPortIsZero(m->UPnPRouterPort) || mDNSIPPortIsZero(m->UPnPSOAPPort))
+            // If an unmapping is being performed, then don't send an LNT discovery message or an LNT port map request.
+            if (!unmapping)
             {
-                LNT_SendDiscoveryMsg(m);
-                debugf("uDNS_SendNATMsg: LNT_SendDiscoveryMsg");
-            }
-            else
-            {
-                mStatus lnterr = LNT_MapPort(m, info);
-                if (lnterr)
-                    LogMsg("uDNS_SendNATMsg: LNT_MapPort returned error %d", lnterr);
+                if (mDNSIPPortIsZero(m->UPnPRouterPort) || mDNSIPPortIsZero(m->UPnPSOAPPort))
+                {
+                    LNT_SendDiscoveryMsg(m);
+                    debugf("uDNS_SendNATMsg: LNT_SendDiscoveryMsg");
+                }
+                else
+                {
+                    mStatus lnterr = LNT_MapPort(m, info);
+                    if (lnterr)
+                        LogMsg("uDNS_SendNATMsg: LNT_MapPort returned error %d", lnterr);
 
-                err = err ? err : lnterr; // PCP error takes precedence
+                    err = err ? err : lnterr; // PCP error takes precedence
+                }
             }
+#else
+            (void)unmapping; // Unused
 #endif // _LEGACY_NAT_TRAVERSAL_
         }
     }
@@ -925,6 +931,16 @@ mDNSexport mStatus mDNS_StopNATOperation_internal(mDNS *m, NATTraversalInfo *tra
         }
     }
 
+    // Even if we DIDN'T make a successful UPnP mapping yet, we might still have a partially-open TCP connection we need to clean up
+    // Before zeroing traversal->RequestedPort below, perform the LNT unmapping, which requires the mapping's external port,
+    // held by the traversal->RequestedPort variable.
+    #ifdef _LEGACY_NAT_TRAVERSAL_
+    {
+        mStatus err = LNT_UnmapPort(m, traversal);
+        if (err) LogMsg("Legacy NAT Traversal - unmap request failed with error %d", err);
+    }
+    #endif // _LEGACY_NAT_TRAVERSAL_
+
     if (traversal->ExpiryTime && unmap)
     {
         traversal->NATLease = 0;
@@ -946,16 +962,8 @@ mDNSexport mStatus mDNS_StopNATOperation_internal(mDNS *m, NATTraversalInfo *tra
         traversal->RequestedPort = zeroIPPort;
         traversal->NewAddress = zerov4Addr;
 
-        uDNS_SendNATMsg(m, traversal, traversal->lastSuccessfulProtocol != NATTProtocolNATPMP);
+        uDNS_SendNATMsg(m, traversal, traversal->lastSuccessfulProtocol != NATTProtocolNATPMP, mDNStrue);
     }
-
-    // Even if we DIDN'T make a successful UPnP mapping yet, we might still have a partially-open TCP connection we need to clean up
-    #ifdef _LEGACY_NAT_TRAVERSAL_
-    {
-        mStatus err = LNT_UnmapPort(m, traversal);
-        if (err) LogMsg("Legacy NAT Traversal - unmap request failed with error %d", err);
-    }
-    #endif // _LEGACY_NAT_TRAVERSAL_
 
     return(mStatus_NoError);
 }
@@ -3660,7 +3668,7 @@ mDNSlocal void uDNS_ReceiveNATPMPPacket(mDNS *m, const mDNSInterfaceID Interface
         {
             // Send a NAT-PMP request for this operation as needed
             // and update the state variables
-            uDNS_SendNATMsg(m, n, mDNSfalse);
+            uDNS_SendNATMsg(m, n, mDNSfalse, mDNSfalse);
         }
 
         m->NextScheduledNATOp = m->timenow;
@@ -5003,7 +5011,7 @@ mDNSexport void CheckNATMappings(mDNS *m)
                     cur->retryInterval = NATMAP_INIT_RETRY;
                 }
 
-                uDNS_SendNATMsg(m, cur, mDNStrue); // Will also do UPnP discovery for us, if necessary
+                uDNS_SendNATMsg(m, cur, mDNStrue, mDNSfalse); // Will also do UPnP discovery for us, if necessary
 
                 if (cur->ExpiryTime)                        // If have active mapping then set next renewal time halfway to expiry
                     NATSetNextRenewalTime(m, cur);

@@ -3473,9 +3473,8 @@ mDNSexport const mDNSu8 *GetLargeResourceRecord(mDNS *const m, const DNSMessage 
     pktrdlength           = (mDNSu16)((mDNSu16)ptr[8] <<  8 | ptr[9]);
 
     // If mDNS record has cache-flush bit set, we mark it unique
-    // For uDNS records, all are implicitly deemed unique (a single DNS server is always
-    // authoritative for the entire RRSet), unless this is a truncated response
-    if (ptr[2] & (kDNSClass_UniqueRRSet >> 8) || (!InterfaceID && !(msg->h.flags.b[0] & kDNSFlag0_TC)))
+    // For uDNS records, all are implicitly deemed unique (a single DNS server is always authoritative for the entire RRSet)
+    if (ptr[2] & (kDNSClass_UniqueRRSet >> 8) || !InterfaceID)
         RecordType |= kDNSRecordTypePacketUniqueMask;
     ptr += 10;
     if (ptr + pktrdlength > end) { debugf("GetLargeResourceRecord: RDATA exceeds end of packet"); return(mDNSNULL); }

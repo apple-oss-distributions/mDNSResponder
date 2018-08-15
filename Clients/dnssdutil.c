@@ -1,5 +1,5 @@
 /*
-	Copyright (c) 2016-2017 Apple Inc. All rights reserved.
+	Copyright (c) 2016-2018 Apple Inc. All rights reserved.
 	
 	dnssdutil is a command-line utility for testing the DNS-SD API.
 */
@@ -9,10 +9,12 @@
 #include <CoreUtils/CommandLineUtils.h>
 #include <CoreUtils/DataBufferUtils.h>
 #include <CoreUtils/DebugServices.h>
+#include <CoreUtils/HTTPUtils.h>
 #include <CoreUtils/MiscUtils.h>
 #include <CoreUtils/NetUtils.h>
 #include <CoreUtils/PrintFUtils.h>
 #include <CoreUtils/RandomNumberUtils.h>
+#include <CoreUtils/SoftLinking.h>
 #include <CoreUtils/StringUtils.h>
 #include <CoreUtils/TickUtils.h>
 #include <dns_sd.h>
@@ -21,6 +23,7 @@
 #if( TARGET_OS_DARWIN )
 	#include <dnsinfo.h>
 	#include <libproc.h>
+	#include <netdb.h>
 	#include <sys/proc_info.h>
 #endif
 
@@ -83,6 +86,8 @@
 #define kDNSServiceProtocolDescriptors	\
 	"\x00" "IPv4\0"						\
 	"\x01" "IPv6\0"						\
+	"\x04" "UDP\0"						\
+	"\x05" "TCP\0"						\
 	"\x00"
 
 // (m)DNS
@@ -165,14 +170,14 @@ static int		gDNSSDFlag_SuppressUnusable		= false;
 static int		gDNSSDFlag_Timeout				= false;
 static int		gDNSSDFlag_UnicastResponse		= false;
 static int		gDNSSDFlag_Unique				= false;
+static int		gDNSSDFlag_WakeOnResolve		= false;
 
 #define DNSSDFlagsOption()								\
 	IntegerOption( 'f', "flags", &gDNSSDFlags, "flags",	\
-		"DNSServiceFlags to use. This value is bitwise ORed with other single flag options.", false )
+		"DNSServiceFlags as an integer. This value is bitwise ORed with other single flag options.", false )
 
-#define DNSSDFlagOption( SHORT_CHAR, FLAG_NAME )									\
-	BooleanOption( SHORT_CHAR, Stringify( FLAG_NAME ), &gDNSSDFlag_ ## FLAG_NAME,	\
-		"Use kDNSServiceFlags" Stringify( FLAG_NAME ) "." )
+#define DNSSDFlagOption( SHORT_CHAR, FLAG_NAME ) \
+	BooleanOption( SHORT_CHAR, # FLAG_NAME, &gDNSSDFlag_ ## FLAG_NAME, "Use kDNSServiceFlags" # FLAG_NAME "." )
 
 #define DNSSDFlagsOption_DenyCellular()			DNSSDFlagOption( 'C', DenyCellular )
 #define DNSSDFlagsOption_DenyExpensive()		DNSSDFlagOption( 'E', DenyExpensive )
@@ -186,6 +191,7 @@ static int		gDNSSDFlag_Unique				= false;
 #define DNSSDFlagsOption_Timeout()				DNSSDFlagOption( 'T', Timeout )
 #define DNSSDFlagsOption_UnicastResponse()		DNSSDFlagOption( 'U', UnicastResponse )
 #define DNSSDFlagsOption_Unique()				DNSSDFlagOption( 'U', Unique )
+#define DNSSDFlagsOption_WakeOnResolve()		DNSSDFlagOption( 'W', WakeOnResolve )
 
 // Interface option
 
@@ -226,7 +232,7 @@ static const char *		gConnectionOpt = kConnectionArg_Normal;
 	"\n"																												\
 	"to specify the delegator by UUID.\n"																				\
 	"\n"																												\
-	"To not use a main connection at all, but instead perform operations on their own connections, use\n"				\
+	"To not use a main connection at all, but instead perform operations on their own implicit connections, use\n"		\
 	"\n"																												\
 	"    --no-connection\n"
 
@@ -234,8 +240,12 @@ static const char *		gConnectionOpt = kConnectionArg_Normal;
 
 // Help text for record data options
 
+#define kRDataArgPrefix_Domain			"domain:"
 #define kRDataArgPrefix_File			"file:"
 #define kRDataArgPrefix_HexString		"hex:"
+#define kRDataArgPrefix_IPv4			"ipv4:"
+#define kRDataArgPrefix_IPv6			"ipv6:"
+#define kRDataArgPrefix_SRV				"srv:"
 #define kRDataArgPrefix_String			"string:"
 #define kRDataArgPrefix_TXT				"txt:"
 
@@ -243,11 +253,15 @@ static const char *		gConnectionOpt = kConnectionArg_Normal;
 #define kRecordDataSection_Text																							\
 	"A record data argument is specified in one of the following formats:\n"											\
 	"\n"																												\
-	"Format                           Syntax                                 Example\n"									\
-	"String                           string:<string>                        string:'\\x09color=red'\n"					\
-	"Hexadecimal string               hex:<hex string>                       hex:c0a80101 or hex:'C0 A8 01 01'\n"		\
-	"TXT record keys and values       txt:<comma-delimited keys and values>  txt:'key1=x,key2=y\\,z,key3'\n"			\
-	"File containing raw record data  file:<file path>                       file:dir/record_data.bin\n"
+	"Format                        Syntax                                   Example\n"									\
+	"Domain name                   domain:<domain name>                     domain:demo._test._tcp.local\n"				\
+	"File containing record data   file:<file path>                         file:/path/to/rdata.bin\n"					\
+	"Hexadecimal string            hex:<hex string>                         hex:c0000201 or hex:'C0 00 02 01'\n"		\
+	"IPv4 address                  ipv4:<IPv4 address>                      ipv4:192.0.2.1\n"							\
+	"IPv6 address                  ipv6:<IPv6 address>                      ipv6:2001:db8::1\n"							\
+	"SRV record                    srv:<priority>,<weight>,<port>,<target>  srv:0,0,64206,example.local\n"				\
+	"String (w/escaped hex bytes)  string:<string>                          string:'\\x09color=red'\n"					\
+	"TXT record keys and values    txt:<comma-delimited keys and values>    txt:'vers=1.0,lang=en\\,es\\,fr,passreq'\n"
 
 #define RecordDataSection()		CLI_SECTION( kRecordDataSection_Name, kRecordDataSection_Text )
 
@@ -466,6 +480,7 @@ static CLIOption		kResolveOpts[] =
 	DNSSDFlagsOption_ForceMulticast(),
 	DNSSDFlagsOption_IncludeAWDL(),
 	DNSSDFlagsOption_ReturnIntermediates(),
+	DNSSDFlagsOption_WakeOnResolve(),
 	
 	CLI_OPTION_GROUP( "Operation" ),
 	ConnectionOptions(),
@@ -519,6 +534,9 @@ static int				gGAIPOSIXFlag_V4MappedCFG	= false;
 #if( defined( AI_DEFAULT ) )
 static int				gGAIPOSIXFlag_Default		= false;
 #endif
+#if( defined( AI_UNUSABLE ) )
+static int				gGAIPOSIXFlag_Unusable		= false;
+#endif
 
 static CLIOption		kGetAddrInfoPOSIXOpts[] =
 {
@@ -543,6 +561,9 @@ static CLIOption		kGetAddrInfoPOSIXOpts[] =
 #endif
 #if( defined( AI_DEFAULT ) )
 	BooleanOption(   0 , "flag-default",		&gGAIPOSIXFlag_Default,		"In hints ai_flags field, set AI_DEFAULT." ),
+#endif
+#if( defined( AI_UNUSABLE ) )
+	BooleanOption(   0 , "flag-unusable",		&gGAIPOSIXFlag_Unusable,	"In hints ai_flags field, set AI_UNUSABLE." ),
 #endif
 	
 	CLI_SECTION( "Notes", "See getaddrinfo(3) man page for more details.\n" ),
@@ -578,6 +599,35 @@ static CLIOption		kReverseLookupOpts[] =
 };
 
 //===========================================================================================================================
+//	PortMapping Command Options
+//===========================================================================================================================
+
+static int		gPortMapping_ProtocolTCP	= false;
+static int		gPortMapping_ProtocolUDP	= false;
+static int		gPortMapping_InternalPort	= 0;
+static int		gPortMapping_ExternalPort	= 0;
+static int		gPortMapping_TTL			= 0;
+
+static CLIOption		kPortMappingOpts[] =
+{
+	InterfaceOption(),
+	BooleanOption( 0, "tcp",			&gPortMapping_ProtocolTCP,	"Use kDNSServiceProtocol_TCP." ),
+	BooleanOption( 0, "udp",			&gPortMapping_ProtocolUDP,	"Use kDNSServiceProtocol_UDP." ),
+	IntegerOption( 0, "internalPort",	&gPortMapping_InternalPort,	"port number", "Internal port.", false ),
+	IntegerOption( 0, "externalPort",	&gPortMapping_ExternalPort,	"port number", "Requested external port. Use '0' for any external port.", false ),
+	IntegerOption( 0, "ttl",			&gPortMapping_TTL,			"seconds", "Requested TTL (renewal period) in seconds. Use '0' for a default value.", false ),
+	
+	CLI_OPTION_GROUP( "Flags" ),
+	DNSSDFlagsOption(),
+	
+	CLI_OPTION_GROUP( "Operation" ),
+	ConnectionOptions(),
+	
+	ConnectionSection(),
+	CLI_OPTION_END()
+};
+
+//===========================================================================================================================
 //	BrowseAll Command Options
 //===========================================================================================================================
 
@@ -586,20 +636,20 @@ static char **			gBrowseAll_ServiceTypes			= NULL;
 static size_t			gBrowseAll_ServiceTypesCount	= 0;
 static int				gBrowseAll_IncludeAWDL			= false;
 static int				gBrowseAll_BrowseTimeSecs		= 5;
-static int				gBrowseAll_ConnectTimeLimitSecs	= 5;
+static int				gBrowseAll_MaxConnectTimeSecs	= 0;
 
 static CLIOption		kBrowseAllOpts[] =
 {
 	InterfaceOption(),
 	StringOption(	   'd', "domain",	&gBrowseAll_Domain, "domain", "Domain in which to browse for the service.", false ),
-	MultiStringOption( 't', "type",		&gBrowseAll_ServiceTypes, &gBrowseAll_ServiceTypesCount, "service type", "Service type(s), e.g., \"_ssh._tcp\".", false ),
+	MultiStringOption( 't', "type",		&gBrowseAll_ServiceTypes, &gBrowseAll_ServiceTypesCount, "service type", "Service type(s), e.g., \"_ssh._tcp\". All services are browsed for if none is specified.", false ),
 	
 	CLI_OPTION_GROUP( "Flags" ),
 	DNSSDFlagsOption_IncludeAWDL(),
 	
 	CLI_OPTION_GROUP( "Operation" ),
-	IntegerOption( 'b', "browseTime",		&gBrowseAll_BrowseTimeSecs,			"seconds", "Specifies the duration of the browse.", false ),
-	IntegerOption( 'c', "connectTimeLimit",	&gBrowseAll_ConnectTimeLimitSecs,	"seconds", "Specifies the max duration of the connect operations.", false ),
+	IntegerOption( 'b', "browseTime",		&gBrowseAll_BrowseTimeSecs,		"seconds", "Amount of time to spend browsing. (Default: 5 seconds)", false ),
+	IntegerOption( 'c', "maxConnectTime",	&gBrowseAll_MaxConnectTimeSecs,	"seconds", "Max duration of connection attempts. If <= 0, then no connections are attempted. (Default: 0 seconds)", false ),
 	CLI_OPTION_END()
 };
 
@@ -732,6 +782,73 @@ static CLIOption		kPIDToUUIDOpts[] =
 };
 
 //===========================================================================================================================
+//	SSDP Command Options
+//===========================================================================================================================
+
+static int				gSSDPDiscover_MX			= 1;
+static const char *		gSSDPDiscover_ST			= "ssdp:all";
+static int				gSSDPDiscover_ReceiveSecs	= 1;
+static int				gSSDPDiscover_UseIPv4		= false;
+static int				gSSDPDiscover_UseIPv6		= false;
+static int				gSSDPDiscover_Verbose		= false;
+
+static CLIOption		kSSDPDiscoverOpts[] =
+{
+	StringOption(  'i', "interface",	&gInterface,				"name or index", "Network interface by name or index.", true ),
+	IntegerOption( 'm', "mx",			&gSSDPDiscover_MX,			"seconds", "MX value in search request, i.e., max response delay in seconds. (Default: 1 second)", false ),
+	StringOption(  's', "st",			&gSSDPDiscover_ST,			"string", "ST value in search request, i.e., the search target. (Default: \"ssdp:all\")", false ),
+	IntegerOption( 'r', "receiveTime",	&gSSDPDiscover_ReceiveSecs,	"seconds", "Amount of time to spend receiving responses. -1 means unlimited. (Default: 1 second)", false ),
+	BooleanOption(  0 , "ipv4",			&gSSDPDiscover_UseIPv4,		"Use IPv4, i.e., multicast to 239.255.255.250:1900." ),
+	BooleanOption(  0 , "ipv6",			&gSSDPDiscover_UseIPv6,		"Use IPv6, i.e., multicast to [ff02::c]:1900" ),
+	BooleanOption( 'v', "verbose",		&gSSDPDiscover_Verbose,		"Prints the search request(s) that were sent." ),
+	CLI_OPTION_END()
+};
+
+static void	SSDPDiscoverCmd( void );
+
+static CLIOption		kSSDPOpts[] =
+{
+	Command( "discover", SSDPDiscoverCmd, kSSDPDiscoverOpts, "Crafts and multicasts an SSDP search message.", false ),
+	CLI_OPTION_END()
+};
+
+//===========================================================================================================================
+//	res_query Command Options
+//===========================================================================================================================
+
+static const char *		gResQuery_Name			= NULL;
+static const char *		gResQuery_Type			= NULL;
+static const char *		gResQuery_Class			= NULL;
+static int				gResQuery_UseLibInfo	= false;
+
+static CLIOption		kResQueryOpts[] =
+{
+	StringOption( 'n', "name",		&gResQuery_Name,		"domain name",	"Full domain name of record to query.", true ),
+	StringOption( 't', "type",		&gResQuery_Type,		"record type",	"Record type by name (e.g., TXT, SRV, etc.) or number.", true ),
+	StringOption( 'c', "class",		&gResQuery_Class,		"record class",	"Record class by name or number. Default class is IN.", false ),
+	BooleanOption( 0 , "libinfo",	&gResQuery_UseLibInfo,	"Use res_query from libinfo instead of libresolv." ),
+	CLI_OPTION_END()
+};
+
+//===========================================================================================================================
+//	dns_query Command Options
+//===========================================================================================================================
+
+static const char *		gResolvDNSQuery_Name	= NULL;
+static const char *		gResolvDNSQuery_Type	= NULL;
+static const char *		gResolvDNSQuery_Class	= NULL;
+static const char *		gResolvDNSQuery_Path	= NULL;
+
+static CLIOption		kResolvDNSQueryOpts[] =
+{
+	StringOption( 'n', "name",	&gResolvDNSQuery_Name,	"domain name",	"Full domain name of record to query.", true ),
+	StringOption( 't', "type",	&gResolvDNSQuery_Type,	"record type",	"Record type by name (e.g., TXT, SRV, etc.) or number.", true ),
+	StringOption( 'c', "class",	&gResolvDNSQuery_Class,	"record class",	"Record class by name or number. Default class is IN.", false ),
+	StringOption( 'p', "path",	&gResolvDNSQuery_Path,	"file path",	"The path argument to pass to dns_open() before calling dns_query(). Default value is NULL.", false ),
+	CLI_OPTION_END()
+};
+
+//===========================================================================================================================
 //	Command Table
 //===========================================================================================================================
 
@@ -746,6 +863,7 @@ static void	ResolveCmd( void );
 static void	ReconfirmCmd( void );
 static void	GetAddrInfoPOSIXCmd( void );
 static void	ReverseLookupCmd( void );
+static void	PortMappingCmd( void );
 static void	BrowseAllCmd( void );
 static void	GetAddrInfoStressCmd( void );
 static void	DNSQueryCmd( void );
@@ -754,6 +872,10 @@ static void	DNSCryptCmd( void );
 #endif
 static void	MDNSQueryCmd( void );
 static void	PIDToUUIDCmd( void );
+#if( TARGET_OS_DARWIN )
+static void	ResQueryCmd( void );
+static void	ResolvDNSQueryCmd( void );
+#endif
 static void	DaemonVersionCmd( void );
 
 static CLIOption		kGlobalOpts[] =
@@ -773,7 +895,8 @@ static CLIOption		kGlobalOpts[] =
 	Command( "reconfirm",			ReconfirmCmd,			kReconfirmOpts,			"Uses DNSServiceReconfirmRecord() to reconfirm a record.", false ),
 	Command( "getaddrinfo-posix",	GetAddrInfoPOSIXCmd,	kGetAddrInfoPOSIXOpts,	"Uses getaddrinfo() to resolve a hostname to IP addresses.", false ),
 	Command( "reverseLookup",		ReverseLookupCmd,		kReverseLookupOpts,		"Uses DNSServiceQueryRecord() to perform a reverse IP address lookup.", false ),
-	Command( "browseAll",			BrowseAllCmd,			kBrowseAllOpts,			"Browse and resolve all, or just some, services.", false ),
+	Command( "portMapping",			PortMappingCmd,			kPortMappingOpts,		"Uses DNSServiceNATPortMappingCreate() to create a port mapping.", false ),
+	Command( "browseAll",			BrowseAllCmd,			kBrowseAllOpts,			"Browse and resolve all (or specific) services and, optionally, attempt connections.", false ),
 	
 	// Uncommon commands.
 	
@@ -784,6 +907,11 @@ static CLIOption		kGlobalOpts[] =
 #endif
 	Command( "mDNSQuery",			MDNSQueryCmd,			kMDNSQueryOpts,			"Crafts and sends an mDNS query over the specified interface.", true ),
 	Command( "pid2uuid",			PIDToUUIDCmd,			kPIDToUUIDOpts,			"Prints the UUID of a process.", true ),
+	Command( "ssdp",				NULL,					kSSDPOpts,				"Commands for testing with Simple Service Discovery Protocol (SSDP).", true ),
+#if( TARGET_OS_DARWIN )
+	Command( "res_query",			ResQueryCmd,			kResQueryOpts,			"Uses res_query() from either libresolv or libinfo to query for a record.", true ),
+	Command( "dns_query",			ResolvDNSQueryCmd,		kResolvDNSQueryOpts,	"Uses dns_query() from libresolv to query for a record.", true ),
+#endif
 	Command( "daemonVersion",		DaemonVersionCmd,		NULL,					"Prints the version of the DNS-SD daemon.", true ),
 	
 	CLI_COMMAND_HELP(),
@@ -908,6 +1036,11 @@ static OSStatus
 		const char *	inString,
 		uint8_t **		outEndPtr );
 static Boolean	DomainNameEqual( const uint8_t *inName1, const uint8_t *inName2 );
+static OSStatus
+	DomainNameFromString(
+		uint8_t			inDomainName[ kDomainNameLengthMax ],
+		const char *	inString,
+		uint8_t **		outEndPtr );
 static OSStatus
 	DomainNameToString(
 		const uint8_t *		inDomainName,
@@ -2115,7 +2248,7 @@ static void	RegisterCmd( void )
 	// Start operation.
 	
 	err = DNSServiceRegister( &context->opRef, context->flags, context->ifIndex, context->name, context->type,
-		context->domain, NULL, ntohs( context->port ), (uint16_t) context->txtLen, context->txtPtr,
+		context->domain, NULL, htons( context->port ), (uint16_t) context->txtLen, context->txtPtr,
 		RegisterCallback, context );
 	ForgetMem( &context->txtPtr );
 	require_noerr( err, exit );
@@ -2679,7 +2812,7 @@ static void	ReconfirmCmd( void )
 		require_noerr_quiet( err, exit );
 	}
 	
-	// Get record data.
+	// Get record class.
 	
 	if( gReconfirmRecord_Class )
 	{
@@ -2794,12 +2927,40 @@ static void DNSSD_API
 	( (X) == AF_UNSPEC )	? "unspec"	:	\
 							  "???" )
 
+typedef struct
+{
+    unsigned int		flag;
+    const char *        str;
+
+}   FlagStringPair;
+
+#define CaseFlagStringify( X )		{ (X), # X }
+
+const FlagStringPair		kGAIPOSIXFlagStringPairs[] =
+{
+#if( defined( AI_UNUSABLE ) )
+	CaseFlagStringify( AI_UNUSABLE ),
+#endif
+	CaseFlagStringify( AI_NUMERICSERV ),
+	CaseFlagStringify( AI_V4MAPPED ),
+	CaseFlagStringify( AI_ADDRCONFIG ),
+#if( defined( AI_V4MAPPED_CFG ) )
+	CaseFlagStringify( AI_V4MAPPED_CFG ),
+#endif
+	CaseFlagStringify( AI_ALL ),
+	CaseFlagStringify( AI_NUMERICHOST ),
+	CaseFlagStringify( AI_CANONNAME ),
+	CaseFlagStringify( AI_PASSIVE ),
+	{ 0, NULL }
+};
+
 static void	GetAddrInfoPOSIXCmd( void )
 {
 	OSStatus					err;
 	struct addrinfo				hints;
 	const struct addrinfo *		addrInfo;
 	struct addrinfo *			addrInfoList = NULL;
+	const FlagStringPair *		pair;
 	char						time[ kTimestampBufLen ];
 	
 	memset( &hints, 0, sizeof( hints ) );
@@ -2833,6 +2994,9 @@ static void	GetAddrInfoPOSIXCmd( void )
 #if( defined( AI_DEFAULT ) )
 	if( gGAIPOSIXFlag_Default )		hints.ai_flags |= AI_DEFAULT;
 #endif
+#if( defined( AI_UNUSABLE ) )
+	if( gGAIPOSIXFlag_Unusable )	hints.ai_flags |= AI_UNUSABLE;
+#endif
 	
 	// Print prologue.
 	
@@ -2840,16 +3004,10 @@ static void	GetAddrInfoPOSIXCmd( void )
 	FPrintF( stdout, "Servname:       %s\n",	gGAIPOSIX_ServName );
 	FPrintF( stdout, "Address family: %s\n",	AddressFamilyStr( hints.ai_family ) );
 	FPrintF( stdout, "Flags:          0x%X < ",	hints.ai_flags );
-	if( hints.ai_flags & AI_NUMERICSERV )	FPrintF( stdout, "AI_NUMERICSERV " );
-	if( hints.ai_flags & AI_V4MAPPED )		FPrintF( stdout, "AI_V4MAPPED " );
-	if( hints.ai_flags & AI_ADDRCONFIG )	FPrintF( stdout, "AI_ADDRCONFIG " );
-#if( defined( AI_V4MAPPED_CFG ) )
-	if( hints.ai_flags & AI_V4MAPPED_CFG )	FPrintF( stdout, "AI_V4MAPPED_CFG " );
-#endif
-	if( hints.ai_flags & AI_ALL )			FPrintF( stdout, "AI_ALL " );
-	if( hints.ai_flags & AI_NUMERICHOST )	FPrintF( stdout, "AI_NUMERICHOST " );
-	if( hints.ai_flags & AI_CANONNAME )		FPrintF( stdout, "AI_CANONNAME " );
-	if( hints.ai_flags & AI_PASSIVE )		FPrintF( stdout, "AI_PASSIVE " );
+	for( pair = kGAIPOSIXFlagStringPairs; pair->str != NULL; ++pair )
+	{
+		if( ( (unsigned int) hints.ai_flags ) & pair->flag ) FPrintF( stdout, "%s ", pair->str );
+	}
 	FPrintF( stdout, ">\n" );
 	FPrintF( stdout, "Start time:     %s\n", GetTimestampStr( time ) );
 	FPrintF( stdout, "---\n" );
@@ -2860,7 +3018,7 @@ static void	GetAddrInfoPOSIXCmd( void )
 	GetTimestampStr( time );
 	if( err )
 	{
-		FPrintF( stderr, "Error %#m: %s.\n", err, gai_strerror( err ) );
+		FPrintF( stderr, "Error %d: %s.\n", err, gai_strerror( err ) );
 	}
 	else
 	{
@@ -2896,6 +3054,7 @@ static void	ReverseLookupCmd( void )
 	uint8_t						ipv6Addr[ 16 ];
 	char						recordName[ ( 16 * 4 ) + 9 + 1 ];
 	int							useMainConnection;
+	const char *				endPtr;
 	
 	// Set up SIGINT handler.
 	
@@ -2944,16 +3103,16 @@ static void	ReverseLookupCmd( void )
 	// Create reverse lookup record name.
 	
 	err = StringToIPv4Address( gReverseLookup_IPAddr, kStringToIPAddressFlagsNoPort | kStringToIPAddressFlagsNoPrefix,
-		&ipv4Addr, NULL, NULL, NULL, NULL );
-	if( err )
+		&ipv4Addr, NULL, NULL, NULL, &endPtr );
+	if( err || ( *endPtr != '\0' ) )
 	{
 		char *		dst;
 		int			i;
 		
 		err = StringToIPv6Address( gReverseLookup_IPAddr,
 			kStringToIPAddressFlagsNoPort | kStringToIPAddressFlagsNoPrefix | kStringToIPAddressFlagsNoScope,
-			ipv6Addr, NULL, NULL, NULL, NULL );
-		if( err )
+			ipv6Addr, NULL, NULL, NULL, &endPtr );
+		if( err || ( *endPtr != '\0' ) )
 		{
 			FPrintF( stderr, "Invalid IP address: \"%s\".\n", gReverseLookup_IPAddr );
 			err = kParamErr;
@@ -3020,6 +3179,202 @@ exit:
 }
 
 //===========================================================================================================================
+//	PortMappingCmd
+//===========================================================================================================================
+
+typedef struct
+{
+	DNSServiceRef			mainRef;		// Main sdRef for shared connection.
+	DNSServiceRef			opRef;			// sdRef for the DNSServiceNATPortMappingCreate operation.
+	DNSServiceFlags			flags;			// Flags for DNSServiceNATPortMappingCreate operation.
+	uint32_t				ifIndex;		// Interface index argument for DNSServiceNATPortMappingCreate operation.
+	DNSServiceProtocol		protocols;		// Protocols argument for DNSServiceNATPortMappingCreate operation.
+	uint32_t				ttl;			// TTL argument for DNSServiceNATPortMappingCreate operation.
+	uint16_t				internalPort;	// Internal port argument for DNSServiceNATPortMappingCreate operation.
+	uint16_t				externalPort;	// External port argument for DNSServiceNATPortMappingCreate operation.
+	Boolean					printedHeader;	// True if results header was printed.
+	
+}	PortMappingContext;
+
+static void	PortMappingPrintPrologue( const PortMappingContext *inContext );
+static void	PortMappingContextFree( PortMappingContext *inContext );
+static void DNSSD_API
+	PortMappingCallback(
+		DNSServiceRef		inSDRef,
+		DNSServiceFlags		inFlags,
+		uint32_t			inInterfaceIndex,
+		DNSServiceErrorType	inError,
+		uint32_t			inExternalIPv4Address,
+		DNSServiceProtocol	inProtocol,
+		uint16_t			inInternalPort,
+		uint16_t			inExternalPort,
+		uint32_t			inTTL,
+		void *				inContext );
+
+static void	PortMappingCmd( void )
+{
+	OSStatus					err;
+	PortMappingContext *		context			= NULL;
+	DNSServiceRef				sdRef;
+	dispatch_source_t			signalSource	= NULL;
+	int							useMainConnection;
+	
+	// Set up SIGINT handler.
+	
+	signal( SIGINT, SIG_IGN );
+	err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+	require_noerr( err, exit );
+	dispatch_resume( signalSource );
+	
+	// Create context.
+	
+	context = (PortMappingContext *) calloc( 1, sizeof( *context ) );
+	require_action( context, exit, err = kNoMemoryErr );
+	
+	// Check command parameters.
+	
+	if( ( gPortMapping_InternalPort < 0 ) || ( gPortMapping_InternalPort > UINT16_MAX ) )
+	{
+		FPrintF( stderr, "Internal port number %d is out-of-range.\n", gPortMapping_InternalPort );
+		err = kParamErr;
+		goto exit;
+	}
+	
+	if( ( gPortMapping_ExternalPort < 0 ) || ( gPortMapping_ExternalPort > UINT16_MAX ) )
+	{
+		FPrintF( stderr, "External port number %d is out-of-range.\n", gPortMapping_ExternalPort );
+		err = kParamErr;
+		goto exit;
+	}
+	
+	// Create main connection.
+	
+	if( gConnectionOpt )
+	{
+		err = CreateConnectionFromArgString( gConnectionOpt, dispatch_get_main_queue(), &context->mainRef, NULL );
+		require_noerr_quiet( err, exit );
+		useMainConnection = true;
+	}
+	else
+	{
+		useMainConnection = false;
+	}
+	
+	// Get flags.
+	
+	context->flags = GetDNSSDFlagsFromOpts();
+	if( useMainConnection ) context->flags |= kDNSServiceFlagsShareConnection;
+	
+	// Get interface index.
+	
+	err = InterfaceIndexFromArgString( gInterface, &context->ifIndex );
+	require_noerr_quiet( err, exit );
+	
+	// Set remaining parameters.
+	
+	if( gPortMapping_ProtocolTCP ) context->protocols |= kDNSServiceProtocol_TCP;
+	if( gPortMapping_ProtocolUDP ) context->protocols |= kDNSServiceProtocol_UDP;
+	context->ttl			= (uint32_t) gPortMapping_TTL;
+	context->internalPort	= (uint16_t) gPortMapping_InternalPort;
+	context->externalPort	= (uint16_t) gPortMapping_ExternalPort;
+	
+	// Print prologue.
+	
+	PortMappingPrintPrologue( context );
+	
+	// Start operation.
+	
+	if( useMainConnection ) sdRef = context->mainRef;
+	err = DNSServiceNATPortMappingCreate( &sdRef, context->flags, context->ifIndex, context->protocols,
+		htons( context->internalPort ), htons( context->externalPort ), context->ttl, PortMappingCallback, context );
+	require_noerr( err, exit );
+	
+	context->opRef = sdRef;
+	if( !useMainConnection )
+	{
+		err = DNSServiceSetDispatchQueue( context->opRef, dispatch_get_main_queue() );
+		require_noerr( err, exit );
+	}
+	
+	dispatch_main();
+	
+exit:
+	dispatch_source_forget( &signalSource );
+	if( context ) PortMappingContextFree( context );
+	if( err ) exit( 1 );
+}
+
+//===========================================================================================================================
+//	PortMappingPrintPrologue
+//===========================================================================================================================
+
+static void	PortMappingPrintPrologue( const PortMappingContext *inContext )
+{
+	char		ifName[ kInterfaceNameBufLen ];
+	char		time[ kTimestampBufLen ];
+	
+	InterfaceIndexToName( inContext->ifIndex, ifName );
+	
+	FPrintF( stdout, "Flags:         %#{flags}\n",	inContext->flags, kDNSServiceFlagsDescriptors );
+	FPrintF( stdout, "Interface:     %d (%s)\n",	(int32_t) inContext->ifIndex, ifName );
+	FPrintF( stdout, "Protocols:     %#{flags}\n",	inContext->protocols, kDNSServiceProtocolDescriptors );
+	FPrintF( stdout, "Internal Port: %u\n",			inContext->internalPort );
+	FPrintF( stdout, "External Port: %u\n",			inContext->externalPort );
+	FPrintF( stdout, "TTL:           %u%?s\n",		inContext->ttl, !inContext->ttl, " (system will use a default value.)" );
+	FPrintF( stdout, "Start time:    %s\n",			GetTimestampStr( time ) );
+	FPrintF( stdout, "---\n" );
+	
+}
+
+//===========================================================================================================================
+//	PortMappingContextFree
+//===========================================================================================================================
+
+static void	PortMappingContextFree( PortMappingContext *inContext )
+{
+	DNSServiceForget( &inContext->opRef );
+	DNSServiceForget( &inContext->mainRef );
+	free( inContext );
+}
+
+//===========================================================================================================================
+//	PortMappingCallback
+//===========================================================================================================================
+
+static void DNSSD_API
+	PortMappingCallback(
+		DNSServiceRef		inSDRef,
+		DNSServiceFlags		inFlags,
+		uint32_t			inInterfaceIndex,
+		DNSServiceErrorType	inError,
+		uint32_t			inExternalIPv4Address,
+		DNSServiceProtocol	inProtocol,
+		uint16_t			inInternalPort,
+		uint16_t			inExternalPort,
+		uint32_t			inTTL,
+		void *				inContext )
+{
+	PortMappingContext * const		context = (PortMappingContext *) inContext;
+	char							time[ kTimestampBufLen ];
+	char							errorStr[ 128 ];
+	
+	Unused( inSDRef );
+	Unused( inFlags );
+	
+	GetTimestampStr( time );
+	
+	if( inError ) SNPrintF( errorStr, sizeof( errorStr ), " (error: %#m)", inError );
+	if( !context->printedHeader )
+	{
+		FPrintF( stdout, "%-26s  IF %7s %15s %7s %6s Protocol\n", "Timestamp", "IntPort", "ExtAddr", "ExtPort", "TTL" );
+		context->printedHeader = true;
+	}
+	FPrintF( stdout, "%-26s  %2u %7u %15.4a %7u %6u %#{flags}%?s\n",
+		time, inInterfaceIndex, ntohs( inInternalPort), &inExternalIPv4Address, ntohs( inExternalPort ), inTTL,
+		inProtocol, kDNSServiceProtocolDescriptors, inError, errorStr );
+}
+
+//===========================================================================================================================
 //	BrowseAllCmd
 //===========================================================================================================================
 
@@ -3042,7 +3397,7 @@ typedef struct
 	uint32_t				ifIndex;
 	int						pendingConnectCount;
 	int						browseTimeSecs;
-	int						connectTimeLimitSecs;
+	int						maxConnectTimeSecs;
 	Boolean					includeAWDL;
 	Boolean					useColoredText;
 	
@@ -3276,7 +3631,7 @@ static void	BrowseAllCmd( void )
 	gBrowseAll_ServiceTypes			= NULL;
 	gBrowseAll_ServiceTypesCount	= 0;
 	context->browseTimeSecs			= gBrowseAll_BrowseTimeSecs;
-	context->connectTimeLimitSecs	= gBrowseAll_ConnectTimeLimitSecs;
+	context->maxConnectTimeSecs		= gBrowseAll_MaxConnectTimeSecs;
 	context->includeAWDL			= gBrowseAll_IncludeAWDL ? true : false;
 #if( TARGET_OS_POSIX )
 	context->useColoredText			= isatty( STDOUT_FILENO ) ? true : false;
@@ -3332,8 +3687,8 @@ static void	BrowseAllPrintPrologue( const BrowseAllContext *inContext )
 	
 	InterfaceIndexToName( inContext->ifIndex, ifName );
 	
-	FPrintF( stdout, "Interface:          %d (%s)\n",	(int32_t) inContext->ifIndex, ifName );
-	FPrintF( stdout, "Service types:      ");
+	FPrintF( stdout, "Interface:        %d (%s)\n",	(int32_t) inContext->ifIndex, ifName );
+	FPrintF( stdout, "Service types:    ");
 	if( inContext->serviceTypesCount > 0 )
 	{
 		FPrintF( stdout, "%s", inContext->serviceTypes[ 0 ] );
@@ -3344,10 +3699,10 @@ static void	BrowseAllPrintPrologue( const BrowseAllContext *inContext )
 	{
 		FPrintF( stdout, "all services\n" );
 	}
-	FPrintF( stdout, "Domain:             %s\n", inContext->domain ? inContext->domain : "default domains" );
-	FPrintF( stdout, "Browse time:        %d second%?c\n", inContext->browseTimeSecs, inContext->browseTimeSecs != 1, 's' );
-	FPrintF( stdout, "Connect time limit: %d second%?c\n",
-		inContext->connectTimeLimitSecs, inContext->connectTimeLimitSecs != 1, 's' );
+	FPrintF( stdout, "Domain:           %s\n", inContext->domain ? inContext->domain : "default domains" );
+	FPrintF( stdout, "Browse time:      %d second%?c\n", inContext->browseTimeSecs, inContext->browseTimeSecs != 1, 's' );
+	FPrintF( stdout, "Max connect time: %d second%?c\n",
+		inContext->maxConnectTimeSecs, inContext->maxConnectTimeSecs != 1, 's' );
 	FPrintF( stdout, "Start time:         %s\n", GetTimestampStr( time ) );
 	FPrintF( stdout, "---\n" );
 }
@@ -3704,10 +4059,10 @@ static void	BrowseAllStop( void *inContext )
 	}
 	DNSServiceForget( &context->mainRef );
 	
-	if( ( context->pendingConnectCount > 0 ) && ( context->connectTimeLimitSecs > 0 ) )
+	if( ( context->pendingConnectCount > 0 ) && ( context->maxConnectTimeSecs > 0 ) )
 	{
 		check( !context->exitTimer );
-		err = DispatchTimerCreate( dispatch_time_seconds( context->connectTimeLimitSecs ), DISPATCH_TIME_FOREVER,
+		err = DispatchTimerCreate( dispatch_time_seconds( context->maxConnectTimeSecs ), DISPATCH_TIME_FOREVER,
 			100 * kNanosecondsPerMillisecond, BrowseAllExit, NULL, context, &context->exitTimer );
 		require_noerr( err, exit );
 		dispatch_resume( context->exitTimer );
@@ -3765,7 +4120,6 @@ static void	BrowseAllExit( void *inContext )
 					char		ifname[ IF_NAMESIZE + 1 ];
 					
 					FPrintF( stdout, "%*s" "%s via ", Indent( 2 ), instance->name );
-					FPrintF( stdout, "%*s" "%s via ", Indent( 2 ), instance->name );
 					if( instance->ifIndex == 0 )
 					{
 						FPrintF( stdout, "the Internet" );
@@ -3809,31 +4163,35 @@ static void	BrowseAllExit( void *inContext )
 							addr->connectError	= kTimeoutErr;
 						}
 						
-						FPrintF( stdout, "%*s" "%-##47a %4llu ms (", Indent( 4 ),
+						FPrintF( stdout, "%*s" "%-##47a %4llu ms", Indent( 4 ),
 							&addr->sip.sa, UpTicksToMilliseconds( addr->foundTicks - instance->getAddrStartTicks ) );
+						if( context->maxConnectTimeSecs <= 0 )
+						{
+							FPrintF( stdout, "\n" );
+							continue;
+						}
 						switch( addr->connectStatus )
 						{
 							case kConnectStatus_None:
-								FPrintF( stdout, "%s", kStatusStr_NoConnectionAttempted );
+								FPrintF( stdout, " (%s)\n", kStatusStr_NoConnectionAttempted );
 								break;
 							
 							case kConnectStatus_Succeeded:
-								FPrintF( stdout, "%s in %.2f ms",
+								FPrintF( stdout, " (%s in %.2f ms)\n",
 									context->useColoredText ? kStatusStr_CouldConnectColored : kStatusStr_CouldConnect,
 									addr->connectTimeSecs * 1000 );
 								break;
 							
 							case kConnectStatus_Failed:
-								FPrintF( stdout, "%s: %m",
+								FPrintF( stdout, " (%s: %m)\n",
 									context->useColoredText ? kStatusStr_CouldNotConnectColored : kStatusStr_CouldNotConnect,
 									addr->connectError );
 								break;
 							
 							default:
-								FPrintF( stdout, "%s", kStatusStr_Unknown );
+								FPrintF( stdout, " (%s)\n", kStatusStr_Unknown );
 								break;
 						}
-						FPrintF( stdout, ")\n" );
 					}
 					
 					FPrintF( stdout, "\n" );
@@ -4230,7 +4588,7 @@ static OSStatus
 	newAddr->foundTicks	= nowTicks;
 	SockAddrCopy( inSockAddr, &newAddr->sip.sa );
 	
-	if( inInstance->isTCP && ( inInstance->port != kDiscardProtocolPort ) )
+	if( ( inContext->maxConnectTimeSecs > 0 ) && inInstance->isTCP && ( inInstance->port != kDiscardProtocolPort ) )
 	{
 		char		destination[ kSockAddrStringMaxSize ];
 		
@@ -5114,8 +5472,7 @@ static void	DNSCryptReceiveCertHandler( void *inContext )
 	err = DNSMessageGetAnswerSection( context->msgBuf, context->msgLen, &ptr );
 	require_noerr( err, exit );
 	
-	targetName[ 0 ] = 0;
-	err = DomainNameAppendString( targetName, context->providerName, NULL );
+	err = DomainNameFromString( targetName, context->providerName, NULL );
 	require_noerr( err, exit );
 	
 	answerCount = DNSHeaderGetAnswerCount( hdr );
@@ -5520,7 +5877,7 @@ typedef struct
 	Boolean					useIPv4;							// True if the query should be sent via IPv4 multicast.
 	Boolean					useIPv6;							// True if the query should be sent via IPv6 multicast.
 	char					ifName[ IF_NAMESIZE + 1 ];			// Name of the interface over which to send the query.
-	uint8_t					qname[ kDomainNameLengthMax ];		// Buffer to hold the QNAME in label format.
+	uint8_t					qname[ kDomainNameLengthMax ];		// Buffer to hold the QNAME in DNS label format.
 	uint8_t					msgBuf[ 8940 ];						// Message buffer. 8940 is max size used by mDNSResponder.
 	
 }	MDNSQueryContext;
@@ -5594,7 +5951,7 @@ static void	MDNSQueryCmd( void )
 		
 		if( !context->isQU && ( context->localPort == kMDNSPort ) )
 		{
-			SocketJoinMulticast( sockV4, &mcastAddr4, ifNamePtr, context->ifIndex );
+			err = SocketJoinMulticast( sockV4, &mcastAddr4, ifNamePtr, context->ifIndex );
 			require_noerr( err, exit );
 		}
 	}
@@ -5625,7 +5982,7 @@ static void	MDNSQueryCmd( void )
 		
 		if( !context->isQU && ( context->localPort == kMDNSPort ) )
 		{
-			SocketJoinMulticast( sockV6, &mcastAddr6, ifNamePtr, context->ifIndex );
+			err = SocketJoinMulticast( sockV6, &mcastAddr6, ifNamePtr, context->ifIndex );
 			require_noerr( err, exit );
 		}
 	}
@@ -5837,6 +6194,619 @@ exit:
 }
 
 //===========================================================================================================================
+//	SSDPDiscoverCmd
+//===========================================================================================================================
+
+#define kSSDPPort		1900
+
+typedef struct
+{
+	HTTPHeader				header;			// HTTP header object for sending and receiving.
+	dispatch_source_t		readSourceV4;	// Read dispatch source for IPv4 socket.
+	dispatch_source_t		readSourceV6;	// Read dispatch source for IPv6 socket.
+	int						receiveSecs;	// After send, the amount of time to spend receiving.
+	uint32_t				ifindex;		// Index of the interface over which to send the query.
+	Boolean					useIPv4;		// True if the query should be sent via IPv4 multicast.
+	Boolean					useIPv6;		// True if the query should be sent via IPv6 multicast.
+	
+}	SSDPDiscoverContext;
+
+static void		SSDPDiscoverPrintPrologue( const SSDPDiscoverContext *inContext );
+static void		SSDPDiscoverReadHandler( void *inContext );
+static int		SocketToPortNumber( SocketRef inSock );
+static OSStatus	WriteSSDPSearchRequest( HTTPHeader *inHeader, const void *inHostSA, int inMX, const char *inST );
+
+static void	SSDPDiscoverCmd( void )
+{
+	OSStatus					err;
+	SSDPDiscoverContext *		context;
+	dispatch_source_t			signalSource	= NULL;
+	SocketRef					sockV4			= kInvalidSocketRef;
+	SocketRef					sockV6			= kInvalidSocketRef;
+	ssize_t						n;
+	int							sendCount;
+	char						time[ kTimestampBufLen ];
+	
+	// Set up SIGINT handler.
+	
+	signal( SIGINT, SIG_IGN );
+	err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+	require_noerr( err, exit );
+	dispatch_resume( signalSource );
+	
+	// Check command parameters.
+	
+	if( gSSDPDiscover_ReceiveSecs < -1 )
+	{
+		FPrintF( stdout, "Invalid receive time: %d seconds.\n", gSSDPDiscover_ReceiveSecs );
+		err = kParamErr;
+		goto exit;
+	}
+	
+	// Create context.
+	
+	context = (SSDPDiscoverContext *) calloc( 1, sizeof( *context ) );
+	require_action( context, exit, err = kNoMemoryErr );
+	
+	context->receiveSecs	= gSSDPDiscover_ReceiveSecs;
+	context->useIPv4		= ( gSSDPDiscover_UseIPv4 || !gSSDPDiscover_UseIPv6 ) ? true : false;
+	context->useIPv6		= ( gSSDPDiscover_UseIPv6 || !gSSDPDiscover_UseIPv4 ) ? true : false;
+	
+	err = InterfaceIndexFromArgString( gInterface, &context->ifindex );
+	require_noerr_quiet( err, exit );
+	
+	// Set up IPv4 socket.
+	
+	if( context->useIPv4 )
+	{
+		int port;
+		err = UDPClientSocketOpen( AF_INET, NULL, 0, -1, &port, &sockV4 );
+		require_noerr( err, exit );
+		
+		err = SocketSetMulticastInterface( sockV4, NULL, context->ifindex );
+		require_noerr( err, exit );
+		
+		err = setsockopt( sockV4, IPPROTO_IP, IP_MULTICAST_LOOP, (char *) &(uint8_t){ 1 }, (socklen_t) sizeof( uint8_t ) );
+		err = map_socket_noerr_errno( sockV4, err );
+		require_noerr( err, exit );
+	}
+	
+	// Set up IPv6 socket.
+	
+	if( context->useIPv6 )
+	{
+		err = UDPClientSocketOpen( AF_INET6, NULL, 0, -1, NULL, &sockV6 );
+		require_noerr( err, exit );
+		
+		err = SocketSetMulticastInterface( sockV6, NULL, context->ifindex );
+		require_noerr( err, exit );
+		
+		err = setsockopt( sockV6, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, (char *) &(int){ 1 }, (socklen_t) sizeof( int ) );
+		err = map_socket_noerr_errno( sockV6, err );
+		require_noerr( err, exit );
+	}
+	
+	// Print prologue.
+	
+	SSDPDiscoverPrintPrologue( context );
+	
+	// Send mDNS query message.
+	
+	sendCount = 0;
+	if( IsValidSocket( sockV4 ) )
+	{
+		struct sockaddr_in		mcastAddr4;
+		
+		memset( &mcastAddr4, 0, sizeof( mcastAddr4 ) );
+		SIN_LEN_SET( &mcastAddr4 );
+		mcastAddr4.sin_family		= AF_INET;
+		mcastAddr4.sin_port			= htons( kSSDPPort );
+		mcastAddr4.sin_addr.s_addr	= htonl( 0xEFFFFFFA );	// 239.255.255.250
+		
+		err = WriteSSDPSearchRequest( &context->header, &mcastAddr4, gSSDPDiscover_MX, gSSDPDiscover_ST );
+		require_noerr( err, exit );
+		
+		n = sendto( sockV4, context->header.buf, context->header.len, 0, (const struct sockaddr *) &mcastAddr4,
+			(socklen_t) sizeof( mcastAddr4 ) );
+		err = map_socket_value_errno( sockV4, n == (ssize_t) context->header.len, n );
+		if( err )
+		{
+			FPrintF( stderr, "*** Failed to send query on IPv4 socket with error %#m\n", err );
+			ForgetSocket( &sockV4 );
+		}
+		else
+		{
+			if( gSSDPDiscover_Verbose )
+			{
+				GetTimestampStr( time );
+				FPrintF( stdout, "---\n" );
+				FPrintF( stdout, "Send time:    %s\n",		time );
+				FPrintF( stdout, "Source Port:  %d\n",		SocketToPortNumber( sockV4 ) );
+				FPrintF( stdout, "Destination:  %##a\n",	&mcastAddr4 );
+				FPrintF( stdout, "Message size: %zu\n",		context->header.len );
+				FPrintF( stdout, "HTTP header:\n%1{text}",	context->header.buf, context->header.len );
+			}
+			++sendCount;
+		}
+	}
+	
+	if( IsValidSocket( sockV6 ) )
+	{
+		struct sockaddr_in6		mcastAddr6;
+		
+		memset( &mcastAddr6, 0, sizeof( mcastAddr6 ) );
+		SIN6_LEN_SET( &mcastAddr6 );
+		mcastAddr6.sin6_family				= AF_INET6;
+		mcastAddr6.sin6_port				= htons( kSSDPPort );
+		mcastAddr6.sin6_addr.s6_addr[  0 ]	= 0xFF;	// SSDP IPv6 link-local multicast address FF02::C
+		mcastAddr6.sin6_addr.s6_addr[  1 ]	= 0x02;
+		mcastAddr6.sin6_addr.s6_addr[ 15 ]	= 0x0C;
+		
+		err = WriteSSDPSearchRequest( &context->header, &mcastAddr6, gSSDPDiscover_MX, gSSDPDiscover_ST );
+		require_noerr( err, exit );
+		
+		n = sendto( sockV6, context->header.buf, context->header.len, 0, (const struct sockaddr *) &mcastAddr6,
+			(socklen_t) sizeof( mcastAddr6 ) );
+		err = map_socket_value_errno( sockV6, n == (ssize_t) context->header.len, n );
+		if( err )
+		{
+			FPrintF( stderr, "*** Failed to send query on IPv6 socket with error %#m\n", err );
+			ForgetSocket( &sockV6 );
+		}
+		else
+		{
+			if( gSSDPDiscover_Verbose )
+			{
+				GetTimestampStr( time );
+				FPrintF( stdout, "---\n" );
+				FPrintF( stdout, "Send time:    %s\n",		time );
+				FPrintF( stdout, "Source Port:  %d\n",		SocketToPortNumber( sockV6 ) );
+				FPrintF( stdout, "Destination:  %##a\n",	&mcastAddr6 );
+				FPrintF( stdout, "Message size: %zu\n",		context->header.len );
+				FPrintF( stdout, "HTTP header:\n%1{text}",	context->header.buf, context->header.len );
+			}
+			++sendCount;
+		}
+	}
+	require_action_quiet( sendCount > 0, exit, err = kUnexpectedErr );
+	
+	// If there's no wait period after the send, then exit.
+	
+	if( context->receiveSecs == 0 ) goto exit;
+	
+	// Create dispatch read sources for socket(s).
+	
+	if( IsValidSocket( sockV4 ) )
+	{
+		SocketContext *		sockContext;
+		
+		sockContext = (SocketContext *) calloc( 1, sizeof( *sockContext ) );
+		require_action( sockContext, exit, err = kNoMemoryErr );
+		
+		err = DispatchReadSourceCreate( sockV4, SSDPDiscoverReadHandler, SocketContextCancelHandler, sockContext,
+			&context->readSourceV4 );
+		if( err ) ForgetMem( &sockContext );
+		require_noerr( err, exit );
+		
+		sockContext->context	= context;
+		sockContext->sock		= sockV4;
+		sockV4 = kInvalidSocketRef;
+		dispatch_resume( context->readSourceV4 );
+	}
+	
+	if( IsValidSocket( sockV6 ) )
+	{
+		SocketContext *		sockContext;
+		
+		sockContext = (SocketContext *) calloc( 1, sizeof( *sockContext ) );
+		require_action( sockContext, exit, err = kNoMemoryErr );
+		
+		err = DispatchReadSourceCreate( sockV6, SSDPDiscoverReadHandler, SocketContextCancelHandler, sockContext,
+			&context->readSourceV6 );
+		if( err ) ForgetMem( &sockContext );
+		require_noerr( err, exit );
+		
+		sockContext->context	= context;
+		sockContext->sock		= sockV6;
+		sockV6 = kInvalidSocketRef;
+		dispatch_resume( context->readSourceV6 );
+	}
+	
+	if( context->receiveSecs > 0 )
+	{
+		dispatch_after_f( dispatch_time_seconds( context->receiveSecs ), dispatch_get_main_queue(), kExitReason_Timeout,
+			Exit );
+	}
+	dispatch_main();
+	
+exit:
+	ForgetSocket( &sockV4 );
+	ForgetSocket( &sockV6 );
+	dispatch_source_forget( &signalSource );
+	if( err ) exit( 1 );
+}
+
+static int	SocketToPortNumber( SocketRef inSock )
+{
+	OSStatus		err;
+	sockaddr_ip		sip;
+	socklen_t		len;
+	
+	len = (socklen_t) sizeof( sip );
+	err = getsockname( inSock, &sip.sa, &len );
+	err = map_socket_noerr_errno( inSock, err );
+	check_noerr( err );
+	return( err ? -1 : SockAddrGetPort( &sip ) );
+}
+
+static OSStatus	WriteSSDPSearchRequest( HTTPHeader *inHeader, const void *inHostSA, int inMX, const char *inST )
+{
+	OSStatus		err;
+	
+	err = HTTPHeader_InitRequest( inHeader, "M-SEARCH", "*", "HTTP/1.1" );
+	require_noerr( err, exit );
+	
+	err = HTTPHeader_SetField( inHeader, "Host", "%##a", inHostSA );
+	require_noerr( err, exit );
+	
+	err = HTTPHeader_SetField( inHeader, "ST", "%s", inST ? inST : "ssdp:all" );
+	require_noerr( err, exit );
+	
+	err = HTTPHeader_SetField( inHeader, "Man", "\"ssdp:discover\"" );
+	require_noerr( err, exit );
+	
+	err = HTTPHeader_SetField( inHeader, "MX", "%d", inMX );
+	require_noerr( err, exit );
+	
+	err = HTTPHeader_Commit( inHeader );
+	require_noerr( err, exit );
+	
+exit:
+	return( err );
+}
+
+//===========================================================================================================================
+//	SSDPDiscoverPrintPrologue
+//===========================================================================================================================
+
+static void	SSDPDiscoverPrintPrologue( const SSDPDiscoverContext *inContext )
+{
+	const int				receiveSecs = inContext->receiveSecs;
+	const char *			ifName;
+	char					ifNameBuf[ IF_NAMESIZE + 1 ];
+	NetTransportType		ifType;
+	char					time[ kTimestampBufLen ];
+	
+	ifName = if_indextoname( inContext->ifindex, ifNameBuf );
+	
+	ifType = kNetTransportType_Undefined;
+	if( ifName ) SocketGetInterfaceInfo( kInvalidSocketRef, ifName, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &ifType );
+	
+	FPrintF( stdout, "Interface:        %s/%d/%s\n",
+		ifName ? ifName : "?", inContext->ifindex, NetTransportTypeToString( ifType ) );
+	FPrintF( stdout, "IP protocols:     %?s%?s%?s\n",
+		inContext->useIPv4, "IPv4", ( inContext->useIPv4 && inContext->useIPv6 ), ", ", inContext->useIPv6, "IPv6" );
+	FPrintF( stdout, "Receive duration: " );
+	if( receiveSecs >= 0 )	FPrintF( stdout, "%d second%?c\n", receiveSecs, receiveSecs != 1, 's' );
+	else					FPrintF( stdout, "∞\n" );
+	FPrintF( stdout, "Start time:       %s\n",		GetTimestampStr( time ) );
+}
+
+//===========================================================================================================================
+//	SSDPDiscoverReadHandler
+//===========================================================================================================================
+
+static void	SSDPDiscoverReadHandler( void *inContext )
+{
+	OSStatus						err;
+	SocketContext * const			sockContext	= (SocketContext *) inContext;
+	SSDPDiscoverContext * const		context		= (SSDPDiscoverContext *) sockContext->context;
+	HTTPHeader * const				header		= &context->header;
+	sockaddr_ip						fromAddr;
+	size_t							msgLen;
+	char							time[ kTimestampBufLen ];
+	
+	GetTimestampStr( time );
+	
+	err = SocketRecvFrom( sockContext->sock, header->buf, sizeof( header->buf ), &msgLen, &fromAddr, sizeof( fromAddr ),
+		NULL, NULL, NULL, NULL );
+	require_noerr( err, exit );
+	
+	FPrintF( stdout, "---\n" );
+	FPrintF( stdout, "Receive time: %s\n",		time );
+	FPrintF( stdout, "Source:       %##a\n", 	&fromAddr );
+	FPrintF( stdout, "Message size: %zu\n",		msgLen );
+	header->len = msgLen;
+	if( HTTPHeader_Validate( header ) )
+	{
+		FPrintF( stdout, "HTTP header:\n%1{text}", header->buf, header->len );
+		if( header->extraDataLen > 0 )
+		{
+			FPrintF( stdout, "HTTP body: %1.1H", header->extraDataPtr, (int) header->extraDataLen, INT_MAX );
+		}
+	}
+	else
+	{
+		FPrintF( stdout, "Invalid HTTP message:\n%1.1H", header->buf, (int) msgLen, INT_MAX );
+		goto exit;
+	}
+	
+exit:
+	if( err ) exit( 1 );
+}
+
+//===========================================================================================================================
+//	HTTPHeader_Validate
+//
+//	Parses for the end of an HTTP header and updates the HTTPHeader structure so it's ready to parse. Returns true if valid.
+//	This assumes the "buf" and "len" fields are set. The other fields are set by this function.
+//
+//	Note: This was copied from CoreUtils because the HTTPHeader_Validate function is currently not exported in the framework.
+//===========================================================================================================================
+
+Boolean	HTTPHeader_Validate( HTTPHeader *inHeader )
+{
+	const char *		src;
+	const char *		end;
+	
+	// Check for interleaved binary data (4 byte header that begins with $). See RFC 2326 section 10.12.
+	
+	require( inHeader->len < sizeof( inHeader->buf ), exit );
+	src = inHeader->buf;
+	end = src + inHeader->len;
+	if( ( ( end - src ) >= 4 ) && ( src[ 0 ] == '$' ) )
+	{
+		src += 4;
+	}
+	else
+	{
+		// Search for an empty line (HTTP-style header/body separator). CRLFCRLF, LFCRLF, or LFLF accepted.
+		// $$$ TO DO: Start from the last search location to avoid re-searching the same data over and over.
+		
+		for( ;; )
+		{
+			while( ( src < end ) && ( src[ 0 ] != '\n' ) ) ++src;
+			if( src >= end ) goto exit;
+			++src;
+			if( ( ( end - src ) >= 2 ) && ( src[ 0 ] == '\r' ) && ( src[ 1 ] == '\n' ) ) // CFLFCRLF or LFCRLF
+			{
+				src += 2;
+				break;
+			}
+			else if( ( ( end - src ) >= 1 ) && ( src[ 0 ] == '\n' ) ) // LFLF
+			{
+				src += 1;
+				break;
+			}
+		}
+	}
+	inHeader->extraDataPtr	= src;
+	inHeader->extraDataLen	= (size_t)( end - src );
+	inHeader->len			= (size_t)( src - inHeader->buf );
+	return( true );
+	
+exit:
+	return( false );
+}
+
+#if( TARGET_OS_DARWIN )
+//===========================================================================================================================
+//	ResQueryCmd
+//===========================================================================================================================
+
+// res_query() from libresolv is actually called res_9_query (see /usr/include/resolv.h).
+
+SOFT_LINK_LIBRARY_EX( "/usr/lib", resolv );
+SOFT_LINK_FUNCTION_EX( resolv, res_9_query,
+	int,
+	( const char *dname, int class, int type, u_char *answer, int anslen ),
+	( dname, class, type, answer, anslen ) );
+
+// res_query() from libinfo
+
+SOFT_LINK_LIBRARY_EX( "/usr/lib", info );
+SOFT_LINK_FUNCTION_EX( info, res_query,
+	int,
+	( const char *dname, int class, int type, u_char *answer, int anslen ),
+	( dname, class, type, answer, anslen ) );
+
+typedef int ( *res_query_f )( const char *dname, int class, int type, u_char *answer, int anslen );
+
+static void	ResQueryCmd( void )
+{
+	OSStatus		err;
+	res_query_f		res_query_ptr;
+	int				n;
+	uint16_t		type, class;
+	char			time[ kTimestampBufLen ];
+	uint8_t			answer[ 1024 ];
+	
+	// Get pointer to one of the res_query() functions.
+	
+	if( gResQuery_UseLibInfo )
+	{
+		if( !SOFT_LINK_HAS_FUNCTION( info, res_query ) )
+		{
+			FPrintF( stderr, "Failed to soft link res_query from libinfo.\n" );
+			err = kNotFoundErr;
+			goto exit;
+		}
+		res_query_ptr = soft_res_query;
+	}
+	else
+	{
+		if( !SOFT_LINK_HAS_FUNCTION( resolv, res_9_query ) )
+		{
+			FPrintF( stderr, "Failed to soft link res_query from libresolv.\n" );
+			err = kNotFoundErr;
+			goto exit;
+		}
+		res_query_ptr = soft_res_9_query;
+	}
+	
+	// Get record type.
+	
+	err = RecordTypeFromArgString( gResQuery_Type, &type );
+	require_noerr( err, exit );
+	
+	// Get record class.
+	
+	if( gResQuery_Class )
+	{
+		err = RecordClassFromArgString( gResQuery_Class, &class );
+		require_noerr( err, exit );
+	}
+	else
+	{
+		class = kDNSServiceClass_IN;
+	}
+	
+	// Print prologue.
+	
+	FPrintF( stdout, "Name:       %s\n",		gResQuery_Name );
+	FPrintF( stdout, "Type:       %s (%u)\n",	RecordTypeToString( type ), type );
+	FPrintF( stdout, "Class:      %s (%u)\n",	( class == kDNSServiceClass_IN ) ? "IN" : "???", class );
+	FPrintF( stdout, "Start time: %s\n",		GetTimestampStr( time ) );
+	FPrintF( stdout, "---\n" );
+	
+	// Call res_query().
+	
+	n = res_query_ptr( gResQuery_Name, class, type, (u_char *) answer, (int) sizeof( answer ) );
+	if( n < 0 )
+	{
+		FPrintF( stderr, "res_query() failed with error: %d (%s).\n", h_errno, hstrerror( h_errno ) );
+		err = kUnknownErr;
+		goto exit;
+	}
+	
+	// Print result.
+	
+	FPrintF( stdout, "Message size: %d\n\n", n );
+	PrintUDNSMessage( answer, (size_t) n, false );
+	
+exit:
+	if( err ) exit( 1 );
+}
+
+//===========================================================================================================================
+//	ResolvDNSQueryCmd
+//===========================================================================================================================
+
+// dns_handle_t is defined as a pointer to a privately-defined struct in /usr/include/dns.h. It's defined as a void * here to
+// avoid including the header file.
+
+typedef void *		dns_handle_t;
+
+SOFT_LINK_FUNCTION_EX( resolv, dns_open, dns_handle_t, ( const char *path ), ( path ) );
+SOFT_LINK_FUNCTION_VOID_RETURN_EX( resolv, dns_free, ( dns_handle_t *dns ), ( dns ) );
+SOFT_LINK_FUNCTION_EX( resolv, dns_query,
+	int32_t, (
+		dns_handle_t		dns,
+		const char *		name,
+		uint32_t			dnsclass,
+		uint32_t			dnstype,
+		char *				buf,
+		uint32_t			len,
+		struct sockaddr *	from,
+		uint32_t *			fromlen ),
+	( dns, name, dnsclass, dnstype, buf, len, from, fromlen ) );
+
+static void	ResolvDNSQueryCmd( void )
+{
+	OSStatus			err;
+	int					n;
+	dns_handle_t		dns = NULL;
+	uint16_t			type, class;
+	sockaddr_ip			from;
+	uint32_t			fromLen;
+	char				time[ kTimestampBufLen ];
+	uint8_t				answer[ 1024 ];
+	
+	// Make sure that the required symbols are available.
+	
+	if( !SOFT_LINK_HAS_FUNCTION( resolv, dns_open ) )
+	{
+		FPrintF( stderr, "Failed to soft link dns_open from libresolv.\n" );
+		err = kNotFoundErr;
+		goto exit;
+	}
+	
+	if( !SOFT_LINK_HAS_FUNCTION( resolv, dns_free ) )
+	{
+		FPrintF( stderr, "Failed to soft link dns_free from libresolv.\n" );
+		err = kNotFoundErr;
+		goto exit;
+	}
+	
+	if( !SOFT_LINK_HAS_FUNCTION( resolv, dns_query ) )
+	{
+		FPrintF( stderr, "Failed to soft link dns_query from libresolv.\n" );
+		err = kNotFoundErr;
+		goto exit;
+	}
+	
+	// Get record type.
+	
+	err = RecordTypeFromArgString( gResolvDNSQuery_Type, &type );
+	require_noerr( err, exit );
+	
+	// Get record class.
+	
+	if( gResolvDNSQuery_Class )
+	{
+		err = RecordClassFromArgString( gResolvDNSQuery_Class, &class );
+		require_noerr( err, exit );
+	}
+	else
+	{
+		class = kDNSServiceClass_IN;
+	}
+	
+	// Get dns handle.
+	
+	dns = soft_dns_open( gResolvDNSQuery_Path );
+	if( !dns )
+	{
+		FPrintF( stderr, "dns_open( %s ) failed.\n", gResolvDNSQuery_Path );
+		err = kUnknownErr;
+		goto exit;
+	}
+	
+	// Print prologue.
+	
+	FPrintF( stdout, "Name:       %s\n",		gResolvDNSQuery_Name );
+	FPrintF( stdout, "Type:       %s (%u)\n",	RecordTypeToString( type ), type );
+	FPrintF( stdout, "Class:      %s (%u)\n",	( class == kDNSServiceClass_IN ) ? "IN" : "???", class );
+	FPrintF( stdout, "Path:       %s\n",		gResolvDNSQuery_Path ? gResolvDNSQuery_Name : "<NULL>" );
+	FPrintF( stdout, "Start time: %s\n",		GetTimestampStr( time ) );
+	FPrintF( stdout, "---\n" );
+	
+	// Call dns_query().
+	
+	memset( &from, 0, sizeof( from ) );
+	fromLen = (uint32_t) sizeof( from );
+	n = soft_dns_query( dns, gResolvDNSQuery_Name, class, type, (char *) answer, (uint32_t) sizeof( answer ), &from.sa,
+		&fromLen );
+	if( n < 0 )
+	{
+		FPrintF( stderr, "dns_query() failed with error: %d (%s).\n", h_errno, hstrerror( h_errno ) );
+		err = kUnknownErr;
+		goto exit;
+	}
+	
+	// Print result.
+	
+	FPrintF( stdout, "From:         %##a\n", &from );
+	FPrintF( stdout, "Message size: %d\n\n", n );
+	PrintUDNSMessage( answer, (size_t) n, false );
+	
+exit:
+	if( dns ) soft_dns_free( dns );
+	if( err ) exit( 1 );
+}
+#endif	// TARGET_OS_DARWIN
+
+//===========================================================================================================================
 //	DaemonVersionCmd
 //===========================================================================================================================
 
@@ -5921,6 +6891,7 @@ static DNSServiceFlags	GetDNSSDFlagsFromOpts( void )
 	if( gDNSSDFlag_Timeout )				flags |= kDNSServiceFlagsTimeout;
 	if( gDNSSDFlag_UnicastResponse )		flags |= kDNSServiceFlagsUnicastResponse;
 	if( gDNSSDFlag_Unique )					flags |= kDNSServiceFlagsUnique;
+	if( gDNSSDFlag_WakeOnResolve )			flags |= kDNSServiceFlagsWakeOnResolve;
 	
 	return( flags );
 }
@@ -6056,47 +7027,37 @@ exit:
 
 #define kRDataMaxLen		UINT16_C( 0xFFFF )
 
+static OSStatus	StringToSRVRData( const char *inString, uint8_t **outPtr, size_t *outLen );
+static OSStatus	StringToTXTRData( const char *inString, char inDelimiter, uint8_t **outPtr, size_t *outLen );
+
 static OSStatus	RecordDataFromArgString( const char *inString, uint8_t **outDataPtr, size_t *outDataLen )
 {
 	OSStatus		err;
 	uint8_t *		dataPtr = NULL;
 	size_t			dataLen;
-	DataBuffer		dataBuf;
 	
-	DataBuffer_Init( &dataBuf, NULL, 0, kRDataMaxLen );
+	if( 0 ) {}
 	
-	if( stricmp_prefix( inString, kRDataArgPrefix_String ) == 0 )
+	// Domain name
+	
+	else if( stricmp_prefix( inString, kRDataArgPrefix_Domain ) == 0 )
 	{
-		const char * const		strPtr = inString + sizeof_string( kRDataArgPrefix_String );
-		const size_t			strLen = strlen( strPtr );
-		size_t					copiedLen;
-		size_t					totalLen;
+		const char * const		str = inString + sizeof_string( kRDataArgPrefix_Domain );
+		uint8_t *				end;
+		uint8_t					dname[ kDomainNameLengthMax ];
 		
-		if( strLen > 0 )
-		{
-			require_action( strLen <= kRDataMaxLen, exit, err = kSizeErr );
-			dataPtr = (uint8_t *) malloc( strLen );
-			require_action( dataPtr, exit, err = kNoMemoryErr );
-			
-			copiedLen = 0;
-			ParseQuotedEscapedString( strPtr, strPtr + strLen, "", (char *) dataPtr, strLen, &copiedLen, &totalLen, NULL );
-			check( copiedLen == totalLen );
-			dataLen = copiedLen;
-		}
-		else
-		{
-			dataPtr = NULL;
-			dataLen = 0;
-		}
-	}
-	else if( stricmp_prefix( inString, kRDataArgPrefix_HexString ) == 0 )
-	{
-		const char * const		strPtr = inString + sizeof_string( kRDataArgPrefix_HexString );
-		
-		err = HexToDataCopy( strPtr, kSizeCString, kHexToData_DefaultFlags, &dataPtr, &dataLen, NULL );
+		err = DomainNameFromString( dname, str, &end );
 		require_noerr( err, exit );
-		require_action( dataLen <= kRDataMaxLen, exit, err = kSizeErr );
+		
+		dataLen = (size_t)( end - dname );
+		dataPtr = malloc( dataLen );
+		require_action( dataPtr, exit, err = kNoMemoryErr );
+		
+		memcpy( dataPtr, dname, dataLen );
 	}
+	
+	// File path
+	
 	else if( stricmp_prefix( inString, kRDataArgPrefix_File ) == 0 )
 	{
 		const char * const		path = inString + sizeof_string( kRDataArgPrefix_File );
@@ -6105,53 +7066,211 @@ static OSStatus	RecordDataFromArgString( const char *inString, uint8_t **outData
 		require_noerr( err, exit );
 		require_action( dataLen <= kRDataMaxLen, exit, err = kSizeErr );
 	}
-	else if( stricmp_prefix( inString, kRDataArgPrefix_TXT ) == 0 )
+	
+	// Hexadecimal string
+	
+	else if( stricmp_prefix( inString, kRDataArgPrefix_HexString ) == 0 )
 	{
-		const char *			strPtr = inString + sizeof_string( kRDataArgPrefix_TXT );
-		const char * const		strEnd = strPtr + strlen( strPtr );
+		const char * const		str = inString + sizeof_string( kRDataArgPrefix_HexString );
 		
-		while( strPtr < strEnd )
-		{
-			size_t		copiedLen, totalLen;
-			uint8_t		kvBuf[ 1 + 255 + 1 ];	// Length byte + max key-value length + 1 for NUL terminator.
-			
-			err = ParseEscapedString( strPtr, strEnd, ',', (char *) &kvBuf[ 1 ], sizeof( kvBuf ) - 1,
-				&copiedLen, &totalLen, &strPtr );
-			require_noerr_quiet( err, exit );
-			check( copiedLen == totalLen );
-			if( totalLen > 255 )
-			{
-				FPrintF( stderr, "TXT key-value pair length %zu is too long (> 255 bytes).\n", totalLen );
-				err = kParamErr;
-				goto exit;
-			}
-			
-			kvBuf[ 0 ] = (uint8_t) copiedLen;
-			err = DataBuffer_Append( &dataBuf, kvBuf, 1 + kvBuf[ 0 ] );
-			require_noerr( err, exit );
-		}
+		err = HexToDataCopy( str, kSizeCString, kHexToData_DefaultFlags, &dataPtr, &dataLen, NULL );
+		require_noerr( err, exit );
+		require_action( dataLen <= kRDataMaxLen, exit, err = kSizeErr );
+	}
+	
+	// IPv4 address string
+	
+	else if( stricmp_prefix( inString, kRDataArgPrefix_IPv4 ) == 0 )
+	{
+		const char * const		str = inString + sizeof_string( kRDataArgPrefix_IPv4 );
+		const char *			end;
 		
-		err = DataBuffer_Commit( &dataBuf, NULL, NULL );
+		dataLen = 4;
+		dataPtr = (uint8_t *) malloc( dataLen );
+		require_action( dataPtr, exit, err = kNoMemoryErr );
+		
+		err = StringToIPv4Address( str, kStringToIPAddressFlagsNoPort | kStringToIPAddressFlagsNoPrefix,
+			(uint32_t *) dataPtr, NULL, NULL, NULL, &end );
+		if( !err && ( *end != '\0' ) ) err = kMalformedErr;
 		require_noerr( err, exit );
 		
-		err = DataBuffer_Detach( &dataBuf, &dataPtr, &dataLen );
+		*( (uint32_t *) dataPtr ) = HostToBig32( *( (uint32_t *) dataPtr ) );
+	}
+	
+	// IPv6 address string
+	
+	else if( stricmp_prefix( inString, kRDataArgPrefix_IPv6 ) == 0 )
+	{
+		const char * const		str = inString + sizeof_string( kRDataArgPrefix_IPv6 );
+		const char *			end;
+		
+		dataLen = 16;
+		dataPtr = (uint8_t *) malloc( dataLen );
+		require_action( dataPtr, exit, err = kNoMemoryErr );
+		
+		err = StringToIPv6Address( str,
+			kStringToIPAddressFlagsNoPort | kStringToIPAddressFlagsNoPrefix | kStringToIPAddressFlagsNoScope,
+			dataPtr, NULL, NULL, NULL, &end );
+		if( !err && ( *end != '\0' ) ) err = kMalformedErr;
 		require_noerr( err, exit );
 	}
+	
+	// SRV record
+	
+	else if( stricmp_prefix( inString, kRDataArgPrefix_SRV ) == 0 )
+	{
+		const char * const		str = inString + sizeof_string( kRDataArgPrefix_SRV );
+		
+		err = StringToSRVRData( str, &dataPtr, &dataLen );
+		require_noerr( err, exit );
+	}
+	
+	// String with escaped hex and octal bytes
+	
+	else if( stricmp_prefix( inString, kRDataArgPrefix_String ) == 0 )
+	{
+		const char * const		str = inString + sizeof_string( kRDataArgPrefix_String );
+		const char * const		end = str + strlen( str );
+		size_t					copiedLen;
+		size_t					totalLen;
+		Boolean					success;
+		
+		if( str < end )
+		{
+			success = ParseQuotedEscapedString( str, end, "", NULL, 0, NULL, &totalLen, NULL );
+			require_action( success, exit, err = kParamErr );
+			require_action( totalLen <= kRDataMaxLen, exit, err = kSizeErr );
+			
+			dataLen = totalLen;
+			dataPtr = (uint8_t *) malloc( dataLen );
+			require_action( dataPtr, exit, err = kNoMemoryErr );
+			
+			success = ParseQuotedEscapedString( str, end, "", (char *) dataPtr, dataLen, &copiedLen, NULL, NULL );
+			require_action( success, exit, err = kParamErr );
+			check( copiedLen == dataLen );
+		}
+		else
+		{
+			dataPtr = NULL;
+			dataLen = 0;
+		}
+	}
+	
+	// TXT record
+	
+	else if( stricmp_prefix( inString, kRDataArgPrefix_TXT ) == 0 )
+	{
+		const char * const		str = inString + sizeof_string( kRDataArgPrefix_TXT );
+		
+		err = StringToTXTRData( str, ',', &dataPtr, &dataLen );
+		require_noerr( err, exit );
+	}
+	
+	// Unrecognized format
+	
 	else
 	{
 		FPrintF( stderr, "Unrecognized record data string \"%s\".\n", inString );
 		err = kParamErr;
 		goto exit;
 	}
-	err = kNoErr;
 	
+	err = kNoErr;
 	*outDataLen = dataLen;
 	*outDataPtr = dataPtr;
 	dataPtr = NULL;
 	
 exit:
-	DataBuffer_Free( &dataBuf );
 	FreeNullSafe( dataPtr );
+	return( err );
+}
+
+static OSStatus	StringToSRVRData( const char *inString, uint8_t **outPtr, size_t *outLen )
+{
+	OSStatus			err;
+	DataBuffer			dataBuf;
+	const char *		ptr;
+	int					i;
+	uint8_t *			end;
+	uint8_t				target[ kDomainNameLengthMax ];
+	
+	DataBuffer_Init( &dataBuf, NULL, 0, ( 3 * 2 ) + kDomainNameLengthMax );
+	
+	// Parse and set the priority, weight, and port values (all three are unsigned 16-bit values).
+	
+	ptr = inString;
+	for( i = 0; i < 3; ++i )
+	{
+		char *		next;
+		long		value;
+		uint8_t		buf[ 2 ];
+		
+		value = strtol( ptr, &next, 0 );
+		require_action_quiet( ( next != ptr ) && ( *next == ',' ), exit, err = kMalformedErr );
+		require_action_quiet( ( value >= 0 ) && ( value <= UINT16_MAX ), exit, err = kRangeErr );
+		ptr = next + 1;
+		
+		WriteBig16( buf, value );
+		
+		err = DataBuffer_Append( &dataBuf, buf, sizeof( buf ) );
+		require_noerr( err, exit );
+	}
+	
+	// Set the target domain name.
+	
+	err = DomainNameFromString( target, ptr, &end );
+    require_noerr_quiet( err, exit );
+	
+	err = DataBuffer_Append( &dataBuf, target, (size_t)( end - target ) );
+	require_noerr( err, exit );
+	
+	err = DataBuffer_Detach( &dataBuf, outPtr, outLen );
+	require_noerr( err, exit );
+	
+exit:
+	DataBuffer_Free( &dataBuf );
+	return( err );
+}
+
+static OSStatus	StringToTXTRData( const char *inString, char inDelimiter, uint8_t **outPtr, size_t *outLen )
+{
+	OSStatus			err;
+	DataBuffer			dataBuf;
+	const char *		src;
+	uint8_t				txtStr[ 256 ];	// Buffer for single TXT string: 1 length byte + up to 255 bytes of data.
+	
+	DataBuffer_Init( &dataBuf, NULL, 0, kRDataMaxLen );
+	
+	src = inString;
+	for( ;; )
+	{
+		uint8_t *					dst = &txtStr[ 1 ];
+		const uint8_t * const		lim = &txtStr[ 256 ];
+		int							c;
+		
+		while( *src && ( *src != inDelimiter ) )
+		{
+			if( ( c = *src++ ) == '\\' )
+			{
+				require_action_quiet( *src != '\0', exit, err = kUnderrunErr );
+				c = *src++;
+			}
+			require_action_quiet( dst < lim, exit, err = kOverrunErr );
+			*dst++ = (uint8_t) c;
+		}
+		txtStr[ 0 ] = (uint8_t)( dst - &txtStr[ 1 ] );
+		err = DataBuffer_Append( &dataBuf, txtStr, 1 + txtStr[ 0 ] );
+		require_noerr( err, exit );
+		
+		if( *src == '\0' ) break;
+		++src;
+	}
+	
+	err = DataBuffer_Detach( &dataBuf, outPtr, outLen );
+	require_noerr( err, exit );
+	
+exit:
+	DataBuffer_Free( &dataBuf );
 	return( err );
 }
 
@@ -6767,67 +7886,55 @@ static OSStatus
 {
 	OSStatus					err;
 	const char *				src;
-	uint8_t *					dst;
-	const uint8_t * const		nameLimit = inDomainName + kDomainNameLengthMax;
+	uint8_t *					root;
+	const uint8_t * const		nameLim = inDomainName + kDomainNameLengthMax;
 	
-	// Find the root label.
+	for( root = inDomainName; ( root < nameLim ) && *root; root += ( 1 + *root ) ) {}
+	require_action_quiet( root < nameLim, exit, err = kMalformedErr );
 	
-	for( dst = inDomainName; ( dst < nameLimit ) && *dst; dst += ( 1 + *dst ) ) {}
-	require_action_quiet( dst < nameLimit, exit, err = kMalformedErr );
-	
-	// Append the string's labels one label at a time.
+	// If the string is a single dot, denoting the root domain, then there are no non-empty labels.
 	
 	src = inString;
+	if( ( src[ 0 ] == '.' ) && ( src[ 1 ] == '\0' ) ) ++src;
 	while( *src )
 	{
-		uint8_t * const				label		= dst++;
-		const uint8_t * const		labelLimit	= Min( dst + kDomainLabelLengthMax, nameLimit - 1 );
+		uint8_t * const				label		= root;
+		const uint8_t * const		labelLim	= Min( &label[ 1 + kDomainLabelLengthMax ], nameLim - 1 );
+		uint8_t *					dst;
+		int							c;
+		size_t						labelLen;
 		
-		// If the first character is a label separator, then the label is empty. Empty non-root labels are not allowed.
-		
-		require_action_quiet( *src != '.', exit, err = kMalformedErr );
-		
-		// Write the label characters until the end of the label, a separator or NUL character, is encountered, or until no
-		// more space is available.
-		
-		while( ( *src != '.' ) && ( *src != '\0' ) && ( dst < labelLimit ) )
+		dst = &label[ 1 ];
+		while( *src && ( ( c = *src++ ) != '.' ) )
 		{
-			uint8_t		value;
-			
-			value = (uint8_t) *src++;
-			if( value == '\\' )
+			if( c == '\\' )
 			{
-				if( *src == '\0' ) break;
-				value = (uint8_t) *src++;
-				if( isdigit_safe( value ) && isdigit_safe( src[ 0 ] ) && isdigit_safe( src[ 1 ] ) )
+				require_action_quiet( *src != '\0', exit, err = kUnderrunErr );
+				c = *src++;
+				if( isdigit_safe( c ) && isdigit_safe( src[ 0 ] ) && isdigit_safe( src[ 1 ] ) )
 				{
-					int		decimalValue;
+					const int		decimal = ( ( c - '0' ) * 100 ) + ( ( src[ 0 ] - '0' ) * 10 ) + ( src[ 1 ] - '0' );
 					
-					decimalValue = ( ( value - '0' ) * 100 ) + ( ( src[ 0 ] - '0' ) * 10 ) + ( src[ 1 ] - '0' );
-					if( decimalValue <= 255 )
+					if( decimal <= 255 )
 					{
-						value = (uint8_t) decimalValue;
+						c = decimal;
 						src += 2;
 					}
 				}
 			}
-			*dst++ = value;
+			require_action_quiet( dst < labelLim, exit, err = kOverrunErr );
+			*dst++ = (uint8_t) c;
 		}
-		if( ( *src == '.' ) || ( *src == '\0' ) )
-		{
-			label[ 0 ] = (uint8_t)( dst - &label[ 1 ] );	// Write the label length.
-			if( *src == '.' ) ++src;						// Advance the pointer past the label separator.
-		}
-		else
-		{
-			label[ 0 ] = 0;
-			err = kOverrunErr;
-			goto exit;
-		}
+		
+		labelLen = (size_t)( dst - &label[ 1 ] );
+		require_action_quiet( labelLen > 0, exit, err = kMalformedErr );
+		
+		label[ 0 ] = (uint8_t) labelLen;
+		root = dst;
+		*root = 0;
 	}
 	
-	*dst++ = 0;	// Write the empty root label.
-	if( outEndPtr ) *outEndPtr = dst;
+	if( outEndPtr ) *outEndPtr = root + 1;
 	err = kNoErr;
 	
 exit:
@@ -6854,6 +7961,20 @@ static Boolean	DomainNameEqual( const uint8_t *inName1, const uint8_t *inName2 )
 		}
 	}
 	return( true );
+}
+
+//===========================================================================================================================
+//	DomainNameFromString
+//===========================================================================================================================
+
+static OSStatus
+	DomainNameFromString(
+		uint8_t			inDomainName[ kDomainNameLengthMax ],
+		const char *	inString,
+		uint8_t **		outEndPtr )
+{
+	inDomainName[ 0 ] = 0;
+	return( DomainNameAppendString( inDomainName, inString, outEndPtr ) );
 }
 
 //===========================================================================================================================
@@ -7081,8 +8202,7 @@ static OSStatus
 	WriteBig16( hdr->additionalCount,	0 );
 	
 	ptr = (uint8_t *)( hdr + 1 );
-	ptr[ 0 ] = 0;
-	err = DomainNameAppendString( ptr, inQName, &ptr );
+	err = DomainNameFromString( ptr, inQName, &ptr );
 	require_noerr_quiet( err, exit );
 	
 	WriteBig16( ptr, inQType );
@@ -7376,56 +8496,6 @@ OSStatus	SocketWriteAll( SocketRef inSock, const void *inData, size_t inSize, in
 	err = kNoErr;
 	
 exit:
-	return( err );
-}
-
-//===========================================================================================================================
-//	ParseEscapedString
-//
-//	Note: This was copied from CoreUtils because the ParseEscapedString function is currently not exported in the framework.
-//===========================================================================================================================
-
-OSStatus
-	ParseEscapedString( 
-		const char *	inSrc, 
-		const char *	inEnd, 
-		char			inDelimiter, 
-		char *			inBuf, 
-		size_t			inMaxLen, 
-		size_t *		outCopiedLen, 
-		size_t *		outTotalLen, 
-		const char **	outSrc )
-{
-	OSStatus		err;
-	char			c;
-	char *			dst;
-	char *			lim;
-	size_t			len;
-	
-	dst = inBuf;
-	lim = dst + ( ( inMaxLen > 0 ) ? ( inMaxLen - 1 ) : 0 ); // Leave room for null terminator.
-	len = 0;
-	while( ( inSrc < inEnd ) && ( ( c = *inSrc++ ) != inDelimiter ) )
-	{
-		if( c == '\\' )
-		{
-			require_action_quiet( inSrc < inEnd, exit, err = kUnderrunErr );
-			c = *inSrc++;
-		}
-		if( dst < lim )
-		{
-			if( inBuf ) *dst = c;
-			++dst;
-		}
-		++len;
-	}
-	if( inBuf && ( inMaxLen > 0 ) ) *dst = '\0';
-	err = kNoErr;
-	
-exit:
-	if( outCopiedLen )	*outCopiedLen	= (size_t)( dst - inBuf );
-	if( outTotalLen )	*outTotalLen	= len;
-	if( outSrc )		*outSrc			= inSrc;
 	return( err );
 }
 

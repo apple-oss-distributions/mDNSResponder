@@ -888,9 +888,10 @@ mDNSexport void LNT_SendDiscoveryMsg(mDNS *m)
         "MX:3\r\n\r\n";
     static const mDNSAddr multicastDest = { mDNSAddrType_IPv4, { { { 239, 255, 255, 250 } } } };
 
-    mDNSu8 *buf = (mDNSu8*)&m->omsg; //m->omsg is 8952 bytes, which is plenty
+    mDNSu8 *const buf = (mDNSu8*)&m->omsg; //m->omsg is 8952 bytes, which is plenty
     unsigned int bufLen;
 
+    if (m->SleepState != SleepState_Awake) return;
     if (!mDNSIPPortIsZero(m->UPnPRouterPort))
     {
         if (m->SSDPSocket) { debugf("LNT_SendDiscoveryMsg destroying SSDPSocket %p", &m->SSDPSocket); mDNSPlatformUDPClose(m->SSDPSocket); m->SSDPSocket = mDNSNULL; }
