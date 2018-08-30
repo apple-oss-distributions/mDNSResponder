@@ -2770,7 +2770,9 @@ mDNSexport const mDNSu8 *getDomainName(const DNSMessage *const msg, const mDNSu8
 
         case 0x80:  debugf("getDomainName: Illegal label length 0x%X in domain name %##s", len, name->c); return(mDNSNULL);
 
-        case 0xC0:  offset = (mDNSu16)((((mDNSu16)(len & 0x3F)) << 8) | *ptr++);
+        case 0xC0:  if (ptr >= end)
+            { debugf("getDomainName: Malformed compression label (overruns packet end)"); return(mDNSNULL); }
+            offset = (mDNSu16)((((mDNSu16)(len & 0x3F)) << 8) | *ptr++);
             if (!nextbyte) nextbyte = ptr;              // Record where we got to before we started following pointers
             ptr = (mDNSu8 *)msg + offset;
             if (ptr < (mDNSu8*)msg || ptr >= end)
@@ -3335,7 +3337,7 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
             AssignDomainName(&name, (domainname *)ptr);
             ptr += DomainNameLength(&name);
         }
-        if (!ptr)
+        if (!ptr || ptr >= end)
         {
             LogInfo("SetRData: Malformed name for TSIG/TKEY type %d", rr->resrec.rrtype);
             goto fail;
