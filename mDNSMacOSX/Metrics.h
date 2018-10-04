@@ -26,7 +26,7 @@ extern "C" {
 
 #if TARGET_OS_IOS
 mStatus MetricsInit(void);
-void    MetricsUpdateDNSQueryStats(const domainname *inQueryName, mDNSu16 inType, const ResourceRecord *inRR, mDNSu32 inSendCount, mDNSu32 inLatencyMs, mDNSBool inForCell);
+void    MetricsUpdateDNSQueryStats(const domainname *inQueryName, mDNSu16 inType, const ResourceRecord *inRR, mDNSu32 inSendCount, ExpiredAnswerMetric inExpiredAnswerState, mDNSu32 inLatencyMs, mDNSBool inForCell);
 void    MetricsUpdateDNSResolveStats(const domainname *inQueryName, const ResourceRecord *inRR, mDNSBool inForCell);
 void    MetricsUpdateDNSQuerySize(mDNSu32 inSize);
 void    MetricsUpdateDNSResponseSize(mDNSu32 inSize);

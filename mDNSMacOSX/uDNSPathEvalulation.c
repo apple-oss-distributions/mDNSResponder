@@ -17,7 +17,13 @@
 
 #include "mDNSMacOSX.h"
 #include <libproc.h>
-#include <network/private.h>
+
+#if __has_include(<nw/private.h>)
+    #include <nw/private.h>
+#else
+    #include <network/private.h>
+#endif
+
 #include "dns_sd_internal.h"
 
 //Gets the DNSPolicy from NW PATH EVALUATOR

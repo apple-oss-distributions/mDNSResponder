@@ -1584,7 +1584,6 @@ DNSServiceErrorType DNSSD_API DNSServiceBrowse
     return err;
 }
 
-DNSServiceErrorType DNSSD_API DNSServiceSetDefaultDomainForUser(DNSServiceFlags flags, const char *domain);
 DNSServiceErrorType DNSSD_API DNSServiceSetDefaultDomainForUser(DNSServiceFlags flags, const char *domain)
 {
     DNSServiceErrorType err;

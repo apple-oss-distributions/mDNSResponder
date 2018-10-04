@@ -439,7 +439,7 @@ static mStatus RegisterOneService(const char *  richTextName,
         status = mDNS_RegisterService(&mDNSStorage, &thisServ->coreServ,
                                       &name, &type, &domain, // Name, type, domain
                                       NULL, mDNSOpaque16fromIntVal(portNumber),
-                                      text, textLen, // TXT data, length
+                                      NULL, text, textLen, // TXT data, length
                                       NULL, 0,      // Subtypes
                                       mDNSInterface_Any, // Interface ID
                                       RegistrationCallback, thisServ, 0); // Callback, context, flags

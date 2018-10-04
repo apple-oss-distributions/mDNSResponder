@@ -62,6 +62,7 @@ static os_log_t	log_general	        = NULL;
 #define kPreferencesKey_DebugLogging              CFSTR("DebugLogging")
 #define kPreferencesKey_UnicastPacketLogging      CFSTR("UnicastPacketLogging")
 #define kPreferencesKey_AlwaysAppendSearchDomains CFSTR("AlwaysAppendSearchDomains")
+#define kPreferencesKey_EnableAllowExpired        CFSTR("EnableAllowExpired")
 #define kPreferencesKey_NoMulticastAdvertisements CFSTR("NoMulticastAdvertisements")
 #define kPreferencesKey_StrictUnicastOrdering     CFSTR("StrictUnicastOrdering")
 #define kPreferencesKey_OfferSleepProxyService    CFSTR("OfferSleepProxyService")
@@ -84,13 +85,13 @@ static os_log_t	log_general	        = NULL;
 
 static mDNS_PlatformSupport PlatformStorage;
 
-// Start off with a default cache of 32K (141 records of 232 bytes each)
-// Each time we grow the cache we add another 141 records
-// 141 * 232 = 32712 bytes.
-// This fits in eight 4kB pages, with 56 bytes spare for memory block headers and similar overhead
+// Start off with a default cache of 32K (136 records of 240 bytes each)
+// Each time we grow the cache we add another 136 records
+// 136 * 240 = 32640 bytes.
+// This fits in eight 4kB pages, with 128 bytes spare for memory block headers and similar overhead
 #define RR_CACHE_SIZE ((32*1024) / sizeof(CacheRecord))
 static CacheEntity rrcachestorage[RR_CACHE_SIZE];
-struct CompileTimeAssertionChecks_RR_CACHE_SIZE { char a[(RR_CACHE_SIZE >= 141) ? 1 : -1]; };
+struct CompileTimeAssertionChecks_RR_CACHE_SIZE { char a[(RR_CACHE_SIZE >= 136) ? 1 : -1]; };
 #define kRRCacheGrowSize (sizeof(CacheEntity) * RR_CACHE_SIZE)
 
 
@@ -107,6 +108,7 @@ static mDNSBool NoMulticastAdvertisements = mDNSfalse; // By default, advertise 
 
 extern mDNSBool StrictUnicastOrdering;
 extern mDNSBool AlwaysAppendSearchDomains;
+extern mDNSBool EnableAllowExpired;
 
 #if ENABLE_BLE_TRIGGERED_BONJOUR
 extern mDNSBool EnableBLEBasedDiscovery;
@@ -571,7 +573,7 @@ mDNSexport void mDNSPlatformLogToFile(int log_level, const char *buffer)
     if (!log_general)
         os_log_error(OS_LOG_DEFAULT, "Could NOT create log handle in init_logging()");
     else
-        os_log_with_type(log_general, log_level, "%s", buffer);
+        os_log_with_type(log_general, log_level, "%{private}s", buffer);
     
 }
 
@@ -652,6 +654,7 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
         mDNS_Lock(m);
         FORALL_CACHERECORDS(slot, cg, rr)
         {
+            rr->resrec.mortality = Mortality_Mortal;
             mDNS_PurgeCacheResourceRecord(m, rr);
         }
         // Restart unicast and multicast queries
@@ -763,7 +766,8 @@ mDNSlocal void SignalDispatch(dispatch_source_t source)
         mDNS_Lock(m);
         FORALL_CACHERECORDS(slot, cg, rr)
         {
-            mDNS_PurgeCacheResourceRecord(m, rr);
+           rr->resrec.mortality = Mortality_Mortal;
+           mDNS_PurgeCacheResourceRecord(m, rr);
         }
         // Restart unicast and multicast queries
         mDNSCoreRestartQueries(m);
@@ -1528,6 +1532,7 @@ mDNSexport int main(int argc, char **argv)
             UseInternalSleepProxy = (i+1<argc && mDNSIsDigit(argv[i+1][0]) && argv[i+1][1]==0) ? atoi(argv[++i]) : 1;
         if (!strcasecmp(argv[i], "-StrictUnicastOrdering"    )) StrictUnicastOrdering     = mDNStrue;
         if (!strcasecmp(argv[i], "-AlwaysAppendSearchDomains")) AlwaysAppendSearchDomains = mDNStrue;
+        if (!strcasecmp(argv[i], "-DisableAllowExpired"      )) EnableAllowExpired        = mDNSfalse;
 #if DEBUG
         if (!strcasecmp(argv[i], "-UseDebugSocket"))            useDebugSocket = mDNStrue;
         if (!strcasecmp(argv[i], "-NoSandbox"))                 useSandbox = mDNSfalse;
@@ -1568,6 +1573,7 @@ mDNSexport int main(int argc, char **argv)
     NoMulticastAdvertisements = PreferencesGetValueBool(kPreferencesKey_NoMulticastAdvertisements, NoMulticastAdvertisements);
     StrictUnicastOrdering     = PreferencesGetValueBool(kPreferencesKey_StrictUnicastOrdering,     StrictUnicastOrdering);
     AlwaysAppendSearchDomains = PreferencesGetValueBool(kPreferencesKey_AlwaysAppendSearchDomains, AlwaysAppendSearchDomains);
+    EnableAllowExpired        = PreferencesGetValueBool(kPreferencesKey_EnableAllowExpired,        EnableAllowExpired);
     OfferSleepProxyService    = PreferencesGetValueInt(kPreferencesKey_OfferSleepProxyService,     OfferSleepProxyService);
     UseInternalSleepProxy     = PreferencesGetValueInt(kPreferencesKey_UseInternalSleepProxy,      UseInternalSleepProxy);
 

@@ -51,7 +51,5 @@ extern int      LogEtcHosts_ut(mDNS *const m);
 extern mDNSBool mDNSMacOSXCreateEtcHostsEntry_ut(const domainname *domain, const struct sockaddr *sa,
                                                  const domainname *cname, char *ifname, AuthHash *auth);
 extern void     UpdateEtcHosts_ut(void *context);
-extern mStatus	ArpLogMsgTest(mDNS *const m, const ARP_EthIP *const arp, const mDNSInterfaceID InterfaceID);
-
 
 #endif /* UNITTEST_COMMON_H */

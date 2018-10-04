@@ -22,7 +22,13 @@
 #include "DNS64.h"
 
 #include <AssertMacros.h>
-#include <network/nat64.h>
+
+#if __has_include(<nw/private.h>)
+    #include <nw/private.h>
+#else
+    #include <network/nat64.h>
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 

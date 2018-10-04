@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2016 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2018 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -97,7 +97,6 @@ static mDNSu8 *const compression_limit = (mDNSu8 *) &compression_base_msg + size
 static mDNSu8 *const compression_lhs = (mDNSu8 *const) compression_base_msg.data + 27;
 
 mDNSlocal void FreeD2DARElemCallback(mDNS *const m, AuthRecord *const rr, mStatus result);
-mDNSlocal void PrintHex(mDNSu8 *data, mDNSu16 len);
 
 typedef struct D2DRecordListElem
 {
@@ -167,42 +166,13 @@ mDNSlocal mDNSu8 * DNSNameCompressionBuildRHS(mDNSu8 *start, const ResourceRecor
     return putRData(&compression_base_msg, start, compression_limit, resourceRecord);
 }
 
-#define PRINT_DEBUG_BYTES_LIMIT 64  // set limit on number of record bytes printed for debugging
-
-mDNSlocal void PrintHex(mDNSu8 *data, mDNSu16 len)
-{
-    mDNSu8 *end;
-    char buffer[49] = {0};
-    char *bufend = buffer + sizeof(buffer);
-
-    if (len > PRINT_DEBUG_BYTES_LIMIT)
-    {
-        LogInfo(" (limiting debug output to %d bytes)", PRINT_DEBUG_BYTES_LIMIT);
-        len = PRINT_DEBUG_BYTES_LIMIT;
-    }
-    end = data + len;
-
-    while(data < end)
-    {
-        char *ptr = buffer;
-        for(; data < end && ptr < bufend-1; ptr+=3,data++)
-            mDNS_snprintf(ptr, bufend - ptr, "%02X ", *data);
-        LogInfo("    %s", buffer);
-    }
-}
-
 mDNSlocal void PrintHelper(const char *const tag, mDNSu8 *lhs, mDNSu16 lhs_len, mDNSu8 *rhs, mDNSu16 rhs_len)
 {
-    if (!mDNS_LoggingEnabled) return;
-
-    LogInfo("%s:", tag);
-    LogInfo("  LHS: (%d bytes)", lhs_len);
-    PrintHex(lhs, lhs_len);
-
-    if (!rhs) return;
-
-    LogInfo("  RHS: (%d bytes)", rhs_len);
-    PrintHex(rhs, rhs_len);
+    if (mDNS_LoggingEnabled)
+    {
+        LogDebug("%s: LHS: (%d bytes) %.*H", tag, lhs_len, lhs_len, lhs);
+        if (rhs) LogDebug("%s: RHS: (%d bytes) %.*H", tag, rhs_len, rhs_len, rhs);
+    }
 }
 
 mDNSlocal void FreeD2DARElemCallback(mDNS *const m, AuthRecord *const rr, mStatus result)
@@ -333,9 +303,8 @@ mDNSlocal mStatus xD2DParse(const mDNSu8 * const lhs, const mDNSu16 lhs_len, con
 
     if (mDNS_LoggingEnabled)
     {
-        LogInfo("%s", __func__);
-        LogInfo("  Static Bytes: (%d bytes)", compression_lhs - (mDNSu8*)&compression_base_msg);
-        PrintHex((mDNSu8*)&compression_base_msg, compression_lhs - (mDNSu8*)&compression_base_msg);
+        const int len = (int)(compression_lhs - (mDNSu8*)&compression_base_msg);
+        LogInfo("xD2DParse: Static Bytes: (%d bytes) %.*H", len, len, &compression_base_msg);
     }
 
     mDNSu8 *ptr = compression_lhs; // pointer to the end of our fake packet
@@ -366,8 +335,8 @@ mDNSlocal mStatus xD2DParse(const mDNSu8 * const lhs, const mDNSu16 lhs_len, con
 
     if (mDNS_LoggingEnabled)
     {
-        LogInfo("  Our Bytes (%d bytes): ", ptr - compression_lhs);
-        PrintHex(compression_lhs, ptr - compression_lhs);
+        const int len = (int)(ptr - compression_lhs);
+        LogInfo("xD2DParse: Our Bytes (%d bytes): %.*H", len, len, compression_lhs);
     }
 
     ptr = (mDNSu8 *) GetLargeResourceRecord(m, &compression_base_msg, compression_lhs, ptr, mDNSInterface_Any, kDNSRecordTypePacketAns, &m->rec);

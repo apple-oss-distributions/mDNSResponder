@@ -4,7 +4,6 @@
 int InitmDNSCoreReceiveTest(void);
 int ValidQueryReqTest(void);
 int NullDstQueryReqTest(void);
-int ReceiveArpLogMsgTest(void);
 void InitmDNSStorage(mDNS *const m);
 
 // This DNS message was gleaned from a uDNS query request packet that was captured with Wireshark.
@@ -46,7 +45,6 @@ UNITTEST_HEADER(mDNSCoreReceiveTest)
     UNITTEST_TEST(InitmDNSCoreReceiveTest)
     UNITTEST_TEST(ValidQueryReqTest)
     UNITTEST_TEST(NullDstQueryReqTest)
-    UNITTEST_TEST(ReceiveArpLogMsgTest)
 UNITTEST_FOOTER
 
 UNITTEST_HEADER(InitmDNSCoreReceiveTest)
@@ -56,16 +54,6 @@ UNITTEST_HEADER(InitmDNSCoreReceiveTest)
 	mDNS_PacketLoggingEnabled = 0;
 UNITTEST_FOOTER
 
-UNITTEST_HEADER(ReceiveArpLogMsgTest)
-    // Init unit test environment and verify no error occurred.
-    mStatus result = init_mdns_environment(mDNStrue);
-    UNITTEST_ASSERT(result == mStatus_NoError);
-
-    UNITTEST_ASSERT(result == mStatus_NoError);
-    ArpLogMsgTest(&mDNSStorage, (const ARP_EthIP *) arp_request_packet, primary_interfaceID);
-    UNITTEST_ASSERT(result == mStatus_NoError);
-UNITTEST_FOOTER
-
 UNITTEST_HEADER(ValidQueryReqTest)
 	mDNS *const m = &mDNSStorage;
 	mDNSAddr srcaddr, dstaddr;
@@ -73,9 +61,9 @@ UNITTEST_HEADER(ValidQueryReqTest)
 	DNSMessage * msg;
 	const mDNSu8 * end;
 
-	// This test case does not require setup of interfaces, the record's cache, or pending questions
-	// so m is initialized to all zeros.
-	InitmDNSStorage(m);
+    // Init unit test environment and verify no error occurred.
+    mStatus result = init_mdns_environment(mDNStrue);
+    UNITTEST_ASSERT(result == mStatus_NoError);
 
 	// Used random values for srcaddr and srcport
 	srcaddr.type	   = mDNSAddrType_IPv4;

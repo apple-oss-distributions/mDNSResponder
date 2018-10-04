@@ -5807,7 +5807,7 @@ struct CompileTimeAssertionChecks_uDNS
     // other overly-large structures instead of having a pointer to them, can inadvertently
     // cause structure sizes (and therefore memory usage) to balloon unreasonably.
     char sizecheck_tcpInfo_t     [(sizeof(tcpInfo_t)      <=  9056) ? 1 : -1];
-    char sizecheck_SearchListElem[(sizeof(SearchListElem) <=  5000) ? 1 : -1];
+    char sizecheck_SearchListElem[(sizeof(SearchListElem) <=  6136) ? 1 : -1];
 };
 
 #if COMPILER_LIKES_PRAGMA_MARK

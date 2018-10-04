@@ -93,10 +93,11 @@ SOFT_LINK_CLASS(WirelessDiagnostics, AWDMDNSResponderDNSMessageSizeStats)
 //  Constants
 //===========================================================================================================================
 
-#define kQueryStatsMaxQuerySendCount    10
-#define kQueryStatsSendCountBinCount    (kQueryStatsMaxQuerySendCount + 1)
-#define kQueryStatsLatencyBinCount      55
-#define kResolveStatsMaxObjCount        2000
+#define kQueryStatsMaxQuerySendCount        10
+#define kQueryStatsSendCountBinCount        (kQueryStatsMaxQuerySendCount + 1)
+#define kQueryStatsLatencyBinCount          55
+#define kQueryStatsExpiredAnswerStateCount  (ExpiredAnswer_EnumCount)
+#define kResolveStatsMaxObjCount            2000
 
 //===========================================================================================================================
 //  Data structures
@@ -152,6 +153,7 @@ typedef struct
     uint16_t    responseLatencyBins[kQueryStatsLatencyBinCount];
     uint16_t    negAnsweredQuerySendCountBins[kQueryStatsSendCountBinCount];
     uint16_t    negResponseLatencyBins[kQueryStatsLatencyBinCount];
+    uint16_t    expiredAnswerStateBins[kQueryStatsExpiredAnswerStateCount];
 
 }   DNSHist;
 
@@ -159,6 +161,7 @@ check_compile_time(sizeof(DNSHist) <= 512);
 check_compile_time(countof_field(DNSHist, unansweredQuerySendCountBins)  == (kQueryStatsMaxQuerySendCount + 1));
 check_compile_time(countof_field(DNSHist, answeredQuerySendCountBins)    == (kQueryStatsMaxQuerySendCount + 1));
 check_compile_time(countof_field(DNSHist, negAnsweredQuerySendCountBins) == (kQueryStatsMaxQuerySendCount + 1));
+check_compile_time(countof_field(DNSHist, expiredAnswerStateBins)         == (kQueryStatsExpiredAnswerStateCount));
 
 // Important: Do not modify kResponseLatencyMsLimits because the code used to generate AWD reports expects the response
 // latency histogram bins to observe these time interval upper bounds.
@@ -344,7 +347,7 @@ check_compile_time(sizeof(DNSMessageSizeStats) <= 132);
 mDNSlocal mStatus       QueryStatsCreate(const char *inDomainStr, const char *inAltDomainStr, QueryNameTest_f inTest, mDNSBool inTerminal, QueryStats **outStats);
 mDNSlocal void          QueryStatsFree(QueryStats *inStats);
 mDNSlocal void          QueryStatsFreeList(QueryStats *inList);
-mDNSlocal mStatus       QueryStatsUpdate(QueryStats *inStats, int inType, const ResourceRecord *inRR, mDNSu32 inQuerySendCount, mDNSu32 inLatencyMs, mDNSBool inForCell);
+mDNSlocal mStatus       QueryStatsUpdate(QueryStats *inStats, int inType, const ResourceRecord *inRR, mDNSu32 inQuerySendCount, ExpiredAnswerMetric inExpiredAnswerState, mDNSu32 inLatencyMs, mDNSBool inForCell);
 mDNSlocal const char *  QueryStatsGetDomainString(const QueryStats *inStats);
 mDNSlocal mDNSBool      QueryStatsDomainTest(const QueryStats *inStats, const domainname *inQueryName);
 mDNSlocal mDNSBool      QueryStatsHostnameTest(const QueryStats *inStats, const domainname *inQueryName);
@@ -492,7 +495,7 @@ mStatus MetricsInit(void)
 //  MetricsUpdateDNSQueryStats
 //===========================================================================================================================
 
-mDNSexport void MetricsUpdateDNSQueryStats(const domainname *inQueryName, mDNSu16 inType, const ResourceRecord *inRR, mDNSu32 inSendCount, mDNSu32 inLatencyMs, mDNSBool inForCell)
+mDNSexport void MetricsUpdateDNSQueryStats(const domainname *inQueryName, mDNSu16 inType, const ResourceRecord *inRR, mDNSu32 inSendCount, ExpiredAnswerMetric inExpiredAnswerState, mDNSu32 inLatencyMs, mDNSBool inForCell)
 {
     QueryStats *        stats;
     mDNSBool            match;
@@ -505,7 +508,7 @@ mDNSexport void MetricsUpdateDNSQueryStats(const domainname *inQueryName, mDNSu1
         match = stats->test(stats, inQueryName);
         if (match)
         {
-            QueryStatsUpdate(stats, inType, inRR, inSendCount, inLatencyMs, inForCell);
+            QueryStatsUpdate(stats, inType, inRR, inSendCount, inExpiredAnswerState, inLatencyMs, inForCell);
             if (stats->terminal) break;
         }
     }
@@ -839,7 +842,7 @@ mDNSlocal void QueryStatsFreeList(QueryStats *inList)
 //  QueryStatsUpdate
 //===========================================================================================================================
 
-mDNSlocal mStatus QueryStatsUpdate(QueryStats *inStats, int inType, const ResourceRecord *inRR, mDNSu32 inQuerySendCount, mDNSu32 inLatencyMs, mDNSBool inForCell)
+mDNSlocal mStatus QueryStatsUpdate(QueryStats *inStats, int inType, const ResourceRecord *inRR, mDNSu32 inQuerySendCount, ExpiredAnswerMetric inExpiredAnswerState, mDNSu32 inLatencyMs, mDNSBool inForCell)
 {
     mStatus             err;
     DNSHistSet *        set;
@@ -892,6 +895,7 @@ mDNSlocal mStatus QueryStatsUpdate(QueryStats *inStats, int inType, const Resour
         for (i = 0; (i < (int)countof(kResponseLatencyMsLimits)) && (inLatencyMs >= kResponseLatencyMsLimits[i]); ++i) {}
         increment_saturate(hist->unansweredQueryDurationBins[i], UINT16_MAX);
     }
+    increment_saturate(hist->expiredAnswerStateBins[Min(inExpiredAnswerState, (kQueryStatsExpiredAnswerStateCount-1))], UINT16_MAX);
     err = mStatus_NoError;
 
 exit:
@@ -2061,6 +2065,7 @@ mDNSlocal mStatus CreateAWDDNSDomainStats(DNSHist *inHist, const char *inDomain,
     size_t                  binCount;
     uint32_t                sendCountBins[kQueryStatsSendCountBinCount];
     uint32_t                latencyBins[kQueryStatsLatencyBinCount];
+    uint32_t                expiredAnswerBins[kQueryStatsExpiredAnswerStateCount];
 
     awdStats = [[AWDDNSDomainStatsSoft alloc] init];
     require_action_quiet(awdStats, exit, err = mStatus_UnknownErr);
@@ -2107,6 +2112,11 @@ mDNSlocal mStatus CreateAWDDNSDomainStats(DNSHist *inHist, const char *inDomain,
         binCount = CopyHistogramBins(latencyBins, inHist->unansweredQueryDurationBins, kQueryStatsLatencyBinCount);
         [awdStats setUnansweredQueryDurationMs:latencyBins count:(NSUInteger)binCount];
     }
+    
+    // Expired answers states
+    
+    binCount = CopyHistogramBins(expiredAnswerBins, inHist->expiredAnswerStateBins, kQueryStatsExpiredAnswerStateCount);
+    [awdStats setExpiredAnswerStates:expiredAnswerBins count:(NSUInteger)binCount];
 
     *outStats = awdStats;
     awdStats = nil;
@@ -2166,6 +2176,9 @@ mDNSlocal void LogDNSHist(const DNSHist *inHist, const char *inDomain, mDNSBool 
     LogMsgNoIdent("Answered questions            %4u", totalAnswered);
     LogMsgNoIdent("Negatively answered questions %4u", totalNegAnswered);
     LogMsgNoIdent("Unanswered questions          %4u", totalUnanswered);
+    LogMsgNoIdent("Expired - no cached answer    %4u", inHist->expiredAnswerStateBins[ExpiredAnswer_Allowed]);
+    LogMsgNoIdent("Expired - answered from cache %4u", inHist->expiredAnswerStateBins[ExpiredAnswer_AnsweredWithExpired]);
+    LogMsgNoIdent("Expired - cache changed       %4u", inHist->expiredAnswerStateBins[ExpiredAnswer_ExpiredAnswerChanged]);
     LogMsgNoIdent("-- Query send counts ---------");
     LogDNSHistSendCounts(inHist->answeredQuerySendCountBins);
     LogMsgNoIdent("-- Query send counts (NAQs) --");

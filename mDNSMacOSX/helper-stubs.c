@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2007-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2018 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,10 +55,10 @@ static int64_t maxwait_secs = 5LL;
 //*************************************************************************************************************
 // Utility Functions
 
-static void LogDebug(const char *prefix, xpc_object_t o)
+static void HelperLog(const char *prefix, xpc_object_t o)
 {
     char *desc = xpc_copy_description(o);
-    mDNSHELPER_DEBUG("LogDebug %s: %s", prefix, desc);
+    mDNSHELPER_DEBUG("HelperLog %s: %s", prefix, desc);
     free(desc);
 }
 
@@ -83,7 +83,7 @@ mDNSlocal int SendDict_ToServer(xpc_object_t msg)
 {
     __block int errorcode = kHelperErr_NoResponse;
     
-    LogDebug("SendDict_ToServer Sending msg to Daemon", msg);
+    HelperLog("SendDict_ToServer Sending msg to Daemon", msg);
     
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
     dispatch_retain(sem); // for the block below
@@ -94,7 +94,7 @@ mDNSlocal int SendDict_ToServer(xpc_object_t msg)
                                                
         if (type == XPC_TYPE_DICTIONARY)
         {
-            LogDebug("SendDict_ToServer Received reply msg from Daemon", recv_msg);
+            HelperLog("SendDict_ToServer Received reply msg from Daemon", recv_msg);
             uint64_t reply_status = xpc_dictionary_get_uint64(recv_msg, kHelperReplyStatus);
             errorcode = xpc_dictionary_get_int64(recv_msg, kHelperErrCode);
             
@@ -112,7 +112,7 @@ mDNSlocal int SendDict_ToServer(xpc_object_t msg)
         {
             LogMsg("SendDict_ToServer Received unexpected reply from daemon [%s]",
                     xpc_dictionary_get_string(recv_msg, XPC_ERROR_KEY_DESCRIPTION));
-            LogDebug("SendDict_ToServer Unexpected Reply contents", recv_msg);
+            HelperLog("SendDict_ToServer Unexpected Reply contents", recv_msg);
         }
         
         dispatch_semaphore_signal(sem);
@@ -137,7 +137,7 @@ mDNSlocal xpc_object_t SendDict_GetReply(xpc_object_t msg)
     if (!dict) return NULL;
     xpc_retain(dict);
 
-    LogDebug("SendDict_GetReply Sending msg to Daemon", msg);
+    HelperLog("SendDict_GetReply Sending msg to Daemon", msg);
     
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
     dispatch_retain(sem); // for the block below
@@ -148,7 +148,7 @@ mDNSlocal xpc_object_t SendDict_GetReply(xpc_object_t msg)
                                                
         if (type == XPC_TYPE_DICTIONARY)
         {
-            LogDebug("SendDict_GetReply Received reply msg from Daemon", recv_msg);
+            HelperLog("SendDict_GetReply Received reply msg from Daemon", recv_msg);
             uint64_t reply_status = xpc_dictionary_get_uint64(recv_msg, kHelperReplyStatus);
             
             switch (reply_status)
@@ -171,7 +171,7 @@ mDNSlocal xpc_object_t SendDict_GetReply(xpc_object_t msg)
         {
             LogMsg("SendDict_GetReply Received unexpected reply from daemon [%s]",
                     xpc_dictionary_get_string(recv_msg, XPC_ERROR_KEY_DESCRIPTION));
-            LogDebug("SendDict_GetReply Unexpected Reply contents", recv_msg);
+            HelperLog("SendDict_GetReply Unexpected Reply contents", recv_msg);
         }
         
         dispatch_semaphore_signal(sem);
