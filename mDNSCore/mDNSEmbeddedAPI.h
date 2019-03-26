@@ -1383,6 +1383,7 @@ typedef struct DNSServer
     mDNSBool req_DO;            // If set, okay to send DNSSEC queries (EDNS DO bit is supported)
     mDNSBool DNSSECAware;       // Set if we are able to receive a response to a request sent with DO option.
     mDNSBool isExpensive;       // True if the interface to this server is expensive.
+    mDNSBool isCLAT46;          // True if the interface to this server is CLAT46.
 } DNSServer;
 
 typedef struct
@@ -3071,8 +3072,8 @@ extern void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCa
 extern void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn);
 extern void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const mDNSAddr *v6addr, const mDNSAddr *router);
 extern DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, mDNSs32 serviceID, const mDNSAddr *addr,
-                                    const mDNSIPPort port, mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSBool isExpensive, mDNSu16 resGroupID,
-                                    mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO);
+                                    const mDNSIPPort port, mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSBool isExpensive, mDNSBool isCLAT46,
+                                    mDNSu16 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO);
 extern void PenalizeDNSServer(mDNS *const m, DNSQuestion *q, mDNSOpaque16 responseFlags);
 extern void mDNS_AddSearchDomain(const domainname *const domain, mDNSInterfaceID InterfaceID);
 

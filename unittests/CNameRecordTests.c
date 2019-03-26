@@ -382,6 +382,7 @@ mDNSlocal mStatus AddDNSServer(void)
     mDNSu32		timeout			= dns_server_timeout;
     mDNSBool	cellIntf		= 0;
     mDNSBool	isExpensive		= 0;
+    mDNSBool	isCLAT46		= mDNSfalse;
     mDNSu16		resGroupID		= dns_server_resGroupID;
     mDNSBool	reqA			= mDNStrue;
     mDNSBool	reqAAAA			= mDNStrue;
@@ -391,7 +392,7 @@ mDNSlocal mStatus AddDNSServer(void)
     addr.ip.v4.NotAnInteger		= dns_server_ipv4.NotAnInteger;
     port.NotAnInteger			= client_resp_src_port;
 	mDNS_AddDNSServer(m, &d, primary_interfaceID, serviceID, &addr, port, scoped, timeout,
-                      cellIntf, isExpensive, resGroupID,
+                      cellIntf, isExpensive, isCLAT46, resGroupID,
 					  reqA, reqAAAA, reqDO);
 	mDNS_Unlock(m);
 	return mStatus_NoError;

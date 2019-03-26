@@ -3612,6 +3612,7 @@ mDNSlocal NetworkInterfaceInfoOSX *AddInterfaceToList(struct ifaddrs *ifa, mDNSs
 
     i->isExpensive     = (eflags & IFEF_EXPENSIVE) ? mDNStrue: mDNSfalse;
     i->isAWDL          = (eflags & IFEF_AWDL)      ? mDNStrue: mDNSfalse;
+    i->isCLAT46        = (eflags & IFEF_CLAT46)    ? mDNStrue: mDNSfalse;
     if (eflags & IFEF_AWDL)
     {
         // Set SupportsUnicastMDNSResponse false for the AWDL interface since unicast reserves
@@ -5470,6 +5471,7 @@ mDNSlocal void ConfigDNSServers(dns_resolver_t *r, mDNSInterfaceID interface, mD
     mDNSBool reqA, reqAAAA;
     NetworkInterfaceInfoOSX *info;
     mDNSBool isExpensive;
+    mDNSBool isCLAT46;
 
     if (!r->domain || !*r->domain) 
     {
@@ -5492,7 +5494,8 @@ mDNSlocal void ConfigDNSServers(dns_resolver_t *r, mDNSInterfaceID interface, mD
     reqA = (r->flags & DNS_RESOLVER_FLAGS_REQUEST_A_RECORDS ? mDNStrue : mDNSfalse);
     reqAAAA = (r->flags & DNS_RESOLVER_FLAGS_REQUEST_AAAA_RECORDS ? mDNStrue : mDNSfalse);
     info = IfindexToInterfaceInfoOSX(interface);
-    isExpensive = info ? info->isExpensive : mDNSfalse;
+    isExpensive = (info && info->isExpensive) ? mDNStrue : mDNSfalse;
+    isCLAT46    = (info && info->isCLAT46)    ? mDNStrue : mDNSfalse;
 
     for (n = 0; n < r->n_nameserver; n++)
     {
@@ -5516,7 +5519,8 @@ mDNSlocal void ConfigDNSServers(dns_resolver_t *r, mDNSInterfaceID interface, mD
         // it takes the sum of all the timeout values for all DNS servers. By doing this, it
         // tries all the DNS servers in a specified timeout
         s = mDNS_AddDNSServer(&mDNSStorage, &d, interface, serviceID, &saddr, r->port ? mDNSOpaque16fromIntVal(r->port) : UnicastDNSPort, scope,
-                              (n == 0 ? (r->timeout ? r->timeout : DEFAULT_UDNS_TIMEOUT) : 0), cellIntf, isExpensive, resGroupID, reqA, reqAAAA, mDNStrue);
+                              (n == 0 ? (r->timeout ? r->timeout : DEFAULT_UDNS_TIMEOUT) : 0), cellIntf, isExpensive, isCLAT46,
+                              resGroupID, reqA, reqAAAA, mDNStrue);
         if (s)
         {
             LogInfo("ConfigDNSServers(%s): DNS server %#a:%d for domain %##s", DNSScopeToString(scope), &s->addr, mDNSVal16(s->port), d.c);

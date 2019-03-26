@@ -9236,6 +9236,7 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
                     {
                         debugf("mDNSCoreReceiveResponse: InterfaceID %p %##s (%s)", q->InterfaceID, q->qname.c, DNSTypeName(q->qtype));
                         m->rec.r.resrec.rDNSServer = uDNSServer = q->qDNSServer;
+                        if (!unicastQuestion) unicastQuestion = q;      //  Acceptable responses to unicast questions need to have (unicastQuestion != nil)
                     }
                     else
                     {
@@ -11302,6 +11303,8 @@ mDNSlocal mDNSBool IsPrivateDomain(mDNS *const m, DNSQuestion *q)
     }
 }
 
+#define TrueFalseStr(X) ((X) ? "true" : "false")
+
 // This function takes the DNSServer as a separate argument because sometimes the
 // caller has not yet assigned the DNSServer, but wants to evaluate the SuppressQuery
 // status before switching to it.
@@ -11328,13 +11331,20 @@ mDNSlocal mDNSBool ShouldSuppressUnicastQuery(mDNS *const m, DNSQuestion *q, DNS
     }
 
     // Check if the DNS Configuration allows A/AAAA queries to be sent
-    if ((q->qtype == kDNSType_A) && (d->req_A))
+    if ((q->qtype == kDNSType_A) && d->req_A)
     {
-        LogDebug("ShouldSuppressUnicastQuery: Query not suppressed for %##s, qtype %s, DNSServer %##s %#a:%d allows A queries", q->qname.c,
-                DNSTypeName(q->qtype), d->domain.c, &d->addr, mDNSVal16(d->port));
-        return mDNSfalse;
+        // The server's configuration allows A record queries, so don't suppress this query unless
+        //     1. the interface associated with the server is CLAT46; and
+        //     2. the query has the kDNSServiceFlagsPathEvaluationDone flag, which indicates that it came from libnetcore.
+        // See <rdar://problem/42672030> for more info.
+        if (!(d->isCLAT46 && (q->flags & kDNSServiceFlagsPathEvaluationDone)))
+        {
+            LogDebug("ShouldSuppressUnicastQuery: Query not suppressed for %##s, qtype %s, DNSServer %##s %#a:%d allows A queries", q->qname.c,
+                     DNSTypeName(q->qtype), d->domain.c, &d->addr, mDNSVal16(d->port));
+            return mDNSfalse;
+        }
     }
-    if ((q->qtype == kDNSType_AAAA) && (d->req_AAAA))
+    if ((q->qtype == kDNSType_AAAA) && d->req_AAAA)
     {
         LogDebug("ShouldSuppressUnicastQuery: Query not suppressed for %##s, qtype %s, DNSServer %##s %#a:%d allows AAAA queries", q->qname.c,
                 DNSTypeName(q->qtype), d->domain.c, &d->addr, mDNSVal16(d->port));
@@ -11348,8 +11358,8 @@ mDNSlocal mDNSBool ShouldSuppressUnicastQuery(mDNS *const m, DNSQuestion *q, DNS
     }
 #endif
 
-    LogInfo("ShouldSuppressUnicastQuery: Query suppressed for %##s, qtype %s, since DNS Configuration does not allow (req_A is %s and req_AAAA is %s)",
-        q->qname.c, DNSTypeName(q->qtype), d->req_A ? "true" : "false", d->req_AAAA ? "true" : "false");
+    LogInfo("ShouldSuppressUnicastQuery: Query suppressed for %##s, qtype %s, since DNS Configuration does not allow (req_A %s, req_AAAA %s, CLAT46 %s)",
+        q->qname.c, DNSTypeName(q->qtype), TrueFalseStr(d->req_A), TrueFalseStr(d->req_AAAA), TrueFalseStr(d->isCLAT46));
 
     return mDNStrue;
 }

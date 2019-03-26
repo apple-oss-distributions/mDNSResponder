@@ -517,7 +517,7 @@ mDNSexport void INFOCallback(void)
         for (s = mDNSStorage.DNSServers; s; s = s->next)
         {
             NetworkInterfaceInfoOSX *ifx = IfindexToInterfaceInfoOSX(s->interface);
-            LogMsgNoIdent("DNS Server %##s %s%s%#a:%d %d %s %d %d %s %s %s %s %s",
+            LogMsgNoIdent("DNS Server %##s %s%s%#a:%d %d %s %d %d %s %s %s %s %s %s",
                           s->domain.c, ifx ? ifx->ifinfo.ifname : "", ifx ? " " : "", &s->addr, mDNSVal16(s->port),
                           s->penaltyTime ? s->penaltyTime - mDNS_TimeNow(&mDNSStorage) : 0, DNSScopeToString(s->scoped),
                           s->timeout, s->resGroupID,
@@ -525,6 +525,7 @@ mDNSexport void INFOCallback(void)
                           s->req_AAAA ? "v6" : "!v6",
                           s->cellIntf ? "cell" : "!cell",
                           s->isExpensive ? "exp" : "!exp",
+                          s->isCLAT46 ? "clat46" : "!clat46",
                           s->DNSSECAware ? "DNSSECAware" : "!DNSSECAware");
         }
     }

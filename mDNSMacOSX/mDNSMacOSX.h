@@ -154,6 +154,7 @@ struct NetworkInterfaceInfoOSX_struct
     u_int BPF_len;
     mDNSBool isExpensive;                       // True if this interface has the IFEF_EXPENSIVE flag set.
     mDNSBool isAWDL;                            // True if this interface has the IFEF_AWDL flag set.
+    mDNSBool isCLAT46;                          // True if this interface has the IFEF_CLAT46 flag set.
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
     dispatch_source_t BPF_source;
 #else
