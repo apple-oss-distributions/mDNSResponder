@@ -3925,14 +3925,7 @@ mDNSexport void uDNS_ReceiveMsg(mDNS *const m, DNSMessage *const msg, const mDNS
             if (msg->h.flags.b[0] & kDNSFlag0_TC && mDNSSameOpaque16(qptr->TargetQID, msg->h.id) && m->timenow - qptr->LastQTime < RESPONSE_WINDOW)
             {
                 if (!srcaddr) LogMsg("uDNS_ReceiveMsg: TCP DNS response had TC bit set: ignoring");
-                else
-                {
-                    // Don't reuse TCP connections. We might have failed over to a different DNS server
-                    // while the first TCP connection is in progress. We need a new TCP connection to the
-                    // new DNS server. So, always try to establish a new connection.
-                    if (qptr->tcp) { DisposeTCPConn(qptr->tcp); qptr->tcp = mDNSNULL; }
-                    qptr->tcp = MakeTCPConn(m, mDNSNULL, mDNSNULL, kTCPSocketFlags_Zero, srcaddr, srcport, mDNSNULL, qptr, mDNSNULL);
-                }
+                else          uDNS_RestartQuestionAsTCP(m, qptr, srcaddr, srcport);
             }
     }
 
@@ -5743,6 +5736,15 @@ mDNSexport domainname  *uDNS_GetNextSearchDomain(mDNSInterfaceID InterfaceID, mD
         p = p->next;
     }
     return mDNSNULL;
+}
+
+mDNSexport void uDNS_RestartQuestionAsTCP(mDNS *m, DNSQuestion *const q, const mDNSAddr *const srcaddr, const mDNSIPPort srcport)
+{
+    // Don't reuse TCP connections. We might have failed over to a different DNS server
+    // while the first TCP connection is in progress. We need a new TCP connection to the
+    // new DNS server. So, always try to establish a new connection.
+    if (q->tcp) { DisposeTCPConn(q->tcp); q->tcp = mDNSNULL; }
+    q->tcp = MakeTCPConn(m, mDNSNULL, mDNSNULL, kTCPSocketFlags_Zero, srcaddr, srcport, mDNSNULL, q, mDNSNULL);
 }
 
 mDNSlocal void FlushAddressCacheRecords(mDNS *const m)

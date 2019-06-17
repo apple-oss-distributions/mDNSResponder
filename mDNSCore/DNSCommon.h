@@ -110,6 +110,13 @@ extern mDNSu32 mDNSRandom(mDNSu32 max);     // Returns pseudo-random result from
 #define mDNSIsUpperCase(X) ((X) >= 'A' && (X) <= 'Z')
 #define mDNSIsLowerCase(X) ((X) >= 'a' && (X) <= 'z')
 #define mDNSIsLetter(X)    (mDNSIsUpperCase(X) || mDNSIsLowerCase(X))
+    
+// We believe we have adequate safeguards to protect against cache poisoning.
+// In the event that someone does find a workable cache poisoning attack, we want to limit the lifetime of the poisoned entry.
+// We set the maximum allowable TTL to one hour.
+// With the 25% correction factor to avoid the DNS Zeno's paradox bug, that gives us an actual maximum lifetime of 75 minutes.
+
+#define mDNSMaximumTTLSeconds (mDNSu32)3600
 
 #define mDNSValidHostChar(X, notfirst, notlast) (mDNSIsLetter(X) || mDNSIsDigit(X) || ((notfirst) && (notlast) && (X) == '-') )
 

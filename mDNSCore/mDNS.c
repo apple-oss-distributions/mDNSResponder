@@ -7171,7 +7171,7 @@ mDNSlocal mDNSu8 *GenerateUnicastResponse(const DNSMessage *const query, const m
     const mDNSu8    *const limit     = response->data + sizeof(response->data);
     const mDNSu8    *ptr             = query->data;
     AuthRecord  *rr;
-    mDNSu32 maxttl = 0x70000000;
+    mDNSu32 maxttl = mDNSMaximumTTLSeconds;
     int i;
 
     // Initialize the response fields so we can answer the questions
@@ -8075,19 +8075,25 @@ struct UDPSocket_struct
     mDNSIPPort port; // MUST BE FIRST FIELD -- mDNSCoreReceive expects every UDPSocket_struct to begin with mDNSIPPort port
 };
 
-mDNSlocal DNSQuestion *ExpectingUnicastResponseForQuestion(const mDNS *const m, const mDNSIPPort port, const mDNSOpaque16 id, const DNSQuestion *const question, mDNSBool tcp)
+mDNSlocal DNSQuestion *ExpectingUnicastResponseForQuestion(const mDNS *const m, const mDNSIPPort port, const mDNSOpaque16 id, const DNSQuestion *const question, mDNSBool tcp, DNSQuestion ** suspiciousQ)
 {
     DNSQuestion *q;
     for (q = m->Questions; q; q=q->next)
     {
         if (!tcp && !q->LocalSocket) continue;
-        if (mDNSSameIPPort(tcp ? q->tcpSrcPort : q->LocalSocket->port, port)     &&
-            mDNSSameOpaque16(q->TargetQID,         id)       &&
+        if (mDNSSameIPPort(tcp ? q->tcpSrcPort : q->LocalSocket->port, port)       &&
             q->qtype                  == question->qtype     &&
             q->qclass                 == question->qclass    &&
             q->qnamehash              == question->qnamehash &&
             SameDomainName(&q->qname, &question->qname))
-            return(q);
+        {
+            if (mDNSSameOpaque16(q->TargetQID, id)) return(q);
+            else
+            {
+                if (!tcp && suspiciousQ) *suspiciousQ = q;
+                return(mDNSNULL);
+            }
+        }
     }
     return(mDNSNULL);
 }
@@ -8413,7 +8419,7 @@ mDNSlocal void mDNSCoreReceiveNoDNSSECAnswers(mDNS *const m, const DNSMessage *c
         DNSQuestion pktq;
         DNSQuestion *qptr = mDNSNULL;
         ptr = getQuestion(response, ptr, end, InterfaceID, &pktq);
-        if (ptr && (qptr = ExpectingUnicastResponseForQuestion(m, dstport, response->h.id, &pktq, !dstaddr)) &&
+        if (ptr && (qptr = ExpectingUnicastResponseForQuestion(m, dstport, response->h.id, &pktq, !dstaddr, mDNSNULL)) &&
             qptr->ValidatingResponse)
         {
             DNSQuestion *next, *q;
@@ -8457,7 +8463,7 @@ mDNSlocal void mDNSCoreReceiveNoUnicastAnswers(mDNS *const m, const DNSMessage *
         DNSQuestion q;
         DNSQuestion *qptr = mDNSNULL;
         ptr = getQuestion(response, ptr, end, InterfaceID, &q);
-        if (ptr && (qptr = ExpectingUnicastResponseForQuestion(m, dstport, response->h.id, &q, !dstaddr)))
+        if (ptr && (qptr = ExpectingUnicastResponseForQuestion(m, dstport, response->h.id, &q, !dstaddr, mDNSNULL)))
         {
             CacheRecord *rr, *neg = mDNSNULL;
             CacheGroup *cg = CacheGroupForName(m, q.qnamehash, &q.qname);
@@ -9037,9 +9043,9 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
         // packet number, then we deduce they are old and delete them
         for (i = 0; i < response->h.numQuestions && ptr && ptr < end; i++)
         {
-            DNSQuestion q, *qptr = mDNSNULL;
+            DNSQuestion q, *qptr = mDNSNULL, *suspiciousForQ = mDNSNULL;
             ptr = getQuestion(response, ptr, end, InterfaceID, &q);
-            if (ptr && (qptr = ExpectingUnicastResponseForQuestion(m, dstport, response->h.id, &q, !dstaddr)))
+            if (ptr && (qptr = ExpectingUnicastResponseForQuestion(m, dstport, response->h.id, &q, !dstaddr, &suspiciousForQ)))
             {
                 if (!failure)
                 {
@@ -9101,6 +9107,15 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m,
                     }
                     returnEarly = mDNStrue;
                 }
+            }
+            else if (!InterfaceID && suspiciousForQ)
+            {
+                // If a response is suspicious for a question, then reissue the question via TCP
+                LogInfo("mDNSCoreReceiveResponse: Server %p responded suspiciously to query %##s (%s) qID %d != rID: %d",
+                        suspiciousForQ->qDNSServer, q.qname.c, DNSTypeName(q.qtype),
+                        mDNSVal16(suspiciousForQ->TargetQID), mDNSVal16(response->h.id));
+                uDNS_RestartQuestionAsTCP(m, suspiciousForQ, srcaddr, srcport);
+                return;
             }
         }
         if (returnEarly)

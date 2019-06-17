@@ -3467,8 +3467,8 @@ mDNSexport const mDNSu8 *GetLargeResourceRecord(mDNS *const m, const DNSMessage 
     rr->resrec.rrtype            = (mDNSu16) ((mDNSu16)ptr[0] <<  8 | ptr[1]);
     rr->resrec.rrclass           = (mDNSu16)(((mDNSu16)ptr[2] <<  8 | ptr[3]) & kDNSClass_Mask);
     rr->resrec.rroriginalttl     = (mDNSu32) ((mDNSu32)ptr[4] << 24 | (mDNSu32)ptr[5] << 16 | (mDNSu32)ptr[6] << 8 | ptr[7]);
-    if (rr->resrec.rroriginalttl > 0x70000000UL / mDNSPlatformOneSecond && (mDNSs32)rr->resrec.rroriginalttl != -1)
-        rr->resrec.rroriginalttl = 0x70000000UL / mDNSPlatformOneSecond;
+    if (rr->resrec.rroriginalttl > mDNSMaximumTTLSeconds && (mDNSs32)rr->resrec.rroriginalttl != -1)
+        rr->resrec.rroriginalttl = mDNSMaximumTTLSeconds;
     // Note: We don't have to adjust m->NextCacheCheck here -- this is just getting a record into memory for
     // us to look at. If we decide to copy it into the cache, then we'll update m->NextCacheCheck accordingly.
     pktrdlength           = (mDNSu16)((mDNSu16)ptr[8] <<  8 | ptr[9]);
