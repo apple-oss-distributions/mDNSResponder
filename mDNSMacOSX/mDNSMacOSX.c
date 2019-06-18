@@ -6875,7 +6875,7 @@ typedef struct
 #include <IOKit/IOKitLib.h>
 #include <dns_util.h>
 
-mDNSlocal mDNSu16 GetPortArray(int trans, mDNSIPPort *portarray)
+mDNSlocal mDNSu16 GetPortArray(int trans, mDNSIPPort *portarray, mDNSBool TCPKAOnly, mDNSBool supportsTCPKA)
 {
     mDNS *const m = &mDNSStorage;
     const domainlabel *const tp = (trans == mDNSTransport_UDP) ? (const domainlabel *)"\x4_udp" : (const domainlabel *)"\x4_tcp";
@@ -6884,6 +6884,14 @@ mDNSlocal mDNSu16 GetPortArray(int trans, mDNSIPPort *portarray)
     AuthRecord *rr;
     for (rr = m->ResourceRecords; rr; rr=rr->next)
     {
+        mDNSBool isKeepAliveRecord = mDNS_KeepaliveRecord(&rr->resrec);
+        // Skip over all other records if we are registering TCP KeepAlive records only
+        // Skip over TCP KeepAlive records if the policy prohibits it or if the interface does not support TCP Keepalive
+        // supportsTCPKA is set to true if both policy and interface allow TCP Keepalive
+        if ((TCPKAOnly && !isKeepAliveRecord) || (isKeepAliveRecord && !supportsTCPKA)) {
+            continue;
+        }
+
         if (rr->resrec.rrtype == kDNSType_SRV && SameDomainLabel(ThirdLabel(rr->resrec.name)->c, tp->c))
         {
             if (!portarray)
@@ -7013,6 +7021,7 @@ mDNSlocal void GetProxyRecords(DNSMessage *const msg, uint32_t *const numbytes, 
 
             // Skip over all other records if we are registering TCP KeepAlive records only
             // Skip over TCP KeepAlive records if the policy prohibits it or if the interface does not support TCP Keepalive
+            // supportsTCPKA is set to true if both policy and interface allow TCP Keepalive
             if ((TCPKAOnly && !isKeepAliveRecord) || (isKeepAliveRecord && !supportsTCPKA))
                 continue;
 
@@ -7134,8 +7143,8 @@ mDNSexport mStatus ActivateLocalProxy(NetworkInterfaceInfo *const intf, mDNSBool
                     mDNSOffloadCmd cmd;
                     mDNSPlatformMemZero(&cmd, sizeof(cmd)); // When compiling 32-bit, make sure top 32 bits of 64-bit pointers get initialized to zero
                     cmd.command       = cmd_mDNSOffloadRR;
-                    cmd.numUDPPorts   = GetPortArray(mDNSTransport_UDP, mDNSNULL);
-                    cmd.numTCPPorts   = GetPortArray(mDNSTransport_TCP, mDNSNULL);
+                    cmd.numUDPPorts   = GetPortArray(mDNSTransport_UDP, mDNSNULL, TCPKAOnly, supportsTCPKA);
+                    cmd.numTCPPorts   = GetPortArray(mDNSTransport_TCP, mDNSNULL, TCPKAOnly, supportsTCPKA);
                     cmd.numRRRecords  = CountProxyRecords(&cmd.rrBufferSize, intf, TCPKAOnly, supportsTCPKA);
                     cmd.compression   = sizeof(DNSMessageHeader);
 
@@ -7151,8 +7160,8 @@ mDNSexport mStatus ActivateLocalProxy(NetworkInterfaceInfo *const intf, mDNSBool
                            cmd.tcpPorts.ptr, cmd.numTCPPorts);
 
                     if (msg && cmd.rrRecords.ptr) GetProxyRecords(msg, &cmd.rrBufferSize, cmd.rrRecords.ptr, TCPKAOnly, supportsTCPKA);
-                    if (cmd.udpPorts.ptr) cmd.numUDPPorts = GetPortArray(mDNSTransport_UDP, cmd.udpPorts.ptr);
-                    if (cmd.tcpPorts.ptr) cmd.numTCPPorts = GetPortArray(mDNSTransport_TCP, cmd.tcpPorts.ptr);
+                    if (cmd.udpPorts.ptr) cmd.numUDPPorts = GetPortArray(mDNSTransport_UDP, cmd.udpPorts.ptr, TCPKAOnly, supportsTCPKA);
+                    if (cmd.tcpPorts.ptr) cmd.numTCPPorts = GetPortArray(mDNSTransport_TCP, cmd.tcpPorts.ptr, TCPKAOnly, supportsTCPKA);
 
                     char outputData[2];
                     size_t outputDataSize = sizeof(outputData);

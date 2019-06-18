@@ -347,6 +347,7 @@
 		BDB04224203FF18000419961 /* dns_sd_private.h in Headers */ = {isa = PBXBuildFile; fileRef = BDA9A7871B3A923600523835 /* dns_sd_private.h */; settings = {ATTRIBUTES = (Private, ); }; };
 		BDB61845206ADB9D00AFF600 /* com.apple.mDNSResponder.plist in Copy Base Logging Profile */ = {isa = PBXBuildFile; fileRef = BDB61843206ADB7700AFF600 /* com.apple.mDNSResponder.plist */; };
 		BDBF9B941ED74B9C001498A8 /* DNS64State.h in Headers */ = {isa = PBXBuildFile; fileRef = BDBF9B931ED74B8C001498A8 /* DNS64State.h */; };
+		BDF8BB902208E2A800419B62 /* mDNSResponder.plist in Copy BATS test plist */ = {isa = PBXBuildFile; fileRef = BDF8BB8F2208E26E00419B62 /* mDNSResponder.plist */; };
 		D284BE540ADD80740027CCDF /* dnssd_ipc.h in Headers */ = {isa = PBXBuildFile; fileRef = F5E11B5B04A28126019798ED /* dnssd_ipc.h */; };
 		D284BE580ADD80740027CCDF /* mDNS.c in Sources */ = {isa = PBXBuildFile; fileRef = 6575FBE9022EAF5A00000109 /* mDNS.c */; };
 		D284BE590ADD80740027CCDF /* uDNS.c in Sources */ = {isa = PBXBuildFile; fileRef = 7F18A9F70587CEF6001880B3 /* uDNS.c */; };
@@ -774,6 +775,17 @@
 			name = "Copy AppleInternal Logging Profile";
 			runOnlyForDeploymentPostprocessing = 1;
 		};
+		BDF8BB8A2208E09D00419B62 /* Copy BATS test plist */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 8;
+			dstPath = /AppleInternal/CoreOS/BATS/unit_tests;
+			dstSubfolderSpec = 0;
+			files = (
+				BDF8BB902208E2A800419B62 /* mDNSResponder.plist in Copy BATS test plist */,
+			);
+			name = "Copy BATS test plist";
+			runOnlyForDeploymentPostprocessing = 1;
+		};
 		D284BE6A0ADD80740027CCDF /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 8;
@@ -1006,6 +1018,7 @@
 		BDB61846206ADDDF00AFF600 /* com.apple.mDNSResponder.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.apple.mDNSResponder.plist; sourceTree = "<group>"; };
 		BDBF9B931ED74B8C001498A8 /* DNS64State.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DNS64State.h; sourceTree = "<group>"; };
 		BDE238C11DF69D8300B9F696 /* dns_sd_internal.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dns_sd_internal.h; path = ../mDNSShared/dns_sd_internal.h; sourceTree = "<group>"; };
+		BDF8BB8F2208E26E00419B62 /* mDNSResponder.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = mDNSResponder.plist; sourceTree = "<group>"; };
 		D284BE730ADD80740027CCDF /* mDNSResponder */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = mDNSResponder; sourceTree = BUILT_PRODUCTS_DIR; };
 		D284BEB00ADD80920027CCDF /* dns-sd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "dns-sd"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D284BEBE0ADD809A0027CCDF /* libjdns_sd.jnilib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libjdns_sd.jnilib; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1297,6 +1310,7 @@
 				BD9BA7561EAF929C00658CCF /* Frameworks */,
 				BDB61842206ADB7700AFF600 /* LoggingProfiles */,
 				BD28AE8D207B88F600F0B257 /* Scripts */,
+				BDF8BB8E2208E26E00419B62 /* BATS */,
 			);
 			name = mDNSResponder;
 			sourceTree = "<group>";
@@ -1654,6 +1668,14 @@
 				BDB61846206ADDDF00AFF600 /* com.apple.mDNSResponder.plist */,
 			);
 			path = AppleInternal;
+			sourceTree = "<group>";
+		};
+		BDF8BB8E2208E26E00419B62 /* BATS */ = {
+			isa = PBXGroup;
+			children = (
+				BDF8BB8F2208E26E00419B62 /* mDNSResponder.plist */,
+			);
+			path = BATS;
 			sourceTree = "<group>";
 		};
 		DB2CC4420662DCE500335AB3 /* Java Support */ = {
@@ -2203,6 +2225,7 @@
 				8418673D15AB8BFF00BB7F70 /* Copy Base Logging Profile */,
 				BD75E93F206ADEAD00656ED3 /* Copy AppleInternal Logging Profile */,
 				BD28AE8C207B888E00F0B257 /* Copy diagnose scripts */,
+				BDF8BB8A2208E09D00419B62 /* Copy BATS test plist */,
 			);
 			buildRules = (
 			);
@@ -3718,7 +3741,6 @@
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
-				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
@@ -3763,7 +3785,6 @@
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
-				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
@@ -4611,6 +4632,8 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES_AGGRESSIVE;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CLANG_WARN__EXIT_TIME_DESTRUCTORS = YES;
+				CODE_SIGN_ENTITLEMENTS = "dnssdutil-entitlements.plist";
+				CODE_SIGN_IDENTITY = "-";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SDKROOT)$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks",
@@ -4676,6 +4699,8 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES_AGGRESSIVE;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CLANG_WARN__EXIT_TIME_DESTRUCTORS = YES;
+				CODE_SIGN_ENTITLEMENTS = "dnssdutil-entitlements.plist";
+				CODE_SIGN_IDENTITY = "-";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SDKROOT)$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks",
