@@ -6092,7 +6092,7 @@ mDNSexport mStatus UpdateKeepaliveRData(mDNS *const m, AuthRecord *rr, NetworkIn
         }
         if ((intf != mDNSNULL) && (mti.IntfId != intf->InterfaceID))
         {
-            LogInfo("mDNSPlatformRetrieveTCPInfo: InterfaceID  mismatch mti.IntfId = %p InterfaceID = %p",  mti.IntfId, intf->InterfaceID);
+            LogInfo("mDNSPlatformRetrieveTCPInfo: InterfaceID mismatch mti.IntfId = %p InterfaceID = %p",  mti.IntfId, intf->InterfaceID);
             return mStatus_BadParamErr;
         }
 
@@ -6661,6 +6661,7 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
         NetworkInterfaceInfo *intf;
         for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
         {
+            mDNSBool skipFullSleepProxyRegistration = mDNSfalse;
             // Intialize it to false. These values make sense only when SleepState is set to Sleeping.
             intf->SendGoodbyes = 0;
 
@@ -6687,18 +6688,21 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
                 continue;
             }
 
-            // Check if we have already registered with a sleep proxy for this subnet
+            // Check if we have already registered with a sleep proxy for this subnet.
+            // If so, then the subsequent in-NIC sleep proxy registration is limited to any keepalive records that belong
+            // to the interface.
             if (skipSameSubnetRegistration(m, registeredIntfIDS, registeredCount, intf->InterfaceID))
             {
-                LogSPS("%s : Skipping sleep proxy registration on %s", __func__, intf->ifname);
-                continue;
+                LogSPS("%s : Skipping full sleep proxy registration on %s", __func__, intf->ifname);
+                skipFullSleepProxyRegistration = mDNStrue;
             }
 
 #if APPLE_OSX_mDNSResponder
-            else if (SupportsInNICProxy(intf))
+            if (SupportsInNICProxy(intf))
             {
                 mDNSBool keepaliveOnly = mDNSfalse;
-                if (ActivateLocalProxy(intf, &keepaliveOnly) == mStatus_NoError)
+                const mStatus err = ActivateLocalProxy(intf, skipFullSleepProxyRegistration, &keepaliveOnly);
+                if (!skipFullSleepProxyRegistration && !err)
                 {
                     SendGoodbyesForWakeOnlyService(m, &WakeOnlyService);
 
@@ -6716,9 +6720,10 @@ mDNSlocal void BeginSleepProcessing(mDNS *const m)
                     registeredIntfIDS[registeredCount] = intf->InterfaceID;
                     registeredCount++;
                 }
+                continue;
             }
 #endif // APPLE_OSX_mDNSResponder
-            else
+            if (!skipFullSleepProxyRegistration)
             {
 #if APPLE_OSX_mDNSResponder
                 // If on battery, do not attempt to offload to external sleep proxies

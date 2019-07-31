@@ -825,7 +825,7 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
     return(result);
 }
 
-mDNSexport ssize_t myrecvfrom(const int s, void *const buffer, const size_t max,
+mDNSlocal ssize_t myrecvfrom(const int s, void *const buffer, const size_t max,
                              struct sockaddr *const from, size_t *const fromlen, mDNSAddr *dstaddr, char ifname[IF_NAMESIZE], mDNSu8 *ttl)
 {
     static unsigned int numLogMessages = 0;
@@ -853,20 +853,22 @@ mDNSexport ssize_t myrecvfrom(const int s, void *const buffer, const size_t max,
         if (errno != EWOULDBLOCK && numLogMessages++ < 100) LogMsg("mDNSMacOSX.c: recvmsg(%d) returned error %d errno %d", s, n, errno);
         return(-1);
     }
-    if (msg.msg_controllen < (int)sizeof(struct cmsghdr))
-    {
-        if (numLogMessages++ < 100) LogMsg("mDNSMacOSX.c: recvmsg(%d) returned %d msg.msg_controllen %d < sizeof(struct cmsghdr) %lu, errno %d",
-                                           s, n, msg.msg_controllen, sizeof(struct cmsghdr), errno);
-        return(-1);
-    }
     if (msg.msg_flags & MSG_CTRUNC)
     {
         if (numLogMessages++ < 100) LogMsg("mDNSMacOSX.c: recvmsg(%d) msg.msg_flags & MSG_CTRUNC", s);
         return(-1);
     }
-
     *fromlen = msg.msg_namelen;
 
+    if (msg.msg_controllen < (int)sizeof(struct cmsghdr))
+    {
+        if (numLogMessages++ < 100)
+        {
+            LogMsg("mDNSMacOSX.c: recvmsg(%d) returned %ld msg.msg_controllen %lu < sizeof(struct cmsghdr) %lu",
+                s, (long)n, (unsigned long)msg.msg_controllen, (unsigned long)sizeof(struct cmsghdr));
+        }
+        goto exit;
+    }
     // Parse each option out of the ancillary data.
     for (cmPtr = CMSG_FIRSTHDR(&msg); cmPtr; cmPtr = CMSG_NXTHDR(&msg, cmPtr))
     {
@@ -900,6 +902,7 @@ mDNSexport ssize_t myrecvfrom(const int s, void *const buffer, const size_t max,
             *ttl = *(int*)CMSG_DATA(cmPtr);
     }
 
+exit:
     return(n);
 }
 
@@ -2452,7 +2455,7 @@ mDNSlocal int GetRemoteMacinternal(int family, v6addr_t raddr, ethaddr_t eth)
         ret = getMACAddress(family, raddr, gateway, &gfamily, eth);
         if (ret == -1)
         {
-            memcpy(raddr, gateway, sizeof(family));
+            memcpy(raddr, gateway, (gfamily == AF_INET) ? 4 : 16);
             family = gfamily;
             count++;
         }
@@ -3183,6 +3186,42 @@ mDNSlocal int GetMAC(mDNSEthAddr *eth, u_short ifindex)
 #define ifr_wake_flags ifr_ifru.ifru_intval
 #endif
 
+mDNSlocal
+kern_return_t
+RegistryEntrySearchCFPropertyAndIOObject( io_registry_entry_t     entry,
+                                          const io_name_t         plane,
+                                          CFStringRef             keystr,
+                                          CFTypeRef *             outProperty,
+                                          io_registry_entry_t *   outEntry)
+{
+    kern_return_t       kr;
+
+    IOObjectRetain(entry);
+    while (entry)
+    {
+        CFTypeRef ref = IORegistryEntryCreateCFProperty(entry, keystr, kCFAllocatorDefault, mDNSNULL);
+        if (ref)
+        {
+            if (outProperty) *outProperty = ref;
+            else             CFRelease(ref);
+            break;
+        }
+        io_registry_entry_t parent;
+        kr = IORegistryEntryGetParentEntry(entry, plane, &parent);
+        if (kr != KERN_SUCCESS) parent = mDNSNULL;
+        IOObjectRelease(entry);
+        entry = parent;
+    }
+    if (!entry)          kr = kIOReturnNoDevice;
+    else
+    {
+        if (outEntry)   *outEntry = entry;
+        else            IOObjectRelease(entry);
+        kr = KERN_SUCCESS;
+    }
+    return(kr);
+}
+
 mDNSlocal mDNSBool  CheckInterfaceSupport(NetworkInterfaceInfo *const intf, const char *key)
 {
     io_service_t service = IOServiceGetMatchingService(kIOMasterPortDefault, IOBSDNameMatching(kIOMasterPortDefault, 0, intf->ifname));
@@ -3192,42 +3231,17 @@ mDNSlocal mDNSBool  CheckInterfaceSupport(NetworkInterfaceInfo *const intf, cons
         return mDNSfalse;
     }
 
-    io_name_t n1, n2;
-    IOObjectGetClass(service, n1);
-    io_object_t parent = IO_OBJECT_NULL;
     mDNSBool    ret    = mDNSfalse;
 
-    kern_return_t kr = IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent);
-    if (kr == KERN_SUCCESS)
-    {
-        CFStringRef keystr =  CFStringCreateWithCString(NULL, key, kCFStringEncodingUTF8);
-        IOObjectGetClass(parent, n2);
-        LogSPS("CheckInterfaceSupport: Interface %s service %s parent %s", intf->ifname, n1, n2);
-        CFTypeRef ref = mDNSNULL;
-
-        // Currently, the key can be in a different part of the IOKit hierarchy on the AppleTV.
-        // TODO: revist if it is ok to have the same call for all platforms.
-        if (IsAppleTV())
-            ref = IORegistryEntrySearchCFProperty(parent, kIOServicePlane, keystr, kCFAllocatorDefault, kIORegistryIterateParents | kIORegistryIterateRecursively);
-        else
-            ref = IORegistryEntryCreateCFProperty(parent, keystr, kCFAllocatorDefault, mDNSNULL);
-
-        if (!ref)
-        {
-            LogSPS("CheckInterfaceSupport: No %s for interface %s/%s/%s", key, intf->ifname, n1, n2);
-            ret = mDNSfalse;
-        }
-        else
-        {
-            ret = mDNStrue;
-            CFRelease(ref);
-        }
-        IOObjectRelease(parent);
-        CFRelease(keystr);
-    }
+    CFStringRef keystr =  CFStringCreateWithCString(NULL, key, kCFStringEncodingUTF8);
+    kern_return_t kr = RegistryEntrySearchCFPropertyAndIOObject(service, kIOServicePlane, keystr, mDNSNULL, mDNSNULL);
+    CFRelease(keystr);
+    if (kr == KERN_SUCCESS) ret = mDNStrue;
     else
     {
-        LogSPS("CheckInterfaceSupport: IORegistryEntryGetParentEntry for %s/%s failed %d", intf->ifname, n1, kr);
+        io_name_t n1;
+        IOObjectGetClass(service, n1);
+        LogSPS("CheckInterfaceSupport: No %s for interface %s/%s kr %d", key, intf->ifname, n1, kr);
         ret = mDNSfalse;
     }
 
@@ -6875,30 +6889,22 @@ typedef struct
 #include <IOKit/IOKitLib.h>
 #include <dns_util.h>
 
-mDNSlocal mDNSu16 GetPortArray(int trans, mDNSIPPort *portarray, mDNSBool TCPKAOnly, mDNSBool supportsTCPKA)
+mDNSlocal mDNSu32 GetPortArray(int trans, mDNSIPPort *portarray)
 {
     mDNS *const m = &mDNSStorage;
     const domainlabel *const tp = (trans == mDNSTransport_UDP) ? (const domainlabel *)"\x4_udp" : (const domainlabel *)"\x4_tcp";
-    int   count = 0;
+    mDNSu32 count = 0;
 
     AuthRecord *rr;
     for (rr = m->ResourceRecords; rr; rr=rr->next)
     {
-        mDNSBool isKeepAliveRecord = mDNS_KeepaliveRecord(&rr->resrec);
-        // Skip over all other records if we are registering TCP KeepAlive records only
-        // Skip over TCP KeepAlive records if the policy prohibits it or if the interface does not support TCP Keepalive
-        // supportsTCPKA is set to true if both policy and interface allow TCP Keepalive
-        if ((TCPKAOnly && !isKeepAliveRecord) || (isKeepAliveRecord && !supportsTCPKA)) {
-            continue;
-        }
-
         if (rr->resrec.rrtype == kDNSType_SRV && SameDomainLabel(ThirdLabel(rr->resrec.name)->c, tp->c))
         {
             if (!portarray)
                 count++;
             else
             {
-                int i;
+                mDNSu32 i;
                 for (i = 0; i < count; i++)
                     if (mDNSSameIPPort(portarray[i], rr->resrec.rdata->u.srv.port))
                         break;
@@ -6913,7 +6919,7 @@ mDNSlocal mDNSu16 GetPortArray(int trans, mDNSIPPort *portarray, mDNSBool TCPKAO
     // If Back to My Mac is on, also wake for packets to the IPSEC UDP port (4500)
     if (trans == mDNSTransport_UDP && m->AutoTunnelNAT.clientContext)
     {
-        LogSPS("GetPortArray Back to My Mac at %d", count);
+        LogSPS("GetPortArray Back to My Mac at %u", count);
         if (portarray) portarray[count] = IPSECPort;
         count++;
     }
@@ -6957,11 +6963,12 @@ mDNSlocal mDNSBool OnBattery(void)
 #define TfrRecordToNIC(RR) \
     ((!(RR)->resrec.InterfaceID && ((RR)->ForceMCast || IsLocalDomain((RR)->resrec.name))))
 
-mDNSlocal mDNSu32 CountProxyRecords(uint32_t *const numbytes, NetworkInterfaceInfo *const intf, mDNSBool TCPKAOnly, mDNSBool supportsTCPKA)
+mDNSlocal mDNSu32 CountProxyRecords(uint32_t *const numbytes, mDNSBool TCPKAOnly, mDNSBool supportsTCPKA)
 {
     mDNS *const m = &mDNSStorage;
     *numbytes = 0;
-    int count = 0;
+    uint32_t count = 0;
+    mDNSBool isKeepAliveRecord = mDNSfalse;
 
     AuthRecord *rr;
 
@@ -6970,31 +6977,22 @@ mDNSlocal mDNSu32 CountProxyRecords(uint32_t *const numbytes, NetworkInterfaceIn
         if (!(rr->AuthFlags & AuthFlagsWakeOnly) && rr->resrec.RecordType > kDNSRecordTypeDeregistering)
         {
 #if APPLE_OSX_mDNSResponder && !TARGET_OS_EMBEDDED
-            mDNSBool   isKeepAliveRecord = mDNS_KeepaliveRecord(&rr->resrec);
+            isKeepAliveRecord = mDNS_KeepaliveRecord(&rr->resrec);
             // Skip over all other records if we are registering TCP KeepAlive records only
             // Skip over TCP KeepAlive records if the policy prohibits it or if the interface does not support TCP Keepalive.
             if ((TCPKAOnly && !isKeepAliveRecord) || (isKeepAliveRecord && !supportsTCPKA))
                 continue;
-
-            // Update the record before calculating the number of bytes required
-            // We offload the TCP Keepalive record even if the update fails. When the driver gets the record, it will
-            // attempt to update the record again.
-            if (isKeepAliveRecord && (UpdateKeepaliveRData(m, rr, intf, mDNSfalse, mDNSNULL) != mStatus_NoError))
-                LogSPS("CountProxyRecords: Failed to update keepalive record - %s", ARDisplayString(m, rr));
-
-			// Offload only Valid Keepalive records
-			if (isKeepAliveRecord && !mDNSValidKeepAliveRecord(rr))
-				continue;
 #else
             (void) TCPKAOnly;     // unused
             (void) supportsTCPKA; // unused
-            (void) intf;          // unused
-#endif // APPLE_OSX_mDNSResponder
+#endif
             if (TfrRecordToNIC(rr))
             {
-                *numbytes += DomainNameLength(rr->resrec.name) + 10 + rr->resrec.rdestimate;
-                LogSPS("CountProxyRecords: %3d size %5d total %5d %s",
-                       count, DomainNameLength(rr->resrec.name) + 10 + rr->resrec.rdestimate, *numbytes, ARDisplayString(m,rr));
+                // For KeepAlive records, use an estimated length of 256, which is the maximum size.
+                const uint32_t rdataLen   = isKeepAliveRecord ? ((uint32_t)sizeof(UTF8str255)) : rr->resrec.rdestimate;
+                const uint32_t recordSize = DomainNameLength(rr->resrec.name) + 10 + rdataLen;
+                *numbytes += recordSize;
+                LogSPS("CountProxyRecords: %3u size %5u total %5u %s", count, recordSize, *numbytes, ARDisplayString(m,rr));
                 count++;
             }
         }
@@ -7002,14 +7000,15 @@ mDNSlocal mDNSu32 CountProxyRecords(uint32_t *const numbytes, NetworkInterfaceIn
     return(count);
 }
 
-mDNSlocal void GetProxyRecords(DNSMessage *const msg, uint32_t *const numbytes, FatPtr *const records, mDNSBool TCPKAOnly, mDNSBool supportsTCPKA)
+mDNSlocal void GetProxyRecords(DNSMessage *const msg, uint32_t *const numbytes, FatPtr *const records,
+    uint32_t *outRecordCount, NetworkInterfaceInfo *const intf, mDNSBool TCPKAOnly, mDNSBool supportsTCPKA)
 {
     mDNS *const m = &mDNSStorage;
     mDNSu8 *p = msg->data;
     const mDNSu8 *const limit = p + *numbytes;
     InitializeDNSMessage(&msg->h, zeroID, zeroID);
 
-    int count = 0;
+    uint32_t count = 0;
     AuthRecord *rr;
 
     for (rr = m->ResourceRecords; rr; rr=rr->next)
@@ -7017,18 +7016,31 @@ mDNSlocal void GetProxyRecords(DNSMessage *const msg, uint32_t *const numbytes, 
         if (!(rr->AuthFlags & AuthFlagsWakeOnly) && rr->resrec.RecordType > kDNSRecordTypeDeregistering)
         {
 #if APPLE_OSX_mDNSResponder && !TARGET_OS_EMBEDDED
-            mDNSBool   isKeepAliveRecord = mDNS_KeepaliveRecord(&rr->resrec);
+            const mDNSBool isKeepAliveRecord = mDNS_KeepaliveRecord(&rr->resrec);
 
             // Skip over all other records if we are registering TCP KeepAlive records only
             // Skip over TCP KeepAlive records if the policy prohibits it or if the interface does not support TCP Keepalive
-            // supportsTCPKA is set to true if both policy and interface allow TCP Keepalive
             if ((TCPKAOnly && !isKeepAliveRecord) || (isKeepAliveRecord && !supportsTCPKA))
                 continue;
 
-			// Offload only Valid Keepalive records
-			if (isKeepAliveRecord && !mDNSValidKeepAliveRecord(rr))
-				continue;
+            // Update the record before calculating the number of bytes required
+            // We offload the TCP Keepalive record even if the update fails. When the driver gets the record, it will
+            // attempt to update the record again.
+            if (isKeepAliveRecord)
+            {
+                if (UpdateKeepaliveRData(m, rr, intf, mDNSfalse, mDNSNULL) != mStatus_NoError)
+                {
+                    LogSPS("GetProxyRecords: Failed to update keepalive record - %s", ARDisplayString(m, rr));
+                    continue;
+                }
+                // Offload only Valid Keepalive records
+                if (!mDNSValidKeepAliveRecord(rr))
+                {
+                    continue;
+                }
+            }
 #else
+            (void) intf;          // unused
             (void) TCPKAOnly;     // unused
             (void) supportsTCPKA; // unused
 #endif // APPLE_OSX_mDNSResponder
@@ -7048,6 +7060,7 @@ mDNSlocal void GetProxyRecords(DNSMessage *const msg, uint32_t *const numbytes, 
         }
     }
     *numbytes = p - msg->data;
+    if (outRecordCount) *outRecordCount = count;
 }
 
 mDNSexport mDNSBool SupportsInNICProxy(NetworkInterfaceInfo *const intf)
@@ -7060,128 +7073,101 @@ mDNSexport mDNSBool SupportsInNICProxy(NetworkInterfaceInfo *const intf)
     return CheckInterfaceSupport(intf, mDNS_IOREG_KEY);
 }
 
-mDNSexport mStatus ActivateLocalProxy(NetworkInterfaceInfo *const intf, mDNSBool *keepaliveOnly)  // Called with the lock held
+// Called with the lock held
+mDNSexport mStatus ActivateLocalProxy(NetworkInterfaceInfo *const intf, mDNSBool offloadKeepAlivesOnly, mDNSBool *keepaliveOnly)
 {
     mStatus      result        = mStatus_UnknownErr;
     mDNSBool     TCPKAOnly     = mDNSfalse;
     mDNSBool     supportsTCPKA = mDNSfalse;
-    mDNSBool     onbattery     = mDNSfalse;
     io_service_t service       = IOServiceGetMatchingService(kIOMasterPortDefault, IOBSDNameMatching(kIOMasterPortDefault, 0, intf->ifname));
 
 #if APPLE_OSX_mDNSResponder && !TARGET_OS_EMBEDDED
-    onbattery = OnBattery();
     // Check if the interface supports TCP Keepalives and the system policy says it is ok to offload TCP Keepalive records
-    supportsTCPKA = (InterfaceSupportsKeepAlive(intf) && SupportsTCPKeepAlive());
-
-    // Only TCP Keepalive records are to be offloaded if
-    // - The system is on battery
-    // - OR wake for network access is not set but powernap is enabled
-    TCPKAOnly     = supportsTCPKA && ((mDNSStorage.SystemWakeOnLANEnabled == mDNS_WakeOnBattery) || onbattery);
+    supportsTCPKA = (InterfaceSupportsKeepAlive(intf) && SupportsTCPKeepAlive()) ? mDNStrue : mDNSfalse;
+    if (!offloadKeepAlivesOnly)
+    {
+        // Only TCP Keepalive records are to be offloaded if
+        // - The system is on battery
+        // - OR wake for network access is not set but powernap is enabled
+        TCPKAOnly = supportsTCPKA && ((mDNSStorage.SystemWakeOnLANEnabled == mDNS_WakeOnBattery) || OnBattery());
+    }
+    else
+    {
+        TCPKAOnly = mDNStrue;
+    }
 #else
-    (void) onbattery; // unused;
+    (void)offloadKeepAlivesOnly; // Unused.
 #endif
     if (!service) { LogMsg("ActivateLocalProxy: No service for interface %s", intf->ifname); return(mStatus_UnknownErr); }
 
-    io_name_t n1, n2;
+    io_name_t       n1, n2;
     IOObjectGetClass(service, n1);
-    io_object_t parent = IO_OBJECT_NULL;
-
-    kern_return_t kr = IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent);
-    if (kr != KERN_SUCCESS) LogMsg("ActivateLocalProxy: IORegistryEntryGetParentEntry for %s/%s failed %d", intf->ifname, n1, kr);
+    
+    CFTypeRef       ref;
+    io_object_t     parent;
+    kern_return_t   kr = RegistryEntrySearchCFPropertyAndIOObject(service, kIOServicePlane, CFSTR(mDNS_IOREG_KEY), &ref, &parent);
+    IOObjectRelease(service);
+    if (kr != KERN_SUCCESS) LogSPS("ActivateLocalProxy: No mDNS_IOREG_KEY for interface %s/%s kr %d", intf->ifname, n1, kr);
     else
     {
-        CFTypeRef ref = mDNSNULL;
-        if (IsAppleTV())
-        {
-            while (service)
-            {
-                ref = IORegistryEntryCreateCFProperty(parent,  CFSTR(mDNS_IOREG_KEY), kCFAllocatorDefault, mDNSNULL);
-                if (!ref)
-                {
-                    IOObjectRelease(service);
-                    service = parent;
-                    kr = IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent);
-                    if (kr != KERN_SUCCESS)
-                    {
-                        IOObjectGetClass(service, n1);
-                        LogMsg("ActivateLocalProxy: IORegistryEntryGetParentEntry for %s/%s failed %d", intf->ifname, n1, kr);
-                        parent = IO_OBJECT_NULL;
-                        result = mStatus_BadStateErr;
-                        break;
-                    }
-                }
-                else
-                {
-                    IOObjectGetClass(parent, n2);
-                    LogSPS("ActivateLocalProxy: Found  %s Interface %s parent %s", mDNS_IOREG_KEY, intf->ifname, n2);
-                    break;
-                }
-            }
-        }
-        else
-        {
-            IOObjectGetClass(parent, n2);
-            LogSPS("ActivateLocalProxy: Interface %s service %s parent %s", intf->ifname, n1, n2);
-            ref = IORegistryEntryCreateCFProperty(parent, CFSTR(mDNS_IOREG_KEY), kCFAllocatorDefault, mDNSNULL);
-        }
+        IOObjectGetClass(parent, n2);
+        LogSPS("ActivateLocalProxy: Interface %s service %s parent %s", intf->ifname, n1, n2);
 
-        if (!ref || parent == IO_OBJECT_NULL) LogSPS("ActivateLocalProxy: No mDNS_IOREG_KEY for interface %s/%s/%s", intf->ifname, n1, n2);
+        if (CFGetTypeID(ref) != CFStringGetTypeID() || !CFEqual(ref, CFSTR(mDNS_IOREG_VALUE)))
+            LogMsg("ActivateLocalProxy: mDNS_IOREG_KEY for interface %s/%s/%s value %s != %s",
+                   intf->ifname, n1, n2, CFStringGetCStringPtr(ref, mDNSNULL), mDNS_IOREG_VALUE);
+        else if (!UseInternalSleepProxy)
+            LogSPS("ActivateLocalProxy: Not using internal (NIC) sleep proxy for interface %s", intf->ifname);
         else
         {
-            if (CFGetTypeID(ref) != CFStringGetTypeID() || !CFEqual(ref, CFSTR(mDNS_IOREG_VALUE)))
-                LogMsg("ActivateLocalProxy: mDNS_IOREG_KEY for interface %s/%s/%s value %s != %s",
-                       intf->ifname, n1, n2, CFStringGetCStringPtr(ref, mDNSNULL), mDNS_IOREG_VALUE);
-            else if (!UseInternalSleepProxy)
-                LogSPS("ActivateLocalProxy: Not using internal (NIC) sleep proxy for interface %s", intf->ifname);
+            io_connect_t conObj;
+            kr = IOServiceOpen(parent, mach_task_self(), mDNS_USER_CLIENT_CREATE_TYPE, &conObj);
+            if (kr != KERN_SUCCESS) LogMsg("ActivateLocalProxy: IOServiceOpen for %s/%s/%s failed %d", intf->ifname, n1, n2, kr);
             else
             {
-                io_connect_t conObj;
-                kr = IOServiceOpen(parent, mach_task_self(), mDNS_USER_CLIENT_CREATE_TYPE, &conObj);
-                if (kr != KERN_SUCCESS) LogMsg("ActivateLocalProxy: IOServiceOpen for %s/%s/%s failed %d", intf->ifname, n1, n2, kr);
-                else
+                mDNSOffloadCmd cmd;
+                mDNSPlatformMemZero(&cmd, sizeof(cmd)); // When compiling 32-bit, make sure top 32 bits of 64-bit pointers get initialized to zero
+                cmd.command       = cmd_mDNSOffloadRR;
+                cmd.numUDPPorts   = TCPKAOnly ? 0 : GetPortArray(mDNSTransport_UDP, mDNSNULL);
+                cmd.numTCPPorts   = TCPKAOnly ? 0 : GetPortArray(mDNSTransport_TCP, mDNSNULL);
+                cmd.numRRRecords  = CountProxyRecords(&cmd.rrBufferSize, TCPKAOnly, supportsTCPKA);
+                cmd.compression   = sizeof(DNSMessageHeader);
+
+                DNSMessage *msg   = (DNSMessage *)mallocL("mDNSOffloadCmd msg", sizeof(DNSMessageHeader) + cmd.rrBufferSize);
+                cmd.rrRecords.ptr = cmd.numRRRecords ? mallocL("mDNSOffloadCmd rrRecords", cmd.numRRRecords * sizeof(FatPtr))     : NULL;
+                cmd.udpPorts.ptr  = cmd.numUDPPorts  ? mallocL("mDNSOffloadCmd udpPorts" , cmd.numUDPPorts  * sizeof(mDNSIPPort)) : NULL;
+                cmd.tcpPorts.ptr  = cmd.numTCPPorts  ? mallocL("mDNSOffloadCmd tcpPorts" , cmd.numTCPPorts  * sizeof(mDNSIPPort)) : NULL;
+
+                LogSPS("ActivateLocalProxy: msg %p %u RR %p %u, UDP %p %u, TCP %p %u",
+                       msg, cmd.rrBufferSize,
+                       cmd.rrRecords.ptr, cmd.numRRRecords,
+                       cmd.udpPorts.ptr, cmd.numUDPPorts,
+                       cmd.tcpPorts.ptr, cmd.numTCPPorts);
+
+                if (msg && cmd.rrRecords.ptr)
                 {
-                    mDNSOffloadCmd cmd;
-                    mDNSPlatformMemZero(&cmd, sizeof(cmd)); // When compiling 32-bit, make sure top 32 bits of 64-bit pointers get initialized to zero
-                    cmd.command       = cmd_mDNSOffloadRR;
-                    cmd.numUDPPorts   = GetPortArray(mDNSTransport_UDP, mDNSNULL, TCPKAOnly, supportsTCPKA);
-                    cmd.numTCPPorts   = GetPortArray(mDNSTransport_TCP, mDNSNULL, TCPKAOnly, supportsTCPKA);
-                    cmd.numRRRecords  = CountProxyRecords(&cmd.rrBufferSize, intf, TCPKAOnly, supportsTCPKA);
-                    cmd.compression   = sizeof(DNSMessageHeader);
-
-                    DNSMessage *msg   = (DNSMessage *)mallocL("mDNSOffloadCmd msg", sizeof(DNSMessageHeader) + cmd.rrBufferSize);
-                    cmd.rrRecords.ptr = cmd.numRRRecords ? mallocL("mDNSOffloadCmd rrRecords", cmd.numRRRecords * sizeof(FatPtr))     : NULL;
-                    cmd.udpPorts.ptr  = cmd.numUDPPorts  ? mallocL("mDNSOffloadCmd udpPorts" , cmd.numUDPPorts  * sizeof(mDNSIPPort)) : NULL;
-                    cmd.tcpPorts.ptr  = cmd.numTCPPorts  ? mallocL("mDNSOffloadCmd tcpPorts" , cmd.numTCPPorts  * sizeof(mDNSIPPort)) : NULL;
-
-                    LogSPS("ActivateLocalProxy: msg %p %d RR %p %d, UDP %p %d, TCP %p %d",
-                           msg, cmd.rrBufferSize,
-                           cmd.rrRecords.ptr, cmd.numRRRecords,
-                           cmd.udpPorts.ptr, cmd.numUDPPorts,
-                           cmd.tcpPorts.ptr, cmd.numTCPPorts);
-
-                    if (msg && cmd.rrRecords.ptr) GetProxyRecords(msg, &cmd.rrBufferSize, cmd.rrRecords.ptr, TCPKAOnly, supportsTCPKA);
-                    if (cmd.udpPorts.ptr) cmd.numUDPPorts = GetPortArray(mDNSTransport_UDP, cmd.udpPorts.ptr, TCPKAOnly, supportsTCPKA);
-                    if (cmd.tcpPorts.ptr) cmd.numTCPPorts = GetPortArray(mDNSTransport_TCP, cmd.tcpPorts.ptr, TCPKAOnly, supportsTCPKA);
-
-                    char outputData[2];
-                    size_t outputDataSize = sizeof(outputData);
-                    kr = IOConnectCallStructMethod(conObj, 0, &cmd, sizeof(cmd), outputData, &outputDataSize);
-                    LogSPS("ActivateLocalProxy: IOConnectCallStructMethod for %s/%s/%s %d", intf->ifname, n1, n2, kr);
-                    if (kr == KERN_SUCCESS) result = mStatus_NoError;
-
-                    if (cmd.tcpPorts.ptr) freeL("mDNSOffloadCmd udpPorts",  cmd.tcpPorts.ptr);
-                    if (cmd.udpPorts.ptr) freeL("mDNSOffloadCmd tcpPorts",  cmd.udpPorts.ptr);
-                    if (cmd.rrRecords.ptr) freeL("mDNSOffloadCmd rrRecords", cmd.rrRecords.ptr);
-                    if (msg) freeL("mDNSOffloadCmd msg",       msg);
-                    IOServiceClose(conObj);
+                    GetProxyRecords(msg, &cmd.rrBufferSize, cmd.rrRecords.ptr, &cmd.numRRRecords, intf, TCPKAOnly, supportsTCPKA);
                 }
+                if (cmd.udpPorts.ptr) cmd.numUDPPorts = TCPKAOnly ? 0 : GetPortArray(mDNSTransport_UDP, cmd.udpPorts.ptr);
+                if (cmd.tcpPorts.ptr) cmd.numTCPPorts = TCPKAOnly ? 0 : GetPortArray(mDNSTransport_TCP, cmd.tcpPorts.ptr);
+
+                char outputData[2];
+                size_t outputDataSize = sizeof(outputData);
+                kr = IOConnectCallStructMethod(conObj, 0, &cmd, sizeof(cmd), outputData, &outputDataSize);
+                LogSPS("ActivateLocalProxy: IOConnectCallStructMethod for %s/%s/%s %d", intf->ifname, n1, n2, kr);
+                if (kr == KERN_SUCCESS) result = mStatus_NoError;
+
+                if (cmd.tcpPorts.ptr) freeL("mDNSOffloadCmd udpPorts",  cmd.tcpPorts.ptr);
+                if (cmd.udpPorts.ptr) freeL("mDNSOffloadCmd tcpPorts",  cmd.udpPorts.ptr);
+                if (cmd.rrRecords.ptr) freeL("mDNSOffloadCmd rrRecords", cmd.rrRecords.ptr);
+                if (msg) freeL("mDNSOffloadCmd msg",       msg);
+                IOServiceClose(conObj);
             }
-            CFRelease(ref);
         }
-        if (parent != IO_OBJECT_NULL) IOObjectRelease(parent);
+        CFRelease(ref);
+        IOObjectRelease(parent);
     }
-    if (service != IO_OBJECT_NULL) IOObjectRelease(service);
-    *keepaliveOnly = TCPKAOnly;
+    *keepaliveOnly = (TCPKAOnly && supportsTCPKA) ? mDNStrue : mDNSfalse;
     return result;
 }
 

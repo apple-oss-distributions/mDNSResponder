@@ -244,8 +244,6 @@ extern int KQueueSet(int fd, u_short flags, short filter, const KQueueEntry *con
 extern void KQueueLock(void);
 extern void KQueueUnlock(const char* task);
 extern void mDNSPlatformCloseFD(KQueueEntry *kq, int fd);
-extern ssize_t myrecvfrom(const int s, void *const buffer, const size_t max,
-                             struct sockaddr *const from, size_t *const fromlen, mDNSAddr *dstaddr, char *ifname, mDNSu8 *ttl);
 
 extern mDNSBool DictionaryIsEnabled(CFDictionaryRef dict);
 

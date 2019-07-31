@@ -3390,7 +3390,7 @@ extern void RemoveAutoTunnel6Record(mDNS *const m);
 extern mDNSBool RecordReadyForSleep(AuthRecord *rr);
 // For now this LocalSleepProxy stuff is specific to Mac OS X.
 // In the future, if there's demand, we may see if we can abstract it out cleanly into the platform layer
-extern mStatus ActivateLocalProxy(NetworkInterfaceInfo *const intf, mDNSBool *keepaliveOnly);
+extern mStatus ActivateLocalProxy(NetworkInterfaceInfo *const intf, mDNSBool offloadKeepAlivesOnly, mDNSBool *keepaliveOnly);
 extern void mDNSPlatformUpdateDNSStatus(DNSQuestion *q);
 extern void mDNSPlatformTriggerDNSRetry(DNSQuestion *v4q, DNSQuestion *v6q);
 extern void mDNSPlatformLogToFile(int log_level, const char *buffer);
