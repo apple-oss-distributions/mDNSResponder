@@ -98,6 +98,8 @@ extern mDNSInterfaceID GetNextActiveInterfaceID(const NetworkInterfaceInfo *intf
 
 extern mDNSu32 mDNSRandom(mDNSu32 max);     // Returns pseudo-random result from zero to max inclusive
 
+extern mDNSu32 mDNS_GetNextResolverGroupID(void);
+
 // ***************************************************************************
 #if COMPILER_LIKES_PRAGMA_MARK
 #pragma mark -

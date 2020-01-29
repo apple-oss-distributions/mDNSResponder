@@ -4170,7 +4170,7 @@ mDNSexport void AnswerCurrentQuestionWithResourceRecord(mDNS *const m, CacheReco
         mDNSBool            isForCellular;
 
         queryName = q->metrics.originalQName ? q->metrics.originalQName : &q->qname;
-        isForCellular = (q->qDNSServer && q->qDNSServer->cellIntf);
+        isForCellular = (q->qDNSServer && q->qDNSServer->isCell);
         if (!q->metrics.answered)
         {
             if (q->metrics.querySendCount > 0)
@@ -4269,7 +4269,7 @@ mDNSexport void AnswerCurrentQuestionWithResourceRecord(mDNS *const m, CacheReco
 #if USE_DNS64
             if (DNS64ShouldAnswerQuestion(q, &rr->resrec))
             {
-                DNS64AnswerQuestion(m, q, &rr->resrec, AddRecord);
+                DNS64AnswerCurrentQuestion(m, &rr->resrec, AddRecord);
             }
             else
 #endif
@@ -7410,8 +7410,8 @@ mDNSlocal CacheRecord *FindIdenticalRecordInCache(const mDNS *const m, const Res
     {
         if (!pktrr->InterfaceID)
         {
-            mDNSu16 id1 = (pktrr->rDNSServer ? pktrr->rDNSServer->resGroupID : 0);
-            mDNSu16 id2 = (rr->resrec.rDNSServer ? rr->resrec.rDNSServer->resGroupID : 0);
+            const mDNSu32 id1 = (pktrr->rDNSServer ? pktrr->rDNSServer->resGroupID : 0);
+            const mDNSu32 id2 = (rr->resrec.rDNSServer ? rr->resrec.rDNSServer->resGroupID : 0);
             match = (id1 == id2);
         }
         else match = (pktrr->InterfaceID == rr->resrec.InterfaceID);
@@ -8737,8 +8737,8 @@ mDNSlocal CacheRecord* mDNSCoreReceiveCacheCheck(mDNS *const m, const DNSMessage
         // Resource record received via unicast, the resGroupID should match ?
         if (!InterfaceID)
         {
-            mDNSu16 id1 = (rr->resrec.rDNSServer ? rr->resrec.rDNSServer->resGroupID : 0);
-            mDNSu16 id2 = (m->rec.r.resrec.rDNSServer ? m->rec.r.resrec.rDNSServer->resGroupID : 0);
+            const mDNSu32 id1 = (rr->resrec.rDNSServer ? rr->resrec.rDNSServer->resGroupID : 0);
+            const mDNSu32 id2 = (m->rec.r.resrec.rDNSServer ? m->rec.r.resrec.rDNSServer->resGroupID : 0);
             match = (id1 == id2);
         }
         else
@@ -11031,14 +11031,14 @@ mDNSexport mDNSBool DomainEnumQuery(const domainname *qname)
 // Note: InterfaceID is the InterfaceID of the question
 mDNSlocal mDNSBool DNSServerMatch(DNSServer *d, mDNSInterfaceID InterfaceID, mDNSs32 ServiceID)
 {
-    // 1) Unscoped questions (NULL InterfaceID) should  consider *only* unscoped DNSServers ( DNSServer
-    // with "scoped" set to kScopeNone)
+    // 1) Unscoped questions (NULL InterfaceID) should consider *only* unscoped DNSServers ( DNSServer
+    // with scopeType set to kScopeNone)
     //
     // 2) Scoped questions (non-NULL InterfaceID) should consider *only* scoped DNSServers (DNSServer
-    // with "scoped" set to kScopeInterfaceId) and their InterfaceIDs should match.
+    // with scopeType set to kScopeInterfaceID) and their InterfaceIDs should match.
     //
     // 3) Scoped questions (non-zero ServiceID) should consider *only* scoped DNSServers (DNSServer
-    // with "scoped" set to kScopeServiceID) and their ServiceIDs should match.
+    // with scopeType set to kScopeServiceID) and their ServiceIDs should match.
     //
     // The first condition in the "if" statement checks to see if both the question and the DNSServer are
     // unscoped. The question is unscoped only if InterfaceID is zero and ServiceID is -1.
@@ -11059,9 +11059,9 @@ mDNSlocal mDNSBool DNSServerMatch(DNSServer *d, mDNSInterfaceID InterfaceID, mDN
     // Note: mDNSInterface_Unicast is used only by .local unicast questions and are treated as unscoped.
     // If a question is scoped both to InterfaceID and ServiceID, the question will be scoped to InterfaceID.
 
-    if (((d->scoped == kScopeNone) && ((!InterfaceID && ServiceID == -1) || InterfaceID == mDNSInterface_Unicast)) ||
-        ((d->scoped == kScopeInterfaceID) && d->interface == InterfaceID) ||
-        ((d->scoped == kScopeServiceID) && d->serviceID == ServiceID))
+    if (((d->scopeType == kScopeNone) && ((!InterfaceID && ServiceID == -1) || InterfaceID == mDNSInterface_Unicast)) ||
+        ((d->scopeType == kScopeInterfaceID) && d->interface == InterfaceID) ||
+        ((d->scopeType == kScopeServiceID) && d->serviceID == ServiceID))
     {
         return mDNStrue;
     }
@@ -11099,14 +11099,16 @@ mDNSexport mDNSu32 SetValidDNSServers(mDNS *m, DNSQuestion *question)
         // Note: DNS configuration change will help pick the new dns servers but currently it does not affect the timeout
 
         // Skip DNSServers that are InterfaceID Scoped but have no valid interfaceid set OR DNSServers that are ServiceID Scoped but have no valid serviceid set
-        if ((curr->scoped == kScopeInterfaceID && curr->interface == mDNSInterface_Any) || (curr->scoped == kScopeServiceID && curr->serviceID <= 0))
+        if (((curr->scopeType == kScopeInterfaceID) && (curr->interface == mDNSInterface_Any)) ||
+            ((curr->scopeType == kScopeServiceID) && (curr->serviceID <= 0)))
         {
-            LogInfo("SetValidDNSServers: ScopeType[%d] Skipping DNS server %#a (Domain %##s) Interface:[%p] Serviceid:[%d]", curr->scoped, &curr->addr, curr->domain.c, curr->interface, curr->serviceID);
+            LogInfo("SetValidDNSServers: ScopeType[%d] Skipping DNS server %#a (Domain %##s) Interface:[%p] Serviceid:[%d]",
+                (int)curr->scopeType, &curr->addr, curr->domain.c, curr->interface, curr->serviceID);
             continue;
         }
 
         currcount = CountLabels(&curr->domain);
-        if ((!curr->cellIntf || (!DEQuery && !(question->flags & kDNSServiceFlagsDenyCellular))) &&
+        if ((!curr->isCell || (!DEQuery && !(question->flags & kDNSServiceFlagsDenyCellular))) &&
             (!curr->isExpensive || !(question->flags & kDNSServiceFlagsDenyExpensive)) &&
             DNSServerMatch(curr, question->InterfaceID, question->ServiceID))
         {
@@ -11130,7 +11132,7 @@ mDNSexport mDNSu32 SetValidDNSServers(mDNS *m, DNSQuestion *question)
                        curr->interface);
                 timeout += curr->timeout;
                 if (DEQuery)
-                    debugf("DomainEnumQuery: Question %##s, DNSServer %#a, cell %d", question->qname.c, &curr->addr, curr->cellIntf);
+                    debugf("DomainEnumQuery: Question %##s, DNSServer %#a, cell %d", question->qname.c, &curr->addr, curr->isCell);
                 bit_set_opaque128(question->validDNSServers, index);
             }
         }
@@ -11999,7 +12001,7 @@ mDNSlocal void InitDNSSECProxyState(mDNS *const m, DNSQuestion *const question)
     // at ValidationRequired setting also.
     if (question->qDNSServer)
     {
-        if (question->qDNSServer->cellIntf)
+        if (question->qDNSServer->isCell)
         {
             debugf("InitDNSSECProxyState: Turning off validation for %##s (%s); going over cell", question->qname.c, DNSTypeName(question->qtype));
             question->ValidationRequired = mDNSfalse;
@@ -12234,7 +12236,7 @@ mDNSexport mStatus mDNS_StopQuery_internal(mDNS *const m, DNSQuestion *const que
         mDNSu32             durationMs;
 
         queryName  = question->metrics.originalQName ? question->metrics.originalQName : &question->qname;
-        isForCell  = (question->qDNSServer && question->qDNSServer->cellIntf);
+        isForCell  = (question->qDNSServer && question->qDNSServer->isCell);
         durationMs = ((m->timenow - question->metrics.firstQueryTime) * 1000) / mDNSPlatformOneSecond;
         MetricsUpdateDNSQueryStats(queryName, question->qtype, mDNSNULL, question->metrics.querySendCount, question->metrics.expiredAnswerState, durationMs, isForCell);
     }
@@ -13248,11 +13250,14 @@ mDNSexport void mDNS_DeregisterInterface(mDNS *const m, NetworkInterfaceInfo *se
             // so that mDNS_RegisterInterface() knows how swiftly it needs to reactivate them
             for (q = m->Questions; q; q=q->next)
             {
-                if (q->InterfaceID == set->InterfaceID) q->ThisQInterval = 0;
-                if (!q->InterfaceID || q->InterfaceID == set->InterfaceID)
+                if (mDNSOpaque16IsZero(q->TargetQID))                   // Only deactivate multicast quesstions. (Unicast questions are stopped when/if the associated DNS server group goes away.)
                 {
-                    q->FlappingInterface2 = q->FlappingInterface1;
-                    q->FlappingInterface1 = set->InterfaceID;       // Keep history of the last two interfaces to go away
+                    if (q->InterfaceID == set->InterfaceID) q->ThisQInterval = 0;
+                    if (!q->InterfaceID || q->InterfaceID == set->InterfaceID)
+                    {
+                        q->FlappingInterface2 = q->FlappingInterface1;
+                        q->FlappingInterface1 = set->InterfaceID;       // Keep history of the last two interfaces to go away
+                    }
                 }
             }
 

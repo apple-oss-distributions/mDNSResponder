@@ -3084,7 +3084,7 @@ mDNSexport void VerifySignature(mDNS *const m, DNSSECVerifier *dv, DNSQuestion *
     if (!dv)
     {
         first = mDNStrue;
-        if (!q->qDNSServer || q->qDNSServer->cellIntf)
+        if (!q->qDNSServer || q->qDNSServer->isCell)
         {
             LogDNSSEC("VerifySignature: Disabled");
             return;

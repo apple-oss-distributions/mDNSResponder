@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,12 +54,12 @@ check_compile_time(sizeof_field(DNS64, qnameStash)  == kDNS64IPv4OnlyFQDNLength)
 //  Local Prototypes
 //===========================================================================================================================
 
-mDNSlocal mStatus   DNS64GetIPv6Addrs(mDNS *m, mDNSu16 inResGroupID, struct in6_addr **outAddrs, uint32_t *outAddrCount);
-mDNSlocal mStatus   DNS64GetPrefixes(mDNS *m, mDNSu16 inResGroupID, nw_nat64_prefix_t **outPrefixes, uint32_t *outPrefixCount);
+mDNSlocal mStatus   DNS64GetIPv6Addrs(mDNS *m, mDNSu32 inResGroupID, struct in6_addr **outAddrs, uint32_t *outAddrCount);
+mDNSlocal mStatus   DNS64GetPrefixes(mDNS *m, mDNSu32 inResGroupID, nw_nat64_prefix_t **outPrefixes, uint32_t *outPrefixCount);
 mDNSlocal mDNSBool  DNS64GetReverseIPv6Addr(const domainname *inQName, struct in6_addr *outAddr);
 mDNSlocal mDNSu32   DNS64IPv4OnlyFQDNHash(void);
 mDNSlocal void      DNS64RestartQuestion(mDNS *m, DNSQuestion *q, DNS64State newState);
-mDNSlocal mDNSBool  DNS64TestIPv6Synthesis(mDNS *m, mDNSu16 inResGroupID, const mDNSv4Addr *inV4Addr);
+mDNSlocal mDNSBool  DNS64TestIPv6Synthesis(mDNS *m, mDNSu32 inResGroupID, const mDNSv4Addr *inV4Addr);
 
 //===========================================================================================================================
 //  DNS64StateMachine
@@ -174,10 +174,10 @@ mDNSexport mDNSBool DNS64StateMachine(mDNS *m, DNSQuestion *inQ, const ResourceR
 }
 
 //===========================================================================================================================
-//  DNS64AnswerQuestion
+//  DNS64AnswerCurrentQuestion
 //===========================================================================================================================
 
-mDNSexport mStatus DNS64AnswerQuestion(mDNS *m, DNSQuestion *inQ, const ResourceRecord *inRR, QC_result inResult)
+mDNSexport mStatus DNS64AnswerCurrentQuestion(mDNS *m, const ResourceRecord *inRR, QC_result inResult)
 {
     mStatus                 err;
     ResourceRecord          newRR;
@@ -187,10 +187,11 @@ mDNSexport mStatus DNS64AnswerQuestion(mDNS *m, DNSQuestion *inQ, const Resource
     uint32_t                i;
     struct in_addr          v4Addr;
     struct in6_addr         synthV6;
+    DNSQuestion * const     q = m->CurrentQuestion;
 
-    require_action_quiet(inQ->qDNSServer, exit, err = mStatus_BadParamErr);
+    require_action_quiet(q->qDNSServer, exit, err = mStatus_BadParamErr);
 
-    err = DNS64GetPrefixes(m, inQ->qDNSServer->resGroupID, &prefixes, &prefixCount);
+    err = DNS64GetPrefixes(m, q->qDNSServer->resGroupID, &prefixes, &prefixCount);
     require_noerr_quiet(err, exit);
 
     newRR               = *inRR;
@@ -205,7 +206,8 @@ mDNSexport mStatus DNS64AnswerQuestion(mDNS *m, DNSQuestion *inQ, const Resource
         if (nw_nat64_synthesize_v6(&prefixes[i], &v4Addr, &synthV6))
         {
             memcpy(rdata.u.ipv6.b, synthV6.s6_addr, 16);
-            inQ->QuestionCallback(m, inQ, &newRR, inResult);
+            q->QuestionCallback(m, q, &newRR, inResult);
+            if (m->CurrentQuestion != q) break;
         }
     }
     err = mStatus_NoError;
@@ -354,7 +356,7 @@ mDNSexport void DNS64RestartQuestions(mDNS *m)
     ((RR)->RecordType != kDNSRecordTypePacketNegative) &&   \
     !(RR)->InterfaceID)
 
-mDNSlocal mStatus DNS64GetIPv6Addrs(mDNS *m, const mDNSu16 inResGroupID, struct in6_addr **outAddrs, uint32_t *outAddrCount)
+mDNSlocal mStatus DNS64GetIPv6Addrs(mDNS *m, const mDNSu32 inResGroupID, struct in6_addr **outAddrs, uint32_t *outAddrCount)
 {
     mStatus                 err;
     const CacheGroup *      cg;
@@ -403,7 +405,7 @@ exit:
 //  DNS64GetPrefixes
 //===========================================================================================================================
 
-mDNSlocal mStatus DNS64GetPrefixes(mDNS *m, mDNSu16 inResGroupID, nw_nat64_prefix_t **outPrefixes, uint32_t *outPrefixCount)
+mDNSlocal mStatus DNS64GetPrefixes(mDNS *m, mDNSu32 inResGroupID, nw_nat64_prefix_t **outPrefixes, uint32_t *outPrefixCount)
 {
     mStatus                 err;
     struct in6_addr *       v6Addrs;
@@ -535,7 +537,7 @@ mDNSlocal void DNS64RestartQuestion(mDNS *const m, DNSQuestion *inQ, DNS64State 
 //  DNS64TestIPv6Synthesis
 //===========================================================================================================================
 
-mDNSlocal mDNSBool DNS64TestIPv6Synthesis(mDNS *m, mDNSu16 inResGroupID, const mDNSv4Addr *inV4Addr)
+mDNSlocal mDNSBool DNS64TestIPv6Synthesis(mDNS *m, mDNSu32 inResGroupID, const mDNSv4Addr *inV4Addr)
 {
     mStatus                 err;
     nw_nat64_prefix_t *     prefixes    = NULL;

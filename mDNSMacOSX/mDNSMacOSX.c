@@ -93,7 +93,6 @@
 
 // Include definition of opaque_presence_indication for KEV_DL_NODE_PRESENCE handling logic.
 #include <Kernel/IOKit/apple80211/apple80211_var.h>
-#include <network_information.h>  // for nwi_state
 
 #if MDNSRESPONDER_BTMM_SUPPORT
 #include <AWACS.h>
@@ -3626,7 +3625,6 @@ mDNSlocal NetworkInterfaceInfoOSX *AddInterfaceToList(struct ifaddrs *ifa, mDNSs
 
     i->isExpensive     = (eflags & IFEF_EXPENSIVE) ? mDNStrue: mDNSfalse;
     i->isAWDL          = (eflags & IFEF_AWDL)      ? mDNStrue: mDNSfalse;
-    i->isCLAT46        = (eflags & IFEF_CLAT46)    ? mDNStrue: mDNSfalse;
     if (eflags & IFEF_AWDL)
     {
         // Set SupportsUnicastMDNSResponse false for the AWDL interface since unicast reserves
@@ -5410,7 +5408,7 @@ mDNSlocal void ConfigSearchDomains(dns_resolver_t *resolver, mDNSInterfaceID int
         {
             if (MakeDomainNameFromDNSNameString(&d, resolver->search[j]) != NULL)
             {
-                static char interface_buf[32];
+                char interface_buf[32];
                 mDNS_snprintf(interface_buf, sizeof(interface_buf), "for interface %s", InterfaceNameForID(&mDNSStorage,  interfaceId));
                 LogInfo("ConfigSearchDomains: (%s) configuring search domain %s %s (generation= %llu)", scopeString,
                         resolver->search[j], (interfaceId == mDNSInterface_Any) ? "" : interface_buf, generation);
@@ -5476,7 +5474,24 @@ mDNSlocal void ConfigNonUnicastResolver(dns_resolver_t *r)
     }
 }
 
-mDNSlocal void ConfigDNSServers(dns_resolver_t *r, mDNSInterfaceID interface, mDNSu32 scope, mDNSu16 resGroupID)
+#if !defined(NWI_IFSTATE_FLAGS_HAS_CLAT46)
+#define NWI_IFSTATE_FLAGS_HAS_CLAT46    0x0040
+#endif
+
+mDNSlocal mDNSBool NWIInterfaceHasCLAT46(nwi_state_t state, uint32_t ifIndex)
+{
+    char ifNameBuf[IFNAMSIZ + 1];
+    const char *ifNamePtr = if_indextoname(ifIndex, ifNameBuf);
+    if (!ifNamePtr) return(mDNSfalse);
+
+    const nwi_ifstate_t ifState = nwi_state_get_ifstate(state, ifNamePtr);
+    if (!ifState) return(mDNSfalse);
+
+    const nwi_ifstate_flags flags = nwi_ifstate_get_flags(ifState);
+    return((flags & NWI_IFSTATE_FLAGS_HAS_CLAT46) ? mDNStrue : mDNSfalse);
+}
+
+mDNSlocal void ConfigDNSServers(dns_resolver_t *r, mDNSInterfaceID interface, mDNSu32 scope, mDNSu32 resGroupID)
 {
     int n;
     domainname d;
@@ -5509,7 +5524,15 @@ mDNSlocal void ConfigDNSServers(dns_resolver_t *r, mDNSInterfaceID interface, mD
     reqAAAA = (r->flags & DNS_RESOLVER_FLAGS_REQUEST_AAAA_RECORDS ? mDNStrue : mDNSfalse);
     info = IfindexToInterfaceInfoOSX(interface);
     isExpensive = (info && info->isExpensive) ? mDNStrue : mDNSfalse;
-    isCLAT46    = (info && info->isCLAT46)    ? mDNStrue : mDNSfalse;
+    if (mDNSStorage.p->NWIState && interface)
+    {
+        const uint32_t ifIndex = (uint32_t)((uintptr_t)interface);
+        isCLAT46 = NWIInterfaceHasCLAT46(mDNSStorage.p->NWIState, ifIndex);
+    }
+    else
+    {
+        isCLAT46 = mDNSfalse;
+    }
 
     for (n = 0; n < r->n_nameserver; n++)
     {
@@ -5553,7 +5576,7 @@ mDNSlocal void ConfigDNSServers(dns_resolver_t *r, mDNSInterfaceID interface, mD
 // "service_specific_resolver" has entries that should be used for Service scoped question i.e., questions that specify
 // a service identifier (q->ServiceID)
 //
-mDNSlocal void ConfigResolvers(dns_config_t *config, mDNSu32 scope, mDNSBool setsearch, mDNSBool setservers, MD5_CTX *sdc, mDNSu16 resGroupID)
+mDNSlocal void ConfigResolvers(dns_config_t *config, mDNSu32 scope, mDNSBool setsearch, mDNSBool setservers, MD5_CTX *sdc)
 {
     int i;
     dns_resolver_t **resolver;
@@ -5609,12 +5632,7 @@ mDNSlocal void ConfigResolvers(dns_config_t *config, mDNSu32 scope, mDNSBool set
         }
         else
         {
-            // Each scoped resolver gets its own ID (i.e., they are in their own group) so that responses from the
-            // scoped resolver are not used by other non-scoped or scoped resolvers.
-            if (scope != kScopeNone) 
-                resGroupID++;
-
-            ConfigDNSServers(r, interface, scope, resGroupID);
+            ConfigDNSServers(r, interface, scope, mDNS_GetNextResolverGroupID());
         }
     }
 }
@@ -5910,7 +5928,6 @@ mDNSexport mDNSBool mDNSPlatformSetDNSConfig(mDNSBool setservers, mDNSBool setse
 {
     mDNS *const m = &mDNSStorage;
     MD5_CTX sdc;    // search domain context
-    static mDNSu16 resolverGroupID = 0;
 
     // Need to set these here because we need to do this even if SCDynamicStoreCreate() or SCDynamicStoreCopyValue() below don't succeed
     if (fqdn         ) fqdn->c[0]      = 0;
@@ -6011,20 +6028,9 @@ mDNSexport mDNSBool mDNSPlatformSetDNSConfig(mDNSBool setservers, mDNSBool setse
             SetupActiveDirectoryDomain(config);
 #endif
 
-            // With scoped DNS, we don't want to answer a non-scoped question using a scoped cache entry
-            // and vice-versa. As we compare resolverGroupID for matching cache entry with question, we need
-            // to make sure that they don't match. We ensure this by always bumping up resolverGroupID between
-            // the two calls to ConfigResolvers DNSServers for scoped and non-scoped can never have the
-            // same resolverGroupID.
-            //
-            // All non-scoped resolvers use the same resolverGroupID i.e, we treat them all equally.
-            ConfigResolvers(config, kScopeNone, setsearch, setservers, &sdc, ++resolverGroupID);
-            resolverGroupID += config->n_resolver;
-
-            ConfigResolvers(config, kScopeInterfaceID, setsearch, setservers, &sdc, resolverGroupID);
-            resolverGroupID += config->n_scoped_resolver;
-
-            ConfigResolvers(config, kScopeServiceID, setsearch, setservers, &sdc, resolverGroupID);
+            ConfigResolvers(config, kScopeNone, setsearch, setservers, &sdc);
+            ConfigResolvers(config, kScopeInterfaceID, setsearch, setservers, &sdc);
+            ConfigResolvers(config, kScopeServiceID, setsearch, setservers, &sdc);
 
             // Acking provides a hint to other processes that the current DNS configuration has completed
             // its update.  When configd receives the ack, it publishes a notification.
@@ -9532,6 +9538,36 @@ mDNSlocal void RegisterLocalOnlyAAAARecord(const domainname *const name, const m
 }
 #endif
 
+mDNSlocal void NWIEventHandler(void)
+{
+    mDNS * const m = &mDNSStorage;
+    nwi_state_t newState = nwi_state_copy();
+
+    KQueueLock();
+    const nwi_state_t oldState = m->p->NWIState;
+    m->p->NWIState = newState;
+    if (m->p->NWIState)
+    {
+        uint32_t lastIfIndex = 0;
+        mDNSBool lastCLAT46  = mDNSfalse;
+        for (DNSServer *server = m->DNSServers; server; server = server->next)
+        {
+            const uint32_t ifIndex = (uint32_t)((uintptr_t)server->interface);
+            if (ifIndex == 0) continue;
+            if (ifIndex == lastIfIndex)
+            {
+                server->isCLAT46 = lastCLAT46;
+                continue;
+            }
+            server->isCLAT46 = NWIInterfaceHasCLAT46(m->p->NWIState, ifIndex);
+            lastIfIndex      = ifIndex;
+            lastCLAT46       = server->isCLAT46;
+        }
+    }
+    KQueueUnlock("NWIEventHandler");
+    if (oldState) nwi_state_release(oldState);
+}
+
 mDNSlocal mStatus mDNSPlatformInit_setup(mDNS *const m)
 {
     mStatus err;
@@ -9671,6 +9707,18 @@ mDNSlocal mStatus mDNSPlatformInit_setup(mDNS *const m)
 
     err = WatchForSysEvents(m);
     if (err) { LogMsg("mDNSPlatformInit_setup: WatchForSysEvents failed %d", err); return(err); }
+
+    m->p->NWIState = nwi_state_copy();
+    uint32_t status = notify_register_dispatch(nwi_state_get_notify_key(), &m->p->NWINotifyToken, dispatch_get_main_queue(),
+        ^(__unused int token) { NWIEventHandler(); });
+    if (status == NOTIFY_STATUS_OK)
+    {
+        m->p->NWINotifyRegistered = mDNStrue;
+    }
+    else
+    {
+        LogMsg("mDNSPlatformInit_setup: notify_register_dispatch failed %u", status);
+    }
 
     mDNSs32 utc = mDNSPlatformUTC();
     m->SystemWakeOnLANEnabled = SystemWakeForNetworkAccess();
@@ -9868,7 +9916,11 @@ mDNSexport void mDNSPlatformClose(mDNS *const m)
     }
 
     if (m->p->SysEventNotifier >= 0) { close(m->p->SysEventNotifier); m->p->SysEventNotifier = -1; }
-
+    if (m->p->NWINotifyRegistered)
+    {
+        notify_cancel(m->p->NWINotifyToken);
+        m->p->NWINotifyRegistered = mDNSfalse;
+    }
     terminateD2DPlugins();
 
     mDNSs32 utc = mDNSPlatformUTC();
@@ -9981,6 +10033,7 @@ mDNSexport void     mDNSPlatformQsort  (      void *base, int nel, int width, in
 }
 #if !(APPLE_OSX_mDNSResponder && MACOSX_MDNS_MALLOC_DEBUGGING)
 mDNSexport void *   mDNSPlatformMemAllocate(mDNSu32 len) { return(mallocL("mDNSPlatformMemAllocate", len)); }
+mDNSexport void *   mDNSPlatformMemAllocateClear(mDNSu32 len) { return(callocL("mDNSPlatformMemAllocateClear", len)); }
 #endif
 mDNSexport void     mDNSPlatformMemFree    (void *mem)   { freeL("mDNSPlatformMemFree", mem); }
 

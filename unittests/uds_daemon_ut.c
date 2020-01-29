@@ -23,7 +23,7 @@ mDNSexport void LogCacheRecords_ut(mDNSs32 now, mDNSu32* retCacheUsed, mDNSu32* 
 				const mDNSs32 remain = cr->resrec.rroriginalttl - (now - cr->TimeRcvd) / mDNSPlatformOneSecond;
 				const char *ifname;
 				mDNSInterfaceID InterfaceID = cr->resrec.InterfaceID;
-				if (!InterfaceID && cr->resrec.rDNSServer && cr->resrec.rDNSServer->scoped)
+				if (!InterfaceID && cr->resrec.rDNSServer && (cr->resrec.rDNSServer->scopeType != kScopeNone))
 					InterfaceID = cr->resrec.rDNSServer->interface;
 				ifname = InterfaceNameForID(&mDNSStorage, InterfaceID);
 				if (cr->CRActiveQuestion) CacheActive++;

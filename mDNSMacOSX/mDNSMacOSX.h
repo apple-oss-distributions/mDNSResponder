@@ -28,7 +28,8 @@ extern "C" {
 #include <IOKit/pwr_mgt/IOPMLibPrivate.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include "mDNSEmbeddedAPI.h"  // for domain name structure
+#include <network_information.h>    // for nwi_state
+#include "mDNSEmbeddedAPI.h"        // for domain name structure
 
 #include <net/if.h>
 #include <os/log.h>
@@ -154,7 +155,6 @@ struct NetworkInterfaceInfoOSX_struct
     u_int BPF_len;
     mDNSBool isExpensive;                       // True if this interface has the IFEF_EXPENSIVE flag set.
     mDNSBool isAWDL;                            // True if this interface has the IFEF_AWDL flag set.
-    mDNSBool isCLAT46;                          // True if this interface has the IFEF_CLAT46 flag set.
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
     dispatch_source_t BPF_source;
 #else
@@ -185,6 +185,9 @@ struct mDNS_PlatformSupport_struct
     SCDynamicStoreRef Store;
     CFRunLoopSourceRef StoreRLS;
     CFRunLoopSourceRef PMRLS;
+    nwi_state_t NWIState;
+    int NWINotifyToken;
+    mDNSBool NWINotifyRegistered;
     int SysEventNotifier;
     KQueueEntry SysEventKQueue;
     IONotificationPortRef PowerPortRef;

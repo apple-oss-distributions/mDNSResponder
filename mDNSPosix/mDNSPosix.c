@@ -1504,6 +1504,7 @@ mDNSexport void    mDNSPlatformMemZero(void *dst, mDNSu32 len)
 }
 
 mDNSexport void *  mDNSPlatformMemAllocate(mDNSu32 len) { return(malloc(len)); }
+mDNSexport void *  mDNSPlatformMemAllocateClear(mDNSu32 len) { return(calloc(1, len)); }
 mDNSexport void    mDNSPlatformMemFree    (void *mem)   { free(mem); }
 
 #if _PLATFORM_HAS_STRONG_PRNG_

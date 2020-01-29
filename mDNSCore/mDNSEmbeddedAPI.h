@@ -1346,15 +1346,14 @@ enum {
 };
 typedef mDNSu8 MortalityState;
 
-// scoped values for DNSServer matching
-enum
+// ScopeType values for DNSServer matching
+typedef enum
 {
     kScopeNone         = 0,        // DNS server used by unscoped questions
     kScopeInterfaceID  = 1,        // Scoped DNS server used only by scoped questions
-    kScopeServiceID    = 2,         // Service specific DNS server used only by questions
+    kScopeServiceID    = 2         // Service specific DNS server used only by questions
                                    // have a matching serviceID
-    kScopesMaxCount    = 3         // Max count for scopes enum
-};
+} ScopeType;
 
 // Note: DNSSECAware is set if we are able to get a valid response to
 // a DNSSEC question. In some cases it is possible that the proxy
@@ -1373,11 +1372,11 @@ typedef struct DNSServer
     mDNSu32 flags;              // Set when we're planning to delete this from the list
     domainname domain;          // name->server matching for "split dns"
     mDNSs32 penaltyTime;        // amount of time this server is penalized
-    mDNSu32 scoped;             // See the scoped enum above
+    ScopeType scopeType;        // See the ScopeType enum above
     mDNSu32 timeout;            // timeout value for questions
-    mDNSu16 resGroupID;         // ID of the resolver group that contains this DNSServer
+    mDNSu32 resGroupID;         // ID of the resolver group that contains this DNSServer
     mDNSu8 retransDO;           // Total Retransmissions for queries sent with DO option
-    mDNSBool cellIntf;          // Resolver from Cellular Interface?
+    mDNSBool isCell;            // Resolver from Cellular Interface?
     mDNSBool req_A;             // If set, send v4 query (DNSConfig allows A queries)
     mDNSBool req_AAAA;          // If set, send v6 query (DNSConfig allows AAAA queries)
     mDNSBool req_DO;            // If set, okay to send DNSSEC queries (EDNS DO bit is supported)
@@ -2616,7 +2615,7 @@ extern const mDNSOpaque64 zeroOpaque64;
 extern const mDNSOpaque128 zeroOpaque128;
     
 extern mDNSBool StrictUnicastOrdering;
-extern mDNSu8 NumUnicastDNSServers;
+extern int NumUnicastDNSServers;
 #if APPLE_OSX_mDNSResponder
 extern mDNSu8 NumUnreachableDNSServers;
 #endif
@@ -3072,8 +3071,8 @@ extern void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCa
 extern void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn);
 extern void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const mDNSAddr *v6addr, const mDNSAddr *router);
 extern DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, mDNSs32 serviceID, const mDNSAddr *addr,
-                                    const mDNSIPPort port, mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSBool isExpensive, mDNSBool isCLAT46,
-                                    mDNSu16 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO);
+                                    const mDNSIPPort port, ScopeType scopeType, mDNSu32 timeout, mDNSBool cellIntf, mDNSBool isExpensive, mDNSBool isCLAT46,
+                                    mDNSu32 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO);
 extern void PenalizeDNSServer(mDNS *const m, DNSQuestion *q, mDNSOpaque16 responseFlags);
 extern void mDNS_AddSearchDomain(const domainname *const domain, mDNSInterfaceID InterfaceID);
 
@@ -3166,6 +3165,7 @@ extern void mDNSPlatformQsort       (void *base, int nel, int width, int (*compa
 #define         mDNSPlatformMemAllocate(X) mallocL(# X, X)
 #else
 extern void *   mDNSPlatformMemAllocate (mDNSu32 len);
+extern void *   mDNSPlatformMemAllocateClear(mDNSu32 len);
 #endif
 extern void     mDNSPlatformMemFree     (void *mem);
 

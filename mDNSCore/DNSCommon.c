@@ -1790,8 +1790,8 @@ mDNSexport mDNSBool SameNameRecordAnswersQuestion(const ResourceRecord *const rr
     // Resource record received via unicast, the resolver group ID should match ?
     if (!rr->InterfaceID)
     {
-        mDNSu16 idr = (rr->rDNSServer ? rr->rDNSServer->resGroupID : 0);
-        mDNSu16 idq = (q->qDNSServer ? q->qDNSServer->resGroupID : 0);
+        const mDNSu32 idr = rr->rDNSServer ? rr->rDNSServer->resGroupID : 0;
+        const mDNSu32 idq = q->qDNSServer ? q->qDNSServer->resGroupID : 0;
         if (idr != idq) return(mDNSfalse);
         if (!DNSSECRecordAnswersQuestion(rr, q, &checkType)) return mDNSfalse;
     }
@@ -1924,8 +1924,8 @@ mDNSexport mDNSBool AnyTypeRecordAnswersQuestion(const ResourceRecord *const rr,
     // both the DNSServers are assumed to be NULL in that case
     if (!rr->InterfaceID)
     {
-        mDNSu16 idr = (rr->rDNSServer ? rr->rDNSServer->resGroupID : 0);
-        mDNSu16 idq = (q->qDNSServer ? q->qDNSServer->resGroupID : 0);
+        const mDNSu32 idr = rr->rDNSServer ? rr->rDNSServer->resGroupID : 0;
+        const mDNSu32 idq = q->qDNSServer ? q->qDNSServer->resGroupID : 0;
         if (idr != idq) return(mDNSfalse);
     }
 
@@ -4550,4 +4550,11 @@ mDNSexport mDNSu32 mDNS_snprintf(char *sbuffer, mDNSu32 buflen, const char *fmt,
     va_end(ptr);
 
     return(length);
+}
+
+mDNSexport mDNSu32 mDNS_GetNextResolverGroupID(void)
+{
+    static mDNSu32 lastID = 0;
+    if (++lastID == 0) lastID = 1; // Valid resolver group IDs are non-zero.
+    return(lastID);
 }

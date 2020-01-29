@@ -53,7 +53,7 @@ mDNSBool StrictUnicastOrdering = mDNSfalse;
 // question. Bit position is the index into the DNS server list. This is done so to try all
 // the servers exactly once before giving up. If we could allocate memory in the core, then
 // arbitrary limitation of 128 DNSServers can be removed.
-mDNSu8 NumUnicastDNSServers = 0;
+int NumUnicastDNSServers = 0;
 #define MAX_UNICAST_DNS_SERVERS 128
 #if APPLE_OSX_mDNSResponder
 mDNSu8 NumUnreachableDNSServers = 0;
@@ -118,11 +118,11 @@ mDNSlocal void SetRecordRetry(mDNS *const m, AuthRecord *rr, mDNSu32 random)
 #define TrueFalseStr(X) ((X) ? "true" : "false")
 
 mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSs32 serviceID, const mDNSAddr *addr,
-                                        const mDNSIPPort port, mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSBool isExpensive, mDNSBool isCLAT46,
-                                        mDNSu16 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO)
+                                        const mDNSIPPort port, ScopeType scopeType, mDNSu32 timeout, mDNSBool isCell, mDNSBool isExpensive, mDNSBool isCLAT46,
+                                        mDNSu32 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO)
 {
-    DNSServer **p = &m->DNSServers;
-    DNSServer *tmp = mDNSNULL;
+    DNSServer **p;
+    DNSServer *server;
 
     if ((NumUnicastDNSServers + 1) > MAX_UNICAST_DNS_SERVERS)
     {
@@ -133,28 +133,38 @@ mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, cons
     if (!d)
         d = (const domainname *)"";
 
-    LogInfo("mDNS_AddDNSServer(%d): Adding %#a for %##s, InterfaceID %p, serviceID %u, scoped %d, resGroupID %d req_A %s, req_AAAA %s, cell %s, expensive %s, CLAT46 %s, req_DO %s",
-        NumUnicastDNSServers, addr, d->c, interface, serviceID, scoped, resGroupID,
-        TrueFalseStr(reqA), TrueFalseStr(reqAAAA), TrueFalseStr(cellIntf), TrueFalseStr(isExpensive), TrueFalseStr(isCLAT46), TrueFalseStr(reqDO));
+    LogInfo("mDNS_AddDNSServer(%d): Adding %#a for %##s, InterfaceID %p, serviceID %u, scopeType %d, resGroupID %d req_A %s, req_AAAA %s, cell %s, expensive %s, CLAT46 %s, req_DO %s",
+        NumUnicastDNSServers, addr, d->c, interface, serviceID, (int)scopeType, resGroupID,
+        TrueFalseStr(reqA), TrueFalseStr(reqAAAA), TrueFalseStr(isCell), TrueFalseStr(isExpensive), TrueFalseStr(isCLAT46), TrueFalseStr(reqDO));
 
     mDNS_CheckLock(m);
 
-    while (*p)  // Check if we already have this {interface,address,port,domain} tuple registered + reqA/reqAAAA bits
+    for (p = &m->DNSServers; (server = *p) != mDNSNULL; p = &server->next)
     {
-        if ((*p)->scoped == scoped && (*p)->interface == interface && (*p)->serviceID == serviceID &&
-            mDNSSameAddress(&(*p)->addr, addr) && mDNSSameIPPort((*p)->port, port) && SameDomainName(&(*p)->domain, d) &&
-            (*p)->req_A == reqA && (*p)->req_AAAA == reqAAAA)
+        if ((server->scopeType     == scopeType)     &&
+            (server->interface     == interface)     &&
+            (server->serviceID     == serviceID)     &&
+            mDNSSameAddress(&server->addr, addr)     &&
+            mDNSSameIPPort(server->port, port)       &&
+            (server->timeout       == timeout)       &&
+            (!!server->isCell      == !!isCell)      &&
+            (!!server->isExpensive == !!isExpensive) &&
+            (!!server->isCLAT46    == !!isCLAT46)    &&
+            (!!server->req_A       == !!reqA)        &&
+            (!!server->req_AAAA    == !!reqAAAA)     &&
+            (!!server->req_DO      == !!reqDO)       &&
+            SameDomainName(&server->domain, d))
         {
-            if (!((*p)->flags & DNSServer_FlagDelete))
+            if (!(server->flags & DNSServer_FlagDelete))
                 debugf("Note: DNS Server %#a:%d for domain %##s (%p) registered more than once", addr, mDNSVal16(port), d->c, interface);
-            tmp = *p;
-            *p = tmp->next;
-            tmp->next = mDNSNULL;
+            *p = server->next;
+            server->next = mDNSNULL;
+            break;
         }
-        else
-        {
-            p=&(*p)->next;
-        }
+    }
+    while (*p)
+    {
+        p = &(*p)->next;
     }
 
     // NumUnicastDNSServers is the count of active DNS servers i.e., ones that are not marked
@@ -167,61 +177,59 @@ mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, cons
     // We have already accounted for it when it was added for the first time. This case happens when
     // we add DNS servers with the same address multiple times (mis-configuration).
 
-    if (!tmp || (tmp->flags & DNSServer_FlagDelete))
+    if (!server || (server->flags & DNSServer_FlagDelete))
         NumUnicastDNSServers++;
 
-
-    if (tmp)
+    if (server)
     {
-#if APPLE_OSX_mDNSResponder
-        if (tmp->flags & DNSServer_FlagDelete)
+        if (server->flags & DNSServer_FlagDelete)
         {
-            tmp->flags &= ~DNSServer_FlagUnreachable;
-        }
+#if APPLE_OSX_mDNSResponder
+            server->flags &= ~DNSServer_FlagUnreachable;
 #endif
-        tmp->flags &= ~DNSServer_FlagDelete;
-        *p = tmp; // move to end of list, to ensure ordering from platform layer
+            server->flags &= ~DNSServer_FlagDelete;
+        }
+        *p = server; // move to end of list, to ensure ordering from platform layer
     }
     else
     {
         // allocate, add to list
-        *p = mDNSPlatformMemAllocate(sizeof(**p));
-        if (!*p)
+        server = (DNSServer *)mDNSPlatformMemAllocateClear(sizeof(*server));
+        if (!server)
         {
             LogMsg("Error: mDNS_AddDNSServer - malloc");
         }
         else
         {
-            (*p)->scoped      = scoped;
-            (*p)->interface   = interface;
-            (*p)->serviceID   = serviceID;
-            (*p)->addr        = *addr;
-            (*p)->port        = port;
-            (*p)->flags       = DNSServer_FlagNew;
-            (*p)->timeout     = timeout;
-            (*p)->cellIntf    = cellIntf;
-            (*p)->isExpensive = isExpensive;
-            (*p)->isCLAT46    = isCLAT46;
-            (*p)->req_A       = reqA;
-            (*p)->req_AAAA    = reqAAAA;
-            (*p)->req_DO      = reqDO;
+            server->scopeType   = scopeType;
+            server->interface   = interface;
+            server->serviceID   = serviceID;
+            server->addr        = *addr;
+            server->port        = port;
+            server->flags       = DNSServer_FlagNew;
+            server->timeout     = timeout;
+            server->isCell      = isCell;
+            server->isExpensive = isExpensive;
+            server->isCLAT46    = isCLAT46;
+            server->req_A       = reqA;
+            server->req_AAAA    = reqAAAA;
+            server->req_DO      = reqDO;
             // We start off assuming that the DNS server is not DNSSEC aware and
             // when we receive the first response to a DNSSEC question, we set
             // it to true.
-            (*p)->DNSSECAware = mDNSfalse;
-            (*p)->retransDO = 0;
-            AssignDomainName(&(*p)->domain, d);
-            (*p)->next = mDNSNULL;
+            server->DNSSECAware = mDNSfalse;
+            server->retransDO = 0;
+            AssignDomainName(&server->domain, d);
+            *p = server;
         }
     }
-    if (*p) {
-        (*p)->penaltyTime = 0;
-        // We always update the ID (not just when we allocate a new instance) because we could
-        // be adding a new non-scoped resolver with a new ID and we want all the non-scoped
-        // resolvers belong to the same group.
-        (*p)->resGroupID  = resGroupID;
+    if (server) {
+        server->penaltyTime = 0;
+        // We always update the ID (not just when we allocate a new instance) because we want
+        // all the resGroupIDs for a particular domain to match.
+        server->resGroupID  = resGroupID;
     }
-    return(*p);
+    return(server);
 }
 
 // PenalizeDNSServer is called when the number of queries to the unicast
@@ -1331,7 +1339,7 @@ mDNSlocal void tcpCallback(TCPSocket *sock, void *context, mDNSBool ConnectionEs
             // LLQ Polling mode or non-LLQ uDNS over TCP
             InitializeDNSMessage(&tcpInfo->request.h, q->TargetQID, (DNSSECQuestion(q) ? DNSSecQFlags : uQueryFlags));
             end = putQuestion(&tcpInfo->request, tcpInfo->request.data, tcpInfo->request.data + AbsoluteMaxDNSMessageData, &q->qname, q->qtype, q->qclass);
-            if (DNSSECQuestion(q) && q->qDNSServer && !q->qDNSServer->cellIntf)
+            if (DNSSECQuestion(q) && q->qDNSServer && !q->qDNSServer->isCell)
             {
                 if (q->ProxyQuestion)
                     end = DNSProxySetAttributes(q, &tcpInfo->request.h, &tcpInfo->request, end, tcpInfo->request.data + AbsoluteMaxDNSMessageData);
@@ -4725,7 +4733,7 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
             InitializeDNSMessage(&m->omsg.h, q->TargetQID, (DNSSECQuestion(q) ? DNSSecQFlags : uQueryFlags));
 
             end = putQuestion(&m->omsg, m->omsg.data, m->omsg.data + AbsoluteMaxDNSMessageData, &q->qname, q->qtype, q->qclass);
-            if (DNSSECQuestion(q) && !q->qDNSServer->cellIntf)
+            if (DNSSECQuestion(q) && !q->qDNSServer->isCell)
             {
                 if (q->ProxyQuestion)
                     end = DNSProxySetAttributes(q, &m->omsg.h, &m->omsg, end, m->omsg.data + AbsoluteMaxDNSMessageData);
@@ -4851,14 +4859,14 @@ mDNSexport void uDNS_CheckCurrentQuestion(mDNS *const m)
                             q->ThisQInterval = LLQ_POLL_INTERVAL;
                         LogInfo("uDNS_CheckCurrentQuestion: private non polling question for %##s (%s) will be retried in %d ms", q->qname.c, DNSTypeName(q->qtype), q->ThisQInterval);
                     }
-                    if (q->qDNSServer->cellIntf)
+                    if (q->qDNSServer->isCell)
                     {
                         // We don't want to retransmit too soon. Schedule our first retransmisson at
                         // MIN_UCAST_RETRANS_TIMEOUT seconds.
                         if (q->ThisQInterval < MIN_UCAST_RETRANS_TIMEOUT)
                             q->ThisQInterval = MIN_UCAST_RETRANS_TIMEOUT;
                     }
-                    debugf("uDNS_CheckCurrentQuestion: Increased ThisQInterval to %d for %##s (%s), cell %d", q->ThisQInterval, q->qname.c, DNSTypeName(q->qtype), q->qDNSServer->cellIntf);
+                    debugf("uDNS_CheckCurrentQuestion: Increased ThisQInterval to %d for %##s (%s), cell %d", q->ThisQInterval, q->qname.c, DNSTypeName(q->qtype), q->qDNSServer->isCell);
                 }
                 q->LastQTime = m->timenow;
             }
@@ -6205,7 +6213,7 @@ mDNSexport mStatus mDNS_StopNATOperation(mDNS *const m, NATTraversalInfo *traver
 }
 
 mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const mDNSs32 serviceID, const mDNSAddr *addr,
-                                        const mDNSIPPort port, mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSBool isExpensive, mDNSu16 resGroupID,
+                                        const mDNSIPPort port, ScopeType scopeType, mDNSu32 timeout, mDNSBool isCell, mDNSBool isExpensive, mDNSu32 resGroupID,
                                         mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO)
 {
     (void) m;
@@ -6214,9 +6222,9 @@ mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, cons
     (void) serviceID;
     (void) addr;
     (void) port;
-    (void) scoped;
+    (void) scopeType;
     (void) timeout;
-    (void) cellIntf;
+    (void) isCell;
     (void) isExpensive;
     (void) resGroupID;
     (void) reqA;

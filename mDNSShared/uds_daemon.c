@@ -5765,7 +5765,7 @@ mDNSexport void udsserver_info()
                 const char *ifname;
                 mDNSInterfaceID InterfaceID = cr->resrec.InterfaceID;
                 mDNSu32 *const countPtr = InterfaceID ? &mcastRecordCount : &ucastRecordCount;
-                if (!InterfaceID && cr->resrec.rDNSServer && cr->resrec.rDNSServer->scoped)
+                if (!InterfaceID && cr->resrec.rDNSServer && (cr->resrec.rDNSServer->scopeType != kScopeNone))
                     InterfaceID = cr->resrec.rDNSServer->interface;
                 ifname = InterfaceNameForID(m, InterfaceID);
                 if (cr->CRActiveQuestion) CacheActive++;

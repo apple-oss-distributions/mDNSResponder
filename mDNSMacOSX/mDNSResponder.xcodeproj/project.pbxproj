@@ -347,6 +347,8 @@
 		BDB04224203FF18000419961 /* dns_sd_private.h in Headers */ = {isa = PBXBuildFile; fileRef = BDA9A7871B3A923600523835 /* dns_sd_private.h */; settings = {ATTRIBUTES = (Private, ); }; };
 		BDB61845206ADB9D00AFF600 /* com.apple.mDNSResponder.plist in Copy Base Logging Profile */ = {isa = PBXBuildFile; fileRef = BDB61843206ADB7700AFF600 /* com.apple.mDNSResponder.plist */; };
 		BDBF9B941ED74B9C001498A8 /* DNS64State.h in Headers */ = {isa = PBXBuildFile; fileRef = BDBF9B931ED74B8C001498A8 /* DNS64State.h */; };
+		BDE5BCCA226D7181009C723C /* DNSCommon.h in Headers */ = {isa = PBXBuildFile; fileRef = BDE5BCC9226D7181009C723C /* DNSCommon.h */; };
+		BDE5BCCC226D7198009C723C /* uDNS.h in Headers */ = {isa = PBXBuildFile; fileRef = BDE5BCCB226D7197009C723C /* uDNS.h */; };
 		BDF8BB902208E2A800419B62 /* mDNSResponder.plist in Copy BATS test plist */ = {isa = PBXBuildFile; fileRef = BDF8BB8F2208E26E00419B62 /* mDNSResponder.plist */; };
 		D284BE540ADD80740027CCDF /* dnssd_ipc.h in Headers */ = {isa = PBXBuildFile; fileRef = F5E11B5B04A28126019798ED /* dnssd_ipc.h */; };
 		D284BE580ADD80740027CCDF /* mDNS.c in Sources */ = {isa = PBXBuildFile; fileRef = 6575FBE9022EAF5A00000109 /* mDNS.c */; };
@@ -1018,6 +1020,8 @@
 		BDB61846206ADDDF00AFF600 /* com.apple.mDNSResponder.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.apple.mDNSResponder.plist; sourceTree = "<group>"; };
 		BDBF9B931ED74B8C001498A8 /* DNS64State.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DNS64State.h; sourceTree = "<group>"; };
 		BDE238C11DF69D8300B9F696 /* dns_sd_internal.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dns_sd_internal.h; path = ../mDNSShared/dns_sd_internal.h; sourceTree = "<group>"; };
+		BDE5BCC9226D7181009C723C /* DNSCommon.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = DNSCommon.h; path = ../mDNSCore/DNSCommon.h; sourceTree = "<group>"; };
+		BDE5BCCB226D7197009C723C /* uDNS.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = uDNS.h; path = ../mDNSCore/uDNS.h; sourceTree = "<group>"; };
 		BDF8BB8F2208E26E00419B62 /* mDNSResponder.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = mDNSResponder.plist; sourceTree = "<group>"; };
 		D284BE730ADD80740027CCDF /* mDNSResponder */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = mDNSResponder; sourceTree = BUILT_PRODUCTS_DIR; };
 		D284BEB00ADD80920027CCDF /* dns-sd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "dns-sd"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1347,6 +1351,7 @@
 				84F4C08F188F04CF00D1E1DE /* dns_services.h */,
 				848DA5D516547F7200D2E8B4 /* dns_xpc.h */,
 				7F18A9F60587CEF6001880B3 /* DNSCommon.c */,
+				BDE5BCC9226D7181009C723C /* DNSCommon.h */,
 				7F461DB5062DBF2900672BF3 /* DNSDigest.c */,
 				FF13FFEA0A5DA44A00897C81 /* dnsextd_lexer.l */,
 				FF13FFEC0A5DA45500897C81 /* dnsextd_parser.y */,
@@ -1398,6 +1403,7 @@
 				FFCB6D73075D539900B8AF62 /* PlatformCommon.c */,
 				BD03E88C1AD31278005E8A81 /* SymptomReporter.c */,
 				7F18A9F70587CEF6001880B3 /* uDNS.c */,
+				BDE5BCCB226D7197009C723C /* uDNS.h */,
 				216D9ACD1720C9F5008066E1 /* uDNSPathEvalulation.c */,
 				F525E72804AA167501F1CF4D /* uds_daemon.c */,
 				4A2E69DD0F5475A3004A87B0 /* uds_daemon.h */,
@@ -1835,7 +1841,9 @@
 				2ECC11A60C4FEC3800CB1885 /* helpermsg-types.h in Headers */,
 				21A57F4E145B2AE100939099 /* CryptoAlg.h in Headers */,
 				21A57F55145B2B1400939099 /* CryptoSupport.h in Headers */,
+				BDE5BCCA226D7181009C723C /* DNSCommon.h in Headers */,
 				2124FA2C1471E98C0021D7BB /* nsec.h in Headers */,
+				BDE5BCCC226D7198009C723C /* uDNS.h in Headers */,
 				2124FA301471E9B50021D7BB /* dnssec.h in Headers */,
 				BD691B2B1ED2F4AB00E6F317 /* DNS64.h in Headers */,
 				218E8E53156D8C0300720DA0 /* dnsproxy.h in Headers */,

@@ -166,6 +166,7 @@ extern void udns_validatelists(void *const v);
 extern void LogMemCorruption(const char *format, ...);
 #else
 #define mallocL(X,Y) malloc(Y)
+#define callocL(X,Y) calloc(1, Y)
 #define freeL(X,Y) free(Y)
 #endif
 
