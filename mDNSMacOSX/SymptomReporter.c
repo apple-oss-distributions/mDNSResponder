@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2015 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2015-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "mDNSEmbeddedAPI.h"
+#include "SymptomReporter.h"
 
 #include <arpa/inet.h>
 #include <dlfcn.h>
@@ -23,21 +22,15 @@
 #include <stdint.h>
 #include <sys/socket.h>
 #include <AvailabilityMacros.h>
-#include <TargetConditionals.h>
-
-#define TARGET_OS_MACOSX    (TARGET_OS_MAC && !TARGET_OS_IPHONE)
-
-#if (!TARGET_OS_MACOSX || (MAC_OS_X_VERSION_MAX_ALLOWED >= 101200))
 #include <SymptomReporter/SymptomReporter.h>
-#else
-#include <Symptoms/SymptomReporter.h>
-#endif
 
 #define SYMPTOM_REPORTER_mDNSResponder_NUMERIC_ID  101
 #define SYMPTOM_REPORTER_mDNSResponder_TEXT_ID     "com.apple.mDNSResponder"
 
 #define SYMPTOM_DNS_NO_REPLIES          0x00065001
 #define SYMPTOM_DNS_RESUMED_RESPONDING  0x00065002
+
+mDNSu32 NumUnreachableDNSServers;
 
 static symptom_framework_t symptomReporter = mDNSNULL;
 static symptom_framework_t (*symptom_framework_init_f)(symptom_ident_t id, const char *originator_string) = mDNSNULL;
@@ -50,11 +43,7 @@ mDNSlocal mStatus SymptomReporterInitCheck(void)
     mStatus err;
     static mDNSBool triedInit = mDNSfalse;
     static void *symptomReporterLib = mDNSNULL;
-#if (!TARGET_OS_MACOSX || (MAC_OS_X_VERSION_MAX_ALLOWED >= 101200))
     static const char path[] = "/System/Library/PrivateFrameworks/SymptomReporter.framework/SymptomReporter";
-#else
-    static const char path[] = "/System/Library/PrivateFrameworks/Symptoms.framework/Frameworks/SymptomReporter.framework/SymptomReporter";
-#endif
 
     if (!triedInit)
     {
@@ -95,7 +84,8 @@ mDNSlocal mStatus SymptomReporterReportDNSReachability(const mDNSAddr *addr, mDN
     struct sockaddr_storage sockAddr;
     size_t sockAddrSize;
 
-    LogInfo("SymptomReporterReportDNSReachability: DNS server %#a is %sreachable", addr, isReachable ? "" : "un");
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+        "SymptomReporterReportDNSReachability: DNS server " PRI_IP_ADDR " is " PUB_S "reachable", addr, isReachable ? "" : "un");
 
     if (addr->type == mDNSAddrType_IPv4)
     {
@@ -117,7 +107,8 @@ mDNSlocal mStatus SymptomReporterReportDNSReachability(const mDNSAddr *addr, mDN
     }
     else
     {
-        LogMsg("SymptomReporterReportDNSReachability: addr is not an IPv4 or IPv6 address!");
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
+            "SymptomReporterReportDNSReachability: addr is not an IPv4 or IPv6 address!");
         err = mStatus_BadParamErr;
         goto exit;
     }
@@ -143,11 +134,11 @@ mDNSexport mStatus SymptomReporterDNSServerReachable(mDNS *const m, const mDNSAd
 
     for (s = m->DNSServers; s; s = s->next)
     {
-        if (s->flags & DNSServer_FlagDelete)
+        if (s->flags & DNSServerFlag_Delete)
             continue;
-        if ((s->flags & DNSServer_FlagUnreachable) && mDNSSameAddress(addr, &s->addr))
+        if ((s->flags & DNSServerFlag_Unreachable) && mDNSSameAddress(addr, &s->addr))
         {
-            s->flags &= ~DNSServer_FlagUnreachable;
+            s->flags &= ~DNSServerFlag_Unreachable;
             NumUnreachableDNSServers--;
             found = mDNStrue;
         }
@@ -173,10 +164,10 @@ mDNSexport mStatus SymptomReporterDNSServerUnreachable(DNSServer *s)
     if (err != mStatus_NoError)
         goto exit;
 
-    if ((s->flags & DNSServer_FlagDelete) || (s->flags & DNSServer_FlagUnreachable))
+    if ((s->flags & DNSServerFlag_Delete) || (s->flags & DNSServerFlag_Unreachable))
         goto exit;
 
-    s->flags |= DNSServer_FlagUnreachable;
+    s->flags |= DNSServerFlag_Unreachable;
     NumUnreachableDNSServers++;
 
     err = SymptomReporterReportDNSReachability(&s->addr, mDNSfalse);

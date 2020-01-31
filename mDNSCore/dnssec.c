@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -225,7 +225,7 @@ mDNSexport int DNSSECCanonicalOrder(const domainname *const d1, const domainname
         return 0;
 }
 
-// Initialize the question enough so that it can be answered from the cache using SameNameRecordAnswersQuestion or
+// Initialize the question enough so that it can be answered from the cache using SameNameCacheRecordAnswersQuestion or
 // ResourceRecordAnswersQuestion.
 mDNSexport void InitializeQuestion(mDNS *const m, DNSQuestion *question, mDNSInterfaceID InterfaceID, const domainname *qname,
                                    mDNSu16 qtype, mDNSQuestionCallback *callback, void *context)
@@ -259,9 +259,8 @@ mDNSexport DNSSECVerifier *AllocateDNSSECVerifier(mDNS *const m, const domainnam
 {
     DNSSECVerifier *dv;
 
-    dv = (DNSSECVerifier *)mDNSPlatformMemAllocate(sizeof(DNSSECVerifier));
+    dv = (DNSSECVerifier *) mDNSPlatformMemAllocateClear(sizeof(*dv));
     if (!dv) { LogMsg("AllocateDNSSECVerifier: ERROR!! memory alloc failed"); return mDNSNULL; }
-    mDNSPlatformMemZero(dv, sizeof(*dv));
 
     LogDNSSEC("AllocateDNSSECVerifier called %p", dv);
 
@@ -297,13 +296,13 @@ mDNSlocal AuthChain *AuthChainCopy(AuthChain *ae)
 
     while (ae)
     {
-        ac = mDNSPlatformMemAllocate(sizeof(AuthChain));
+        ac = (AuthChain *) mDNSPlatformMemAllocateClear(sizeof(*ac));
         if (!ac)
         {
             LogMsg("AuthChainCopy: AuthChain alloc failure");
             if (retac)
                 FreeDNSSECAuthChainInfo(retac);
-            return mDNSfalse;
+            return mDNSNULL;
         }
 
         ac->next  = mDNSNULL;
@@ -496,7 +495,7 @@ mDNSlocal RRVerifier* CopyRRVerifier(RRVerifier *from)
 {
     RRVerifier *r;
 
-    r = mDNSPlatformMemAllocate(sizeof (RRVerifier) + from->rdlength);
+    r = (RRVerifier *) mDNSPlatformMemAllocate(sizeof(*r) + from->rdlength);
     if (!r)
     {
         LogMsg("CopyRRVerifier: memory failure");
@@ -513,7 +512,7 @@ mDNSexport RRVerifier* AllocateRRVerifier(const ResourceRecord *const rr, mStatu
 {
     RRVerifier *r;
 
-    r = mDNSPlatformMemAllocate(sizeof (RRVerifier) + rr->rdlength);
+    r = (RRVerifier *) mDNSPlatformMemAllocateClear(sizeof(*r) + rr->rdlength);
     if (!r)
     {
         LogMsg("AllocateRRVerifier: memory failure");
@@ -1967,19 +1966,17 @@ mDNSlocal mDNSBool ValidateSignatureWithKey(DNSSECVerifier *dv, RRVerifier *rrse
         nrrsets++;
 
     tmp = rrset;
-    start = ptr = mDNSPlatformMemAllocate(nrrsets * sizeof (rdataComp));
+    start = ptr = (rdataComp *) mDNSPlatformMemAllocateClear(nrrsets * sizeof(rdataComp));
     debugdnssec("ValidateSignatureWithKey: start %p, nrrsets %d", start, nrrsets);
     if (ptr)
     {
-        // Need to initialize for failure case below
-        mDNSPlatformMemZero(ptr, nrrsets * (sizeof (rdataComp)));
         while (tmp)
         {
             ptr->rdlength = tmp->rdlength;
             ptr->rrtype = tmp->rrtype;
             if (ptr->rdlength)
             {
-                ptr->rdata = mDNSPlatformMemAllocate(ptr->rdlength);
+                ptr->rdata = (mDNSu8 *) mDNSPlatformMemAllocate(ptr->rdlength);
                 if (ptr->rdata)
                 {
                     mDNSPlatformMemCopy(ptr->rdata, tmp->rdata, tmp->rdlength);
@@ -2286,7 +2283,7 @@ mDNSlocal mDNSBool AuthChainAdd(DNSSECVerifier *dv, RRVerifier *resultKey, RRVer
         return mDNSfalse;
     }
 
-    ae = mDNSPlatformMemAllocate(sizeof(AuthChain));
+    ae = (AuthChain *) mDNSPlatformMemAllocateClear(sizeof(*ae));
     if (!ae)
     {
         LogMsg("AuthChainAdd: AuthChain alloc failure");
@@ -2368,7 +2365,7 @@ mDNSlocal void SetTTLRRSet(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus statu
     }
 
     for (rr = cg->members; rr; rr = rr->next)
-        if (SameNameRecordAnswersQuestion(&rr->resrec, &question))
+        if (SameNameCacheRecordAnswersQuestion(rr, &question))
         {
             // originalttl is never touched. The actual TTL is derived based on when it was
             // received.
@@ -2496,7 +2493,7 @@ mDNSlocal void SetTTLRRSet(mDNS *const m, DNSSECVerifier *dv, DNSSECStatus statu
     // Find the RRset and set its TTL
     for (rr = cg ? cg->members : mDNSNULL; rr; rr=rr->next)
     {
-        if (SameNameRecordAnswersQuestion(&rr->resrec, &question))
+        if (SameNameCacheRecordAnswersQuestion(rr, &question))
         {
             LogDNSSEC("SetTTLRRSet: Setting the TTL %d for %s, question %##s (%s)", rrTTL, CRDisplayString(m, rr),
                       question.qname.c, DNSTypeName(rr->resrec.rrtype));
@@ -2709,7 +2706,7 @@ mDNSlocal void DNSSECNoResponse(mDNS *const m, DNSSECVerifier *dv)
     // RRSIGs that can match the original question
     for (cr = cg->members; cr; cr = cr->next)
     {
-        if (SameNameRecordAnswersQuestion(&cr->resrec, &dv->q))
+        if (SameNameCacheRecordAnswersQuestion(cr, &dv->q))
         {
             answer = &cr->resrec;
             break;
@@ -3057,7 +3054,7 @@ mDNSlocal void DNSSECValidationCB(mDNS *const m, DNSSECVerifier *dv, DNSSECStatu
     dv->q.ValidatingResponse = mDNSfalse;
     for (cr = cg->members; cr; cr = cr->next)
     {
-        if (SameNameRecordAnswersQuestion(&cr->resrec, &dv->q))
+        if (SameNameCacheRecordAnswersQuestion(cr, &dv->q))
         {
             if (cr->resrec.RecordType == kDNSRecordTypePacketNegative)
                 DNSSECNegativeValidationCB(m, dv, cg, &cr->resrec, status);
@@ -3084,7 +3081,7 @@ mDNSexport void VerifySignature(mDNS *const m, DNSSECVerifier *dv, DNSQuestion *
     if (!dv)
     {
         first = mDNStrue;
-        if (!q->qDNSServer || q->qDNSServer->cellIntf)
+        if (!q->qDNSServer || q->qDNSServer->isCell)
         {
             LogDNSSEC("VerifySignature: Disabled");
             return;
@@ -3107,7 +3104,7 @@ mDNSexport void VerifySignature(mDNS *const m, DNSSECVerifier *dv, DNSQuestion *
 
     // Walk the cache and get all the rrsets for verification.
     for (rr = cg ? cg->members : mDNSNULL; rr; rr=rr->next)
-        if (SameNameRecordAnswersQuestion(&rr->resrec, q))
+        if (SameNameCacheRecordAnswersQuestion(rr, q))
         {
             // We also get called for RRSIGs which matches qtype. We don't need that here as we are
             // building rrset for matching q->qname. Checking for RRSIG type is important as otherwise
@@ -3834,10 +3831,10 @@ mDNSexport void ProveInsecure(mDNS *const m, DNSSECVerifier *dv, InsecureContext
 
     if (ic == mDNSNULL)
     {
-        ic = (InsecureContext *)mDNSPlatformMemAllocate(sizeof(InsecureContext));
+        ic = (InsecureContext *) mDNSPlatformMemAllocateClear(sizeof(*ic));
         if (!ic)
         {
-            LogMsg("mDNSPlatformMemAllocate: ERROR!! memory alloc failed for ic");
+            LogMsg("mDNSPlatformMemAllocateClear: ERROR!! memory alloc failed for ic");
             return;
         }
         

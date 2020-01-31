@@ -36,7 +36,7 @@
 
 //*************************************************************************************************************
 // Globals
-static mDNS mDNSStorage;       // mDNS core uses this to store its globals
+mDNS mDNSStorage;       // mDNS core uses this to store its globals
 static mDNS_PlatformSupport PlatformStorage;  // Stores this platform's globals
 mDNSexport const char ProgramName[] = "mDNSProxyResponderPosix";
 
@@ -155,7 +155,7 @@ mDNSlocal void RegisterService(mDNS *m, ServiceRecordSet *recordset,
     mDNS_RegisterService(m, recordset,
                          &n, &t, &d, // Name, type, domain
                          host, mDNSOpaque16fromIntVal(PortAsNumber),
-                         txtbuffer, bptr-txtbuffer, // TXT data, length
+                         mDNSNULL, txtbuffer, bptr-txtbuffer, // TXT data, length
                          mDNSNULL, 0, // Subtypes
                          mDNSInterface_Any, // Interface ID
                          ServiceCallback, mDNSNULL, 0); // Callback, context, flags

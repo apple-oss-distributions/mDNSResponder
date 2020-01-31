@@ -50,6 +50,7 @@ mDNSexport void ExampleClientEventLoop(mDNS *const m)
     {
         int nfds = 0;
         fd_set readfds;
+        fd_set writefds;
         struct timeval timeout;
         int result;
 
@@ -57,6 +58,7 @@ mDNSexport void ExampleClientEventLoop(mDNS *const m)
         // This example client has no file descriptors of its own,
         // but a real application would call FD_SET to add them to the set here
         FD_ZERO(&readfds);
+        FD_ZERO(&writefds);
 
         // 2. Set up the timeout.
         // This example client has no other work it needs to be doing,
@@ -65,11 +67,11 @@ mDNSexport void ExampleClientEventLoop(mDNS *const m)
         timeout.tv_usec = 0;
 
         // 3. Give the mDNSPosix layer a chance to add its information to the fd_set and timeout
-        mDNSPosixGetFDSet(m, &nfds, &readfds, &timeout);
+        mDNSPosixGetFDSet(m, &nfds, &readfds, &writefds, &timeout);
 
         // 4. Call select as normal
         verbosedebugf("select(%d, %d.%06d)", nfds, timeout.tv_sec, timeout.tv_usec);
-        result = select(nfds, &readfds, NULL, NULL, &timeout);
+        result = select(nfds, &readfds, &writefds, NULL, &timeout);
 
         if (result < 0)
         {
@@ -79,7 +81,7 @@ mDNSexport void ExampleClientEventLoop(mDNS *const m)
         else
         {
             // 5. Call mDNSPosixProcessFDSet to let the mDNSPosix layer do its work
-            mDNSPosixProcessFDSet(m, &readfds);
+            mDNSPosixProcessFDSet(m, &readfds, &writefds);
 
             // 6. This example client has no other work it needs to be doing,
             // but a real client would do its work here

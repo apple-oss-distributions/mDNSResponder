@@ -19,59 +19,8 @@
 #import "_CNDomainBrowser.h"
 #import "CNDomainBrowserPathUtils.h"
 
-#define DEBUG_POPUP_CELLS					0
-#define SHOW_SERVICETYPE_IF_SEARCH_COUNT	0
-#define TEST_LEGACYBROWSE                   0
-
 #define BROWSER_CELL_SPACING                4
-
-@protocol CNServiceTypeLocalizerDelegate <NSObject>
-@property (strong) NSDictionary * localizedServiceTypesDictionary;
-@end
-
-@interface CNServiceTypeLocalizer : NSValueTransformer
-{
-	id<CNServiceTypeLocalizerDelegate>	_delegate;
-}
-- (instancetype)initWithDelegate:(id<CNServiceTypeLocalizerDelegate>)delegate;
-
-@end
-
-@implementation CNServiceTypeLocalizer
-
-- (instancetype)initWithDelegate:(id<CNServiceTypeLocalizerDelegate>)delegate
-{
-	if (self = [super init])
-	{
-		_delegate = delegate;
-	}
-	return(self);
-}
-
-+ (Class)transformedValueClass
-{
-	return [NSString class];
-}
-
-+ (BOOL)allowsReverseTransformation
-{
-	return NO;
-}
-
-- (nullable id)transformedValue:(nullable id)value
-{
-	id	result = value;
-	
-	if (value && _delegate && [_delegate respondsToSelector: @selector(localizedServiceTypesDictionary)])
-	{
-		NSString *	localizedValue = [_delegate.localizedServiceTypesDictionary objectForKey: value];
-		if (localizedValue) result = localizedValue;
-	}
-	
-	return(result);
-}
-
-@end
+#define INITIAL_LEGACYBROWSE                1
 
 @implementation NSBrowser(PathArray)
 
@@ -93,7 +42,6 @@
 @interface CNDomainBrowserView ()
 
 @property (strong) _CNDomainBrowser *      bonjour;
-@property (strong) NSSplitView	*			mainSplitView;
 
 @property (strong) NSTableView	*			instanceTable;
 @property (strong) NSArrayController *		instanceC;
@@ -102,8 +50,9 @@
 @property (strong) NSTableColumn *			instancePathPopupColumn;
 
 @property (strong) NSBrowser *				browser;
-
-@property (strong) CNServiceTypeLocalizer * serviceTypeLocalizer;
+#if INITIAL_LEGACYBROWSE
+@property (assign) BOOL                     initialPathSet;
+#endif
 
 @end
 
@@ -142,8 +91,7 @@
 {
 	NSRect	frame = self.frame;
 	self.instanceC = [[NSArrayController alloc] init];
-	self.serviceTypeLocalizer = [[CNServiceTypeLocalizer alloc] initWithDelegate: (id<CNServiceTypeLocalizerDelegate>)self];
-		
+    
 	//	Bottom browser
     frame.origin.x = frame.origin.y = 0;
 	NSBrowser * browserView = [[NSBrowser alloc] initWithFrame: frame];
@@ -157,9 +105,43 @@
 	browserView.hasHorizontalScroller = YES;
 	browserView.columnResizingType = NSBrowserNoColumnResizing;
 	browserView.minColumnWidth = 50;
+    browserView.translatesAutoresizingMaskIntoConstraints = NO;
 	self.browser = browserView;
 
     [self addSubview: browserView];
+    
+    [self addConstraint:
+     [NSLayoutConstraint constraintWithItem:_browser
+                                  attribute:NSLayoutAttributeLeft
+                                  relatedBy:NSLayoutRelationEqual
+                                     toItem:self
+                                  attribute:NSLayoutAttributeLeft
+                                 multiplier:1
+                                   constant:0]];
+    [self addConstraint:
+     [NSLayoutConstraint constraintWithItem:_browser
+                                  attribute:NSLayoutAttributeRight
+                                  relatedBy:NSLayoutRelationEqual
+                                     toItem:self
+                                  attribute:NSLayoutAttributeRight
+                                 multiplier:1
+                                   constant:0]];
+    [self addConstraint:
+     [NSLayoutConstraint constraintWithItem:_browser
+                                  attribute:NSLayoutAttributeBottom
+                                  relatedBy:NSLayoutRelationEqual
+                                     toItem:self
+                                  attribute:NSLayoutAttributeBottom
+                                 multiplier:1
+                                   constant:0]];
+    [self addConstraint:
+     [NSLayoutConstraint constraintWithItem:_browser
+                                  attribute:NSLayoutAttributeTop
+                                  relatedBy:NSLayoutRelationEqual
+                                     toItem:self
+                                  attribute:NSLayoutAttributeTop
+                                 multiplier:1
+                                   constant:0]];
 }
 
 - (void)commonInit
@@ -167,12 +149,12 @@
 	[self contentViewsInit];
 }
 
-- (void)viewWillMoveToWindow:(NSWindow *)newWindow
+- (void)viewWillMoveToSuperview:(NSView *)newSuperview
 {
-    [super viewWillMoveToWindow: newWindow];
-    if (newWindow)
+    [super viewWillMoveToSuperview: newSuperview];
+    if (newSuperview && !_bonjour)
     {
-        [self.mainSplitView adjustSubviews];
+        [self awakeFromNib];
     }
 }
 
@@ -246,6 +228,7 @@
 - (void)stopBrowse
 {
     [self.bonjour stopBrowser];
+    _initialPathSet = NO;
 }
 
 - (BOOL)isBrowsing
@@ -253,14 +236,34 @@
     return(self.bonjour.isBrowsing);
 }
 
+- (CGFloat)minimumHeight
+{
+    return self.selectedDNSDomain.length ? [self.browser frameOfRow: [self.browser selectedRowInColumn: self.browser.lastVisibleColumn] inColumn: self.browser.lastVisibleColumn].size.height : 0.0;
+}
+
+- (void)showSelectedRow
+{
+    for( NSInteger i = self.browser.firstVisibleColumn ; i <= self.browser.lastVisibleColumn ; i++ )
+    {
+        NSInteger selRow = [self.browser selectedRowInColumn: i];
+        if( selRow != NSNotFound ) [self.browser scrollRowToVisible: selRow inColumn: i];
+    }
+}
+
+- (BOOL)foundInstanceInMoreThanLocalDomain
+{
+    return( [_bonjour foundInstanceInMoreThanLocalDomain] );
+}
+
+
 #pragma mark - Notifications
 
 - (void)browser:(NSBrowser *)sender selectionDidChange:(NSArray *)pathArray
 {
-    if (_delegate && [_delegate respondsToSelector: @selector(bonjourBrowserDomainSelected:)] &&
+    if (_delegate && [_delegate respondsToSelector: @selector(domainBrowserDomainSelected:)] &&
         sender == self.browser)
     {
-        [_delegate bonjourBrowserDomainSelected: pathArray ? DomainPathToDNSDomain(pathArray) : nil];
+        [_delegate domainBrowserDomainSelected: pathArray ? DomainPathToDNSDomain(pathArray) : nil];
     }
 }
 
@@ -328,7 +331,21 @@
 {
 	(void)defaultDomainPath;
     [self.browser loadColumnZero];
-    [self setDomainSelectionToPathArray: self.bonjour.defaultDomainPath];
+#if INITIAL_LEGACYBROWSE
+    if( !_initialPathSet )
+    {
+        _initialPathSet = YES;
+        [_delegate domainBrowserDomainUpdate: [NSString string]];
+    }
+    else
+#endif
+    {
+        [self setDomainSelectionToPathArray: self.bonjour.defaultDomainPath];
+        if (_delegate && [_delegate respondsToSelector: @selector(domainBrowserDomainUpdate:)])
+        {
+            [_delegate domainBrowserDomainUpdate: defaultDomainPath ? DomainPathToDNSDomain(defaultDomainPath) : [NSString string]];
+        }
+    }
 }
 
 #pragma mark - Commands
@@ -337,7 +354,7 @@
 {
 	(void)sender;
 	NSArray * pathArray = [self.browser pathArrayToColumn: self.browser.selectedColumn includeSelectedRow: YES];
-    if (!pathArray.count) pathArray = self.bonjour.defaultDomainPath;
+    if (!pathArray.count && (([NSEvent modifierFlags] & NSEventModifierFlagOption ) != NSEventModifierFlagOption)) pathArray = self.bonjour.defaultDomainPath;
     [self setDomainSelectionToPathArray: pathArray];
     [self browser: self.browser selectionDidChange: pathArray];
 }

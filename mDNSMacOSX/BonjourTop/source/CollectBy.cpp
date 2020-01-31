@@ -156,9 +156,10 @@ void CollectByService::Collect(CDNSFrame* pFrame,CollectByAbstract* nextCollectB
 
 
         CServiceNode *pNode= m_Cache.FindwithAddRecord(&RecordName);
-        if (pNode->pNext == NULL)
+        if ((pNode->pNext == NULL) && nextCollectBy)
             pNode->pNext = nextCollectBy->Factory();
-        pNode->pNext->Collect(pFrame,nextCollectBy?nextCollectBy->pNext:NULL);
+        if (pNode->pNext)
+            pNode->pNext->Collect(pFrame,nextCollectBy?nextCollectBy->pNext:NULL);
 
     }
 
@@ -226,9 +227,10 @@ void CollectByIPAddressType::Collect(CDNSFrame* pFrame,CollectByAbstract* nextCo
     }
     if (pFrame->m_SourceIPAddress.IsIPv6())
     {
-        if (pIPv6Next == NULL)
+        if ((pIPv6Next == NULL) && nextCollectBy)
             pIPv6Next = nextCollectBy->Factory();
-        pIPv6Next->Collect(pFrame, nextCollectBy?nextCollectBy->pNext:NULL);
+        if (pIPv6Next)
+            pIPv6Next->Collect(pFrame, nextCollectBy?nextCollectBy->pNext:NULL);
     }
 }
 void CollectByIPAddressType::Export(FILE* hFile,BJString sPrevColumns)

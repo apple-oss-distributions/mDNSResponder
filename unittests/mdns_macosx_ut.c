@@ -1,4 +1,5 @@
 #include "DNSCommon.h"                  // Defines general DNS utility routines
+#include "unittest_common.h"
 
 // To match *either* a v4 or v6 instance of this interface
 mDNSlocal mDNSInterfaceID SearchForInterfaceByAddr(mDNSAddr* addr)
@@ -63,4 +64,9 @@ mDNSexport void UpdateEtcHosts_ut(void *context)
 	mDNS_Lock(&mDNSStorage);
 	UpdateEtcHosts(&mDNSStorage, context);
 	mDNS_Unlock(&mDNSStorage);
+}
+
+mDNSexport void mDNSDomainLabelFromCFString_ut(CFStringRef cfs, domainlabel *const namelabel)
+{
+    mDNSDomainLabelFromCFString(cfs, namelabel);
 }

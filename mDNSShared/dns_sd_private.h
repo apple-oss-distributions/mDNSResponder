@@ -1,15 +1,22 @@
 /* -*- Mode: C; tab-width: 4 -*-
  * 
- * Copyright (c) 2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2015-2019 Apple Inc. All rights reserved.
  */
 
 #ifndef _DNS_SD_PRIVATE_H
 #define _DNS_SD_PRIVATE_H
 
+#include <dns_sd.h>
 
-// Private flags (kDNSServiceFlagsPrivateOne, kDNSServiceFlagsPrivateTwo, kDNSServiceFlagsPrivateThree, kDNSServiceFlagsPrivateFour) from dns_sd.h
+// Private flags (kDNSServiceFlagsPrivateOne, kDNSServiceFlagsPrivateTwo, kDNSServiceFlagsPrivateThree, kDNSServiceFlagsPrivateFour, kDNSServiceFlagsPrivateFive) from dns_sd.h
 enum
 {
+    kDNSServiceFlagsDenyConstrained        = 0x2000,
+    /*
+     * This flag is meaningful only for Unicast DNS queries. When set, the daemon will restrict
+     * DNS resolutions on interfaces defined as constrained for that request.
+     */
+
     kDNSServiceFlagsDenyCellular           = 0x8000000,
     /*
      * This flag is meaningful only for Unicast DNS queries. When set, the daemon will restrict
@@ -35,8 +42,7 @@ enum
      */
 };
 
-
-#if !DNSSD_NO_CREATE_DELEGATE_CONNECTION
+#if !defined(DNSSD_NO_CREATE_DELEGATE_CONNECTION) || !DNSSD_NO_CREATE_DELEGATE_CONNECTION
 /* DNSServiceCreateDelegateConnection()
  *
  * Parameters:
@@ -58,6 +64,7 @@ enum
  *                  returned to indicate that the calling process does not have entitlements
  *                  to use this API.
  */
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceCreateDelegateConnection(DNSServiceRef *sdRef, int32_t pid, uuid_t uuid);
 #endif
 
@@ -77,11 +84,15 @@ DNSServiceErrorType DNSSD_API DNSServiceCreateDelegateConnection(DNSServiceRef *
  *                  if the daemon is not running. The value of the pid is undefined if the return
  *                  value has error.
  */
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceGetPID
 (
     uint16_t srcport,
     int32_t *pid
 );
+
+DNSSD_EXPORT
+DNSServiceErrorType DNSSD_API DNSServiceSetDefaultDomainForUser(DNSServiceFlags flags, const char *domain);
 
 #define kDNSServiceCompPrivateDNS   "PrivateDNS"
 #define kDNSServiceCompMulticastDNS "MulticastDNS"

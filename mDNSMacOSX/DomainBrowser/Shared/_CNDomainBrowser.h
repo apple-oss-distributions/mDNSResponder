@@ -35,6 +35,8 @@ extern const NSString *    _CNSubDomainKey_subPath;
 - (void)startBrowser;
 - (void)stopBrowser;
 
+- (BOOL)foundInstanceInMoreThanLocalDomain;
+
 @property (readonly) NSArray *          defaultDomainPath;
 @property (readonly) NSArray *          flattenedDNSDomains;
 

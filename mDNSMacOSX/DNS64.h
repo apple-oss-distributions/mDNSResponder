@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 mDNSexport mDNSBool DNS64StateMachine(mDNS *m, DNSQuestion *inQ, const ResourceRecord *inRR, QC_result inResult);
-mDNSexport mStatus  DNS64AnswerQuestion(mDNS *m, DNSQuestion *inQ, const ResourceRecord *inRR, QC_result inResult);
+mDNSexport mStatus  DNS64AnswerCurrentQuestion(mDNS *m, const ResourceRecord *inRR, QC_result inResult);
 mDNSexport void     DNS64HandleNewQuestion(mDNS *m, DNSQuestion *inQ);
 mDNSexport void     DNS64ResetState(DNSQuestion *inQ);
 mDNSexport void     DNS64RestartQuestions(mDNS *m);

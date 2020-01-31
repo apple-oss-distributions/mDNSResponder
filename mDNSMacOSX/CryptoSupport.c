@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2011-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +29,7 @@
 #include "DNSSECSupport.h"
 
 #if TARGET_OS_IPHONE
-#include "SecRSAKey.h"                  // For RSA_SHA1 etc. verification
+#include <Security/SecRSAKey.h>                  // For RSA_SHA1 etc. verification
 #else
 #include <Security/Security.h>
 #endif
@@ -54,7 +53,7 @@ mDNSlocal mStatus enc_create(AlgContext *ctx)
     {
     case ENC_BASE32:
     case ENC_BASE64:
-        ptr = (encContext *)mDNSPlatformMemAllocate(sizeof(encContext));
+        ptr = (encContext *) mDNSPlatformMemAllocateClear(sizeof(*ptr));
         if (!ptr) return mStatus_NoMemoryErr;
         break;
     default:
@@ -161,12 +160,12 @@ mDNSlocal mStatus sha_create(AlgContext *ctx)
     switch (ctx->alg)
     {
     case SHA1_DIGEST_TYPE:
-        ptr = mDNSPlatformMemAllocate(sizeof(CC_SHA1_CTX));
+        ptr = (mDNSu8 *) mDNSPlatformMemAllocate(sizeof(CC_SHA1_CTX));
         if (!ptr) return mStatus_NoMemoryErr;
         CC_SHA1_Init((CC_SHA1_CTX *)ptr);
         break;
     case SHA256_DIGEST_TYPE:
-        ptr = mDNSPlatformMemAllocate(sizeof(CC_SHA256_CTX));
+        ptr = (mDNSu8 *) mDNSPlatformMemAllocate(sizeof(CC_SHA256_CTX));
         if (!ptr) return mStatus_NoMemoryErr;
         CC_SHA256_Init((CC_SHA256_CTX *)ptr);
         break;
@@ -282,17 +281,17 @@ mDNSlocal mStatus rsa_sha_create(AlgContext *ctx)
     {
     case CRYPTO_RSA_NSEC3_SHA1:
     case CRYPTO_RSA_SHA1:
-        ptr = mDNSPlatformMemAllocate(sizeof(CC_SHA1_CTX));
+        ptr = (mDNSu8 *) mDNSPlatformMemAllocate(sizeof(CC_SHA1_CTX));
         if (!ptr) return mStatus_NoMemoryErr;
         CC_SHA1_Init((CC_SHA1_CTX *)ptr);
         break;
     case CRYPTO_RSA_SHA256:
-        ptr = mDNSPlatformMemAllocate(sizeof(CC_SHA256_CTX));
+        ptr = (mDNSu8 *) mDNSPlatformMemAllocate(sizeof(CC_SHA256_CTX));
         if (!ptr) return mStatus_NoMemoryErr;
         CC_SHA256_Init((CC_SHA256_CTX *)ptr);
         break;
     case CRYPTO_RSA_SHA512:
-        ptr = mDNSPlatformMemAllocate(sizeof(CC_SHA512_CTX));
+        ptr = (mDNSu8 *) mDNSPlatformMemAllocate(sizeof(CC_SHA512_CTX));
         if (!ptr) return mStatus_NoMemoryErr;
         CC_SHA512_Init((CC_SHA512_CTX *)ptr);
         break;
@@ -644,8 +643,8 @@ mDNSlocal Boolean VerifyData(SecKeyRef key, CFStringRef digestStr, mDNSu8 *diges
     }
     
     CFBooleanRef boolRef = SecTransformExecute(verifyXForm, &error);
-    ret = boolRef ? CFBooleanGetValue(boolRef) : false;
-    if (boolRef) CFRelease(boolRef);
+    ret = (boolRef != NULL) ? CFBooleanGetValue(boolRef) : false;
+    if (boolRef != NULL) CFRelease(boolRef);
     CFRelease(verifyXForm);
 
     if (error != NULL)

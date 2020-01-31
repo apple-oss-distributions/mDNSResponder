@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2012-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2012-2018 Apple Inc. All rights reserved.
  *
  *
  * @header      Interface to DNSX SPI
@@ -13,6 +13,12 @@
 #define _DNS_SERVICES_H
 
 #include <dispatch/dispatch.h>
+
+#if (defined(__GNUC__) && (__GNUC__ >= 4))
+#define DNS_SERVICES_EXPORT __attribute__((visibility("default")))
+#else
+#define DNS_SERVICES_EXPORT
+#endif
 
 // DNSXConnRef: Opaque internal data type
 typedef struct _DNSXConnRef_t *DNSXConnRef;
@@ -101,6 +107,7 @@ typedef void (*DNSXEnableProxyReply)
  *
  */
 
+DNS_SERVICES_EXPORT
 DNSXErrorType DNSXEnableProxy
 (
     DNSXConnRef              *connRef,
@@ -119,6 +126,7 @@ DNSXErrorType DNSXEnableProxy
  * connRef:        A DNSXConnRef initialized by any of the DNSX*() calls.
  *
  */
+DNS_SERVICES_EXPORT
 void DNSXRefDeAlloc(DNSXConnRef connRef);
 
 #endif

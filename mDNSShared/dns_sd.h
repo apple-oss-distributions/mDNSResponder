@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2003-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -66,7 +66,7 @@
  */
 
 #ifndef _DNS_SD_H
-#define _DNS_SD_H 8780101
+#define _DNS_SD_H 10960002
 
 #ifdef  __cplusplus
 extern "C" {
@@ -75,9 +75,11 @@ extern "C" {
 /* Set to 1 if libdispatch is supported
  * Note: May also be set by project and/or Makefile
  */
-#ifndef _DNS_SD_LIBDISPATCH
+#if defined(__APPLE__)
+#define _DNS_SD_LIBDISPATCH 1
+#else
 #define _DNS_SD_LIBDISPATCH 0
-#endif /* ndef _DNS_SD_LIBDISPATCH */
+#endif
 
 /* standard calling convention under Win32 is __stdcall */
 /* Note: When compiling Intel EFI (Extensible Firmware Interface) under MS Visual Studio, the */
@@ -86,6 +88,12 @@ extern "C" {
 #define DNSSD_API __stdcall
 #else
 #define DNSSD_API
+#endif
+
+#if (defined(__GNUC__) && (__GNUC__ >= 4))
+#define DNSSD_EXPORT __attribute__((visibility("default")))
+#else
+#define DNSSD_EXPORT
 #endif
 
 #if defined(_WIN32)
@@ -189,7 +197,7 @@ enum
 
     kDNSServiceFlagsAutoTrigger        = 0x1,
     /* Valid for browses using kDNSServiceInterfaceIndexAny.
-     * Will auto trigger the browse over AWDL as well once the service is discoveryed
+     * Will auto trigger the browse over AWDL as well once the service is discovered
      * over BLE.
      * This flag is an input value to DNSServiceBrowse(), which is why we can
      * use the same value as kDNSServiceFlagsMoreComing, which is an output flag
@@ -248,7 +256,6 @@ enum
     /* 
      * Client guarantees that record names are unique, so we can skip sending out initial
      * probe messages.  Standard name conflict resolution is still done if a conflict is discovered.
-     * Currently only valid for a DNSServiceRegister call.
      */
 
     kDNSServiceFlagsReturnIntermediates = 0x1000,
@@ -265,38 +272,28 @@ enum
      * (In earlier builds this flag was briefly calledkDNSServiceFlagsReturnCNAME)
      */
 
-    kDNSServiceFlagsNonBrowsable        = 0x2000,
-    /* A service registered with the NonBrowsable flag set can be resolved using
-     * DNSServiceResolve(), but will not be discoverable using DNSServiceBrowse().
-     * This is for cases where the name is actually a GUID; it is found by other means;
-     * there is no end-user benefit to browsing to find a long list of opaque GUIDs.
-     * Using the NonBrowsable flag creates SRV+TXT without the cost of also advertising
-     * an associated PTR record.
-     */
-
     kDNSServiceFlagsShareConnection     = 0x4000,
     /* For efficiency, clients that perform many concurrent operations may want to use a
      * single Unix Domain Socket connection with the background daemon, instead of having a
      * separate connection for each independent operation. To use this mode, clients first
-     * call DNSServiceCreateConnection(&MainRef) to initialize the main DNSServiceRef.
+     * call DNSServiceCreateConnection(&SharedRef) to initialize the main DNSServiceRef.
      * For each subsequent operation that is to share that same connection, the client copies
-     * the MainRef, and then passes the address of that copy, setting the ShareConnection flag
+     * the SharedRef, and then passes the address of that copy, setting the ShareConnection flag
      * to tell the library that this DNSServiceRef is not a typical uninitialized DNSServiceRef;
      * it's a copy of an existing DNSServiceRef whose connection information should be reused.
      *
      * For example:
      *
      * DNSServiceErrorType error;
-     * DNSServiceRef MainRef;
-     * error = DNSServiceCreateConnection(&MainRef);
+     * DNSServiceRef SharedRef;
+     * error = DNSServiceCreateConnection(&SharedRef);
      * if (error) ...
-     * DNSServiceRef BrowseRef = MainRef;  // Important: COPY the primary DNSServiceRef first...
+     * DNSServiceRef BrowseRef = SharedRef;  // Important: COPY the primary DNSServiceRef first...
      * error = DNSServiceBrowse(&BrowseRef, kDNSServiceFlagsShareConnection, ...); // then use the copy
      * if (error) ...
      * ...
      * DNSServiceRefDeallocate(BrowseRef); // Terminate the browse operation
-     * DNSServiceRefDeallocate(MainRef);   // Terminate the shared connection
-     * Also see Point 4.(Don't Double-Deallocate if the MainRef has been Deallocated) in Notes below:
+     * DNSServiceRefDeallocate(SharedRef); // Terminate the shared connection
      *
      * Notes:
      *
@@ -334,15 +331,18 @@ enum
      * DNSServiceRef's created by other calls like DNSServiceBrowse() or DNSServiceResolve()
      * cannot be shared by copying them and using kDNSServiceFlagsShareConnection.
      *
-     * 4. Don't Double-Deallocate if the MainRef has been Deallocated
-     * Calling DNSServiceRefDeallocate(ref) for a particular operation's DNSServiceRef terminates
-     * just that operation. Calling DNSServiceRefDeallocate(ref) for the main shared DNSServiceRef
-     * (the parent DNSServiceRef, originally created by DNSServiceCreateConnection(&ref))
-     * automatically terminates the shared connection and all operations that were still using it.
+     * 4. Don't Double-Deallocate
+     * Calling DNSServiceRefDeallocate(OpRef) for a particular operation's DNSServiceRef terminates
+     * just that operation. Calling DNSServiceRefDeallocate(SharedRef) for the main shared DNSServiceRef
+     * (the parent DNSServiceRef, originally created by DNSServiceCreateConnection(&SharedRef))
+     * automatically terminates the shared connection *and* all operations that were still using it.
      * After doing this, DO NOT then attempt to deallocate any remaining subordinate DNSServiceRef's.
      * The memory used by those subordinate DNSServiceRef's has already been freed, so any attempt
      * to do a DNSServiceRefDeallocate (or any other operation) on them will result in accesses
      * to freed memory, leading to crashes or other equally undesirable results.
+     * You can deallocate individual operations first and then deallocate the parent DNSServiceRef last,
+     * but if you deallocate the parent DNSServiceRef first, then all of the subordinate DNSServiceRef's
+     * are implicitly deallocated, and explicitly deallocating them a second time will lead to crashes.
      *
      * 5. Thread Safety
      * The dns_sd.h API does not presuppose any particular threading model, and consequently
@@ -350,15 +350,15 @@ enum
      * If the client concurrently, from multiple threads (or contexts), calls API routines using 
      * the same DNSServiceRef, it is the client's responsibility to provide mutual exclusion for 
      * that DNSServiceRef.
-
+     *
      * For example, use of DNSServiceRefDeallocate requires caution. A common mistake is as follows:
      * Thread B calls DNSServiceRefDeallocate to deallocate sdRef while Thread A is processing events
      * using sdRef. Doing this will lead to intermittent crashes on thread A if the sdRef is used after
      * it was deallocated.
-
+     *
      * A telltale sign of this crash type is to see DNSServiceProcessResult on the stack preceding the
      * actual crash location.
-
+     *
      * To state this more explicitly, mDNSResponder does not queue DNSServiceRefDeallocate so
      * that it occurs discretely before or after an event is handled.
      */
@@ -511,24 +511,50 @@ enum
      * is only set in the callbacks and kDNSServiceFlagsThresholdOne is only set on
      * input to a DNSServiceBrowse call.
      */
-     kDNSServiceFlagsPrivateOne          = 0x8000000,
+     kDNSServiceFlagsPrivateOne          = 0x2000,
     /*
      * This flag is private and should not be used.
      */
 
-     kDNSServiceFlagsPrivateTwo           = 0x10000000,
+     kDNSServiceFlagsPrivateTwo           = 0x8000000,
     /*
      * This flag is private and should not be used.
      */
 
-     kDNSServiceFlagsPrivateThree         = 0x20000000,
+     kDNSServiceFlagsPrivateThree         = 0x10000000,
     /*
      * This flag is private and should not be used.
      */
 
-     kDNSServiceFlagsPrivateFour       = 0x40000000
+     kDNSServiceFlagsPrivateFour          = 0x20000000,
     /*
      * This flag is private and should not be used.
+     */
+
+    kDNSServiceFlagsPrivateFive          = 0x40000000,
+    /*
+     * This flag is private and should not be used.
+     */
+
+
+    kDNSServiceFlagAnsweredFromCache     = 0x40000000,
+    /*
+     * When kDNSServiceFlagAnsweredFromCache is passed back in the flags parameter of DNSServiceQueryRecordReply or DNSServiceGetAddrInfoReply,
+     * an answer will have this flag set if it was answered from the cache.
+     */
+
+    kDNSServiceFlagsAllowExpiredAnswers   = 0x80000000,
+    /*
+     * When kDNSServiceFlagsAllowExpiredAnswers is passed to DNSServiceQueryRecord or DNSServiceGetAddrInfo,
+     * if there are matching expired records still in the cache, then they are immediately returned to the
+     * client, and in parallel a network query for that name is issued. All returned records from the query will
+     * remain in the cache after expiration.
+     */
+    
+    kDNSServiceFlagsExpiredAnswer         = 0x80000000
+    /*
+     * When kDNSServiceFlagsAllowExpiredAnswers is passed to DNSServiceQueryRecord or DNSServiceGetAddrInfo,
+     * an expired answer will have this flag set.
      */
 
 };
@@ -674,7 +700,8 @@ enum
     kDNSServiceErr_NATPortMappingDisabled    = -65565,  /* NAT supports PCP, NAT-PMP or UPnP, but it's disabled by the administrator */
     kDNSServiceErr_NoRouter                  = -65566,  /* No router currently configured (probably no network connectivity) */
     kDNSServiceErr_PollingMode               = -65567,
-    kDNSServiceErr_Timeout                   = -65568
+    kDNSServiceErr_Timeout                   = -65568,
+    kDNSServiceErr_DefunctConnection         = -65569   /* Connection to daemon returned a SO_ISDEFUNCT error result */
 
                                                /* mDNS Error codes are in the range
                                                 * FFFE FF00 (-65792) to FFFE FFFF (-65537) */
@@ -700,8 +727,10 @@ enum
  * conventional DNS escaping rules, as used by the traditional DNS res_query() API, as described below:
  *
  * Generally all UTF-8 characters (which includes all US ASCII characters) represent themselves,
- * with two exceptions, the dot ('.') character, which is the label separator,
- * and the backslash ('\') character, which is the escape character.
+ * with three exceptions:
+ * the dot ('.') character, which is the DNS label separator,
+ * the backslash ('\') character, which is the DNS escape character, and
+ * the ASCII NUL (0) byte value, which is the C-string terminator character.
  * The escape character ('\') is interpreted as described below:
  * 
  *   '\ddd', where ddd is a three-digit decimal value from 000 to 255,
@@ -710,10 +739,10 @@ enum
  *        For example, the ASCII code for 'w' is 119, and therefore '\119' is equivalent to 'w'.
  *        Thus the command "ping '\119\119\119.apple.com'" is the equivalent to the command "ping 'www.apple.com'".
  *        Nonprinting ASCII characters in the range 0-31 are often represented this way.
- *        In particular, the ASCII NUL character (0) cannot appear in a C string because C uses it as the
- *        string terminator character, so ASCII NUL in a domain name has to be represented in a C string as '\000'.
+ *        In particular, the ASCII NUL character (0) cannot appear in a C-string because C uses it as the
+ *        string terminator character, so ASCII NUL in a domain name has to be represented in a C-string as '\000'.
  *        Other characters like space (ASCII code 32) are sometimes represented as '\032'
- *        in contexts where having an actual space character in a C string would be inconvenient.
+ *        in contexts where having an actual space character in a C-string would be inconvenient.
  *        
  *   Otherwise, for all cases where a '\' is followed by anything other than a three-digit decimal value
  *        from 000 to 255, the character sequence '\x' represents a single literal occurrence of character 'x'.
@@ -728,6 +757,21 @@ enum
  *   A lone escape character ('\') appearing at the end of a string is not allowed, since it is
  *        followed by neither a three-digit decimal value from 000 to 255 nor a single character.
  *        If a lone escape character ('\') does appear as the last character of a string, it is silently ignored.
+ *
+ * The worse-case length for an escaped domain name is calculated as follows:
+ * The longest legal domain name is 256 bytes in wire format (see RFC 6762, Appendix C, DNS Name Length).
+ * For our calculation of the longest *escaped* domain name, we use
+ * the longest legal domain name, with the most characters escaped.
+ *
+ * We consider a domain name of the form: "label63.label63.label63.label62."
+ * where "label63" is a 63-byte label and "label62" is a 62-byte label.
+ * Counting four label-length bytes, 251 bytes of label data, and the terminating zero,
+ * this makes a total of 256 bytes in wire format, the longest legal domain name.
+ *
+ * If each one of the 251 bytes of label data is represented using '\ddd',
+ * then it takes 251 * 4 = 1004 bytes to represent these in a C-string.
+ * Adding four '.' characters as shown above, plus the C-string terminating
+ * zero at the end, results in a maximum storage requirement of 1009 bytes.
  *
  * The exceptions, that do not use escaping, are the routines where the full
  * DNS name of a resource is broken, for convenience, into servicename/regtype/domain.
@@ -871,6 +915,7 @@ typedef int32_t DNSServiceErrorType;
  *                  if the daemon (or "system service" on Windows) is not running.
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceGetProperty
 (
     const char *property,  /* Requested property (i.e. kDNSServiceProperty_DaemonVersion) */
@@ -930,6 +975,7 @@ DNSServiceErrorType DNSSD_API DNSServiceGetProperty
  *                  error.
  */
 
+DNSSD_EXPORT
 dnssd_sock_t DNSSD_API DNSServiceRefSockFD(DNSServiceRef sdRef);
 
 
@@ -951,6 +997,7 @@ dnssd_sock_t DNSSD_API DNSServiceRefSockFD(DNSServiceRef sdRef);
  *                  an error code indicating the specific failure that occurred.
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceProcessResult(DNSServiceRef sdRef);
 
 
@@ -972,12 +1019,16 @@ DNSServiceErrorType DNSSD_API DNSServiceProcessResult(DNSServiceRef sdRef);
  * is invalidated when this function is called - the DNSRecordRef may not be used in subsequent
  * functions.
  *
+ * If the reference was passed to DNSServiceSetDispatchQueue(), DNSServiceRefDeallocate() must 
+ * be called on the same queue originally passed as an argument to DNSServiceSetDispatchQueue().
+ *
  * Note: This call is to be used only with the DNSServiceRef defined by this API.
  *
  * sdRef:           A DNSServiceRef initialized by any of the DNSService calls.
  *
  */
 
+DNSSD_EXPORT
 void DNSSD_API DNSServiceRefDeallocate(DNSServiceRef sdRef);
 
 
@@ -1035,12 +1086,17 @@ typedef void (DNSSD_API *DNSServiceDomainEnumReply)
 
 /* DNSServiceEnumerateDomains() Parameters:
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef. If the call succeeds
- *                  then it initializes the DNSServiceRef, returns kDNSServiceErr_NoError,
- *                  and the enumeration operation will run indefinitely until the client
- *                  terminates it by passing this DNSServiceRef to DNSServiceRefDeallocate().
+ * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
+ *                  a copy of the shared connection reference that is to be used).
+ *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
+ *                  returns kDNSServiceErr_NoError, and the enumeration operation
+ *                  will remain active indefinitely until the client terminates it
+ *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
+ *                  (or by closing the underlying shared connection, if used).
  *
  * flags:           Possible values are:
+ *                  kDNSServiceFlagsShareConnection to use a shared connection.
  *                  kDNSServiceFlagsBrowseDomains to enumerate domains recommended for browsing.
  *                  kDNSServiceFlagsRegistrationDomains to enumerate domains recommended
  *                  for registration.
@@ -1062,6 +1118,7 @@ typedef void (DNSSD_API *DNSServiceDomainEnumReply)
  *                  is not initialized).
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceEnumerateDomains
 (
     DNSServiceRef                       *sdRef,
@@ -1127,13 +1184,20 @@ typedef void (DNSSD_API *DNSServiceRegisterReply)
 
 /* DNSServiceRegister() Parameters:
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef. If the call succeeds
- *                  then it initializes the DNSServiceRef, returns kDNSServiceErr_NoError,
- *                  and the registration will remain active indefinitely until the client
- *                  terminates it by passing this DNSServiceRef to DNSServiceRefDeallocate().
+ * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
+ *                  a copy of the shared connection reference that is to be used).
+ *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
+ *                  returns kDNSServiceErr_NoError, and the service registration
+ *                  will remain active indefinitely until the client terminates it
+ *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
+ *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           Indicates the renaming behavior on name conflict (most applications
- *                  will pass 0). See flag definitions above for details.
+ * flags:           Possible values are:
+ *                  kDNSServiceFlagsShareConnection to use a shared connection.
+ *                  Other flags indicate the renaming behavior on name conflict
+ *                  (not required for most applications).
+ *                  See flag definitions above for details.
  *
  * interfaceIndex:  If non-zero, specifies the interface on which to register the service
  *                  (the index for a given interface is determined via the if_nametoindex()
@@ -1183,31 +1247,6 @@ typedef void (DNSSD_API *DNSServiceRegisterReply)
  *
  *                  % dns-sd -R Test '_test._tcp,s\.one,s\,two,s\\three,s\000four' local 123
  *
- *                  When a service is registered, all the clients browsing for the registered
- *                  type ("regtype") will discover it. If the discovery should be
- *                  restricted to a smaller set of well known peers, the service can be
- *                  registered with additional data (group identifier) that is known
- *                  only to a smaller set of peers. The group identifier should follow primary
- *                  service type using a colon (":") as a delimeter. If subtypes are also present,
- *                  it should be given before the subtype as shown below.
- *
- *                  % dns-sd -R _test1 _http._tcp:mygroup1 local 1001 
- *                  % dns-sd -R _test2 _http._tcp:mygroup2 local 1001 
- *                  % dns-sd -R _test3 _http._tcp:mygroup3,HasFeatureA local 1001 
- *
- *                  Now:
- *                  % dns-sd -B _http._tcp:"mygroup1"                # will discover only test1
- *                  % dns-sd -B _http._tcp:"mygroup2"                # will discover only test2
- *                  % dns-sd -B _http._tcp:"mygroup3",HasFeatureA    # will discover only test3
- *                  
- *                  By specifying the group information, only the members of that group are
- *                  discovered.
- *
- *                  The group identifier itself is not sent in clear. Only a hash of the group
- *                  identifier is sent and the clients discover them anonymously. The group identifier
- *                  may be up to 256 bytes long and may contain any eight bit values except comma which
- *                  should be escaped.
- *
  * domain:          If non-NULL, specifies the domain on which to advertise the service.
  *                  Most applications will not specify a domain, instead automatically
  *                  registering in the default domain(s).
@@ -1252,6 +1291,7 @@ typedef void (DNSSD_API *DNSServiceRegisterReply)
  *                  is not initialized).
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceRegister
 (
     DNSServiceRef                       *sdRef,
@@ -1307,6 +1347,7 @@ DNSServiceErrorType DNSSD_API DNSServiceRegister
  *                  error code indicating the error that occurred (the RecordRef is not initialized).
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceAddRecord
 (
     DNSServiceRef sdRef,
@@ -1348,6 +1389,7 @@ DNSServiceErrorType DNSSD_API DNSServiceAddRecord
  *                  error code indicating the error that occurred.
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceUpdateRecord
 (
     DNSServiceRef sdRef,
@@ -1380,6 +1422,7 @@ DNSServiceErrorType DNSSD_API DNSServiceUpdateRecord
  *                  error code indicating the error that occurred.
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceRemoveRecord
 (
     DNSServiceRef sdRef,
@@ -1447,12 +1490,17 @@ typedef void (DNSSD_API *DNSServiceBrowseReply)
 
 /* DNSServiceBrowse() Parameters:
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef. If the call succeeds
- *                  then it initializes the DNSServiceRef, returns kDNSServiceErr_NoError,
- *                  and the browse operation will run indefinitely until the client
- *                  terminates it by passing this DNSServiceRef to DNSServiceRefDeallocate().
+ * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
+ *                  a copy of the shared connection reference that is to be used).
+ *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
+ *                  returns kDNSServiceErr_NoError, and the browse operation
+ *                  will remain active indefinitely until the client terminates it
+ *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
+ *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           Currently ignored, reserved for future use.
+ * flags:           Possible values are:
+ *                  kDNSServiceFlagsShareConnection to use a shared connection.
  *
  * interfaceIndex:  If non-zero, specifies the interface on which to browse for services
  *                  (the index for a given interface is determined via the if_nametoindex()
@@ -1464,10 +1512,7 @@ typedef void (DNSSD_API *DNSServiceBrowseReply)
  *                  A client may optionally specify a single subtype to perform filtered browsing:
  *                  e.g. browsing for "_primarytype._tcp,_subtype" will discover only those
  *                  instances of "_primarytype._tcp" that were registered specifying "_subtype"
- *                  in their list of registered subtypes. Additionally, a group identifier may
- *                  also be specified before the subtype e.g., _primarytype._tcp:GroupID, which
- *                  will discover only the members that register the service with GroupID. See
- *                  DNSServiceRegister for more details.
+ *                  in their list of registered subtypes.
  *
  * domain:          If non-NULL, specifies the domain on which to browse for services.
  *                  Most applications will not specify a domain, instead browsing on the
@@ -1485,6 +1530,7 @@ typedef void (DNSSD_API *DNSServiceBrowseReply)
  *                  is not initialized).
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceBrowse
 (
     DNSServiceRef                       *sdRef,
@@ -1575,12 +1621,18 @@ typedef void (DNSSD_API *DNSServiceResolveReply)
 
 /* DNSServiceResolve() Parameters
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef. If the call succeeds
- *                  then it initializes the DNSServiceRef, returns kDNSServiceErr_NoError,
- *                  and the resolve operation will run indefinitely until the client
- *                  terminates it by passing this DNSServiceRef to DNSServiceRefDeallocate().
+ * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
+ *                  a copy of the shared connection reference that is to be used).
+ *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
+ *                  returns kDNSServiceErr_NoError, and the resolve operation
+ *                  will remain active indefinitely until the client terminates it
+ *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
+ *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           Specifying kDNSServiceFlagsForceMulticast will cause query to be
+ * flags:           Possible values are:
+ *                  kDNSServiceFlagsShareConnection to use a shared connection.
+ *                  Specifying kDNSServiceFlagsForceMulticast will cause query to be
  *                  performed with a link-local mDNS query, even if the name is an
  *                  apparently non-local name (i.e. a name not ending in ".local.")
  *
@@ -1613,6 +1665,7 @@ typedef void (DNSSD_API *DNSServiceResolveReply)
  *                  is not initialized).
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceResolve
 (
     DNSServiceRef                       *sdRef,
@@ -1696,12 +1749,18 @@ typedef void (DNSSD_API *DNSServiceQueryRecordReply)
 
 /* DNSServiceQueryRecord() Parameters:
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef. If the call succeeds
- *                  then it initializes the DNSServiceRef, returns kDNSServiceErr_NoError,
- *                  and the query operation will run indefinitely until the client
- *                  terminates it by passing this DNSServiceRef to DNSServiceRefDeallocate().
+ * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
+ *                  a copy of the shared connection reference that is to be used).
+ *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
+ *                  returns kDNSServiceErr_NoError, and the query operation
+ *                  will remain active indefinitely until the client terminates it
+ *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
+ *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           kDNSServiceFlagsForceMulticast or kDNSServiceFlagsLongLivedQuery.
+ * flags:           Possible values are:
+ *                  kDNSServiceFlagsShareConnection to use a shared connection.
+ *                  kDNSServiceFlagsForceMulticast or kDNSServiceFlagsLongLivedQuery.
  *                  Pass kDNSServiceFlagsLongLivedQuery to create a "long-lived" unicast
  *                  query to a unicast DNS server that implements the protocol. This flag
  *                  has no effect on link-local multicast queries.
@@ -1730,6 +1789,7 @@ typedef void (DNSSD_API *DNSServiceQueryRecordReply)
  *                  is not initialized).
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
 (
     DNSServiceRef                       *sdRef,
@@ -1801,12 +1861,18 @@ typedef void (DNSSD_API *DNSServiceGetAddrInfoReply)
 
 /* DNSServiceGetAddrInfo() Parameters:
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef. If the call succeeds then it
- *                  initializes the DNSServiceRef, returns kDNSServiceErr_NoError, and the query
- *                  begins and will last indefinitely until the client terminates the query
- *                  by passing this DNSServiceRef to DNSServiceRefDeallocate().
+ * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
+ *                  a copy of the shared connection reference that is to be used).
+ *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
+ *                  returns kDNSServiceErr_NoError, and the address query operation
+ *                  will remain active indefinitely until the client terminates it
+ *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
+ *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           kDNSServiceFlagsForceMulticast
+ * flags:           Possible values are:
+ *                  kDNSServiceFlagsShareConnection to use a shared connection.
+ *                  kDNSServiceFlagsForceMulticast
  *
  * interfaceIndex:  The interface on which to issue the query.  Passing 0 causes the query to be
  *                  sent on all active interfaces via Multicast or the primary interface via Unicast.
@@ -1834,6 +1900,7 @@ typedef void (DNSSD_API *DNSServiceGetAddrInfoReply)
  *                  the error that occurred.
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo
 (
     DNSServiceRef                    *sdRef,
@@ -1861,15 +1928,17 @@ DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo
  *
  * Parameters:
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef. Deallocating
- *                  the reference (via DNSServiceRefDeallocate()) severs the
- *                  connection and deregisters all records registered on this connection.
+ * sdRef:           A pointer to an uninitialized DNSServiceRef.
+ *                  Deallocating the reference (via DNSServiceRefDeallocate())
+ *                  severs the connection and cancels all operations and
+ *                  deregisters all records registered on this connection.
  *
  * return value:    Returns kDNSServiceErr_NoError on success, otherwise returns
- *                  an error code indicating the specific failure that occurred (in which
- *                  case the DNSServiceRef is not initialized).
+ *                  an error code indicating the specific failure that occurred
+ *                  (in which case the DNSServiceRef is not initialized).
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceCreateConnection(DNSServiceRef *sdRef);
 
 /* DNSServiceRegisterRecord
@@ -1918,8 +1987,7 @@ typedef void (DNSSD_API *DNSServiceRegisterRecordReply)
  *                  and deallocate each of their corresponding DNSServiceRecordRefs, call
  *                  DNSServiceRefDeallocate()).
  *
- * flags:           Possible values are kDNSServiceFlagsShared or kDNSServiceFlagsUnique
- *                  (see flag type definitions for details).
+ * flags:           One of either kDNSServiceFlagsShared, kDNSServiceFlagsUnique or kDNSServiceFlagsKnownUnique must be set.
  *
  * interfaceIndex:  If non-zero, specifies the interface on which to register the record
  *                  (the index for a given interface is determined via the if_nametoindex()
@@ -1952,6 +2020,7 @@ typedef void (DNSSD_API *DNSServiceRegisterRecordReply)
  *                  not initialized).
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
 (
     DNSServiceRef sdRef,
@@ -2001,6 +2070,7 @@ DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
  *
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
 (
     DNSServiceFlags flags,
@@ -2137,15 +2207,20 @@ typedef void (DNSSD_API *DNSServiceNATPortMappingReply)
 
 /* DNSServiceNATPortMappingCreate() Parameters:
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef. If the call succeeds then it
- *                  initializes the DNSServiceRef, returns kDNSServiceErr_NoError, and the nat
- *                  port mapping will last indefinitely until the client terminates the port
- *                  mapping request by passing this DNSServiceRef to DNSServiceRefDeallocate().
+ * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
+ *                  a copy of the shared connection reference that is to be used).
+ *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
+ *                  returns kDNSServiceErr_NoError, and the NAT port mapping
+ *                  will remain active indefinitely until the client terminates it
+ *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
+ *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           Currently ignored, reserved for future use.
+ * flags:           Possible values are:
+ *                  kDNSServiceFlagsShareConnection to use a shared connection.
  *
- * interfaceIndex:  The interface on which to create port mappings in a NAT gateway. Passing 0 causes
- *                  the port mapping request to be sent on the primary interface.
+ * interfaceIndex:  The interface on which to create port mappings in a NAT gateway.
+ *                  Passing 0 causes the port mapping request to be sent on the primary interface.
  *
  * protocol:        To request a port mapping, pass in kDNSServiceProtocol_UDP, or kDNSServiceProtocol_TCP,
  *                  or (kDNSServiceProtocol_UDP | kDNSServiceProtocol_TCP) to map both.
@@ -2184,6 +2259,7 @@ typedef void (DNSSD_API *DNSServiceNATPortMappingReply)
  *                  display) then pass zero for protocol, internalPort, externalPort and ttl.
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceNATPortMappingCreate
 (
     DNSServiceRef                    *sdRef,
@@ -2230,6 +2306,7 @@ DNSServiceErrorType DNSSD_API DNSServiceNATPortMappingCreate
  *
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceConstructFullName
 (
     char                            * const fullName,
@@ -2275,7 +2352,11 @@ typedef union _TXTRecordRef_t { char PrivateData[16]; char *ForceNaturalAlignmen
  *
  * If the buffer parameter is NULL, or the specified storage size is not
  * large enough to hold a key subsequently added using TXTRecordSetValue(),
- * then additional memory will be added as needed using malloc().
+ * then additional memory will be added as needed using malloc(). Note that
+ * an existing TXT record buffer should not be passed to TXTRecordCreate
+ * to create a copy of another TXT Record. The correct way to copy TXTRecordRef
+ * is creating an empty TXTRecordRef with TXTRecordCreate() first, and using
+ * TXTRecordSetValue to set the same value.  
  *
  * On some platforms, when memory is low, malloc() may fail. In this
  * case, TXTRecordSetValue() will return kDNSServiceErr_NoMemory, and this
@@ -2310,6 +2391,7 @@ typedef union _TXTRecordRef_t { char PrivateData[16]; char *ForceNaturalAlignmen
  *                  the TXTRecordRef.
  */
 
+DNSSD_EXPORT
 void DNSSD_API TXTRecordCreate
 (
     TXTRecordRef     *txtRecord,
@@ -2328,6 +2410,7 @@ void DNSSD_API TXTRecordCreate
  *
  */
 
+DNSSD_EXPORT
 void DNSSD_API TXTRecordDeallocate
 (
     TXTRecordRef     *txtRecord
@@ -2371,6 +2454,7 @@ void DNSSD_API TXTRecordDeallocate
  *                  exceed the available storage.
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API TXTRecordSetValue
 (
     TXTRecordRef     *txtRecord,
@@ -2394,6 +2478,7 @@ DNSServiceErrorType DNSSD_API TXTRecordSetValue
  *                  exist in the TXTRecordRef.
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API TXTRecordRemoveValue
 (
     TXTRecordRef     *txtRecord,
@@ -2413,6 +2498,7 @@ DNSServiceErrorType DNSSD_API TXTRecordRemoveValue
  *                  Returns 0 if the TXTRecordRef is empty.
  */
 
+DNSSD_EXPORT
 uint16_t DNSSD_API TXTRecordGetLength
 (
     const TXTRecordRef *txtRecord
@@ -2430,6 +2516,7 @@ uint16_t DNSSD_API TXTRecordGetLength
  *                  to DNSServiceUpdateRecord().
  */
 
+DNSSD_EXPORT
 const void * DNSSD_API TXTRecordGetBytesPtr
 (
     const TXTRecordRef *txtRecord
@@ -2484,6 +2571,7 @@ const void * DNSSD_API TXTRecordGetBytesPtr
  *                  Otherwise, it returns 0.
  */
 
+DNSSD_EXPORT
 int DNSSD_API TXTRecordContainsKey
 (
     uint16_t txtLen,
@@ -2513,6 +2601,7 @@ int DNSSD_API TXTRecordContainsKey
  *                  For non-empty value, valueLen will be length of value data.
  */
 
+DNSSD_EXPORT
 const void * DNSSD_API TXTRecordGetValuePtr
 (
     uint16_t txtLen,
@@ -2535,6 +2624,7 @@ const void * DNSSD_API TXTRecordGetValuePtr
  *
  */
 
+DNSSD_EXPORT
 uint16_t DNSSD_API TXTRecordGetCount
 (
     uint16_t txtLen,
@@ -2564,7 +2654,7 @@ uint16_t DNSSD_API TXTRecordGetCount
  * keyBufLen:       The size of the string buffer being supplied.
  *
  * key:             A string buffer used to store the key name.
- *                  On return, the buffer contains a null-terminated C string
+ *                  On return, the buffer contains a null-terminated C-string
  *                  giving the key name. DNS-SD TXT keys are usually
  *                  9 characters or fewer. To hold the maximum possible
  *                  key name, the buffer should be 256 bytes long.
@@ -2580,6 +2670,7 @@ uint16_t DNSSD_API TXTRecordGetCount
  *                  TXTRecordGetCount()-1.
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
 (
     uint16_t txtLen,
@@ -2620,6 +2711,8 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
  * DNSServiceSetDispatchQueue a second time to schedule the DNSServiceRef onto a different serial dispatch
  * queue. Once scheduled onto a dispatch queue a DNSServiceRef will deliver events to that queue until
  * the application no longer requires that operation and terminates it using DNSServiceRefDeallocate.
+ * Note that the call to DNSServiceRefDeallocate() must be done on the same queue originally passed 
+ * as an argument to DNSServiceSetDispatchQueue().
  *
  * service:         DNSServiceRef that was allocated and returned to the application, when the
  *                  application calls one of the DNSService API.
@@ -2632,6 +2725,7 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
  *                  queue param is invalid
  */
 
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceSetDispatchQueue
 (
     DNSServiceRef service,
@@ -2646,6 +2740,7 @@ typedef void (DNSSD_API *DNSServiceSleepKeepaliveReply)
     DNSServiceErrorType errorCode,
     void                                *context
 );
+DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
 (
     DNSServiceRef                       *sdRef,

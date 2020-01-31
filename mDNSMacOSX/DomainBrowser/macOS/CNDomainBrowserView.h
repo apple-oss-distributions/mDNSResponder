@@ -37,14 +37,18 @@ IB_DESIGNABLE
 - (void)startBrowse;
 - (void)stopBrowse;
 
+- (CGFloat)minimumHeight;
+- (void)showSelectedRow;
+- (BOOL)foundInstanceInMoreThanLocalDomain;
+
 @end
 
 @protocol CNDomainBrowserViewDelegate <NSObject>
 
 @optional
 
-- (void)bonjourBrowserDomainSelected:(NSString *)domain;
-- (void)bonjourBrowserDomainUpdate:(NSString *)defaultDomain;
+- (void)domainBrowserDomainSelected:(NSString *)domain;
+- (void)domainBrowserDomainUpdate:(NSString *)defaultDomain;
 
 @end
 

@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2018 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@
 //*************************************************************************************************************
 // Globals
 
-static mDNS mDNSStorage;       // mDNS core uses this to store its globals
+mDNS mDNSStorage;       // mDNS core uses this to store its globals
 static mDNS_PlatformSupport PlatformStorage;  // Stores this platform's globals
 #define RR_CACHE_SIZE 500
 static CacheEntity gRRCache[RR_CACHE_SIZE];
@@ -173,11 +173,12 @@ mDNSlocal void WaitForAnswer(mDNS *const m, int seconds)
     while (!StopNow)
     {
         int nfds = 0;
-        fd_set readfds;
+        fd_set readfds, writefds;
         struct timeval now, remain = end;
         int result;
 
         FD_ZERO(&readfds);
+        FD_ZERO(&writefds);
         gettimeofday(&now, NULL);
         if (remain.tv_usec < now.tv_usec) { remain.tv_usec += 1000000; remain.tv_sec--; }
         if (remain.tv_sec < now.tv_sec)
@@ -187,9 +188,9 @@ mDNSlocal void WaitForAnswer(mDNS *const m, int seconds)
         }
         remain.tv_usec -= now.tv_usec;
         remain.tv_sec  -= now.tv_sec;
-        mDNSPosixGetFDSet(m, &nfds, &readfds, &remain);
-        result = select(nfds, &readfds, NULL, NULL, &remain);
-        if (result >= 0) mDNSPosixProcessFDSet(m, &readfds);
+        mDNSPosixGetFDSet(m, &nfds, &readfds, &writefds, &remain);
+        result = select(nfds, &readfds, &writefds, NULL, &remain);
+        if (result >= 0) mDNSPosixProcessFDSet(m, &readfds, &writefds);
         else if (errno != EINTR) StopNow = 2;
     }
 }
@@ -210,17 +211,13 @@ mDNSlocal mStatus StartQuery(DNSQuestion *q, char *qname, mDNSu16 qtype, const m
     q->ForceMCast       = mDNStrue;     // Query via multicast, even for apparently uDNS names like 1.1.1.17.in-addr.arpa.
     q->ReturnIntermed   = mDNStrue;
     q->SuppressUnusable = mDNSfalse;
-    q->SearchListIndex  = 0;
     q->AppendSearchDomains = 0;
-    q->RetryWithSearchDomains = mDNSfalse;
     q->TimeoutQuestion  = 0;
     q->ValidationRequired = 0;
     q->ValidatingResponse = 0;
     q->WakeOnResolve    = 0;
-    q->UseBackgroundTrafficClass = mDNSfalse;
+    q->UseBackgroundTraffic = mDNSfalse;
     q->ProxyQuestion    = 0;
-    q->qnameOrig        = mDNSNULL;
-    q->AnonInfo         = mDNSNULL;
     q->pid              = mDNSPlatformGetPID();
     q->QuestionCallback = callback;
     q->QuestionContext  = NULL;

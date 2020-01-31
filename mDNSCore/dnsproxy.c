@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 
 #ifndef UNICAST_DISABLED
 
-mDNSexport mDNS mDNSStorage;
+extern mDNS mDNSStorage;
 
 // Implementation Notes
 //
@@ -245,7 +245,7 @@ again:
         pc->q.ValidatingResponse = 1;
     for (cr = cg->members; cr; cr = cr->next)
     {
-        if (SameNameRecordAnswersQuestion(&cr->resrec, &pc->q))
+        if (SameNameCacheRecordAnswersQuestion(cr, &pc->q))
         {
             if (first)
             {
@@ -473,11 +473,11 @@ mDNSlocal void ProxyClientCallback(mDNS *const m, DNSQuestion *question, const R
 
     if (!pc->tcp)
     {
-        mDNSSendDNSMessage(m, &m->omsg, ptr, pc->interfaceID, (UDPSocket *)pc->socket, &pc->addr, pc->port, mDNSNULL, mDNSNULL, mDNSfalse);
+        mDNSSendDNSMessage(m, &m->omsg, ptr, pc->interfaceID, mDNSNULL, (UDPSocket *)pc->socket, &pc->addr, pc->port, mDNSNULL, mDNSfalse);
     }
     else
     {
-        mDNSSendDNSMessage(m, &m->omsg, ptr, pc->interfaceID, mDNSNULL, &pc->addr, pc->port, (TCPSocket *)pc->socket, mDNSNULL, mDNSfalse);
+        mDNSSendDNSMessage(m, &m->omsg, ptr, pc->interfaceID, (TCPSocket *)pc->socket, mDNSNULL, &pc->addr, pc->port, mDNSNULL, mDNSfalse);
     }
 
 done:
@@ -515,13 +515,11 @@ mDNSlocal void SendError(void *socket, DNSMessage *const msg, const mDNSu8 *cons
     
     if (!tcp)
     {
-        mDNSSendDNSMessage(m, &m->omsg, (mDNSu8 *)&m->omsg + pktlen, InterfaceID, socket, dstaddr, dstport, mDNSNULL, mDNSNULL,
-            mDNSfalse);
+        mDNSSendDNSMessage(m, &m->omsg, (mDNSu8 *)&m->omsg + pktlen, InterfaceID, mDNSNULL, socket, dstaddr, dstport, mDNSNULL, mDNSfalse);
     }
     else
     {
-        mDNSSendDNSMessage(m, &m->omsg, (mDNSu8 *)&m->omsg + pktlen, InterfaceID, mDNSNULL, dstaddr, dstport, (TCPSocket *)socket,
-            mDNSNULL, mDNSfalse);
+        mDNSSendDNSMessage(m, &m->omsg, (mDNSu8 *)&m->omsg + pktlen, InterfaceID, (TCPSocket *)socket, mDNSNULL, dstaddr, dstport, mDNSNULL, mDNSfalse);
     }
     mDNSPlatformDisposeProxyContext(context);
 }
@@ -662,13 +660,12 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
         LogInfo("ProxyCallbackCommon: Found a duplicate for pkt from %#a:%d, ignoring this", srcaddr, mDNSVal16(srcport));
         return;
     }
-    pc = mDNSPlatformMemAllocate(sizeof(DNSProxyClient));
+    pc = (DNSProxyClient *) mDNSPlatformMemAllocateClear(sizeof(*pc));
     if (!pc)
     {
         LogMsg("ProxyCallbackCommon: Memory failure for pkt from %#a:%d, ignoring this", srcaddr, mDNSVal16(srcport));
         return;
     }
-    mDNSPlatformMemZero(pc, sizeof(DNSProxyClient));
     pc->addr = *srcaddr;
     pc->port = srcport;
     pc->msgid = msg->h.id;
@@ -686,7 +683,7 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
         }
         else
         {
-            pc->optRR = mDNSPlatformMemAllocate(optLen);
+            pc->optRR = (mDNSu8 *) mDNSPlatformMemAllocate(optLen);
             if (!pc->optRR)
             {
                 LogMsg("ProxyCallbackCommon: Memory failure for pkt from %#a:%d, ignoring this", srcaddr, mDNSVal16(srcport));

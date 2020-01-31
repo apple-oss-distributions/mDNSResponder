@@ -1,16 +1,15 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2012-2015 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2012-2019 Apple Inc. All rights reserved.
  *
  * PRIVATE DNSX CLIENT LIBRARY --FOR Apple Platforms ONLY OSX/iOS--
  * Resides in /usr/lib/libdns_services.dylib
  */
 
 #include "dns_services.h"
-#include "dns_xpc.h"
 #include <xpc/xpc.h>
 #include <Block.h>
 #include <os/log.h>
+#include "xpc_clients.h"
 
 //*************************************************************************************************************
 // Globals
@@ -19,10 +18,10 @@
 
 struct _DNSXConnRef_t
 {
-    connection_t      conn_ref;      // xpc_connection between client and daemon
-    dispatch_queue_t  lib_q;         // internal queue created in library itself
-    void              *AppCallBack;  // Callback function ptr for Client
-    dispatch_queue_t  client_q;      // Queue specified by client for scheduling its Callback
+    connection_t          conn_ref;      // xpc_connection between client and daemon
+    dispatch_queue_t      lib_q;         // internal queue created in library itself
+    DNSXEnableProxyReply  AppCallBack;   // Callback function ptr for Client
+    dispatch_queue_t      client_q;      // Queue specified by client for scheduling its Callback
 };
 
 //*************************************************************************************************************
@@ -104,7 +103,7 @@ static DNSXErrorType SendMsgToServer(DNSXConnRef connRef, xpc_object_t msg)
                     case kDNSMsg_NoError:
                         dispatch_async((connRef)->client_q, ^{
                         if (connRef->AppCallBack != NULL)
-                            ((DNSXEnableProxyReply)connRef->AppCallBack)(connRef, kDNSX_NoError);
+                            connRef->AppCallBack(connRef, kDNSX_NoError);
                         });
                         break;
                                                              
@@ -112,7 +111,7 @@ static DNSXErrorType SendMsgToServer(DNSXConnRef connRef, xpc_object_t msg)
                         os_log(OS_LOG_DEFAULT, "dns_services: SendMsgToServer: DNS Proxy already in use");
                         dispatch_async((connRef)->client_q, ^{
                         if (connRef->AppCallBack != NULL)
-                            ((DNSXEnableProxyReply)connRef->AppCallBack)(connRef, kDNSX_Busy);
+                            connRef->AppCallBack(connRef, kDNSX_Busy);
                         });
                         break;
                                                                
@@ -120,7 +119,7 @@ static DNSXErrorType SendMsgToServer(DNSXConnRef connRef, xpc_object_t msg)
                         os_log(OS_LOG_DEFAULT, "dns_services: SendMsgToServer: Unknown error");
                         dispatch_async((connRef)->client_q, ^{
                         if (connRef->AppCallBack != NULL)
-                            ((DNSXEnableProxyReply)connRef->AppCallBack)(connRef, kDNSX_UnknownErr);
+                            connRef->AppCallBack(connRef, kDNSX_UnknownErr);
                         });
                         break;
                 }
@@ -138,7 +137,7 @@ static DNSXErrorType SendMsgToServer(DNSXConnRef connRef, xpc_object_t msg)
 }
 
 // Creates a new DNSX Connection Reference(DNSXConnRef)
-static DNSXErrorType InitConnection(DNSXConnRef *connRefOut, const char *servname, dispatch_queue_t clientq, void *AppCallBack)
+static DNSXErrorType InitConnection(DNSXConnRef *connRefOut, const char *servname, dispatch_queue_t clientq, DNSXEnableProxyReply AppCallBack)
 {
     if (connRefOut == NULL)
     {
@@ -183,7 +182,7 @@ static DNSXErrorType InitConnection(DNSXConnRef *connRefOut, const char *servnam
                                  xpc_dictionary_get_string(event, XPC_ERROR_KEY_DESCRIPTION));
             dispatch_async(connRef->client_q, ^{
             if (connRef->AppCallBack != NULL)
-                ((DNSXEnableProxyReply)connRef->AppCallBack)(connRef, kDNSX_DaemonNotRunning);
+                connRef->AppCallBack(connRef, kDNSX_DaemonNotRunning);
             });
         }
                                          

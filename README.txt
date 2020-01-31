@@ -93,8 +93,8 @@ The "mDNS Core" layer in turn calls through to the "Platform Support"
 layer to send and receive the multicast UDP packets to do the actual work.
 
 Apple currently provides "Platform Support" layers for Mac OS 9, Mac OS X,
-Microsoft Windows, VxWorks, and for POSIX platforms like Linux, Solaris,
-FreeBSD, etc.
+Microsoft Windows, and for POSIX platforms like Linux, Solaris, FreeBSD,
+etc.
 
 Note: Developers writing applications for OS X do not need to incorporate
 this code into their applications, since OS X provides a system service to

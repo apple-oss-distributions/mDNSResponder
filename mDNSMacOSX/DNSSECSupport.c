@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2012-2013 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2012-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -115,7 +114,7 @@ mDNSlocal void AddTrustAnchor(mDNS *const m, const domainname *zone, mDNSu16 key
         tmp = tmp->next;
     }
 
-    ta = (TrustAnchor *)mDNSPlatformMemAllocate(sizeof(TrustAnchor));
+    ta = (TrustAnchor *) mDNSPlatformMemAllocateClear(sizeof(*ta));
     if (!ta)
     {
         LogMsg("AddTrustAnchor: malloc failure ta");
@@ -155,7 +154,7 @@ mDNSlocal mDNSu8 *ConvertDigest(char *digest, int digestType, int *diglen)
         LogMsg("ConvertDigest: digest type %d not supported", digestType);
         return mDNSNULL;
     }
-    dig = mDNSPlatformMemAllocate(*diglen);
+    dig = (mDNSu8 *) mDNSPlatformMemAllocate(*diglen);
     if (!dig)
     {
         LogMsg("ConvertDigest: malloc failure");
@@ -435,13 +434,12 @@ mDNSlocal void FetchRootTA(mDNS *const m)
 
     (void) m;
 
-    TrustAnchor *ta = (TrustAnchor *)mDNSPlatformMemAllocate(sizeof(TrustAnchor));
+    TrustAnchor *ta = (TrustAnchor *) mDNSPlatformMemAllocateClear(sizeof(*ta));
     if (!ta)
     {
         LogMsg("FetchRootTA: TrustAnchor alloc failed");
         return;
     }
-    memset(ta, 0, sizeof(TrustAnchor));
 
     url = CFURLCreateWithString(NULL, urlString, NULL);
     if (!url)
@@ -632,18 +630,18 @@ mDNSexport mStatus DNSSECPlatformInit(mDNS *const m)
 
     char *digest = "F122E47B5B7D2B6A5CC0A21EADA11D96BB9CC927";
     mDNSu8 *dig = ConvertDigest(digest, 1, &diglen);
-    AddTrustAnchor(m, testZone, 23044, 5, 1, diglen, dig);
+    if (dig) AddTrustAnchor(m, testZone, 23044, 5, 1, diglen, dig);
 
     char *digest1 = "D795AE5E1AFB200C6139474199B70EAD3F3484553FD97BE5A43704B8A4791F21";
     dig = ConvertDigest(digest1, 2, &diglen);
-    AddTrustAnchor(m, testZone, 23044, 5, 2, diglen, dig);
+    if (dig) AddTrustAnchor(m, testZone, 23044, 5, 2, diglen, dig);
 
     // Add the TA for root zone manually here. We will dynamically fetch the root TA and
     // update it shortly. If that fails e.g., disconnected from the network, we still
     // have something to work with.
     char *digest2 = "49AAC11D7B6F6446702E54A1607371607A1A41855200FD2CE1CDDE32F24E8FB5";
     dig = ConvertDigest(digest2, 2, &diglen);
-    AddTrustAnchor(m, (const domainname *)"\000", 19036, 8, 2, diglen, dig);
+    if (dig) AddTrustAnchor(m, (const domainname *)"\000", 19036, 8, 2, diglen, dig);
 
 #if !TARGET_OS_IPHONE
     DNSSECProbeQuestion.ThisQInterval = -1;

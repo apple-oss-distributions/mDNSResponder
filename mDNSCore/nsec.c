@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,7 +66,7 @@ mDNSlocal CacheRecord *NSECParentForQuestion(mDNS *const m, DNSQuestion *q)
         return mDNSNULL;
     }
     for (cr = cg->members; cr; cr = cr->next)
-        if (SameNameRecordAnswersQuestion(&cr->resrec, q))
+        if (SameNameCacheRecordAnswersQuestion(cr, q))
             return cr;
     return mDNSNULL;
 }

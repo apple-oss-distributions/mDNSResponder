@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2007-2012 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2007-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +18,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <sys/cdefs.h>
+#include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <mach/mach.h>
@@ -38,7 +38,7 @@
 #include "helper-server.h"
 #include <xpc/private.h>
 
-#if TARGET_OS_EMBEDDED
+#if TARGET_OS_IPHONE
 #define NO_SECURITYFRAMEWORK 1
 #endif
 
@@ -185,7 +185,7 @@ static mDNSBool HelperPrefsGetValueBool(CFStringRef key, mDNSBool defaultVal)
     mDNSBool result = defaultVal;
     
     boolean = CFPreferencesCopyAppValue(key, kmDNSHelperProgramArgs);
-    if (boolean)
+    if (boolean != NULL)
     {
         if (CFGetTypeID(boolean) == CFBooleanGetTypeID())
             result = CFBooleanGetValue(boolean) ? mDNStrue : mDNSfalse;
@@ -263,26 +263,35 @@ static void handle_request(xpc_object_t req)
             
         case p2p_packetfilter:
         {
+            size_t count = 0;
             pfArray_t pfports;
             pfArray_t pfprotocols;
             const char *if_name;
             uint32_t cmd;
-            uint32_t count;
+            xpc_object_t xpc_obj_port_array;
+            size_t port_array_count = 0;
+            xpc_object_t xpc_obj_protocol_array;
+            size_t protocol_array_count = 0;
             
             cmd = xpc_dictionary_get_uint64(req, "pf_opcode");
             if_name = xpc_dictionary_get_string(req, "pf_ifname");
-            count = xpc_dictionary_get_uint64(req, "pf_count");
-            
-            pfports[0]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_port0");
-            pfports[1]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_port1");
-            pfports[2]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_port2");
-            pfports[3]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_port3");
-            
-            pfprotocols[0]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_protocol0");
-            pfprotocols[1]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_protocol1");
-            pfprotocols[2]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_protocol2");
-            pfprotocols[3]  = (uint16_t)xpc_dictionary_get_uint64(req, "pf_protocol3");
-            
+            xpc_obj_port_array = xpc_dictionary_get_value(req, "xpc_obj_array_port");
+            if ((void *)xpc_obj_port_array != NULL)
+                port_array_count = xpc_array_get_count(xpc_obj_port_array);
+            xpc_obj_protocol_array = xpc_dictionary_get_value(req, "xpc_obj_array_protocol");
+            if ((void *)xpc_obj_protocol_array != NULL)
+                protocol_array_count = xpc_array_get_count(xpc_obj_protocol_array);
+            if (port_array_count != protocol_array_count)
+                break;
+            if (port_array_count > PFPortArraySize)
+                break;
+            count = port_array_count;
+
+            for (size_t i = 0; i < count; i++) {
+                pfports[i] = (uint16_t)xpc_array_get_uint64(xpc_obj_port_array, i);
+                pfprotocols[i] = (uint16_t)xpc_array_get_uint64(xpc_obj_protocol_array, i);
+            }
+
             os_log_info(log_handle,"Calling new PacketFilterControl()");
             PacketFilterControl(cmd, if_name, count, pfports, pfprotocols);
             break;
@@ -332,46 +341,28 @@ static void handle_request(xpc_object_t req)
         case set_localaddr_cacheentry:
         {
             int if_index, family;
-            
+            size_t ip_len, eth_len;
+
             if_index = xpc_dictionary_get_uint64(req, "slace_ifindex");
             family   = xpc_dictionary_get_uint64(req, "slace_family");
-            
-            const uint8_t* ip  = xpc_dictionary_get_data(req, "slace_ip", NULL);
-            const uint8_t* eth = xpc_dictionary_get_data(req, "slace_eth", NULL);
-            
+
+            const uint8_t * const ip = (const uint8_t *)xpc_dictionary_get_data(req, "slace_ip", &ip_len);
+            if (ip_len != sizeof(v6addr_t))
+            {
+                error_code = kHelperErr_ParamErr;
+                break;
+            }
+
+            const uint8_t * const eth = (const uint8_t *)xpc_dictionary_get_data(req, "slace_eth", &eth_len);
+            if (eth_len != sizeof(ethaddr_t))
+            {
+                error_code = kHelperErr_ParamErr;
+                break;
+            }
+
             os_log_info(log_handle, "Calling new SetLocalAddressCacheEntry() if_index[%d] family[%d] ", if_index, family);
 
             SetLocalAddressCacheEntry(if_index, family, ip, eth, &error_code);
-            
-            /*
-            static int v6addr_to_string(const v6addr_t addr, char *buf, size_t buflen)
-            {
-                if (NULL == inet_ntop(AF_INET6, addr, buf, buflen))
-                {
-                    os_log(log_handle, "inet_ntop failed: %s", strerror(errno));
-                    return -1;
-                }
-                else
-                {
-                    return 0;
-                }
-            }
-
-            ethaddr_t eth = { 0x33, 0x33, 0x00, 0x00, 0x00, 0x01 } ;
-            const uint8_t* slace_ip = NULL;
-            v6addr_t addr_ipv6;
-            size_t ip_len;
-            slace_ip = xpc_dictionary_get_data(req, "slace_ip", &ip_len);
-            if (slace_ip && (ip_len == sizeof(v6addr_t)))
-            {
-                os_log(log_handle, "mDNSResponderHelper: doing memcpy()");
-                memcpy(&addr_ipv6, slace_ip, ip_len);
-            }
-            char test_ipv6_str[46];
-            v6addr_to_string(addr_ipv6, test_ipv6_str, sizeof(test_ipv6_str));
-            os_log(log_handle, "mDNSResponderHelper: handle_request: set_localaddr_cacheentry: test_ipv6_str is %s", test_ipv6_str);
-            */
-                        
             break;
         }
             
@@ -379,6 +370,7 @@ static void handle_request(xpc_object_t req)
         {
             uint16_t lport, rport, win;
             uint32_t seq, ack;
+            size_t sadd6_len, dadd6_len;
             
             lport = xpc_dictionary_get_uint64(req, "send_keepalive_lport");
             rport = xpc_dictionary_get_uint64(req, "send_keepalive_rport");
@@ -386,9 +378,14 @@ static void handle_request(xpc_object_t req)
             ack   = xpc_dictionary_get_uint64(req, "send_keepalive_ack");
             win   = xpc_dictionary_get_uint64(req, "send_keepalive_win");
             
-            const uint8_t* sadd6 = xpc_dictionary_get_data(req, "send_keepalive_sadd", NULL);
-            const uint8_t* dadd6 = xpc_dictionary_get_data(req, "send_keepalive_dadd", NULL);
-            
+            const uint8_t * const sadd6 = (const uint8_t *)xpc_dictionary_get_data(req, "send_keepalive_sadd", &sadd6_len);
+            const uint8_t * const dadd6 = (const uint8_t *)xpc_dictionary_get_data(req, "send_keepalive_dadd", &dadd6_len);
+            if ((sadd6_len != sizeof(v6addr_t)) || (dadd6_len != sizeof(v6addr_t)))
+            {
+                error_code = kHelperErr_ParamErr;
+                break;
+            }
+
             os_log_info(log_handle, "helper-main: handle_request: send_keepalive: lport is[%d] rport is[%d] seq is[%d] ack is[%d] win is[%d]",
                            lport, rport, seq, ack, win);
             
@@ -403,14 +400,20 @@ static void handle_request(xpc_object_t req)
             uint32_t seq, ack;
             uint16_t win;
             int32_t  intfid;
+            size_t laddr_len, raddr_len;
             
             lport    = xpc_dictionary_get_uint64(req, "retreive_tcpinfo_lport");
             rport    = xpc_dictionary_get_uint64(req, "retreive_tcpinfo_rport");
             family   = xpc_dictionary_get_uint64(req, "retreive_tcpinfo_family");
-            
-            const uint8_t* laddr = xpc_dictionary_get_data(req, "retreive_tcpinfo_laddr", NULL);
-            const uint8_t* raddr = xpc_dictionary_get_data(req, "retreive_tcpinfo_raddr", NULL);
-            
+
+            const uint8_t * const laddr = (const uint8_t *)xpc_dictionary_get_data(req, "retreive_tcpinfo_laddr", &laddr_len);
+            const uint8_t * const raddr = (const uint8_t *)xpc_dictionary_get_data(req, "retreive_tcpinfo_raddr", &raddr_len);
+            if ((laddr_len != sizeof(v6addr_t)) || (raddr_len != sizeof(v6addr_t)))
+            {
+                error_code = kHelperErr_ParamErr;
+                break;
+            }
+
             os_log_info(log_handle, "helper-main: handle_request: retreive_tcpinfo: lport is[%d] rport is[%d] family is [%d]",
                            lport, rport, family);
             
@@ -430,33 +433,6 @@ static void handle_request(xpc_object_t req)
             break;
         }
             
-        case autotunnel_setkeys:
-        {
-            uint16_t lport, rport;
-            int replace_del;
-            const char *fqdnstr;
-            
-            lport        = xpc_dictionary_get_uint64(req, "autotunnelsetkeys_lport");
-            rport        = xpc_dictionary_get_uint64(req, "autotunnelsetkeys_rport");
-            replace_del  = xpc_dictionary_get_uint64(req, "autotunnelsetkeys_repdel");
-
-            const uint8_t* local_inner  =  xpc_dictionary_get_data(req, "autotunnelsetkeys_localinner", NULL);
-            const uint8_t* local_outer  =  xpc_dictionary_get_data(req, "autotunnelsetkeys_localouter", NULL);
-            const uint8_t* remote_inner =  xpc_dictionary_get_data(req, "autotunnelsetkeys_remoteinner", NULL);
-            const uint8_t* remote_outer =  xpc_dictionary_get_data(req, "autotunnelsetkeys_remoteouter", NULL);
-            
-            fqdnstr = xpc_dictionary_get_string(req, "autotunnelsetkeys_fqdnStr");
-            
-            os_log_info(log_handle, "helper-main: handle_request: autotunnel_setkeys: lport is[%d] rport is[%d] replace_del is [%d]",
-                        lport, rport, replace_del);
-            
-
-            HelperAutoTunnelSetKeys(replace_del, local_inner, local_outer, lport, remote_inner, remote_outer, rport, fqdnstr, &error_code);
-
-            break;
-        }
-
-        
         case keychain_getsecrets:
         {
             unsigned int num_sec  = 0;
@@ -469,13 +445,12 @@ static void handle_request(xpc_object_t req)
             
             if (response)
             {
-                xpc_dictionary_set_uint64(response, "keychain_num_secrets",   num_sec);
+                xpc_dictionary_set_uint64(response, "keychain_num_secrets", num_sec);
                 xpc_dictionary_set_data(response, "keychain_secrets", (void *)secrets, sec_cnt);
-                xpc_dictionary_set_uint64(response, "keychain_secrets_count", sec_cnt);
             }
             
-            os_log_info(log_handle,"helper-main: handle_request: keychain_getsecrets: num_secrets is %d, secrets is %lu, secrets_Cnt is %d",
-                           num_sec, secrets, sec_cnt);
+            os_log_info(log_handle,"helper-main: handle_request: keychain_getsecrets: num_secrets is %u, secrets is %lu, secrets_Cnt is %u",
+                        num_sec, secrets, sec_cnt);
             
             if (secrets)
                 vm_deallocate(mach_task_self(), secrets, sec_cnt);

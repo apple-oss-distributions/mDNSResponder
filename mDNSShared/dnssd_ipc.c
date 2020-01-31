@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2003-2011 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2003-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -102,9 +101,11 @@ uint16_t get_uint16(const char **ptr, const char *end)
 
 int put_string(const char *str, char **ptr)
 {
+    size_t len;
     if (!str) str = "";
-    strcpy(*ptr, str);
-    *ptr += strlen(str) + 1;
+    len = strlen(str) + 1;
+    memcpy(*ptr, str, len);
+    *ptr += len;
     return 0;
 }
 

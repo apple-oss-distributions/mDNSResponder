@@ -19,7 +19,6 @@
 #define __DNSSEC_H
 
 #include "CryptoAlg.h"
-#include "mDNSDebug.h"
 
 typedef enum
 {

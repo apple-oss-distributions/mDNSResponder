@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2007-2013 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,8 +49,6 @@ typedef enum
     send_keepalive = 8,
     retreive_tcpinfo = 9,
     keychain_getsecrets = 10,
-    autotunnel_setkeys = 11,
-    request_other,
 } HelperModes;
 
 typedef enum
@@ -81,6 +79,7 @@ typedef enum
     kHelperErr_RouteAdditionFailed = -17,
     kHelperErr_RacoonStartFailed = -18,
     kHelperErr_RacoonNotificationFailed = -19,
+    kHelperErr_ParamErr = -20,
 } HelperErrorCodes;
 
 
@@ -95,13 +94,6 @@ enum mDNSUpDown
     kmDNSUp = 1,
     kmDNSDown
 };
-
-enum mDNSAutoTunnelSetKeysReplaceDelete
-{
-    kmDNSAutoTunnelSetKeysReplace = 1,
-    kmDNSAutoTunnelSetKeysDelete
-};
-
 
 // helper parses the system keychain and returns the information to mDNSResponder.
 // It returns four attributes. Attributes are defined after how they show up in
@@ -128,9 +120,6 @@ extern int  mDNSSetLocalAddressCacheEntry(int ifindex, int family, const v6addr_
 extern void mDNSNotify(const char *title, const char *msg);     // Both strings are UTF-8 text
 extern void mDNSPreferencesSetName(int key, domainlabel *old, domainlabel *new);
 extern int  mDNSKeychainGetSecrets(CFArrayRef *secrets);
-extern int  mDNSAutoTunnelSetKeys(int replacedelete, v6addr_t local_inner,
-                                  v6addr_t local_outer, short local_port, v6addr_t remote_inner,
-                                  v6addr_t remote_outer, short remote_port, const char *const prefix, const domainname *const fqdn);
 extern void mDNSSendWakeupPacket(unsigned ifid, char *eth_addr, char *ip_addr, int iteration);
 extern void mDNSPacketFilterControl(uint32_t command, char * ifname, uint32_t count, pfArray_t portArray, pfArray_t protocolArray);
 extern void mDNSSendKeepalive(const v6addr_t sadd, const v6addr_t dadd, uint16_t lport, uint16_t rport, unsigned seq, unsigned ack, uint16_t win);

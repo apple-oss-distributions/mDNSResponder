@@ -315,7 +315,7 @@ public:
 		m_nAnswerFrames = pSrc->m_nAnswerFrames;
 		m_nAnswerFramesiOS = pSrc->m_nAnswerFramesiOS;
 		m_nAnswerFramesOSX = pSrc->m_nAnswerFramesOSX;
-		strcpy(m_Value,pSrc->m_Value);
+		strlcpy(m_Value,pSrc->m_Value,sizeof(m_Value));
 		m_nDeviceAskingCount = pSrc->m_nDeviceAskingCount;
 		m_nDeviceAskingiOSCount = pSrc->m_nDeviceAskingiOSCount;
 		m_nDeviceAskingOSXCount = pSrc->m_nDeviceAskingOSXCount;
@@ -415,7 +415,7 @@ public:
 		m_nFrames = pSrc->m_nFrames;
 		m_nQuestionFrames = pSrc->m_nQuestionFrames;
 		m_nAnswerFrames = pSrc->m_nAnswerFrames;
-		strcpy(m_Value,pSrc->m_Value);
+		strlcpy(m_Value,pSrc->m_Value,sizeof(m_Value));
 		m_nDeviceAskingCount = pSrc->m_nDeviceAskingCount;
 		m_nDeviceAnsweringCount = pSrc->m_nDeviceAnsweringCount;
 		m_nDeviceTotalCount = pSrc->m_nDeviceTotalCount;

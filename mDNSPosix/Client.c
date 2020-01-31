@@ -21,13 +21,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <sys/socket.h>
 
 #include "mDNSEmbeddedAPI.h" // Defines the interface to the mDNS core code
 #include "mDNSPosix.h"    // Defines the specific types needed to run mDNS on this platform
 #include "ExampleClientApp.h"
 
 // Globals
-static mDNS mDNSStorage;       // mDNS core uses this to store its globals
+mDNSexport mDNS mDNSStorage;       // mDNS core uses this to store its globals
 static mDNS_PlatformSupport PlatformStorage;  // Stores this platform's globals
 #define RR_CACHE_SIZE 500
 static CacheEntity gRRCache[RR_CACHE_SIZE];
@@ -196,7 +197,7 @@ int main(int argc, char **argv)
         MakeDomainNameFromDNSNameString(&type, gServiceType);
         MakeDomainNameFromDNSNameString(&domain, gServiceDomain);
 
-        status = mDNS_StartBrowse(&mDNSStorage, &question, &type, &domain, mDNSNULL, mDNSInterface_Any, 0, mDNSfalse, mDNSfalse, BrowseCallback, NULL);
+        status = mDNS_StartBrowse(&mDNSStorage, &question, &type, &domain, mDNSInterface_Any, 0, mDNSfalse, mDNSfalse, BrowseCallback, NULL);
 
         // Run the platform main event loop until the user types ^C.
         // The BrowseCallback routine is responsible for printing

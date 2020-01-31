@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2015-2016 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2015-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -277,8 +276,7 @@ mDNSlocal requestList_t * addToRequestList(requestList_t ** listHead, const doma
 
     if (!*ptr)
     {
-        *ptr = mDNSPlatformMemAllocate(sizeof(**ptr));
-        mDNSPlatformMemZero(*ptr, sizeof(**ptr));
+        *ptr = (requestList_t *) mDNSPlatformMemAllocateClear(sizeof(**ptr));
         (*ptr)->type = type;
         (*ptr)->flags = flags;
         AssignDomainName(&(*ptr)->name, name);
@@ -709,8 +707,7 @@ mDNSlocal responseList_t * addToResponseList(serviceHash_t peerBloomFilter, mDNS
 
     if (!*ptr)
     {
-        *ptr = mDNSPlatformMemAllocate(sizeof(**ptr));
-        mDNSPlatformMemZero(*ptr, sizeof(**ptr));
+        *ptr = (responseList_t *) mDNSPlatformMemAllocateClear(sizeof(**ptr));
         (*ptr)->peerBloomFilter = peerBloomFilter;
         memcpy(& (*ptr)->peerMac, ptrToMAC, sizeof(mDNSEthAddr));
     }

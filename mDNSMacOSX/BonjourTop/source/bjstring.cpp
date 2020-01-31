@@ -44,7 +44,8 @@ BJString& BJString::operator=(const char* str)
 
 BJString& BJString::operator=(const BJString& str)
 {
-    Set(str.GetBuffer());
+    if (&str != this)
+        Set(str.GetBuffer());
     return *this;
 }
 bool BJString::operator==(const char* str)
@@ -118,8 +119,8 @@ BJString& BJString::operator+=(const char* str)
 
     BJString temp = buffer;
     Create((BJ_UINT32)(strlen(buffer) + strlen(str)));
-    strcpy(buffer,temp.GetBuffer());
-    strcat(buffer,str);
+    strlcpy(buffer, temp.GetBuffer(), length + 1);
+    strlcat(buffer, str, length + 1);
     return *this;
 }
 BJString& BJString::operator+=(const BJString&str)
@@ -142,7 +143,7 @@ void BJString::Set(const char* str)
         len = 250;
     Create(len);
     if (buffer && str)
-           strcpy(buffer, str);
+        strlcpy(buffer, str, length + 1);
 
 }
 void BJString::Set(const char* str, BJ_UINT32 len)
@@ -164,7 +165,7 @@ void BJString::Append(const char* str, BJ_UINT32 len)
         BJString temp = buffer;
         Create((BJ_UINT32)(strlen(buffer) + strlen(str)));
         if (buffer && temp.buffer)
-            strcpy(buffer,temp.GetBuffer());
+            strlcpy(buffer, temp.GetBuffer(), length + 1);
     }
     strncat(buffer,str,len);
 }
@@ -210,15 +211,13 @@ void BJString::Format(BJ_UINT64 number,BJ_FORMAT_STYLE style)
 
 void BJString::Create(BJ_UINT32 len)
 {
-    if (length >= len)
-    {
-        if (length > 0)
-            memset(buffer, 0, len+1);
-        return;
-    }
-
     if (buffer)
     {
+        if (length >= len)
+        {
+            memset(buffer, 0, len + 1);
+            return;
+        }
         delete buffer;
         buffer = NULL;
         length = 0;

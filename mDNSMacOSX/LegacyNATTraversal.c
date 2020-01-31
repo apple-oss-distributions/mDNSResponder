@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2004-2015 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2004-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -81,13 +80,15 @@ mDNSlocal mStatus SendPortMapRequest(mDNS *m, NATTraversalInfo *n);
 // Note that this function assumes src is already NULL terminated
 mDNSlocal void AllocAndCopy(char **const dst, const char *const src)
 {
+    size_t srcLen;
     if (src == mDNSNULL) return;
-    if ((strlen((char*)src)) >= UINT32_MAX || (*dst = mDNSPlatformMemAllocate((mDNSu32)strlen((char*)src) + 1)) == mDNSNULL)
+    srcLen = strlen(src) + 1;
+    if ((srcLen > UINT32_MAX) || ((*dst = mDNSPlatformMemAllocate((mDNSu32)srcLen)) == mDNSNULL))
     {
         LogMsg("AllocAndCopy: can't allocate string");
         return;
     }
-    strcpy((char*)*dst, (char*)src);
+    memcpy(*dst, src, srcLen);
 }
 
 // This function does a simple parse of an HTTP URL that may include a hostname, port, and path
@@ -411,7 +412,7 @@ mDNSlocal void tcpConnectionCallback(TCPSocket *sock, void *context, mDNSBool Co
     mDNSBool closed  = mDNSfalse;
     long n       = 0;
     long nsent   = 0;
-    static int LNTERRORcount = 0;
+    static mDNSu32 LNTERRORcount = 0;
 
     if (tcpInfo->sock != sock)
     {
@@ -459,10 +460,18 @@ mDNSlocal void tcpConnectionCallback(TCPSocket *sock, void *context, mDNSBool Co
 exit:
     if (err || status)
     {
-        mDNS   *m = tcpInfo->m;
+        mDNS *const m = tcpInfo->m;
+        static mDNSs32 lastErrorTime = 0;
+
+        if ((LNTERRORcount > 0) && (((mDNSu32)(m->timenow - lastErrorTime)) >= ((mDNSu32)mDNSPlatformOneSecond)))
+        {
+            LNTERRORcount = 0;
+        }
+        lastErrorTime = m->timenow;
         if ((++LNTERRORcount % 1000) == 0)
         {   
-            LogMsg("ERROR: tcpconnectioncallback -> got error status %d times", LNTERRORcount);
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
+                "ERROR: tcpconnectioncallback -> got error status %u times", LNTERRORcount);
             assert(LNTERRORcount < 1000);
             // Recovery Mechanism to bail mDNSResponder out of trouble: It has been seen that we can get into 
             // this loop: [tcpKQSocketCallback()--> doTcpSocketCallback()-->tcpconnectionCallback()-->mDNSASLLog()],
@@ -524,10 +533,10 @@ mDNSlocal mStatus MakeTCPConnection(mDNS *const m, tcpLNTInfo *info, const mDNSA
     else if ((info->Reply = mDNSPlatformMemAllocate(LNT_MAXBUFSIZE)) == mDNSNULL) { LogInfo("can't allocate reply buffer"); return (mStatus_NoMemoryErr); }
 
     if (info->sock) { LogInfo("MakeTCPConnection: closing previous open connection"); mDNSPlatformTCPCloseConnection(info->sock); info->sock = mDNSNULL; }
-    info->sock = mDNSPlatformTCPSocket(kTCPSocketFlags_Zero, &srcport, mDNSfalse);
+    info->sock = mDNSPlatformTCPSocket(kTCPSocketFlags_Zero, Addr->type, &srcport, mDNSNULL, mDNSfalse);
     if (!info->sock) { LogMsg("LNT MakeTCPConnection: unable to create TCP socket"); mDNSPlatformMemFree(info->Reply); info->Reply = mDNSNULL; return(mStatus_NoMemoryErr); }
     LogInfo("MakeTCPConnection: connecting to %#a:%d", &info->Address, mDNSVal16(info->Port));
-    err = mDNSPlatformTCPConnect(info->sock, Addr, Port, mDNSNULL, 0, tcpConnectionCallback, info);
+    err = mDNSPlatformTCPConnect(info->sock, Addr, Port, 0, tcpConnectionCallback, info);
 
     if      (err == mStatus_ConnPending) err = mStatus_NoError;
     else if (err == mStatus_ConnEstablished)
@@ -740,7 +749,7 @@ mDNSexport mStatus LNT_UnmapPort(mDNS *m, NATTraversalInfo *const n)
     if (n->tcpInfo.Reply  ) { mDNSPlatformMemFree(n->tcpInfo.Reply);           n->tcpInfo.Reply   = mDNSNULL; }
 
     // make a copy of the tcpInfo that we can clean up later (the one passed in will be destroyed by the client as soon as this returns)
-    if ((info = mDNSPlatformMemAllocate(sizeof(tcpLNTInfo))) == mDNSNULL)
+    if ((info = (tcpLNTInfo *) mDNSPlatformMemAllocate(sizeof(*info))) == mDNSNULL)
     { LogInfo("LNT_UnmapPort: can't allocate tcpInfo"); return(mStatus_NoMemoryErr); }
     *info = n->tcpInfo;
 
@@ -888,9 +897,10 @@ mDNSexport void LNT_SendDiscoveryMsg(mDNS *m)
         "MX:3\r\n\r\n";
     static const mDNSAddr multicastDest = { mDNSAddrType_IPv4, { { { 239, 255, 255, 250 } } } };
 
-    mDNSu8 *buf = (mDNSu8*)&m->omsg; //m->omsg is 8952 bytes, which is plenty
+    mDNSu8 *const buf = (mDNSu8*)&m->omsg; //m->omsg is 8952 bytes, which is plenty
     unsigned int bufLen;
 
+    if (m->SleepState != SleepState_Awake) return;
     if (!mDNSIPPortIsZero(m->UPnPRouterPort))
     {
         if (m->SSDPSocket) { debugf("LNT_SendDiscoveryMsg destroying SSDPSocket %p", &m->SSDPSocket); mDNSPlatformUDPClose(m->SSDPSocket); m->SSDPSocket = mDNSNULL; }

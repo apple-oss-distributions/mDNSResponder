@@ -31,6 +31,7 @@
 #include <errno.h>          // For errno, EINTR
 #include <signal.h>
 #include <fcntl.h>
+#include <sys/socket.h>
 
 #if __APPLE__
 #undef daemon
@@ -45,7 +46,7 @@ extern int daemon(int, int);
 #pragma mark ***** Globals
 #endif
 
-static mDNS mDNSStorage;       // mDNS core uses this to store its globals
+mDNS mDNSStorage;       // mDNS core uses this to store its globals
 static mDNS_PlatformSupport PlatformStorage;  // Stores this platform's globals
 
 mDNSexport const char ProgramName[] = "mDNSResponderPosix";
@@ -428,7 +429,7 @@ static mStatus RegisterOneService(const char *  richTextName,
     domainname domain;
 
     status = mStatus_NoError;
-    thisServ = (PosixService *) malloc(sizeof(*thisServ));
+    thisServ = (PosixService *) calloc(sizeof(*thisServ), 1);
     if (thisServ == NULL) {
         status = mStatus_NoMemoryErr;
     }
@@ -439,7 +440,7 @@ static mStatus RegisterOneService(const char *  richTextName,
         status = mDNS_RegisterService(&mDNSStorage, &thisServ->coreServ,
                                       &name, &type, &domain, // Name, type, domain
                                       NULL, mDNSOpaque16fromIntVal(portNumber),
-                                      text, textLen, // TXT data, length
+                                      NULL, text, textLen, // TXT data, length
                                       NULL, 0,      // Subtypes
                                       mDNSInterface_Any, // Interface ID
                                       RegistrationCallback, thisServ, 0); // Callback, context, flags
@@ -631,13 +632,10 @@ static mStatus RegisterOurServices(void)
 static void DeregisterOurServices(void)
 {
     PosixService *thisServ;
-    int thisServID;
 
     while (gServiceList != NULL) {
         thisServ = gServiceList;
         gServiceList = thisServ->next;
-
-        thisServID = thisServ->serviceID;
 
         mDNS_DeregisterService(&mDNSStorage, &thisServ->coreServ);
 
@@ -711,7 +709,7 @@ int main(int argc, char **argv)
     while (!gStopNow)
     {
         int nfds = 0;
-        fd_set readfds;
+        fd_set readfds, writefds;
         struct timeval timeout;
         int result;
 
@@ -719,6 +717,7 @@ int main(int argc, char **argv)
         // This example client has no file descriptors of its own,
         // but a real application would call FD_SET to add them to the set here
         FD_ZERO(&readfds);
+        FD_ZERO(&writefds);
 
         // 2. Set up the timeout.
         // This example client has no other work it needs to be doing,
@@ -727,7 +726,7 @@ int main(int argc, char **argv)
         timeout.tv_usec = 0;
 
         // 3. Give the mDNSPosix layer a chance to add its information to the fd_set and timeout
-        mDNSPosixGetFDSet(&mDNSStorage, &nfds, &readfds, &timeout);
+        mDNSPosixGetFDSet(&mDNSStorage, &nfds, &readfds, &writefds, &timeout);
 
         // 4. Call select as normal
         verbosedebugf("select(%d, %d.%06d)", nfds, timeout.tv_sec, timeout.tv_usec);
@@ -764,7 +763,7 @@ int main(int argc, char **argv)
         else
         {
             // 5. Call mDNSPosixProcessFDSet to let the mDNSPosix layer do its work
-            mDNSPosixProcessFDSet(&mDNSStorage, &readfds);
+            mDNSPosixProcessFDSet(&mDNSStorage, &readfds, &writefds);
 
             // 6. This example client has no other work it needs to be doing,
             // but a real client would do its work here

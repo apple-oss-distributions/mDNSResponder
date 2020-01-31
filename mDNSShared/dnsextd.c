@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2002-2015 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2002-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -302,7 +301,7 @@ mDNSlocal TCPSocket *ConnectToServer(DaemonInfo *d)
         mDNSIPPort port = zeroIPPort;
         int fd;
 
-        TCPSocket *sock = mDNSPlatformTCPSocket(0, &port, mDNSfalse );
+        TCPSocket *sock = mDNSPlatformTCPSocket(0, mDNSAddrType_IPv4, &port, NULL, mDNSfalse );
         if ( !sock ) { LogErr("ConnectToServer", "socket");  return NULL; }
         fd = mDNSPlatformTCPGetFD( sock );
         if (!connect( fd, (struct sockaddr *)&d->ns_addr, sizeof(d->ns_addr))) return sock;
@@ -2316,7 +2315,8 @@ mDNSlocal int RecvLLQ( DaemonInfo *d, PktMsg *pkt, TCPSocket *sock )
 {
     DNSQuestion q;
     LargeCacheRecord opt;
-    int i, err = -1;
+    unsigned int i;
+    int err = -1;
     char addr[32];
     const mDNSu8 *qptr = pkt->msg.data;
     const mDNSu8 *end = (mDNSu8 *)&pkt->msg + pkt->len;
@@ -2343,7 +2343,7 @@ mDNSlocal int RecvLLQ( DaemonInfo *d, PktMsg *pkt, TCPSocket *sock )
     for (i = 0; i < pkt->msg.h.numAdditionals; i++)
     {
         aptr = GetLargeResourceRecord(NULL, &pkt->msg, aptr, end, 0, kDNSRecordTypePacketAdd, &opt);
-        if (!aptr) { Log("Malformatted LLQ from %s: could not get Additional record %d", addr, i); goto end; }
+        if (!aptr) { Log("Malformatted LLQ from %s: could not get Additional record %u", addr, i); goto end; }
         if (opt.r.resrec.RecordType != kDNSRecordTypePacketNegative && opt.r.resrec.rrtype == kDNSType_OPT) break;
     }
 
@@ -2355,7 +2355,7 @@ mDNSlocal int RecvLLQ( DaemonInfo *d, PktMsg *pkt, TCPSocket *sock )
     for (i = 0; i < pkt->msg.h.numQuestions; i++)
     {
         qptr = getQuestion(&pkt->msg, qptr, end, 0, &q);
-        if (!qptr) { Log("Malformatted LLQ from %s: cannot read question %d", addr, i); goto end; }
+        if (!qptr) { Log("Malformatted LLQ from %s: cannot read question %u", addr, i); goto end; }
         llq = &opt.r.resrec.rdata->u.opt[i].u.llq; // point into OptData at index i
         if (llq->vers != kLLQ_Vers) { Log("LLQ from %s contains bad version %d (expected %d)", addr, llq->vers, kLLQ_Vers); goto end; }
 
@@ -3100,9 +3100,9 @@ void mDNSCoreReceive(mDNS *const m, DNSMessage *const msg, const mDNSu8 *const e
                      const mDNSAddr *const dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID iid)
 { ( void ) m; ( void ) msg; ( void ) end; ( void ) srcaddr; ( void ) srcport; ( void ) dstaddr; ( void ) dstport; ( void ) iid; }
 DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, const int serviceID, const mDNSAddr *addr, const mDNSIPPort port, 
-                             mDNSu32 scoped, mDNSu32 timeout, mDNSBool cellIntf, mDNSBool isExpensive, mDNSu16 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO)
-{ ( void ) m; ( void ) d; ( void ) interface; ( void ) serviceID; ( void ) addr; ( void ) port; ( void ) scoped; ( void ) timeout; (void) cellIntf; (void) isExpensive;
- (void) resGroupID; (void) reqA; (void) reqAAAA; (void) reqDO; return(NULL); }
+                             mDNSu32 scopedType, mDNSu32 timeout, mDNSBool isCell, mDNSBool isExpensive, mDNSBool isConstrained,  mDNSBool isCLAT46, mDNSu32 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO)
+{ ( void ) m; ( void ) d; ( void ) interface; ( void ) serviceID; ( void ) addr; ( void ) port; ( void ) scopedType; ( void ) timeout; (void) isCell; (void) isExpensive; (void) isConstrained; (void) isCLAT46;
+    (void) resGroupID; (void) reqA; (void) reqAAAA; (void) reqDO; return(NULL); }
 void mDNS_AddSearchDomain(const domainname *const domain, mDNSInterfaceID InterfaceID) { (void)domain; (void) InterfaceID;}
 void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCallback *StatusCallback, const void *StatusContext)
 { ( void ) m; ( void ) fqdn; ( void ) StatusCallback; ( void ) StatusContext; }
@@ -3124,13 +3124,11 @@ void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const mDNSAd
 { ( void ) m; ( void ) v4addr; ( void ) v6addr; ( void ) router; }
 mStatus uDNS_SetupDNSConfig( mDNS *const m ) { ( void ) m; return 0; }
 mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
-                                const domainname *domain, const domainname *keyname, const char *b64keydata, const domainname *hostname, mDNSIPPort *port, mDNSBool autoTunnel)
-{ ( void ) m; ( void ) info; ( void ) domain; ( void ) keyname; ( void ) b64keydata; ( void ) hostname; (void) port; ( void ) autoTunnel; return 0; }
+                                const domainname *domain, const domainname *keyname, const char *b64keydata, const domainname *hostname, mDNSIPPort *port)
+{ ( void ) m; ( void ) info; ( void ) domain; ( void ) keyname; ( void ) b64keydata; ( void ) hostname; (void) port; return 0; }
 mStatus mDNS_StopQuery(mDNS *const m, DNSQuestion *const question) { ( void ) m; ( void ) question; return 0; }
 void TriggerEventCompletion(void);
 void TriggerEventCompletion() {}
-int AnonInfoAnswersQuestion(const ResourceRecord *const rr, const DNSQuestion *const q);
-int AnonInfoAnswersQuestion(const ResourceRecord *const rr, const DNSQuestion *const q) { ( void ) rr; ( void ) q; return 1;}
 mDNS mDNSStorage;
 
 

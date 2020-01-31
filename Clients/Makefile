@@ -29,12 +29,20 @@
 
 # On OS X the dns_sd library functions are included in libSystem, which is implicitly linked with every executable
 # If /usr/lib/libSystem.dylib exists, then we're on OS X, so we don't need also to link the "dns_sd" shared library
+ifeq "$(DEBUG)" "1"
+DEBUGFLAGS = -g
+BUILDDIR = build/debug
+else
+DEBUGFLAGS = -Os
+BUILDDIR = build/prod
+endif
+
 ifneq "$(wildcard /usr/lib/libSystem.dylib)" ""
 TARGETS = build/dns-sd build/dns-sd64
 LIBS =
 else
 TARGETS = build/dns-sd
-LIBS = -L../mDNSPosix/build/prod/ -ldns_sd
+LIBS = -L../mDNSPosix/$(BUILDDIR)/ -ldns_sd
 endif
 
 all: $(TARGETS)
@@ -46,10 +54,10 @@ build:
 	mkdir build
 
 build/dns-sd: build dns-sd.c ClientCommon.c
-	$(CC) $(filter %.c %.o, $+) $(LIBS) -I../mDNSShared -Wall -o $@
+	$(CC) $(SUPMAKE_CFLAGS) $(filter %.c %.o, $+) $(LIBS) -I../mDNSShared -Wall -o $@
 
 build/dns-sd64: build dns-sd.c ClientCommon.c
-	$(CC) $(filter %.c %.o, $+) $(LIBS) -I../mDNSShared -Wall -o $@ -m64
+	$(CC) $(SUPMAKE_CFLAGS) $(filter %.c %.o, $+) $(LIBS) -I../mDNSShared -Wall -o $@ -m64
 
 # Note, we can make a 'fat' version of dns-sd using 'lipo', as shown below, but we
 # don't, because we don't want or need a 'fat' version of dns-sd, because it will

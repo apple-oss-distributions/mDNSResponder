@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002, 2004, 2006, 2011 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2018 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,8 +31,9 @@
 #include <sys/cdefs.h>
 
 #include <netinet/in.h>
+#include <os/availability.h>
 
-#include <AvailabilityMacros.h>
+#define kDNSServiceDiscoveryDeprecatedMsg "This API was deprecated in Mac OS X 10.3 and replaced by the portable cross-platform /usr/include/dns_sd.h API"
 
 __BEGIN_DECLS
 
@@ -90,7 +91,7 @@ typedef uint32_t DNSRecordReference;
    call to the specified callout function.
    @param replyMsg The Mach message.
  */
-void DNSServiceDiscovery_handleReply(void *replyMsg);
+void DNSServiceDiscovery_handleReply(void *replyMsg) API_DEPRECATED(kDNSServiceDiscoveryDeprecatedMsg, macos(10.2, 10.3));
 
 /***************************************************************************/
 /*   DNS Service Browser   */
@@ -125,7 +126,7 @@ dns_service_discovery_ref DNSServiceBrowserCreate
     const char      *domain,
     DNSServiceBrowserReply callBack,
     void        *context
-) AVAILABLE_MAC_OS_X_VERSION_10_2_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_10_3;
+) API_DEPRECATED(kDNSServiceDiscoveryDeprecatedMsg, macos(10.2, 10.3));
 
 /***************************************************************************/
 /* Resolver requests */
@@ -158,7 +159,7 @@ dns_service_discovery_ref DNSServiceResolverResolve
     const char      *domain,
     DNSServiceResolverReply callBack,
     void        *context
-) AVAILABLE_MAC_OS_X_VERSION_10_2_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_10_3;
+) API_DEPRECATED(kDNSServiceDiscoveryDeprecatedMsg, macos(10.2, 10.3));
 
 /***************************************************************************/
 /* Mach port accessor and deallocation */
@@ -173,7 +174,7 @@ dns_service_discovery_ref DNSServiceResolverResolve
         specified or some other error occurred which prevented the
         resolution from being started.
  */
-mach_port_t DNSServiceDiscoveryMachPort(dns_service_discovery_ref dnsServiceDiscovery) AVAILABLE_MAC_OS_X_VERSION_10_2_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_10_3;
+mach_port_t DNSServiceDiscoveryMachPort(dns_service_discovery_ref dnsServiceDiscovery) API_DEPRECATED(kDNSServiceDiscoveryDeprecatedMsg, macos(10.2, 10.3));
 
 /*!
     @function DNSServiceDiscoveryDeallocate
@@ -181,7 +182,7 @@ mach_port_t DNSServiceDiscoveryMachPort(dns_service_discovery_ref dnsServiceDisc
     @param dnsServiceDiscovery A dns_service_discovery_ref as returned from a creation or enumeration call
     @result void
  */
-void DNSServiceDiscoveryDeallocate(dns_service_discovery_ref dnsServiceDiscovery) AVAILABLE_MAC_OS_X_VERSION_10_2_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_10_3;
+void DNSServiceDiscoveryDeallocate(dns_service_discovery_ref dnsServiceDiscovery) API_DEPRECATED(kDNSServiceDiscoveryDeprecatedMsg, macos(10.2, 10.3));
 
 __END_DECLS
 

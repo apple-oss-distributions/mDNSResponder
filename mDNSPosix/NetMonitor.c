@@ -314,7 +314,7 @@ mDNSlocal void SendUnicastQuery(mDNS *const m, HostEntry *entry, domainname *nam
         InterfaceID = mDNSInterface_Any;    // Send query from our unicast reply socket
     }
 
-    mDNSSendDNSMessage(m, &query, qptr, InterfaceID, mDNSNULL, target, MulticastDNSPort, mDNSNULL, mDNSNULL, mDNSfalse);
+    mDNSSendDNSMessage(m, &query, qptr, InterfaceID, mDNSNULL, mDNSNULL, target, MulticastDNSPort, mDNSNULL, mDNSfalse);
 }
 
 mDNSlocal void AnalyseHost(mDNS *const m, HostEntry *entry, const mDNSInterfaceID InterfaceID)
@@ -531,8 +531,8 @@ mDNSlocal void DisplayResourceRecord(const mDNSAddr *const srcaddr, const char *
     // Perhaps more (or all?) of the cases should do that?
     switch(pktrr->rrtype)
     {
-    case kDNSType_A:    n += mprintf("%.4a", &rd->ipv4); break;
-    case kDNSType_PTR:  n += mprintf("%##.*s", MaxWidth - n, rd->name.c); break;
+    case kDNSType_A:    mprintf("%.4a", &rd->ipv4); break;
+    case kDNSType_PTR:  mprintf("%##.*s", MaxWidth - n, rd->name.c); break;
     case kDNSType_HINFO:    // same as kDNSType_TXT below
     case kDNSType_TXT:  {
         mDNSu8 *t = rd->txt.c;
@@ -556,10 +556,10 @@ mDNSlocal void DisplayResourceRecord(const mDNSAddr *const srcaddr, const char *
             if (t < rdend && t[0]) { *p++ = '\\'; *p++ = ' '; }
         }
         *p++ = 0;
-        n += mprintf("%.*s", MaxWidth - n, buffer);
+        mprintf("%.*s", MaxWidth - n, buffer);
     } break;
-    case kDNSType_AAAA: n += mprintf("%.16a", &rd->ipv6); break;
-    case kDNSType_SRV:  n += mprintf("%##s:%d", rd->srv.target.c, mDNSVal16(rd->srv.port)); break;
+    case kDNSType_AAAA: mprintf("%.16a", &rd->ipv6); break;
+    case kDNSType_SRV:  mprintf("%##s:%d", rd->srv.target.c, mDNSVal16(rd->srv.port)); break;
     case kDNSType_OPT:  {
         char b[MaxMsg];
         // Quick hack: we don't want the prefix that GetRRDisplayString_rdb puts at the start of its
@@ -567,14 +567,14 @@ mDNSlocal void DisplayResourceRecord(const mDNSAddr *const srcaddr, const char *
         // length of that prefix and strip that many bytes off the beginning of the string we display.
         mDNSu32 striplen = mDNS_snprintf(b, MaxMsg-1, "%4d %##s %s ", pktrr->rdlength, pktrr->name->c, DNSTypeName(pktrr->rrtype));
         GetRRDisplayString_rdb(pktrr, &pktrr->rdata->u, b);
-        n += mprintf("%.*s", MaxWidth - n, b + striplen);
+        mprintf("%.*s", MaxWidth - n, b + striplen);
     } break;
     case kDNSType_NSEC: {
         char b[MaxMsg];
         // See the quick hack above
         mDNSu32 striplen = mDNS_snprintf(b, MaxMsg-1, "%4d %##s %s ", pktrr->rdlength, pktrr->name->c, DNSTypeName(pktrr->rrtype));
         GetRRDisplayString_rdb(pktrr, &pktrr->rdata->u, b);
-        n += mprintf("%s", b+striplen);
+        mprintf("%s", b+striplen);
     } break;
     default:            {
         mDNSu8 *s = rd->data;
@@ -593,7 +593,7 @@ mDNSlocal void DisplayResourceRecord(const mDNSAddr *const srcaddr, const char *
             s++;
         }
         *p++ = 0;
-        n += mprintf("%.*s", MaxWidth - n, buffer);
+        mprintf("%.*s", MaxWidth - n, buffer);
     } break;
     }
 

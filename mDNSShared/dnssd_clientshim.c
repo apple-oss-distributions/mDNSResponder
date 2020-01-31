@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+/*
+ * Copyright (c) 2003-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +24,8 @@
 
 #include "dns_sd.h"             // Defines the interface to the client layer above
 #include "mDNSEmbeddedAPI.h"        // The interface we're building on top of
+#include <sys/socket.h>
+#include <netinet/in.h>
 extern mDNS mDNSStorage;        // We need to pass the address of this storage to the lower-layer functions
 
 #if MDNS_BUILDINGSHAREDLIBRARY || MDNS_BUILDINGSTUBLIBRARY
@@ -87,6 +88,16 @@ typedef struct
     DNSQuestion q;
 } mDNS_DirectOP_QueryRecord;
 
+typedef struct
+{
+    mDNS_DirectOP_Dispose     *disposefn;
+    DNSServiceGetAddrInfoReply callback;
+    void                      *context;
+    mDNSu32                    interfaceIndex;
+    DNSQuestion                a;
+    DNSQuestion                aaaa;
+} mDNS_DirectOP_GetAddrInfo;
+
 dnssd_sock_t DNSServiceRefSockFD(DNSServiceRef sdRef)
 {
     (void)sdRef;    // Unused
@@ -104,6 +115,19 @@ void DNSServiceRefDeallocate(DNSServiceRef sdRef)
     mDNS_DirectOP *op = (mDNS_DirectOP *)sdRef;
     //LogMsg("DNSServiceRefDeallocate");
     op->disposefn(op);
+}
+
+static mDNSInterfaceID DNSServiceInterfaceIndexToID(mDNSu32 interfaceIndex, DNSServiceFlags *flags)
+{
+    // Map kDNSServiceInterfaceIndexP2P to kDNSServiceInterfaceIndexAny with the kDNSServiceFlagsIncludeP2P
+    // flag set so that the resolve will run over P2P interfaces that are not yet created.
+    if (interfaceIndex == kDNSServiceInterfaceIndexP2P)
+    {
+        LogOperation("handle_resolve_request: mapping kDNSServiceInterfaceIndexP2P to kDNSServiceInterfaceIndexAny + kDNSServiceFlagsIncludeP2P");
+        if (flags != mDNSNULL) *flags |= kDNSServiceFlagsIncludeP2P;
+        interfaceIndex = kDNSServiceInterfaceIndexAny;
+    }
+    return mDNSPlatformInterfaceIDfromInterfaceIndex(&mDNSStorage, interfaceIndex);
 }
 
 //*************************************************************************************************************
@@ -245,7 +269,7 @@ DNSServiceErrorType DNSServiceRegister
     // Allocate memory, and handle failure
     if (size < txtLen)
         size = txtLen;
-    x = (mDNS_DirectOP_Register *)mDNSPlatformMemAllocate(sizeof(*x) - sizeof(RDataBody) + size);
+    x = (mDNS_DirectOP_Register *) mDNSPlatformMemAllocateClear(sizeof(*x) - sizeof(RDataBody) + size);
     if (!x) { err = mStatus_NoMemoryErr; errormsg = "No memory"; goto fail; }
 
     // Set up object
@@ -261,6 +285,7 @@ DNSServiceErrorType DNSServiceRegister
     err = mDNS_RegisterService(&mDNSStorage, &x->s,
                                &x->name, &t, &d, // Name, type, domain
                                &x->host, port, // Host and port
+							   mDNSNULL,
                                txtRecord, txtLen, // TXT data, length
                                SubTypes, NumSubTypes, // Subtypes
                                mDNSInterface_Any, // Interface ID
@@ -402,7 +427,7 @@ DNSServiceErrorType DNSServiceBrowse
     if (!MakeDomainNameFromDNSNameString(&d, *domain ? domain : "local.")) { errormsg = "Illegal domain";  goto badparam; }
 
     // Allocate memory, and handle failure
-    x = (mDNS_DirectOP_Browse *)mDNSPlatformMemAllocate(sizeof(*x));
+    x = (mDNS_DirectOP_Browse *) mDNSPlatformMemAllocateClear(sizeof(*x));
     if (!x) { err = mStatus_NoMemoryErr; errormsg = "No memory"; goto fail; }
 
     // Set up object
@@ -412,7 +437,7 @@ DNSServiceErrorType DNSServiceBrowse
     x->q.QuestionContext = x;
 
     // Do the operation
-    err = mDNS_StartBrowse(&mDNSStorage, &x->q, &t, &d, mDNSNULL, mDNSInterface_Any, flags, (flags & kDNSServiceFlagsForceMulticast) != 0, (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0, FoundInstance, x);
+    err = mDNS_StartBrowse(&mDNSStorage, &x->q, &t, &d, mDNSInterface_Any, flags, (flags & kDNSServiceFlagsForceMulticast) != 0, (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0, FoundInstance, x);
     if (err) { mDNSPlatformMemFree(x); errormsg = "mDNS_StartBrowse"; goto fail; }
 
     // Succeeded: Wrap up and return
@@ -479,9 +504,6 @@ DNSServiceErrorType DNSServiceResolve
     domainname t, d, srv;
     mDNS_DirectOP_Resolve *x;
 
-    (void)flags;            // Unused
-    (void)interfaceIndex;   // Unused
-
     // Check parameters
     if (!name[0]    || !MakeDomainLabelFromLiteralString(&n, name  )) { errormsg = "Bad Instance Name"; goto badparam; }
     if (!regtype[0] || !MakeDomainNameFromDNSNameString(&t, regtype)) { errormsg = "Bad Service Type";  goto badparam; }
@@ -489,7 +511,7 @@ DNSServiceErrorType DNSServiceResolve
     if (!ConstructServiceName(&srv, &n, &t, &d))                      { errormsg = "Bad Name";          goto badparam; }
 
     // Allocate memory, and handle failure
-    x = (mDNS_DirectOP_Resolve *)mDNSPlatformMemAllocate(sizeof(*x));
+    x = (mDNS_DirectOP_Resolve *) mDNSPlatformMemAllocateClear(sizeof(*x));
     if (!x) { err = mStatus_NoMemoryErr; errormsg = "No memory"; goto fail; }
 
     // Set up object
@@ -500,9 +522,8 @@ DNSServiceErrorType DNSServiceResolve
     x->TXT       = mDNSNULL;
 
     x->qSRV.ThisQInterval       = -1;       // So that DNSServiceResolveDispose() knows whether to cancel this question
-    x->qSRV.InterfaceID         = mDNSInterface_Any;
-    x->qSRV.flags               = 0;
-    x->qSRV.Target              = zeroAddr;
+    x->qSRV.InterfaceID         = DNSServiceInterfaceIndexToID(interfaceIndex, &flags);
+    x->qSRV.flags               = flags;
     AssignDomainName(&x->qSRV.qname, &srv);
     x->qSRV.qtype               = kDNSType_SRV;
     x->qSRV.qclass              = kDNSClass_IN;
@@ -511,25 +532,20 @@ DNSServiceErrorType DNSServiceResolve
     x->qSRV.ForceMCast          = mDNSfalse;
     x->qSRV.ReturnIntermed      = mDNSfalse;
     x->qSRV.SuppressUnusable    = mDNSfalse;
-    x->qSRV.SearchListIndex     = 0;
     x->qSRV.AppendSearchDomains = 0;
-    x->qSRV.RetryWithSearchDomains = mDNSfalse;
     x->qSRV.TimeoutQuestion     = 0;
     x->qSRV.WakeOnResolve       = 0;
-    x->qSRV.UseBackgroundTrafficClass = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
+    x->qSRV.UseBackgroundTraffic = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
     x->qSRV.ValidationRequired  = 0;
     x->qSRV.ValidatingResponse  = 0;
     x->qSRV.ProxyQuestion       = 0;
-    x->qSRV.qnameOrig           = mDNSNULL;
-    x->qSRV.AnonInfo            = mDNSNULL;
     x->qSRV.pid                 = mDNSPlatformGetPID();
     x->qSRV.QuestionCallback    = FoundServiceInfo;
     x->qSRV.QuestionContext     = x;
 
     x->qTXT.ThisQInterval       = -1;       // So that DNSServiceResolveDispose() knows whether to cancel this question
-    x->qTXT.InterfaceID         = mDNSInterface_Any;
-    x->qTXT.flags               = 0;
-    x->qTXT.Target              = zeroAddr;
+    x->qTXT.InterfaceID         = DNSServiceInterfaceIndexToID(interfaceIndex, mDNSNULL);
+    x->qTXT.flags               = flags;
     AssignDomainName(&x->qTXT.qname, &srv);
     x->qTXT.qtype               = kDNSType_TXT;
     x->qTXT.qclass              = kDNSClass_IN;
@@ -538,17 +554,13 @@ DNSServiceErrorType DNSServiceResolve
     x->qTXT.ForceMCast          = mDNSfalse;
     x->qTXT.ReturnIntermed      = mDNSfalse;
     x->qTXT.SuppressUnusable    = mDNSfalse;
-    x->qTXT.SearchListIndex     = 0;
     x->qTXT.AppendSearchDomains = 0;
-    x->qTXT.RetryWithSearchDomains = mDNSfalse;
     x->qTXT.TimeoutQuestion     = 0;
     x->qTXT.WakeOnResolve       = 0;
-    x->qTXT.UseBackgroundTrafficClass = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
+    x->qTXT.UseBackgroundTraffic = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
     x->qTXT.ValidationRequired  = 0;
     x->qTXT.ValidatingResponse  = 0;
     x->qTXT.ProxyQuestion       = 0;
-    x->qTXT.qnameOrig           = mDNSNULL;
-    x->qTXT.AnonInfo            = mDNSNULL;
     x->qTXT.pid                 = mDNSPlatformGetPID();
     x->qTXT.QuestionCallback    = FoundServiceInfo;
     x->qTXT.QuestionContext     = x;
@@ -637,25 +649,22 @@ mDNSlocal void DNSServiceQueryRecordResponse(mDNS *const m, DNSQuestion *questio
 
 DNSServiceErrorType DNSServiceQueryRecord
 (
-    DNSServiceRef                       *sdRef,
-    DNSServiceFlags flags,
-    uint32_t interfaceIndex,
-    const char                          *fullname,
-    uint16_t rrtype,
-    uint16_t rrclass,
+    DNSServiceRef             *sdRef,
+    DNSServiceFlags            flags,
+    uint32_t                   interfaceIndex,
+    const char                *fullname,
+    uint16_t                   rrtype,
+    uint16_t                   rrclass,
     DNSServiceQueryRecordReply callback,
-    void                                *context  /* may be NULL */
+    void                      *context  /* may be NULL */
 )
 {
     mStatus err = mStatus_NoError;
     const char *errormsg = "Unknown";
     mDNS_DirectOP_QueryRecord *x;
 
-    (void)flags;            // Unused
-    (void)interfaceIndex;   // Unused
-
     // Allocate memory, and handle failure
-    x = (mDNS_DirectOP_QueryRecord *)mDNSPlatformMemAllocate(sizeof(*x));
+    x = (mDNS_DirectOP_QueryRecord *) mDNSPlatformMemAllocateClear(sizeof(*x));
     if (!x) { err = mStatus_NoMemoryErr; errormsg = "No memory"; goto fail; }
 
     // Set up object
@@ -663,32 +672,27 @@ DNSServiceErrorType DNSServiceQueryRecord
     x->callback  = callback;
     x->context   = context;
 
-    x->q.ThisQInterval       = -1;      // So that DNSServiceResolveDispose() knows whether to cancel this question
-    x->q.InterfaceID         = mDNSInterface_Any;
-    x->q.flags               = flags;
-    x->q.Target              = zeroAddr;
+    x->q.ThisQInterval        = -1;      // So that DNSServiceResolveDispose() knows whether to cancel this question
+    x->q.InterfaceID          = DNSServiceInterfaceIndexToID(interfaceIndex, &flags);
+    x->q.flags                = flags;
     MakeDomainNameFromDNSNameString(&x->q.qname, fullname);
-    x->q.qtype               = rrtype;
-    x->q.qclass              = rrclass;
-    x->q.LongLived           = (flags & kDNSServiceFlagsLongLivedQuery) != 0;
-    x->q.ExpectUnique        = mDNSfalse;
-    x->q.ForceMCast          = (flags & kDNSServiceFlagsForceMulticast) != 0;
-    x->q.ReturnIntermed      = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
-    x->q.SuppressUnsable     = (flags & kDNSServiceFlagsSuppressUnusable) != 0;
-    x->q.SearchListIndex     = 0;
-    x->q.AppendSearchDomains = 0;
-    x->q.RetryWithSearchDomains = mDNSfalse;
-    x->q.TimeoutQuestion     = 0;
-    x->q.WakeOnResolve       = 0;
-    x->q.UseBackgroundTrafficClass = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
-    x->q.ValidationRequired  = 0;
-    x->q.ValidatingResponse  = 0;
-    x->q.ProxyQuestion       = 0;
-    x->q.qnameOrig           = mDNSNULL;
-    x->q.AnonInfo            = mDNSNULL;
-    x->q.pid                 = mDNSPlatformGetPID();
-    x->q.QuestionCallback    = DNSServiceQueryRecordResponse;
-    x->q.QuestionContext     = x;
+    x->q.qtype                = rrtype;
+    x->q.qclass               = rrclass;
+    x->q.LongLived            = (flags & kDNSServiceFlagsLongLivedQuery) != 0;
+    x->q.ExpectUnique         = mDNSfalse;
+    x->q.ForceMCast           = (flags & kDNSServiceFlagsForceMulticast) != 0;
+    x->q.ReturnIntermed       = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
+    x->q.SuppressUnusable     = (flags & kDNSServiceFlagsSuppressUnusable) != 0;
+    x->q.AppendSearchDomains  = 0;
+    x->q.TimeoutQuestion      = 0;
+    x->q.WakeOnResolve        = 0;
+    x->q.UseBackgroundTraffic = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
+    x->q.ValidationRequired   = 0;
+    x->q.ValidatingResponse   = 0;
+    x->q.ProxyQuestion        = 0;
+    x->q.pid                  = mDNSPlatformGetPID();
+    x->q.QuestionCallback     = DNSServiceQueryRecordResponse;
+    x->q.QuestionContext      = x;
 
     err = mDNS_StartQuery(&mDNSStorage, &x->q);
     if (err) { DNSServiceResolveDispose((mDNS_DirectOP*)x); errormsg = "mDNS_StartQuery"; goto fail; }
@@ -704,71 +708,184 @@ fail:
 
 //*************************************************************************************************************
 // DNSServiceGetAddrInfo
+//
 
 static void DNSServiceGetAddrInfoDispose(mDNS_DirectOP *op)
 {
     mDNS_DirectOP_GetAddrInfo *x = (mDNS_DirectOP_GetAddrInfo*)op;
-    if (x->aQuery) DNSServiceRefDeallocate(x->aQuery);
+    if (x->a.ThisQInterval >= 0) mDNS_StopQuery(&mDNSStorage, &x->a);
+    if (x->aaaa.ThisQInterval >= 0) mDNS_StopQuery(&mDNSStorage, &x->aaaa);
     mDNSPlatformMemFree(x);
 }
 
-static void DNSSD_API DNSServiceGetAddrInfoResponse(
-    DNSServiceRef inRef,
-    DNSServiceFlags inFlags,
-    uint32_t inInterfaceIndex,
-    DNSServiceErrorType inErrorCode,
-    const char *        inFullName,
-    uint16_t inRRType,
-    uint16_t inRRClass,
-    uint16_t inRDLen,
-    const void *        inRData,
-    uint32_t inTTL,
-    void *              inContext )
+mDNSlocal void DNSServiceGetAddrInfoResponse(mDNS *const m, DNSQuestion *question,
+                                             const ResourceRecord *const answer, QC_result addRecord)
 {
-    mDNS_DirectOP_GetAddrInfo *     x = (mDNS_DirectOP_GetAddrInfo*)inContext;
-    struct sockaddr_in sa4;
+    mDNS_DirectOP_GetAddrInfo *x = (mDNS_DirectOP_GetAddrInfo*)question->QuestionContext;
+    char fullname[MAX_ESCAPED_DOMAIN_NAME];
 
-    mDNSPlatformMemZero(&sa4, sizeof(sa4));
-    if (inErrorCode == kDNSServiceErr_NoError && inRRType == kDNSServiceType_A)
+    struct sockaddr_storage sas;
+	struct sockaddr_in *sin = (struct sockaddr_in *)&sas;
+	struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&sas;
+    void *sa_ap = mDNSNULL;
+    int sa_as = 0;
+    mStatus err = mStatus_NoError;
+
+    (void)m;    // Unused
+
+	mDNSPlatformMemZero(&sas, sizeof sas);
+
+    ConvertDomainNameToCString(answer->name, fullname);
+
+    if (addRecord == QC_suppressed || answer->RecordType == kDNSRecordTypePacketNegative)
     {
-        sa4.sin_family = AF_INET;
-        mDNSPlatformMemCopy(&sa4.sin_addr.s_addr, inRData, 4);
+        err = mStatus_NoSuchRecord;
+    }
+        
+    // There are three checks here for bad data: class != IN, RRTYPE not in {A,AAAA} and wrong length.
+    // None of these should be possible, because the cache code wouldn't cache malformed data and wouldn't
+    // return records we didn't ask for, but it doesn't hurt to check.
+    if (answer->rrclass != kDNSServiceClass_IN)
+    {
+        LogMsg("DNSServiceGetAddrInfoResponse: response of class %d received, which is bogus", answer->rrclass);
+    totally_invalid:
+        if (x->a.ThisQInterval >= 0)
+        {
+            sin->sin_family = AF_INET;
+#ifndef NOT_HAVE_SA_LEN
+            sin->sin_len = sizeof *sin;
+#endif
+            x->callback((DNSServiceRef)x, 0, x->interfaceIndex, kDNSServiceErr_Invalid, fullname,
+                        (const struct sockaddr *)&sas, 0, x->context);
+        }
+        if (x->aaaa.ThisQInterval >= 0)
+        {
+            sin6->sin6_family = AF_INET6;
+#ifndef NOT_HAVE_SA_LEN
+            sin6->sin6_len = sizeof *sin6;
+#endif
+            x->callback((DNSServiceRef)x, 0, x->interfaceIndex, kDNSServiceErr_Invalid, fullname,
+                        (const struct sockaddr *)&sas, 0, x->context);
+        }
+        return;
+    }
+    else if (answer->rrtype == kDNSServiceType_A)
+    {
+        sin->sin_family = AF_INET;
+#ifndef NOT_HAVE_SA_LEN
+        sin->sin_len = sizeof *sin;
+#endif
+        sa_ap = &sin->sin_addr;
+        sa_as = sizeof sin->sin_addr.s_addr;
+    }
+    else if (answer->rrtype == kDNSServiceType_AAAA)
+    {
+        sin6->sin6_family = AF_INET6;
+#ifndef NOT_HAVE_SA_LEN
+        sin6->sin6_len = sizeof *sin6;
+#endif
+        sa_ap = &sin6->sin6_addr;
+        sa_as = sizeof sin6->sin6_addr.s6_addr;
+    }
+    else
+    {
+        LogMsg("DNSServiceGetAddrInfoResponse: response of type %d received, which is bogus", answer->rrtype);
+        goto totally_invalid;
+    }
+    
+    if (err == kDNSServiceErr_NoError && sa_ap != mDNSNULL)
+    {
+        if (err == mStatus_NoError)
+        {
+            if (answer->rdlength == sa_as)
+            {
+                mDNSPlatformMemCopy(sa_ap, answer->rdata->u.data, answer->rdlength);
+            }
+            else
+            {
+                LogMsg("DNSServiceGetAddrInfoResponse: %s rrtype with length %d received",
+                       answer->rrtype == kDNSServiceType_A ? "A" : "AAAA", answer->rdlength);
+                goto totally_invalid;
+            }
+        }
     }
 
-    x->callback((DNSServiceRef)x, inFlags, inInterfaceIndex, inErrorCode, inFullName,
-                (const struct sockaddr *) &sa4, inTTL, x->context);
+    x->callback((DNSServiceRef)x, addRecord ? kDNSServiceFlagsAdd : (DNSServiceFlags)0, x->interfaceIndex, err,
+                fullname, (const struct sockaddr *)&sas, answer->rroriginalttl, x->context);
 }
 
 DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo(
-    DNSServiceRef *             outRef,
-    DNSServiceFlags inFlags,
-    uint32_t inInterfaceIndex,
-    DNSServiceProtocol inProtocol,
-    const char *                inHostName,
+    DNSServiceRef             *outRef,
+    DNSServiceFlags            inFlags,
+    uint32_t                   inInterfaceIndex,
+    DNSServiceProtocol         inProtocol,
+    const char                *inHostName,
     DNSServiceGetAddrInfoReply inCallback,
-    void *                      inContext )
+    void                      *inContext )
 {
-    const char *                    errormsg = "Unknown";
-    DNSServiceErrorType err;
-    mDNS_DirectOP_GetAddrInfo *     x;
+    const char                *errormsg = "Unknown";
+    DNSServiceErrorType        err;
+    mDNS_DirectOP_GetAddrInfo *x;
 
     // Allocate memory, and handle failure
-    x = (mDNS_DirectOP_GetAddrInfo *)mDNSPlatformMemAllocate(sizeof(*x));
+    x = (mDNS_DirectOP_GetAddrInfo *) mDNSPlatformMemAllocateClear(sizeof(*x));
     if (!x) { err = mStatus_NoMemoryErr; errormsg = "No memory"; goto fail; }
 
     // Set up object
-    x->disposefn = DNSServiceGetAddrInfoDispose;
-    x->callback  = inCallback;
-    x->context   = inContext;
-    x->aQuery    = mDNSNULL;
+    x->disposefn      = DNSServiceGetAddrInfoDispose;
+    x->callback       = inCallback;
+    x->context        = inContext;
+    x->interfaceIndex = inInterfaceIndex;
 
-    // Start the query.
-    // (It would probably be more efficient to code this using mDNS_StartQuery directly,
-    // instead of wrapping DNSServiceQueryRecord, which then unnecessarily allocates
-    // more memory and then just calls through to mDNS_StartQuery. -- SC June 2010)
-    err = DNSServiceQueryRecord(&x->aQuery, inFlags, inInterfaceIndex, inHostName, kDNSServiceType_A,
-                                kDNSServiceClass_IN, DNSServiceGetAddrInfoResponse, x);
-    if (err) { DNSServiceGetAddrInfoDispose((mDNS_DirectOP*)x); errormsg = "DNSServiceQueryRecord"; goto fail; }
+    // Validate and default the protocols.
+    if ((inProtocol & ~(kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6)) != 0)
+    {
+        err = mStatus_BadParamErr;
+        errormsg = "Unsupported protocol";
+        goto fail;
+    }
+    // In theory this API checks to see if we have a routable IPv6 address, but 
+    if ((inProtocol & (kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6)) == 0)
+    {
+        inProtocol = kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6;
+        inFlags |= kDNSServiceFlagsSuppressUnusable;
+    }
+    
+    x->a.ThisQInterval        = -1;      // So we know whether to cancel this question
+    x->a.InterfaceID          = DNSServiceInterfaceIndexToID(inInterfaceIndex, &inFlags);
+    x->a.flags                = inFlags;
+    MakeDomainNameFromDNSNameString(&x->a.qname, inHostName);
+    x->a.qtype                = kDNSType_A;
+    x->a.qclass               = kDNSClass_IN;
+    x->a.LongLived            = (inFlags & kDNSServiceFlagsLongLivedQuery) != 0;
+    x->a.ExpectUnique         = mDNSfalse;
+    x->a.ForceMCast           = (inFlags & kDNSServiceFlagsForceMulticast) != 0;
+    x->a.ReturnIntermed       = (inFlags & kDNSServiceFlagsReturnIntermediates) != 0;
+    x->a.SuppressUnusable     = (inFlags & kDNSServiceFlagsSuppressUnusable) != 0;
+    x->a.AppendSearchDomains  = 0;
+    x->a.TimeoutQuestion      = 0;
+    x->a.WakeOnResolve        = 0;
+    x->a.UseBackgroundTraffic = (inFlags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
+    x->a.ValidationRequired   = 0;
+    x->a.ValidatingResponse   = 0;
+    x->a.ProxyQuestion        = 0;
+    x->a.pid                  = mDNSPlatformGetPID();
+    x->a.QuestionCallback     = DNSServiceGetAddrInfoResponse;
+    x->a.QuestionContext      = x;
+
+	x->aaaa = x->a;
+	x->aaaa.qtype = kDNSType_AAAA;
+
+    if (inProtocol & kDNSServiceProtocol_IPv4)
+    {
+        err = mDNS_StartQuery(&mDNSStorage, &x->a);
+        if (err) { DNSServiceResolveDispose((mDNS_DirectOP*)x); errormsg = "mDNS_StartQuery"; goto fail; }
+    }
+    if (inProtocol & kDNSServiceProtocol_IPv6)
+    {
+        err = mDNS_StartQuery(&mDNSStorage, &x->aaaa);
+        if (err) { DNSServiceResolveDispose((mDNS_DirectOP*)x); errormsg = "mDNS_StartQuery"; goto fail; }
+    }
 
     *outRef = (DNSServiceRef)x;
     return(mStatus_NoError);
@@ -807,5 +924,13 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
     return(kDNSServiceErr_Unsupported);
 }
 
+#endif // !MDNS_BUILDINGSTUBLIBRARY
 
-#endif  // !MDNS_BUILDINGSTUBLIBRARY
+// Local Variables:
+// mode: C
+// tab-width: 4
+// c-file-style: "bsd"
+// c-basic-offset: 4
+// fill-column: 108
+// indent-tabs-mode: nil
+// End:

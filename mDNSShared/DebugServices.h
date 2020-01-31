@@ -28,10 +28,6 @@
 
 #include    "CommonServices.h"
 
-#if ( TARGET_OS_VXWORKS )
-    #include    "logLib.h"
-#endif
-
 #if 0
 #pragma mark == Settings ==
 #endif
@@ -1245,30 +1241,6 @@ typedef uint32_t DebugPropertyTag;
     #else
         #define DebugNSLog                  while( 0 )
     #endif
-#endif
-
-//---------------------------------------------------------------------------------------------------------------------------
-/*!	@defined	DebugLogMsg
-
-    @abstract	Debug-only macro for the VxWorks logMsg function.
- */
-
-#if ( TARGET_OS_VXWORKS )
-    #if ( DEBUG )
-        #define DebugLogMsg( LEVEL, FORMAT, P1, P2, P3, P4, P5, P6 )                            \
-    do                                                                                  \
-    {                                                                                   \
-        if( ( inLevel >= gDebugPrintLevelMin ) || ( inLevel <= gDebugPrintLevelMax ) )  \
-        {                                                                               \
-            logMsg( ( FORMAT ), ( P1 ), ( P2 ), ( P3 ), ( P4 ), ( P5 ), ( P6 ) );       \
-        }                                                                               \
-                                                                                                \
-    }   while( 0 )
-    #else
-        #define DebugLogMsg( LEVEL, FORMAT, P1, P2, P3, P4, P5, P6 )
-    #endif
-#else
-    #define DebugLogMsg     dlog
 #endif
 
 #if 0

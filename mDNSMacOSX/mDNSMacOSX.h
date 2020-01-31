@@ -1,6 +1,6 @@
-/* -*- Mode: C; tab-width: 4 -*-
+/* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2018 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,8 @@ extern "C" {
 #include <IOKit/pwr_mgt/IOPMLibPrivate.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include "mDNSEmbeddedAPI.h"  // for domain name structure
+#include "mDNSEmbeddedAPI.h"        // for domain name structure
+#include "mdns_private.h"           // for mdns_interface_monitor_t struct
 
 #include <net/if.h>
 #include <os/log.h>
@@ -39,10 +40,9 @@ extern "C" {
 #include <dispatch/private.h>
 #endif
 
-#if TARGET_OS_EMBEDDED
+#if TARGET_OS_IPHONE
 #define NO_SECURITYFRAMEWORK 1
 #define NO_CFUSERNOTIFICATION 1
-#include <MobileGestalt.h> // for IsAppleTV()
 #endif
 
 #ifndef NO_SECURITYFRAMEWORK
@@ -107,22 +107,33 @@ typedef enum
 
 struct TCPSocket_struct
 {
-    TCPSocketFlags flags;       // MUST BE FIRST FIELD -- mDNSCore expects every TCPSocket_struct to begin with TCPSocketFlags flags
+    mDNSIPPort port;                // MUST BE FIRST FIELD -- mDNSCore expects every TCPSocket_struct to begin with mDNSIPPort
+    TCPSocketFlags flags;           // MUST BE SECOND FIELD -- mDNSCore expects every TCPSocket_struct have TCPSocketFlags flags after mDNSIPPort
     TCPConnectionCallback callback;
     int fd;
-    KQueueEntry *kqEntry;
-    KQSocketSet ss;
+    KQueueEntry kqEntry;
 #ifndef NO_SECURITYFRAMEWORK
     SSLContextRef tlsContext;
     pthread_t handshake_thread;
 #endif /* NO_SECURITYFRAMEWORK */
-    domainname hostname;
+    domainname *hostname;
     void *context;
     mDNSBool setup;
     mDNSBool connected;
     handshakeStatus handshake;
     mDNS *m; // So we can call KQueueLock from the SSLHandshake thread
     mStatus err;
+};
+
+struct TCPListener_struct
+{
+    TCPAcceptedCallback callback;
+    int fd;
+    KQueueEntry kqEntry;
+    void *context;
+    mDNSAddr_Type addressType;
+    TCPSocketFlags socketFlags;
+    mDNS *m; // So we can call KQueueLock from the SSLHandshake thread
 };
 
 // Value assiged to 'Exists' to indicate the multicast state of the interface has changed.
@@ -152,7 +163,7 @@ struct NetworkInterfaceInfoOSX_struct
     int BPF_fd;                                 // -1 uninitialized; -2 requested BPF; -3 failed
     int BPF_mcfd;                               // Socket for our IPv6 ND group membership
     u_int BPF_len;
-    mDNSBool isExpensive;                       // True if this interface has the IFEF_EXPENSIVE flag set.
+    mDNSBool isAWDL;                            // True if this interface has the IFEF_AWDL flag set.
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
     dispatch_source_t BPF_source;
 #else
@@ -165,6 +176,7 @@ struct NetworkInterfaceInfoOSX_struct
 struct mDNS_PlatformSupport_struct
 {
     NetworkInterfaceInfoOSX *InterfaceList;
+    CFMutableArrayRef InterfaceMonitors;
     KQSocketSet permanentsockets;
     int num_mcasts;                             // Number of multicasts received during this CPU scheduling period (used for CPU limiting)
     domainlabel userhostlabel;                  // The hostlabel as it was set in System Preferences the last time we looked
@@ -207,8 +219,12 @@ struct mDNS_PlatformSupport_struct
     mDNSu8 v6answers;                  // for A/AAAA from external DNS servers
     mDNSs32 DNSTrigger;                // Time the DNSTrigger was given
     uint64_t LastConfigGeneration;     // DNS configuration generation number
+    mDNSBool if_interface_changed;     // There are some changes that we do not know from LastConfigGeneration, such as
+                                       // if the interface is expensive/constrained or not. Therefore, we need an additional
+                                       // field to determine if the interface has changed.
     UDPSocket UDPProxy;
-    TCPSocket TCPProxy;
+    TCPSocket TCPProxyV4;
+    TCPSocket TCPProxyV6;
     ProxyCallback *UDPProxyCallback;
     ProxyCallback *TCPProxyCallback;
 };
@@ -247,8 +263,6 @@ extern ssize_t myrecvfrom(const int s, void *const buffer, const size_t max,
 
 extern mDNSBool DictionaryIsEnabled(CFDictionaryRef dict);
 
-extern const char *DNSScopeToString(mDNSu32 scope);
-
 // If any event takes more than WatchDogReportingThreshold milliseconds to be processed, we log a warning message
 // General event categories are:
 //  o Mach client request initiated / terminated
@@ -272,13 +286,20 @@ struct CompileTimeAssertionChecks_mDNSMacOSX
     // Check our structures are reasonable sizes. Including overly-large buffers, or embedding
     // other overly-large structures instead of having a pointer to them, can inadvertently
     // cause structure sizes (and therefore memory usage) to balloon unreasonably.
-    char sizecheck_NetworkInterfaceInfoOSX[(sizeof(NetworkInterfaceInfoOSX) <=  7464) ? 1 : -1];
+    char sizecheck_NetworkInterfaceInfoOSX[(sizeof(NetworkInterfaceInfoOSX) <=  8488) ? 1 : -1];
     char sizecheck_mDNS_PlatformSupport   [(sizeof(mDNS_PlatformSupport)    <=  1378) ? 1 : -1];
 };
 
 extern mDNSInterfaceID AWDLInterfaceID;
 void initializeD2DPlugins(mDNS *const m);
 void terminateD2DPlugins(void);
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, REACHABILITY_TRIGGER)
+extern void mDNSPlatformUpdateDNSStatus(const DNSQuestion *q);
+extern void mDNSPlatformTriggerDNSRetry(const DNSQuestion *v4q, const DNSQuestion *v6q);
+#endif
+
+extern mdns_interface_monitor_t GetInterfaceMonitorForIndex(uint32_t ifIndex);
 
 #ifdef  __cplusplus
 }

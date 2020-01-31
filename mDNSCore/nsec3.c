@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2018 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,15 @@
 #include "CryptoAlg.h"
 #include "nsec3.h"
 #include "nsec.h"
+
+// Base32 encoding takes 5 bytes of the input and encodes as 8 bytes of output.
+// For example, SHA-1 hash of 20 bytes will be encoded as 20/5 * 8 = 32 base32
+// bytes. For a max domain name size of 255 bytes of base32 encoding : (255/8)*5
+// is the max hash length possible.
+#define NSEC3_MAX_HASH_LEN  155
+// In NSEC3, the names are hashed and stored in the first label and hence cannot exceed label
+// size.
+#define NSEC3_MAX_B32_LEN   MAX_DOMAIN_LABEL
 
 // Define DNSSEC_DISABLED to remove all the DNSSEC functionality
 // and use the stub functions implemented later in this file.
@@ -160,6 +169,54 @@ mDNSlocal mDNSBool NSEC3CoversName(mDNS *const m, CacheRecord *ncr, const mDNSu8
     return mDNSfalse;
 }
 
+mDNSlocal const mDNSu8 *NSEC3HashName(const domainname *name, rdataNSEC3 *nsec3, const mDNSu8 hash[NSEC3_MAX_HASH_LEN], int *dlen)
+{
+    AlgContext *ctx;
+    unsigned int i;
+    unsigned int iterations;
+    domainname lname;
+    mDNSu8 *p = (mDNSu8 *)&nsec3->salt;
+    const mDNSu8 *digest;
+    int digestlen;
+    mDNSBool first = mDNStrue;
+
+    if (DNSNameToLowerCase((domainname *)name, &lname) != mStatus_NoError)
+    {
+        LogMsg("NSEC3HashName: ERROR!! DNSNameToLowerCase failed");
+        return mDNSNULL;
+    }
+
+    digest = lname.c;
+    digestlen = DomainNameLength(&lname);
+
+    // Note that it is "i <=". The first iteration is for digesting the name and salt.
+    // The iteration count does not include that.
+    iterations = swap16(nsec3->iterations);
+    for (i = 0; i <= iterations; i++)
+    {
+        ctx = AlgCreate(DIGEST_ALG, nsec3->alg);
+        if (!ctx)
+        {
+            LogMsg("NSEC3HashName: ERROR!! Cannot allocate context");
+            return mDNSNULL;
+        }
+
+        AlgAdd(ctx, digest, digestlen);
+        if (nsec3->saltLength)
+            AlgAdd(ctx, p, nsec3->saltLength);
+        if (first)
+        {
+            first = mDNSfalse;
+            digest = hash;
+            digestlen = AlgLength(ctx);
+        }
+        AlgFinal(ctx, (void *)digest, digestlen);
+        AlgDestroy(ctx);
+    }
+    *dlen = digestlen;
+    return digest;
+}
+
 // This function can be called with NSEC3ClosestEncloser, NSEC3Covers and NSEC3CEProof
 //
 // Passing in NSEC3ClosestEncloser means "find an exact match for the origName".
@@ -236,7 +293,7 @@ mDNSlocal mDNSBool NSEC3Find(mDNS *const m, NSEC3FindValues val, CacheRecord *nc
         int b32len;
 
         name = SkipLeadingLabels(origName, i);
-        if (!NSEC3HashName(name, nsec3, mDNSNULL, 0, hashName, &hlen))
+        if (!NSEC3HashName(name, nsec3, hashName, &hlen))
         {
             LogMsg("NSEC3Find: NSEC3HashName failed for %##s", name->c);
             continue;
@@ -705,7 +762,7 @@ mDNSexport CacheRecord *NSEC3RecordIsDelegation(mDNS *const m, domainname *name,
 
             nsec3 = (rdataNSEC3 *)rdb->data;
 
-            if (!NSEC3HashName(name, nsec3, mDNSNULL, 0, hashName, &hlen))
+            if (!NSEC3HashName(name, nsec3, hashName, &hlen))
             {
                 LogMsg("NSEC3RecordIsDelegation: NSEC3HashName failed for %##s", name->c);
                 return mDNSNULL;

@@ -175,7 +175,6 @@ BJ_BOOL CDNSFrame::ParseDnsRecord(CDNSRecord::dnsItemType eItemType)
 
     //temp
     BJ_UINT16 nRdataLen = 0;
-    BJ_UINT16 nRdataLen2 = 0;
 
     if (pTemp > m_pEndBuffer)
     {
@@ -240,8 +239,6 @@ BJ_BOOL CDNSFrame::ParseDnsRecord(CDNSRecord::dnsItemType eItemType)
         if (nRdataLen > 1024*10)
         {
             printf("large Rdata ??");
-            nRdataLen2 = (pTemp[8] << 8) | pTemp[9];
-
         }
         //    printf("Namelen=%u, Type=%u, class=%u, TTL=%u, RDLength=%u\n", m_dnsItems[ndnsIndex].nNameLength,m_dnsItems[ndnsIndex].RecType,nClass,nTTL,m_dnsItems[ndnsIndex].nRdataLen);
         pTemp += 10 + pRecord->m_nRdataLen;

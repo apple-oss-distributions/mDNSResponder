@@ -16,9 +16,11 @@
 	</array>
 	<key>MachServices</key>
 	<dict>
-		<key>com.apple.mDNSResponder.dnsproxy</key>
+		<key>com.apple.dnssd.service</key>
 		<true/>
-		<key>com.apple.mDNSResponder.dnsctl</key>
+		<key>com.apple.mDNSResponder.log_utility</key>
+		<true/>
+		<key>com.apple.mDNSResponder.dnsproxy</key>
 		<true/>
 	</dict>
 	<key>Sockets</key>

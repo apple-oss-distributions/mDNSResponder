@@ -34,7 +34,7 @@ const NSString *    _CNSubDomainKey_reverseDomainPath   = @"reverseDomainPath";
 
 @implementation _CNDomainBrowser
 
-void enumReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, DNSServiceErrorType errorCode, const char *replyDomain, void *context);
+static void enumReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, DNSServiceErrorType errorCode, const char *replyDomain, void *context);
 
 - (instancetype)initWithDelegate:(id<_CNDomainBrowserDelegate>)delegate
 {
@@ -67,12 +67,13 @@ void enumReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceInd
             dispatch_set_finalizer_f(queue, finalizer);
             
             DNSServiceRef ref;
-            if (DNSServiceEnumerateDomains(&ref, _browseRegistration ? kDNSServiceFlagsRegistrationDomains : kDNSServiceFlagsBrowseDomains, 0, enumReply, (__bridge void *)self))
-                NSLog(@"DNSServiceEnumerateDomains failed");
+            DNSServiceErrorType error;
+            if ((error = DNSServiceEnumerateDomains(&ref, self->_browseRegistration ? kDNSServiceFlagsRegistrationDomains : kDNSServiceFlagsBrowseDomains, 0, enumReply, (__bridge void *)self)) != 0)
+                NSLog(@"DNSServiceEnumerateDomains failed err: %ld", error);
             else
             {
-                _browseDomainR = ref;
-                (void)DNSServiceSetDispatchQueue(_browseDomainR, queue);
+                self->_browseDomainR = ref;
+                (void)DNSServiceSetDispatchQueue(self->_browseDomainR, queue);
             }
         });
     }
@@ -85,6 +86,26 @@ void enumReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceInd
         DNSServiceRefDeallocate(_browseDomainR);
         _browseDomainR = nil;
     }
+}
+
+- (BOOL)foundInstanceInMoreThanLocalDomain
+{
+    BOOL result = YES;
+    
+    if( self.browseDomainD.count )
+    {
+        for( NSDictionary *next in [self.browseDomainD allValues] )
+        {
+            if( [next[_CNSubDomainKey_reverseDomainPath][0] isEqual: @"local"] )            continue;
+            else
+            {
+                result = YES;
+                break;
+            }
+        }
+    }
+    
+    return( result );
 }
 
 - (NSArray *)defaultDomainPath
@@ -131,7 +152,7 @@ void enumReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceInd
     if ([_delegate respondsToSelector: @selector(bonjourBrowserDomainUpdate:)])
     {
         dispatch_async(self.callbackQueue, ^{
-            [_delegate bonjourBrowserDomainUpdate: [self defaultDomainPath]];
+            [self->_delegate bonjourBrowserDomainUpdate: [self defaultDomainPath]];
         });
     }
 }
@@ -146,7 +167,7 @@ void enumReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceInd
 static void finalizer(void * context)
 {
     _CNDomainBrowser *self = (__bridge _CNDomainBrowser *)context;
-    NSLog(@"finalizer: %@", self);
+//    NSLog(@"finalizer: %@", self);
     (void)CFBridgingRelease((__bridge void *)self);
 }
 
@@ -154,7 +175,7 @@ static void finalizer(void * context)
 
 #pragma mark - Static Callbacks
 
-void enumReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, DNSServiceErrorType errorCode,
+static void enumReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, DNSServiceErrorType errorCode,
                const char *replyDomain, void *context)
 {
 	(void)sdRef;
@@ -166,8 +187,8 @@ void enumReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceInd
     _CNDomainBrowser *self = (__bridge _CNDomainBrowser *)context;
     NSString *key = [NSString stringWithUTF8String: replyDomain];
     
-    if (self.ignoreLocal && [key isEqualToString: @"local."])   return;
-    if (self.ignoreBTMM && [key hasSuffix: @".members.btmm.icloud.com."])   return;
+    if (self.ignoreLocal && [key isEqualToString: @"local."])               goto exit;
+    if (self.ignoreBTMM && [key hasSuffix: @".members.btmm.icloud.com."])   goto exit;
     
     if (!(flags & kDNSServiceFlagsAdd))
     {
@@ -180,7 +201,8 @@ void enumReply(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceInd
                                           _CNSubDomainKey_defaultFlag: (flags & kDNSServiceFlagsDefault) ? @YES : @NO }
                                forKey: key];
     }
-    
+
+exit:
     if (!(flags & kDNSServiceFlagsMoreComing))
     {
         [self reloadBrowser];

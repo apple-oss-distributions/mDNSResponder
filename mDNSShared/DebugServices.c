@@ -39,10 +39,6 @@
 
 #if ( DEBUG )
 
-#if ( TARGET_OS_VXWORKS )
-    #include    "intLib.h"
-#endif
-
 #if ( TARGET_OS_WIN32 )
     #include    <time.h>
 
@@ -170,27 +166,6 @@ DebugWinCharToTCharString(
 //	Private Globals
 //===========================================================================================================================
 
-#if ( TARGET_OS_VXWORKS )
-// TCP States for inetstatShow.
-
-extern char **  pTcpstates;         // defined in tcpLib.c
-
-const char *        kDebugTCPStates[] =
-{
-    "(0)  TCPS_CLOSED",
-    "(1)  TCPS_LISTEN",
-    "(2)  TCPS_SYN_SENT",
-    "(3)  TCPS_SYN_RECEIVED",
-    "(4)  TCPS_ESTABLISHED",
-    "(5)  TCPS_CLOSE_WAIT",
-    "(6)  TCPS_FIN_WAIT_1",
-    "(7)  TCPS_CLOSING",
-    "(8)  TCPS_LAST_ACK",
-    "(9)  TCPS_FIN_WAIT_2",
-    "(10) TCPS_TIME_WAIT",
-};
-#endif
-
 // General
 
 static bool gDebugInitialized               = false;
@@ -245,15 +220,6 @@ DEBUG_EXPORT OSStatus   DebugInitialize( DebugOutputType inType, ... )
 
     va_start( args, inType );
 
-#if ( TARGET_OS_VXWORKS )
-    // Set up the TCP state strings if they are not already set up by VxWorks (normally not set up for some reason).
-
-    if( !pTcpstates )
-    {
-        pTcpstates = (char **) kDebugTCPStates;
-    }
-#endif
-
     // Set up DebugLib stuff (if building with Debugging.h).
 
 #if ( DEBUG_CORE_SERVICE_ASSERTS_ENABLED )
@@ -288,12 +254,6 @@ DEBUG_EXPORT OSStatus   DebugInitialize( DebugOutputType inType, ... )
         type = kDebugOutputTypeiDebug;
             #elif ( DEBUG_KPRINTF_ENABLED )
         type = kDebugOutputTypeKPrintF;
-            #endif
-        #elif ( TARGET_OS_VXWORKS )
-            #if ( DEBUG_FPRINTF_ENABLED )
-        type = kDebugOutputTypeFPrintF;
-            #else
-                #error target is VxWorks, but fprintf output is disabled
             #endif
         #else
             #if ( DEBUG_FPRINTF_ENABLED )
@@ -565,10 +525,6 @@ static OSStatus DebugPrint( DebugLevel inLevel, char *inData, size_t inSize )
 
     if( DebugTaskLevel() & kDebugInterruptLevelMask )
     {
-        #if ( TARGET_OS_VXWORKS )
-        logMsg( "\ncannot print at interrupt time\n\n", 1, 2, 3, 4, 5, 6 );
-        #endif
-
         err = kExecutionStateErr;
         goto exit;
     }
@@ -2449,13 +2405,6 @@ DEBUG_EXPORT uint32_t   DebugTaskLevel( void )
     uint32_t level;
 
     level = 0;
-
-#if ( TARGET_OS_VXWORKS )
-    if( intContext() )
-    {
-        level |= ( ( 1 << kDebugInterruptLevelShift ) & kDebugInterruptLevelMask );
-    }
-#endif
 
     return( level );
 }

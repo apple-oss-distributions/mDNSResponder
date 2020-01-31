@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2016 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2016-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,20 +14,21 @@
  * limitations under the License.
  */
 
-#include "mDNSEmbeddedAPI.h"
-
 #ifndef __Metrics_h
 #define __Metrics_h
+
+#include "mDNSEmbeddedAPI.h"
 
 #ifdef  __cplusplus
 extern "C" {
 #endif
 
-#if TARGET_OS_EMBEDDED
+#if MDNSRESPONDER_SUPPORTS(APPLE, METRICS)
 mStatus MetricsInit(void);
-void    MetricsUpdateUDNSQueryStats(const domainname *inQueryName, mDNSu16 inType, const ResourceRecord *inRR, mDNSu32 inSendCount, mDNSu32 inLatencyMs, mDNSBool inForCell);
-void    MetricsUpdateUDNSResolveStats(const domainname *inQueryName, const ResourceRecord *inRR, mDNSBool inForCell);
-void    LogMetrics(void);
+void    MetricsUpdateDNSQueryStats(const domainname *inQueryName, mDNSu16 inType, const ResourceRecord *inRR, mDNSu32 inSendCount, ExpiredAnswerMetric inExpiredAnswerState, DNSOverTCPMetric inDNSOverTCPState, mDNSu32 inLatencyMs, mDNSBool inForCell);
+void    MetricsUpdateDNSQuerySize(mDNSu32 inSize);
+void    MetricsUpdateDNSResponseSize(mDNSu32 inSize);
+void    LogMetricsToFD(int fd);
 #endif
 
 #ifdef  __cplusplus

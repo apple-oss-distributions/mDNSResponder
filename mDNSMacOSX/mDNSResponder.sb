@@ -1,6 +1,5 @@
-; -*- Mode: Scheme; tab-width: 4 -*-
 ;
-; Copyright (c) 2012-2015 Apple Inc. All rights reserved.
+; Copyright (c) 2012-2019 Apple Inc. All rights reserved.
 ;
 ; Redistribution and use in source and binary forms, with or without 
 ; modification, are permitted provided that the following conditions are met:
@@ -64,6 +63,7 @@
        (global-name "com.apple.SystemConfiguration.NetworkInformation")
        (global-name "com.apple.system.notification_center")
        (global-name "com.apple.system.logger")
+       (global-name "com.apple.trustd")
        (global-name "com.apple.usymptomsd")
        (global-name "com.apple.webcontentfilter.dns")
        (global-name "com.apple.server.bluetooth")
@@ -72,13 +72,15 @@
        (global-name "com.apple.networkd")
        (global-name "com.apple.securityd")
        (global-name "com.apple.wifi.manager")
+       (global-name "com.apple.wifip2pd")
        ; "com.apple.blued" is the name used in pre Lobo builds,
        ; leave it in place while still running roots on pre Lobo targets
        (global-name "com.apple.blued")
        (global-name "com.apple.bluetoothd")
        (global-name "com.apple.mobilegestalt.xpc")
        (global-name "com.apple.ReportCrash.SimulateCrash")
-       (global-name "com.apple.snhelper"))
+       (global-name "com.apple.snhelper")
+       (global-name "com.apple.networkd_privileged"))
 
 (allow mach-register
        (global-name "com.apple.d2d.ipc"))
@@ -128,7 +130,7 @@
        (literal "/private/var/preferences/SystemConfiguration/preferences.plist")
        (subpath "/System/Library/Preferences/Logging")
        (subpath "/AppleInternal/Library/Preferences/Logging")
-       (subpath "/private/var/preferences/Logging/Subsystems")
+       (subpath "/private/var/preferences/Logging")
        (subpath "/private/var/db/timezone")
        (subpath "/Library/Preferences/Logging"))
 
@@ -175,3 +177,9 @@
     (allow sysctl-read sysctl-write
         (sysctl-name "vm.footprint_suspend"))) ; dyld performance reporting
 
+; Used to dump internal state
+; Allows directory lookup, and creating, reading and writing files under /private/var/log/mDNSResponder
+; We know that this sandbox rule seems to give the broader access to mDNSResponder, but given the fact that the directory
+; "/private/var/log/mDNSResponder" is owned by user "_mdnsresponder" who is in "wheel" group, no one else would have the
+; access to this directory, so there is not much security concern.
+(allow file-read* file-write* (subpath "/private/var/log/mDNSResponder"))

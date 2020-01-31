@@ -315,13 +315,13 @@ void CBonjourTop::UpdateRecord(CStringTree&  Cache,CDNSRecord* pDNSRecord,BJStri
     if (pRecord == NULL)
     {
         pRecord = (CStringNode*) Cache.FindwithAddRecord(&nHashValue);
-        strcpy(pRecord->m_Value, RecordName.GetBuffer());
+        strlcpy(pRecord->m_Value, RecordName.GetBuffer(), sizeof(pRecord->m_Value));
     }
 
     if (pRecord == NULL)
         return;
     CDeviceNode dummyDevice;
-    CDeviceNode *device = &dummyDevice;
+    CDeviceNode *device;
     CIPDeviceNode *pipNode = m_IPtoNameMap.Find(&m_Frame.m_SourceIPAddress);
 
     device = (pipNode)? pipNode->pDeviceNode : &dummyDevice;
@@ -534,14 +534,14 @@ void CBonjourTop::UpdateShortRecord(CStringShortTree*  Cache,CDNSRecord* pDNSRec
     }
 
     BJ_UINT64 nHashValue = 0;
-    char deviceOS = '?';
 
     nHashValue = Hash(RecordName.GetBuffer());
     CStringShortNode* pRecord = Cache->Find(&nHashValue);
     if (pRecord == NULL)
     {
         pRecord = (CStringShortNode*) Cache->FindwithAddRecord(&nHashValue);
-        strcpy(pRecord->m_Value, RecordName.GetBuffer());
+        if (pRecord)
+            strlcpy(pRecord->m_Value, RecordName.GetBuffer(), sizeof(pRecord->m_Value));
     }
 
     if (pRecord == NULL)
@@ -550,12 +550,11 @@ void CBonjourTop::UpdateShortRecord(CStringShortTree*  Cache,CDNSRecord* pDNSRec
     }
 
     CDeviceNode dummyDevice;
-    CDeviceNode *device = &dummyDevice;
+    CDeviceNode *device;
     CIPDeviceNode *pipNode = m_IPtoNameMap.Find(&m_Frame.m_SourceIPAddress);
 
     device = (pipNode)? pipNode->pDeviceNode : &dummyDevice;
     pRecord->m_nBytes += 10 + nBytes;
-    deviceOS = device->GetDeviceOS();
     device->frameTotal.Increment(m_nFrameCount);
 
     if (pRecord->m_nLastFrameIndex != m_nFrameCount)
@@ -1849,22 +1848,10 @@ void CStringNode::UpdateOSTypeCounts(CDeviceMap* pGlobalDeviceMap,CIPAddrMap *pI
     m_nDeviceTotaliOSCount = 0;
     m_nDeviceTotalOSXCount = 0;
     m_DeviceAskingTree.GetDeviceOSTypes(m_DeviceAskingTree.GetRoot(),pIp2NameMap,m_nDeviceAskingiOSCount,m_nDeviceAskingOSXCount,nDeviceUnknown);
-    if (m_DeviceAskingTree.GetCount() != m_nDeviceAskingiOSCount + m_nDeviceAskingOSXCount+nDeviceUnknown)
-    {
-        nDeviceUnknown = 0;
-    }
     nDeviceUnknown = 0;
     m_DeviceAnsweringTree.GetDeviceOSTypes(m_DeviceAnsweringTree.GetRoot(),pIp2NameMap,m_nDeviceAnsweringiOSCount,m_nDeviceAnsweringOSXCount,nDeviceUnknown);
-    if (m_DeviceAnsweringTree.GetCount() != m_nDeviceAnsweringiOSCount + m_nDeviceAnsweringOSXCount+nDeviceUnknown)
-    {
-        nDeviceUnknown = 0;
-    }
     nDeviceUnknown = 0;
     m_DeviceTotalTree.GetDeviceOSTypes(m_DeviceTotalTree.GetRoot(), pIp2NameMap, m_nDeviceTotaliOSCount, m_nDeviceTotalOSXCount, nDeviceUnknown);
-    if (m_DeviceTotalTree.GetCount() != m_nDeviceTotaliOSCount + m_nDeviceTotalOSXCount + nDeviceUnknown)
-    {
-        nDeviceUnknown = 0;
-    }
 }
 
 void CStringNode::Print(bool bCursers,bool bDescendingSort,BJ_UINT32 &nIndex, BJ_UINT32 nStartIndex,BJ_UINT32 nEndIndex)

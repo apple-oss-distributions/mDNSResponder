@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 4 -*-
- *
- * Copyright (c) 2011-2013 Apple Inc. All rights reserved.
+/*
+ * Copyright (c) 2011-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +22,7 @@
 #include <sys/event.h>
 #include <netinet/tcp.h>
 
-mDNSexport mDNS mDNSStorage;
+extern mDNS mDNSStorage;
 
 #define ValidSocket(s) ((s) >= 0)
 
@@ -72,7 +71,7 @@ mDNSlocal int ProxyTCPRead(ProxyTCPInfo_t *tcpInfo)
             return -1;
         }
 
-        tcpInfo->reply = mallocL("ProxyTCPInfo", tcpInfo->replyLen);
+        tcpInfo->reply = (DNSMessage *) mallocL("ProxyTCPInfo", tcpInfo->replyLen);
         if (!tcpInfo->reply)
         {
             LogMsg("ProxyTCPRead: Memory failure");
@@ -103,7 +102,6 @@ mDNSlocal void ProxyTCPSocketCallBack(int s1, short filter, void *context, __unu
     mDNSIPPort senderPort;
     ProxyTCPInfo_t *ti = (ProxyTCPInfo_t *)context;
     TCPSocket *sock = &ti->sock;
-    KQSocketSet *kq = &sock->ss;
     struct tcp_info tcp_if;
     socklen_t size = sizeof(tcp_if);
     int32_t intf_id = 0;
@@ -122,7 +120,7 @@ mDNSlocal void ProxyTCPSocketCallBack(int s1, short filter, void *context, __unu
         return;
     }
     // We read all the data and hence not interested in read events anymore
-    KQueueSet(s1, EV_DELETE, EVFILT_READ, sock->kqEntry);
+    KQueueSet(s1, EV_DELETE, EVFILT_READ, &sock->kqEntry);
 
     mDNSPlatformMemZero(&to, sizeof(to));
     mDNSPlatformMemZero(&from, sizeof(from));
@@ -187,7 +185,7 @@ mDNSlocal void ProxyTCPSocketCallBack(int s1, short filter, void *context, __unu
     // We pass sock for the TCPSocket and the "ti" for context as that's what we want to free at the end.
     // In the UDP case, there is just a single socket and nothing to free. Hence, the context (last argument)
     // would be NULL.
-    kq->m->p->TCPProxyCallback(sock, ti->reply, (mDNSu8 *)ti->reply + ti->replyLen, &senderAddr, senderPort, &destAddr,
+    ti->sock.m->p->TCPProxyCallback(sock, ti->reply, (mDNSu8 *)ti->reply + ti->replyLen, &senderAddr, senderPort, &destAddr,
         UnicastDNSPort, (mDNSInterfaceID)(uintptr_t)intf_id, ti);
 }
 
@@ -197,40 +195,30 @@ mDNSlocal void ProxyTCPAccept(int s1, short filter, void *context, __unused mDNS
     struct sockaddr_storage ss;
     socklen_t sslen = sizeof(ss);
     const int on = 1;
-    KQSocketSet *listenSet = (KQSocketSet *)context;
+    TCPSocket *listenSock = (TCPSocket *)context;
 
     (void) filter;
 
     while ((newfd = accept(s1, (struct sockaddr *)&ss, &sslen)) != -1)
     {
         int err;
-        int *s;
-        KQueueEntry *k;
-        KQSocketSet *kq;
 
         // Even though we just need a single KQueueEntry, for simplicity we re-use
         // the KQSocketSet
-        ProxyTCPInfo_t *ti = mallocL("ProxyTCPContext", sizeof(ProxyTCPInfo_t));
+        ProxyTCPInfo_t * const ti = (ProxyTCPInfo_t *)callocL("ProxyTCPContext", sizeof(*ti));
         if (!ti)
         {
             LogMsg("ProxyTCPAccept: cannot allocate TCPSocket");
             close(newfd);
             return;
         }
-        mDNSPlatformMemZero(ti, sizeof(ProxyTCPInfo_t));
-        
-        TCPSocket *sock = &ti->sock;
-
-        kq = &sock->ss;
-        kq->sktv4 = -1;
-        kq->sktv6 = -1;
-        kq->m = listenSet->m;
+        TCPSocket * const sock = &ti->sock;
+        sock->fd = -1;
+        sock->m  = listenSock->m;
 
         fcntl(newfd, F_SETFL, fcntl(newfd, F_GETFL, 0) | O_NONBLOCK); // set non-blocking
         if (ss.ss_family == AF_INET)
         {
-            s =  &kq->sktv4;
-            k =  &kq->kqsv4;
             // Receive interface identifiers
             err = setsockopt(newfd, IPPROTO_IP, IP_RECVIF, &on, sizeof(on));
             if (err)
@@ -243,8 +231,6 @@ mDNSlocal void ProxyTCPAccept(int s1, short filter, void *context, __unused mDNS
         }
         else
         {
-            s =  &kq->sktv6;
-            k =  &kq->kqsv6;
             // We want to receive destination addresses and receive interface identifiers
             err = setsockopt(newfd, IPPROTO_IPV6, IPV6_RECVPKTINFO, &on, sizeof(on));
             if (err)
@@ -255,21 +241,21 @@ mDNSlocal void ProxyTCPAccept(int s1, short filter, void *context, __unused mDNS
                 return;
             }
         }
-        *s = newfd;
         // mDNSPlatformReadTCP/WriteTCP (unlike the UDP counterpart) does not provide the destination address
         // from which we can infer the destination address family. Hence we need to remember that here.
         // Instead of remembering the address family, we remember the right fd.
         sock->fd = newfd;
-        sock->kqEntry = k;
-        k->KQcallback = ProxyTCPSocketCallBack;
-        k->KQcontext  = ti;
-        k->KQtask     = "TCP Proxy packet reception";
+        sock->kqEntry.KQcallback = ProxyTCPSocketCallBack;
+        sock->kqEntry.KQcontext  = ti;
+        sock->kqEntry.KQtask     = "TCP Proxy packet reception";
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
-        k->readSource = mDNSNULL;
-        k->writeSource = mDNSNULL;
-        k->fdClosed = mDNSfalse;
+        sock->kqEntry.readSource = mDNSNULL;
+        sock->kqEntry.writeSource = mDNSNULL;
+        sock->kqEntry.fdClosed = mDNSfalse;
 #endif
-        KQueueSet(*s, EV_ADD, EVFILT_READ, k);
+        sock->connected = mDNStrue;
+        sock->m = listenSock->m;
+        KQueueSet(newfd, EV_ADD, EVFILT_READ, &sock->kqEntry);
     }
 }
 
@@ -350,19 +336,15 @@ mDNSlocal mStatus SetupUDPProxySocket(int skt, KQSocketSet *cp, u_short sa_famil
     return(err);
 }
 
-mDNSlocal mStatus SetupTCPProxySocket(int skt, KQSocketSet *cp, u_short sa_family, mDNSBool useBackgroundTrafficClass)
+mDNSlocal mStatus SetupTCPProxySocket(int skt, TCPSocket *sock, u_short sa_family, mDNSBool useBackgroundTrafficClass)
 {
-    int         *s        = (sa_family == AF_INET) ? &cp->sktv4 : &cp->sktv6;
-    KQueueEntry *k        = (sa_family == AF_INET) ? &cp->kqsv4 : &cp->kqsv6;
     mStatus err;
-
-    cp->m = &mDNSStorage;
-    // XXX may not be used by the TCP codepath 
-    cp->closeFlag = mDNSNULL;
+    mDNS *m = &mDNSStorage;
 
     // for TCP sockets, the traffic class is set once and not changed
     // setTrafficClass(skt, useBackgroundTrafficClass);
     (void) useBackgroundTrafficClass;
+    (void) sa_family;
 
     // All the socket setup has already been done 
     err = listen(skt, NUM_PROXY_TCP_CONNS);
@@ -373,16 +355,17 @@ mDNSlocal mStatus SetupTCPProxySocket(int skt, KQSocketSet *cp, u_short sa_famil
     }
     fcntl(skt, F_SETFL, fcntl(skt, F_GETFL, 0) | O_NONBLOCK); // set non-blocking
     
-    *s = skt;
-    k->KQcallback  = ProxyTCPAccept;
-    k->KQcontext   = cp;
-    k->KQtask      = "TCP Accept";
+    sock->fd = skt;
+    sock->kqEntry.KQcallback  = ProxyTCPAccept;
+    sock->kqEntry.KQcontext   = sock;
+    sock->kqEntry.KQtask      = "TCP Accept";
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
-    k->readSource  = mDNSNULL;
-    k->writeSource = mDNSNULL;
-    k->fdClosed    = mDNSfalse;
+    sock->kqEntry.readSource  = mDNSNULL;
+    sock->kqEntry.writeSource = mDNSNULL;
+    sock->kqEntry.fdClosed    = mDNSfalse;
 #endif
-    KQueueSet(*s, EV_ADD, EVFILT_READ, k);
+    sock->m = m;
+    KQueueSet(skt, EV_ADD, EVFILT_READ, &sock->kqEntry);
     return mStatus_NoError;
 }
 
@@ -443,15 +426,19 @@ mDNSlocal void BindDPSocket(int fd, int sa_family)
 mDNSlocal void SetupDNSProxySkts(int fd[4])
 {
     mDNS *const m = &mDNSStorage;
-	int i;
+    int i;
     mStatus err;
     KQSocketSet *udpSS;
-    KQSocketSet *tcpSS;
+    TCPSocket *v4, *v6;
 
     udpSS       = &m->p->UDPProxy.ss;
-    tcpSS       = &m->p->TCPProxy.ss;
     udpSS->port = UnicastDNSPort;
-    tcpSS->port = UnicastDNSPort;
+    v4 = &m->p->TCPProxyV4;
+    v6 = &m->p->TCPProxyV6;
+    v4->m = m;
+    v4->port = UnicastDNSPort;
+    v6->m = m;
+    v6->port = UnicastDNSPort;
 
     LogMsg("SetupDNSProxySkts: %d, %d, %d, %d", fd[0], fd[1], fd[2], fd[3]);
 
@@ -465,11 +452,11 @@ mDNSlocal void SetupDNSProxySkts(int fd[4])
     if (err)
         LogMsg("SetupDNSProxySkts: ERROR!! UDPv6 Socket");
 
-    err = SetupTCPProxySocket(fd[2], tcpSS, AF_INET, mDNSfalse);
+    err = SetupTCPProxySocket(fd[2], v4, AF_INET, mDNSfalse);
     if (err)
         LogMsg("SetupDNSProxySkts: ERROR!! TCPv4 Socket");
 
-    err = SetupTCPProxySocket(fd[3], tcpSS, AF_INET6, mDNSfalse);
+    err = SetupTCPProxySocket(fd[3], v6, AF_INET6, mDNSfalse);
     if (err)
         LogMsg("SetupDNSProxySkts: ERROR!! TCPv6 Socket");
 
@@ -528,7 +515,6 @@ mDNSexport void mDNSPlatformDisposeProxyContext(void *context)
 {
     ProxyTCPInfo_t *ti;
     TCPSocket *sock;
-    KQSocketSet *kq;
 
     if (!context)
         return;
@@ -536,22 +522,22 @@ mDNSexport void mDNSPlatformDisposeProxyContext(void *context)
     ti = (ProxyTCPInfo_t *)context;
     sock = &ti->sock;
 
-    kq = &sock->ss;
-    if (kq->sktv4 != -1)
+    if (sock->fd >= 0)
     {
-        shutdown(kq->sktv4, 2);
-        mDNSPlatformCloseFD(&kq->kqsv4, kq->sktv4);
+        mDNSPlatformCloseFD(&sock->kqEntry, sock->fd);
+        sock->fd = -1;
     }
-    if (kq->sktv6 != -1)
-    {
-        shutdown(kq->sktv6, 2);
-        mDNSPlatformCloseFD(&kq->kqsv6, kq->sktv6);
-    }
-    if (kq->closeFlag)
-        *kq->closeFlag = 1;
 
     if (ti->reply)
         freeL("ProxyTCPInfoLen", ti->reply);
     freeL("ProxyTCPContext", ti);
 }
 
+// Local Variables:
+// mode: C
+// tab-width: 4
+// c-file-style: "bsd"
+// c-basic-offset: 4
+// fill-column: 108
+// indent-tabs-mode: nil
+// End:
