@@ -959,6 +959,47 @@
 		</dict>
 		<dict>
 			<key>TestName</key>
+			<string>KeepAlive Record Registration</string>
+			<key>Description</key>
+			<string>Tests KeepAlive record registrations.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>keepalive</string>
+				<string>--format</string>
+				<string>json</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>10</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
 			<string>Probe Conflicts</string>
 			<key>Description</key>
 			<string>Tests various probe conflict scenarios, some of which are expected to result in service instance and record renames.</string>

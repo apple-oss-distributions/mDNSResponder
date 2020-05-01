@@ -184,6 +184,24 @@ static const uint8_t		kDNSServerBadBaseAddrV6[] =
 check_compile_time( sizeof( kDNSServerBadBaseAddrV6 ) == 16 );
 
 //===========================================================================================================================
+//	Soft Linking
+//===========================================================================================================================
+
+#if( TARGET_OS_DARWIN )
+SOFT_LINK_LIBRARY_EX( "/usr/lib/system", system_dnssd );
+SOFT_LINK_FUNCTION_EX( system_dnssd, DNSServiceSleepKeepalive_sockaddr,
+	DNSServiceErrorType, (
+		DNSServiceRef *					sdRef,
+		DNSServiceFlags					flags,
+		const struct sockaddr *			localAddr,
+		const struct sockaddr *			remoteAddr,
+		unsigned int					timeout,
+		DNSServiceSleepKeepaliveReply	callBack,
+		void *							context ),
+	( sdRef, flags, localAddr, remoteAddr, timeout, callBack, context ) );
+#endif
+
+//===========================================================================================================================
 //	Misc.
 //===========================================================================================================================
 
@@ -768,6 +786,27 @@ static CLIOption		kPortMappingOpts[] =
 	ConnectionSection(),
 	CLI_OPTION_END()
 };
+
+#if( TARGET_OS_DARWIN )
+//===========================================================================================================================
+//	RegisterKA Command Options
+//===========================================================================================================================
+
+static const char *		gRegisterKA_LocalAddress	= NULL;
+static const char *		gRegisterKA_RemoteAddress	= NULL;
+static int				gRegisterKA_Timeout			= 0;
+
+static CLIOption		kRegisterKA_Opts[] =
+{
+	DNSSDFlagsOption(),
+	StringOption(  'l', "local",   &gRegisterKA_LocalAddress,  "IP addr+port", "TCP connection's local IPv4 or IPv6 address and port pair.", true ),
+	StringOption(  'r', "remote",  &gRegisterKA_RemoteAddress, "IP addr+port", "TCP connection's remote IPv4 or IPv6 address and port pair.", true ),
+	IntegerOption( 't', "timeout", &gRegisterKA_Timeout,       "timeout", "Keepalive record's timeout value, i.e., its 't=' value.", false ),
+	CLI_OPTION_END()
+};
+
+static void	RegisterKACmd( void );
+#endif
 
 //===========================================================================================================================
 //	BrowseAll Command Options
@@ -1790,6 +1829,23 @@ static CLIOption        kXCTestOpts[] =
 };
 #endif
 
+#if( TARGET_OS_DARWIN )
+static void	KeepAliveTestCmd( void );
+
+static const char *		gKeepAliveTest_OutputFormat		= kOutputFormatStr_JSON;
+static const char *		gKeepAliveTest_OutputFilePath	= NULL;
+
+static CLIOption		kKeepAliveTestOpts[] =
+{
+	CLI_OPTION_GROUP( "Results" ),
+	FormatOption( 'f', "format", &gKeepAliveTest_OutputFormat,   "Specifies the test results output format. (default: " kOutputFormatStr_JSON ")", false ),
+	StringOption( 'o', "output", &gKeepAliveTest_OutputFilePath, "path", "Path of the file to write test results to instead of standard output (stdout).", false ),
+	
+	TestExitStatusSection(),
+	CLI_OPTION_END()
+};
+#endif
+
 static CLIOption		kTestOpts[] =
 {
 	Command( "gaiperf",        GAIPerfCmd,           kGAIPerfOpts,            "Runs DNSServiceGetAddrInfo() performance tests.", false ),
@@ -1801,7 +1857,10 @@ static CLIOption		kTestOpts[] =
 #if( MDNSRESPONDER_PROJECT )
     Command( "xctest",         XCTestCmd,            kXCTestOpts,              "Run a XCTest from /AppleInternal/XCTests/com.apple.mDNSResponder/Tests.xctest.", true ),
 #endif
-    CLI_OPTION_END()
+#if( TARGET_OS_DARWIN )
+	Command( "keepalive",      KeepAliveTestCmd,     kKeepAliveTestOpts,      "Tests keepalive record registrations.", false ),
+#endif
+	CLI_OPTION_END()
 };
 
 //===========================================================================================================================
@@ -2065,6 +2124,9 @@ static CLIOption		kGlobalOpts[] =
 	Command( "getaddrinfo-posix",	GetAddrInfoPOSIXCmd,	kGetAddrInfoPOSIXOpts,	"Uses getaddrinfo() to resolve a hostname to IP addresses.", false ),
 	Command( "reverseLookup",		ReverseLookupCmd,		kReverseLookupOpts,		"Uses DNSServiceQueryRecord() to perform a reverse IP address lookup.", false ),
 	Command( "portMapping",			PortMappingCmd,			kPortMappingOpts,		"Uses DNSServiceNATPortMappingCreate() to create a port mapping.", false ),
+#if( TARGET_OS_DARWIN )
+	Command( "registerKA",			RegisterKACmd,			kRegisterKA_Opts,		"Uses DNSServiceSleepKeepalive_sockaddr() to register a keep alive record.", false ),
+#endif
 	Command( "browseAll",			BrowseAllCmd,			kBrowseAllOpts,			"Browse and resolve all (or specific) services and, optionally, attempt connections.", false ),
 	
 	// Uncommon commands.
@@ -2182,6 +2244,7 @@ typedef void ( *DispatchHandler )( void *inContext );
 static OSStatus
 	DispatchSignalSourceCreate(
 		int					inSignal,
+		dispatch_queue_t	inQueue,
 		DispatchHandler		inEventHandler,
 		void *				inContext,
 		dispatch_source_t *	outSource );
@@ -2669,7 +2732,7 @@ static void	BrowseCmd( void )
 	// Set up SIGINT handler.
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), Exit, kExitReason_SIGINT, &signalSource );
 	require_noerr( err, exit );
 	dispatch_resume( signalSource );
 	
@@ -3075,7 +3138,7 @@ static void	GetAddrInfoCmd( void )
 	// Set up SIGINT handler.
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), Exit, kExitReason_SIGINT, &signalSource );
 	require_noerr( err, exit );
 	dispatch_resume( signalSource );
 	
@@ -3326,7 +3389,7 @@ static void	QueryRecordCmd( void )
 	// Set up SIGINT handler.
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), Exit, kExitReason_SIGINT, &signalSource );
 	require_noerr( err, exit );
 	dispatch_resume( signalSource );
 	
@@ -3584,7 +3647,7 @@ static void	RegisterCmd( void )
 	// Set up SIGINT handler.
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), Exit, kExitReason_SIGINT, &signalSource );
 	require_noerr( err, exit );
 	dispatch_resume( signalSource );
 	
@@ -3893,7 +3956,7 @@ static void	RegisterRecordCmd( void )
 	// Set up SIGINT handler.
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), Exit, kExitReason_SIGINT, &signalSource );
 	require_noerr( err, exit );
 	dispatch_resume( signalSource );
 	
@@ -4122,7 +4185,7 @@ static void	ResolveCmd( void )
 	// Set up SIGINT handler.
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), Exit, kExitReason_SIGINT, &signalSource );
 	require_noerr( err, exit );
 	dispatch_resume( signalSource );
 	
@@ -4487,7 +4550,7 @@ static void	ReverseLookupCmd( void )
 	// Set up SIGINT handler.
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), Exit, kExitReason_SIGINT, &signalSource );
 	require_noerr( err, exit );
 	dispatch_resume( signalSource );
 	
@@ -4650,7 +4713,7 @@ static void	PortMappingCmd( void )
 	// Set up SIGINT handler.
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), Exit, kExitReason_SIGINT, &signalSource );
 	require_noerr( err, exit );
 	dispatch_resume( signalSource );
 	
@@ -4801,6 +4864,180 @@ static void DNSSD_API
 		&now, inInterfaceIndex, ntohs( inInternalPort), &inExternalIPv4Address, ntohs( inExternalPort ), inTTL,
 		inProtocol, kDNSServiceProtocolDescriptors, inError, errorStr );
 }
+
+#if( TARGET_OS_DARWIN )
+//===========================================================================================================================
+//	RegisterKACmd
+//===========================================================================================================================
+
+typedef struct
+{
+	dispatch_queue_t			queue;			// Serial queue for command's events.
+	dispatch_semaphore_t		doneSem;		// Semaphore to signal when underlying command operation is done.
+	sockaddr_ip					local;			// Connection's local IP address and port.
+	sockaddr_ip					remote;			// Connection's remote IP address and port.
+	DNSServiceFlags				flags;			// Flags to pass to DNSServiceSleepKeepalive_sockaddr().
+	unsigned int				timeout;		// Timeout to pass to DNSServiceSleepKeepalive_sockaddr().
+	DNSServiceRef				keepalive;		// DNSServiceSleepKeepalive_sockaddr operation.
+	dispatch_source_t			sourceSigInt;	// Dispatch source for SIGINT.
+	dispatch_source_t			sourceSigTerm;	// Dispatch source for SIGTERM.
+	OSStatus					error;			// Command's error.
+	
+}	RegisterKACmdContext;
+
+static void		_RegisterKACmdFree( RegisterKACmdContext *inCmd );
+static void		_RegisterKACmdStart( void *inContext );
+static OSStatus	_RegisterKACmdGetIPAddressArgument( const char *inArgStr, const char *inArgName, sockaddr_ip *outSA );
+
+static void	RegisterKACmd( void )
+{
+	OSStatus					err;
+	RegisterKACmdContext *		cmd = NULL;
+	
+	if( !SOFT_LINK_HAS_FUNCTION( system_dnssd, DNSServiceSleepKeepalive_sockaddr ) )
+	{
+		FPrintF( stderr, "error: Failed to soft link DNSServiceSleepKeepalive_sockaddr from libsystem_dnssd.\n" );
+		err = kNotFoundErr;
+		goto exit;
+	}
+	cmd = (RegisterKACmdContext *) calloc( 1, sizeof( *cmd ) );
+	require_action( cmd, exit, err = kNoMemoryErr );
+	
+	err = _RegisterKACmdGetIPAddressArgument( gRegisterKA_LocalAddress, "local IP address", &cmd->local );
+	require_noerr_quiet( err, exit );
+	
+	err = _RegisterKACmdGetIPAddressArgument( gRegisterKA_RemoteAddress, "remote IP address", &cmd->remote );
+	require_noerr_quiet( err, exit );
+	
+	err = CheckIntegerArgument( gRegisterKA_Timeout, "timeout", 0, INT_MAX );
+	require_noerr_quiet( err, exit );
+	
+	cmd->flags		= GetDNSSDFlagsFromOpts();
+	cmd->timeout	= (unsigned int) gRegisterKA_Timeout;
+	
+	// Start command.
+	
+	cmd->queue = dispatch_queue_create( "com.apple.dnssdutil.registerka-command", DISPATCH_QUEUE_SERIAL );
+	require_action( cmd->queue, exit, err = kNoResourcesErr );
+	
+	cmd->doneSem = dispatch_semaphore_create( 0 );
+	require_action( cmd->doneSem, exit, err = kNoResourcesErr );
+	
+	dispatch_async_f( cmd->queue, cmd, _RegisterKACmdStart );
+    dispatch_semaphore_wait( cmd->doneSem, DISPATCH_TIME_FOREVER );
+	if( cmd->error ) err = cmd->error;
+	
+	FPrintF( stdout, "---\n" );
+	FPrintF( stdout, "End time:   %{du:time}\n", NULL );
+	
+exit:
+	if( cmd ) _RegisterKACmdFree( cmd );
+	gExitCode = err ? 1 : 0;
+}
+
+//===========================================================================================================================
+
+static void	_RegisterKACmdFree( RegisterKACmdContext *inCmd )
+{
+	check( !inCmd->keepalive );
+	check( !inCmd->sourceSigInt );
+	check( !inCmd->sourceSigTerm );
+	dispatch_forget( &inCmd->queue );
+	dispatch_forget( &inCmd->doneSem );
+	free( inCmd );
+}
+
+//===========================================================================================================================
+
+static void				_RegisterKACmdStop( RegisterKACmdContext *inCmd, OSStatus inError );
+static void				_RegisterKACmdSignalHandler( void *inContext );
+static void DNSSD_API	_RegisterKACmdKeepaliveCallback( DNSServiceRef inSDRef, DNSServiceErrorType inError, void *inCtx );
+
+static void	_RegisterKACmdStart( void *inContext )
+{
+	OSStatus							err;
+	RegisterKACmdContext * const		cmd = (RegisterKACmdContext *) inContext;
+	
+	signal( SIGINT, SIG_IGN );
+	err = DispatchSignalSourceCreate( SIGINT, cmd->queue, _RegisterKACmdSignalHandler, cmd, &cmd->sourceSigInt );
+	require_noerr( err, exit );
+	dispatch_resume( cmd->sourceSigInt );
+	
+	signal( SIGTERM, SIG_IGN );
+	err = DispatchSignalSourceCreate( SIGTERM, cmd->queue, _RegisterKACmdSignalHandler, cmd, &cmd->sourceSigTerm );
+	require_noerr( err, exit );
+	dispatch_resume( cmd->sourceSigTerm );
+	
+	FPrintF( stdout, "Flags:      %#{flags}\n",		cmd->flags, kDNSServiceFlagsDescriptors );
+	FPrintF( stdout, "Local:      %##a\n",			&cmd->local.sa );
+	FPrintF( stdout, "Remote:     %##a\n",			&cmd->remote.sa );
+	FPrintF( stdout, "Timeout:    %u\n",			cmd->timeout );
+	FPrintF( stdout, "Start time: %{du:time}\n",	NULL );
+	FPrintF( stdout, "---\n" );
+	
+	err = soft_DNSServiceSleepKeepalive_sockaddr( &cmd->keepalive, cmd->flags, &cmd->local.sa, &cmd->remote.sa,
+		cmd->timeout, _RegisterKACmdKeepaliveCallback, cmd );
+	require_noerr( err, exit );
+	
+	err = DNSServiceSetDispatchQueue( cmd->keepalive, cmd->queue );
+	require_noerr( err, exit );
+	
+exit:
+	if( err ) _RegisterKACmdStop( cmd, err );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_RegisterKACmdGetIPAddressArgument( const char *inArgStr, const char *inArgName, sockaddr_ip *outSA )
+{
+	OSStatus		err;
+	sockaddr_ip		sip;
+	
+	err = StringToSockAddr( inArgStr, &sip, sizeof( sip ), NULL );
+	if( !err && ( ( sip.sa.sa_family == AF_INET ) || ( sip.sa.sa_family == AF_INET6 ) ) )
+	{
+		if( outSA ) SockAddrCopy( &sip, outSA );
+	}
+	else
+	{
+		FPrintF( stderr, "error: Invalid %s: '%s'\n", inArgName, inArgStr );
+		err = kParamErr;
+	}
+	return( err );
+}
+
+//===========================================================================================================================
+
+static void	_RegisterKACmdStop( RegisterKACmdContext *inCmd, OSStatus inError )
+{
+	if( !inCmd->error ) inCmd->error = inError;
+	DNSServiceForget( &inCmd->keepalive );
+	dispatch_source_forget( &inCmd->sourceSigInt );
+	dispatch_source_forget( &inCmd->sourceSigTerm );
+	dispatch_semaphore_signal( inCmd->doneSem );
+}
+
+//===========================================================================================================================
+
+static void	_RegisterKACmdSignalHandler( void *inContext )
+{
+	RegisterKACmdContext * const		cmd = (RegisterKACmdContext *) inContext;
+	
+	_RegisterKACmdStop( cmd, kNoErr );
+}
+
+//===========================================================================================================================
+
+static void DNSSD_API	_RegisterKACmdKeepaliveCallback( DNSServiceRef inSDRef, DNSServiceErrorType inError, void *inCtx )
+{
+	RegisterKACmdContext * const		cmd = (RegisterKACmdContext *) inCtx;
+	
+	Unused( inSDRef );
+	
+	FPrintF( stdout, "%{du:time} Record registration result: %#m\n", NULL, inError );
+	if( !cmd->error ) cmd->error = inError;
+}
+#endif	// TARGET_OS_DARWIN
 
 //===========================================================================================================================
 //	BrowseAllCmd
@@ -6943,12 +7180,14 @@ static void	DNSServerCmd( void )
 #endif
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, DNSServerCmdSigIntHandler, context, &context->sigIntSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), DNSServerCmdSigIntHandler, context,
+		&context->sigIntSource );
 	require_noerr( err, exit );
 	dispatch_resume( context->sigIntSource );
 	
 	signal( SIGTERM, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGTERM, DNSServerCmdSigTermHandler, context, &context->sigTermSource );
+	err = DispatchSignalSourceCreate( SIGTERM, dispatch_get_main_queue(), DNSServerCmdSigTermHandler, context,
+		&context->sigTermSource );
 	require_noerr( err, exit );
 	dispatch_resume( context->sigTermSource );
 	
@@ -10548,12 +10787,14 @@ static void	GAIPerfCmd( void )
 	GAITesterSetResultsHandler( context->tester, GAIPerfResultsHandler, context );
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, GAIPerfSignalHandler, context, &context->sigIntSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), GAIPerfSignalHandler, context,
+		&context->sigIntSource );
 	require_noerr( err, exit );
 	dispatch_resume( context->sigIntSource );
 	
 	signal( SIGTERM, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGTERM, GAIPerfSignalHandler, context, &context->sigTermSource );
+	err = DispatchSignalSourceCreate( SIGTERM, dispatch_get_main_queue(), GAIPerfSignalHandler, context,
+		&context->sigTermSource );
 	require_noerr( err, exit );
 	dispatch_resume( context->sigTermSource );
 	
@@ -14546,7 +14787,7 @@ static void ExpensiveConstrainedTestCmd( void )
 
     // Set up SIGINT handler.
     signal( SIGINT, SIG_IGN );
-    err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+    err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), Exit, kExitReason_SIGINT, &signalSource );
     require_noerr( err, exit );
     dispatch_resume( signalSource );
 
@@ -15712,7 +15953,8 @@ static OSStatus	_RegistrationTestStart( RegistrationTest *inTest )
 	
 	signal( SIGINT, SIG_IGN );
 	check( !inTest->sigSourceINT ); 
-	err = DispatchSignalSourceCreate( SIGINT, _RegistrationTestSignalHandler, inTest, &inTest->sigSourceINT );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), _RegistrationTestSignalHandler, inTest,
+		&inTest->sigSourceINT );
 	require_noerr( err, exit );
 	dispatch_resume( inTest->sigSourceINT );
 	
@@ -15720,7 +15962,8 @@ static OSStatus	_RegistrationTestStart( RegistrationTest *inTest )
 	
 	signal( SIGTERM, SIG_IGN );
 	check( !inTest->sigSourceTERM ); 
-	err = DispatchSignalSourceCreate( SIGTERM, _RegistrationTestSignalHandler, inTest, &inTest->sigSourceTERM );
+	err = DispatchSignalSourceCreate( SIGTERM, dispatch_get_main_queue(), _RegistrationTestSignalHandler, inTest,
+		&inTest->sigSourceTERM );
 	require_noerr( err, exit );
 	dispatch_resume( inTest->sigSourceTERM );
 	
@@ -16838,6 +17081,786 @@ static Boolean	_RegistrationTestInterfaceIsWiFi( const char *inIfName )
 }
 #endif
 
+#if( TARGET_OS_DARWIN )
+//===========================================================================================================================
+//	KeepAliveTestCmd
+//===========================================================================================================================
+
+typedef enum
+{
+	kKeepAliveCallVariant_Null				= 0,
+	kKeepAliveCallVariant_TakesSocket		= 1, // DNSServiceSleepKeepalive(), which takes a connected socket.
+	kKeepAliveCallVariant_TakesSockAddrs	= 2, // DNSServiceSleepKeepalive_sockaddr(), which takes connection's sockaddrs.
+	
+}	KeepAliveCallVariant;
+
+typedef struct
+{
+	int							family;			// TCP connection's address family.
+	KeepAliveCallVariant		callVariant;	// Describes which DNSServiceSleepKeepalive* call to use.
+	const char *				description;
+	
+}	KeepAliveSubtestParams;
+
+const KeepAliveSubtestParams		kKeepAliveSubtestParams[] =
+{
+	{ AF_INET,  kKeepAliveCallVariant_TakesSocket,    "Calls DNSServiceSleepKeepalive() for IPv4 TCP connection." },
+	{ AF_INET,  kKeepAliveCallVariant_TakesSockAddrs, "Calls DNSServiceSleepKeepalive_sockaddr() for IPv4 TCP connection." },
+	{ AF_INET6, kKeepAliveCallVariant_TakesSocket,    "Calls DNSServiceSleepKeepalive() for IPv6 TCP connection." },
+	{ AF_INET6, kKeepAliveCallVariant_TakesSockAddrs, "Calls DNSServiceSleepKeepalive_sockaddr() for IPv6 TCP connection." }
+};
+
+typedef struct
+{
+	sockaddr_ip			local;			// TCP connection's local address and port.
+	sockaddr_ip			remote;			// TCP connection's remote address and port.
+	NanoTime64			startTime;		// Subtest's start time.
+	NanoTime64			endTime;		// Subtest's end time.
+	SocketRef			clientSock;		// Socket for client-side of TCP connection.
+	SocketRef			serverSock;		// Socket for server-side of TCP connection.
+	char *				recordName;		// Keepalive record's name.
+	char *				dataStr;		// Data expected to be contained in keepalive record's data.
+	const char *		description;	// Subtests's description.
+	unsigned int		timeoutKA;		// Randomly-generated timeout value that gets put in keepalive record's rdata.
+	OSStatus			error;			// Subtest's error.
+	
+}	KeepAliveSubtest;
+
+typedef struct KeepAliveTest *		KeepAliveTestRef;
+
+typedef struct
+{
+	KeepAliveTestRef		test;	// Weak back pointer to test.
+	
+}	KeepAliveTestConnectionContext;
+
+struct KeepAliveTest
+{
+	dispatch_queue_t						queue;			// Serial queue for test events.
+	dispatch_semaphore_t					doneSem;		// Semaphore to signal when the test is done.
+	dispatch_source_t						readSource;		// Read source for TCP listener socket.
+	DNSServiceRef							keepalive;		// DNSServiceSleepKeepalive{,2} operation.
+	DNSServiceRef							query;			// Query to verify registered keepalive record.
+	dispatch_source_t						timer;			// Timer to put time limit on query.
+	AsyncConnectionRef						connection;		// Establishes current subtest's TCP connection.
+	KeepAliveTestConnectionContext *		connectionCtx;	// Weak pointer to connection's context.
+	NanoTime64								startTime;		// Test's start time.
+	NanoTime64								endTime;		// Test's end time.
+	OSStatus								error;			// Test's error.
+	size_t									subtestIdx;		// Index of current subtest.
+	KeepAliveSubtest						subtests[ 4 ];	// Subtest array.
+};
+check_compile_time( countof_field( struct KeepAliveTest, subtests ) == countof( kKeepAliveSubtestParams ) );
+
+ulog_define_ex( kDNSSDUtilIdentifier, KeepAliveTest, kLogLevelInfo, kLogFlags_None, "KeepAliveTest", NULL );
+#define kat_ulog( LEVEL, ... )		ulog( &log_category_from_name( KeepAliveTest ), (LEVEL), __VA_ARGS__ )
+
+static OSStatus	_KeepAliveTestCreate( KeepAliveTestRef *outTest );
+static OSStatus	_KeepAliveTestRun( KeepAliveTestRef inTest );
+static void		_KeepAliveTestFree( KeepAliveTestRef inTest );
+
+static void	KeepAliveTestCmd( void )
+{
+	OSStatus				err;
+	OutputFormatType		outputFormat;
+	KeepAliveTestRef		test		= NULL;
+	CFPropertyListRef		plist		= NULL;
+	CFMutableArrayRef		subtests;
+	size_t					i;
+	size_t					subtestFailCount;
+	Boolean					testPassed	= false;
+	char					startTime[ 32 ];
+	char					endTime[ 32 ];
+	
+	err = OutputFormatFromArgString( gKeepAliveTest_OutputFormat, &outputFormat );
+	require_noerr_quiet( err, exit );
+	
+	err = _KeepAliveTestCreate( &test );
+	require_noerr( err, exit );
+	
+	err = _KeepAliveTestRun( test );
+	require_noerr( err, exit );
+	
+	_NanoTime64ToTimestamp( test->startTime, startTime, sizeof( startTime ) );
+	_NanoTime64ToTimestamp( test->endTime, endTime, sizeof( endTime ) );
+	err = CFPropertyListCreateFormatted( kCFAllocatorDefault, &plist,
+		"{"
+			"%kO=%s"	// startTime
+			"%kO=%s"	// endTime
+			"%kO=[%@]"	// subtests
+		"}",
+		CFSTR( "startTime" ),	startTime,
+		CFSTR( "endTime" ),		endTime,
+		CFSTR( "subtests" ),	&subtests );
+	require_noerr( err, exit );
+	
+	subtestFailCount = 0;
+	check( test->subtestIdx == countof( test->subtests ) );
+	for( i = 0; i < countof( test->subtests ); ++i )
+	{
+		KeepAliveSubtest * const		subtest = &test->subtests[ i ];
+		char							errorDesc[ 128 ];
+		
+		_NanoTime64ToTimestamp( subtest->startTime, startTime, sizeof( startTime ) );
+		_NanoTime64ToTimestamp( subtest->endTime, endTime, sizeof( endTime ) );
+		SNPrintF( errorDesc, sizeof( errorDesc ), "%m", subtest->error );
+		err = CFPropertyListAppendFormatted( kCFAllocatorDefault, subtests,
+			"{"
+				"%kO=%s"		// startTime
+				"%kO=%s"		// endTime
+				"%kO=%s"		// description
+				"%kO=%##a"		// localAddr
+				"%kO=%##a"		// remoteAddr
+				"%kO=%s"		// recordName
+				"%kO=%s"		// expectedRData
+				"%kO="			// error
+				"{"
+					"%kO=%lli"	// code
+					"%kO=%s"	// description
+				"}"
+			"}",
+			CFSTR( "startTime" ),		startTime,
+			CFSTR( "endTime" ),			endTime,
+			CFSTR( "description" ),		subtest->description,
+			CFSTR( "localAddr" ),		&subtest->local.sa,
+			CFSTR( "remoteAddr" ),		&subtest->remote.sa,
+			CFSTR( "recordName" ),		subtest->recordName,
+			CFSTR( "expectedRData" ),	subtest->dataStr,
+			CFSTR( "error" ),
+			CFSTR( "code" ),			(int64_t) subtest->error,
+			CFSTR( "description" ),		errorDesc
+		);
+		require_noerr( err, exit );
+		if( subtest->error ) ++subtestFailCount;
+	}
+	if( subtestFailCount == 0 ) testPassed = true;
+	CFPropertyListAppendFormatted( kCFAllocatorDefault, plist, "%kO=%b", CFSTR( "pass" ), testPassed );
+	
+	err = OutputPropertyList( plist, outputFormat, gKeepAliveTest_OutputFilePath );
+	require_noerr( err, exit );
+	
+exit:
+	if( test ) _KeepAliveTestFree( test );
+	CFReleaseNullSafe( plist );
+    gExitCode = err ? 1 : ( testPassed ? 0 : 2 );
+}
+
+//===========================================================================================================================
+
+static void					_KeepAliveTestStart( void *inCtx );
+static void					_KeepAliveTestStop( KeepAliveTestRef inTest, OSStatus inError );
+static OSStatus				_KeepAliveTestStartSubtest( KeepAliveTestRef inTest );
+static void					_KeepAliveTestStopSubtest( KeepAliveTestRef inTest );
+static KeepAliveSubtest *	_KeepAliveTestGetSubtest( KeepAliveTestRef inTest );
+static const char *			_KeepAliveTestGetSubtestLogPrefix( KeepAliveTestRef inTest, char *inBufPtr, size_t inBufLen );
+static OSStatus				_KeepAliveTestContinue( KeepAliveTestRef inTest, OSStatus inSubtestError, Boolean *outDone );
+static void					_KeepAliveTestTCPAcceptHandler( void *inCtx );
+static void					_KeepAliveTestConnectionHandler( SocketRef inSock, OSStatus inError, void *inArg );
+static void					_KeepAliveTestHandleConnection( KeepAliveTestRef inTest, SocketRef inSock, OSStatus inError );
+static void					_KeepAliveTestForgetConnection( KeepAliveTestRef inTest );
+static void DNSSD_API		_KeepAliveTestKeepaliveCallback( DNSServiceRef inSDRef, DNSServiceErrorType inErr, void *inCtx );
+static void					_KeepAliveTestQueryTimerHandler( void *inCtx );
+static void DNSSD_API
+	_KeepAliveTestQueryRecordCallback(
+		DNSServiceRef		inSDRef,
+		DNSServiceFlags		inFlags,
+		uint32_t			inInterfaceIndex,
+		DNSServiceErrorType	inError,
+		const char *		inFullName,
+		uint16_t			inType,
+		uint16_t			inClass,
+		uint16_t			inRDataLen,
+		const void *		inRDataPtr,
+		uint32_t			inTTL,
+		void *				inCtx );
+
+static OSStatus	_KeepAliveTestCreate( KeepAliveTestRef *outTest )
+{
+	OSStatus				err;
+	KeepAliveTestRef		test;
+	size_t					i;
+	
+	test = (KeepAliveTestRef) calloc( 1, sizeof( *test ) );
+	require_action( test, exit, err = kNoMemoryErr );
+	
+	test->error = kInProgressErr;
+	for( i = 0; i < countof( test->subtests ); ++i )
+	{
+		KeepAliveSubtest * const		subtest = &test->subtests[ i ];
+		
+		subtest->local.sa.sa_family		= AF_UNSPEC;
+		subtest->remote.sa.sa_family	= AF_UNSPEC;
+		subtest->clientSock				= kInvalidSocketRef;
+		subtest->serverSock				= kInvalidSocketRef;
+	}
+	test->queue = dispatch_queue_create( "com.apple.dnssdutil.keepalive-test", DISPATCH_QUEUE_SERIAL );
+	require_action( test->queue, exit, err = kNoResourcesErr );
+	
+	test->doneSem = dispatch_semaphore_create( 0 );
+	require_action( test->doneSem, exit, err = kNoResourcesErr );
+	
+	*outTest = test;
+	test = NULL;
+	err = kNoErr;
+	
+exit:
+	if( test ) _KeepAliveTestFree( test );
+	return( err );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_KeepAliveTestRun( KeepAliveTestRef inTest )
+{
+	dispatch_async_f( inTest->queue, inTest, _KeepAliveTestStart );
+	dispatch_semaphore_wait( inTest->doneSem, DISPATCH_TIME_FOREVER );
+	return( inTest->error );
+}
+
+//===========================================================================================================================
+
+static void	_KeepAliveTestFree( KeepAliveTestRef inTest )
+{
+	size_t		i;
+	
+	check( !inTest->readSource );
+	check( !inTest->query );
+	check( !inTest->timer );
+	check( !inTest->keepalive );
+	check( !inTest->connection );
+	check( !inTest->connectionCtx );
+	dispatch_forget( &inTest->queue );
+	dispatch_forget( &inTest->doneSem );
+	for( i = 0; i < countof( inTest->subtests ); ++i )
+	{
+		KeepAliveSubtest * const		subtest = &inTest->subtests[ i ];
+		
+		check( !IsValidSocket( subtest->clientSock ) );
+		check( !IsValidSocket( subtest->serverSock ) );
+		ForgetMem( &subtest->recordName );
+		ForgetMem( &subtest->dataStr );
+	}
+	free( inTest );
+}
+
+//===========================================================================================================================
+
+static void _KeepAliveTestStart( void *inCtx )
+{
+	OSStatus					err;
+	const KeepAliveTestRef		test = (KeepAliveTestRef) inCtx;
+	
+	test->error		= kInProgressErr;
+	test->startTime	= NanoTimeGetCurrent();
+	err = _KeepAliveTestStartSubtest( test );
+	require_noerr( err, exit );
+	
+exit:
+	if( err ) _KeepAliveTestStop( test, err );
+}
+
+//===========================================================================================================================
+
+static void	_KeepAliveTestStop( KeepAliveTestRef inTest, OSStatus inError )
+{
+	size_t		i;
+	
+	inTest->error	= inError;
+	inTest->endTime	= NanoTimeGetCurrent();
+	_KeepAliveTestStopSubtest( inTest );
+	for( i = 0; i < countof( inTest->subtests ); ++i )
+	{
+		KeepAliveSubtest * const		subtest = &inTest->subtests[ i ];
+		
+		ForgetSocket( &subtest->clientSock );
+		ForgetSocket( &subtest->serverSock );
+	}
+	dispatch_semaphore_signal( inTest->doneSem );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_KeepAliveTestStartSubtest( KeepAliveTestRef inTest )
+{
+	OSStatus									err;
+	KeepAliveSubtest * const					subtest		= _KeepAliveTestGetSubtest( inTest );
+	const KeepAliveSubtestParams * const		params		= &kKeepAliveSubtestParams[ inTest->subtestIdx ];
+	int											port;
+	SocketRef									sock		= kInvalidSocketRef;
+	const uint32_t								loopbackV4	= htonl( INADDR_LOOPBACK );
+	SocketContext *								sockCtx		= NULL;
+	KeepAliveTestConnectionContext *			cnxCtx		= NULL;
+	Boolean										useIPv4;
+	char										serverAddrStr[ 64 ];
+	char										prefix[ 64 ];
+	
+	subtest->error			= kInProgressErr;
+	subtest->startTime		= NanoTimeGetCurrent();
+	subtest->description	= params->description;
+	
+	require_action( ( params->family == AF_INET ) || ( params->family == AF_INET6 ), exit, err = kInternalErr );
+	
+	// Create TCP listener socket.
+	
+	useIPv4 = ( params->family == AF_INET ) ? true : false;
+	err = ServerSocketOpenEx( params->family, SOCK_STREAM, IPPROTO_TCP,
+		useIPv4 ? ( (const void *) &loopbackV4 ) : ( (const void *) &in6addr_loopback ), kSocketPort_Auto, &port,
+		kSocketBufferSize_DontSet, &sock );
+	require_noerr( err, exit );
+	
+	if( useIPv4 )	SNPrintF( serverAddrStr, sizeof( serverAddrStr ), "%.4a:%d", &loopbackV4, port );
+	else			SNPrintF( serverAddrStr, sizeof( serverAddrStr ), "[%.16a]:%d", in6addr_loopback.s6_addr, port );
+	_KeepAliveTestGetSubtestLogPrefix( inTest, prefix, sizeof( prefix ) );
+	kat_ulog( kLogLevelInfo, "%s: Will listen for connections on %s\n", prefix, serverAddrStr );
+	
+	err = SocketContextCreate( sock, inTest, &sockCtx );
+	require_noerr( err, exit );
+	sock = kInvalidSocketRef;
+	
+	// Create read source for TCP listener socket.
+	
+	check( !inTest->readSource );
+	err = DispatchReadSourceCreate( sockCtx->sock, inTest->queue, _KeepAliveTestTCPAcceptHandler,
+		SocketContextCancelHandler, sockCtx, &inTest->readSource );
+	require_noerr( err, exit );
+	sockCtx = NULL;
+	dispatch_resume( inTest->readSource );
+	
+	cnxCtx = (KeepAliveTestConnectionContext *) calloc( 1, sizeof( *cnxCtx ) );
+	require_action( cnxCtx, exit, err = kNoMemoryErr );
+	
+	// Start asynchronous connection to listener socket.
+	
+	kat_ulog( kLogLevelInfo, "%s: Will connect to %s\n", prefix, serverAddrStr );
+	
+	check( !inTest->connection );
+	err = AsyncConnection_Connect( &inTest->connection, serverAddrStr, 0, kAsyncConnectionFlags_None,
+		5 * UINT64_C_safe( kNanosecondsPerSecond ), kSocketBufferSize_DontSet, kSocketBufferSize_DontSet,
+		NULL, NULL, _KeepAliveTestConnectionHandler, cnxCtx, inTest->queue );
+	require_noerr( err, exit );
+	
+	cnxCtx->test = inTest;
+	check( !inTest->connectionCtx );
+	inTest->connectionCtx = cnxCtx;
+	cnxCtx = NULL;
+	
+exit:
+	ForgetSocket( &sock );
+	if( sockCtx ) SocketContextRelease( sockCtx );
+	FreeNullSafe( cnxCtx );
+	return( err );
+}
+
+//===========================================================================================================================
+
+static void	_KeepAliveTestStopSubtest( KeepAliveTestRef inTest )
+{
+	dispatch_source_forget( &inTest->readSource );
+	DNSServiceForget( &inTest->keepalive );
+	DNSServiceForget( &inTest->query );
+	dispatch_source_forget( &inTest->timer );
+	_KeepAliveTestForgetConnection( inTest );
+}
+
+//===========================================================================================================================
+
+static KeepAliveSubtest *	_KeepAliveTestGetSubtest( KeepAliveTestRef inTest )
+{
+	return( ( inTest->subtestIdx < countof( inTest->subtests ) ) ? &inTest->subtests[ inTest->subtestIdx ] : NULL );
+}
+
+//===========================================================================================================================
+
+static const char *	_KeepAliveTestGetSubtestLogPrefix( KeepAliveTestRef inTest, char *inBufPtr, size_t inBufLen )
+{
+	SNPrintF( inBufPtr, inBufLen, "Subtest %zu/%zu", inTest->subtestIdx + 1, countof( inTest->subtests ) );
+	return( inBufPtr );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_KeepAliveTestContinue( KeepAliveTestRef inTest, OSStatus inSubtestError, Boolean *outDone )
+{
+	OSStatus				err;
+	KeepAliveSubtest *		subtest;
+	
+	require_action( inTest->subtestIdx <= countof( inTest->subtests ), exit, err = kInternalErr );
+	
+	if( inTest->subtestIdx < countof( inTest->subtests ) )
+	{
+		subtest = _KeepAliveTestGetSubtest( inTest );
+		_KeepAliveTestStopSubtest( inTest );
+		subtest->endTime	= NanoTimeGetCurrent();
+		subtest->error		= inSubtestError;
+		if( ++inTest->subtestIdx < countof( inTest->subtests ) )
+		{
+			err = _KeepAliveTestStartSubtest( inTest );
+			require_noerr_quiet( err, exit );
+		}
+	}
+	err = kNoErr;
+	
+exit:
+	if( outDone ) *outDone = ( !err && ( inTest->subtestIdx == countof( inTest->subtests ) ) ) ? true : false;
+	return( err );
+}
+
+//===========================================================================================================================
+
+static void	_KeepAliveTestTCPAcceptHandler( void *inCtx )
+{
+	OSStatus						err;
+	const SocketContext * const		sockCtx	= (SocketContext *) inCtx;
+	const KeepAliveTestRef			test	= (KeepAliveTestRef) sockCtx->userContext;
+	KeepAliveSubtest * const		subtest	= _KeepAliveTestGetSubtest( test );
+	sockaddr_ip						peer;
+	socklen_t						len;
+	char							prefix[ 64 ];
+	
+	check( !IsValidSocket( subtest->serverSock ) );
+	len = (socklen_t) sizeof( peer );
+	subtest->serverSock = accept( sockCtx->sock, &peer.sa, &len );
+	err = map_socket_creation_errno( subtest->serverSock );
+	require_noerr( err, exit );
+	
+	_KeepAliveTestGetSubtestLogPrefix( test, prefix, sizeof( prefix ) );
+	kat_ulog( kLogLevelInfo, "%s: Accepted connection from %##a\n", prefix, &peer.sa );
+	
+	dispatch_source_forget( &test->readSource );
+	
+exit:
+	if( err ) _KeepAliveTestStop( test, err );
+}
+
+//===========================================================================================================================
+
+static void	_KeepAliveTestConnectionHandler( SocketRef inSock, OSStatus inError, void *inArg )
+{
+	KeepAliveTestConnectionContext *		ctx		= (KeepAliveTestConnectionContext *) inArg;
+	const KeepAliveTestRef					test	= ctx->test;
+	
+	if( test )
+	{
+		_KeepAliveTestForgetConnection( test );
+		_KeepAliveTestHandleConnection( test, inSock, inError );
+		inSock = kInvalidSocketRef;
+	}
+	ForgetSocket( &inSock );
+	free( ctx );
+}
+
+//===========================================================================================================================
+
+#define kKeepAliveTestQueryTimeoutSecs		5
+
+static void	_KeepAliveTestHandleConnection( KeepAliveTestRef inTest, SocketRef inSock, OSStatus inError )
+{
+	OSStatus								err;
+	KeepAliveSubtest * const				subtest			= _KeepAliveTestGetSubtest( inTest );
+	const KeepAliveSubtestParams * const	params			= &kKeepAliveSubtestParams[ inTest->subtestIdx ];
+	socklen_t								len;
+    uint32_t								value;
+	int										family, i;
+	Boolean									subtestFailed	= false;
+	Boolean									done;
+	char									prefix[ 64 ];
+	
+	require_noerr_action( inError, exit, err = inError );
+	
+	check( !IsValidSocket( subtest->clientSock ) );
+	subtest->clientSock = inSock;
+	inSock = kInvalidSocketRef;
+	
+	// Get local and remote IP addresses.
+	
+	len = (socklen_t) sizeof( subtest->local );
+	err = getsockname( subtest->clientSock, &subtest->local.sa, &len );
+	err = map_global_noerr_errno( err );
+	require_noerr( err, exit );
+	
+	len = (socklen_t) sizeof( subtest->remote );
+	err = getpeername( subtest->clientSock, &subtest->remote.sa, &len );
+	err = map_global_noerr_errno( err );
+	require_noerr( err, exit );
+	
+	_KeepAliveTestGetSubtestLogPrefix( inTest, prefix, sizeof( prefix ) );
+	kat_ulog( kLogLevelInfo, "%s: Connection established: %##a <-> %##a\n",
+		prefix, &subtest->local.sa, &subtest->remote.sa );
+	
+	// Call either DNSServiceSleepKeepalive() or DNSServiceSleepKeepalive_sockaddr().
+	
+	check( subtest->timeoutKA == 0 );
+	subtest->timeoutKA = (unsigned int) RandomRange( 1, UINT_MAX );
+	
+    switch( params->callVariant )
+	{
+		case kKeepAliveCallVariant_TakesSocket:
+			kat_ulog( kLogLevelInfo, "%s: Will call DNSServiceSleepKeepalive() for client-side socket\n", prefix );
+			check( !inTest->keepalive );
+			err = DNSServiceSleepKeepalive( &inTest->keepalive, 0, subtest->clientSock,
+				subtest->timeoutKA, _KeepAliveTestKeepaliveCallback, inTest );
+			require_noerr( err, exit );
+			
+			err = DNSServiceSetDispatchQueue( inTest->keepalive, inTest->queue );
+			require_noerr( err, exit );
+			break;
+		
+		case kKeepAliveCallVariant_TakesSockAddrs:
+			kat_ulog( kLogLevelInfo,
+				"%s: Will call DNSServiceSleepKeepalive_sockaddr() for local and remote sockaddrs\n", prefix );
+			if( !SOFT_LINK_HAS_FUNCTION( system_dnssd, DNSServiceSleepKeepalive_sockaddr ) )
+			{
+				kat_ulog( kLogLevelError,
+					"%s: Failed to soft link DNSServiceSleepKeepalive_sockaddr from libsystem_dnssd.\n", prefix );
+				subtestFailed = true;
+				err = kUnsupportedErr;
+				goto exit;
+			}
+			check( !inTest->keepalive );
+			err = soft_DNSServiceSleepKeepalive_sockaddr( &inTest->keepalive, 0, &subtest->local.sa, &subtest->remote.sa,
+				subtest->timeoutKA, _KeepAliveTestKeepaliveCallback, inTest );
+			require_noerr( err, exit );
+			
+			err = DNSServiceSetDispatchQueue( inTest->keepalive, inTest->queue );
+			require_noerr( err, exit );
+			break;
+		
+		default:
+			kat_ulog( kLogLevelError, "%s: Invalid KeepAliveCallVariant value %d\n", prefix, (int) params->callVariant );
+			err = kInternalErr;
+			goto exit;
+	}
+	// Use the same logic that the DNSServiceSleepKeepalive functions use to derive a record name and rdata.
+	
+	value = 0;
+	family = subtest->local.sa.sa_family;
+	if( family == AF_INET )
+	{
+		const struct sockaddr_in * const		sin = &subtest->local.v4;
+		const uint8_t *							ptr;
+		
+		check_compile_time_code( sizeof( sin->sin_addr.s_addr ) == 4 );
+		ptr = (const uint8_t *) &sin->sin_addr.s_addr;
+		for( i = 0; i < 4; ++i ) value += ptr[ i ];
+		value += sin->sin_port;	// Note: No ntohl(). This is what DNSServiceSleepKeepalive does.
+		
+		check( subtest->remote.sa.sa_family == AF_INET );
+		ASPrintF( &subtest->dataStr, "t=%u h=%.4a d=%.4a l=%u r=%u",
+			subtest->timeoutKA, &subtest->local.v4.sin_addr.s_addr, &subtest->remote.v4.sin_addr.s_addr,
+			ntohs( subtest->local.v4.sin_port ), ntohs( subtest->remote.v4.sin_port ) );
+		require_action( subtest->dataStr, exit, err = kNoMemoryErr );
+	}
+	else if( family == AF_INET6 )
+	{
+		const struct sockaddr_in6 * const		sin6 = &subtest->local.v6;
+		
+		check_compile_time_code( countof( sin6->sin6_addr.s6_addr ) == 16 );
+		for( i = 0; i < 16; ++i ) value += sin6->sin6_addr.s6_addr[ i ];
+		value += sin6->sin6_port; // Note: No ntohl(). This is what DNSServiceSleepKeepalive does.
+		
+		check( subtest->remote.sa.sa_family == AF_INET6 );
+		ASPrintF( &subtest->dataStr, "t=%u H=%.16a D=%.16a l=%u r=%u",
+			subtest->timeoutKA, subtest->local.v6.sin6_addr.s6_addr, subtest->remote.v6.sin6_addr.s6_addr,
+			ntohs( subtest->local.v6.sin6_port ), ntohs( subtest->remote.v6.sin6_port ) );
+		require_action( subtest->dataStr, exit, err = kNoMemoryErr );
+	}
+	else
+	{
+		kat_ulog( kLogLevelError, "%s: Unexpected local address family %d\n", prefix, family );
+		err = kInternalErr;
+		goto exit;
+	}
+	
+	// Start query for the new keepalive record.
+	
+	check( !subtest->recordName );
+	ASPrintF( &subtest->recordName, "%u._keepalive._dns-sd._udp.local.", value );
+	require_action( subtest->recordName, exit, err = kNoMemoryErr );
+	
+	kat_ulog( kLogLevelInfo, "%s: Will query for %s NULL record\n", prefix, subtest->recordName );
+	check( !inTest->query );
+	err = DNSServiceQueryRecord( &inTest->query, 0, kDNSServiceInterfaceIndexLocalOnly, subtest->recordName,
+		kDNSServiceType_NULL, kDNSServiceClass_IN, _KeepAliveTestQueryRecordCallback, inTest );
+	require_noerr( err, exit );
+	
+	err = DNSServiceSetDispatchQueue( inTest->query, inTest->queue );
+	require_noerr( err, exit );
+	
+	// Start timer to enforce a time limit on the query.
+	
+	check( !inTest->timer );
+	err = DispatchTimerOneShotCreate( dispatch_time_seconds( kKeepAliveTestQueryTimeoutSecs ),
+		kKeepAliveTestQueryTimeoutSecs * ( INT64_C_safe( kNanosecondsPerSecond ) / 20 ), inTest->queue,
+		_KeepAliveTestQueryTimerHandler, inTest, &inTest->timer );
+	require_noerr( err, exit );
+	dispatch_resume( inTest->timer );
+	
+exit:
+	ForgetSocket( &inSock );
+	if( subtestFailed )
+	{
+		err = _KeepAliveTestContinue( inTest, err, &done );
+		check_noerr( err );
+	}
+	else
+	{
+		done = false;
+	}
+	if( err || done ) _KeepAliveTestStop( inTest, err );
+}
+
+//===========================================================================================================================
+
+static void	_KeepAliveTestForgetConnection( KeepAliveTestRef inTest )
+{
+	if( inTest->connection )
+	{
+		check( inTest->connectionCtx );
+		inTest->connectionCtx->test	= NULL; // Unset the connection's back pointer to test.
+		inTest->connectionCtx		= NULL; // Context will be freed by the connection's handler.
+		AsyncConnection_Forget( &inTest->connection );
+	}
+}
+
+//===========================================================================================================================
+
+static void DNSSD_API	_KeepAliveTestKeepaliveCallback( DNSServiceRef inSDRef, DNSServiceErrorType inError, void *inCtx )
+{
+	OSStatus					err;
+	const KeepAliveTestRef		test	= (KeepAliveTestRef) inCtx;
+	char						prefix[ 64 ];
+	
+	Unused( inSDRef );
+	
+	_KeepAliveTestGetSubtestLogPrefix( test, prefix, sizeof( prefix ) );
+	kat_ulog( kLogLevelInfo, "%s: Keepalive callback error: %#m\n", prefix, inError );
+	
+	if( inError )
+	{
+		Boolean		done;
+		
+		err = _KeepAliveTestContinue( test, inError, &done );
+		check_noerr( err );
+		if( err || done ) _KeepAliveTestStop( test, err );
+	}
+}
+
+//===========================================================================================================================
+
+static void	_KeepAliveTestQueryTimerHandler( void *inCtx )
+{
+	OSStatus						err;
+	const KeepAliveTestRef			test	= (KeepAliveTestRef) inCtx;
+	KeepAliveSubtest * const		subtest	= _KeepAliveTestGetSubtest( test );
+	Boolean							done;
+	char							prefix[ 64 ];
+	
+	_KeepAliveTestGetSubtestLogPrefix( test, prefix, sizeof( prefix ) );
+	kat_ulog( kLogLevelInfo, "%s: Query for \"%s\" timed out.\n", prefix, subtest->recordName );
+	
+	err = _KeepAliveTestContinue( test, kTimeoutErr, &done );
+	check_noerr( err );
+	if( err || done ) _KeepAliveTestStop( test, err );
+}
+
+//===========================================================================================================================
+
+static void DNSSD_API
+	_KeepAliveTestQueryRecordCallback(
+		DNSServiceRef		inSDRef,
+		DNSServiceFlags		inFlags,
+		uint32_t			inInterfaceIndex,
+		DNSServiceErrorType	inError,
+		const char *		inFullName,
+		uint16_t			inType,
+		uint16_t			inClass,
+		uint16_t			inRDataLen,
+		const void *		inRDataPtr,
+		uint32_t			inTTL,
+		void *				inCtx )
+{
+	OSStatus						err;
+	const KeepAliveTestRef			test	= (KeepAliveTestRef) inCtx;
+	KeepAliveSubtest * const		subtest	= _KeepAliveTestGetSubtest( test );
+	const uint8_t *					ptr;
+	size_t							dataStrLen, minLen;
+	Boolean							done;
+	char							prefix[ 64 ];
+	
+	Unused( inSDRef );
+	Unused( inInterfaceIndex );
+	Unused( inTTL );
+	
+	_KeepAliveTestGetSubtestLogPrefix( test, prefix, sizeof( prefix ) );
+	if( strcasecmp( inFullName, subtest->recordName ) != 0 )
+	{
+		kat_ulog( kLogLevelError, "%s: QueryRecord(%s) result: Got unexpected record name \"%s\".\n",
+			prefix, subtest->recordName, inFullName );
+		err = kUnexpectedErr;
+		goto exit;
+	}
+	if( inType != kDNSServiceType_NULL )
+	{
+		kat_ulog( kLogLevelError, "%s: QueryRecord(%s) result: Got unexpected record type %d (%s) != %d (NULL).\n",
+			prefix, subtest->recordName, inType, RecordTypeToString( inType ), kDNSServiceType_NULL );
+		err = kUnexpectedErr;
+		goto exit;
+	}
+	if( inClass != kDNSServiceClass_IN )
+	{
+		kat_ulog( kLogLevelError, "%s: QueryRecord(%s) result: Got unexpected record class %d != %d (IN).\n",
+			prefix, subtest->recordName, inClass, kDNSServiceClass_IN );
+		err = kUnexpectedErr;
+		goto exit;
+	}
+	if( inError )
+	{
+		kat_ulog( kLogLevelError, "%s: QueryRecord(%s) result: Got unexpected error %#m.\n",
+			prefix, subtest->recordName, inError );
+		err = inError;
+		goto exit;
+	}
+	if( ( inFlags & kDNSServiceFlagsAdd ) == 0 )
+	{
+		kat_ulog( kLogLevelError, "%s: QueryRecord(%s) result: Missing Add flag.\n", prefix, subtest->recordName );
+		err = kUnexpectedErr;
+		goto exit;
+	}
+	kat_ulog( kLogLevelInfo, "%s: QueryRecord(%s) result rdata: %#H\n",
+		prefix, subtest->recordName, inRDataPtr, inRDataLen, inRDataLen );
+	
+	dataStrLen	= strlen( subtest->dataStr ) + 1;	// There's a NUL terminator at the end of the rdata.
+	minLen		= 1 + dataStrLen;					// The first byte of the rdata is a length byte.
+	if( inRDataLen < minLen )
+	{
+		kat_ulog( kLogLevelError, "%s: QueryRecord(%s) result: rdata length (%d) is less than expected minimum (%zu).\n",
+			prefix, subtest->recordName, inRDataLen, minLen );
+		err = kUnexpectedErr;
+		goto exit;
+	}
+	ptr = (const uint8_t *) inRDataPtr;
+	if( ptr[ 0 ] < dataStrLen )
+	{
+		kat_ulog( kLogLevelError,
+			"%s: QueryRecord(%s) result: rdata length byte value (%d) is less than expected minimum (%zu).\n",
+			prefix, subtest->recordName, ptr[ 0 ], dataStrLen );
+		err = kUnexpectedErr;
+		goto exit;
+	}
+	if( memcmp( &ptr[ 1 ], subtest->dataStr, dataStrLen - 1 ) != 0 )
+	{
+		kat_ulog( kLogLevelError, "%s: QueryRecord(%s) result: rdata body doesn't contain '%s'.\n",
+			prefix, subtest->recordName, subtest->dataStr );
+	}
+	err = kNoErr;
+	
+exit:
+	err = _KeepAliveTestContinue( test, err, &done );
+	check_noerr( err );
+	if( err || done ) _KeepAliveTestStop( test, kNoErr );
+}
+#endif	// TARGET_OS_DARWIN
+
 //===========================================================================================================================
 //	SSDPDiscoverCmd
 //===========================================================================================================================
@@ -16875,7 +17898,7 @@ static void	SSDPDiscoverCmd( void )
 	// Set up SIGINT handler.
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, Exit, kExitReason_SIGINT, &signalSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), Exit, kExitReason_SIGINT, &signalSource );
 	require_noerr( err, exit );
 	dispatch_resume( signalSource );
 	
@@ -18085,7 +19108,8 @@ static void	InterfaceMonitorCmd( void )
 	mdns_interface_monitor_activate( monitor );
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, _InterfaceMonitorSignalHandler, monitor, &signalSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), _InterfaceMonitorSignalHandler, monitor,
+		&signalSource );
 	require_noerr( err, exit );
 	dispatch_resume( signalSource );
 	
@@ -18170,12 +19194,14 @@ static void	DNSProxyCmd( void )
 	require_noerr_quiet( err, exit );
 	
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, _DNSProxyCmdSignalHandler, connection, &sigIntSource );
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), _DNSProxyCmdSignalHandler, connection,
+		&sigIntSource );
 	require_noerr( err, exit );
 	dispatch_activate( sigIntSource );
 	
 	signal( SIGTERM, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGTERM, _DNSProxyCmdSignalHandler, connection, &sigTermSource );
+	err = DispatchSignalSourceCreate( SIGTERM, dispatch_get_main_queue(), _DNSProxyCmdSignalHandler, connection,
+		&sigTermSource );
 	require_noerr( err, exit );
 	dispatch_activate( sigTermSource );
 	
@@ -19334,6 +20360,7 @@ exit:
 static OSStatus
 	DispatchSignalSourceCreate(
 		int					inSignal,
+		dispatch_queue_t	inQueue,
 		DispatchHandler		inEventHandler,
 		void *				inContext,
 		dispatch_source_t *	outSource )
@@ -19341,7 +20368,7 @@ static OSStatus
 	OSStatus				err;
 	dispatch_source_t		source;
 	
-	source = dispatch_source_create( DISPATCH_SOURCE_TYPE_SIGNAL, (uintptr_t) inSignal, 0, dispatch_get_main_queue() );
+	source = dispatch_source_create( DISPATCH_SOURCE_TYPE_SIGNAL, (uintptr_t) inSignal, 0, inQueue );
 	require_action( source, exit, err = kUnknownErr );
 	
 	dispatch_set_context( source, inContext );

@@ -28,9 +28,9 @@
 
 // Following are needed for fetching the root trust anchor dynamically
 #include <CoreFoundation/CoreFoundation.h>
-#include <libxml2/libxml/parser.h>
-#include <libxml2/libxml/tree.h>
-#include <libxml2/libxml/xmlmemory.h>
+#include <libxml/parser.h>
+#include <libxml/tree.h>
+#include <libxml/xmlmemory.h>
 #include <notify.h>
 
 // 30 days

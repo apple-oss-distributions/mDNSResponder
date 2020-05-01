@@ -2353,6 +2353,17 @@ static void DNSSD_API SleepKeepaliveCallback(DNSServiceRef sdRef, DNSRecordRef r
         ((DNSServiceSleepKeepaliveReply)ka->AppCallback)(sdRef, errorCode, ka->AppContext);
 }
 
+static DNSServiceErrorType _DNSServiceSleepKeepalive_sockaddr
+(
+    DNSServiceRef *                 sdRef,
+    DNSServiceFlags                 flags,
+    const struct sockaddr *         localAddr,
+    const struct sockaddr *         remoteAddr,
+    unsigned int                    timeout,
+    DNSServiceSleepKeepaliveReply   callBack,
+    void *                          context
+);
+
 DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
 (
     DNSServiceRef                       *sdRef,
@@ -2363,24 +2374,9 @@ DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
     void                                *context
 )
 {
-    char source_str[INET6_ADDRSTRLEN];
-    char target_str[INET6_ADDRSTRLEN];
     struct sockaddr_storage lss;
     struct sockaddr_storage rss;
     socklen_t len1, len2;
-    unsigned int len, proxyreclen;
-    char buf[256];
-    DNSServiceErrorType err;
-    DNSRecordRef record = NULL;
-    char name[10];
-    char recname[128];
-    SleepKAContext *ka;
-    unsigned int i, unique;
-
-
-    (void) flags; //unused
-    if (!timeout) return kDNSServiceErr_BadParam;
-
 
     len1 = sizeof(lss);
     if (getsockname(fd, (struct sockaddr *)&lss, &len1) < 0)
@@ -2401,12 +2397,54 @@ DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
         syslog(LOG_WARNING, "dnssd_clientstub DNSServiceSleepKeepalive local/remote info not same");
         return kDNSServiceErr_Unknown;
     }
+    return _DNSServiceSleepKeepalive_sockaddr(sdRef, flags, (const struct sockaddr *)&lss, (const struct sockaddr *)&rss,
+        timeout, callBack, context);
+}
+
+DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive_sockaddr
+(
+    DNSServiceRef *                 sdRef,
+    DNSServiceFlags                 flags,
+    const struct sockaddr *         localAddr,
+    const struct sockaddr *         remoteAddr,
+    unsigned int                    timeout,
+    DNSServiceSleepKeepaliveReply   callBack,
+    void *                          context
+)
+{
+    return _DNSServiceSleepKeepalive_sockaddr(sdRef, flags, localAddr, remoteAddr, timeout, callBack, context );
+}
+
+static DNSServiceErrorType _DNSServiceSleepKeepalive_sockaddr
+(
+    DNSServiceRef *                 sdRef,
+    DNSServiceFlags                 flags,
+    const struct sockaddr *         localAddr,
+    const struct sockaddr *         remoteAddr,
+    unsigned int                    timeout,
+    DNSServiceSleepKeepaliveReply   callBack,
+    void *                          context
+)
+{
+    char source_str[INET6_ADDRSTRLEN];
+    char target_str[INET6_ADDRSTRLEN];
+    unsigned int len, proxyreclen;
+    char buf[256];
+    DNSServiceErrorType err;
+    DNSRecordRef record = NULL;
+    char name[10];
+    char recname[128];
+    SleepKAContext *ka;
+    unsigned int i, unique;
+
+    (void) flags; //unused
+    if (!timeout) return kDNSServiceErr_BadParam;
 
     unique = 0;
-    if (lss.ss_family == AF_INET)
+    if ((localAddr->sa_family == AF_INET) && (remoteAddr->sa_family == AF_INET))
     {
-        struct sockaddr_in *sl = (struct sockaddr_in *)&lss;
-        struct sockaddr_in *sr = (struct sockaddr_in *)&rss;
+        const struct sockaddr_in *sl = (const struct sockaddr_in *)localAddr;
+        const struct sockaddr_in *sr = (const struct sockaddr_in *)remoteAddr;
         unsigned char *ptr = (unsigned char *)&sl->sin_addr;
 
         if (!inet_ntop(AF_INET, (const void *)&sr->sin_addr, target_str, sizeof (target_str)))
@@ -2426,10 +2464,10 @@ DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
         unique += sl->sin_port;
         len = snprintf(buf+1, sizeof(buf) - 1, "t=%u h=%s d=%s l=%u r=%u", timeout, source_str, target_str, ntohs(sl->sin_port), ntohs(sr->sin_port));
     }
-    else
+    else if ((localAddr->sa_family == AF_INET6) && (remoteAddr->sa_family == AF_INET6))
     {
-        struct sockaddr_in6 *sl6 = (struct sockaddr_in6 *)&lss;
-        struct sockaddr_in6 *sr6 = (struct sockaddr_in6 *)&rss;
+        const struct sockaddr_in6 *sl6 = (const struct sockaddr_in6 *)localAddr;
+        const struct sockaddr_in6 *sr6 = (const struct sockaddr_in6 *)remoteAddr;
         unsigned char *ptr = (unsigned char *)&sl6->sin6_addr;
 
         if (!inet_ntop(AF_INET6, (const void *)&sr6->sin6_addr, target_str, sizeof (target_str)))
@@ -2446,6 +2484,10 @@ DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
             unique += ptr[i];
         unique += sl6->sin6_port;
         len = snprintf(buf+1, sizeof(buf) - 1, "t=%u H=%s D=%s l=%u r=%u", timeout, source_str, target_str, ntohs(sl6->sin6_port), ntohs(sr6->sin6_port));
+    }
+    else
+    {
+        return kDNSServiceErr_BadParam;
     }
 
     if (len >= (sizeof(buf) - 1))
