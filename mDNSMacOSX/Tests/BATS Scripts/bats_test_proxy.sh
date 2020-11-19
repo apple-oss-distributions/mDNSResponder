@@ -47,7 +47,7 @@ function test_proxy_on {
     local dnssdutil_pid=$!
 
     # See if that worked
-    sleep 1
+    sleep 5
     local dnssdutil_pid_now=$(ps xa |sed -n -e 's/^ *\([0-9][0-9]*\).*$/\1/' -e "/$dnssdutil_pid/p")
     if [ $dnssdutil_pid != "$dnssdutil_pid_now" ]; then
         echo "Failed to enable DNS proxy $dnssdutil_pid $dnssdutil_pid_now."

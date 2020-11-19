@@ -578,7 +578,7 @@ static void resolveReply( DNSServiceRef sdRef,
             const u_char *  valuePtr = TXTRecordGetValuePtr( txtLen, txtRecord, "path", &valueLen );
             urlComponents.path = (__bridge_transfer NSString *)CFStringCreateWithBytes( kCFAllocatorDefault, valuePtr, valueLen, kCFStringEncodingUTF8, false );
         }
-        if( port ) urlComponents.port = [NSNumber numberWithShort: NTOHS( port )];
+        if( port ) urlComponents.port = [NSNumber numberWithUnsignedShort: ntohs( port )];
         record[_CNInstanceKey_resolveUrl] = urlComponents.URL;
     }
 }

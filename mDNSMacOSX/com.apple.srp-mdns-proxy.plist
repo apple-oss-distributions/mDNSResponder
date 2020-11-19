@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.apple.srp-mdns-proxy</string>
+
+    <key>InitGroups</key>
+    <false/>
+
+    <key>GroupName</key>
+    <string>_mdnsresponder</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/libexec/srp-mdns-proxy</string>
+    </array>
+
+    <key>MachServices</key>
+    <dict>
+      <key>com.apple.srp-mdns-proxy.proxy</key>
+      <true/>
+    </dict>
+
+    <key>POSIXSpawnType</key>
+    <string>Interactive</string>
+
+    <key>EnablePressuredExit</key>
+    <true/>
+
+    <key>LimitLoadToHardware</key>
+    <dict>
+      <key>features.fillmore</key>
+      <true/>
+    </dict>
+
+  </dict>
+</plist>

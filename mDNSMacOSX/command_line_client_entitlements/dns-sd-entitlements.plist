@@ -4,6 +4,9 @@
 <dict>
 	<key>com.apple.mDNSResponder.log_utility</key>
 	<true/>
+	<key>com.apple.developer.networking.multicast.BYPASS</key>
+	<true/>
+	<key>com.apple.developer.on-demand-install-capable.BYPASS</key>
+	<true/>
 </dict>
 </plist>
-

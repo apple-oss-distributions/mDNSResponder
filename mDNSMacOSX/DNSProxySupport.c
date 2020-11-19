@@ -369,18 +369,26 @@ mDNSlocal mStatus SetupTCPProxySocket(int skt, TCPSocket *sock, u_short sa_famil
     return mStatus_NoError;
 }
 
-mDNSlocal void BindDPSocket(int fd, int sa_family)
+mDNSlocal void BindDPSocket(int fd, int sa_family, int type)
 {
     int err;
     const int on = 1;
 
+    if (type == SOCK_STREAM)
+    {
+        err = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+        if (err != 0)
+        {
+            const int setsockopt_errno = errno;
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                "BindDPSocket: setsockopt SO_REUSEADDR failed for " PUB_S " %d errno %d (" PUB_S ")",
+                (sa_family == AF_INET) ? "IPv4" : "IPv6", fd, setsockopt_errno, strerror(setsockopt_errno));
+            return;
+        }
+    }
     if (sa_family == AF_INET)
     {
         struct sockaddr_in addr;
-
-        err = setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
-        if (err < 0) 
-            LogMsg("BindDPSocket: setsockopt SO_REUSEPORT failed for IPv4 %d errno %d (%s)", fd, errno, strerror(errno));
 
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
@@ -405,10 +413,6 @@ mDNSlocal void BindDPSocket(int fd, int sa_family)
             LogMsg("DPFBindSocket: setsockopt IPV6_V6ONLY %d errno %d (%s)", fd, errno, strerror(errno));
             return;
         }
-        err = setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
-        if (err < 0)
-            LogMsg("BindDPSocket: setsockopt SO_REUSEPORT failed for V6 %d errno %d (%s)", fd, errno, strerror(errno));
-
         memset(&addr6, 0, sizeof(addr6));
         addr6.sin6_family = AF_INET6;
         addr6.sin6_port = htons(53);
@@ -488,10 +492,10 @@ mDNSexport void mDNSPlatformInitDNSProxySkts(ProxyCallback UDPCallback, ProxyCal
             close(dpskt[3]);
     }
 
-    BindDPSocket(dpskt[0], AF_INET);
-    BindDPSocket(dpskt[1], AF_INET6);
-    BindDPSocket(dpskt[2], AF_INET);
-    BindDPSocket(dpskt[3], AF_INET6);
+    BindDPSocket(dpskt[0], AF_INET, SOCK_DGRAM);
+    BindDPSocket(dpskt[1], AF_INET6, SOCK_DGRAM);
+    BindDPSocket(dpskt[2], AF_INET, SOCK_STREAM);
+    BindDPSocket(dpskt[3], AF_INET6, SOCK_STREAM);
 
     LogInfo("mDNSPlatformInitDNSProxySkts: Opened Listener Sockets for DNS Proxy : %d, %d, %d, %d", 
              dpskt[0], dpskt[1], dpskt[2], dpskt[3]);

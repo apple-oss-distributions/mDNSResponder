@@ -30,7 +30,9 @@ mDNSexport mDNSBool DNS64StateMachine(mDNS *m, DNSQuestion *inQ, const ResourceR
 mDNSexport mStatus  DNS64AnswerCurrentQuestion(mDNS *m, const ResourceRecord *inRR, QC_result inResult);
 mDNSexport void     DNS64HandleNewQuestion(mDNS *m, DNSQuestion *inQ);
 mDNSexport void     DNS64ResetState(DNSQuestion *inQ);
+#if !MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 mDNSexport void     DNS64RestartQuestions(mDNS *m);
+#endif
 
 #ifdef  __cplusplus
 }

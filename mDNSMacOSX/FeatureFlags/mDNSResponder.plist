@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>bonjour_privacy</key>
+	<dict>
+		<key>Enabled</key>
+		<true/>
+		<key>DisplayName</key>
+		<string>Require Entitlements For Bonjour</string>
+		<key>Description</key>
+		<string>Restrict bonjour browsing without proper entitlments</string>
+		<key>Radar</key>
+		<integer>59374417</integer>
+	</dict>
+</dict>
+</plist>

@@ -6,9 +6,17 @@
 	<true/>
 	<key>com.apple.mDNSResponder_Helper</key>
 	<true/>
+	<key>com.apple.networkd_privileged</key>
+	<true/>
+	<key>com.apple.private.necp.match</key>
+	<true/>
+	<key>com.apple.private.nehelper.privileged</key>
+	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
 	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>com.apple.private.network.socket-delegate</key>
 	<true/>
 	<key>com.apple.SystemConfiguration.SCDynamicStore-write-access</key>
 	<true/>

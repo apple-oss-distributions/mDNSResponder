@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2012-2020 Apple Inc. All rights reserved.
  *
  * PRIVATE DNSX CLIENT LIBRARY --FOR Apple Platforms ONLY OSX/iOS--
  * Resides in /usr/lib/libdns_services.dylib
@@ -9,6 +9,7 @@
 #include <xpc/xpc.h>
 #include <Block.h>
 #include <os/log.h>
+#include <stdatomic.h>
 #include "xpc_clients.h"
 
 //*************************************************************************************************************
@@ -22,6 +23,7 @@ struct _DNSXConnRef_t
     dispatch_queue_t      lib_q;         // internal queue created in library itself
     DNSXEnableProxyReply  AppCallBack;   // Callback function ptr for Client
     dispatch_queue_t      client_q;      // Queue specified by client for scheduling its Callback
+    _Atomic(int32_t)      refCount;      // Reference count for this object.
 };
 
 //*************************************************************************************************************
@@ -40,6 +42,19 @@ static void LogDebug(const char *prefix, xpc_object_t o)
     char *desc = xpc_copy_description(o);
     os_log_info(OS_LOG_DEFAULT, "%s: %s", prefix, desc);
     free(desc);
+}
+
+static void _DNSXConnRefRetain(DNSXConnRef connRef)
+{
+    atomic_fetch_add(&connRef->refCount, 1);
+}
+
+static void _DNSXConnRefRelease(DNSXConnRef connRef)
+{
+    if (atomic_fetch_add(&connRef->refCount, -1) == 1)
+    {
+        free(connRef);
+    }
 }
 
 //**************************************************************************************************************
@@ -65,8 +80,8 @@ void DNSXRefDeAlloc(DNSXConnRef connRef)
         dispatch_async((connRef)->client_q, ^{
             dispatch_release(connRef->client_q);
             connRef->client_q = NULL;
-            free(connRef);
-            os_log_info(OS_LOG_DEFAULT, "dns_services: DNSXRefDeAlloc successfully DeAllocated client_q & freed connRef");
+            _DNSXConnRefRelease(connRef);
+            os_log_info(OS_LOG_DEFAULT, "dns_services: DNSXRefDeAlloc successfully DeAllocated client_q & released connRef");
         });
     });
     
@@ -82,6 +97,7 @@ static DNSXErrorType SendMsgToServer(DNSXConnRef connRef, xpc_object_t msg)
     
     LogDebug("dns_services: SendMsgToServer Sending msg to Daemon", msg);
     
+    _DNSXConnRefRetain(connRef);
     xpc_connection_send_message_with_reply((connRef)->conn_ref, msg, (connRef)->lib_q, ^(xpc_object_t recv_msg)
     {
         xpc_type_t type = xpc_get_type(recv_msg);
@@ -131,6 +147,7 @@ static DNSXErrorType SendMsgToServer(DNSXConnRef connRef, xpc_object_t msg)
                                 xpc_dictionary_get_string(recv_msg, XPC_ERROR_KEY_DESCRIPTION));
             LogDebug("dns_services: SendMsgToServer Unexpected Reply contents", recv_msg);
         }
+        _DNSXConnRefRelease(connRef);
     });
     
     return errx;
@@ -146,7 +163,7 @@ static DNSXErrorType InitConnection(DNSXConnRef *connRefOut, const char *servnam
     }
     
     // Use a DNSXConnRef on the stack to be captured in the blocks below, rather than capturing the DNSXConnRef* owned by the client
-    DNSXConnRef connRef = malloc(sizeof(struct _DNSXConnRef_t));
+    DNSXConnRef connRef = (DNSXConnRef)calloc(1, sizeof(*connRef));
     if (connRef == NULL)
     {
         os_log(OS_LOG_DEFAULT, "dns_services: InitConnection() No memory to allocate!");
@@ -154,6 +171,7 @@ static DNSXErrorType InitConnection(DNSXConnRef *connRefOut, const char *servnam
     }
     
     // Initialize the DNSXConnRef
+    atomic_init(&connRef->refCount, 1);
     dispatch_retain(clientq);
     connRef->client_q     = clientq;
     connRef->AppCallBack  = AppCallBack;
@@ -164,7 +182,9 @@ static DNSXErrorType InitConnection(DNSXConnRef *connRefOut, const char *servnam
     {
         os_log(OS_LOG_DEFAULT, "dns_services: InitConnection() conn_ref/lib_q is NULL");
         if (connRef != NULL)
-            free(connRef);
+        {
+            _DNSXConnRefRelease(connRef);
+        }
         return kDNSX_NoMem;
     }
     
@@ -194,16 +214,18 @@ static DNSXErrorType InitConnection(DNSXConnRef *connRefOut, const char *servnam
     return kDNSX_NoError;
 }
 
-DNSXErrorType DNSXEnableProxy(DNSXConnRef *connRef, DNSProxyParameters proxyparam, IfIndex inIfindexArr[MaxInputIf],
-                              IfIndex outIfindex, dispatch_queue_t clientq, DNSXEnableProxyReply callBack)
+#define kDNSXProxyRecognizedFlags (kDNSXProxyFlagForceAAAASynthesis)
+
+static DNSXErrorType _DNSXEnableProxy(DNSXConnRef *connRef, DNSProxyParameters proxyparam, IfIndex inIfindexArr[MaxInputIf],
+                                      IfIndex outIfindex, uint8_t ipv6Prefix[16], int ipv6PrefixBitLen,
+                                      DNSXProxyFlags flags, dispatch_queue_t clientq, DNSXEnableProxyReply callBack)
 {
-    
     DNSXErrorType errx = kDNSX_NoError;
     
     // Sanity Checks
     if (connRef == NULL || callBack == NULL || clientq == NULL)
     {
-        os_log(OS_LOG_DEFAULT, "dns_services: DNSXEnableProxy called with NULL DNSXConnRef OR Callback OR ClientQ parameter");
+        os_log(OS_LOG_DEFAULT, "dns_services: _DNSXEnableProxy called with NULL DNSXConnRef OR Callback OR ClientQ parameter");
         return kDNSX_BadParam;
     }
     
@@ -223,11 +245,17 @@ DNSXErrorType DNSXEnableProxy(DNSXConnRef *connRef, DNSProxyParameters proxypara
         return kDNSX_BadParam;
     }
     
+    if (flags & ~kDNSXProxyRecognizedFlags)
+    {
+        os_log_error(OS_LOG_DEFAULT, "dns_services: Use of unrecognized flags 0x%08X", flags & ~kDNSXProxyRecognizedFlags);
+        return kDNSX_BadParam;
+    }
+
     // Create Dictionary To Send
     xpc_object_t dict = xpc_dictionary_create(NULL, NULL, 0);
     if (dict == NULL)
     {
-        os_log(OS_LOG_DEFAULT, "dns_services: DNSXEnableProxy could not create the Msg Dict To Send!");
+        os_log(OS_LOG_DEFAULT, "dns_services: _DNSXEnableProxy could not create the Msg Dict To Send!");
         DNSXRefDeAlloc(*connRef);
         return kDNSX_NoMem;
     }
@@ -242,6 +270,13 @@ DNSXErrorType DNSXEnableProxy(DNSXConnRef *connRef, DNSProxyParameters proxypara
     
     xpc_dictionary_set_uint64(dict, kDNSOutIfindex,      outIfindex);
     
+    if (ipv6Prefix)
+    {
+        xpc_dictionary_set_data(dict, kDNSProxyDNS64IPv6Prefix, ipv6Prefix, 16);
+        xpc_dictionary_set_int64(dict, kDNSProxyDNS64IPv6PrefixBitLen, ipv6PrefixBitLen);
+        const bool forceAAAASynthesis = (flags & kDNSXProxyFlagForceAAAASynthesis) ? true : false;
+        xpc_dictionary_set_bool(dict, kDNSProxyDNS64ForceAAAASynthesis, forceAAAASynthesis);
+    }
     errx = SendMsgToServer(*connRef, dict);
     xpc_release(dict);
     dict = NULL;
@@ -249,3 +284,16 @@ DNSXErrorType DNSXEnableProxy(DNSXConnRef *connRef, DNSProxyParameters proxypara
     return errx;
 }
 
+DNSXErrorType DNSXEnableProxy(DNSXConnRef *connRef, DNSProxyParameters proxyparam, IfIndex inIfindexArr[MaxInputIf],
+                              IfIndex outIfindex, dispatch_queue_t clientq, DNSXEnableProxyReply callBack)
+{
+    return _DNSXEnableProxy(connRef, proxyparam, inIfindexArr, outIfindex, NULL, 0, kDNSXProxyFlagNull, clientq, callBack);
+}
+
+DNSXErrorType DNSXEnableProxy64(DNSXConnRef *connRef, DNSProxyParameters proxyparam, IfIndex inIfindexArr[MaxInputIf],
+                                IfIndex outIfindex, uint8_t ipv6Prefix[16], int ipv6PrefixBitLen, DNSXProxyFlags flags,
+                                dispatch_queue_t clientq, DNSXEnableProxyReply callBack)
+{
+    return _DNSXEnableProxy(connRef, proxyparam, inIfindexArr, outIfindex, ipv6Prefix, ipv6PrefixBitLen, flags, clientq,
+        callBack);
+}

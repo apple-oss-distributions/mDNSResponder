@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,6 +48,14 @@
 
 #if !defined(MDNSRESPONDER_SUPPORTS_APPLE_D2D)
     #define MDNSRESPONDER_SUPPORTS_APPLE_D2D                        1
+#endif
+
+// Feature: DNS64 support for DNS proxy
+// Radar:   <rdar://problem/56505415>
+// Enabled: Yes.
+
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_DNS_PROXY_DNS64)
+    #define MDNSRESPONDER_SUPPORTS_APPLE_DNS_PROXY_DNS64            1
 #endif
 
 // Feature: DNS64 IPv6 synthesis.
@@ -103,6 +111,21 @@
     #endif
 #endif
 
+// Feature: No system wake for network access.
+// Radar:   <rdar://problem/28079659&55038229>
+// Enabled: Yes, but only for iOS and watchOS, which shouldn't act as sleep-proxy clients.
+
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_NO_WAKE_FOR_NET_ACCESS)
+    #if (!defined(TARGET_OS_IOS) || !defined(TARGET_OS_WATCH))
+        #error "Expected TARGET_OS_IOS and TARGET_OS_WATCH to be defined."
+    #endif
+    #if (TARGET_OS_IOS || TARGET_OS_WATCH)
+        #define MDNSRESPONDER_SUPPORTS_APPLE_NO_WAKE_FOR_NET_ACCESS 1
+    #else
+        #define MDNSRESPONDER_SUPPORTS_APPLE_NO_WAKE_FOR_NET_ACCESS 0
+    #endif
+#endif
+
 // Feature: Support for having finer granularity of log redaction, by using os_log based-log routine.
 // Radar:   <rdar://problem/42814956>
 // Enabled: Yes.
@@ -117,6 +140,14 @@
 
 #if !defined(MDNSRESPONDER_SUPPORTS_APPLE_PREALLOCATED_CACHE)
     #define MDNSRESPONDER_SUPPORTS_APPLE_PREALLOCATED_CACHE         0
+#endif
+
+// Feature: Use mdns_querier objects for DNS transports.
+// Radar:   <rdar://problem/55746371>
+// Enabled: Yes.
+
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_QUERIER)
+    #define MDNSRESPONDER_SUPPORTS_APPLE_QUERIER                    1
 #endif
 
 // Feature: Randomized AWDL Hostname
@@ -142,22 +173,6 @@
 
 #if !defined(MDNSRESPONDER_SUPPORTS_APPLE_SLOW_ACTIVATION)
     #define MDNSRESPONDER_SUPPORTS_APPLE_SLOW_ACTIVATION            0
-#endif
-
-// Feature: Suspicious Reply Defense
-// Radar:   <rdar://problem/50050767>
-// Enabled: Yes.
-
-#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_SUSPICIOUS_REPLY_DEFENSE)
-    #define MDNSRESPONDER_SUPPORTS_APPLE_SUSPICIOUS_REPLY_DEFENSE   1
-#endif
-
-// Feature: Symptoms Reporting
-// Radar:   <rdar://problem/20194922>
-// Enabled: Yes.
-
-#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_SYMPTOMS)
-    #define MDNSRESPONDER_SUPPORTS_APPLE_SYMPTOMS                   1
 #endif
 
 // Feature: Support for performing dot-local queries via mDNS and DNS in parallel.
@@ -186,6 +201,97 @@
     #else
         #define MDNSRESPONDER_SUPPORTS_APPLE_WEB_CONTENT_FILTER     0
     #endif
+#endif
+
+// Feature: Support for Analytics For Cache
+// Radar:   <rdar://problem/52206048>
+// Enabled: iOS & macOS
+
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_CACHE_ANALYTICS)
+	#if !(defined(TARGET_OS_IOS) && defined(TARGET_OS_OSX))
+		#error "Expected TARGET_OS_IOS && TARGET_OS_OSX to be defined."
+	#endif
+	#if (TARGET_OS_IOS || TARGET_OS_OSX)
+		#define MDNSRESPONDER_SUPPORTS_APPLE_CACHE_ANALYTICS        1
+	#else
+		#define MDNSRESPONDER_SUPPORTS_APPLE_CACHE_ANALYTICS        0
+	#endif
+#endif
+
+// Feature: Support for Analytics For WAB (Wide Area Bonjour)
+// Radar:   <rdar://problem/52136688>
+// Enabled: iOS & macOS
+
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_WAB_ANALYTICS)
+	#define MDNSRESPONDER_SUPPORTS_APPLE_WAB_ANALYTICS        		0
+#endif
+
+// Feature: Support for Analytics
+// Enabled: If any analytics are enabled (above)
+
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_ANALYTICS)
+	#if (MDNSRESPONDER_SUPPORTS_APPLE_CACHE_ANALYTICS || MDNSRESPONDER_SUPPORTS_APPLE_WAB_ANALYTICS)
+		#define MDNSRESPONDER_SUPPORTS_APPLE_ANALYTICS        		1
+	#else
+		#define MDNSRESPONDER_SUPPORTS_APPLE_ANALYTICS        		0
+	#endif
+#endif
+
+// Feature: Add audit token to questions
+// Radar: 	<rdar://problem/59042213>
+// Enabled: On all Apple platforms
+
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_AUDIT_TOKEN)
+	#define MDNSRESPONDER_SUPPORTS_APPLE_AUDIT_TOKEN				1
+#endif
+
+// Feature: Enforce entitlements prompts
+// Radar: 	<rdar://problem/55922132>
+// Enabled: iOS only (depends on MDNSRESPONDER_SUPPORTS_APPLE_AUDIT_TOKEN)
+
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_TRUST_ENFORCEMENT)
+	#if MDNSRESPONDER_SUPPORTS_APPLE_AUDIT_TOKEN
+		#if (TARGET_OS_IOS)
+			#define MDNSRESPONDER_SUPPORTS_APPLE_TRUST_ENFORCEMENT	1
+		#else
+			#define MDNSRESPONDER_SUPPORTS_APPLE_TRUST_ENFORCEMENT	0
+		#endif
+	#else
+		#define MDNSRESPONDER_SUPPORTS_APPLE_TRUST_ENFORCEMENT		0
+	#endif
+#endif
+
+// Feature: Symptoms Reporting
+// Radar:   <rdar://problem/20194922>
+// Enabled: Yes. (depends on MDNSRESPONDER_SUPPORTS_APPLE_AUDIT_TOKEN)
+
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_SYMPTOMS)
+	#if MDNSRESPONDER_SUPPORTS_APPLE_AUDIT_TOKEN
+		#define MDNSRESPONDER_SUPPORTS_APPLE_SYMPTOMS       		1
+	#else
+		#define MDNSRESPONDER_SUPPORTS_APPLE_SYMPTOMS          		0
+	#endif
+#endif
+
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_IPC_TLV)
+    #define MDNSRESPONDER_SUPPORTS_APPLE_IPC_TLV                    1
+#endif
+
+// Feature: DNSSEC support
+// Radar:   <rdar://problem/55275552>
+// Enabled: On all Apple platforms
+// Notes:
+//		MDNSRESPONDER_SUPPORTS(APPLE, QUERIER) should always be true if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+//		is true, except for only one case, the Tests target that runs XCTest. In the XCTest,
+//		MDNSRESPONDER_SUPPORTS_APPLE_DNSSECv2 is predefined in the preprocess which does not check what
+//		MDNSRESPONDER_SUPPORTS checks. In order to test DNSSEC functions in XCtest without querier support, we
+// 		will wrap all DNSSEC code that calls querier, since the code will never be excuted in XCTest.
+#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_DNSSECv2)
+	#if MDNSRESPONDER_SUPPORTS_APPLE_QUERIER
+		#define MDNSRESPONDER_SUPPORTS_APPLE_DNSSECv2                   0
+	#else
+		#define MDNSRESPONDER_SUPPORTS_APPLE_DNSSECv2                   0
+	#endif
 #endif
 
 #endif  // __ApplePlatformFeatures_h

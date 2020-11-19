@@ -23,6 +23,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <assert.h>
@@ -45,7 +46,8 @@
 #ifdef STANDALONE
 #undef LogMsg
 #define LogMsg(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
-#define mDNSRandom(x) arc4random_uniform(x)
+extern uint16_t srp_random16(void);
+#define mDNSRandom(x) srp_random16()
 #define mDNSPlatformMemAllocateClear(length) calloc(1, length)
 #endif // STANDALONE
 
@@ -104,7 +106,7 @@ void dso_drop(dso_state_t *dso)
     dso_connections_needing_cleanup = dso;
 }
 
-int64_t dso_idle(void *context, int64_t now, int64_t next_timer_event)
+int32_t dso_idle(void *context, int64_t now, int64_t next_timer_event)
 {
     dso_state_t *dso, *dnext;
     dso_activity_t *ap, *anext;
@@ -171,7 +173,7 @@ dso_state_t *dso_create(bool is_server, int max_outstanding_queries, const char 
                         dso_event_callback_t callback, void *context, dso_transport_t *transport)
 {
     dso_state_t *dso;
-    int namelen = strlen(remote_name) + 1;
+    int namelen = (int)strlen(remote_name) + 1;
     int outsize = (sizeof (dso_outstanding_query_state_t)) + max_outstanding_queries * sizeof (dso_outstanding_query_t);
 
     // We allocate everything in a single hunk so that we can free it together as well.
@@ -361,7 +363,7 @@ dso_activity_t *dso_add_activity(dso_state_t *dso, const char *name, const char 
     }
 
     len = namelen + sizeof *activity;
-    ap = mDNSPlatformMemAllocateClear(len);
+    ap = mDNSPlatformMemAllocateClear((mDNSu32)len);
     if (ap == NULL) {
         return NULL;
     }

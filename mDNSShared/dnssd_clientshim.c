@@ -536,8 +536,6 @@ DNSServiceErrorType DNSServiceResolve
     x->qSRV.TimeoutQuestion     = 0;
     x->qSRV.WakeOnResolve       = 0;
     x->qSRV.UseBackgroundTraffic = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
-    x->qSRV.ValidationRequired  = 0;
-    x->qSRV.ValidatingResponse  = 0;
     x->qSRV.ProxyQuestion       = 0;
     x->qSRV.pid                 = mDNSPlatformGetPID();
     x->qSRV.QuestionCallback    = FoundServiceInfo;
@@ -558,8 +556,6 @@ DNSServiceErrorType DNSServiceResolve
     x->qTXT.TimeoutQuestion     = 0;
     x->qTXT.WakeOnResolve       = 0;
     x->qTXT.UseBackgroundTraffic = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
-    x->qTXT.ValidationRequired  = 0;
-    x->qTXT.ValidatingResponse  = 0;
     x->qTXT.ProxyQuestion       = 0;
     x->qTXT.pid                 = mDNSPlatformGetPID();
     x->qTXT.QuestionCallback    = FoundServiceInfo;
@@ -687,8 +683,6 @@ DNSServiceErrorType DNSServiceQueryRecord
     x->q.TimeoutQuestion      = 0;
     x->q.WakeOnResolve        = 0;
     x->q.UseBackgroundTraffic = (flags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
-    x->q.ValidationRequired   = 0;
-    x->q.ValidatingResponse   = 0;
     x->q.ProxyQuestion        = 0;
     x->q.pid                  = mDNSPlatformGetPID();
     x->q.QuestionCallback     = DNSServiceQueryRecordResponse;
@@ -866,8 +860,6 @@ DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo(
     x->a.TimeoutQuestion      = 0;
     x->a.WakeOnResolve        = 0;
     x->a.UseBackgroundTraffic = (inFlags & kDNSServiceFlagsBackgroundTrafficClass) != 0;
-    x->a.ValidationRequired   = 0;
-    x->a.ValidatingResponse   = 0;
     x->a.ProxyQuestion        = 0;
     x->a.pid                  = mDNSPlatformGetPID();
     x->a.QuestionCallback     = DNSServiceGetAddrInfoResponse;

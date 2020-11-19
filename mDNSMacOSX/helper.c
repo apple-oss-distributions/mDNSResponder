@@ -52,6 +52,8 @@
 #include "helper.h"
 #include "helper-server.h"
 #include "P2PPacketFilter.h"
+#include "setup_assistant_helper.h"
+#include <stdatomic.h>
 
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
@@ -68,6 +70,7 @@
 #endif
 
 // Embed the client stub code here, so we can access private functions like ConnectToServer, create_hdr, deliver_request
+#define XPC_AUTH_CONNECTION   0
 #include "../mDNSShared/dnssd_ipc.c"
 #include "../mDNSShared/dnssd_clientstub.c"
 
@@ -493,6 +496,23 @@ static void update_notification(void)
 {
 #ifndef NO_CFUSERNOTIFICATION
     os_log_debug(log_handle,"entry ucn=%s, uhn=%s, lcn=%s, lhn=%s", usercompname, userhostname, lastcompname, lasthostname);
+    buddy_state_t buddy_state = assistant_helper_get_buddy_state();
+    if (buddy_state != buddy_state_done)
+    {
+        static _Atomic uint32_t notify_count = 0;
+        os_log_info(log_handle, "update_notification: buddy is %{public}s so skipping notification (%u)", buddy_state_to_string(buddy_state), atomic_load(&notify_count));
+        if (buddy_state == buddy_state_in_process &&
+            atomic_load(&notify_count) == 0)
+        {
+            assistant_helper_notify_when_buddy_done(^{
+                os_log_info(log_handle, "update_notification: buddy done notification (%u)", atomic_load(&notify_count));
+                update_notification();
+                atomic_store(&notify_count, 0);
+            });
+        }
+        atomic_fetch_add(&notify_count, 1);
+        return;
+    }
     if (!CFS_OQ)
     {
         // Note: The "\xEF\xBB\xBF" byte sequence (U+FEFF) in the CFS_Format string is the UTF-8 encoding of the zero-width non-breaking space character.

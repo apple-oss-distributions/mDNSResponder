@@ -238,6 +238,11 @@ extern "C" {
 
     #elif ( defined( _MSC_VER ) )
 
+        #if ( _MSC_VER >= 1900 )
+            #include    <stdint.h>
+            #include    <stdbool.h>
+        #endif
+
         #pragma warning( disable:4127 ) // Disable "conditional expression is constant" warning for debug macros.
         #pragma warning( disable:4706 ) // Disable "assignment within conditional expression" for Microsoft headers.
 

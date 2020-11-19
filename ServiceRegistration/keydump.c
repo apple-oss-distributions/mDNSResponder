@@ -25,17 +25,18 @@
 #include "srp.h"
 #include "dns-msg.h"
 #include "srp-crypto.h"
+#include "srp-api.h"
 
 int
 main(int argc, char **argv)
 {
-    const char *keyfile_name = "srp-simple.key";
+    const char *key_name = "com.apple.srp-client.host-key";
     srp_key_t *key;
 
-    key = srp_load_keypair(keyfile_name);
+    key = srp_get_key(key_name);
     if (key == NULL) {
         if (key == NULL) {
-            printf("Unable to load key from %s.", keyfile_name);
+            printf("Unable to load key from %s.", key_name);
             exit(1);
         }
     }

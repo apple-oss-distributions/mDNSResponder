@@ -295,7 +295,7 @@ int mDNSKeychainGetSecrets(CFArrayRef *result)
     
     CFPropertyListRef plist = NULL;
     CFDataRef bytes = NULL;
-    unsigned int numsecrets = 0;
+    uint64_t numsecrets = 0;
     size_t secretsCnt = 0;
     int error_code = kHelperErr_NotConnected;
     xpc_object_t reply_dict = NULL;
@@ -313,11 +313,11 @@ int mDNSKeychainGetSecrets(CFArrayRef *result)
     {
         numsecrets = xpc_dictionary_get_uint64(reply_dict, "keychain_num_secrets");
         sec = xpc_dictionary_get_data(reply_dict, "keychain_secrets", &secretsCnt);
-        error_code = xpc_dictionary_get_int64(reply_dict,   kHelperErrCode);
+        error_code = (int)xpc_dictionary_get_int64(reply_dict,   kHelperErrCode);
     }
  
     mDNSHELPER_DEBUG("mDNSKeychainGetSecrets: Using XPC IPC calling out to Helper: numsecrets is %u, secretsCnt is %u error_code is %d",
-                     numsecrets, (unsigned int)secretsCnt, error_code);
+                     (unsigned int)numsecrets, (unsigned int)secretsCnt, error_code);
      
     if (NULL == (bytes = CFDataCreateWithBytesNoCopy(kCFAllocatorDefault, (void*)sec, secretsCnt, kCFAllocatorNull)))
     {
@@ -491,11 +491,11 @@ int mDNSRetrieveTCPInfo(int family, v6addr_t laddr, uint16_t lport, v6addr_t rad
     
     if (reply_dict != NULL)
     {
-        *seq = xpc_dictionary_get_uint64(reply_dict, "retreive_tcpinfo_seq");
-        *ack = xpc_dictionary_get_uint64(reply_dict, "retreive_tcpinfo_ack");
-        *win = xpc_dictionary_get_uint64(reply_dict, "retreive_tcpinfo_win");
+        *seq = (uint32_t)xpc_dictionary_get_uint64(reply_dict, "retreive_tcpinfo_seq");
+        *ack = (uint32_t)xpc_dictionary_get_uint64(reply_dict, "retreive_tcpinfo_ack");
+        *win = (uint16_t)xpc_dictionary_get_uint64(reply_dict, "retreive_tcpinfo_win");
         *intfid = (int32_t)xpc_dictionary_get_uint64(reply_dict, "retreive_tcpinfo_ifid");
-        error_code = xpc_dictionary_get_int64(reply_dict, kHelperErrCode);
+        error_code = (int)xpc_dictionary_get_int64(reply_dict, kHelperErrCode);
     }
     
     mDNSHELPER_DEBUG("mDNSRetrieveTCPInfo: Using XPC IPC calling out to Helper: seq is %d, ack is %d, win is %d, intfid is %d, error is %d",

@@ -1,6 +1,6 @@
 /* dns-msg.h
  *
- * Copyright (c) 2018 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018, 2019 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,16 +21,22 @@
 #ifndef __DNS_MSG_H
 #define __DNS_MSG_H
 
+#include "srp.h"
+
 #ifndef DNS_MAX_UDP_PAYLOAD
 #define DNS_MAX_UDP_PAYLOAD 1410
 #endif
 
-#define DNS_HEADER_SIZE           12
-#define DNS_DATA_SIZE             (DNS_MAX_UDP_PAYLOAD - DNS_HEADER_SIZE)
-#define DNS_MAX_POINTER           ((2 << 14) - 1)
-#define DNS_MAX_LABEL_SIZE        63
-#define DNS_MAX_NAME_SIZE	      255
-#define DNS_MAX_NAME_SIZE_ESCAPED 1009
+#define DNS_HEADER_SIZE            12
+#define DNS_DATA_SIZE              (DNS_MAX_UDP_PAYLOAD - DNS_HEADER_SIZE)
+#define DNS_MAX_POINTER            ((2 << 14) - 1)
+#define DNS_MAX_LABEL_SIZE         63
+#define DNS_MAX_LABEL_SIZE_ESCAPED 252
+#define DNS_MAX_NAME_SIZE          255
+#define DNS_MAX_NAME_SIZE_ESCAPED  1009
+#define DNS_MAX_LABELS             128
+
+typedef struct message message_t;
 
 typedef struct dns_wire dns_wire_t;
 struct dns_wire {
@@ -43,14 +49,25 @@ struct dns_wire {
     uint8_t data[DNS_DATA_SIZE];
 };
 
+typedef struct dns_name_pointer dns_name_pointer_t;
+struct dns_name_pointer {
+    dns_name_pointer_t *NULLABLE next;
+    uint8_t *NONNULL message_start;
+    uint8_t *NONNULL name_start;
+    int num_labels;
+    int length;
+};
+
 typedef struct dns_towire_state dns_towire_state_t;
 struct dns_towire_state {
- 	dns_wire_t *NULLABLE message;
+    dns_wire_t *NULLABLE message;
     uint8_t *NONNULL p;
     uint8_t *NONNULL lim;
     uint8_t *NULLABLE p_rdlength;
     uint8_t *NULLABLE p_opt;
-    int error;
+    uint16_t line, outer_line;
+    bool truncated : 1;
+    unsigned int error : 31;
 };
 
 typedef struct dns_transaction dns_transaction_t;
@@ -60,14 +77,6 @@ struct dns_transaction {
     dns_wire_t *NULLABLE response;
     int response_length;
     int sock;
-};    
-
-typedef struct dns_name_pointer dns_name_pointer_t;
-struct dns_name_pointer {
-    uint8_t *NONNULL message_start;
-    uint8_t *NONNULL name_start;
-    int num_labels;
-    int length;
 };
 
 typedef void (*dns_response_callback_t)(dns_transaction_t *NONNULL txn);
@@ -80,11 +89,10 @@ struct dns_label {
     char data[DNS_MAX_LABEL_SIZE];
 };
 
-typedef struct dns_txt_element dns_txt_element_t;
-struct dns_txt_element {
-    dns_txt_element_t *NULLABLE next;
+typedef struct dns_rdata_txt dns_rdata_txt_t;
+struct dns_rdata_txt {
     uint8_t len;
-    char data[0];
+    char *NONNULL data;
 };
 
 typedef struct dns_rdata_unparsed dns_rdata_unparsed_t;
@@ -99,25 +107,13 @@ struct dns_rdata_single_name {
     dns_label_t *NONNULL name;
 };
 
-typedef struct dns_rdata_a dns_rdata_a_t;
-struct dns_rdata_a {
-    struct in_addr *NONNULL addrs;
-    int num;
-};
-
-typedef struct dns_rdata_aaaa dns_rdata_aaaa_t;
-struct dns_rdata_aaaa {
-    struct in6_addr *NONNULL addrs;
-    int num;
-} aaaa;
-
 typedef struct dns_rdata_srv dns_rdata_srv_t;
 struct dns_rdata_srv {
     dns_label_t *NONNULL name;
     uint16_t priority;
     uint16_t weight;
     uint16_t port;
-} srv;
+};
 
 typedef struct dns_rdata_sig dns_rdata_sig_t;
 struct dns_rdata_sig {
@@ -132,7 +128,7 @@ struct dns_rdata_sig {
     int start;
     int len;
     uint8_t *NONNULL signature;
-} sig;
+};
 
 typedef struct dns_rdata_key dns_rdata_key_t;
 struct dns_rdata_key {
@@ -141,7 +137,7 @@ struct dns_rdata_key {
     uint8_t algorithm;
     int len;
     uint8_t *NONNULL key;
-} key;
+};
 
 typedef struct dns_rr dns_rr_t;
 struct dns_rr {
@@ -153,10 +149,10 @@ struct dns_rr {
         dns_rdata_unparsed_t unparsed;
         dns_rdata_ptr_t ptr;
         dns_rdata_cname_t cname;
-        dns_rdata_a_t a;
-        dns_rdata_aaaa_t aaaa;
+        struct in_addr a;
+        struct in6_addr aaaa;
         dns_rdata_srv_t srv;
-        dns_txt_element_t *NONNULL txt;
+        dns_rdata_txt_t txt;
         dns_rdata_sig_t sig;
         dns_rdata_key_t key;
     } data;
@@ -166,12 +162,13 @@ typedef struct dns_edns0 dns_edns0_t;
 struct dns_edns0 {
     dns_edns0_t *NULLABLE next;
     uint16_t length;
+    uint16_t type;
     uint8_t data[0];
 };
 
 typedef struct dns_message dns_message_t;
 struct dns_message {
-    dns_wire_t *NULLABLE wire;
+    int ref_count;
     int qdcount, ancount, nscount, arcount;
     dns_rr_t *NULLABLE questions;
     dns_rr_t *NULLABLE answers;
@@ -200,17 +197,17 @@ struct dns_message {
 #define dns_flags_cd 0x0010
 
 // Getters
-#define dns_qr_get(w) ((ntohs((w)->bitfield) & dns_qr_mask) >> dns_qr_shift)
+#define dns_qr_get(w)     ((ntohs((w)->bitfield) & dns_qr_mask) >> dns_qr_shift)
 #define dns_opcode_get(w) ((ntohs((w)->bitfield) & dns_opcode_mask) >> dns_opcode_shift)
-#define dns_rcode_get(w) ((ntohs((w)->bitfield) & dns_rcode_mask) >> dns_rcode_shift)
+#define dns_rcode_get(w)  ((ntohs((w)->bitfield) & dns_rcode_mask) >> dns_rcode_shift)
 
 // Setters
-#define dns_qr_set(w, value) ((w)->bitfield = htons(((ntohs((w)->bitfield) & ~dns_qr_mask) | \
-                                                     ((value) << dns_qr_shift))))
-#define dns_opcode_set(w, value) ((w)->bitfield = htons(((ntohs((w)->bitfield) & ~dns_opcode_mask) | \
-                                                         ((value) << dns_opcode_shift))))
-#define dns_rcode_set(w, value) ((w)->bitfield = htons(((ntohs((w)->bitfield) & ~dns_rcode_mask) | \
-                                                        ((value) << dns_rcode_shift))))
+#define dns_qr_set(w, value) \
+    ((w)->bitfield = htons(((ntohs((w)->bitfield) & ~dns_qr_mask) | ((value) << dns_qr_shift))))
+#define dns_opcode_set(w, value) \
+    ((w)->bitfield = htons(((ntohs((w)->bitfield) & ~dns_opcode_mask) | ((value) << dns_opcode_shift))))
+#define dns_rcode_set(w, value) \
+    ((w)->bitfield = htons(((ntohs((w)->bitfield) & ~dns_rcode_mask) | ((value) << dns_rcode_shift))))
 
 // Query/Response
 #define dns_qr_query           0
@@ -261,12 +258,12 @@ struct dns_message {
 #define dns_rrtype_mb          7 // [RFC1035] a mailbox domain name (EXPERIMENTAL)
 #define dns_rrtype_mg          8 // [RFC1035] a mail group member (EXPERIMENTAL)
 #define dns_rrtype_mr          9 // [RFC1035] a mail rename domain name (EXPERIMENTAL)
-#define dns_rrtype_null       10 // [RFC1035]	 a null RR (EXPERIMENTAL)
-#define dns_rrtype_wks        11 // [RFC1035]	 a well known service description
-#define dns_rrtype_ptr        12 // [RFC1035]	 a domain name pointer
-#define dns_rrtype_hinfo      13 // [RFC1035]	 host information
-#define dns_rrtype_minfo      14 // [RFC1035]	 mailbox or mail list information
-#define dns_rrtype_mx         15 // [RFC1035]	 mail exchange
+#define dns_rrtype_null       10 // [RFC1035]    a null RR (EXPERIMENTAL)
+#define dns_rrtype_wks        11 // [RFC1035]    a well known service description
+#define dns_rrtype_ptr        12 // [RFC1035]    a domain name pointer
+#define dns_rrtype_hinfo      13 // [RFC1035]    host information
+#define dns_rrtype_minfo      14 // [RFC1035]    mailbox or mail list information
+#define dns_rrtype_mx         15 // [RFC1035]    mail exchange
 #define dns_rrtype_txt        16 // [RFC1035] text strings
 #define dns_rrtype_rp         17 // [RFC1183] for Responsible Person
 #define dns_rrtype_afsdb      18 // [RFC1183,RFC5864] for AFS Data Base location
@@ -289,7 +286,7 @@ struct dns_message {
 #define dns_rrtype_naptr      35 // [RFC2915] [RFC2168] [RFC3403] Naming Authority Pointer
 #define dns_rrtype_kx         36 // [RFC2230] Key Exchanger
 #define dns_rrtype_cert       37 // [RFC4398] CERT
-#define dns_rrtype_a6         38 // [RFC3226] [RFC2874] [RFC6563]	 A6 (OBSOLETE - use AAAA)
+#define dns_rrtype_a6         38 // [RFC3226] [RFC2874] [RFC6563]    A6 (OBSOLETE - use AAAA)
 #define dns_rrtype_dname      39 // [RFC6672]
 #define dns_rrtype_sink       40 // [http://tools.ietf.org/html/draft-eastlake-kitchen-sink]
 #define dns_rrtype_opt        41 // [RFC6891] [RFC3225]
@@ -310,34 +307,34 @@ struct dns_message {
 #define dns_rrtype_rkey       57 // [Jim_Reid] RKEY/rkey-completed-template
 #define dns_rrtype_talink     58 // [Wouter_Wijngaards] Trust Anchor LINK
 #define dns_rrtype_cds        59 // [RFC7344] Child DS
-#define dns_rrtype_cdnskey    60 // [RFC7344]	DNSKEY(s) the Child wants reflected in DS
-#define dns_rrtype_openpgpkey 61 // [RFC7929]	OpenPGP Key
+#define dns_rrtype_cdnskey    60 // [RFC7344]   DNSKEY(s) the Child wants reflected in DS
+#define dns_rrtype_openpgpkey 61 // [RFC7929]   OpenPGP Key
 #define dns_rrtype_csync      62 // [RFC7477] Child-To-Parent Synchronization
 #define dns_rrtype_spf        99 // [RFC7208]
-#define dns_rrtype_uinfo     100 // [IANA-Reserved]		
-#define dns_rrtype_uid       101 // [IANA-Reserved]		
-#define dns_rrtype_gid       102 // [IANA-Reserved]		
-#define dns_rrtype_unspec    103 // [IANA-Reserved]		
+#define dns_rrtype_uinfo     100 // [IANA-Reserved]
+#define dns_rrtype_uid       101 // [IANA-Reserved]
+#define dns_rrtype_gid       102 // [IANA-Reserved]
+#define dns_rrtype_unspec    103 // [IANA-Reserved]
 #define dns_rrtype_nid       104 // [RFC6742]
 #define dns_rrtype_l32       105 // [RFC6742]
 #define dns_rrtype_l64       106 // [RFC6742]
 #define dns_rrtype_lp        107 // [RFC6742]
 #define dns_rrtype_eui48     108 // an EUI-48 address [RFC7043]
 #define dns_rrtype_eui64     109 // an EUI-64 address [RFC7043]
-#define dns_rrtype_tkey      249 // Transaction Key	[RFC2930]		
-#define dns_rrtype_tsig      250 // Transaction Signature [RFC2845]		
-#define dns_rrtype_ixfr      251 // incremental transfer	[RFC1995]		
-#define dns_rrtype_axfr      252 // transfer of an entire zone [RFC1035][RFC5936]		
-#define dns_rrtype_mailb     253 // mailbox-related RRs (MB, MG or MR) [RFC1035]		
-#define dns_rrtype_maila     254 // mail agent RRs (OBSOLETE - see MX) [RFC1035]		
+#define dns_rrtype_tkey      249 // Transaction Key [RFC2930]
+#define dns_rrtype_tsig      250 // Transaction Signature [RFC2845]
+#define dns_rrtype_ixfr      251 // incremental transfer    [RFC1995]
+#define dns_rrtype_axfr      252 // transfer of an entire zone [RFC1035][RFC5936]
+#define dns_rrtype_mailb     253 // mailbox-related RRs (MB, MG or MR) [RFC1035]
+#define dns_rrtype_maila     254 // mail agent RRs (OBSOLETE - see MX) [RFC1035]
 #define dns_rrtype_any       255 // A request for some or all records the server has available
-#define dns_rrtype_uri       256 // URI	[RFC7553]	URI/uri-completed-template
+#define dns_rrtype_uri       256 // URI [RFC7553]   URI/uri-completed-template
 #define dns_rrtype_caa       257 // Certification Authority Restriction [RFC6844]
 #define dns_rrtype_avc       258 // Application Visibility and Control [Wolfgang_Riedel]
 #define dns_rrtype_doa       259 // Digital Object Architecture [draft-durand-doa-over-dns]
 
 #define dns_opt_llq            1 // On-hold [http://files.dns-sd.org/draft-sekar-dns-llq.txt]
-#define dns_opt_update_lease   2 // On-hold	[http://files.dns-sd.org/draft-sekar-dns-ul.txt]
+#define dns_opt_update_lease   2 // On-hold [http://files.dns-sd.org/draft-sekar-dns-ul.txt]
 #define dns_opt_nsid           3 // [RFC5001]
 #define dns_opt_owner          4 // [draft-cheshire-edns0-owner-option]
 #define dns_opt_dau            5 // [RFC6975]
@@ -354,48 +351,78 @@ struct dns_message {
 // towire.c:
 
 uint16_t srp_random16(void);
-void dns_name_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
-                      dns_towire_state_t *NONNULL txn,
-                      const char *NONNULL name);
-void dns_full_name_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
-                           dns_towire_state_t *NONNULL txn,
-                           const char *NONNULL name);
-void dns_pointer_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
-                         dns_towire_state_t *NONNULL txn,
-                         dns_name_pointer_t *NONNULL pointer);
-void dns_u8_to_wire(dns_towire_state_t *NONNULL txn,
-                    uint8_t val);
-void dns_u16_to_wire(dns_towire_state_t *NONNULL txn,
-                      uint16_t val);
-void dns_u32_to_wire(dns_towire_state_t *NONNULL txn,
-                      uint32_t val);
-void dns_ttl_to_wire(dns_towire_state_t *NONNULL txn,
-                     int32_t val);
-void dns_rdlength_begin(dns_towire_state_t *NONNULL txn);
-void dns_rdlength_end(dns_towire_state_t *NONNULL txn);
-void dns_rdata_a_to_wire(dns_towire_state_t *NONNULL txn,
-                         const char *NONNULL ip_address);
-void dns_rdata_aaaa_to_wire(dns_towire_state_t *NONNULL txn,
-                            const char *NONNULL ip_address);
-uint16_t dns_rdata_key_to_wire(dns_towire_state_t *NONNULL txn,
-                               unsigned key_type,
-                               unsigned name_type,
-                               unsigned signatory,
-                               srp_key_t *NONNULL key);
-void dns_rdata_txt_to_wire(dns_towire_state_t *NONNULL txn,
-                           const char *NONNULL txt_record);
-void dns_rdata_raw_data_to_wire(dns_towire_state_t *NONNULL txn, const void *NONNULL raw_data, size_t length);
-void dns_edns0_header_to_wire(dns_towire_state_t *NONNULL txn,
-                              int mtu,
-                              int xrcode,
-                              int version,
-                              int DO);
-void dns_edns0_option_begin(dns_towire_state_t *NONNULL txn);
-void dns_edns0_option_end(dns_towire_state_t *NONNULL txn);
-void dns_sig0_signature_to_wire(dns_towire_state_t *NONNULL txn,
-                                srp_key_t *NONNULL key, uint16_t key_tag,
-                                dns_name_pointer_t *NONNULL signer,
-                                const char *NONNULL signer_fqdn);
+void dns_name_to_wire_(dns_name_pointer_t *NULLABLE r_pointer,
+                       dns_towire_state_t *NONNULL txn,
+                       const char *NONNULL name, int line);
+#define dns_name_to_wire(r_pointer, txn, name) dns_name_to_wire_(r_pointer, txn, name, __LINE__)
+
+void dns_full_name_to_wire_(dns_name_pointer_t *NULLABLE r_pointer,
+                            dns_towire_state_t *NONNULL txn,
+                            const char *NONNULL name, int line);
+#define dns_full_name_to_wire(r_pointer, txn, name) dns_full_name_to_wire_(r_pointer, txn, name, __LINE__)
+
+void dns_pointer_to_wire_(dns_name_pointer_t *NULLABLE r_pointer,
+                          dns_towire_state_t *NONNULL txn,
+                          dns_name_pointer_t *NONNULL pointer, int line);
+#define dns_pointer_to_wire(r_pointer, txn, pointer) dns_pointer_to_wire_(r_pointer, txn, pointer, __LINE__)
+
+void dns_u8_to_wire_(dns_towire_state_t *NONNULL txn, uint8_t val, int line);
+#define dns_u8_to_wire(txn, val) dns_u8_to_wire_(txn, val, __LINE__)
+
+void dns_u16_to_wire_(dns_towire_state_t *NONNULL txn, uint16_t val, int line);
+#define dns_u16_to_wire(txn, val) dns_u16_to_wire_(txn, val, __LINE__)
+
+void dns_u32_to_wire_(dns_towire_state_t *NONNULL txn, uint32_t val, int line);
+#define dns_u32_to_wire(txn, val) dns_u32_to_wire_(txn, val, __LINE__)
+
+void dns_ttl_to_wire_(dns_towire_state_t *NONNULL txn, int32_t val, int line);
+#define dns_ttl_to_wire(txn, val) dns_ttl_to_wire_(txn, val, __LINE__)
+
+void dns_rdlength_begin_(dns_towire_state_t *NONNULL txn, int line);
+#define dns_rdlength_begin(txn) dns_rdlength_begin_(txn, __LINE__)
+
+void dns_rdlength_end_(dns_towire_state_t *NONNULL txn, int line);
+#define dns_rdlength_end(txn) dns_rdlength_end_(txn, __LINE__)
+
+void dns_rdata_a_to_wire_(dns_towire_state_t *NONNULL txn, const char *NONNULL ip_address, int line);
+#define dns_rdata_a_to_wire(txn, ip_address) dns_rdata_a_to_wire_(txn, ip_address, __LINE__)
+
+void dns_rdata_aaaa_to_wire_(dns_towire_state_t *NONNULL txn, const char *NONNULL ip_address, int line);
+#define dns_rdata_aaaa_to_wire(txn, ip_address) dns_rdata_aaaa_to_wire_(txn, ip_address, __LINE__)
+
+uint16_t dns_rdata_key_to_wire_(dns_towire_state_t *NONNULL txn,
+                                unsigned key_type,
+                                unsigned name_type,
+                                unsigned signatory,
+                                srp_key_t *NONNULL key, int line);
+#define dns_rdata_key_to_wire(txn, key_type, name_type, signatory, key) \
+    dns_rdata_key_to_wire_(txn, key_type, name_type, signatory, key, __LINE__)
+
+void dns_rdata_txt_to_wire_(dns_towire_state_t *NONNULL txn, const char *NONNULL txt_record, int line);
+#define dns_rdata_txt_to_wire(txn, txt_record) dns_rdata_txt_to_wire_(txn, txt_record, __LINE__)
+
+void dns_rdata_raw_data_to_wire_(dns_towire_state_t *NONNULL txn,
+                                 const void *NONNULL raw_data, size_t length, int line);
+#define dns_rdata_raw_data_to_wire(txn, raw_data, length) dns_rdata_raw_data_to_wire_(txn, raw_data, length, __LINE__)
+
+void dns_edns0_header_to_wire_(dns_towire_state_t *NONNULL txn,
+                               int mtu, int xrcode, int version, int DO, int line);
+#define dns_edns0_header_to_wire(txn, mtu, xrcode, version, DO) \
+    dns_edns0_header_to_wire_(txn, mtu, xrcode, version, DO, __LINE__)
+
+void dns_edns0_option_begin_(dns_towire_state_t *NONNULL txn, int line);
+#define dns_edns0_option_begin(txn) dns_edns0_option_begin_(txn, __LINE__)
+
+void dns_edns0_option_end_(dns_towire_state_t *NONNULL txn, int line);
+#define dns_edns0_option_end(txn) dns_edns0_option_end_(txn, __LINE__)
+
+void dns_sig0_signature_to_wire_(dns_towire_state_t *NONNULL txn,
+                                 srp_key_t *NONNULL key, uint16_t key_tag,
+                                 dns_name_pointer_t *NONNULL signer, const char *NONNULL signer_hostname,
+                                 const char *NONNULL signer_domain, int line);
+#define dns_sig0_signature_to_wire(txn, key, key_tag, signer, signer_hostname, signer_domain) \
+    dns_sig0_signature_to_wire_(txn, key, key_tag, signer, signer_hostname, signer_domain, __LINE__)
+
 int dns_send_to_server(dns_transaction_t *NONNULL txn,
                        const char *NONNULL anycast_address, uint16_t port,
                        dns_response_callback_t NONNULL callback);
@@ -419,10 +446,30 @@ bool dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *NONNULL buf, unsi
                           unsigned target, unsigned rdlen, unsigned rrstart);
 bool dns_wire_parse(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *NONNULL message, unsigned len);
 bool dns_names_equal(dns_label_t *NONNULL name1, dns_label_t *NONNULL name2);
+
+// wireutils.c
+dns_name_t *NULLABLE dns_name_copy(dns_name_t *NONNULL original);
+void dns_u48_to_wire_(dns_towire_state_t *NONNULL txn, uint64_t val, int line);
+#define dns_u48_to_wire(txn, val) dns_u48_to_wire_(txn, val, __LINE__)
+
+void dns_concatenate_name_to_wire_(dns_towire_state_t *NONNULL towire,
+                                   dns_name_t *NULLABLE labels_prefix,
+                                   const char *NULLABLE prefix, const char *NULLABLE suffix, int line);
+#define dns_concatenate_name_to_wire(txn, labels_prefix, prefix, suffix) \
+    dns_concatenate_name_to_wire_(txn, labels_prefix, prefix, suffix, __LINE__)
+
+const char *NONNULL dns_name_print_to_limit(dns_name_t *NONNULL name, dns_name_t *NULLABLE limit, char *NULLABLE buf,
+                                            int bufmax);
 const char *NONNULL dns_name_print(dns_name_t *NONNULL name, char *NONNULL buf, int bufmax);
+bool dns_labels_equal(const char *NONNULL label1, const char *NONNULL label2, size_t len);
 bool dns_names_equal_text(dns_label_t *NONNULL name1, const char *NONNULL name2);
 size_t dns_name_wire_length(dns_label_t *NONNULL name);
 size_t dns_name_to_wire_canonical(uint8_t *NONNULL buf, size_t max, dns_label_t *NONNULL name);
+dns_name_t *NULLABLE dns_pres_name_parse(const char *NONNULL pname);
+dns_name_t *NULLABLE dns_name_subdomain_of(dns_name_t *NONNULL name, dns_name_t *NONNULL domain);
+const char *NONNULL dns_rcode_name(int rcode);
+bool dns_keys_rdata_equal(dns_rr_t *NONNULL key1, dns_rr_t *NONNULL key2);
+
 #endif // _DNS_MSG_H
 
 // Local Variables:

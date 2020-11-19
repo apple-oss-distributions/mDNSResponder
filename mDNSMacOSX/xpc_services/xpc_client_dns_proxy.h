@@ -2,7 +2,7 @@
 //  xpc_client_dns_proxy.h
 //  mDNSResponder
 //
-//  Copyright (c) 2019 Apple Inc. All rights reserved.
+//  Copyright (c) 2019-2020 Apple Inc. All rights reserved.
 //
 
 #ifndef XPC_CLIENT_DNS_PROXY_H
@@ -18,5 +18,9 @@
 #define kDNSInIfindex4          "InputArrayInterfaceIndex[4]"
 
 #define kDNSOutIfindex          "OutputInterfaceIndex"
+
+#define kDNSProxyDNS64IPv6Prefix         "ipv6_prefix"
+#define kDNSProxyDNS64IPv6PrefixBitLen   "ipv6_prefix_bitlen"
+#define kDNSProxyDNS64ForceAAAASynthesis "force_aaaa_synthesis"
 
 #endif /* XPC_CLIENT_DNS_PROXY_H */

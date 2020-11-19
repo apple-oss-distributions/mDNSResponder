@@ -1,6 +1,6 @@
-/* wire.c
+/* towire.c
  *
- * Copyright (c) 2018 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * DNS wire-format functions.
+ * DNS to-wire wire-format functions.
  *
- * These are really simple functions for constructing DNS messages wire format.
+ * These are really simple functions for constructing DNS messages in wire format.
  * The flow is that there is a transaction structure which contains pointers to both
  * a message output buffer and a response input buffer.   The structure is initialized,
  * and then the various wire format functions are called repeatedly to store data.
@@ -28,9 +28,12 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
-#include <sys/errno.h>
-#include <sys/socket.h>
+#include <errno.h>
+#ifndef THREAD_DEVKIT_ADK
 #include <arpa/inet.h>
+#endif
+#include <stdlib.h>
+
 #include "srp.h"
 #include "dns-msg.h"
 #include "srp-crypto.h"
@@ -39,61 +42,125 @@
 #include <sys/time.h>
 #endif
 
+static int
+dns_parse_label(const char *cur, const char *NONNULL *NONNULL nextp, uint8_t *NONNULL lenp, uint8_t *NONNULL buf,
+                ssize_t max)
+{
+    const char *end;
+    int tlen;
+    const char *s;
+    uint8_t *t;
+
+    end = strchr(cur, '.');
+    if (end == NULL) {
+        end = cur + strlen(cur);
+        if (end == cur) {
+            *lenp = 0;
+            *nextp = NULL;
+            return 0;
+        }
+        *nextp = NULL;
+    } else {
+        if (end == cur) {
+            return EINVAL;
+        }
+        *nextp = end + 1;
+    }
+
+    // Figure out the length of the label after escapes have been converted.
+    tlen = 0;
+    for (s = cur; s < end; s++) {
+        if (*s == '\\') {
+            if (s + 4 <= end) {
+                tlen++;
+                s += 3;
+            } else {
+                tlen++;
+            }
+        } else {
+            tlen++;
+        }
+    }
+
+    // Is there no space?
+
+    if (tlen >= max) {
+        return ENOBUFS;
+    }
+
+    // Is the label too long?
+    if (end - cur > DNS_MAX_LABEL_SIZE) {
+        return ENAMETOOLONG;
+    }
+
+    // Store the label length
+    *lenp = (uint8_t)(tlen);
+
+    // Store the label.
+    t = buf;
+    for (s = cur; s < end; s++) {
+        if (*s == '\\') {
+            if (s + 4 <= end) {
+                int v0 = s[1] - '0';
+                int v1 = s[2] - '0';
+                int v2 = s[3] - '0';
+                int val = v0 * 100 + v1 * 10 + v2;
+                if (val < 255) {
+                    *t++ = val;
+                    s += 3;
+                } else {
+                    return EINVAL;
+                }
+            } else {
+                return EINVAL;
+            }
+        } else {
+            *t++ = *s;
+        }
+    }
+    return 0;
+}
+
 // Convert a name to wire format.   Does not store the root label (0) at the end.   Does not support binary labels.
 void
-dns_name_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
-                 dns_towire_state_t *NONNULL txn,
-                 const char *NONNULL name)
+dns_name_to_wire_(dns_name_pointer_t *NULLABLE r_pointer, dns_towire_state_t *NONNULL txn,
+                  const char *NONNULL name, int line)
 {
-    const char *next, *cur, *end;
+    const char *next, *cur;
+    int status;
     dns_name_pointer_t np;
+
     if (!txn->error) {
         memset(&np, 0, sizeof np);
-        np.message_start = (u_int8_t *)txn->message;
+        np.message_start = (uint8_t *)txn->message;
         np.name_start = txn->p;
 
         cur = name;
         do {
-            end = strchr(cur, '.');
-            if (end == NULL) {
-                end = cur + strlen(cur);
-                if (end == cur) {
-                    break;
+            // Note that nothing is stored through txn->p until dns_name_parse has verified that
+            // there is space in the buffer for the label as well as the length.
+            status = dns_parse_label(cur, &next, txn->p, txn->p + 1, txn->lim - txn->p - 1);
+            if (status) {
+                if (status == ENOBUFS) {
+                    txn->truncated = true;
                 }
-                next = NULL;
-            } else {
-                if (end == cur) {
-                    break;
-                }
-                next = end + 1;
-            }
-
-            // Is there no space?
-            if (txn->p + (1 + end - cur) >= txn->lim) {
-                txn->error = ENOBUFS;
+                txn->error = status;
+                txn->line = line;
                 return;
             }
 
-            // Is the label too long?
-            if (end - cur > DNS_MAX_LABEL_SIZE) {
-                txn->error = ENAMETOOLONG;
-                return;
+            // Don't use the root label if it was parsed.
+            if (*txn->p != 0) {
+                np.num_labels++;
+                np.length += 1 + *txn->p;
+                txn->p = txn->p + *txn->p + 1;
+                cur = next;
             }
-
-            // Store the label length
-            *txn->p++ = (uint8_t)(end - cur);
-
-            // Store the label.
-            memcpy(txn->p, cur, end - cur);
-            txn->p += (end - cur);
-            np.num_labels++;
-            np.length += 1 + (end - cur);
-
-            cur = next;
         } while (next != NULL);
 
         if (np.length > DNS_MAX_NAME_SIZE) {
             txn->error = ENAMETOOLONG;
+            txn->line = line;
             return;
         }
         if (r_pointer != NULL) {
@@ -104,9 +171,8 @@ dns_name_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
 
 // Like dns_name_to_wire, but includes the root label at the end.
 void
-dns_full_name_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
-                      dns_towire_state_t *NONNULL txn,
-                      const char *NONNULL name)
+dns_full_name_to_wire_(dns_name_pointer_t *NULLABLE r_pointer, dns_towire_state_t *NONNULL txn,
+                       const char *NONNULL name, int line)
 {
     dns_name_pointer_t np;
     if (!txn->error) {
@@ -115,6 +181,8 @@ dns_full_name_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
         if (!txn->error) {
             if (txn->p + 1 >= txn->lim) {
                 txn->error = ENOBUFS;
+                txn->truncated = true;
+                txn->line = line;
                 return;
             }
             *txn->p++ = 0;
@@ -122,6 +190,7 @@ dns_full_name_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
             np.length += 1;
             if (np.length > DNS_MAX_NAME_SIZE) {
                 txn->error = ENAMETOOLONG;
+                txn->line = line;
                 return;
             }
             if (r_pointer) {
@@ -133,18 +202,20 @@ dns_full_name_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
 
 // Store a pointer to a name that's already in the message.
 void
-dns_pointer_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
-                    dns_towire_state_t *NONNULL txn,
-                    dns_name_pointer_t *NONNULL pointer)
+dns_pointer_to_wire_(dns_name_pointer_t *NULLABLE r_pointer, dns_towire_state_t *NONNULL txn,
+                     dns_name_pointer_t *NONNULL pointer, int line)
 {
     if (!txn->error) {
-        u_int16_t offset = pointer->name_start - pointer->message_start;
+        uint16_t offset = pointer->name_start - pointer->message_start;
         if (offset > DNS_MAX_POINTER) {
             txn->error = ETOOMANYREFS;
+            txn->line = line;
             return;
         }
         if (txn->p + 2 >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return;
         }
         *txn->p++ = 0xc0 | (offset >> 8);
@@ -154,6 +225,7 @@ dns_pointer_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
             r_pointer->length += pointer->length + 1;
             if (r_pointer->length > DNS_MAX_NAME_SIZE) {
                 txn->error = ENAMETOOLONG;
+                txn->line = line;
                 return;
             }
         }
@@ -161,12 +233,13 @@ dns_pointer_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
 }
 
 void
-dns_u8_to_wire(dns_towire_state_t *NONNULL txn,
-                 uint8_t val)
+dns_u8_to_wire_(dns_towire_state_t *NONNULL txn, uint8_t val, int line)
 {
     if (!txn->error) {
         if (txn->p + 1 >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return;
         }
         *txn->p++ = val;
@@ -175,12 +248,13 @@ dns_u8_to_wire(dns_towire_state_t *NONNULL txn,
 
 // Store a 16-bit integer in network byte order
 void
-dns_u16_to_wire(dns_towire_state_t *NONNULL txn,
-                 uint16_t val)
+dns_u16_to_wire_(dns_towire_state_t *NONNULL txn, uint16_t val, int line)
 {
     if (!txn->error) {
         if (txn->p + 2 >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return;
         }
         *txn->p++ = val >> 8;
@@ -189,12 +263,13 @@ dns_u16_to_wire(dns_towire_state_t *NONNULL txn,
 }
 
 void
-dns_u32_to_wire(dns_towire_state_t *NONNULL txn,
-                 uint32_t val)
+dns_u32_to_wire_(dns_towire_state_t *NONNULL txn, uint32_t val, int line)
 {
     if (!txn->error) {
         if (txn->p + 4 >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return;
         }
         *txn->p++ = val >> 24;
@@ -205,28 +280,26 @@ dns_u32_to_wire(dns_towire_state_t *NONNULL txn,
 }
 
 void
-dns_ttl_to_wire(dns_towire_state_t *NONNULL txn,
-                int32_t val)
+dns_ttl_to_wire_(dns_towire_state_t *NONNULL txn, int32_t val, int line)
 {
     if (!txn->error) {
-        if (val < 0) {
-            txn->error = EINVAL;
-            return;
-        }
-        dns_u32_to_wire(txn, (uint32_t)val);
+        dns_u32_to_wire_(txn, (uint32_t)val, line);
     }
 }
 
 void
-dns_rdlength_begin(dns_towire_state_t *NONNULL txn)
+dns_rdlength_begin_(dns_towire_state_t *NONNULL txn, int line)
 {
     if (!txn->error) {
         if (txn->p + 2 >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return;
         }
         if (txn->p_rdlength != NULL) {
             txn->error = EINVAL;
+            txn->line = line;
             return;
         }
         txn->p_rdlength = txn->p;
@@ -235,12 +308,13 @@ dns_rdlength_begin(dns_towire_state_t *NONNULL txn)
 }
 
 void
-dns_rdlength_end(dns_towire_state_t *NONNULL txn)
+dns_rdlength_end_(dns_towire_state_t *NONNULL txn, int line)
 {
-    int rdlength;
+    ssize_t rdlength;
     if (!txn->error) {
         if (txn->p_rdlength == NULL) {
             txn->error = EINVAL;
+            txn->line = line;
             return;
         }
         rdlength = txn->p - txn->p_rdlength - 2;
@@ -250,64 +324,78 @@ dns_rdlength_end(dns_towire_state_t *NONNULL txn)
     }
 }
 
+#ifndef THREAD_DEVKIT_ADK
 void
-dns_rdata_a_to_wire(dns_towire_state_t *NONNULL txn,
-                    const char *NONNULL ip_address)
+dns_rdata_a_to_wire_(dns_towire_state_t *NONNULL txn, const char *NONNULL ip_address, int line)
 {
     if (!txn->error) {
         if (txn->p + 4 >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return;
         }
         if (!inet_pton(AF_INET, ip_address, txn->p)) {
             txn->error = EINVAL;
+            txn->line = line;
+            return;
         }
         txn->p += 4;
     }
 }
 
 void
-dns_rdata_aaaa_to_wire(dns_towire_state_t *NONNULL txn,
-                       const char *NONNULL ip_address)
+dns_rdata_aaaa_to_wire_(dns_towire_state_t *NONNULL txn, const char *NONNULL ip_address, int line)
 {
     if (!txn->error) {
         if (txn->p + 16 >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return;
         }
         if (!inet_pton(AF_INET6, ip_address, txn->p)) {
             txn->error = EINVAL;
+            txn->line = line;
+            return;
         }
         txn->p += 16;
     }
 }
+#endif
 
 uint16_t
-dns_rdata_key_to_wire(dns_towire_state_t *NONNULL txn,
-                      unsigned key_type,
-                      unsigned name_type,
-                      unsigned signatory,
-                      srp_key_t *key)
+dns_rdata_key_to_wire_(dns_towire_state_t *NONNULL txn, unsigned key_type, unsigned name_type,
+                       unsigned signatory, srp_key_t *key, int line)
 {
-    int key_len = srp_pubkey_length(key);
+    ssize_t key_len = srp_pubkey_length(key), copied_len;
     uint8_t *rdata = txn->p;
     uint32_t key_tag;
-    int i, rdlen;
-    
+    int i;
+    ssize_t rdlen;
+
     if (!txn->error) {
         if (key_type > 3 || name_type > 3 || signatory > 15) {
             txn->error = EINVAL;
+            txn->line = line;
             return 0;
         }
         if (txn->p + key_len + 4 >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return 0;
         }
         *txn->p++ = (key_type << 6) | name_type;
         *txn->p++ = signatory;
         *txn->p++ = 3; // protocol type is always 3
         *txn->p++ = srp_key_algorithm(key);
-        srp_pubkey_copy(txn->p, key_len, key);
+        copied_len = srp_pubkey_copy(txn->p, key_len, key);
+        if (copied_len == 0) {
+            txn->error = EINVAL;
+            txn->line = line;
+            return 0;
+        }
         txn->p += key_len;
     }
     rdlen = txn->p - rdata;
@@ -322,31 +410,35 @@ dns_rdata_key_to_wire(dns_towire_state_t *NONNULL txn,
 }
 
 void
-dns_rdata_txt_to_wire(dns_towire_state_t *NONNULL txn,
-                      const char *NONNULL txt_record)
+dns_rdata_txt_to_wire_(dns_towire_state_t *NONNULL txn, const char *NONNULL txt_record, int line)
 {
     if (!txn->error) {
-        unsigned len = strlen(txt_record);
+        ssize_t len = strlen(txt_record);
         if (txn->p + len + 1 >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return;
         }
         if (len > 255) {
             txn->error = ENAMETOOLONG;
+            txn->line = line;
             return;
         }
-        *txn->p++ = (u_int8_t)len;
+        *txn->p++ = (uint8_t)len;
         memcpy(txn->p, txt_record, len);
         txn->p += len;
     }
 }
 
 void
-dns_rdata_raw_data_to_wire(dns_towire_state_t *NONNULL txn, const void *NONNULL raw_data, size_t length)
+dns_rdata_raw_data_to_wire_(dns_towire_state_t *NONNULL txn, const void *NONNULL raw_data, size_t length, int line)
 {
     if (!txn->error) {
         if (txn->p + length >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return;
         }
         memcpy(txn->p, raw_data, length);
@@ -355,15 +447,13 @@ dns_rdata_raw_data_to_wire(dns_towire_state_t *NONNULL txn, const void *NONNULL 
 }
 
 void
-dns_edns0_header_to_wire(dns_towire_state_t *NONNULL txn,
-                         int mtu,
-                         int xrcode,
-                         int version,
-                         int DO)
+dns_edns0_header_to_wire_(dns_towire_state_t *NONNULL txn, int mtu, int xrcode, int version, int DO, int line)
 {
     if (!txn->error) {
         if (txn->p + 9 >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return;
         }
         *txn->p++ = 0; // root label
@@ -371,21 +461,24 @@ dns_edns0_header_to_wire(dns_towire_state_t *NONNULL txn,
         dns_u16_to_wire(txn, mtu);
         *txn->p++ = xrcode;
         *txn->p++ = version;
-        *txn->p++ = DO << 7;	// flags (usb)
-        *txn->p++ = 0;			// flags (lsb, mbz)
+        *txn->p++ = DO << 7; // flags (usb)
+        *txn->p++ = 0;       // flags (lsb, mbz)
     }
 }
 
 void
-dns_edns0_option_begin(dns_towire_state_t *NONNULL txn)
+dns_edns0_option_begin_(dns_towire_state_t *NONNULL txn, int line)
 {
     if (!txn->error) {
         if (txn->p + 2 >= txn->lim) {
             txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
             return;
         }
         if (txn->p_opt != NULL) {
             txn->error = EINVAL;
+            txn->line = line;
             return;
         }
         txn->p_opt = txn->p;
@@ -394,12 +487,13 @@ dns_edns0_option_begin(dns_towire_state_t *NONNULL txn)
 }
 
 void
-dns_edns0_option_end(dns_towire_state_t *NONNULL txn)
+dns_edns0_option_end_(dns_towire_state_t *NONNULL txn, int line)
 {
-    int opt_length;
+    ssize_t opt_length;
     if (!txn->error) {
         if (txn->p_opt == NULL) {
             txn->error = EINVAL;
+            txn->line = line;
             return;
         }
         opt_length = txn->p - txn->p_opt - 2;
@@ -410,13 +504,11 @@ dns_edns0_option_end(dns_towire_state_t *NONNULL txn)
 }
 
 void
-dns_sig0_signature_to_wire(dns_towire_state_t *NONNULL txn,
-                           srp_key_t *key,
-                           uint16_t key_tag,
-                           dns_name_pointer_t *NONNULL signer,
-                           const char *NONNULL signer_fqdn)
+dns_sig0_signature_to_wire_(dns_towire_state_t *NONNULL txn, srp_key_t *key, uint16_t key_tag,
+                            dns_name_pointer_t *NONNULL signer, const char *NONNULL signer_hostname,
+                            const char *NONNULL signer_domain, int line)
 {
-    int siglen = srp_signature_length(key);
+    ssize_t siglen = srp_signature_length(key);
     uint8_t *start, *p_signer, *p_signature, *rrstart = txn->p;
 #ifndef NO_CLOCK
     struct timeval now;
@@ -431,7 +523,7 @@ dns_sig0_signature_to_wire(dns_towire_state_t *NONNULL txn,
     // 29 bytes so far
     // signature data (depends on algorithm, e.g. 64 for ECDSASHA256)
     // so e.g. 93 bytes total
-    
+
     if (!txn->error) {
         dns_u8_to_wire(txn, 0);	// root label
         dns_u16_to_wire(txn, dns_rrtype_sig);
@@ -443,116 +535,91 @@ dns_sig0_signature_to_wire(dns_towire_state_t *NONNULL txn,
         dns_u8_to_wire(txn, srp_key_algorithm(key));
         dns_u8_to_wire(txn, 0); // labels field doesn't apply for transaction signature
         dns_ttl_to_wire(txn, 0); // original ttl doesn't apply
-#ifdef NO_CLOCK
-        dns_u32_to_wire(txn, 0); // Indicate that we have no clock: set expiry and inception times to zero
-        dns_u32_to_wire(txn, 0);
-#else        
+#ifndef NO_CLOCK
         gettimeofday(&now, NULL);
-        dns_u32_to_wire(txn, now.tv_sec + 300); // signature expiration time is five minutes from now
-        dns_u32_to_wire(txn, now.tv_sec - 300); // signature inception time, five minutes in the past
+        uint32_t sec = (uint32_t)now.tv_sec;
+        // In te extraordinarily unlikely event that time_t has rolled over
+        if (sec < 300) {
+#endif
+            dns_u32_to_wire(txn, 0); // Indicate that we have no clock: set expiry and inception times to zero
+            dns_u32_to_wire(txn, 0);
+#ifndef NO_CLOCK
+        } else {
+            dns_u32_to_wire(txn, sec + 300); // signature expiration time is five minutes from now
+            dns_u32_to_wire(txn, sec - 300); // signature inception time, five minutes in the past
+        }
 #endif
         dns_u16_to_wire(txn, key_tag);
+
         p_signer = txn->p;
         // We store the name in uncompressed form because that's what we have to sign
-        dns_full_name_to_wire(NULL, txn, signer_fqdn);
+        if (signer_hostname != NULL) {
+            dns_name_to_wire(NULL, txn, signer_hostname);
+        }
+        dns_full_name_to_wire(NULL, txn, signer_domain);
         // And that means we're going to have to copy the signature back earlier in the packet.
         p_signature = txn->p;
 
         // Sign the message, signature RRDATA (less signature) first.
-        srp_sign(txn->p, siglen, (uint8_t *)txn->message, rrstart - (uint8_t *)txn->message,
-                 start, txn->p - start, key);
-
-        // Now that it's signed, back up and store the pointer to the name, because we're trying
-        // to be as compact as possible.
-        txn->p = p_signer;
-        dns_pointer_to_wire(NULL, txn, signer); // Pointer to the owner name the key is attached to
-        // And move the signature earlier in the packet.
-        memmove(txn->p, p_signature, siglen);
-
-        txn->p += siglen;
-        dns_rdlength_end(txn);
-    }
-}
-
-int
-dns_send_to_server(dns_transaction_t *NONNULL txn,
-                   const char *NONNULL anycast_address, uint16_t port,
-                   dns_response_callback_t NONNULL callback)
-{
-    union {
-        struct sockaddr_storage s;
-        struct sockaddr sa;
-        struct sockaddr_in sin;
-        struct sockaddr_in6 sin6;
-    } addr, from;
-    socklen_t len, fromlen;
-    ssize_t rv, datasize;
-
-    if (!txn->towire.error) {
-        memset(&addr, 0, sizeof addr);
-
-        // Try IPv4 first because IPv6 addresses are never valid IPv4 addresses
-        if (inet_pton(AF_INET, anycast_address, &addr.sin.sin_addr)) {
-            addr.sin.sin_family = AF_INET;
-            addr.sin.sin_port = htons(port);
-            len = sizeof addr.sin;
-        } else if (inet_pton(AF_INET6, anycast_address, &addr.sin6.sin6_addr)) {
-            addr.sin6.sin6_family = AF_INET6;
-            addr.sin6.sin6_port = htons(port);
-            len = sizeof addr.sin6;
+        if (!srp_sign(txn->p, siglen, (uint8_t *)txn->message, rrstart - (uint8_t *)txn->message,
+                      start, txn->p - start, key)) {
+            txn->error = true;
+            txn->line = __LINE__;
         } else {
-            txn->towire.error = EPROTONOSUPPORT;
-            return -1;
-        }
-//#ifdef HAVE_SA_LEN
-        addr.sa.sa_len = len;
-//#endif
+            // Now that it's signed, back up and store the pointer to the name, because we're trying
+            // to be as compact as possible.
+            txn->p = p_signer;
+            dns_pointer_to_wire(NULL, txn, signer); // Pointer to the owner name the key is attached to
+            // And move the signature earlier in the packet.
+            memmove(txn->p, p_signature, siglen);
 
-        txn->sock = socket(addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP);
-        if (txn->sock < 0) {
-            txn->towire.error = errno;
-            return -1;
+            txn->p += siglen;
+            dns_rdlength_end(txn);
         }
 
-#if 0
-        memset(&myaddr, 0, sizeof myaddr);
-        myaddr.sin.sin_port = htons(9999);
-        myaddr.sa.sa_len = len;
-        myaddr.sa.sa_family = addr.sa.sa_family;
-        rv = bind(txn->sock, &myaddr.sa, len);
-        if (rv < 0) {
-            txn->towire.error = errno;
-            return -1;
+        if (txn->error) {
+            txn->outer_line = line;
         }
-#endif
-
-        datasize = txn->towire.p - ((u_int8_t *)txn->towire.message);
-        rv = sendto(txn->sock, txn->towire.message, datasize, 0, &addr.sa, len);
-        if (rv < 0) {
-            txn->towire.error = errno;
-            goto out;
-        }
-        if (rv != datasize) {
-            txn->towire.error = EMSGSIZE;
-            goto out;
-        }
-        fromlen = sizeof from;
-        rv = recvfrom(txn->sock, txn->response, sizeof *txn->response, 0, &from.sa, &fromlen);
-        if (rv < 0) {
-            txn->towire.error = errno;
-            goto out;
-        }
-        txn->response_length = rv;
     }
-out:
-    close(txn->sock);
-    txn->sock = 0;
-
-    if (txn->towire.error) {
-        return -1;
-    }
-    return 0;
 }
+
+#ifdef MALLOC_DEBUG_LOGGING
+#undef malloc
+#undef calloc
+#undef strdup
+#undef free
+
+void *
+debug_malloc(size_t len, const char *file, int line)
+{
+    void *ret = malloc(len);
+    INFO("%p: malloc(%zu) at " PUB_S_SRP ":%d", ret, len, file, line);
+    return ret;
+}
+
+void *
+debug_calloc(size_t count, size_t len, const char *file, int line)
+{
+    void *ret = calloc(count, len);
+    INFO("%p: calloc(%zu, %zu) at " PUB_S_SRP ":%d", ret, count, len, file, line);
+    return ret;
+}
+
+char *
+debug_strdup(const char *s, const char *file, int line)
+{
+    char *ret = strdup(s);
+    INFO("%p: strdup(%p) at " PUB_S_SRP ":%d", ret, s, file, line);
+    return ret;
+}
+
+void
+debug_free(void *p, const char *file, int line)
+{
+    INFO("%p: free() at " PUB_S_SRP ":%d", p, file, line);
+    free(p);
+}
+#endif
 
 // Local Variables:
 // mode: C

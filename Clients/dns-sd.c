@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
  *
  * Disclaimer: IMPORTANT:  This Apple software is supplied to you by Apple Inc.
  * ("Apple") in consideration of your agreement to the following terms, and your
@@ -173,7 +173,7 @@ static const char kFilePathSep = '/';
 #undef _DNS_SD_LIBDISPATCH
 #endif
 #include "dns_sd.h"
-#include "dns_sd_internal.h"
+#include "dns_sd_private.h"
 #include "ClientCommon.h"
 
 
@@ -318,6 +318,8 @@ static uint16_t GetRRType(const char *s)
     else if (!strcasecmp(s, "ds"      )) return(kDNSServiceType_DS);
     else if (!strcasecmp(s, "rrsig"   )) return(kDNSServiceType_RRSIG);
     else if (!strcasecmp(s, "nsec"    )) return(kDNSServiceType_NSEC);
+    else if (!strcasecmp(s, "SVCB"    )) return(kDNSServiceType_SVCB);
+    else if (!strcasecmp(s, "HTTPS"   )) return(kDNSServiceType_HTTPS);
     else if (!strcasecmp(s, "ANY"     )) return(kDNSServiceType_ANY);
     else return(atoi(s));
 }
@@ -389,6 +391,8 @@ static char *DNSTypeName(unsigned short rr_type)
         case kDNSServiceType_AXFR:       return("AXFR");
         case kDNSServiceType_MAILB:      return("MAILB");
         case kDNSServiceType_MAILA:      return("MAILA");
+        case kDNSServiceType_SVCB:       return("SVCB");
+        case kDNSServiceType_HTTPS:      return("HTTPS");
         case kDNSServiceType_ANY:        return("ANY");
         default:            
         {
@@ -540,7 +544,6 @@ static void print_usage(const char *arg0, int print_all)
         fprintf(stderr, "\n");
         fprintf(stderr, "%s -A                              (Test Adding/Updating/Deleting a record)\n", arg0);
         fprintf(stderr, "%s -C <name> <rrtype> <rrclass>           (Query; reconfirming each result)\n", arg0);
-        fprintf(stderr, "%s -D <name> <rrtype> <rrclass>                (Validate query with DNSSEC)\n", arg0);
         fprintf(stderr, "%s -I           (Test registering and then immediately updating TXT record)\n", arg0);
         fprintf(stderr, "%s -N                                     (Test adding a large NULL record)\n", arg0);
         fprintf(stderr, "%s -M              (Test creating a registration with multiple TXT records)\n", arg0);
@@ -548,14 +551,12 @@ static void print_usage(const char *arg0, int print_all)
         fprintf(stderr, "%s -T                                    (Test creating a large TXT record)\n", arg0);
         fprintf(stderr, "%s -U                                          (Test updating a TXT record)\n", arg0);
         fprintf(stderr, "%s -ble                                  (Use kDNSServiceInterfaceIndexBLE)\n", arg0);
-        fprintf(stderr, "%s -g v4/v6/v4v6 <hostname>             (Validate address info with DNSSEC)\n", arg0);
         fprintf(stderr, "%s -i <Interface>         (Run dns-sd cmd on a specific interface (en0/en1)\n", arg0);
         fprintf(stderr, "%s -includep2p                        (Set kDNSServiceFlagsIncludeP2P flag)\n", arg0);
         fprintf(stderr, "%s -includeAWDL                      (Set kDNSServiceFlagsIncludeAWDL flag)\n", arg0);
         fprintf(stderr, "%s -intermediates            (Set kDNSServiceFlagsReturnIntermediates flag)\n", arg0);
         fprintf(stderr, "%s -ku                               (Set kDNSServiceFlagsKnownUnique flag)\n", arg0);
         fprintf(stderr, "%s -lo                          (Run dns-sd cmd using local only interface)\n", arg0);
-        fprintf(stderr, "%s -optional                    (Set kDNSServiceFlagsValidateOptional flag)\n", arg0);
         fprintf(stderr, "%s -p2p                                  (Use kDNSServiceInterfaceIndexP2P)\n", arg0);
         fprintf(stderr, "%s -tc                    (Set kDNSServiceFlagsBackgroundTrafficClass flag)\n", arg0);
         fprintf(stderr, "%s -test                                  (Run basic API input range tests)\n", arg0);
@@ -564,6 +565,7 @@ static void print_usage(const char *arg0, int print_all)
         fprintf(stderr, "%s -timeout                              (Set kDNSServiceFlagsTimeout flag)\n", arg0);
         fprintf(stderr, "%s -unicastResponse              (Set kDNSServiceFlagsUnicastResponse flag)\n", arg0);
         fprintf(stderr, "%s -autoTrigger                      (Set kDNSServiceFlagsAutoTrigger flag)\n", arg0);
+        fprintf(stderr, "%s -enableDNSSEC              (Enable DNSSEC validation for the '-Q' query)\n", arg0);
     }
 }
 
@@ -1049,6 +1051,12 @@ static void DNSSD_API qr_reply(DNSServiceRef sdref, const DNSServiceFlags flags,
     char rr_type[RR_TYPE_SIZE];
     char rr_class[6];
     DNSServiceFlags check_flags = flags;//local flags for dnssec status checking
+    int8_t enable_dnssec = ((check_flags & kDNSServiceFlagsEnableDNSSEC) != 0);
+    static int8_t enabled_dnssec_before = -1;
+
+    if (enabled_dnssec_before == -1) {
+        enabled_dnssec_before = enable_dnssec;
+    }
 
     (void)sdref;    // Unused
     (void)ifIndex;  // Unused
@@ -1058,10 +1066,7 @@ static void DNSSD_API qr_reply(DNSServiceRef sdref, const DNSServiceFlags flags,
 
     if (num_printed++ == 0)
     {
-        if (operation == 'D') 
-            printf("Timestamp     A/R if %-30s%-6s%-7s%-18s Rdata\n", "Name", "Type", "Class", "DNSSECStatus"); 
-        else     
-            printf("Timestamp     A/R    Flags if %-30s%-6s%-7s Rdata\n", "Name", "Type", "Class");
+        printf("Timestamp     A/R    Flags if %-30s%-6s%-7s%s Rdata\n", "Name", "Type", "Class", enable_dnssec ? " DNSSECResult  " : "");
     }
     printtimestamp();
 
@@ -1078,75 +1083,69 @@ static void DNSSD_API qr_reply(DNSServiceRef sdref, const DNSServiceFlags flags,
 
     if (!errorCode) //to avoid printing garbage in rdata
     {
-        if (!(check_flags & (kDNSServiceFlagsValidate | kDNSServiceFlagsValidateOptional)))
+        switch (rrtype)
         {
-            switch (rrtype)
-            {
-                case kDNSServiceType_A:
-                    snprintf(rdb, sizeof(rdb), "%d.%d.%d.%d", rd[0], rd[1], rd[2], rd[3]);
-                    break;
-    
-                case kDNSServiceType_NS:
-                case kDNSServiceType_CNAME:
-                case kDNSServiceType_PTR:
-                case kDNSServiceType_DNAME:
-                    snprintd(p, sizeof(rdb), &rd);
-                    break;
+            case kDNSServiceType_A:
+                snprintf(rdb, sizeof(rdb), "%d.%d.%d.%d", rd[0], rd[1], rd[2], rd[3]);
+                break;
 
-                case kDNSServiceType_SOA:
-                    p += snprintd(p, rdb + sizeof(rdb) - p, &rd);           // mname
-                    p += snprintf(p, rdb + sizeof(rdb) - p, " ");
-                    p += snprintd(p, rdb + sizeof(rdb) - p, &rd);           // rname
-                         snprintf(p, rdb + sizeof(rdb) - p, " Ser %d Ref %d Ret %d Exp %d Min %d",
-                             ntohl(((uint32_t*)rd)[0]), ntohl(((uint32_t*)rd)[1]), ntohl(((uint32_t*)rd)[2]), ntohl(((uint32_t*)rd)[3]), ntohl(((uint32_t*)rd)[4]));
-                    break;
+            case kDNSServiceType_NS:
+            case kDNSServiceType_CNAME:
+            case kDNSServiceType_PTR:
+            case kDNSServiceType_DNAME:
+                snprintd(p, sizeof(rdb), &rd);
+                break;
 
-                case kDNSServiceType_AAAA:
-                    snprintf(rdb, sizeof(rdb), "%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X",
-                        rd[0x0], rd[0x1], rd[0x2], rd[0x3], rd[0x4], rd[0x5], rd[0x6], rd[0x7],
-                        rd[0x8], rd[0x9], rd[0xA], rd[0xB], rd[0xC], rd[0xD], rd[0xE], rd[0xF]);
-                    break;
+            case kDNSServiceType_SOA:
+                p += snprintd(p, rdb + sizeof(rdb) - p, &rd);           // mname
+                p += snprintf(p, rdb + sizeof(rdb) - p, " ");
+                p += snprintd(p, rdb + sizeof(rdb) - p, &rd);           // rname
+                     snprintf(p, rdb + sizeof(rdb) - p, " Ser %d Ref %d Ret %d Exp %d Min %d",
+                         ntohl(((uint32_t*)rd)[0]), ntohl(((uint32_t*)rd)[1]), ntohl(((uint32_t*)rd)[2]), ntohl(((uint32_t*)rd)[3]), ntohl(((uint32_t*)rd)[4]));
+                break;
 
-                case kDNSServiceType_SRV:
-                    p += snprintf(p, rdb + sizeof(rdb) - p, "%d %d %d ",        // priority, weight, port
-                             ntohs(*(unsigned short*)rd), ntohs(*(unsigned short*)(rd+2)), ntohs(*(unsigned short*)(rd+4)));
-                    rd += 6;
-                         snprintd(p, rdb + sizeof(rdb) - p, &rd);               // target host
-                    break;
+            case kDNSServiceType_AAAA:
+                snprintf(rdb, sizeof(rdb), "%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X",
+                    rd[0x0], rd[0x1], rd[0x2], rd[0x3], rd[0x4], rd[0x5], rd[0x6], rd[0x7],
+                    rd[0x8], rd[0x9], rd[0xA], rd[0xB], rd[0xC], rd[0xD], rd[0xE], rd[0xF]);
+                break;
 
-                case kDNSServiceType_DS:
-                case kDNSServiceType_DNSKEY:
-                case kDNSServiceType_NSEC:
-                case kDNSServiceType_RRSIG:
-                    ParseDNSSECRecords(rrtype, rdb, sizeof(rdb), rd, rdlen);
-                    break;
+            case kDNSServiceType_SRV:
+                p += snprintf(p, rdb + sizeof(rdb) - p, "%d %d %d ",        // priority, weight, port
+                         ntohs(*(unsigned short*)rd), ntohs(*(unsigned short*)(rd+2)), ntohs(*(unsigned short*)(rd+4)));
+                rd += 6;
+                     snprintd(p, rdb + sizeof(rdb) - p, &rd);               // target host
+                break;
 
-                default: 
-                    snprintf(rdb, sizeof(rdb), "%d bytes%s", rdlen, rdlen ? ":" : ""); 
-                    unknowntype = 1;
-                    break;
-            }   
-        }   
-        else 
-        {
-            strncpy(rdb, "----", sizeof(rdb));
-            //Clear all o/p bits, and then check for dnssec status
-            check_flags &= ~kDNSServiceOutputFlags;
-            if (check_flags & kDNSServiceFlagsSecure)
-                strncpy(dnssec_status, "Secure", sizeof(dnssec_status));
-            else if (check_flags & kDNSServiceFlagsInsecure)
-                strncpy(dnssec_status, "Insecure", sizeof(dnssec_status));
-            else if (check_flags & kDNSServiceFlagsIndeterminate)
-                strncpy(dnssec_status, "Indeterminate", sizeof(dnssec_status));
-            else if (check_flags & kDNSServiceFlagsBogus) 
-                strncpy(dnssec_status, "Bogus", sizeof(dnssec_status));
+            case kDNSServiceType_DS:
+            case kDNSServiceType_DNSKEY:
+            case kDNSServiceType_NSEC:
+            case kDNSServiceType_RRSIG:
+                ParseDNSSECRecords(rrtype, rdb, sizeof(rdb), rd, rdlen);
+                break;
+
+            default:
+                snprintf(rdb, sizeof(rdb), "%d bytes%s", rdlen, rdlen ? ":" : "");
+                unknowntype = 1;
+                break;
         }
     }
 
-    if (operation == 'D')
-        printf("%s%3d %-30s%-6s%-7s%-18s %s", op, ifIndex, fullname, rr_type, rr_class, dnssec_status, rdb);
+    if (check_flags & kDNSServiceFlagsSecure)
+        strncpy(dnssec_status, "Secure            ", sizeof(dnssec_status));
+    else if (check_flags & kDNSServiceFlagsInsecure)
+        strncpy(dnssec_status, "Insecure          ", sizeof(dnssec_status));
+    else if (check_flags & kDNSServiceFlagsIndeterminate)
+        strncpy(dnssec_status, "Indeterminate     ", sizeof(dnssec_status));
+    else if (check_flags & kDNSServiceFlagsBogus)
+        strncpy(dnssec_status, "Bogus             ", sizeof(dnssec_status));
     else
-        printf("%s%9X%3d %-30s%-7s%-6s %s", op, flags, ifIndex, fullname, rr_type, rr_class, rdb);
+        strncpy(dnssec_status, "                  ", sizeof(dnssec_status));
+
+    printf("%s%9X%3d %-30s%-7s%-6s %s%s",
+        op, flags, ifIndex, fullname, rr_type, rr_class, enabled_dnssec_before ? dnssec_status : "", rdb);
+
+
     if (unknowntype)
     { 
         while (rd < end) 
@@ -1154,8 +1153,10 @@ static void DNSSD_API qr_reply(DNSServiceRef sdref, const DNSServiceFlags flags,
     }
     if (errorCode)
     {
-        if (errorCode == kDNSServiceErr_NoSuchRecord) 
+        if (errorCode == kDNSServiceErr_NoSuchRecord)
             printf("    No Such Record");
+        else if (errorCode == kDNSServiceErr_NoAuth)
+            printf("    No Authorization");
         else if (errorCode == kDNSServiceErr_Timeout)
         {
             printf("    No Such Record\n");
@@ -1203,15 +1204,13 @@ static void DNSSD_API addrinfo_reply(DNSServiceRef sdref, const DNSServiceFlags 
     DNSServiceFlags check_flags = flags;
 	(void) sdref;
 	(void) context;
+    unsigned char enable_dnssec = ((check_flags & kDNSServiceFlagsEnableDNSSEC) != 0);
 
     EXIT_IF_LIBDISPATCH_FATAL_ERROR(errorCode);
 
     if (num_printed++ == 0)
     {
-        if (operation == 'g') 
-            printf("Timestamp     A/R if %-25s %-44s %-18s\n", "Hostname", "Address", "DNSSECStatus");
-        else  
-            printf("Timestamp     A/R    Flags if %-38s %-44s %s\n", "Hostname", "Address", "TTL");
+        printf("Timestamp     A/R    Flags if %-38s %-44s %s%s\n", "Hostname", "Address", "TTL", enable_dnssec ? "DNSSECResult" : "");
     }
     printtimestamp();
    
@@ -1232,26 +1231,20 @@ static void DNSSD_API addrinfo_reply(DNSServiceRef sdref, const DNSServiceFlags 
             b[0x8], b[0x9], b[0xA], b[0xB], b[0xC], b[0xD], b[0xE], b[0xF], if_name);
     }
 
-    //go through this only if you have a dnssec validation status
-    if (!errorCode && (check_flags & (kDNSServiceFlagsValidate | kDNSServiceFlagsValidateOptional)))
+    if (enable_dnssec)
     {
-        strncpy(addr, "----", sizeof(addr));
-        //Clear all o/p bits, and then check for dnssec status
-        check_flags &= ~kDNSServiceOutputFlags;
         if (check_flags & kDNSServiceFlagsSecure)
-            strncpy(dnssec_status, "Secure", sizeof(dnssec_status));
+            strncpy(dnssec_status, " Secure", sizeof(dnssec_status));
         else if (check_flags & kDNSServiceFlagsInsecure)
-            strncpy(dnssec_status, "Insecure", sizeof(dnssec_status));
+            strncpy(dnssec_status, " Insecure", sizeof(dnssec_status));
         else if (check_flags & kDNSServiceFlagsIndeterminate)
-            strncpy(dnssec_status, "Indeterminate", sizeof(dnssec_status));
-        else if (check_flags & kDNSServiceFlagsBogus) 
-            strncpy(dnssec_status, "Bogus", sizeof(dnssec_status));
+            strncpy(dnssec_status, " Indeterminate", sizeof(dnssec_status));
+        else if (check_flags & kDNSServiceFlagsBogus)
+            strncpy(dnssec_status, " Bogus", sizeof(dnssec_status));
     }
-    
-    if (operation == 'g')
-        printf("%s%3d %-25s %-44s %-18s", op, interfaceIndex, hostname, addr, dnssec_status);
-    else
-        printf("%s%9X%3d %-38s %-44s %d", op, flags, interfaceIndex, hostname, addr, ttl);
+
+    printf("%s%9X%3d %-38s %-44s %d%s", op, flags, interfaceIndex, hostname, addr, ttl, enable_dnssec ? dnssec_status : "");
+
     if (errorCode)
     {
         if (errorCode == kDNSServiceErr_NoSuchRecord) 
@@ -1863,7 +1856,7 @@ int main(int argc, char **argv)
     char buffer[TypeBufferSize], *typ, *dom;
     int opi;
     DNSServiceFlags flags = 0;
-    int optional = 0;
+    unsigned char enable_dnssec = 0;
 
     // Extract the program name from argv[0], which by convention contains the path to this executable.
     // Note that this is just a voluntary convention, not enforced by the kernel --
@@ -2026,12 +2019,12 @@ int main(int argc, char **argv)
 	        printf("Setting kDNSServiceFlagsAutoTrigger\n");
 	    }
 
-	    if (argc > 1 && !strcasecmp(argv[1], "-optional"))
+	    if (argc > 1 && !strcasecmp(argv[1], "-enableDNSSEC"))
 	    {
 	        argc--;
 	        argv++;
-	        optional = 1;
-	        printf("Setting DNSSEC optional flag\n");
+            enable_dnssec = 1;
+	        printf("Enable DNSSEC validation for the '-Q' query\n");
 	    }
 
 	    if (argc > 2 && !strcmp(argv[1], "-i"))
@@ -2120,7 +2113,6 @@ int main(int argc, char **argv)
         err = RegisterService(&client, argv[opi+0], gettype(buffer, argv[opi+1]), argv[opi+2], argv[opi+4], argv[opi+3], argc-(opi+6), argv+(opi+6), flags);
         break;
 
-    case 'D':
     case 'q':
     case 'Q':
     case 'C':   {
@@ -2128,20 +2120,14 @@ int main(int argc, char **argv)
         flags |= kDNSServiceFlagsReturnIntermediates;
         if (operation == 'q')
             flags |= kDNSServiceFlagsSuppressUnusable;
-        if (argc < opi+1) 
+        if (enable_dnssec)
+            flags |= kDNSServiceFlagsEnableDNSSEC;
+        if (argc < opi+1)
             goto Fail;
         rrtype = (argc <= opi+1) ? kDNSServiceType_A  : GetRRType(argv[opi+1]);
         rrclass = (argc <= opi+2) ? kDNSServiceClass_IN : GetRRClass(argv[opi+2]);
         if (rrtype == kDNSServiceType_TXT || rrtype == kDNSServiceType_PTR)
             flags |= kDNSServiceFlagsLongLivedQuery;
-        if (operation == 'D')
-        {
-            flags |= kDNSServiceFlagsSuppressUnusable;
-            if (optional)
-                flags |= kDNSServiceFlagsValidateOptional;
-            else
-                flags |= kDNSServiceFlagsValidate;
-        }
         err = DNSServiceQueryRecord(&client, flags, opinterface, argv[opi+0], rrtype, rrclass, qr_reply, NULL);
         break;
     }
@@ -2205,18 +2191,9 @@ int main(int argc, char **argv)
         break;
     }
 
-    case 'g':
     case 'G':   {
         flags |= kDNSServiceFlagsReturnIntermediates;
 
-        if (operation == 'g')
-        {
-            flags |= kDNSServiceFlagsSuppressUnusable;
-            if (optional)
-                flags |= kDNSServiceFlagsValidateOptional;
-            else
-                flags |= kDNSServiceFlagsValidate;
-        }
         if (argc != opi+2) 
             goto Fail;
         else 

@@ -17,7 +17,7 @@
 
 include $(MAKEFILEPATH)/pb_makefiles/platform.make
 
-MVERS = "mDNSResponder-1096.0.2"
+MVERS = "mDNSResponder-1310.40.42"
 
 VER =
 ifneq ($(strip $(GCC_VERSION)),)
@@ -29,6 +29,38 @@ projectdir	:= $(SRCROOT)/mDNSMacOSX
 buildsettings	:= OBJROOT=$(OBJROOT) SYMROOT=$(SYMROOT) DSTROOT=$(DSTROOT) MVERS=$(MVERS) SDKROOT=$(SDKROOT)
 
 .PHONY: install installSome installEmpty installExtras SystemLibraries installhdrs installapi installsrc java clean
+
+# Sanitizer support
+# Disable Sanitizer instrumentation in LibSystem contributors. See rdar://problem/29952210.
+UNSUPPORTED_SANITIZER_PROJECTS := mDNSResponderSystemLibraries mDNSResponderSystemLibraries_Sim
+PROJECT_SUPPORTS_SANITIZERS := 1
+ifneq ($(words $(filter $(UNSUPPORTED_SANITIZER_PROJECTS), $(RC_ProjectName))), 0)
+  PROJECT_SUPPORTS_SANITIZERS := 0
+endif
+ifeq ($(RC_ENABLE_ADDRESS_SANITIZATION),1)
+  ifeq ($(PROJECT_SUPPORTS_SANITIZERS),1)
+    $(info Enabling Address Sanitizer)
+    buildsettings += -enableAddressSanitizer YES
+  else
+    $(warning WARNING: Address Sanitizer not supported for project $(RC_ProjectName))
+  endif
+endif
+ifeq ($(RC_ENABLE_THREAD_SANITIZATION),1)
+  ifeq ($(PROJECT_SUPPORTS_SANITIZERS),1)
+    $(info Enabling Thread Sanitizer)
+    buildsettings += -enableThreadSanitizer YES
+  else
+    $(warning WARNING: Thread Sanitizer not supported for project $(RC_ProjectName))
+  endif
+endif
+ifeq ($(RC_ENABLE_UNDEFINED_BEHAVIOR_SANITIZATION),1)
+  ifeq ($(PROJECT_SUPPORTS_SANITIZERS),1)
+    $(info Enabling Undefined Behavior Sanitizer)
+    buildsettings += -enableUndefinedBehaviorSanitizer YES
+  else
+    $(warning WARNING: Undefined Behavior Sanitizer not supported for project $(RC_ProjectName))
+  endif
+endif
 
 # B&I install build targets
 #
@@ -46,17 +78,19 @@ buildsettings	:= OBJROOT=$(OBJROOT) SYMROOT=$(SYMROOT) DSTROOT=$(DSTROOT) MVERS=
 
 install:
 ifeq ($(RC_ProjectName), mDNSResponderServices)
+ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), osx)
+	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Services-macOS' $(VER)
+else
 	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Services' $(VER)
+endif
+else ifeq ($(RC_ProjectName), mDNSResponderServices_Sim)
+	mkdir -p $(DSTROOT)/AppleInternal
 else
 	cd '$(projectdir)'; xcodebuild install $(buildsettings) $(VER)
 endif
 
 installSome:
-ifeq ($(RC_ProjectName), mDNSResponderServices)
-	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Services' $(VER)
-else
 	cd '$(projectdir)'; xcodebuild install $(buildsettings) $(VER)
-endif
 
 installEmpty:
 	mkdir -p $(DSTROOT)/AppleInternal
@@ -66,6 +100,8 @@ ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), osx)
 	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras-macOS' $(VER)
 else ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), ios)
 	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras-iOS' $(VER)
+else ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), atv)
+	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras-tvOS' $(VER)
 else
 	cd '$(projectdir)'; xcodebuild install $(buildsettings) -target 'Build Extras' $(VER)
 endif
@@ -77,7 +113,13 @@ SystemLibraries:
 
 installhdrs::
 ifeq ($(RC_ProjectName), mDNSResponderServices)
+ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), osx)
+	cd '$(projectdir)'; xcodebuild installhdrs $(buildsettings) -target 'Build Services-macOS' $(VER)
+else
 	cd '$(projectdir)'; xcodebuild installhdrs $(buildsettings) -target 'Build Services' $(VER)
+endif
+else ifeq ($(RC_ProjectName), mDNSResponderServices_Sim)
+	mkdir -p $(DSTROOT)/AppleInternal
 else ifneq ($(findstring SystemLibraries,$(RC_ProjectName)),)
 	cd '$(projectdir)'; xcodebuild installhdrs $(buildsettings) -target SystemLibraries $(VER)
 endif
@@ -86,7 +128,13 @@ endif
 
 installapi:
 ifeq ($(RC_ProjectName), mDNSResponderServices)
+ifeq ($(RC_PROJECT_COMPILATION_PLATFORM), osx)
+	cd '$(projectdir)'; xcodebuild installapi $(buildsettings) -target 'Build Services-macOS' $(VER)
+else
 	cd '$(projectdir)'; xcodebuild installapi $(buildsettings) -target 'Build Services' $(VER)
+endif
+else ifeq ($(RC_ProjectName), mDNSResponderServices_Sim)
+	mkdir -p $(DSTROOT)/AppleInternal
 else ifneq ($(findstring SystemLibraries,$(RC_ProjectName)),)
 	cd '$(projectdir)'; xcodebuild installapi $(buildsettings) -target SystemLibrariesDynamic $(VER)
 endif

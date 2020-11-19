@@ -70,6 +70,8 @@ typedef enum
     extern os_log_t mDNSLogCategory_uDNS;
     extern os_log_t mDNSLogCategory_SPS;
     extern os_log_t mDNSLogCategory_XPC;
+    extern os_log_t mDNSLogCategory_Analytics;
+    extern os_log_t mDNSLogCategory_DNSSEC;
 
     #define MDNS_LOG_CATEGORY_DEFINITION(NAME)  mDNSLogCategory_ ## NAME
 #else
@@ -81,6 +83,8 @@ typedef enum
 #define MDNS_LOG_CATEGORY_UDNS      MDNS_LOG_CATEGORY_DEFINITION(uDNS)
 #define MDNS_LOG_CATEGORY_SPS       MDNS_LOG_CATEGORY_DEFINITION(SPS)
 #define MDNS_LOG_CATEGORY_XPC       MDNS_LOG_CATEGORY_DEFINITION(XPC)
+#define MDNS_LOG_CATEGORY_ANALYTICS MDNS_LOG_CATEGORY_DEFINITION(Analytics)
+#define MDNS_LOG_CATEGORY_DNSSEC    MDNS_LOG_CATEGORY_DEFINITION(DNSSEC)
 
 // Set this symbol to 1 to answer remote queries for our Address, and reverse mapping PTR
 #define ANSWER_REMOTE_HOSTNAME_QUERIES 0
@@ -296,12 +300,14 @@ extern void LogMemCorruption(const char *format, ...);
 // The followings are the customized log specifier defined in os_log. For compatibility, we have to define it when it is
 // not on the Apple platform, for example, the Posix platform. The keyword "public" or "private" is used to control whether
 // the content would be redacted when the redaction is turned on: "public" means the content will always be printed;
-// "private" means the content will be printed as <private> if the redaction is turned on, only when the redaction is
-// turned off, the content will be printed as what it should be.
+// "private" means the content will be printed as <mask.hash: '<The hashed string from binary data>'> if the redaction is turned on,
+// only when the redaction is turned off, the content will be printed as what it should be. Note that the hash performed
+// to the data is a salted hashing transformation, and the salt is generated randomly on a per-process basis, meaning
+// that hashes cannot be correlated across processes or devices.
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_S "%{public}s"
-    #define PRI_S "%{private}s"
+    #define PRI_S "%{private, mask.hash}s"
 #else
     #define PUB_S "%s"
     #define PRI_S PUB_S
@@ -309,9 +315,9 @@ extern void LogMemCorruption(const char *format, ...);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_DM_NAME "%{public, mdnsresponder:domain_name}.*P"
-    #define PRI_DM_NAME "%{private, mdnsresponder:domain_name}.*P"
+    #define PRI_DM_NAME "%{private, mask.hash, mdnsresponder:domain_name}.*P"
     // When DM_NAME_PARAM is used, the file where the function is defined must include DNSEmbeddedAPI.h
-    #define DM_NAME_PARAM(name) ((name) ? ((int)DomainNameLength((const domainname *)(name))) : 0), (name)
+    #define DM_NAME_PARAM(name) ((name) ? ((int)DomainNameLength((name))) : 0), (name)
 #else
     #define PUB_DM_NAME "%##s"
     #define PRI_DM_NAME PUB_DM_NAME
@@ -320,13 +326,13 @@ extern void LogMemCorruption(const char *format, ...);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_IP_ADDR "%{public, mdnsresponder:ip_addr}.20P"
-    #define PRI_IP_ADDR "%{private, mdnsresponder:ip_addr}.20P"
+    #define PRI_IP_ADDR "%{private, mask.hash, mdnsresponder:ip_addr}.20P"
 
     #define PUB_IPv4_ADDR "%{public, network:in_addr}.4P"
-    #define PRI_IPv4_ADDR "%{private, network:in_addr}.4P"
+    #define PRI_IPv4_ADDR "%{private, mask.hash, network:in_addr}.4P"
 
     #define PUB_IPv6_ADDR "%{public, network:in6_addr}.16P"
-    #define PRI_IPv6_ADDR "%{private, network:in6_addr}.16P"
+    #define PRI_IPv6_ADDR "%{private, mask.hash, network:in6_addr}.16P"
 #else
     #define PUB_IP_ADDR "%#a"
     #define PRI_IP_ADDR PUB_IP_ADDR
@@ -340,10 +346,70 @@ extern void LogMemCorruption(const char *format, ...);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_MAC_ADDR "%{public, mdnsresponder:mac_addr}.6P"
-    #define PRI_MAC_ADDR "%{private, mdnsresponder:mac_addr}.6P"
+    #define PRI_MAC_ADDR "%{private, mask.hash, mdnsresponder:mac_addr}.6P"
 #else
     #define PUB_MAC_ADDR "%.6a"
     #define PRI_MAC_ADDR PUB_MAC_ADDR
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_DNSKEY "%{public, mdns:rd.dnskey}.*P"
+    #define PRI_DNSKEY "%{private, mask.hash, mdns:rd.dnskey}.*P"
+    #define DNSKEY_PARAM(rdata, rdata_length) (rdata_length), (rdata)
+#else
+    #define PUB_DNSKEY "%p"
+    #define PRI_DNSKEY PUB_DNSKEY
+    #define DNSKEY_PARAM(rdata, rdata_length) (rdata)
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_DS "%{public, mdns:rd.ds}.*P"
+    #define PRI_DS "%{private, mask.hash, mdns:rd.ds}.*P"
+    #define DS_PARAM(rdata, rdata_length) (rdata_length), (rdata)
+#else
+    #define PUB_DS "%p"
+    #define PRI_DS PUB_DS
+    #define DS_PARAM(rdata, rdata_length) (rdata)
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_NSEC "%{public, mdns:rd.nsec}.*P"
+    #define PRI_NSEC "%{private, mask.hash, mdns:rd.nsec}.*P"
+    #define NSEC_PARAM(rdata, rdata_length) (rdata_length), (rdata)
+#else
+    #define PUB_NSEC "%p"
+    #define PRI_NSEC PUB_NSEC
+    #define NSEC_PARAM(rdata, rdata_length) (rdata)
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_NSEC3 "%{public, mdns:rd.nsec3}.*P"
+    #define PRI_NSEC3 "%{private, mask.hash, mdns:rd.nsec3}.*P"
+    #define NSEC3_PARAM(rdata, rdata_length) (rdata_length), (rdata)
+#else
+    #define PUB_NSEC3 "%p"
+    #define PRI_NSEC3 PUB_NSEC3
+    #define NSEC3_PARAM(rdata, rdata_length) (rdata)
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_RRSIG "%{public, mdns:rd.rrsig}.*P"
+    #define PRI_RRSIG "%{private, mask.hash, mdns:rd.rrsig}.*P"
+    #define RRSIG_PARAM(rdata, rdata_length) (rdata_length), (rdata)
+#else
+    #define PUB_RRSIG "%p"
+    #define PRI_RRSIG PUB_RRSIG
+    #define RRSIG_PARAM(rdata, rdata_length) (rdata)
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_SVCB "%{public, mdns:rd.svcb}.*P"
+    #define PRI_SVCB "%{private, mask.hash, mdns:rd.svcb}.*P"
+    #define SVCB_PARAM(rdata, rdata_length) (rdata_length), (rdata)
+#else
+    #define PUB_SVCB "%p"
+    #define PRI_SVCB PUB_SVCB
+    #define SVCB_PARAM(rdata, rdata_length) (rdata)
 #endif
 
 extern void LogToFD(int fd, const char *format, ...);

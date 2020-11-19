@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,9 +17,18 @@
 
 #include "dnsproxy.h"
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+#include <nw/private.h>
+#endif
+
 #ifndef UNICAST_DISABLED
 
 extern mDNS mDNSStorage;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+static mDNSBool gDNS64Enabled = mDNSfalse;
+static mDNSBool gDNS64ForceAAAASynthesis = mDNSfalse;
+static nw_nat64_prefix_t gDNS64Prefix;
+#endif
 
 // Implementation Notes
 //
@@ -54,6 +63,18 @@ extern mDNS mDNSStorage;
 
 typedef struct DNSProxyClient_struct DNSProxyClient;
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+typedef enum
+{
+    kDNSProxyDNS64State_Initial                 = 0,    // Initial state.
+    kDNSProxyDNS64State_AAAASynthesis           = 1,    // Querying for A record for AAAA record synthesis.
+    kDNSProxyDNS64State_PTRSynthesisTrying      = 2,    // Querying for in-addr.arpa PTR record to map from ip6.arpa PTR.
+    kDNSProxyDNS64State_PTRSynthesisSuccess     = 3,    // in-addr.arpa PTR query got non-negative non-CNAME answer.
+    kDNSProxyDNS64State_PTRSynthesisNXDomain    = 4     // in-addr.arpa PTR query produced no useful result.
+
+}   DNSProxyDNS64State;
+#endif
+
 struct DNSProxyClient_struct {
 
     DNSProxyClient *next; 
@@ -67,10 +88,13 @@ struct DNSProxyClient_struct {
     mDNSu8 *optRR;                  // EDNS0 option
     mDNSu16 optLen;                 // Total Length of the EDNS0 option 
     mDNSu16 rcvBufSize;             // How much can the client receive ?
-    mDNSBool DNSSECOK;              // DNSSEC OK ?
     void *context;                  // Platform context to be disposed if non-NULL
     domainname qname;               // q->qname can't be used for duplicate check
     DNSQuestion q;                  // as it can change underneath us for CNAMEs
+    mDNSu16 qtype;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+    DNSProxyDNS64State dns64state;
+#endif
 };
 
 #define MIN_DNS_MESSAGE_SIZE    512
@@ -106,7 +130,6 @@ mDNSlocal mDNSBool ParseEDNS0(DNSProxyClient *pc, const mDNSu8 *ptr, int length,
     debugf("rrtype is %s, length is %d, rcode %d, version %d, flag 0x%x", DNSTypeName(rrtype), rrclass, rcode, version, flag);
 #endif
     pc->rcvBufSize = rrclass;
-    pc->DNSSECOK = ptr[6] & 0x80;
     
     return mDNStrue;
 }
@@ -193,9 +216,8 @@ mDNSlocal mDNSu8 *AddResourceRecords(DNSProxyClient *pc, mDNSu8 **prevptr, mStat
     mDNSu8 *ptr = mDNSNULL;
     mDNSs32 now;
     mDNSs32 ttl;
-    CacheRecord *nsec = mDNSNULL;
-    CacheRecord *soa = mDNSNULL;
-    CacheRecord *cname = mDNSNULL;
+    const CacheRecord *soa = mDNSNULL;
+    const CacheRecord *cname = mDNSNULL;
     mDNSu8 *limit;
     domainname tempQName;
     mDNSu32 tempQNameHash;
@@ -226,11 +248,24 @@ mDNSlocal mDNSu8 *AddResourceRecords(DNSProxyClient *pc, mDNSu8 **prevptr, mStat
     }
     LogInfo("AddResourceRecords: Limit is %d", limit - m->omsg.data);
 
-    AssignDomainName(&tempQName, &pc->qname);
-    tempQNameHash = DomainNameHashValue(&tempQName);
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+    if (pc->dns64state == kDNSProxyDNS64State_PTRSynthesisSuccess)
+    {
+        // We're going to synthesize a CNAME record to map the originally requested ip6.arpa domain name to the
+        // in-addr.arpa domain name, so we use pc->q.qname, which contains the in-addr.arpa domain name, to get the
+        // in-addr.arpa PTR record.
+        AssignDomainName(&tempQName, &pc->q.qname);
+        tempQNameHash = DomainNameHashValue(&tempQName);
+    }
+    else
+#endif
+    {
+        AssignDomainName(&tempQName, &pc->qname);
+        tempQNameHash = DomainNameHashValue(&tempQName);
+    }
 
 again:
-    nsec = soa = cname = mDNSNULL;
+    soa = cname = mDNSNULL;
 
     cg = CacheGroupForName(m, tempQNameHash, &tempQName);
     if (!cg)
@@ -239,10 +274,6 @@ again:
         *error = mStatus_NoSuchRecord;
         return mDNSNULL;
     }
-    // Set ValidatingResponse so that you can get RRSIGs also matching
-    // the question
-    if (pc->DNSSECOK)
-        pc->q.ValidatingResponse = 1;
     for (cr = cg->members; cr; cr = cr->next)
     {
         if (SameNameCacheRecordAnswersQuestion(cr, &pc->q))
@@ -254,13 +285,37 @@ again:
                 // cache record
                 mDNSOpaque16 responseFlags = SetResponseFlags(pc, cr->responseFlags);
                 InitializeDNSMessage(&m->omsg.h, pc->msgid, responseFlags);
-                ptr = putQuestion(&m->omsg, m->omsg.data, m->omsg.data + AbsoluteMaxDNSMessageData, &pc->qname, pc->q.qtype, pc->q.qclass);
+                ptr = putQuestion(&m->omsg, m->omsg.data, m->omsg.data + AbsoluteMaxDNSMessageData, &pc->qname, pc->qtype, pc->q.qclass);
                 if (!ptr)
                 {
-                    LogInfo("AddResourceRecords: putQuestion NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->q.qtype));
+                    LogInfo("AddResourceRecords: putQuestion NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
                     return mDNSNULL;
                 }
                 first = mDNSfalse;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+                if (pc->dns64state == kDNSProxyDNS64State_PTRSynthesisSuccess)
+                {
+                    // For the first answer record, synthesize a CNAME record to map the originally requested ip6.arpa
+                    // domain name to the in-addr.arpa domain name.
+                    // See <https://tools.ietf.org/html/rfc6147#section-5.3.1>.
+                    RData rdata;
+                    ResourceRecord newRR;
+                    mDNSPlatformMemZero(&newRR, (mDNSu32)sizeof(newRR));
+                    newRR.RecordType    = kDNSRecordTypePacketAns;
+                    newRR.rrtype        = kDNSType_CNAME;
+                    newRR.rrclass       = kDNSClass_IN;
+                    newRR.name          = &pc->qname;
+                    AssignDomainName(&rdata.u.name, &pc->q.qname);
+                    rdata.MaxRDLength   = (mDNSu32)sizeof(rdata.u);
+                    newRR.rdata         = &rdata;
+                    ptr = PutResourceRecordTTLWithLimit(&m->omsg, ptr, &m->omsg.h.numAnswers, &newRR, 0, limit);
+                    if (!ptr)
+                    {
+                        *prevptr = orig;
+                        return mDNSNULL;
+                    }
+                }
+#endif
             }
             // - For NegativeAnswers there is nothing to add
             // - If DNSSECOK is set, we also automatically lookup the RRSIGs which
@@ -269,9 +324,40 @@ again:
             //   DNSSECOK bit only influences whether we add the RRSIG or not.
             if (cr->resrec.RecordType != kDNSRecordTypePacketNegative)
             {
-                LogInfo("AddResourceRecords: Answering question with %s", CRDisplayString(m, cr));
+                const ResourceRecord *rr;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+                RData rdata;
+                ResourceRecord newRR;
+                if ((pc->dns64state == kDNSProxyDNS64State_AAAASynthesis) && (cr->resrec.rrtype == kDNSType_A))
+                {
+                    struct in_addr  addrV4;
+                    struct in6_addr addrV6;
+
+                    newRR               = cr->resrec;
+                    newRR.rrtype        = kDNSType_AAAA;
+                    newRR.rdlength      = 16;
+                    rdata.MaxRDLength   = newRR.rdlength;
+                    newRR.rdata         = &rdata;
+
+                    memcpy(&addrV4.s_addr, cr->resrec.rdata->u.ipv4.b, 4);
+                    if (nw_nat64_synthesize_v6(&gDNS64Prefix, &addrV4, &addrV6))
+                    {
+                        memcpy(rdata.u.ipv6.b, addrV6.s6_addr, 16);
+                        rr = &newRR;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+                else
+#endif
+                {
+                    rr = &cr->resrec;
+                }
+                LogInfo("AddResourceRecords: Answering question with %s", RRDisplayString(m, rr));
                 ttl = cr->resrec.rroriginalttl - (now - cr->TimeRcvd) / mDNSPlatformOneSecond;
-                ptr = PutResourceRecordTTLWithLimit(&m->omsg, ptr, &m->omsg.h.numAnswers, &cr->resrec, ttl, limit);
+                ptr = PutResourceRecordTTLWithLimit(&m->omsg, ptr, &m->omsg.h.numAnswers, rr, ttl, limit);
                 if (!ptr)
                 {
                     *prevptr = orig;
@@ -279,13 +365,6 @@ again:
                 }
                 len += (ptr - orig); 
                 orig = ptr;
-            }
-            // If we have nsecs (wildcard expanded answer or negative response), add them
-            // in the additional section below if the DNSSECOK bit is set
-            if (pc->DNSSECOK && cr->nsec)
-            {
-                LogInfo("AddResourceRecords: nsec set for %s", CRDisplayString(m ,cr));
-                nsec = cr->nsec;
             }
             if (cr->soa)
             {
@@ -315,21 +394,6 @@ again:
     // - if we issue a non-DNSSEC question followed by DNSSEC question for the same name,
     //   the "core" flushes the cache entry and re-issue the question with EDNS0/DOK bit and
     //   in this case we return all the DNSSEC records we have.
-    for (; nsec; nsec = nsec->next)
-    {
-        if (!pc->DNSSECOK && DNSSECRecordType(nsec->resrec.rrtype))
-            continue;
-        LogInfo("AddResourceRecords:NSEC Answering question with %s", CRDisplayString(m, nsec));
-        ttl = nsec->resrec.rroriginalttl - (now - nsec->TimeRcvd) / mDNSPlatformOneSecond;
-        ptr = PutResourceRecordTTLWithLimit(&m->omsg, ptr, &m->omsg.h.numAuthorities, &nsec->resrec, ttl, limit);
-        if (!ptr)
-        {
-            *prevptr = orig;
-            return mDNSNULL;
-        }
-        len += (ptr - orig); 
-        orig = ptr;
-    }
     if (soa)
     {
         LogInfo("AddResourceRecords: SOA Answering question with %s", CRDisplayString(m, soa));
@@ -382,93 +446,99 @@ mDNSlocal void ProxyClientCallback(mDNS *const m, DNSQuestion *question, const R
 
     LogInfo("ProxyClientCallback: ResourceRecord %s", RRDisplayString(m, answer));
 
-    // We asked for validation and not timed out yet, then wait for the DNSSEC result.
-    // We have to set the AD bit in the response if it is secure which can't be done
-    // till we get the DNSSEC result back (indicated by QC_dnssec).
-    if (question->ValidationRequired)
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+    if (gDNS64Enabled)
     {
-        mDNSs32 now;
-
-        mDNS_Lock(m);
-        now = m->timenow;
-        mDNS_Unlock(m);
-        if (((now - question->StopTime) < 0) && AddRecord != QC_dnssec)
+        if (pc->dns64state == kDNSProxyDNS64State_Initial)
         {
-            LogInfo("ProxyClientCallback: No DNSSEC answer yet for Question %##s (%s), AddRecord %d, answer %s", question->qname.c,
-                DNSTypeName(question->qtype), AddRecord, RRDisplayString(m, answer));
-            return;
+            // If we get a negative AAAA answer, then retry the query as an A record query.
+            // See <https://tools.ietf.org/html/rfc6147#section-5.1.6>.
+            if ((answer->RecordType == kDNSRecordTypePacketNegative) && (question->qtype == kDNSType_AAAA) &&
+                (answer->rrtype == kDNSType_AAAA) && (answer->rrclass == kDNSClass_IN))
+            {
+                mDNS_StopQuery(m, question);
+                pc->dns64state = kDNSProxyDNS64State_AAAASynthesis;
+                question->qtype = kDNSType_A;
+                mDNS_StartQuery(m, question);
+                return;
+            }
+        }
+        else if (pc->dns64state == kDNSProxyDNS64State_PTRSynthesisTrying)
+        {
+            // If we get a non-negative non-CNAME answer, then this is the answer we give to the client.
+            // Otherwise, just respond with NXDOMAIN.
+            // See <https://tools.ietf.org/html/rfc6147#section-5.3.1>.
+            if ((answer->RecordType != kDNSRecordTypePacketNegative) && (question->qtype == kDNSType_PTR) &&
+                (answer->rrtype == kDNSType_PTR) && (answer->rrclass == kDNSClass_IN))
+            {
+                pc->dns64state = kDNSProxyDNS64State_PTRSynthesisSuccess;
+            }
+            else
+            {
+                pc->dns64state = kDNSProxyDNS64State_PTRSynthesisNXDomain;
+            }
         }
     }
-
-    if (answer->RecordType != kDNSRecordTypePacketNegative)
+    if (pc->dns64state == kDNSProxyDNS64State_PTRSynthesisNXDomain)
     {
-        if (answer->rrtype != question->qtype)
+        const mDNSOpaque16 flags = { { kDNSFlag0_QR_Response | kDNSFlag0_OP_StdQuery, kDNSFlag1_RC_NXDomain } };
+        InitializeDNSMessage(&m->omsg.h, pc->msgid, flags);
+        ptr = putQuestion(&m->omsg, m->omsg.data, m->omsg.data + AbsoluteMaxDNSMessageData, &pc->qname, pc->qtype,
+            pc->q.qclass);
+        if (!ptr)
+        {
+            LogInfo("ProxyClientCallback: putQuestion NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
+        }
+    }
+    else
+#endif
+    {
+        if ((answer->RecordType != kDNSRecordTypePacketNegative) && (answer->rrtype != question->qtype))
         {
             // Wait till we get called for the real response
             LogInfo("ProxyClientCallback: Received %s, not answering yet", RRDisplayString(m, answer));
             return;
         }
-    }
-    ptr = AddResourceRecords(pc, &prevptr, &error);
-    if (!ptr)
-    {
-        LogInfo("ProxyClientCallback: AddResourceRecords NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->q.qtype));
-        if (error == mStatus_NoError && prevptr)
+        ptr = AddResourceRecords(pc, &prevptr, &error);
+        if (!ptr)
         {
-            // No space to add the record. Set the Truncate bit for UDP.
-            //
-            // TBD: For TCP, we need to send the rest of the data. But finding out what is left
-            // is harder. We should allocate enough buffer in the first place to send all
-            // of the data.
-            if (!pc->tcp)
+            LogInfo("ProxyClientCallback: AddResourceRecords NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
+            if (error == mStatus_NoError && prevptr)
             {
-                m->omsg.h.flags.b[0] |= kDNSFlag0_TC;
-                ptr = prevptr;
+                // No space to add the record. Set the Truncate bit for UDP.
+                //
+                // TBD: For TCP, we need to send the rest of the data. But finding out what is left
+                // is harder. We should allocate enough buffer in the first place to send all
+                // of the data.
+                if (!pc->tcp)
+                {
+                    m->omsg.h.flags.b[0] |= kDNSFlag0_TC;
+                    ptr = prevptr;
+                }
+                else
+                {
+                    LogInfo("ProxyClientCallback: ERROR!! Not enough space to return in TCP for %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
+                    ptr = prevptr;
+                }
             }
             else
             {
-                LogInfo("ProxyClientCallback: ERROR!! Not enough space to return in TCP for %##s (%s)", &pc->qname.c, DNSTypeName(pc->q.qtype));
-                ptr = prevptr;
-            }
-        }
-        else
-        {
-            mDNSOpaque16 flags   = { { kDNSFlag0_QR_Response | kDNSFlag0_OP_StdQuery, kDNSFlag1_RC_ServFail } };
-            // We could not find the record for some reason. Return a response, so that the client
-            // is not waiting forever.
-            LogInfo("ProxyClientCallback: No response");
-            if (!mDNSOpaque16IsZero(pc->q.responseFlags))
-                flags = pc->q.responseFlags;
-            InitializeDNSMessage(&m->omsg.h, pc->msgid, flags);
-            ptr = putQuestion(&m->omsg, m->omsg.data, m->omsg.data + AbsoluteMaxDNSMessageData, &pc->qname, pc->q.qtype, pc->q.qclass);
-            if (!ptr)
-            {
-                LogInfo("ProxyClientCallback: putQuestion NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->q.qtype));
-                goto done;
+                mDNSOpaque16 flags   = { { kDNSFlag0_QR_Response | kDNSFlag0_OP_StdQuery, kDNSFlag1_RC_ServFail } };
+                // We could not find the record for some reason. Return a response, so that the client
+                // is not waiting forever.
+                LogInfo("ProxyClientCallback: No response");
+                if (!mDNSOpaque16IsZero(pc->q.responseFlags))
+                    flags = pc->q.responseFlags;
+                InitializeDNSMessage(&m->omsg.h, pc->msgid, flags);
+                ptr = putQuestion(&m->omsg, m->omsg.data, m->omsg.data + AbsoluteMaxDNSMessageData, &pc->qname, pc->qtype, pc->q.qclass);
+                if (!ptr)
+                {
+                    LogInfo("ProxyClientCallback: putQuestion NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
+                    goto done;
+                }
             }
         }
     }
-    if (question->ValidationRequired)
-    {
-        if (question->ValidationState == DNSSECValDone && question->ValidationStatus == DNSSEC_Secure)
-        {
-            LogInfo("ProxyClientCallback: Setting AD bit for Question %##s (%s)", question->qname.c, DNSTypeName(question->qtype));
-            m->omsg.h.flags.b[1] |= kDNSFlag1_AD;
-        }
-        else
-        {
-            // If some external resolver sets the AD bit and we did not validate the response securely, don't set
-            // the AD bit. It is possible that we did not see all the records that the upstream resolver saw or
-            // a buggy implementation somewhere.
-            if (m->omsg.h.flags.b[1] & kDNSFlag1_AD)
-            {
-                LogInfo("ProxyClientCallback: AD bit set in the response for response that was not validated locally %##s (%s)",
-                    question->qname.c, DNSTypeName(question->qtype));
-                m->omsg.h.flags.b[1] &= ~kDNSFlag1_AD;
-            }
-        }
-    }
-    
     debugf("ProxyClientCallback: InterfaceID is %p for response to client", pc->interfaceID);
 
     if (!pc->tcp)
@@ -529,12 +599,12 @@ mDNSlocal DNSQuestion *IsDuplicateClient(const mDNSAddr *const addr, const mDNSI
 {
     DNSProxyClient *pc;
 
-	for (pc = DNSProxyClients; pc; pc = pc->next)
+    for (pc = DNSProxyClients; pc; pc = pc->next)
     {
         if (mDNSSameAddress(&pc->addr, addr)   &&
             mDNSSameIPPort(pc->port, port)  &&
             mDNSSameOpaque16(pc->msgid, id) &&
-            pc->q.qtype == question->qtype  &&
+            pc->qtype == question->qtype  &&
             pc->q.qclass  == question->qclass &&
             SameDomainName(&pc->qname, &question->qname))
         {
@@ -645,7 +715,7 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
         }
         else
         {
-            optLen = ptr - optRR;
+            optLen = (int)(ptr - optRR);
             LogInfo("ProxyCallbackCommon: EDNS0 opt length %d present in Question %##s (%s)", optLen, q.qname.c, DNSTypeName(q.qtype));
         }
     }
@@ -701,27 +771,32 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
     // Set ReturnIntermed so that we get the negative responses
     pc->q.ReturnIntermed  = mDNStrue;
     pc->q.ProxyQuestion   = mDNStrue;
-    pc->q.ProxyDNSSECOK   = pc->DNSSECOK;
     pc->q.responseFlags   = zeroID;
-    if (pc->DNSSECOK)
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+    pc->qtype = pc->q.qtype;
+    if (gDNS64Enabled)
     {
-        if (!(msg->h.flags.b[1] & kDNSFlag1_CD) && pc->q.qtype != kDNSType_RRSIG && pc->q.qtype != kDNSQType_ANY)
+        if (pc->qtype == kDNSType_PTR)
         {
-            LogInfo("ProxyCallbackCommon: Setting Validation required bit for %#a:%d, validating %##s (%s)", srcaddr, mDNSVal16(srcport),
-                q.qname.c, DNSTypeName(q.qtype));
-            pc->q.ValidationRequired = DNSSEC_VALIDATION_SECURE;
+            struct in6_addr v6Addr;
+            struct in_addr v4Addr;
+            if (GetReverseIPv6Addr(&pc->qname, v6Addr.s6_addr) && nw_nat64_extract_v4(&gDNS64Prefix, &v6Addr, &v4Addr))
+            {
+                const mDNSu8 *const a = (const mDNSu8 *)&v4Addr.s_addr;
+                char qnameStr[MAX_REVERSE_MAPPING_NAME_V4];
+                mDNS_snprintf(qnameStr, (mDNSu32)sizeof(qnameStr), "%u.%u.%u.%u.in-addr.arpa.", a[3], a[2], a[1], a[0]);
+                MakeDomainNameFromDNSNameString(&pc->q.qname, qnameStr);
+                pc->q.qnamehash = DomainNameHashValue(&pc->q.qname);
+                pc->dns64state = kDNSProxyDNS64State_PTRSynthesisTrying;
+            }
         }
-        else
+        else if ((pc->qtype == kDNSType_AAAA) && gDNS64ForceAAAASynthesis)
         {
-            LogInfo("ProxyCallbackCommon: CD bit not set OR not a valid type for %#a:%d, not validating %##s (%s)", srcaddr, mDNSVal16(srcport),
-                q.qname.c, DNSTypeName(q.qtype));
+            pc->dns64state = kDNSProxyDNS64State_AAAASynthesis;
+            pc->q.qtype    = kDNSType_A;
         }
     }
-    else
-    {
-        LogInfo("ProxyCallbackCommon: DNSSEC OK bit not set for %#a:%d, not validating %##s (%s)", srcaddr, mDNSVal16(srcport),
-                q.qname.c, DNSTypeName(q.qtype));
-    }
+#endif
 
     while (*ppc)
         ppc = &((*ppc)->next);
@@ -770,7 +845,12 @@ mDNSexport void ProxyTCPCallback(void *socket, DNSMessage *const msg, const mDNS
     ProxyCallbackCommon(socket, msg, end, srcaddr, srcport, dstaddr, dstport, InterfaceID, mDNStrue, context);
 }
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+mDNSexport void DNSProxyInit(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf, const mDNSu8 IPv6Prefix[16], int IPv6PrefixBitLen,
+                             mDNSBool forceAAAASynthesis)
+#else
 mDNSexport void DNSProxyInit(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf)
+#endif
 {
     mDNS *const m = &mDNSStorage;
     int i;
@@ -782,6 +862,65 @@ mDNSexport void DNSProxyInit(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf)
 
     LogInfo("DNSProxyInit Storing interface list: Input [%d, %d, %d, %d, %d] Output [%d]", m->dp_ipintf[0],
             m->dp_ipintf[1], m->dp_ipintf[2], m->dp_ipintf[3], m->dp_ipintf[4], m->dp_opintf);
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+    if (IPv6Prefix)
+    {
+        mDNSu32 copyLen;
+        mDNSPlatformMemZero(&gDNS64Prefix, (mDNSu32)sizeof(gDNS64Prefix));
+        switch (IPv6PrefixBitLen)
+        {
+            case 32:
+                gDNS64Prefix.length = nw_nat64_prefix_length_32;
+                copyLen = 4;
+                break;
+
+            case 40:
+                gDNS64Prefix.length = nw_nat64_prefix_length_40;
+                copyLen = 5;
+                break;
+
+            case 48:
+                gDNS64Prefix.length = nw_nat64_prefix_length_48;
+                copyLen = 6;
+                break;
+
+            case 56:
+                gDNS64Prefix.length = nw_nat64_prefix_length_56;
+                copyLen = 7;
+                break;
+
+            case 64:
+                gDNS64Prefix.length = nw_nat64_prefix_length_64;
+                copyLen = 8;
+                break;
+
+            case 96:
+                gDNS64Prefix.length = nw_nat64_prefix_length_96;
+                copyLen = 12;
+                break;
+
+            default:
+                copyLen = 0;
+                break;
+        }
+        if (copyLen > 0)
+        {
+            mDNSPlatformMemCopy(gDNS64Prefix.data, IPv6Prefix, copyLen);
+            gDNS64ForceAAAASynthesis = forceAAAASynthesis;
+            gDNS64Enabled = mDNStrue;
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                "DNSProxy using DNS64 IPv6 prefix: " PRI_IPv6_ADDR "/%d" PUB_S,
+                IPv6Prefix, IPv6PrefixBitLen, gDNS64ForceAAAASynthesis ? "" : " (force AAAA synthesis)");
+        }
+        else
+        {
+            gDNS64Enabled = mDNSfalse;
+            gDNS64ForceAAAASynthesis = mDNSfalse;
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
+                "DNSProxy not using invalid DNS64 IPv6 prefix: " PRI_IPv6_ADDR "/%d", IPv6Prefix, IPv6PrefixBitLen);
+        }
+    }
+#endif
 }
 
 mDNSexport void DNSProxyTerminate(void)
@@ -796,6 +935,9 @@ mDNSexport void DNSProxyTerminate(void)
     
     LogInfo("DNSProxyTerminate Cleared interface list: Input [%d, %d, %d, %d, %d] Output [%d]", m->dp_ipintf[0],
             m->dp_ipintf[1], m->dp_ipintf[2], m->dp_ipintf[3], m->dp_ipintf[4], m->dp_opintf);
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+    gDNS64Enabled = mDNSfalse;
+#endif
 }
 #else // UNICAST_DISABLED
 

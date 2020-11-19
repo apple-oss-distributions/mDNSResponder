@@ -21,8 +21,6 @@
 #include "mDNSPosix.h"               // Defines the specific types needed to run mDNS on this platform
 #include "PlatformCommon.h"
 #include "dns_sd.h"
-#include "dnssec.h"
-#include "nsec.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -1318,7 +1316,8 @@ mDNSlocal int SetupInterfaceList(mDNS *const m)
         struct ifaddrs *i = intfList;
         while (i)
         {
-            if (     ((i->ifa_addr->sa_family == AF_INET)
+            if (     i->ifa_addr != NULL &&
+                     ((i->ifa_addr->sa_family == AF_INET)
 #if HAVE_IPV6
                       || (i->ifa_addr->sa_family == AF_INET6)
 #endif
@@ -1796,31 +1795,6 @@ mDNSexport int mDNSPlatformMemCmp(const void *dst, const void *src, mDNSu32 len)
 mDNSexport void mDNSPlatformQsort(void *base, int nel, int width, int (*compar)(const void *, const void *))
 {
     return (qsort(base, nel, width, compar));
-}
-
-// DNSSEC stub functions
-mDNSexport void VerifySignature(mDNS *const m, DNSSECVerifier *dv, DNSQuestion *q)
-{
-    (void)m;
-    (void)dv;
-    (void)q;
-}
-
-mDNSexport mDNSBool AddNSECSForCacheRecord(mDNS *const m, CacheRecord *crlist, CacheRecord *negcr, mDNSu8 rcode)
-{
-    (void)m;
-    (void)crlist;
-    (void)negcr;
-    (void)rcode;
-    return mDNSfalse;
-}
-
-mDNSexport void BumpDNSSECStats(mDNS *const m, DNSSECStatsAction action, DNSSECStatsType type, mDNSu32 value)
-{
-    (void)m;
-    (void)action;
-    (void)type;
-    (void)value;
 }
 
 // Proxy stub functions

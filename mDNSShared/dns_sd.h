@@ -66,7 +66,7 @@
  */
 
 #ifndef _DNS_SD_H
-#define _DNS_SD_H 10960002
+#define _DNS_SD_H 13104042
 
 #ifdef  __cplusplus
 extern "C" {
@@ -406,6 +406,12 @@ enum
     * Include AWDL interface when kDNSServiceInterfaceIndexAny is specified.
     */
 
+    kDNSServiceFlagsEnableDNSSEC           = 0x200000,
+    /*
+     * Perform DNSSEC validation on the client request when kDNSServiceFlagsEnableDNSSEC is specified
+     * Since the client API has not been finalized, we will use it as a temporary flag to turn on the DNSSEC validation.
+     */
+
     kDNSServiceFlagsValidate               = 0x200000,
    /*
     * This flag is meaningful in DNSServiceGetAddrInfo and DNSServiceQueryRecord. This is the ONLY flag to be valid 
@@ -427,7 +433,7 @@ enum
     *
     * The following four flags indicate the status of the DNSSEC validation and marked in the flags field of the callback.
     * When any of the four flags is set, kDNSServiceFlagsValidate will also be set. To check the validation status, the 
-    * other applicable output flags should be masked. See kDNSServiceOutputFlags below.
+    * other applicable output flags should be masked.
     */
 
     kDNSServiceFlagsSecure                 = 0x200010,
@@ -559,9 +565,6 @@ enum
 
 };
 
-#define kDNSServiceOutputFlags (kDNSServiceFlagsValidate | kDNSServiceFlagsValidateOptional | kDNSServiceFlagsMoreComing | kDNSServiceFlagsAdd | kDNSServiceFlagsDefault)
-   /* All the output flags excluding the DNSSEC Status flags. Typically used to check DNSSEC Status */
-
 /* Possible protocol values */
 enum
 {
@@ -651,6 +654,9 @@ enum
 
     kDNSServiceType_HIP        = 55,     /* Host Identity Protocol */
 
+    kDNSServiceType_SVCB       = 64,     /* Service Binding. */
+    kDNSServiceType_HTTPS      = 65,      /* HTTPS Service Binding. */
+
     kDNSServiceType_SPF        = 99,     /* Sender Policy Framework for E-Mail */
     kDNSServiceType_UINFO      = 100,    /* IANA-Reserved */
     kDNSServiceType_UID        = 101,    /* IANA-Reserved */
@@ -663,7 +669,7 @@ enum
     kDNSServiceType_AXFR       = 252,    /* Transfer zone of authority. */
     kDNSServiceType_MAILB      = 253,    /* Transfer mailbox records. */
     kDNSServiceType_MAILA      = 254,    /* Transfer mail agent records. */
-    kDNSServiceType_ANY        = 255     /* Wildcard match. */
+    kDNSServiceType_ANY        = 255    /* Wildcard match. */
 };
 
 /* possible error code values */
@@ -701,7 +707,8 @@ enum
     kDNSServiceErr_NoRouter                  = -65566,  /* No router currently configured (probably no network connectivity) */
     kDNSServiceErr_PollingMode               = -65567,
     kDNSServiceErr_Timeout                   = -65568,
-    kDNSServiceErr_DefunctConnection         = -65569   /* Connection to daemon returned a SO_ISDEFUNCT error result */
+    kDNSServiceErr_DefunctConnection         = -65569,  /* Connection to daemon returned a SO_ISDEFUNCT error result */
+    kDNSServiceErr_PolicyDenied              = -65570
 
                                                /* mDNS Error codes are in the range
                                                 * FFFE FF00 (-65792) to FFFE FFFF (-65537) */

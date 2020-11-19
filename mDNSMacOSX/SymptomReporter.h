@@ -19,6 +19,7 @@
 
 #include "mDNSEmbeddedAPI.h"
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, SYMPTOMS) && !MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 extern mDNSu32 NumUnreachableDNSServers;
 
 #ifdef  __cplusplus
@@ -32,4 +33,5 @@ extern mStatus SymptomReporterDNSServerUnreachable(DNSServer *s);
 }
 #endif
 
+#endif // MDNSRESPONDER_SUPPORTS(APPLE, SYMPTOMS)
 #endif // __SymptomReporter_h

@@ -42,5 +42,11 @@
 	<true/>
 	<key>com.apple.wifip2pd</key>
 	<true/>
+	<key>com.apple.bluetooth.system</key>
+	<true/>
+	<key>com.apple.private.networkextension.configuration</key>
+	<true/>
+	<key>com.apple.symptom_analytics.delegate_symptom</key>
+	<true/>
 </dict>
 </plist>

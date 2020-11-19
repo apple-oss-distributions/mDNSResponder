@@ -213,7 +213,7 @@ exit:
 mDNSlocal mDNSBool GetConfigOption(char *dst, const char *option, FILE *f)
 {
     char buf[32+1+MAX_ESCAPED_DOMAIN_NAME]; // Option name, one space, option value
-    unsigned int len = strlen(option);
+    size_t len = strlen(option);
     if (len + 1 + MAX_ESCAPED_DOMAIN_NAME > sizeof(buf)-1) { LogMsg("GetConfigOption: option %s too long", option); return mDNSfalse; }
     fseek(f, 0, SEEK_SET);  // set position to beginning of stream
     while (fgets(buf, sizeof(buf), f))      // Read at most sizeof(buf)-1 bytes from file, and append '\0' C-string terminator

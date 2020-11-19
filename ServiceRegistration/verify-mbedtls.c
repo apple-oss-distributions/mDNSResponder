@@ -75,11 +75,11 @@ srp_sig0_verify(dns_wire_t *message, dns_rr_t *key, dns_rr_t *signature)
     mbedtls_mpi_init(&s);
     mbedtls_sha256_init(&sha);
     memset(hash, 0, sizeof hash);
-    
+
     if ((status = mbedtls_mpi_read_binary(&pubkey.X, key->data.key.key, ECDSA_KEY_PART_SIZE)) != 0 ||
         (status = mbedtls_mpi_read_binary(&pubkey.Y, key->data.key.key + ECDSA_KEY_PART_SIZE, ECDSA_KEY_PART_SIZE)) != 0) {
         mbedtls_strerror(status, errbuf, sizeof errbuf);
-        ERROR("mbedtls_mpi_read_binary: reading key: %s", errbuf);
+        ERROR("mbedtls_mpi_read_binary: reading key: " PUB_S_SRP, errbuf);
     }
     mbedtls_mpi_lset(&pubkey.Z, 1);
 
@@ -87,9 +87,9 @@ srp_sig0_verify(dns_wire_t *message, dns_rr_t *key, dns_rr_t *signature)
         (status = mbedtls_mpi_read_binary(&s, signature->data.sig.signature + ECDSA_SHA256_SIG_PART_SIZE,
                                           ECDSA_SHA256_SIG_PART_SIZE)) != 0) {
         mbedtls_strerror(status, errbuf, sizeof errbuf);
-        ERROR("mbedtls_mpi_read_binary: reading signature: %s", errbuf);
+        ERROR("mbedtls_mpi_read_binary: reading signature: " PUB_S_SRP, errbuf);
     }
-    
+
     // The hash is across the message _before_ the SIG RR is added, so we have to decrement arcount before
  	// computing it.
     message->arcount = htons(ntohs(message->arcount) - 1);
@@ -112,25 +112,25 @@ srp_sig0_verify(dns_wire_t *message, dns_rr_t *key, dns_rr_t *signature)
 
     // First compute the hash across the SIG RR, then hash the message up to the SIG RR
     if ((status = mbedtls_sha256_starts_ret(&sha, 0)) != 0 ||
-        (status = srp_mbedtls_sha256_update_ret(&sha, rdata, rdlen)) != 0 ||
-        (status = srp_mbedtls_sha256_update_ret(&sha, (uint8_t *)message,
+        (status = srp_mbedtls_sha256_update_ret("rdata", &sha, rdata, rdlen)) != 0 ||
+        (status = srp_mbedtls_sha256_update_ret("message", &sha, (uint8_t *)message,
                                                 signature->data.sig.start +
                                                 (sizeof *message) - DNS_DATA_SIZE)) != 0 ||
         (status = srp_mbedtls_sha256_finish_ret(&sha, hash)) != 0) {
         // Put it back
         message->arcount = htons(ntohs(message->arcount) + 1);
         mbedtls_strerror(status, errbuf, sizeof errbuf);
-        ERROR("mbedtls_sha_256 hash failed: %s", errbuf);
+        ERROR("mbedtls_sha_256 hash failed: " PUB_S_SRP, errbuf);
         return 0;
     }
     message->arcount = htons(ntohs(message->arcount) + 1);
     free(rdata);
-    
+
     // Now check the signature against the hash
     status = mbedtls_ecdsa_verify(&group, hash, sizeof hash, &pubkey, &r, &s);
     if (status != 0) {
         mbedtls_strerror(status, errbuf, sizeof errbuf);
-        ERROR("mbedtls_ecdsa_verify failed: %s", errbuf);
+        ERROR("mbedtls_ecdsa_verify failed: " PUB_S_SRP, errbuf);
         return 0;
     }
     return 1;
@@ -151,14 +151,14 @@ srp_print_key(srp_key_t *key)
     if ((status = mbedtls_mpi_write_binary(&ecp->Q.X, buf, ECDSA_KEY_PART_SIZE)) != 0 ||
         (status = mbedtls_mpi_write_binary(&ecp->Q.Y, buf + ECDSA_KEY_PART_SIZE, ECDSA_KEY_PART_SIZE)) != 0) {
         mbedtls_strerror(status, errbuf, sizeof errbuf);
-        ERROR("mbedtls_mpi_write_binary: %s", errbuf);
+        ERROR("mbedtls_mpi_write_binary: " PUB_S_SRP, errbuf);
         return;
     }
 
     status = mbedtls_base64_encode(b64buf, sizeof b64buf, &b64len, buf, ECDSA_KEY_SIZE);
     if (status != 0) {
         mbedtls_strerror(status, errbuf, sizeof errbuf);
-        ERROR("mbedtls_mpi_write_binary: %s", errbuf);
+        ERROR("mbedtls_mpi_write_binary: " PUB_S_SRP, errbuf);
         return;
     }
     fputs("thread-demo.default.service.arpa. IN KEY 513 3 13 ", stdout);

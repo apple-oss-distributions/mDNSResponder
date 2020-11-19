@@ -1,11 +1,11 @@
 #! /bin/bash
 #
-#	Copyright (c) 2017-2019 Apple Inc. All rights reserved.
+#	Copyright (c) 2017-2020 Apple Inc. All rights reserved.
 #
 #	This script is currently for Apple Internal use only.
 #
 
-declare -r version=1.6
+declare -r version=1.8
 declare -r script=${BASH_SOURCE[0]}
 declare -r dnssdutil=${dnssdutil:-dnssdutil}
 
@@ -244,7 +244,7 @@ RunInterfaceMulticastTests()
 RunMulticastTests()
 {
 	local -r interfaces=( $( ifconfig -l -u ) )
-	local -r skipPrefixes=( ap awdl bridge ipsec llw p2p pdp_ip pktap UDC utun )
+	local -r skipPrefixes=( ap awdl bridge ipsec llw nan p2p pdp_ip pktap UDC utun )
 	local -a pids
 	local ifname
 	local skip
@@ -304,29 +304,23 @@ RunBrowseTest()
 }
 
 #============================================================================================================================
-#	IsMacOS
-#============================================================================================================================
-
-IsMacOS()
-{
-	[[ $( sw_vers -productName ) =~ ^Mac\ OS ]]
-}
-
-#============================================================================================================================
 #	ArchiveLogs
 #============================================================================================================================
 
 ArchiveLogs()
 {
+	local parentDir=''
+	# First, check for the non-macOS sysdiagnose archive path, then check for the macOS sysdiagnose archive path.
+	for dir in '/var/mobile/Library/Logs/CrashReporter' '/var/tmp'; do
+		if [ -w "${dir}" ]; then
+			parentDir="${dir}"
+			break
+		fi
+	done
+	# If a writable path wasn't available, just use /tmp.
+	[ -n "${parentDir}" ] || parentDir='/tmp'
 	local -r workdir=$( basename "${workPath}" )
-	local parentDir
-	if IsMacOS; then
-		parentDir=/var/tmp
-	else
-		parentDir=/var/mobile/Library/Logs/CrashReporter
-	fi
 	local -r archivePath="${parentDir}/${workdir}.tar.gz"
-	
 	LogMsg "Archiving logs."
 	echo "---"
 	tar -C "${tempPath}" -czf "${archivePath}" "${workdir}"
@@ -334,7 +328,7 @@ ArchiveLogs()
 		echo "Created log archive at ${archivePath}"
 		echo "*** Please run sysdiagnose NOW. ***"
 		echo "Attach both the log archive and the sysdiagnose archive to the radar."
-		if IsMacOS; then
+		if command -v open 2>&1 > /dev/null; then
 			open "${parentDir}"
 		fi
 	else
@@ -355,13 +349,13 @@ CreateWorkDirName()
 		suffix+="_${productName}"
 	fi
 	
-	local model
-	if IsMacOS; then
-		model=$( sysctl -n hw.model )
-		model=${model//,/-}
+	local model=''
+	if command -v gestalt_query 2>&1 > /dev/null; then
+		model=$( gestalt_query -undecorated ProductType )
 	else
-		model=$( gestalt_query -undecorated DeviceName )
+		model=$( sysctl -n hw.model )
 	fi
+	model=${model//,/-}
 	if [ -n "${model}" ]; then
 		suffix+="_${model}"
 	fi
@@ -411,13 +405,13 @@ main()
 	
 	[ "${OPTIND}" -gt "$#" ] || ErrQuit "unexpected argument \"${!OPTIND}\"."
 	
-	if IsMacOS; then
-		if [ "${EUID}" -ne 0 ]; then
+	if [ "${EUID}" -ne 0 ]; then
+		if command -v sudo 2>&1 > /dev/null; then
 			echo "Re-launching with sudo"
 			exec sudo "${script}" "$@"
+		else
+			ErrQuit "$( basename "${script}" ) needs to be run as root."
 		fi
-	else
-		[ "${EUID}" -eq 0 ] || ErrQuit "$( basename "${script}" ) needs to be run as root."
 	fi
 	
 	tempPath=$( mktemp -d -q ) || ErrQuit "Failed to make temp directory."

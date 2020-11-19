@@ -222,17 +222,17 @@ ifeq ($(wildcard /etc/init.d/rc2.d/), /etc/init.d/rc2.d/)
 STARTUPSCRIPTDIR = /etc/init.d
 RUNLEVELSCRIPTSDIR = /etc/init.d
 else
-# else if directory /etc/rc.d/init.d/ exists, then we install into that (old Linux)
+# Else if directory /etc/rc.d/init.d/ exists, then we install into that (old Linux)
 ifeq ($(wildcard /etc/rc.d/init.d/), /etc/rc.d/init.d/)
 STARTUPSCRIPTDIR = /etc/rc.d/init.d
 RUNLEVELSCRIPTSDIR = /etc/rc.d
 else
-# else if directory /etc/init.d/ exists, then we install into that (new Linux)
+# Else if directory /etc/init.d/ exists, then we install into that (new Linux)
 ifeq ($(wildcard /etc/init.d/), /etc/init.d/)
 STARTUPSCRIPTDIR = /etc/init.d
 RUNLEVELSCRIPTSDIR = /etc
 else
-# else install into /etc/rc.d/ (*BSD)
+# Else install into /etc/rc.d/ (*BSD)
 STARTUPSCRIPTDIR = $(INSTBASE)/etc/rc.d
 endif
 endif
@@ -263,14 +263,13 @@ clean:
 DAEMONOBJS = $(OBJDIR)/PosixDaemon.c.o $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNS.c.o \
              $(OBJDIR)/DNSDigest.c.o $(OBJDIR)/uDNS.c.o $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/uds_daemon.c.o \
              $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/dnssd_ipc.c.o $(OBJDIR)/GenLinkedList.c.o \
-             $(OBJDIR)/PlatformCommon.c.o $(OBJDIR)/CryptoAlg.c.o $(OBJDIR)/ClientRequests.c.o \
+             $(OBJDIR)/PlatformCommon.c.o $(OBJDIR)/ClientRequests.c.o \
              $(OBJDIR)/dso.c.o $(OBJDIR)/dso-transport.c.o $(OBJDIR)/dnssd_clientshim.c.o \
              $(OBJDIR)/posix_utilities.c.o
 
 # dnsextd target build dnsextd
 DNSEXTDOBJ = $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/GenLinkedList.c.o $(OBJDIR)/DNSDigest.c.o \
-             $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/PlatformCommon.c.o $(OBJDIR)/dnsextd_parser.y.o $(OBJDIR)/dnsextd_lexer.l.o \
-			 $(OBJDIR)/CryptoAlg.c.o
+             $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/PlatformCommon.c.o $(OBJDIR)/dnsextd_parser.y.o $(OBJDIR)/dnsextd_lexer.l.o
 
 Daemon: setup $(BUILDDIR)/mdnsd
 	@echo "Responder daemon done"
@@ -474,7 +473,7 @@ JavaDoc: Java setup
 # The following targets build embedded example programs
 SPECIALOBJ = $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/GenLinkedList.c.o \
 	$(OBJDIR)/DNSDigest.c.o $(OBJDIR)/uDNS.c.o $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/PlatformCommon.c.o \
-	$(OBJDIR)/CryptoAlg.c.o $(OBJDIR)/dso.c.o $(OBJDIR)/dso-transport.c.o $(OBJDIR)/dnssd_clientshim.c.o
+	$(OBJDIR)/dso.c.o $(OBJDIR)/dso-transport.c.o $(OBJDIR)/dnssd_clientshim.c.o
 COMMONOBJ  = $(SPECIALOBJ) $(OBJDIR)/mDNS.c.o
 APPOBJ     = $(COMMONOBJ) $(OBJDIR)/ExampleClientApp.c.o
 

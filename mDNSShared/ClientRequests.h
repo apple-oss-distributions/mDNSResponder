@@ -61,24 +61,102 @@ typedef struct
 
 }   QueryRecordClientRequest;
 
+typedef struct
+{
+    mDNSu32                 requestID;
+    const char *            hostnameStr;
+    mDNSu32                 interfaceIndex;
+    DNSServiceFlags         flags;
+    mDNSu32                 protocols;
+    mDNSs32                 effectivePID;
+    const mDNSu8 *          effectiveUUID;
+    mDNSu32                 peerUID;
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+    mDNSBool                needEncryption;
+    const mDNSu8 *          resolverUUID;
+    mdns_dns_service_id_t   customID;
+#endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
+    const audit_token_t *   peerAuditToken;
+    const audit_token_t *   delegatorAuditToken;
+    mDNSBool                isInAppBrowserRequest;
+#endif
+
+}   GetAddrInfoClientRequestParams;
+
+typedef struct
+{
+    mDNSu32                 requestID;
+    const char *            qnameStr;
+    mDNSu32                 interfaceIndex;
+    DNSServiceFlags         flags;
+    mDNSu16                 qtype;
+    mDNSu16                 qclass;
+    mDNSs32                 effectivePID;
+    const mDNSu8 *          effectiveUUID;
+    mDNSu32                 peerUID;
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+    mDNSBool                needEncryption;
+    const mDNSu8 *          resolverUUID;
+	mdns_dns_service_id_t	customID;
+#endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
+    const audit_token_t *   peerAuditToken;
+    const audit_token_t *   delegatorAuditToken;
+    mDNSBool                isInAppBrowserRequest;
+#endif
+
+}   QueryRecordClientRequestParams;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-mDNSexport mStatus GetAddrInfoClientRequestStart(GetAddrInfoClientRequest *inRequest, mDNSu32 inReqID,
-    const char *inHostnameStr, mDNSu32 inInterfaceIndex, DNSServiceFlags inFlags, mDNSu32 inProtocols, mDNSs32 inPID,
-    const mDNSu8 inUUID[UUID_SIZE], mDNSu32 inUID, QueryRecordResultHandler inResultHandler, void *inResultContext);
+mDNSexport void GetAddrInfoClientRequestParamsInit(GetAddrInfoClientRequestParams *inParams);
+mDNSexport mStatus GetAddrInfoClientRequestStart(GetAddrInfoClientRequest *inRequest,
+    const GetAddrInfoClientRequestParams *inParams, QueryRecordResultHandler inResultHandler, void *inResultContext);
 mDNSexport void GetAddrInfoClientRequestStop(GetAddrInfoClientRequest *inRequest);
 mDNSexport const domainname * GetAddrInfoClientRequestGetQName(const GetAddrInfoClientRequest *inRequest);
 mDNSexport mDNSBool GetAddrInfoClientRequestIsMulticast(const GetAddrInfoClientRequest *inRequest);
 
-mDNSexport mStatus QueryRecordClientRequestStart(QueryRecordClientRequest *inRequest, mDNSu32 inReqID,
-    const char *inQNameStr, mDNSu32 inInterfaceIndex, DNSServiceFlags inFlags, mDNSu16 inQType, mDNSu16 inQClass,
-    mDNSs32 inPID, mDNSu8 inUUID[UUID_SIZE], mDNSu32 inUID, QueryRecordResultHandler inResultHandler, void *inResultContext);
+mDNSexport void QueryRecordClientRequestParamsInit(QueryRecordClientRequestParams *inParams);
+mDNSexport mStatus QueryRecordClientRequestStart(QueryRecordClientRequest *inRequest,
+    const QueryRecordClientRequestParams *inParams, QueryRecordResultHandler inResultHandler, void *inResultContext);
 mDNSexport void QueryRecordClientRequestStop(QueryRecordClientRequest *inRequest);
 mDNSexport const domainname * QueryRecordClientRequestGetQName(const QueryRecordClientRequest *inRequest);
 mDNSexport mDNSu16 QueryRecordClientRequestGetType(const QueryRecordClientRequest *inRequest);
 mDNSexport mDNSBool QueryRecordClientRequestIsMulticast(QueryRecordClientRequest *inRequest);
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+// This is a "mDNSexport" wrapper around the "static" QueryRecordOpStart that cannot be called by outside, which can be
+// called by the outside(dnssec related function).
+mDNSexport mStatus QueryRecordOpStartForClientRequest(
+    QueryRecordOp *             inOp,
+    mDNSu32                     inReqID,
+    const domainname *          inQName,
+    mDNSu16                     inQType,
+    mDNSu16                     inQClass,
+    mDNSInterfaceID             inInterfaceID,
+    mDNSs32                     inServiceID,
+    mDNSu32                     inFlags,
+    mDNSBool                    inAppendSearchDomains,
+    mDNSs32                     inPID,
+    const mDNSu8                inUUID[UUID_SIZE],
+    mDNSu32                     inUID,
+#if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
+    const audit_token_t *       inPeerAuditTokenPtr,
+    const audit_token_t *       inDelegateAuditTokenPtr,
+#endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+    const mDNSu8                inResolverUUID[UUID_SIZE],
+    mDNSBool                    inNeedEncryption,
+    const mdns_dns_service_id_t inCustomID,
+#endif
+    QueryRecordResultHandler    inResultHandler,
+    void *                      inResultContext);
+
+mDNSexport void QueryRecordOpStopForClientRequest(QueryRecordOp *op);
+#endif // MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
 
 #ifdef __cplusplus
 }

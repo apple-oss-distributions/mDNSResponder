@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2012-2018 Apple Inc. All rights reserved.
+ * Copyright (c) 2012-2020 Apple Inc. All rights reserved.
  *
  *
  * @header      Interface to DNSX SPI
@@ -117,6 +117,70 @@ DNSXErrorType DNSXEnableProxy
     dispatch_queue_t         clientq,
     DNSXEnableProxyReply     callBack
  );
+
+typedef uint32_t DNSXProxyFlags;
+
+#define kDNSXProxyFlagNull               0         // No flags.
+#define kDNSXProxyFlagForceAAAASynthesis (1U << 1) // Force AAAA synthesis during DNS64.
+
+/* DNSXEnableProxy64
+ *
+ * Enables the DNS Proxy functionality which will remain ON until the client explicitly turns it OFF
+ * by passing the returned DNSXConnRef to DNSXRefDeAlloc(), or the client exits or crashes.
+ *
+ * DNSXEnableProxy64() Parameters:
+ *
+ * connRef:                   A pointer to DNSXConnRef that is initialized to NULL.
+ *                            If the call succeeds it will be initialized to a non-NULL value.
+ *                            Client terminates the DNS Proxy by passing this DNSXConnRef to DNSXRefDeAlloc().
+ *
+ * proxyparam:                Enable DNS Proxy functionality with parameters that are described in
+ *                            DNSProxyParameters above.
+ *
+ * inIfindexArr[MaxInputIf]:  List of input interfaces from which the DNS queries will be accepted and
+ *                            forwarded to the output interface specified below. The daemon processes
+ *                            MaxInputIf entries in the list. For eg. if one has less than MaxInputIfs
+ *                            values, just initialize the other values to be 0. Note: This field needs to
+ *                            be initialized by the client.
+ *
+ * outIfindex:                Output interface on which the query will be forwarded.
+ *                            Passing kDNSIfindexAny causes DNS Queries to be sent on the primary interface.
+ *
+ *                            Note: It is the responsibility of the client to ensure the input/output interface
+ *                            indexes are valid.
+ *
+ * ipv6Prefix:                IPv6 prefix to use for DNS64.
+ *
+ * ipv6PrefixBitLength:       Bit length of IPv6 prefix to use for DNS64.
+ *
+ * flags:                     Flags to specify additional behavioral aspects of the proxy.
+ *
+ * clientq:                   Queue the client wants to schedule the callBack on (Note: Must not be NULL)
+ *
+ * callBack:                  CallBack function for the client that indicates success or failure.
+ *                            Note: callback may be invoked more than once, For e.g. if enabling DNS Proxy
+ *                            first succeeds and the daemon possibly crashes sometime later.
+ *
+ * return value:              Returns kDNSX_NoError when no error otherwise returns an error code indicating
+ *                            the error that occurred. Note: A return value of kDNSX_NoError does not mean
+ *                            that DNS Proxy was successfully enabled. The callBack may asynchronously
+ *                            return an error (such as kDNSX_DaemonNotRunning)
+ *
+ */
+
+SPI_AVAILABLE(macos(10.16), ios(14.0), watchos(7.0), tvos(14.0))
+DNSXErrorType DNSXEnableProxy64
+(
+    DNSXConnRef              *connRef,
+    DNSProxyParameters       proxyparam,
+    IfIndex                  inIfindexArr[MaxInputIf],
+    IfIndex                  outIfindex,
+    uint8_t                  ipv6Prefix[16],
+    int                      ipv6PrefixBitLength,
+    DNSXProxyFlags           flags,
+    dispatch_queue_t         clientq,
+    DNSXEnableProxyReply     callBack
+);
 
 /* DNSXRefDeAlloc()
  *

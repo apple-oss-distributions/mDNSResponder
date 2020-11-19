@@ -10,6 +10,7 @@
 
 #include "xpc_client_dns_proxy.h"
 #include "xpc_client_log_utility.h"
+#include "xpc_client_advertising_proxy.h"
 
 #define kDNSDaemonReply "DaemonReplyStatusToClient"
 

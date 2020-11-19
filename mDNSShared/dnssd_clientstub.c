@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2003-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -35,7 +35,14 @@
 #include <mach-o/dyld.h>
 #include <uuid/uuid.h>
 #include <TargetConditionals.h>
-#include "dns_sd_internal.h"
+#include "dns_sd_private.h"
+#include "dnssd_clientstub_apple.h"
+#include <CoreUtils/CommonServices.h>
+#if !defined(__i386__)
+#define CHECK_BUNDLE_VERSION  1
+#else
+#define CHECK_BUNDLE_VERSION  0
+#endif
 #endif
 
 #if defined(_WIN32)
@@ -88,6 +95,11 @@ static void syslog( int priority, const char * message, ...)
     #define sockaddr_mdns sockaddr_un
     #define AF_MDNS AF_LOCAL
 
+#endif
+
+#if CHECK_BUNDLE_VERSION
+#include "bundle_utilities.h"
+#include <os/feature_private.h>
 #endif
 
 #if defined(_WIN32)
@@ -173,6 +185,19 @@ struct _DNSRecordRef_t
     client_context_t uid;  // For demultiplexing multiple DNSServiceRegisterRecord calls
     DNSServiceOp *sdr;
 };
+
+#if CHECK_BUNDLE_VERSION
+static bool _should_return_noauth_error(void)
+{
+    static dispatch_once_t  s_once      = 0;
+    static bool        s_should    = false;
+    dispatch_once(&s_once,
+    ^{
+        s_should = bundle_sdk_is_ios14_or_later();
+    });
+    return s_should;
+}
+#endif
 
 #if !defined(USE_TCP_LOOPBACK)
 static void SetUDSPath(struct sockaddr_un *saddr, const char *path)
@@ -542,7 +567,7 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
     sdr->disp_queue    = NULL;
 #endif
     sdr->kacontext     = NULL;
-
+    
     if (flags & kDNSServiceFlagsShareConnection)
     {
         DNSServiceOp **p = &(*ref)->next;       // Append ourselves to end of primary's list
@@ -1410,12 +1435,24 @@ DNSServiceErrorType DNSSD_API DNSServiceResolve
     put_string(domain, &ptr);
 
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
+#if CHECK_BUNDLE_VERSION
+    if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
+    {
+        err = kDNSServiceErr_NoError;
+    }
+#endif
     if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
     return err;
 }
 
 static void handle_query_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *const end)
 {
+#if CHECK_BUNDLE_VERSION
+    if (cbh->cb_err == kDNSServiceErr_PolicyDenied && !_should_return_noauth_error())
+    {
+        return;
+    }
+#endif
     uint32_t ttl;
     char name[kDNSServiceMaxDomainName];
     uint16_t rrtype, rrclass, rdlen;
@@ -1433,6 +1470,37 @@ static void handle_query_response(DNSServiceOp *const sdr, const CallbackHeader 
     // MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
 }
 
+#if APPLE_OSX_mDNSResponder
+static size_t get_required_length_for_defaults(const xpc_object_t defaults)
+{
+    size_t required_len = 0;
+    size_t plist_data_len = 0;
+    // Add length for IPC_TLV_TYPE_RESOLVER_CONFIG_PLIST_DATA.
+    if (xpc_dictionary_get_data(defaults, kDNSServiceDefaultsKey_ResolverConfigPListData, &plist_data_len))
+    {
+        required_len += get_required_tlv16_length(plist_data_len);
+    }
+    // Add length for IPC_TLV_TYPE_REQUIRE_PRIVACY.
+    required_len += get_required_tlv16_length(sizeof(uint8_t));
+    return required_len;
+}
+
+static void put_tlvs_for_defaults(const xpc_object_t defaults, ipc_msg_hdr *const hdr, char **ptr)
+{
+    uint8_t require_privacy;
+    size_t plist_data_len = 0;
+    const uint8_t *const plist_data_ptr = xpc_dictionary_get_data(defaults,
+        kDNSServiceDefaultsKey_ResolverConfigPListData, &plist_data_len);
+    if (plist_data_ptr)
+    {
+        put_tlv16(IPC_TLV_TYPE_RESOLVER_CONFIG_PLIST_DATA, (uint16_t)plist_data_len, plist_data_ptr, ptr);
+    }
+    require_privacy = xpc_dictionary_get_bool(defaults, kDNSServiceDefaultsKey_RequirePrivacy) ? 1 : 0;
+    put_tlv16(IPC_TLV_TYPE_REQUIRE_PRIVACY, sizeof(require_privacy), &require_privacy, ptr);
+    hdr->ipc_flags |= IPC_FLAGS_TRAILING_TLVS;
+}
+#endif
+
 DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
 (
     DNSServiceRef              *sdRef,
@@ -1449,7 +1517,9 @@ DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
     size_t len;
     ipc_msg_hdr *hdr;
     DNSServiceErrorType err;
-
+#if APPLE_OSX_mDNSResponder
+    xpc_object_t defaults;
+#endif
     // NULL name handled below.
     if (!sdRef || !callBack) return kDNSServiceErr_BadParam;
 
@@ -1466,23 +1536,54 @@ DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
     len += sizeof(uint32_t);  // interfaceIndex
     len += strlen(name) + 1;
     len += 2 * sizeof(uint16_t);  // rrtype, rrclass
-
+#if APPLE_OSX_mDNSResponder
+    defaults = DNSServiceGetRetainedResolverDefaults();
+    if (defaults)
+    {
+        len += get_required_length_for_defaults(defaults);
+    }
+#endif
     hdr = create_hdr(query_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
-    if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
-
+    if (!hdr)
+    {
+        DNSServiceRefDeallocate(*sdRef);
+        *sdRef = NULL;
+#if APPLE_OSX_mDNSResponder
+        xpc_forget(&defaults);
+#endif
+        return kDNSServiceErr_NoMemory;
+    }
     put_flags(flags, &ptr);
     put_uint32(interfaceIndex, &ptr);
     put_string(name, &ptr);
     put_uint16(rrtype, &ptr);
     put_uint16(rrclass, &ptr);
-
+#if APPLE_OSX_mDNSResponder
+    if (defaults)
+    {
+        put_tlvs_for_defaults(defaults, hdr, &ptr);
+        xpc_forget(&defaults);
+    }
+#endif
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
+#if CHECK_BUNDLE_VERSION
+    if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
+    {
+        err = kDNSServiceErr_NoError;
+    }
+#endif
     if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
     return err;
 }
 
 static void handle_addrinfo_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *const end)
 {
+#if CHECK_BUNDLE_VERSION
+    if (cbh->cb_err == kDNSServiceErr_PolicyDenied && !_should_return_noauth_error())
+    {
+        return;
+    }
+#endif
     char hostname[kDNSServiceMaxDomainName];
     uint16_t rrtype, rrclass, rdlen;
     const char *rdata;
@@ -1532,17 +1633,12 @@ static void handle_addrinfo_response(DNSServiceOp *const sdr, const CallbackHead
                 if (IN6_IS_ADDR_LINKLOCAL(&sa6.sin6_addr)) sa6.sin6_scope_id = cbh->cb_interface;
             }
         }
-        // Validation results are always delivered separately from the actual results of the
-        // DNSServiceGetAddrInfo. Set the "addr" to NULL as per the documentation.
-        //
-        // Note: If we deliver validation results along with the "addr" in the future, we need
-        // a way to differentiate the negative response from validation-only response as both
-        // has zero address.
-        if (!(cbh->cb_flags & kDNSServiceFlagsValidate))
-            ((DNSServiceGetAddrInfoReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, hostname, sa, ttl, sdr->AppContext);
-        else
-            ((DNSServiceGetAddrInfoReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, hostname, NULL, 0, sdr->AppContext);
-        // MUST NOT touch sdr after invoking AppCallback -- client is allowed to dispose it from within callback function
+
+		((DNSServiceGetAddrInfoReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, hostname, sa, ttl, sdr->AppContext);
+    }
+    else if (cbh->cb_err == kDNSServiceErr_PolicyDenied)
+    {
+        ((DNSServiceGetAddrInfoReply)sdr->AppCallback)(sdr, cbh->cb_flags, cbh->cb_interface, cbh->cb_err, hostname, NULL, ttl, sdr->AppContext);
     }
 }
 
@@ -1561,6 +1657,9 @@ DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo
     size_t len;
     ipc_msg_hdr *hdr;
     DNSServiceErrorType err;
+#if APPLE_OSX_mDNSResponder
+    xpc_object_t defaults;
+#endif
 
     if (!sdRef || !hostname || !callBack) return kDNSServiceErr_BadParam;
 
@@ -1575,22 +1674,53 @@ DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo
     len += sizeof(uint32_t);      // interfaceIndex
     len += sizeof(uint32_t);      // protocol
     len += strlen(hostname) + 1;
-
+#if APPLE_OSX_mDNSResponder
+    defaults = DNSServiceGetRetainedResolverDefaults();
+    if (defaults)
+    {
+        len += get_required_length_for_defaults(defaults);
+    }
+#endif
     hdr = create_hdr(addrinfo_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
-    if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
-
+    if (!hdr)
+    {
+        DNSServiceRefDeallocate(*sdRef);
+        *sdRef = NULL;
+#if APPLE_OSX_mDNSResponder
+        xpc_forget(&defaults);
+#endif
+        return kDNSServiceErr_NoMemory;
+    }
     put_flags(flags, &ptr);
     put_uint32(interfaceIndex, &ptr);
     put_uint32(protocol, &ptr);
     put_string(hostname, &ptr);
-
+#if APPLE_OSX_mDNSResponder
+    if (defaults)
+    {
+        put_tlvs_for_defaults(defaults, hdr, &ptr);
+        xpc_forget(&defaults);
+    }
+#endif
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
+#if CHECK_BUNDLE_VERSION
+    if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
+    {
+        err = kDNSServiceErr_NoError;
+    }
+#endif
     if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
     return err;
 }
 
 static void handle_browse_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *const end)
 {
+#if CHECK_BUNDLE_VERSION
+    if (cbh->cb_err == kDNSServiceErr_PolicyDenied && !_should_return_noauth_error())
+    {
+        return;
+    }
+#endif
     char replyName[256], replyType[kDNSServiceMaxDomainName], replyDomain[kDNSServiceMaxDomainName];
     get_string(&data, end, replyName, 256);
     get_string(&data, end, replyType, kDNSServiceMaxDomainName);
@@ -1640,6 +1770,12 @@ DNSServiceErrorType DNSSD_API DNSServiceBrowse
     put_string(domain, &ptr);
 
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
+#if CHECK_BUNDLE_VERSION
+    if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
+    {
+        err = kDNSServiceErr_NoError;
+    }
+#endif
     if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
     return err;
 }
@@ -1670,6 +1806,12 @@ DNSServiceErrorType DNSSD_API DNSServiceSetDefaultDomainForUser(DNSServiceFlags 
 
 static void handle_regservice_response(DNSServiceOp *const sdr, const CallbackHeader *const cbh, const char *data, const char *const end)
 {
+#if CHECK_BUNDLE_VERSION
+    if (cbh->cb_err == kDNSServiceErr_PolicyDenied && !_should_return_noauth_error())
+    {
+        return;
+    }
+#endif
     char name[256], regtype[kDNSServiceMaxDomainName], domain[kDNSServiceMaxDomainName];
     get_string(&data, end, name, 256);
     get_string(&data, end, regtype, kDNSServiceMaxDomainName);
@@ -1738,6 +1880,12 @@ DNSServiceErrorType DNSSD_API DNSServiceRegister
     put_rdata(txtLen, txtRecord, &ptr);
 
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
+#if CHECK_BUNDLE_VERSION
+    if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
+    {
+        err = kDNSServiceErr_NoError;
+    }
+#endif
     if (err) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; }
     return err;
 }
@@ -1811,6 +1959,12 @@ static void ConnectionResponse(DNSServiceOp *const sdr, const CallbackHeader *co
     }
     else
     {
+#if CHECK_BUNDLE_VERSION
+        if (cbh->cb_err == kDNSServiceErr_PolicyDenied && !_should_return_noauth_error())
+        {
+            return;
+        }
+#endif
         DNSRecordRef rec;
         for (rec = sdr->rec; rec; rec = rec->recnext)
         {
@@ -1947,6 +2101,7 @@ DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
     void                          *context
 )
 {
+    DNSServiceErrorType err;
     char *ptr;
     size_t len;
     ipc_msg_hdr *hdr = NULL;
@@ -2025,7 +2180,14 @@ DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
     while (*p) p = &(*p)->recnext;
     *p = rref;
 
-    return deliver_request(hdr, sdRef);     // Will free hdr for us
+    err = deliver_request(hdr, sdRef);     // Will free hdr for us
+#if CHECK_BUNDLE_VERSION
+    if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
+    {
+        err = kDNSServiceErr_NoError;
+    }
+#endif
+    return err;
 }
 
 // sdRef returned by DNSServiceRegister()
@@ -2353,6 +2515,17 @@ static void DNSSD_API SleepKeepaliveCallback(DNSServiceRef sdRef, DNSRecordRef r
         ((DNSServiceSleepKeepaliveReply)ka->AppCallback)(sdRef, errorCode, ka->AppContext);
 }
 
+static DNSServiceErrorType _DNSServiceSleepKeepalive_sockaddr
+(
+    DNSServiceRef *                 sdRef,
+    DNSServiceFlags                 flags,
+    const struct sockaddr *         localAddr,
+    const struct sockaddr *         remoteAddr,
+    unsigned int                    timeout,
+    DNSServiceSleepKeepaliveReply   callBack,
+    void *                          context
+);
+
 DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
 (
     DNSServiceRef                       *sdRef,
@@ -2363,24 +2536,9 @@ DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
     void                                *context
 )
 {
-    char source_str[INET6_ADDRSTRLEN];
-    char target_str[INET6_ADDRSTRLEN];
     struct sockaddr_storage lss;
     struct sockaddr_storage rss;
     socklen_t len1, len2;
-    unsigned int len, proxyreclen;
-    char buf[256];
-    DNSServiceErrorType err;
-    DNSRecordRef record = NULL;
-    char name[10];
-    char recname[128];
-    SleepKAContext *ka;
-    unsigned int i, unique;
-
-
-    (void) flags; //unused
-    if (!timeout) return kDNSServiceErr_BadParam;
-
 
     len1 = sizeof(lss);
     if (getsockname(fd, (struct sockaddr *)&lss, &len1) < 0)
@@ -2401,12 +2559,54 @@ DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
         syslog(LOG_WARNING, "dnssd_clientstub DNSServiceSleepKeepalive local/remote info not same");
         return kDNSServiceErr_Unknown;
     }
+    return _DNSServiceSleepKeepalive_sockaddr(sdRef, flags, (const struct sockaddr *)&lss, (const struct sockaddr *)&rss,
+        timeout, callBack, context);
+}
+
+DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive_sockaddr
+(
+    DNSServiceRef *                 sdRef,
+    DNSServiceFlags                 flags,
+    const struct sockaddr *         localAddr,
+    const struct sockaddr *         remoteAddr,
+    unsigned int                    timeout,
+    DNSServiceSleepKeepaliveReply   callBack,
+    void *                          context
+)
+{
+    return _DNSServiceSleepKeepalive_sockaddr(sdRef, flags, localAddr, remoteAddr, timeout, callBack, context );
+}
+
+static DNSServiceErrorType _DNSServiceSleepKeepalive_sockaddr
+(
+    DNSServiceRef *                 sdRef,
+    DNSServiceFlags                 flags,
+    const struct sockaddr *         localAddr,
+    const struct sockaddr *         remoteAddr,
+    unsigned int                    timeout,
+    DNSServiceSleepKeepaliveReply   callBack,
+    void *                          context
+)
+{
+    char source_str[INET6_ADDRSTRLEN];
+    char target_str[INET6_ADDRSTRLEN];
+    unsigned int len, proxyreclen;
+    char buf[256];
+    DNSServiceErrorType err;
+    DNSRecordRef record = NULL;
+    char name[10];
+    char recname[128];
+    SleepKAContext *ka;
+    unsigned int i, unique;
+
+    (void) flags; //unused
+    if (!timeout) return kDNSServiceErr_BadParam;
 
     unique = 0;
-    if (lss.ss_family == AF_INET)
+    if ((localAddr->sa_family == AF_INET) && (remoteAddr->sa_family == AF_INET))
     {
-        struct sockaddr_in *sl = (struct sockaddr_in *)&lss;
-        struct sockaddr_in *sr = (struct sockaddr_in *)&rss;
+        const struct sockaddr_in *sl = (const struct sockaddr_in *)localAddr;
+        const struct sockaddr_in *sr = (const struct sockaddr_in *)remoteAddr;
         unsigned char *ptr = (unsigned char *)&sl->sin_addr;
 
         if (!inet_ntop(AF_INET, (const void *)&sr->sin_addr, target_str, sizeof (target_str)))
@@ -2426,10 +2626,10 @@ DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
         unique += sl->sin_port;
         len = snprintf(buf+1, sizeof(buf) - 1, "t=%u h=%s d=%s l=%u r=%u", timeout, source_str, target_str, ntohs(sl->sin_port), ntohs(sr->sin_port));
     }
-    else
+    else if ((localAddr->sa_family == AF_INET6) && (remoteAddr->sa_family == AF_INET6))
     {
-        struct sockaddr_in6 *sl6 = (struct sockaddr_in6 *)&lss;
-        struct sockaddr_in6 *sr6 = (struct sockaddr_in6 *)&rss;
+        const struct sockaddr_in6 *sl6 = (const struct sockaddr_in6 *)localAddr;
+        const struct sockaddr_in6 *sr6 = (const struct sockaddr_in6 *)remoteAddr;
         unsigned char *ptr = (unsigned char *)&sl6->sin6_addr;
 
         if (!inet_ntop(AF_INET6, (const void *)&sr6->sin6_addr, target_str, sizeof (target_str)))
@@ -2446,6 +2646,10 @@ DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
             unique += ptr[i];
         unique += sl6->sin6_port;
         len = snprintf(buf+1, sizeof(buf) - 1, "t=%u H=%s D=%s l=%u r=%u", timeout, source_str, target_str, ntohs(sl6->sin6_port), ntohs(sr6->sin6_port));
+    }
+    else
+    {
+        return kDNSServiceErr_BadParam;
     }
 
     if (len >= (sizeof(buf) - 1))

@@ -16,6 +16,7 @@
 
 #include "SymptomReporter.h"
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, SYMPTOMS) && !MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 #include <arpa/inet.h>
 #include <dlfcn.h>
 #include <stddef.h>
@@ -175,3 +176,4 @@ mDNSexport mStatus SymptomReporterDNSServerUnreachable(DNSServer *s)
 exit:
     return err;
 }
+#endif // MDNSRESPONDER_SUPPORTS(APPLE, SYMPTOMS)

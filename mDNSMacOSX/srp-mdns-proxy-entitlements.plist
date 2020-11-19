@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>seatbelt-profiles</key>
+    <array>
+      <string>temporary-sandbox</string>
+    </array>
+    <key>platform-application</key>
+    <true/>
+
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <key>com.apple.security.network.server</key>
+    <true/>
+
+    <key>com.apple.networkd_privileged</key>
+    <true/>
+
+    <key>com.apple.private.network.reserved-port</key>
+    <true/>
+
+    <key>com.apple.private.wpantund.service.xpc</key>
+    <true/>
+
+    <key>com.apple.private.fillmore.service.add</key>
+    <true/>
+
+    <key>com.apple.private.fillmore.service.remove</key>
+    <true/>
+
+    <key>com.apple.private.fillmore.prefix.modification</key>
+    <true/>
+
+    <key>com.apple.security.exception.mach-lookup.global-name</key>
+    <array>
+      <string>com.apple.wpantund.xpc</string>
+      <string>com.apple.network.IPConfiguration</string>
+    </array>
+
+    <key>com.apple.security.exception.sysctl.read-write</key>
+    <array>
+      <string>net.inet6.ip6.forwarding</string>
+    </array>
+
+    <key>com.apple.SystemConfiguration.SCDynamicStore-write-access</key>
+    <true/>
+
+    <key>com.apple.security.exception.shared-preference.read-write</key>
+    <array>
+      <string>com.apple.srp-mdns-proxy.preferences</string>
+    </array>
+
+    <key>com.apple.security.exception.files.absolute-path.read-write</key>
+    <array>
+      <string>/private/var/preferences/SystemConfiguration/preferences.plist</string>
+    </array>
+
+    <key>com.apple.security.exception.files.absolute-path.read-only</key>
+    <array>
+      <string>/usr/libexec</string>
+      <string>/dev/fd</string>
+    </array>
+
+  </dict>
+</plist>

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,8 +28,13 @@ static dispatch_queue_t dps_queue = NULL;
 
 mDNSlocal void accept_dps_client(xpc_connection_t conn);
 mDNSlocal void handle_dps_request(xpc_object_t req);
-mDNSlocal void handle_dps_terminate();
+mDNSlocal void handle_dps_terminate(void);
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+mDNSlocal void ActivateDNSProxy(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf, const mDNSu8 IPv6Prefix[16], int IPv6PrefixBitLen,
+                                mDNSBool forceAAAASynthesis, mDNSBool proxy_off);
+#else
 mDNSlocal void ActivateDNSProxy(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf, mDNSBool proxy_off);
+#endif
 
 mDNSexport void log_dnsproxy_info(mDNS *const m)
 {
@@ -196,6 +201,12 @@ mDNSlocal void handle_dps_request(xpc_object_t req)
     if (xpc_dictionary_get_uint64(req, kDNSProxyParameters))
     {
         mDNSu32 inIf[MaxIp], outIf;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+        const mDNSu8 *ipv6Prefix;
+        size_t dataLen;
+        int ipv6PrefixLen;
+        mDNSBool forceAAAASynthesis;
+#endif
 
         inIf[0]   = (mDNSu32)xpc_dictionary_get_uint64(req, kDNSInIfindex0);
         inIf[1]   = (mDNSu32)xpc_dictionary_get_uint64(req, kDNSInIfindex1);
@@ -204,11 +215,36 @@ mDNSlocal void handle_dps_request(xpc_object_t req)
         inIf[4]   = (mDNSu32)xpc_dictionary_get_uint64(req, kDNSInIfindex4);
         outIf     = (mDNSu32)xpc_dictionary_get_uint64(req, kDNSOutIfindex);
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+        ipv6Prefix = xpc_dictionary_get_data(req, kDNSProxyDNS64IPv6Prefix, &dataLen);
+        if (ipv6Prefix && (dataLen == 16))
+        {
+            int64_t prefixLen = xpc_dictionary_get_int64(req, kDNSProxyDNS64IPv6PrefixBitLen);
+            if (prefixLen < INT_MIN)
+            {
+                prefixLen = INT_MIN;
+            }
+            else if (prefixLen > INT_MAX)
+            {
+                prefixLen = INT_MAX;
+            }
+            ipv6PrefixLen = (int)prefixLen;
+            forceAAAASynthesis = xpc_dictionary_get_bool(req, kDNSProxyDNS64ForceAAAASynthesis);
+        }
+        else
+        {
+            ipv6Prefix = NULL;
+            ipv6PrefixLen = 0;
+            forceAAAASynthesis = mDNSfalse;
+        }
+        ActivateDNSProxy(inIf, outIf, ipv6Prefix, ipv6PrefixLen, forceAAAASynthesis, proxy_off);
+#else
         ActivateDNSProxy(inIf, outIf, proxy_off);
+#endif
     }
 }
 
-mDNSlocal void handle_dps_terminate()
+mDNSlocal void handle_dps_terminate(void)
 {
 
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
@@ -224,14 +260,23 @@ mDNSlocal void handle_dps_terminate()
     KQueueUnlock("DNSProxy Deactivated");
 }
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+mDNSlocal void ActivateDNSProxy(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf, const mDNSu8 IPv6Prefix[16], int IPv6PrefixBitLen,
+                                mDNSBool forceAAAASynthesis, mDNSBool proxy_off)
+#else
 mDNSlocal void ActivateDNSProxy(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf, mDNSBool proxy_off)
+#endif
 {
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
               "ActivateDNSProxy: InterfaceIndex List by Client: Input[%d, %d, %d, %d, %d] Output[%d]",
               IpIfArr[0], IpIfArr[1], IpIfArr[2], IpIfArr[3], IpIfArr[4], OpIf);
 
     KQueueLock();
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
+    DNSProxyInit(IpIfArr, OpIf, IPv6Prefix, IPv6PrefixBitLen, forceAAAASynthesis);
+#else
     DNSProxyInit(IpIfArr, OpIf);
+#endif
     if (proxy_off) // Open skts only if proxy was OFF else we may end up opening extra skts
         mDNSPlatformInitDNSProxySkts(ProxyUDPCallback, ProxyTCPCallback);
     KQueueUnlock("DNSProxy Activated");

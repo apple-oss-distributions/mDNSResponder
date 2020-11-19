@@ -168,7 +168,7 @@ dso_state_t *dso_create(bool is_server, int max_outstanding_queries, const char 
                         dso_event_callback_t callback, void *context, dso_transport_t *transport);
 dso_state_t *dso_find_by_serial(uint32_t serial);
 void dso_drop(dso_state_t *dso);
-int64_t dso_idle(void *context, int64_t now, int64_t next_timer_event);
+int32_t dso_idle(void *context, int64_t now, int64_t next_timer_event);
 void dso_release(dso_state_t **dsop);
 void dso_start_tlv(dso_message_t *state, int opcode);
 void dso_add_tlv_bytes(dso_message_t *state, const uint8_t *bytes, size_t len);
@@ -191,7 +191,7 @@ void dso_message_received(dso_state_t *dso, const uint8_t *message, size_t messa
 void dns_message_received(dso_state_t *dso, const uint8_t *message, size_t message_length);
 
 // Provided by DSO transport implementation for use by dso.c:
-int64_t dso_transport_idle(void *context, int64_t now, int64_t next_timer_event);
+int32_t dso_transport_idle(void *context, int64_t now, int64_t next_timer_event);
 bool dso_send_simple_response(dso_state_t *dso, int rcode, const DNSMessageHeader *header, const char *pres);
 bool dso_send_not_implemented(dso_state_t *dso, const DNSMessageHeader *header);
 bool dso_send_refused(dso_state_t *dso, const DNSMessageHeader *header);

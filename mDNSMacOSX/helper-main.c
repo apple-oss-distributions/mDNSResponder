@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#define _FORTIFY_SOURCE 2
-
 #include <CoreFoundation/CoreFoundation.h>
 #include <sys/cdefs.h>
 #include <sys/socket.h>

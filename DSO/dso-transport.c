@@ -120,7 +120,7 @@ dso_transport_finalize(dso_transport_t *transport)
 //
 // If there is a finalize function, that function MUST either free its own state that references the
 // DSO state, or else must NULL out the pointer to the DSO state.
-int64_t dso_transport_idle(void *context, int64_t now_in, int64_t next_timer_event)
+int32_t dso_transport_idle(void *context, int64_t now_in, int64_t next_timer_event)
 {
     dso_connect_state_t *cs, *cnext;
     mDNS *m = context;
@@ -248,7 +248,7 @@ bool dso_write_finish(dso_transport_t *transport)
 {
 #ifdef DSO_USES_NETWORK_FRAMEWORK
     uint32_t serial = transport->dso->serial;
-    int bytes_to_write = transport->bytes_to_write;
+    size_t bytes_to_write = transport->bytes_to_write;
     transport->bytes_to_write = 0;
     if (transport->write_failed) {
         dso_drop(transport->dso);
@@ -428,7 +428,7 @@ bool dso_send_no_error(dso_state_t *dso, const DNSMessageHeader *header)
 }
 
 #ifdef DSO_USES_NETWORK_FRAMEWORK
-static void dso_read_message(dso_transport_t *transport, size_t length);
+static void dso_read_message(dso_transport_t *transport, uint32_t length);
 
 static void dso_read_message_length(dso_transport_t *transport)
 {
@@ -457,24 +457,28 @@ static void dso_read_message_length(dso_transport_t *transport)
                                   LogMsg("dso_read_message_length: remote end closed connection.");
                                   goto fail;
                               } else {
-                                  size_t length;
+                                  uint32_t length;
+                                  size_t length_length;
                                   const uint8_t *lenbuf;
-                                  dispatch_data_t map = dispatch_data_create_map(content, (const void **)&lenbuf, &length);
+                                  dispatch_data_t map = dispatch_data_create_map(content, (const void **)&lenbuf,
+                                                                                 &length_length);
                                   if (map == NULL) {
                                       LogMsg("dso_read_message_length: map create failed");
                                       goto fail;
-                                  } else if (length != 2) {
-                                      LogMsg("dso_read_message_length: invalid length = %d", length);
+                                  } else if (length_length != 2) {
+                                      LogMsg("dso_read_message_length: invalid length = %d", length_length);
+                                      dispatch_release(map);
                                       goto fail;
                                   }
                                   length = ((unsigned)(lenbuf[0]) << 8) | ((unsigned)lenbuf[1]);
+                                  dispatch_release(map);
                                   dso_read_message(transport, length);
                               }
                               KQueueUnlock("dso_read_message_length completion routine");
                           });
 }
 
-void dso_read_message(dso_transport_t *transport, size_t length)
+void dso_read_message(dso_transport_t *transport, uint32_t length)
 {
     const uint32_t serial = transport->dso->serial;
     if (transport->connection == NULL) {
@@ -508,12 +512,16 @@ void dso_read_message(dso_transport_t *transport, size_t length)
                                       goto fail;
                                   } else if (bytes_read != length) {
                                       LogMsg("dso_read_message_length: only %d of %d bytes read", bytes_read, length);
+                                      dispatch_release(map);
                                       goto fail;
                                   }
                                   // Process the message.
                                   mDNS_Lock(&mDNSStorage);
                                   dns_message_received(dso, message, length);
                                   mDNS_Unlock(&mDNSStorage);
+
+                                  // Release the map object now that we no longer need its buffers.
+                                  dispatch_release(map);
 
                                   // Now read the next message length.
                                   dso_read_message_length(transport);
@@ -732,9 +740,9 @@ dso_connect_state_t *dso_connect_state_create(const char *hostname, mDNSAddr *ad
                                               int max_outstanding_queries, size_t inbuf_size, size_t outbuf_size,
                                               dso_event_callback_t callback, dso_state_t *dso, void *context, const char *detail)
 {
-    int detlen = strlen(detail) + 1;
-    int hostlen = hostname == NULL ? 0 : strlen(hostname) + 1;
-    int len;
+    size_t detlen = strlen(detail) + 1;
+    size_t hostlen = hostname == NULL ? 0 : strlen(hostname) + 1;
+    size_t len;
     dso_connect_state_t *cs;
     char *csp;
     char nbuf[INET6_ADDRSTRLEN + 1];

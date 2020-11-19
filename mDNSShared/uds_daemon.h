@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2018 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,9 @@
 #include "mDNSEmbeddedAPI.h"
 #include "dnssd_ipc.h"
 #include "ClientRequests.h"
+#if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
+#include "mdns_private.h"
+#endif
 
 /* Client request: */
 
@@ -98,10 +101,15 @@ struct request_state
 	mDNSu8 uuid[UUID_SIZE];
 	mDNSBool validUUID;
 	dnssd_sock_t errsd;
+#if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
+    audit_token_t audit_token;
+#endif
 	mDNSu32 uid;
     mDNSu32 request_id;
 	void * platform_data;
-
+#if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
+    mdns_trust_t trust;
+#endif
 	// Note: On a shared connection these fields in the primary structure, including hdr, are re-used
 	// for each new request. This is because, until we've read the ipc_msg_hdr to find out what the
 	// operation is, we don't know if we're going to need to allocate a new request_state or not.
@@ -121,6 +129,9 @@ struct request_state
 	req_termination_fn terminate;
 	DNSServiceFlags flags;
 	mDNSu32 interfaceIndex;
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+    mdns_dns_service_id_t custom_service_id;
+#endif
 
 	union
 	{
@@ -199,7 +210,7 @@ typedef struct reply_state
 
 #define LogTimerToFD(FILE_DESCRIPTOR, MSG, T) LogToFD((FILE_DESCRIPTOR), MSG " %08X %11d  %08X %11d", (T), (T), (T)-now, (T)-now)
 
-extern int udsserver_init(dnssd_sock_t skts[], mDNSu32 count);
+extern int udsserver_init(dnssd_sock_t skts[], size_t count);
 extern mDNSs32 udsserver_idle(mDNSs32 nextevent);
 extern void udsserver_info_dump_to_fd(int fd);
 extern void udsserver_handle_configchange(mDNS *const m);
