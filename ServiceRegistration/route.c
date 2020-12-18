@@ -829,6 +829,8 @@ router_discovery_stop(interface_t *interface, uint64_t now)
     interface->router_discovery_complete = true;
     interface->router_discovery_in_progress = false;
     interface->vicarious_router_discovery_in_progress = false;
+    // clear out need_reconfigure_prefix when router_discovery_complete is set back to true.
+    interface->need_reconfigure_prefix = false;
     flush_stale_routers(interface, now);
 
     // See if we need a new prefix on the interface.
@@ -840,11 +842,25 @@ adjust_router_received_time(interface_t *const interface, const uint64_t now, co
 {
     icmp_message_t *router;
 
+    if (interface->routers == NULL) {
+        if (interface->advertise_ipv6_prefix) {
+            SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __ipv6_prefix);
+            INFO("adjust_router_received_time: No router information available for the interface - "
+                 "ifname: " PUB_S_SRP ", prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                 interface->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __ipv6_prefix));
+        } else {
+            INFO("adjust_router_received_time: No router information available for the interface - "
+                 "ifname: " PUB_S_SRP, interface->name);
+        }
+
+        goto exit;
+    }
+
     for (router = interface->routers; router != NULL; router = router->next) {
         SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, __router_src_addr_buf);
         // Only adjust the received time once.
         if (router->received_time_already_adjusted) {
-            DEBUG("adjust_router_received_time: received time already adjusted - remaining time: %llu, "
+            INFO("adjust_router_received_time: received time already adjusted - remaining time: %llu, "
                   "router src: " PRI_SEGMENTED_IPv6_ADDR_SRP, (now - router->received_time) / MSEC_PER_SEC,
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, __router_src_addr_buf));
             continue;
@@ -856,7 +872,7 @@ adjust_router_received_time(interface_t *const interface, const uint64_t now, co
                   "now: %" PRIu64 ", time_adjusted: %" PRId64, now, time_adjusted));
         router->received_time = now + time_adjusted;
         router->received_time_already_adjusted = true; // Only adjust the icmp message received time once.
-        DEBUG("adjust_router_received_time: router received time is adjusted - router src: " PRI_SEGMENTED_IPv6_ADDR_SRP
+        INFO("adjust_router_received_time: router received time is adjusted - router src: " PRI_SEGMENTED_IPv6_ADDR_SRP
               ", adjusted value: %" PRId64,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, __router_src_addr_buf), time_adjusted);
     }
@@ -1002,7 +1018,8 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
               interface->preferred_lifetime == 0)) {
 
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
-        INFO("routing_policy_evaluate: advertising prefix again - ifname: " PUB_S_SRP ", prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP, interface->name,
+        INFO("routing_policy_evaluate: advertising prefix again - ifname: " PUB_S_SRP
+             ", prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP, interface->name,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
 
         // If we were deprecating, stop.
@@ -1028,6 +1045,19 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
             interface->advertise_ipv6_prefix = true;
             something_changed = true;
         }
+    }
+    // If there is no on-link prefix present, and srp-mdns-proxy itself is advertising the prefix, and it has configured
+    // an on-link prefix, and the interface is not thread interface, and it just got an interface address removal event,
+    // it is possible that the IPv6 routing has been flushed due to loss of address in configd, so here we explicitly
+    // reconfigure the IPv6 prefix and the routing.
+    else if (interface->need_reconfigure_prefix && !on_link_prefix_present && interface->advertise_ipv6_prefix &&
+             interface->on_link_prefix_configured && !interface->is_thread) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
+        INFO("routing_policy_evaluate: reconfigure ipv6 prefix due to possible network changes -"
+             " prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
+        interface_prefix_configure(interface->ipv6_prefix, interface);
+        interface->need_reconfigure_prefix = false;
     }
 
     // If we've been looking to see if there's an on-link prefix, and we got one from the new router advertisement,
@@ -2121,6 +2151,8 @@ post_solicit_policy_evaluate(void *context)
     interface_prefix_evaluate(interface);
 
     routing_policy_evaluate(interface, true);
+    // Always clear out need_reconfigure_prefix when router_discovery_complete is set to true.
+    interface->need_reconfigure_prefix = false;
 }
 
 static void
@@ -2790,6 +2822,7 @@ interface_shutdown(interface_t *interface)
     interface->router_discovery_complete = false;
     interface->router_discovery_in_progress = false;
     interface->vicarious_router_discovery_in_progress = false;
+    interface->need_reconfigure_prefix = false;
     interface->link = NULL;
 }
 
@@ -3076,6 +3109,13 @@ ifaddr_callback(void *__unused context, const char *name, const addr_t *address,
                     INFO("ifaddr_callback: making all routers stale and start router discovery due to removed address");
                     adjust_router_received_time(interface, ioloop_timenow(),
                                                 -(MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE + MSEC_PER_SEC));
+                    // Explicitly set router_discovery_complete to false so we can ensure that srp-mdns-proxy will start
+                    // the router discovery immediately.
+                    interface->router_discovery_complete = false;
+                    // Set need_reconfigure_prefix to true to let routing_policy_evaluate know that the router discovery
+                    // is caused by interface removal event, so when the router discovery finished and nothing changes,
+                    // it can reconfigure the IPv6 routing in case configured does not handle it correctly.
+                    interface->need_reconfigure_prefix = true;
                     routing_policy_evaluate(interface, false);
                 }
             }
@@ -5029,6 +5069,7 @@ partition_maybe_advertise_service(void)
     }
     if (i == 16) {
         INFO("partition_maybe_advertise_service: no listener.");
+        return;
     }
 
     // The add service function requires a remove prior to the add, so if we are doing an add, we need to wait

@@ -910,6 +910,20 @@ static void DNSSD_API reg_reply(DNSServiceRef sdref, const DNSServiceFlags flags
     if (!(flags & kDNSServiceFlagsMoreComing)) fflush(stdout);
 }
 
+static int snprintf_safe(char *str, size_t size, const char *format, ...)
+{
+    int length = 0;
+    va_list ptr;
+    va_start(ptr, format);
+    int result = vsnprintf(str, size, format, ptr);
+    va_end(ptr);
+    if (result > 0 && size > 0)
+    {
+        length = MIN((size_t)result, size-1);
+    }
+    return length;
+}
+
 // Output the wire-format domainname pointed to by rd
 static int snprintd(char *p, int max, const unsigned char **rd)
 {
@@ -917,7 +931,7 @@ static int snprintd(char *p, int max, const unsigned char **rd)
     const char *const end = p + max;
     while (**rd) 
     { 
-        p += snprintf(p, end-p, "%.*s.", **rd, *rd+1); 
+        p += snprintf_safe(p, end-p, "%.*s.", **rd, *rd+1);
         *rd += 1 + **rd; 
     }
     *rd += 1;   // Advance over the final zero byte
@@ -934,18 +948,18 @@ static void ParseDNSSECRecords(uint16_t rrtype, char *rdb, size_t rdb_size, unsi
             unsigned char *ptr;
             int i;
             rdataDS *rrds = (rdataDS *)rd;
-            p += snprintf(p, rdb + rdb_size - p, "%d  %d  %d  ",
+            p += snprintf_safe(p, rdb + rdb_size - p, "%d  %d  %d  ",
                           rrds->alg, swap16(rrds->keyTag), rrds->digestType);
             ptr = (unsigned char *)(rd + DS_FIXED_SIZE);
             for (i = 0; i < (rdlen - DS_FIXED_SIZE); i++)
-                p += snprintf(p, rdb + rdb_size - p, "%x", ptr[i]);   
+                p += snprintf_safe(p, rdb + rdb_size - p, "%x", ptr[i]);
             break; 
         } 
             
         case kDNSServiceType_DNSKEY:
         {
             rdataDNSKey *rrkey = (rdataDNSKey *)rd;
-            p += snprintf(p, rdb + rdb_size - p, "%d  %d  %d  %u ", swap16(rrkey->flags), rrkey->proto,
+            p += snprintf_safe(p, rdb + rdb_size - p, "%d  %d  %d  %u ", swap16(rrkey->flags), rrkey->proto,
                           rrkey->alg, (unsigned int)keytag((unsigned char *)rrkey, rdlen));
             base64Encode(p, rdb + rdb_size - p, (unsigned char *)(rd + DNSKEY_FIXED_SIZE), rdlen - DNSKEY_FIXED_SIZE);
             break;
@@ -993,7 +1007,7 @@ static void ParseDNSSECRecords(uint16_t rrtype, char *rdb, size_t rdb_size, unsi
                 for (i = 0; i < wlen * 8; i++)
                 {
                     if (bmap[i>>3] & (128 >> (i&7)))
-                        p += snprintf(p, rdb + rdb_size - p, " %s ", DNSTypeName(type + i));
+                        p += snprintf_safe(p, rdb + rdb_size - p, " %s ", DNSTypeName(type + i));
                 }
                 bmap += wlen;
                 bitmaplen -= wlen;
@@ -1018,7 +1032,7 @@ static void ParseDNSSECRecords(uint16_t rrtype, char *rdb, size_t rdb_size, unsi
             inceptClock = (unsigned long)swap32(rrsig->sigInceptTime);
             FormatTime(inceptClock, inceptTimeBuf, sizeof(inceptTimeBuf));
             
-            p += snprintf(p, rdb + rdb_size - p, " %-7s  %d  %d  %d  %s  %s  %7d  ",
+            p += snprintf_safe(p, rdb + rdb_size - p, " %-7s  %d  %d  %d  %s  %s  %7d  ",
                           DNSTypeName(swap16(rrsig->typeCovered)), rrsig->alg, rrsig->labels, swap32(rrsig->origTTL),
                           expTimeBuf, inceptTimeBuf, swap16(rrsig->keyTag));
             
@@ -1086,7 +1100,7 @@ static void DNSSD_API qr_reply(DNSServiceRef sdref, const DNSServiceFlags flags,
         switch (rrtype)
         {
             case kDNSServiceType_A:
-                snprintf(rdb, sizeof(rdb), "%d.%d.%d.%d", rd[0], rd[1], rd[2], rd[3]);
+                snprintf_safe(rdb, sizeof(rdb), "%d.%d.%d.%d", rd[0], rd[1], rd[2], rd[3]);
                 break;
 
             case kDNSServiceType_NS:
@@ -1098,7 +1112,7 @@ static void DNSSD_API qr_reply(DNSServiceRef sdref, const DNSServiceFlags flags,
 
             case kDNSServiceType_SOA:
                 p += snprintd(p, rdb + sizeof(rdb) - p, &rd);           // mname
-                p += snprintf(p, rdb + sizeof(rdb) - p, " ");
+                p += snprintf_safe(p, rdb + sizeof(rdb) - p, " ");
                 p += snprintd(p, rdb + sizeof(rdb) - p, &rd);           // rname
                      snprintf(p, rdb + sizeof(rdb) - p, " Ser %d Ref %d Ret %d Exp %d Min %d",
                          ntohl(((uint32_t*)rd)[0]), ntohl(((uint32_t*)rd)[1]), ntohl(((uint32_t*)rd)[2]), ntohl(((uint32_t*)rd)[3]), ntohl(((uint32_t*)rd)[4]));
@@ -1111,7 +1125,7 @@ static void DNSSD_API qr_reply(DNSServiceRef sdref, const DNSServiceFlags flags,
                 break;
 
             case kDNSServiceType_SRV:
-                p += snprintf(p, rdb + sizeof(rdb) - p, "%d %d %d ",        // priority, weight, port
+                p += snprintf_safe(p, rdb + sizeof(rdb) - p, "%d %d %d ",        // priority, weight, port
                          ntohs(*(unsigned short*)rd), ntohs(*(unsigned short*)(rd+2)), ntohs(*(unsigned short*)(rd+4)));
                 rd += 6;
                      snprintd(p, rdb + sizeof(rdb) - p, &rd);               // target host

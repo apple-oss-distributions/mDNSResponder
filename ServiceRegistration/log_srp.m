@@ -49,9 +49,11 @@ srp_os_log_copy_formatted_string_ipv6_addr_segment(id value)
 	ptr = buf;
 	ptr_limit = buf + sizeof(buf);
 	for (size_t i = 0; i < data.length; i++) {
-		require_action((size_t)(ptr_limit - ptr) > strlen(delimiter) + 2, exit,
-			a_str = AStrWithFormat(@"<failed to decode - buffer space not enough: i: %lu>", i));
-		ptr += snprintf(ptr, ptr_limit - ptr, "%s%02x", delimiter, addr_data[i]);
+        size_t remaining = (size_t)(ptr_limit - ptr);
+        int result = snprintf(ptr, remaining, "%s%02x", delimiter, addr_data[i]);
+        require_action(result > 0 && result < remaining, exit,
+            a_str = AStrWithFormat(@"<failed to decode - snprintf: result: %ld remain: %lu>", i, remaining));
+        ptr += result;
 		if ((i + 1) % 2 == 0) {
 			delimiter = ":";
 		} else {
