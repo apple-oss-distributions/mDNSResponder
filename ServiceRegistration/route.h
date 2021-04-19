@@ -59,6 +59,9 @@ struct interface {
     // Wakeup event to detect that vicarious router discovery is complete
     wakeup_t *NULLABLE vicarious_discovery_complete;
 
+    // Wakeup event to periodically notice whether routers we have heard previously on this interface have gone stale.
+    wakeup_t *NULLABLE stale_evaluation_wakeup;
+
     // List of ICMP messages from different routers.
     icmp_message_t *NULLABLE routers;
 
@@ -198,9 +201,8 @@ struct icmp_message {
     icmp_message_t *NULLABLE next;
     interface_t *NULLABLE interface;
     icmp_option_t *NULLABLE options;
-    bool new_router;                // If this router information is a newly recevied one.
-    bool received_time_already_adjusted;    // if the received time of the message is already adjusted by
-                                                    // vicarious mode
+    bool new_router;                     // If this router information is a newly recevied one.
+    bool received_time_already_adjusted; // if the received time of the message is already adjusted by vicarious mode
     struct in6_addr source;
     struct in6_addr destination;
 

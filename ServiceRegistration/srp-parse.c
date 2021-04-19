@@ -1,6 +1,6 @@
 /* srp-parse.c
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -716,15 +716,12 @@ srp_proxy_listener_cancel(srp_proxy_listener_state_t *listener_state)
 {
     if (listener_state->tcp_listener != NULL) {
         ioloop_listener_cancel(listener_state->tcp_listener);
-        ioloop_listener_release(listener_state->tcp_listener);
     }
     if (listener_state->tls_listener != NULL) {
         ioloop_listener_cancel(listener_state->tls_listener);
-        ioloop_listener_release(listener_state->tls_listener);
     }
     if (listener_state->udp_listener != NULL) {
         ioloop_listener_cancel(listener_state->udp_listener);
-        ioloop_listener_release(listener_state->udp_listener);
     }
     free(listener_state);
 }

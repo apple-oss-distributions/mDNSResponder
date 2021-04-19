@@ -397,18 +397,29 @@ _mdns_dns_service_manager_purge_discovered_services(const mdns_dns_service_manag
 		return;
 	}
 
+	os_log(_mdns_dns_service_log(), "Purging %u discovered services down to 4", (uint32_t)n);
+
+	// Create a new array to hold the remaining services
+	CFMutableArrayRef remaining_services = CFArrayCreateMutable(kCFAllocatorDefault, 0, &mdns_cfarray_callbacks);
+
 	// Sort by recent use
 	CFMutableArrayRef recent_services = CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, me->discovered_services);
 	CFArraySortValues(recent_services, CFRangeMake(0, n), _mdns_dns_service_compare_time, NULL);
 
 	// Reduce number of services down to target by defuncting them
 	for (CFIndex i = 0; i < n; ++i) {
+		const mdns_dns_service_t service = (mdns_dns_service_t)CFArrayGetValueAtIndex(recent_services, i);
 		if (i >= MDNS_TARGET_DISCOVERED_SERVICE_COUNT) {
-			const mdns_dns_service_t service = (mdns_dns_service_t)CFArrayGetValueAtIndex(recent_services, i);
 			_mdns_dns_service_make_defunct(service);
+		} else {
+			CFArrayAppendValue(remaining_services, service);
 		}
 	}
-	CFRelease(recent_services);
+	ForgetCF(&recent_services);
+
+	ForgetCF(&me->discovered_services);
+	me->discovered_services = remaining_services;
+	remaining_services = NULL;
 }
 
 static void
@@ -707,14 +718,14 @@ _mdns_dns_service_manager_fetch_trusted_name_pvd(const mdns_dns_service_manager_
 		if (xpc_get_type(array_value) == XPC_TYPE_STRING) {
 			const char *dns_zone = xpc_string_get_string_ptr(array_value);
 
-			if (strcmp(trusted_name, dns_zone) == 0) {
+			if (strcasecmp(trusted_name, dns_zone) == 0) {
 				// Exact match
 				xpc_array_append_value(candidate_dns_zones, array_value);
 			} else {
 				size_t trusted_name_suffix_length = strlen(trusted_name_suffix);
 				size_t dns_zone_length = strlen(dns_zone);
 				if (trusted_name_suffix_length <= dns_zone_length) {
-					if (strcmp(trusted_name_suffix, dns_zone + (dns_zone_length - trusted_name_suffix_length)) == 0) {
+					if (strcasecmp(trusted_name_suffix, dns_zone + (dns_zone_length - trusted_name_suffix_length)) == 0) {
 						// Suffix match
 						xpc_array_append_value(candidate_dns_zones, array_value);
 					}
@@ -1540,8 +1551,8 @@ _mdns_dns_service_manager_get_discovered_service(const mdns_dns_service_manager_
 
 			const char *config_hostname = nw_resolver_config_get_provider_name(service->config);
 			const char *config_path = nw_resolver_config_get_provider_path(service->config);
-			if (strcmp(hostname, config_hostname) == 0 ||
-				strcmp(path, config_path) == 0) {
+			if (strcasecmp(hostname, config_hostname) == 0 &&
+				strcasecmp(path, config_path) == 0) {
 				return service;
 			}
 		}

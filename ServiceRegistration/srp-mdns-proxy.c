@@ -76,6 +76,7 @@ int advertise_interface = kDNSServiceInterfaceIndexAny;
 const char local_suffix_ld[] = ".local";
 const char *local_suffix = &local_suffix_ld[1];
 uint32_t max_lease_time = 3600 * 27; // One day plus 20%
+uint32_t min_lease_time = 30; // thirty seconds
 
 static xpc_connection_t xpc_listener;
 
@@ -1630,26 +1631,29 @@ prepare_update(adv_host_t *host)
     for (i = 0; i < num_add_instances; i++) {
         adv_instance_t *add_instance = add_instances->vec[i];
 
-        for (j = 0; j < host->instances->num; j++) {
-            adv_instance_t *host_instance = host->instances->vec[j];
+        if (add_instance != NULL) {
+            for (j = 0; j < host->instances->num; j++) {
+                adv_instance_t *host_instance = host->instances->vec[j];
 
-            // See if the instance names match.
-            if (!strcmp(add_instance->instance_name, host_instance->instance_name) &&
-                !strcmp(add_instance->service_type, host_instance->service_type))
-            {
-                // If the rdata is the same, it's not an add or an update.
-                if (add_instance->txt_length == host_instance->txt_length &&
-                    add_instance->port == host_instance->port &&
-                    (add_instance->txt_length == 0 ||
-                     !memcmp(add_instance->txt_data, host_instance->txt_data, add_instance->txt_length)))
+                // See if the instance names match.
+                if (host_instance != NULL &&
+                    !strcmp(add_instance->instance_name, host_instance->instance_name) &&
+                    !strcmp(add_instance->service_type, host_instance->service_type))
                 {
-                    RELEASE_HERE(add_instance, adv_instance_finalize);
-                } else {
-                    // Implicit RETAIN/RELEASE
-                    update_instances->vec[j] = add_instance;
+                    // If the rdata is the same, it's not an add or an update.
+                    if (add_instance->txt_length == host_instance->txt_length &&
+                        add_instance->port == host_instance->port &&
+                        (add_instance->txt_length == 0 ||
+                         !memcmp(add_instance->txt_data, host_instance->txt_data, add_instance->txt_length)))
+                    {
+                        RELEASE_HERE(add_instance, adv_instance_finalize);
+                    } else {
+                        // Implicit RETAIN/RELEASE
+                        update_instances->vec[j] = add_instance;
+                    }
+                    add_instances->vec[i] = NULL;
+                    break;
                 }
-                add_instances->vec[i] = NULL;
-                break;
             }
         }
     }
@@ -1992,7 +1996,11 @@ found_something:
     client_update->services = services;
     client_update->update_zone = update_zone;
     if (lease_time < max_lease_time) {
-        client_update->host_lease = lease_time;
+        if (lease_time < min_lease_time) {
+            client_update->host_lease = min_lease_time;
+        } else {
+            client_update->host_lease = lease_time;
+        }
     } else {
         client_update->host_lease = max_lease_time;
     }
@@ -2396,7 +2404,7 @@ adv_xpc_message(xpc_connection_t connection, xpc_object_t request)
 static void
 usage(void)
 {
-    ERROR("srp-mdns-proxy [--max-lease-time <seconds>] [--log-stderr]");
+    ERROR("srp-mdns-proxy [--max-lease-time <seconds>] [--min-lease-time <seconds>] [--log-stderr]");
     exit(1);
 }
 
@@ -2413,6 +2421,15 @@ main(int argc, char **argv)
                 usage();
             }
             max_lease_time = (uint32_t)strtoul(argv[i + 1], &end, 10);
+            if (end == argv[i + 1] || end[0] != 0) {
+                usage();
+            }
+            i++;
+        } else if (!strcmp(argv[i], "--min-lease-time")) {
+            if (i + 1 == argc) {
+                usage();
+            }
+            min_lease_time = (uint32_t)strtoul(argv[i + 1], &end, 10);
             if (end == argv[i + 1] || end[0] != 0) {
                 usage();
             }

@@ -597,9 +597,13 @@ dns_wire_parse(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsign
 {
     unsigned offset = 0;
     unsigned data_len = len - DNS_HEADER_SIZE;
-    dns_message_t *rv = calloc(1, sizeof(*rv));
+    dns_message_t *rv;
     int i;
 
+    if (len < DNS_HEADER_SIZE) {
+        return false;
+    }
+    rv = calloc(1, sizeof(*rv));
     if (rv == NULL) {
         return false;
     }

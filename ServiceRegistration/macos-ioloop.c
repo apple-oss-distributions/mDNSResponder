@@ -1,6 +1,6 @@
 /* macos-ioloop.c
  *
- * Copyright (c) 2018-2020 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -701,8 +701,7 @@ ioloop_listener_cancel(comm_t *connection)
 {
     if (connection->listener != NULL) {
         nw_listener_cancel(connection->listener);
-        nw_release(connection->listener);
-        connection->listener = NULL;
+        // connection->listener will be released in ioloop_listener_state_changed_handler: nw_listener_state_cancelled.
     }
 }
 
@@ -710,6 +709,24 @@ static void
 ioloop_listener_state_changed_handler(comm_t *listener, nw_listener_state_t state, nw_error_t error)
 {
     int i;
+
+#ifdef DEBUG_VERBOSE
+    if (listener->listener == NULL) {
+        if (state == nw_listener_state_cancelled) {
+            INFO("nw_listener gets released before the final nw_listener_state_cancelled event - name: " PRI_S_SRP,
+                 listener->name);
+        } else {
+            ERROR("nw_listener gets released before the listener is canceled - name: " PRI_S_SRP ", state: %d",
+                  listener->name, state);
+        }
+    }
+#endif // DEBUG_VERBOSE
+
+    // Should never happen.
+    if (listener->listener == NULL && state != nw_listener_state_cancelled) {
+        return;
+    }
+
     if (error != NULL) {
         INFO("nw_listener_create:state changed: error");
     } else {

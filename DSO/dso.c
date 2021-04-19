@@ -173,11 +173,12 @@ dso_state_t *dso_create(bool is_server, int max_outstanding_queries, const char 
                         dso_event_callback_t callback, void *context, dso_transport_t *transport)
 {
     dso_state_t *dso;
-    int namelen = (int)strlen(remote_name) + 1;
+    int namelen = (int)strlen(remote_name);
+    int namespace = namelen + 1;
     int outsize = (sizeof (dso_outstanding_query_state_t)) + max_outstanding_queries * sizeof (dso_outstanding_query_t);
 
     // We allocate everything in a single hunk so that we can free it together as well.
-    dso = (dso_state_t *) mDNSPlatformMemAllocateClear((sizeof *dso) + outsize + namelen);
+    dso = (dso_state_t *) mDNSPlatformMemAllocateClear((sizeof *dso) + outsize + namespace);
     if (dso == NULL) {
         goto out;
     }

@@ -98,15 +98,14 @@ static void
 cti_connection_release_(cti_connection_t ref, const char *file, int line)
 {
     ref->callback.reply = NULL;
-    if (ref->connection != NULL) {
-        xpc_connection_cancel(ref->connection);
-    }
     RELEASE(ref, cti_connection_finalize);
 }
 
 static void
 cti_xpc_connection_finalize(void *context)
 {
+    cti_connection_t ref = context;
+    INFO("cti_xpc_connection_finalize: " PUB_S_SRP, ref->command_name);
     cti_connection_release(context);
 }
 
@@ -418,7 +417,15 @@ cti_event_handler(xpc_object_t event, cti_connection_t conn_ref)
             xpc_release(conn_ref->connection);
             conn_ref->connection = NULL;
         }
-    } else if (xpc_get_type(event) == XPC_TYPE_DICTIONARY) {
+        return;
+    }
+
+    if (conn_ref->connection == NULL) {
+        cti_log_object("cti_event_handler NULL connection", conn_ref->command_name, "", "", event, "");
+        return;
+    }
+
+    if (xpc_get_type(event) == XPC_TYPE_DICTIONARY) {
         cti_log_object("cti_event_handler", conn_ref->command_name, "", "", event, "");
         if (!conn_ref->checked_in) {
             xpc_object_t command_result = xpc_dictionary_get_value(event, "commandResult");
@@ -607,6 +614,9 @@ cti_internal_reply_callback(cti_connection_t NONNULL conn_ref, xpc_object_t __un
     callback = conn_ref->callback.reply;
     if (callback != NULL) {
         callback(conn_ref->context, status);
+    }
+    if (conn_ref->connection != NULL) {
+        xpc_connection_cancel(conn_ref->connection);
     }
     cti_connection_release(conn_ref);
 }
@@ -1505,6 +1515,9 @@ cti_get_prefix_list(cti_connection_t *ref, void *NULLABLE context, cti_prefix_re
 cti_status_t
 cti_events_discontinue(cti_connection_t ref)
 {
+    if (ref->connection != NULL) {
+        xpc_connection_cancel(ref->connection);
+    }
     cti_connection_release(ref);
     return kCTIStatus_NoError;
 }
