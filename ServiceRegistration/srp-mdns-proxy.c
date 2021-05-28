@@ -1408,6 +1408,13 @@ start_host_update(adv_host_t *host)
         err = DNSServiceCreateConnection(&sdref);
         // In principle the only way this can fail is if the daemon isn't running.
         if (err != kDNSServiceErr_NoError) {
+            // If this is a "no memory" error, that actually means that we've run out of file descriptors.
+            // This should never happen, but if it does, we can't really continue to function; it's better to
+            // exit and restart.
+            if (err == kDNSServiceErr_NoMemory) {
+                ERROR("Out of file descriptors--quitting.");
+                abort(); // So that we get a crash report
+            }
             // If this is a new update, just send a response to the client.  Otherwise maybe try to re-add it.
             if (update->client != NULL) {
                 ERROR("DNSServiceCreateConnection: something went wrong: %d.", err);

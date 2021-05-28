@@ -1,5 +1,5 @@
 ;
-; Copyright (c) 2012-2020 Apple Inc. All rights reserved.
+; Copyright (c) 2012-2021 Apple Inc. All rights reserved.
 ;
 ; Redistribution and use in source and binary forms, with or without 
 ; modification, are permitted provided that the following conditions are met:
@@ -79,7 +79,9 @@
        (global-name "com.apple.mobilegestalt.xpc")
        (global-name "com.apple.networkd_privileged")
        (global-name "com.apple.dnssd.service")
-       (global-name "com.apple.nehelper"))
+       (global-name "com.apple.nehelper")
+       (global-name "com.apple.cfnetwork.AuthBrokerAgent")
+       (global-name "com.apple.cfnetwork.cfnetworkagent"))
 
 (allow mach-register
        (global-name "com.apple.d2d.ipc"))

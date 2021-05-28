@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2018-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -132,14 +132,6 @@
 
 #if !defined(MDNSRESPONDER_SUPPORTS_APPLE_OS_LOG)
     #define MDNSRESPONDER_SUPPORTS_APPLE_OS_LOG                     1
-#endif
-
-// Feature: Preallocate mDNSResponder's cache memory. For testing purposes only.
-// Radar:   <rdar://problem/29545890>
-// Enabled: No.
-
-#if !defined(MDNSRESPONDER_SUPPORTS_APPLE_PREALLOCATED_CACHE)
-    #define MDNSRESPONDER_SUPPORTS_APPLE_PREALLOCATED_CACHE         0
 #endif
 
 // Feature: Use mdns_querier objects for DNS transports.

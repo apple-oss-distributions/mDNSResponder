@@ -1773,6 +1773,7 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
 #else
     (void)prefix;
 #endif // CONFIGURE_STATIC_INTERFACE_ADDRESSES
+    close(sock);
 }
 
 #ifdef USE_SYSCTL_COMMMAND_TO_ENABLE_FORWARDING
@@ -2908,7 +2909,12 @@ find_interface(const char *name, int ifindex)
     // We could do a callback, but don't have a use case
     if (*p_interface == NULL) {
         interface = interface_create(name, ifindex);
-        *p_interface = interface;
+        if (interface != NULL) {
+            if (thread_interface_name != NULL && !strcmp(name, thread_interface_name)) {
+                interface->is_thread = true;
+            }
+            *p_interface = interface;
+        }
     }
     return interface;
 }
@@ -4831,6 +4837,7 @@ partition_utun0_address_changed(const struct in6_addr *addr, enum interface_addr
                          SEGMENTED_IPv6_ADDR_PARAM_SRP(addr, addr_buf));
                     srp_proxy_listener_cancel(srp_listener);
                     srp_listener = NULL;
+                    memset(&srp_listener_ip_address, 0, sizeof(srp_listener_ip_address));
                 }
                 if (srp_listener == NULL) {
                     if (!have_non_thread_interface) {
@@ -4915,6 +4922,12 @@ static void
 partition_got_tunnel_name(void)
 {
     partition_tunnel_name_is_known = true;
+    for (interface_t *interface = interfaces; interface; interface = interface->next) {
+        if (!strcmp(interface->name, thread_interface_name)) {
+            interface->is_thread = true;
+            break;
+        }
+    }
     refresh_interface_list();
 }
 

@@ -13,5 +13,16 @@
 		<key>Radar</key>
 		<integer>59374417</integer>
 	</dict>
+	<key>preallocated_cache</key>
+	<dict>
+		<key>Enabled</key>
+		<false/>
+		<key>DisplayName</key>
+		<string>Preallocate Cache Entities</string>
+		<key>Description</key>
+		<string>For memory testing purposes, preallocates the maximum number of cache entities allowed for the record cache during daemon initialization. This feature only applies to OSes that have a cache entity limit, such as iOS, tvOS, and watchOS.</string>
+		<key>Radar</key>
+		<integer>76878894</integer>
+	</dict>
 </dict>
 </plist>

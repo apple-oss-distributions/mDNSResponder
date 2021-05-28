@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil -*-
  *
- * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -58,6 +58,10 @@
 #include "QuerierSupport.h"
 #endif
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, CACHE_MEM_LIMIT)
+#include <os/feature_private.h>
+#endif
+
 // Used on OSX(10.11.x onwards) for manipulating mDNSResponder program arguments
 #if APPLE_OSX_mDNSResponder
 // plist file to read the user's preferences
@@ -77,9 +81,6 @@
 #define kPreferencesKey_DefaultToBLETriggered     CFSTR("DefaultToBLETriggered")
 #endif  // ENABLE_BLE_TRIGGERED_BONJOUR
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, PREALLOCATED_CACHE)
-#define kPreferencesKey_PreallocateCacheMemory    CFSTR("PreallocateCacheMemory")
-#endif
 #define kPreferencesKey_PQWorkaroundThreshold     CFSTR("PQWorkaroundThreshold")
 #endif
 
@@ -121,10 +122,6 @@ mDNSexport void dump_state_to_fd(int fd);
 extern mDNSBool EnableBLEBasedDiscovery;
 extern mDNSBool DefaultToBLETriggered;
 #endif  // ENABLE_BLE_TRIGGERED_BONJOUR
-
-#if MDNSRESPONDER_SUPPORTS(APPLE, PREALLOCATED_CACHE)
-static mDNSBool PreallocateCacheMemory = mDNSfalse;
-#endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, CACHE_MEM_LIMIT)
 #define kRRCacheMemoryLimit 1000000 // For now, we limit the cache to at most 1MB on iOS devices.
@@ -669,8 +666,8 @@ mDNSlocal kern_return_t mDNSDaemonInitialize(void)
         return(err);
     }
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, PREALLOCATED_CACHE)
-    if (PreallocateCacheMemory)
+#if MDNSRESPONDER_SUPPORTS(APPLE, CACHE_MEM_LIMIT)
+    if (os_feature_enabled(mDNSResponder, preallocated_cache))
     {
         const int growCount = (kRRCacheMemoryLimit + kRRCacheGrowSize - 1) / kRRCacheGrowSize;
         int i;
@@ -1609,9 +1606,6 @@ mDNSexport int main(int argc, char **argv)
 #endif  // ENABLE_BLE_TRIGGERED_BONJOUR
 #endif
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, PREALLOCATED_CACHE)
-    PreallocateCacheMemory    = PreferencesGetValueBool(kPreferencesKey_PreallocateCacheMemory,    PreallocateCacheMemory);
-#endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     PQWorkaroundThreshold     = PreferencesGetValueInt(kPreferencesKey_PQWorkaroundThreshold,      PQWorkaroundThreshold);
     CFDictionaryRef managedDefaults = mdns_managed_defaults_create("com.apple.mDNSResponder", NULL);
