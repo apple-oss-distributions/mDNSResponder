@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -594,12 +594,19 @@ exit:
     mdns_release_null_safe(querier);
 }
 
+mDNSlocal mDNSu32 _Querier_GetQuestionCount(void)
+{
+    mDNSu32 count = 0;
+    for (const DNSQuestion *q = mDNSStorage.Questions; q; q = q->next)
+    {
+        count++;
+    }
+    return count;
+}
+
 mDNSexport void Querier_ProcessDNSServiceChanges(void)
 {
     mDNS *const m = &mDNSStorage;
-    DNSQuestion *q;
-    DNSQuestion *restartList = NULL;
-    DNSQuestion **ptr = &restartList;
     mDNSu32 slot;
     CacheGroup *cg;
     CacheRecord *cr;
@@ -607,9 +614,11 @@ mDNSexport void Querier_ProcessDNSServiceChanges(void)
     DNSPushNotificationServer **psp;
 #endif
 
+    const mDNSu32 count = _Querier_GetQuestionCount();
     m->RestartQuestion = m->Questions;
-    while ((q = m->RestartQuestion) != mDNSNULL)
+    for (mDNSu32 i = 0; (i < count) && m->RestartQuestion; i++)
     {
+        DNSQuestion *const q = m->RestartQuestion;
         if (mDNSOpaque16IsZero(q->TargetQID))
         {
             m->RestartQuestion = q->next;
@@ -677,18 +686,12 @@ mDNSexport void Querier_ProcessDNSServiceChanges(void)
                 mDNS_StopQuery_internal(m, q);
                 q->ForcePathEval = forcePathEval;
                 q->next = mDNSNULL;
-                *ptr = q;
-                ptr = &q->next;
+                mDNS_StartQuery_internal(m, q);
             }
         }
         if (m->RestartQuestion == q) m->RestartQuestion = q->next;
     }
-    while ((q = restartList) != mDNSNULL)
-    {
-        restartList = q->next;
-        q->next = mDNSNULL;
-        mDNS_StartQuery_internal(m, q);
-    }
+    m->RestartQuestion = mDNSNULL;
 #if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
     // The above code may have found some DNS Push servers that are no longer valid.   Now that we
     // are done running through the code, we need to drop our connections to those servers.
