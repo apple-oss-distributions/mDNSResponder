@@ -1,0 +1,4 @@
+FUZZER_NAME = FUZZING_DNSMESSAGETOSTRING
+EXECUTABLE_NAME = fuzz-dns-message-to-string
+
+#include "Tests/Fuzzing/fuzzer.xcconfig"

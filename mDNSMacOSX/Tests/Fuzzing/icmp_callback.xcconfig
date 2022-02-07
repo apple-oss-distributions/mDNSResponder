@@ -1,0 +1,4 @@
+FUZZER_NAME = FUZZING_ICMP_CALLBACK
+EXECUTABLE_NAME = fuzz-icmp-callback
+
+#include "Tests/Fuzzing/fuzzer.xcconfig"

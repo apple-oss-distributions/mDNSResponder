@@ -1,12 +1,12 @@
 /* dso.h
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,18 +21,27 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "nullability.h"
 
 // Maximum number of additional TLVs we support in a DSO message.
 #define MAX_ADDITLS           10
 
+// Use 0 to represent an invalid ID for the object dso_connect_t.
+#define DSO_STATE_INVALID_SERIAL 0
+
 typedef enum {
+    // Standard DSO Types from RFC 8490
     kDSOType_Keepalive = 1,
     kDSOType_RetryDelay = 2,
     kDSOType_EncryptionPadding = 3,
+
+    // Standard DSO Types from RFC 8765
     kDSOType_DNSPushSubscribe = 0x40,
     kDSOType_DNSPushUpdate = 0x41,
     kDSOType_DNSPushUnsubscribe = 0x42,
     kDSOType_DNSPushReconfirm = 0x43,
+
+    // Experimental types, taken from the experimental number space, for the discovery relay.
     kDSOType_mDNSLinkRequest = 0xF901,
     kDSOType_mDNSLinkDiscontinue = 0xF902,
     kDSOType_mDNSMessage = 0xF903,
@@ -43,7 +52,22 @@ typedef enum {
     kDSOType_mDNSStopLinkChanges = 0xF908,
     kDSOType_mDNSLinkAvailable = 0xF900,
     kDSOType_mDNSLinkUnavailable = 0xF90a,
-    kDSOType_LinkPrefix = 0xf90b
+    kDSOType_LinkPrefix = 0xF90b,
+
+    // Experimental types, taken from the experimental number space, for SRP Replication.
+    kDSOType_SRPLSession = 0xF90c,
+    kDSOType_SRPLSendCandidates = 0xF90d,
+    kDSOType_SRPLCandidate = 0xF90e,
+    kDSOType_SRPLHost = 0xF90f,
+    kDSOType_SRPLServerID = 0xF910,
+    kDSOType_SRPLCandidateYes = 0xF911,
+    kDSOType_SRPLCandidateNo = 0xF912,
+    kDSOType_SRPLConflict = 0xF913,
+    kDSOType_SRPLHostname = 0xF914,
+    kDSOType_SRPLHostMessage = 0xF915,
+    kDSOType_SRPLTimeOffset = 0xF916,
+    kDSOType_SRPLKeyID = 0xF917,
+    kDSOType_SRPLServerStableID = 0xF918,
 } dso_message_types_t;
 
 // When a DSO message arrives, or one that was sent is acknowledged, or the state of the DSO connection
@@ -81,6 +105,7 @@ typedef struct dso_outstanding_query_state {
 
 typedef struct dso_query_receive_context {
     void *query_context;
+    void *message_context;
     uint16_t rcode;
 } dso_query_receive_context_t;
 
@@ -121,21 +146,38 @@ struct dso_activity {
     void (*finalize)(dso_activity_t *activity);
     const char *activity_type;  // Name of the activity type, must be the same pointer for all activities of a type.
     void *context;              // Activity implementation's context (if any).
-    char *name;                 // Name of the individual activity
+    char *name;                 // Name of the individual activity.
 };
 
 typedef struct dso_transport dso_transport_t;
 typedef struct dso_state dso_state_t;
-typedef int64_t event_time_t;
+typedef int32_t event_time_t;
 
-typedef void (*dso_event_callback_t)(void *context, const void *header,
+typedef void (*dso_event_callback_t)(void *context, void *header,
                                      dso_state_t *dso, dso_event_type_t eventType);
 typedef void (*dso_transport_finalize_t)(dso_transport_t *transport);
+
+typedef enum {
+    // When the object is created and holds a reference to the context, the callback(see below) is called with
+    // dso_life_cycle_create.
+    dso_life_cycle_create,
+    // When the object is canceled, the callback(see below) is called with dso_life_cycle_cancel to provide a chance
+    // for the context to do the corresponding cleaning work(cancel or release/free).
+    dso_life_cycle_cancel,
+    // When the object is freed, the callback(see below) is called with dso_life_cycle_free to provide a chance for the
+    // context to clean anything remains allocated.
+    dso_life_cycle_free
+} dso_life_cycle_t;
+
+typedef void (*dso_life_cycle_context_callback_t)(const dso_life_cycle_t life_cycle, void *const context,
+                                                  dso_state_t *const dso);
 
 // DNS Stateless Operations state
 struct dso_state {
     dso_state_t *next;
     void *context;                   // The context of the next layer up (e.g., a Discovery Proxy)
+    // The callback gets called when dso_state_t is created, canceled or freed.
+    dso_life_cycle_context_callback_t context_callback;
     dso_event_callback_t cb;         // Called when an event happens
 
     // Transport state; handled separately for reusability
@@ -164,12 +206,15 @@ struct dso_state {
 };
 
 // Provided by dso.c
-dso_state_t *dso_create(bool is_server, int max_outstanding_queries, const char *remote_name,
-                        dso_event_callback_t callback, void *context, dso_transport_t *transport);
+dso_state_t *dso_state_create(bool is_server, int max_outstanding_queries, const char *remote_name,
+                        dso_event_callback_t callback, void *const context,
+                        const dso_life_cycle_context_callback_t context_callback,
+                        dso_transport_t *transport);
 dso_state_t *dso_find_by_serial(uint32_t serial);
-void dso_drop(dso_state_t *dso);
-int32_t dso_idle(void *context, int64_t now, int64_t next_timer_event);
-void dso_release(dso_state_t **dsop);
+void dso_state_cancel(dso_state_t *dso);
+int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event);
+void dso_set_event_context(dso_state_t *dso, void *context);
+void dso_set_event_callback(dso_state_t *dso, dso_event_callback_t callback);
 void dso_start_tlv(dso_message_t *state, int opcode);
 void dso_add_tlv_bytes(dso_message_t *state, const uint8_t *bytes, size_t len);
 void dso_add_tlv_bytes_no_copy(dso_message_t *state, const uint8_t *bytes, size_t len);
@@ -182,16 +227,18 @@ dso_activity_t *dso_add_activity(dso_state_t *dso, const char *name, const char 
                                             void *context, void (*finalize)(dso_activity_t *));
 void dso_drop_activity(dso_state_t *dso, dso_activity_t *activity);
 void dso_ignore_response(dso_state_t *dso, void *context);
-bool dso_make_message(dso_message_t *state, uint8_t *outbuf, size_t outbuf_size,
-                      dso_state_t *dso, bool unidirectional, void *callback_state);
+bool dso_make_message(dso_message_t *state, uint8_t *outbuf, size_t outbuf_size, dso_state_t *dso,
+                      bool unidirectional, bool response, uint16_t xid, int rcode, void *callback_state);
 size_t dso_message_length(dso_message_t *state);
 void dso_retry_delay(dso_state_t *dso, const DNSMessageHeader *header);
 void dso_keepalive(dso_state_t *dso, const DNSMessageHeader *header);
-void dso_message_received(dso_state_t *dso, const uint8_t *message, size_t message_length);
-void dns_message_received(dso_state_t *dso, const uint8_t *message, size_t message_length);
+void dso_message_received(dso_state_t *dso, const uint8_t *message, size_t message_length, void *context);
+void dns_message_received(dso_state_t *dso, const uint8_t *message, size_t message_length, void *context);
+
+const char *dso_event_type_to_string(dso_event_type_t dso_event_type);
 
 // Provided by DSO transport implementation for use by dso.c:
-int32_t dso_transport_idle(void *context, int64_t now, int64_t next_timer_event);
+int32_t dso_transport_idle(void *context, int32_t now, int32_t next_timer_event);
 bool dso_send_simple_response(dso_state_t *dso, int rcode, const DNSMessageHeader *header, const char *pres);
 bool dso_send_not_implemented(dso_state_t *dso, const DNSMessageHeader *header);
 bool dso_send_refused(dso_state_t *dso, const DNSMessageHeader *header);

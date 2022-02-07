@@ -39,7 +39,7 @@ extern "C" {
 // Macintosh
 
 #if ( !defined( TARGET_OS_MAC ) )
-    #if ( ( macintosh || __MACH__ ) && !KERNEL )
+    #if ( ( macintosh || __MACH__ ) && (!defined(KERNEL) || !KERNEL) )
 // ConditionalMacros.h in CoreServices will define this TARGET_* flag.
     #else
         #define TARGET_OS_MAC           0
@@ -47,7 +47,7 @@ extern "C" {
 #endif
 
 #if ( !defined( TARGET_API_MAC_OSX_KERNEL ) )
-    #if ( __MACH__ && KERNEL )
+    #if ( __MACH__ && defined(KERNEL) && KERNEL )
         #define TARGET_API_MAC_OSX_KERNEL       1
     #else
         #define TARGET_API_MAC_OSX_KERNEL       0
@@ -98,7 +98,7 @@ extern "C" {
 
 #if ( !defined( TARGET_OS_WIN32 ) )
     #if ( macintosh || __MACH__ )
-// ConditionalMacros.h in CoreServices will define this TARGET_* flag.
+        #define TARGET_OS_WIN32         0
     #else
         #if ( defined( _WIN32 ) )
             #define TARGET_OS_WIN32     1
@@ -126,14 +126,14 @@ extern "C" {
 //	 Includes
 //===========================================================================================================================
 
-#if ( !KERNEL )
+#if ( !defined(KERNEL) || !KERNEL )
     #if defined(WIN32) && !defined(_WSPIAPI_COUNTOF)
         #define _WSPIAPI_COUNTOF(_Array) (sizeof(_Array) / sizeof(_Array[0]))
     #endif
     #include    <stddef.h>
 #endif
 
-#if ( ( macintosh || __MACH__ ) && !KERNEL )
+#if ( ( (defined(macintosh) && macintosh) || __MACH__ ) && (!defined(KERNEL) || !KERNEL) )
 
     #if ( defined( __MWERKS__ ) )
         #if ( __option( c9x ) )
@@ -237,6 +237,8 @@ extern "C" {
         #include    <stdint.h>
 
     #elif ( defined( _MSC_VER ) )
+
+    #include    "VisualStudioSupport.h"
 
         #if ( _MSC_VER >= 1900 )
             #include    <stdint.h>
@@ -1480,7 +1482,7 @@ int NumVersionCompare( uint32_t inLeft, uint32_t inRight );
     @abstract	Unit test.
  */
 
-#if ( DEBUG )
+#if ( defined( DEBUG ) && DEBUG )
 OSStatus    CommonServicesTest( void );
 #endif
 

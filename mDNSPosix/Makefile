@@ -1,29 +1,18 @@
 # -*- tab-width: 4 -*-
 #
-# Copyright (c) 2002-2019 Apple Inc. All rights reserved.
+# Copyright (c) 2002-2021 Apple Inc. All rights reserved.
 #
-# Redistribution and use in source and binary forms, with or without 
-# modification, are permitted provided that the following conditions are met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# 1.  Redistributions of source code must retain the above copyright notice, 
-#     this list of conditions and the following disclaimer. 
-# 2.  Redistributions in binary form must reproduce the above copyright notice, 
-#     this list of conditions and the following disclaimer in the documentation 
-#     and/or other materials provided with the distribution. 
-# 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of its 
-#     contributors may be used to endorse or promote products derived from this 
-#     software without specific prior written permission. 
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY 
-# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED 
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
-# DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY 
-# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES 
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; 
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND 
-# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS 
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # IMPORTANT NOTE: This is a Makefile for *GNU make*
 # On some systems, a different program may be the default "make" command.
@@ -52,7 +41,9 @@ LIBVERS = 1
 
 COREDIR = ../mDNSCore
 SHAREDDIR ?= ../mDNSShared
+UTILDIR ?= ../mDNSShared/utilities
 DSODIR ?= ../DSO
+SERVICEREGISTRATIONDIR ?= ../ServiceRegistration
 JDK = /usr/jdk
 
 SYSTEM := $(shell uname -s)
@@ -71,18 +62,12 @@ SOOPTS = -shared
 CP = cp
 RM = rm
 LN = ln -s -f
-CFLAGS_COMMON = -I$(COREDIR) -I$(SHAREDDIR) -I$(DSODIR) -I$(PROXYDIR) -I$(OBJDIR) -fwrapv -W -Wall -DPID_FILE=\"/var/run/mdnsd.pid\" -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\"
+CFLAGS_COMMON = -I$(COREDIR) -I$(SHAREDDIR) -I$(UTILDIR) -I$(DSODIR) -I$(SERVICEREGISTRATIONDIR) -I$(OBJDIR) -fwrapv -W -Wall -DPOSIX_BUILD -DPID_FILE=\"/var/run/mdnsd.pid\" -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\"
 CFLAGS_PTHREAD =
 LINKOPTS =
 LINKOPTS_PTHREAD = -lpthread
 LDSUFFIX = so
 JAVACFLAGS_OS = -fPIC -shared -ldns_sd
-
-ifeq "$(OPEN_SOURCE)" "1"
-CFLAGS_OPEN_SOURCE=-D__OPEN_SOURCE__
-else
-CFLAGS_OPEN_SOURCE=
-endif
 
 # Set up diverging paths for debug vs. prod builds
 ifeq "$(DEBUG)" "1"
@@ -124,7 +109,13 @@ else
 
 # any target that contains the string "linux"
 ifeq ($(findstring linux,$(os)),linux)
-CFLAGS_OS = -D_GNU_SOURCE -DHAVE_IPV6 -DNOT_HAVE_SA_LEN -DUSES_NETLINK -DHAVE_LINUX -DTARGET_OS_LINUX -ftabstop=4
+ifeq ($(tls), no)
+CFLAGS_OS = -D_GNU_SOURCE -DHAVE_IPV6 -DNOT_HAVE_SA_LEN -DUSES_NETLINK -DHAVE_LINUX -DTARGET_OS_LINUX -ftabstop=4 -Wno-expansion-to-defined
+TLSOBJS =
+else
+CFLAGS_OS = -D_GNU_SOURCE -DHAVE_IPV6 -DNOT_HAVE_SA_LEN -DUSES_NETLINK -DHAVE_LINUX -DTARGET_OS_LINUX -DPOSIX_HAS_TLS -ftabstop=4 -Wno-expansion-to-defined
+TLSOBJS = $(OBJDIR)/mbedtls.c.o -lmbedtls -lmbedcrypto
+endif
 LD = $(CC)
 SOOPTS = -shared
 FLEXFLAGS_OS = -l
@@ -238,7 +229,7 @@ endif
 endif
 endif
 
-MDNSCFLAGS = $(CFLAGS) $(CFLAGS_COMMON) $(CFLAGS_OS) $(CFLAGS_DEBUGGING) $(CFLAGS_OPEN_SOURCE)
+MDNSCFLAGS = $(CFLAGS) $(CFLAGS_COMMON) $(CFLAGS_OS) $(CFLAGS_DEBUGGING)
 
 #############################################################################
 
@@ -265,7 +256,7 @@ DAEMONOBJS = $(OBJDIR)/PosixDaemon.c.o $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP
              $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/dnssd_ipc.c.o $(OBJDIR)/GenLinkedList.c.o \
              $(OBJDIR)/PlatformCommon.c.o $(OBJDIR)/ClientRequests.c.o \
              $(OBJDIR)/dso.c.o $(OBJDIR)/dso-transport.c.o $(OBJDIR)/dnssd_clientshim.c.o \
-             $(OBJDIR)/posix_utilities.c.o
+             $(TLSOBJS) $(OBJDIR)/mdns_addr_tailq.c.o $(OBJDIR)/misc_utilities.c.o
 
 # dnsextd target build dnsextd
 DNSEXTDOBJ = $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/GenLinkedList.c.o $(OBJDIR)/DNSDigest.c.o \
@@ -282,7 +273,7 @@ $(BUILDDIR)/mdnsd: $(DAEMONOBJS)
 libdns_sd: setup $(BUILDDIR)/libdns_sd.$(LDSUFFIX)
 	@echo "Client library done"
 
-CLIENTLIBOBJS = $(OBJDIR)/dnssd_clientlib.c.so.o $(OBJDIR)/dnssd_clientstub.c.so.o $(OBJDIR)/dnssd_ipc.c.so.o
+CLIENTLIBOBJS = $(OBJDIR)/dnssd_clientlib.c.so.o $(OBJDIR)/dnssd_clientstub.c.so.o $(OBJDIR)/dnssd_ipc.c.so.o $(OBJDIR)/dnssd_errstring.c.so.o
 
 $(BUILDDIR)/libdns_sd.$(LDSUFFIX): $(CLIENTLIBOBJS)
 	$(LD) $(SOOPTS) $(LINKOPTS) -o $@ $+
@@ -385,7 +376,7 @@ $(NSSINSTPATH)/$(NSSLIBFILE): $(BUILDDIR)/$(NSSLIBFILE)
 # Check the nsswitch.conf file.
 # If 'mdns' does not already appear on the "hosts:" line, then add it right before 'dns'
 	cp -f /etc/nsswitch.conf /etc/nsswitch.conf.pre-mdns
-	sed -e '/mdns/!s/^\(hosts:.*\)dns\(.*\)/\1mdns dns\2/' /etc/nsswitch.conf.pre-mdns > /etc/nsswitch.conf
+	sed -e '/\bmdns\b/!s/^\(hosts:.*\)dns\(.*\)/\1mdns dns\2/' /etc/nsswitch.conf.pre-mdns > /etc/nsswitch.conf
 
 #############################################################################
 
@@ -473,7 +464,8 @@ JavaDoc: Java setup
 # The following targets build embedded example programs
 SPECIALOBJ = $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/GenLinkedList.c.o \
 	$(OBJDIR)/DNSDigest.c.o $(OBJDIR)/uDNS.c.o $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/PlatformCommon.c.o \
-	$(OBJDIR)/dso.c.o $(OBJDIR)/dso-transport.c.o $(OBJDIR)/dnssd_clientshim.c.o
+	$(OBJDIR)/dso.c.o $(OBJDIR)/dso-transport.c.o $(OBJDIR)/dnssd_clientshim.c.o \
+	$(OBJDIR)/mdns_addr_tailq.c.o $(OBJDIR)/misc_utilities.c.o
 COMMONOBJ  = $(SPECIALOBJ) $(OBJDIR)/mDNS.c.o
 APPOBJ     = $(COMMONOBJ) $(OBJDIR)/ExampleClientApp.c.o
 
@@ -492,16 +484,16 @@ NetMonitor: setup $(BUILDDIR)/mDNSNetMonitor
 dnsextd: setup $(BUILDDIR)/dnsextd
 	@echo "dnsextd done"
 
-$(BUILDDIR)/mDNSClientPosix:         $(APPOBJ)     $(OBJDIR)/Client.c.o
+$(BUILDDIR)/mDNSClientPosix:         $(APPOBJ) $(TLSOBJS)     $(OBJDIR)/Client.c.o
 	$(CC) $+ -o $@ $(LINKOPTS)
 
-$(BUILDDIR)/mDNSResponderPosix:      $(COMMONOBJ)  $(OBJDIR)/Responder.c.o
+$(BUILDDIR)/mDNSResponderPosix:      $(COMMONOBJ) $(TLSOBJS)  $(OBJDIR)/Responder.c.o
 	$(CC) $+ -o $@ $(LINKOPTS)
 
-$(BUILDDIR)/mDNSProxyResponderPosix: $(COMMONOBJ)  $(OBJDIR)/ProxyResponder.c.o
+$(BUILDDIR)/mDNSProxyResponderPosix: $(COMMONOBJ) $(TLSOBJS)  $(OBJDIR)/ProxyResponder.c.o
 	$(CC) $+ -o $@ $(LINKOPTS)
 
-$(BUILDDIR)/mDNSNetMonitor:          $(SPECIALOBJ) $(OBJDIR)/NetMonitor.c.o
+$(BUILDDIR)/mDNSNetMonitor:          $(SPECIALOBJ) $(TLSOBJS) $(OBJDIR)/NetMonitor.c.o
 	$(CC) $+ -o $@ $(LINKOPTS)
 
 $(OBJDIR)/NetMonitor.c.o:            $(COREDIR)/mDNS.c # Note: NetMonitor.c textually imports mDNS.c
@@ -522,6 +514,9 @@ $(OBJDIR)/%.c.o:	$(SHAREDDIR)/%.c
 	$(CC) $(MDNSCFLAGS) -c -o $@ $<
 
 $(OBJDIR)/%.c.o:	$(DSODIR)/%.c
+	$(CC) $(MDNSCFLAGS) -c -o $@ $<
+
+$(OBJDIR)/%.c.o:	$(UTILDIR)/%.c
 	$(CC) $(MDNSCFLAGS) -c -o $@ $<
 
 $(OBJDIR)/%.c.threadsafe.o:	%.c

@@ -17,6 +17,7 @@
 #include "SymptomReporter.h"
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, SYMPTOMS) && !MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+#include "mdns_strict.h"
 #include <arpa/inet.h>
 #include <dlfcn.h>
 #include <stddef.h>

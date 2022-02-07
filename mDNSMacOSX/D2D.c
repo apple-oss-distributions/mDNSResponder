@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,8 +21,8 @@
 #include "dns_sd.h"                 // For mDNSInterface_LocalOnly etc.
 #include "dns_sd_internal.h"
 #include "uds_daemon.h"
-#include "BLE.h"
-#include "mdns_powerlog.h"
+#include <mdns/powerlog.h>
+#include "mdns_strict.h"
 
 D2DStatus D2DInitialize(CFRunLoopRef runLoop, D2DServiceCallback serviceCallback, void* userData) __attribute__((weak_import));
 D2DStatus D2DRetain(D2DServiceInstance instanceHandle, D2DTransportType transportType) __attribute__((weak_import));
@@ -60,7 +60,9 @@ mDNSexport void D2D_stop_advertising_interface(NetworkInterfaceInfo *interface)
     {
         // only log if we have a valid record to stop advertising
         if (interface->RR_A.resrec.RecordType || interface->RR_PTR.resrec.RecordType)
-            LogInfo("D2D_stop_advertising_interface: %s", interface->ifname);
+        {
+            LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "D2D_stop_advertising_interface: " PUB_S, interface->ifname);
+        }
 
         if (interface->RR_A.resrec.RecordType)
             external_stop_advertising_service(&interface->RR_A.resrec, 0, 0);
@@ -138,7 +140,7 @@ mDNSlocal mDNSu8 *putVal32(mDNSu8 *ptr, mDNSu32 val)
 mDNSlocal void DomainnameToLower(const domainname * const in, domainname * const out)
 {
     const mDNSu8 * const start = (const mDNSu8 * const)in;
-    mDNSu8 *ptr = (mDNSu8*)start;
+    const mDNSu8 *ptr = (const mDNSu8*)start;
     while(*ptr)
     {
         mDNSu8 c = *ptr;
@@ -149,7 +151,7 @@ mDNSlocal void DomainnameToLower(const domainname * const in, domainname * const
     out->c[ptr-start] = *ptr;
 }
 
-mDNSlocal mDNSu8 * DNSNameCompressionBuildLHS(const domainname* typeDomain, DNS_TypeValues qtype)
+mDNSlocal mDNSu8 * DNSNameCompressionBuildLHS(const domainname* typeDomain, mDNSu16 qtype)
 {
     mDNSu8 *ptr = putDomainNameAsLabels(&compression_base_msg, compression_lhs, compression_limit, typeDomain);
     if (!ptr) return ptr;
@@ -166,12 +168,15 @@ mDNSlocal mDNSu8 * DNSNameCompressionBuildRHS(mDNSu8 *start, const ResourceRecor
     return putRData(&compression_base_msg, start, compression_limit, resourceRecord);
 }
 
-mDNSlocal void PrintHelper(const char *const tag, mDNSu8 *lhs, mDNSu16 lhs_len, mDNSu8 *rhs, mDNSu16 rhs_len)
+mDNSlocal void PrintHelper(const char *const tag, const mDNSu8 *lhs, mDNSu16 lhs_len, const mDNSu8 *rhs, mDNSu16 rhs_len)
 {
     if (mDNS_LoggingEnabled)
     {
-        LogDebug("%s: LHS: (%d bytes) %.*H", tag, lhs_len, lhs_len, lhs);
-        if (rhs) LogDebug("%s: RHS: (%d bytes) %.*H", tag, rhs_len, rhs_len, rhs);
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEBUG, PUB_S ": LHS: (%d bytes) " PRI_HEX, tag, lhs_len, HEX_PARAM(lhs, lhs_len));
+        if (rhs)
+        {
+            LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEBUG, PUB_S ": RHS: (%d bytes) " PRI_HEX, tag, rhs_len, HEX_PARAM(rhs, rhs_len));
+        }
     }
 }
 
@@ -183,8 +188,12 @@ mDNSlocal void FreeD2DARElemCallback(mDNS *const m, AuthRecord *const rr, mStatu
         D2DRecordListElem **ptr = &D2DRecords;
         D2DRecordListElem *tmp;
         while (*ptr && &(*ptr)->ar != rr) ptr = &(*ptr)->next;
-        if (!*ptr) { LogMsg("FreeD2DARElemCallback: Could not find in D2DRecords: %s", ARDisplayString(m, rr)); return; }
-        LogInfo("FreeD2DARElemCallback: Found in D2DRecords: %s", ARDisplayString(m, rr));
+        if (!*ptr)
+        {
+            LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEFAULT, "FreeD2DARElemCallback: Could not find in D2DRecords: " PRI_S, ARDisplayString(m, rr));
+            return;
+        }
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "FreeD2DARElemCallback: Found in D2DRecords: " PRI_S, ARDisplayString(m, rr));
         tmp = *ptr;
         *ptr = (*ptr)->next;
         // Just because we stoppped browsing, doesn't mean we should tear down the PAN connection.
@@ -209,7 +218,7 @@ mDNSexport void external_connection_release(const domainname *instance)
     }
 }
 
-mDNSlocal void xD2DClearCache(const domainname *regType, DNS_TypeValues qtype)
+mDNSlocal void xD2DClearCache(const domainname *regType, mDNSu16 qtype)
 {
     D2DRecordListElem *ptr = D2DRecords;
     for ( ; ptr ; ptr = ptr->next)
@@ -338,8 +347,8 @@ mDNSlocal mStatus xD2DParse(const mDNSu8 * const lhs, const mDNSu16 lhs_len, con
         LogInfo("xD2DParse: Our Bytes (%d bytes): %.*H", len, len, compression_lhs);
     }
 
-    ptr = (mDNSu8 *) GetLargeResourceRecord(m, &compression_base_msg, compression_lhs, ptr, mDNSInterface_Any, kDNSRecordTypePacketAns, &m->rec);
-    if (!ptr || m->rec.r.resrec.RecordType == kDNSRecordTypePacketNegative)
+    const mDNSu8 *const next = GetLargeResourceRecord(m, &compression_base_msg, compression_lhs, ptr, mDNSInterface_Any, kDNSRecordTypePacketAns, &m->rec);
+    if (!next || m->rec.r.resrec.RecordType == kDNSRecordTypePacketNegative)
     {
         LogMsg("xD2DParse: failed to get large RR");
         m->rec.r.resrec.RecordType = 0;
@@ -381,18 +390,11 @@ mDNSexport void xD2DAddToCache(D2DStatus result, D2DServiceInstance instanceHand
         if (err)
         {
             LogMsg("xD2DAddToCache: xD2DParse returned error: %d", err);
-            PrintHelper(__func__, (mDNSu8 *)key, (mDNSu16)keySize, (mDNSu8 *)value, (mDNSu16)valueSize);
+            PrintHelper(__func__, key, (mDNSu16)keySize, value, (mDNSu16)valueSize);
             if (ptr)
                 mDNSPlatformMemFree(ptr);
             return;
         }
-
-#if ENABLE_BLE_TRIGGERED_BONJOUR
-        // If the record was created based on a BLE beacon, update the interface index to indicate
-        // this and thus match BLE specific queries.
-        if (transportType == D2DBLETransport)
-            ptr->ar.resrec.InterfaceID = mDNSInterface_BLE;
-#endif // ENABLE_BLE_TRIGGERED_BONJOUR
 
         err = mDNS_Register(m, &ptr->ar);
         if (err)
@@ -423,7 +425,7 @@ mDNSlocal D2DRecordListElem * xD2DFindInList(const Byte *const key, const size_t
     if (err)
     {
         LogMsg("xD2DFindInList: xD2DParse returned error: %d", err);
-        PrintHelper(__func__, (mDNSu8 *)key, (mDNSu16)keySize, (mDNSu8 *)value, (mDNSu16)valueSize);
+        PrintHelper(__func__, key, (mDNSu16)keySize, value, (mDNSu16)valueSize);
         if (arptr)
             mDNSPlatformMemFree(arptr);
         return NULL;
@@ -530,7 +532,7 @@ mDNSlocal void xD2DServiceCallback(D2DServiceEvent event, D2DStatus result, D2DS
     }
 
     LogInfo("xD2DServiceCallback: event=%s result=%d instanceHandle=%p transportType=%d LHS=%p (%u) RHS=%p (%u) userData=%p", eventString, result, instanceHandle, transportType, key, keySize, value, valueSize, userData);
-    PrintHelper(__func__, (mDNSu8 *)key, (mDNSu16)keySize, (mDNSu8 *)value, (mDNSu16)valueSize);
+    PrintHelper(__func__, key, (mDNSu16)keySize, value, (mDNSu16)valueSize);
 
     switch (event)
     {
@@ -573,76 +575,68 @@ mDNSlocal D2DTransportType xD2DInterfaceToTransportType(mDNSInterfaceID Interfac
     // Call all D2D plugins when both kDNSServiceFlagsIncludeP2P and kDNSServiceFlagsIncludeAWDL are set.
     if ((flags & kDNSServiceFlagsIncludeP2P) && (flags & kDNSServiceFlagsIncludeAWDL))
     {
-        LogInfo("xD2DInterfaceToTransportType: returning D2DTransportMax (including AWDL) since both kDNSServiceFlagsIncludeP2P and kDNSServiceFlagsIncludeAWDL are set");
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "xD2DInterfaceToTransportType: returning D2DTransportMax (including AWDL) since both "
+            "kDNSServiceFlagsIncludeP2P and kDNSServiceFlagsIncludeAWDL are set");
         *excludedTransportType = D2DTransportMax;
         return D2DTransportMax;
     } 
     // Call all D2D plugins (exlcluding AWDL) when only kDNSServiceFlagsIncludeP2P is set.
     else if (flags & kDNSServiceFlagsIncludeP2P)
     {
-        LogInfo("xD2DInterfaceToTransportType: returning D2DTransportMax (excluding AWDL) since only kDNSServiceFlagsIncludeP2P is set");
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "xD2DInterfaceToTransportType: returning D2DTransportMax (excluding AWDL) since only "
+            "kDNSServiceFlagsIncludeP2P is set");
         return D2DTransportMax;
     }
     // Call AWDL D2D plugin when only kDNSServiceFlagsIncludeAWDL is set.
     else if (flags & kDNSServiceFlagsIncludeAWDL)
     {
-        LogInfo("xD2DInterfaceToTransportType: returning D2DAWDLTransport since only kDNSServiceFlagsIncludeAWDL is set");
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "xD2DInterfaceToTransportType: returning D2DAWDLTransport since only kDNSServiceFlagsIncludeAWDL is "
+            "set");
         return D2DAWDLTransport;
     }
 
     if (InterfaceID == mDNSInterface_P2P)
     {
-        LogInfo("xD2DInterfaceToTransportType: returning D2DTransportMax (excluding AWDL) for interface index mDNSInterface_P2P");
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "xD2DInterfaceToTransportType: returning D2DTransportMax (excluding AWDL) for interface index "
+            "mDNSInterface_P2P");
         return D2DTransportMax; 
     }
 
     // Compare to cached AWDL interface ID.
     if (AWDLInterfaceID && (InterfaceID == AWDLInterfaceID))
     {
-        LogInfo("xD2DInterfaceToTransportType: returning D2DAWDLTransport for interface index %d", InterfaceID);
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "xD2DInterfaceToTransportType: returning D2DAWDLTransport for interface index %p", InterfaceID);
         return D2DAWDLTransport;
     }
 
     info = IfindexToInterfaceInfoOSX(InterfaceID);
     if (info == NULL)
     {
-        LogInfo("xD2DInterfaceToTransportType: Invalid interface index %d", InterfaceID);
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "xD2DInterfaceToTransportType: Invalid interface index %p", InterfaceID);
         return D2DTransportMax;
     }
 
     // Recognize AirDrop specific p2p* interface based on interface name.
     if (strncmp(info->ifinfo.ifname, "p2p", 3) == 0)
     {
-        LogInfo("xD2DInterfaceToTransportType: returning D2DWifiPeerToPeerTransport for interface index %d", InterfaceID);
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "xD2DInterfaceToTransportType: returning D2DWifiPeerToPeerTransport for interface index %p",
+            InterfaceID);
         return D2DWifiPeerToPeerTransport;
     }
 
     // Currently there is no way to identify Bluetooth interface by name,
     // since they use "en*" based name strings.
 
-    LogInfo("xD2DInterfaceToTransportType: returning default D2DTransportMax for interface index %d", InterfaceID);
+    LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "xD2DInterfaceToTransportType: returning default D2DTransportMax for interface index %p", InterfaceID);
     return D2DTransportMax;
 }
 
-mDNSexport void external_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const typeDomain, DNS_TypeValues qtype, DNSServiceFlags flags, pid_t clientPID)
+mDNSexport void external_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const typeDomain, mDNSu16 qtype, DNSServiceFlags flags, pid_t clientPID)
 {
-#if ENABLE_BLE_TRIGGERED_BONJOUR
-    // BLE support currently not handled by a D2D plugin
-    if (applyToBLE(InterfaceID, flags))
-    {
-        domainname lower;
-
-        DomainnameToLower(typeDomain, &lower);
-        // pass in the key and keySize
-        mDNSu8 *end = DNSNameCompressionBuildLHS(&lower, qtype);
-        start_BLE_browse(InterfaceID, &lower, qtype, flags, compression_lhs, end - compression_lhs);
-    }
-    else
-#endif  // ENABLE_BLE_TRIGGERED_BONJOUR
-        internal_start_browsing_for_service(InterfaceID, typeDomain, qtype, flags, clientPID);
+    internal_start_browsing_for_service(InterfaceID, typeDomain, qtype, flags, clientPID);
 }
 
-mDNSexport void internal_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const typeDomain, DNS_TypeValues qtype, DNSServiceFlags flags, pid_t clientPID)
+mDNSexport void internal_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const typeDomain, mDNSu16 qtype, DNSServiceFlags flags, pid_t clientPID)
 {
     domainname lower;
 
@@ -653,8 +647,9 @@ mDNSexport void internal_start_browsing_for_service(mDNSInterfaceID InterfaceID,
         D2DTransportType transportType, excludedTransport;
 
         LogInfo("%s: Starting browse for: %##s %s", __func__, lower.c, DNSTypeName(qtype));
-        mDNSu8 *end = DNSNameCompressionBuildLHS(&lower, qtype);
-        PrintHelper(__func__, compression_lhs, end - compression_lhs, mDNSNULL, 0);
+        mDNSu8 *const end = DNSNameCompressionBuildLHS(&lower, qtype);
+        const size_t keyLen = (size_t)(end - compression_lhs);
+        PrintHelper(__func__, compression_lhs, (mDNSu16)keyLen, mDNSNULL, 0);
 
         transportType = xD2DInterfaceToTransportType(InterfaceID, flags, & excludedTransport);
         if (transportType == D2DTransportMax)
@@ -669,7 +664,7 @@ mDNSexport void internal_start_browsing_for_service(mDNSInterfaceID InterfaceID,
                     {
                         mdns_powerlog_awdl_browse_start(typeDomain->c, qtype, clientPID);
                     }
-                    D2DStartBrowsingForKeyOnTransport(compression_lhs, end - compression_lhs, i);
+                    D2DStartBrowsingForKeyOnTransport(compression_lhs, keyLen, i);
                 }
             }
         }
@@ -681,33 +676,19 @@ mDNSexport void internal_start_browsing_for_service(mDNSInterfaceID InterfaceID,
                 {
                     mdns_powerlog_awdl_browse_start(typeDomain->c, qtype, clientPID);
                 }
-                D2DStartBrowsingForKeyOnTransport(compression_lhs, end - compression_lhs, transportType);
+                D2DStartBrowsingForKeyOnTransport(compression_lhs, keyLen, transportType);
             }
         }
     }
     D2DBrowseListRetain(&lower, qtype);
 }
 
-mDNSexport void external_stop_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const typeDomain, DNS_TypeValues qtype, DNSServiceFlags flags, pid_t clientPID)
+mDNSexport void external_stop_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const typeDomain, mDNSu16 qtype, DNSServiceFlags flags, pid_t clientPID)
 {
-#if ENABLE_BLE_TRIGGERED_BONJOUR
-    // BLE support currently not handled by a D2D plugin
-    if (applyToBLE(InterfaceID, flags))
-    {
-        domainname lower;
-
-        // If this is the last instance of this browse, clear any cached records recieved for it.
-        // We are not guaranteed to get a D2DServiceLost event for all key, value pairs cached over BLE.
-        DomainnameToLower(typeDomain, &lower);
-        if (stop_BLE_browse(InterfaceID, &lower, qtype, flags))
-            xD2DClearCache(&lower, qtype);
-    }
-    else
-#endif  // ENABLE_BLE_TRIGGERED_BONJOUR
-        internal_stop_browsing_for_service(InterfaceID, typeDomain, qtype, flags, clientPID);
+    internal_stop_browsing_for_service(InterfaceID, typeDomain, qtype, flags, clientPID);
 }
 
-mDNSexport void internal_stop_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const typeDomain, DNS_TypeValues qtype, DNSServiceFlags flags, pid_t clientPID)
+mDNSexport void internal_stop_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const typeDomain, mDNSu16 qtype, DNSServiceFlags flags, pid_t clientPID)
 {
     domainname lower;
 
@@ -719,8 +700,9 @@ mDNSexport void internal_stop_browsing_for_service(mDNSInterfaceID InterfaceID, 
         D2DTransportType transportType, excludedTransport;
 
         LogInfo("%s: Stopping browse for: %##s %s", __func__, lower.c, DNSTypeName(qtype));
-        mDNSu8 *end = DNSNameCompressionBuildLHS(&lower, qtype);
-        PrintHelper(__func__, compression_lhs, end - compression_lhs, mDNSNULL, 0);
+        mDNSu8 *const end = DNSNameCompressionBuildLHS(&lower, qtype);
+        const size_t keyLen = (size_t)(end - compression_lhs);
+        PrintHelper(__func__, compression_lhs, (mDNSu16)keyLen, mDNSNULL, 0);
 
         transportType = xD2DInterfaceToTransportType(InterfaceID, flags, & excludedTransport);
         if (transportType == D2DTransportMax)
@@ -731,7 +713,7 @@ mDNSexport void internal_stop_browsing_for_service(mDNSInterfaceID InterfaceID, 
                 if (i == excludedTransport) continue;
                 if (D2DStopBrowsingForKeyOnTransport)
                 {
-                    D2DStopBrowsingForKeyOnTransport(compression_lhs, end - compression_lhs, i);
+                    D2DStopBrowsingForKeyOnTransport(compression_lhs, keyLen, i);
                     if (i == D2DAWDLTransport)
                     {
                         mdns_powerlog_awdl_browse_stop(typeDomain->c, qtype, clientPID);
@@ -743,7 +725,7 @@ mDNSexport void internal_stop_browsing_for_service(mDNSInterfaceID InterfaceID, 
         {
             if (D2DStopBrowsingForKeyOnTransport)
             {
-                D2DStopBrowsingForKeyOnTransport(compression_lhs, end - compression_lhs, transportType);
+                D2DStopBrowsingForKeyOnTransport(compression_lhs, keyLen, transportType);
                 if (transportType == D2DAWDLTransport)
                 {
                     mdns_powerlog_awdl_browse_stop(typeDomain->c, qtype, clientPID);
@@ -760,37 +742,22 @@ mDNSexport void internal_stop_browsing_for_service(mDNSInterfaceID InterfaceID, 
 
 mDNSexport void external_start_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags, pid_t clientPID)
 {
-#if ENABLE_BLE_TRIGGERED_BONJOUR
-    if (applyToBLE(resourceRecord->InterfaceID, flags))
-    {
-        domainname lower;
-
-        DomainnameToLower(resourceRecord->name, &lower);
-        start_BLE_advertise(resourceRecord, &lower, resourceRecord->rrtype, flags);
-    }
-    else
-#endif  // ENABLE_BLE_TRIGGERED_BONJOUR
-        internal_start_advertising_service(resourceRecord, flags, clientPID);
+    internal_start_advertising_service(resourceRecord, flags, clientPID);
 }
 
 mDNSexport void internal_start_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags, pid_t clientPID)
 {
     domainname lower;
-    mDNSu8 *rhs = NULL;
-    mDNSu8 *end = NULL;
     D2DTransportType transportType, excludedTransport;
     DomainnameToLower(resourceRecord->name, &lower);
 
     LogInfo("%s: %s", __func__, RRDisplayString(&mDNSStorage, resourceRecord));
 
-    // For SRV records, update packet filter if p2p interface already exists, otherwise,
-    // if will be updated when we get the KEV_DL_IF_ATTACHED event for the interface.
-    if (resourceRecord->rrtype == kDNSType_SRV)
-        mDNSUpdatePacketFilter(NULL);
-
-    rhs = DNSNameCompressionBuildLHS(&lower, resourceRecord->rrtype);
-    end = DNSNameCompressionBuildRHS(rhs, resourceRecord);
-    PrintHelper(__func__, compression_lhs, rhs - compression_lhs, rhs, end - rhs);
+    mDNSu8 *const rhs = DNSNameCompressionBuildLHS(&lower, resourceRecord->rrtype);
+    const mDNSu8 *const end = DNSNameCompressionBuildRHS(rhs, resourceRecord);
+    const size_t keyLen = (size_t)(rhs - compression_lhs);
+    const size_t valueLen = (size_t)(end - rhs);
+    PrintHelper(__func__, compression_lhs, (mDNSu16)keyLen, rhs, (mDNSu16)valueLen);
 
     transportType = xD2DInterfaceToTransportType(resourceRecord->InterfaceID, flags, & excludedTransport);
     if (transportType == D2DTransportMax)
@@ -805,7 +772,7 @@ mDNSexport void internal_start_advertising_service(const ResourceRecord *const r
                 {
                     mdns_powerlog_awdl_advertise_start(lower.c, resourceRecord->rrtype, clientPID);
                 }
-                D2DStartAdvertisingPairOnTransport(compression_lhs, rhs - compression_lhs, rhs, end - rhs, i);
+                D2DStartAdvertisingPairOnTransport(compression_lhs, keyLen, rhs, valueLen, i);
             }
         }
     }
@@ -817,45 +784,29 @@ mDNSexport void internal_start_advertising_service(const ResourceRecord *const r
             {
                 mdns_powerlog_awdl_advertise_start(lower.c, resourceRecord->rrtype, clientPID);
             }
-            D2DStartAdvertisingPairOnTransport(compression_lhs, rhs - compression_lhs, rhs, end - rhs, transportType);
+            D2DStartAdvertisingPairOnTransport(compression_lhs, keyLen, rhs, valueLen, transportType);
         }
     }
 }
 
 mDNSexport void external_stop_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags, pid_t clientPID)
 {
-#if ENABLE_BLE_TRIGGERED_BONJOUR
-    // BLE support currently not handled by a D2D plugin
-    if (applyToBLE(resourceRecord->InterfaceID, flags))
-    {
-        domainname lower;
-
-        DomainnameToLower(resourceRecord->name, &lower);
-        stop_BLE_advertise(&lower, resourceRecord->rrtype, flags);
-    }
-    else
-#endif  // ENABLE_BLE_TRIGGERED_BONJOUR
-        internal_stop_advertising_service(resourceRecord, flags, clientPID);
+    internal_stop_advertising_service(resourceRecord, flags, clientPID);
 }
 
 mDNSexport void internal_stop_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags, pid_t clientPID)
 {
     domainname lower;
-    mDNSu8 *rhs = NULL;
-    mDNSu8 *end = NULL;
     D2DTransportType transportType, excludedTransport;
     DomainnameToLower(resourceRecord->name, &lower);
 
-    LogInfo("%s: %s", __func__, RRDisplayString(&mDNSStorage, resourceRecord));
+    LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_INFO, "internal_stop_advertising_service: " PRI_S, RRDisplayString(&mDNSStorage, resourceRecord));
 
-    // For SRV records, update packet filter if p2p interface already exists, otherwise,
-    // For SRV records, update packet filter to to remove this port from list
-    if (resourceRecord->rrtype == kDNSType_SRV)
-        mDNSUpdatePacketFilter(resourceRecord);
-
-    rhs = DNSNameCompressionBuildLHS(&lower, resourceRecord->rrtype);
-    end = DNSNameCompressionBuildRHS(rhs, resourceRecord);
-    PrintHelper(__func__, compression_lhs, rhs - compression_lhs, rhs, end - rhs);
+    mDNSu8 *const rhs = DNSNameCompressionBuildLHS(&lower, resourceRecord->rrtype);
+    const mDNSu8 *const end = DNSNameCompressionBuildRHS(rhs, resourceRecord);
+    const size_t keyLen = (size_t)(rhs - compression_lhs);
+    const size_t valueLen = (size_t)(end - rhs);
+    PrintHelper(__func__, compression_lhs, (mDNSu16)keyLen, rhs, (mDNSu16)valueLen);
 
     transportType = xD2DInterfaceToTransportType(resourceRecord->InterfaceID, flags, & excludedTransport);
     if (transportType == D2DTransportMax)
@@ -866,7 +817,7 @@ mDNSexport void internal_stop_advertising_service(const ResourceRecord *const re
             if (i == excludedTransport) continue;
             if (D2DStopAdvertisingPairOnTransport)
             {
-                D2DStopAdvertisingPairOnTransport(compression_lhs, rhs - compression_lhs, rhs, end - rhs, i);
+                D2DStopAdvertisingPairOnTransport(compression_lhs, keyLen, rhs, valueLen, i);
                 if (i == D2DAWDLTransport)
                 {
                     mdns_powerlog_awdl_advertise_stop(lower.c, resourceRecord->rrtype, clientPID);
@@ -878,7 +829,7 @@ mDNSexport void internal_stop_advertising_service(const ResourceRecord *const re
     {
         if (D2DStopAdvertisingPairOnTransport)
         {
-            D2DStopAdvertisingPairOnTransport(compression_lhs, rhs - compression_lhs, rhs, end - rhs, transportType);
+            D2DStopAdvertisingPairOnTransport(compression_lhs, keyLen, rhs, valueLen, transportType);
             if (transportType == D2DAWDLTransport)
             {
                 mdns_powerlog_awdl_advertise_stop(lower.c, resourceRecord->rrtype, clientPID);
@@ -890,16 +841,16 @@ mDNSexport void internal_stop_advertising_service(const ResourceRecord *const re
 mDNSexport void external_start_resolving_service(mDNSInterfaceID InterfaceID, const domainname *const fqdn, DNSServiceFlags flags, pid_t clientPID)
 {
     domainname lower;
-    mDNSu8 *rhs = NULL;
-    mDNSu8 *end = NULL;
     mDNSBool AWDL_used = false;   // whether AWDL was used for this resolve
     D2DTransportType transportType, excludedTransport;
     DomainnameToLower(SkipLeadingLabels(fqdn, 1), &lower);
 
     LogInfo("external_start_resolving_service: %##s", fqdn->c);
-    rhs = DNSNameCompressionBuildLHS(&lower, kDNSType_PTR);
-    end = putDomainNameAsLabels(&compression_base_msg, rhs, compression_limit, fqdn);
-    PrintHelper(__func__, compression_lhs, rhs - compression_lhs, rhs, end - rhs);
+    mDNSu8 *const rhs = DNSNameCompressionBuildLHS(&lower, kDNSType_PTR);
+    const mDNSu8 *const end = putDomainNameAsLabels(&compression_base_msg, rhs, compression_limit, fqdn);
+    const size_t keyLen = (size_t)(rhs - compression_lhs);
+    const size_t valueLen = (size_t)(end - rhs);
+    PrintHelper(__func__, compression_lhs, (mDNSu16)keyLen, rhs, (mDNSu16)valueLen);
 
     transportType = xD2DInterfaceToTransportType(InterfaceID, flags, & excludedTransport);
     if (transportType == D2DTransportMax)
@@ -915,7 +866,7 @@ mDNSexport void external_start_resolving_service(mDNSInterfaceID InterfaceID, co
                 {
                     mdns_powerlog_awdl_resolve_start(lower.c, kDNSType_PTR, clientPID);
                 }
-                D2DStartResolvingPairOnTransport(compression_lhs, rhs - compression_lhs, rhs, end - rhs, i);
+                D2DStartResolvingPairOnTransport(compression_lhs, keyLen, rhs, valueLen, i);
             }
             if (i == D2DAWDLTransport)
                 AWDL_used = true;
@@ -930,7 +881,7 @@ mDNSexport void external_start_resolving_service(mDNSInterfaceID InterfaceID, co
             {
                 mdns_powerlog_awdl_resolve_start(lower.c, kDNSType_PTR, clientPID);
             }
-            D2DStartResolvingPairOnTransport(compression_lhs, rhs - compression_lhs, rhs, end - rhs, transportType);
+            D2DStartResolvingPairOnTransport(compression_lhs, keyLen, rhs, valueLen, transportType);
         }
         if (transportType == D2DAWDLTransport)
             AWDL_used = true;
@@ -950,16 +901,16 @@ mDNSexport void external_start_resolving_service(mDNSInterfaceID InterfaceID, co
 mDNSexport void external_stop_resolving_service(mDNSInterfaceID InterfaceID, const domainname *const fqdn, DNSServiceFlags flags, pid_t clientPID)
 {
     domainname lower;
-    mDNSu8 *rhs = NULL;
-    mDNSu8 *end = NULL;
     mDNSBool AWDL_used = false;   // whether AWDL was used for this resolve
     D2DTransportType transportType, excludedTransport;
     DomainnameToLower(SkipLeadingLabels(fqdn, 1), &lower);
 
     LogInfo("external_stop_resolving_service: %##s", fqdn->c);
-    rhs = DNSNameCompressionBuildLHS(&lower, kDNSType_PTR);
-    end = putDomainNameAsLabels(&compression_base_msg, rhs, compression_limit, fqdn);
-    PrintHelper(__func__, compression_lhs, rhs - compression_lhs, rhs, end - rhs);
+    mDNSu8 *const rhs = DNSNameCompressionBuildLHS(&lower, kDNSType_PTR);
+    const mDNSu8 *const end = putDomainNameAsLabels(&compression_base_msg, rhs, compression_limit, fqdn);
+    const size_t keyLen = (size_t)(rhs - compression_lhs);
+    const size_t valueLen = (size_t)(end - rhs);
+    PrintHelper(__func__, compression_lhs, (mDNSu16)keyLen, rhs, (mDNSu16)valueLen);
 
     transportType = xD2DInterfaceToTransportType(InterfaceID, flags, & excludedTransport);
     if (transportType == D2DTransportMax)
@@ -970,7 +921,7 @@ mDNSexport void external_stop_resolving_service(mDNSInterfaceID InterfaceID, con
             if (i == excludedTransport) continue;
             if (D2DStopResolvingPairOnTransport)
             {
-                D2DStopResolvingPairOnTransport(compression_lhs, rhs - compression_lhs, rhs, end - rhs, i);
+                D2DStopResolvingPairOnTransport(compression_lhs, keyLen, rhs, valueLen, i);
                 if (i == D2DAWDLTransport)
                 {
                     mdns_powerlog_awdl_resolve_stop(lower.c, kDNSType_PTR, clientPID);
@@ -984,7 +935,7 @@ mDNSexport void external_stop_resolving_service(mDNSInterfaceID InterfaceID, con
     {
         if (D2DStopResolvingPairOnTransport)
         {
-            D2DStopResolvingPairOnTransport(compression_lhs, rhs - compression_lhs, rhs, end - rhs, transportType);
+            D2DStopResolvingPairOnTransport(compression_lhs, keyLen, rhs, valueLen, transportType);
             if (transportType == D2DAWDLTransport)
             {
                 mdns_powerlog_awdl_resolve_stop(lower.c, kDNSType_PTR, clientPID);
@@ -1049,9 +1000,14 @@ void terminateD2DPlugins(void)
     {
         D2DStatus ds = D2DTerminate();
         if (ds != kD2DSuccess)
-            LogMsg("D2DTerminate failed: %d", ds);
+        {
+            LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEFAULT, "D2DTerminate failed: %d", ds);
+        }
         else
-            LogMsg("D2DTerminate succeeded");
+        {
+            LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEFAULT, "D2DTerminate succeeded");
+        }
+
     }
 }
 

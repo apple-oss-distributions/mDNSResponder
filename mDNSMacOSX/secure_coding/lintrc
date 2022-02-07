@@ -1,0 +1,49 @@
+{
+	"lint_include": [
+		"mDNSCore",
+		"mDNSMacOSX",
+		"mDNSMacOSX/clientstub",
+		"mDNSMacOSX/dnssec_v2",
+		"mDNSMacOSX/libmdns/mdns",
+		"mDNSMacOSX/libmdns/src",
+		"mDNSMacOSX/mdns_objects",
+		"mDNSMacOSX/Private",
+		"mDNSMacOSX/utilities",
+		"mDNSMacOSX/xpc_services",
+		"mDNSShared"
+	],
+	"strict"					: "mdns_strict.h",
+	"public_headers"				: [
+		"{BUILT_PRODUCTS_DIR}/usr/include",
+		"{BUILT_PRODUCTS_DIR}/usr/local/include",
+		"{BUILT_PRODUCTS_DIR}/usr/local/include/mdns"
+	],
+	"clang_tidy"				: true,
+	"clang_tidy_flags"			: [
+		"-DOSATOMIC_USE_INLINED=1",
+		"-iframework",
+		"{SDKROOT}/System/Library/Frameworks",
+		"-iframework",
+		"{SDKROOT}/System/Library/PrivateFrameworks",
+		"-iquote{PROJECT_DIR}",
+		"-iquote{PROJECT_DIR}/clientstub",
+		"-iquote{PROJECT_DIR}/dnssec_v2",
+		"-iquote{PROJECT_DIR}/libmdns/mdns",
+		"-iquote{PROJECT_DIR}/mdns_objects",
+		"-iquote{PROJECT_DIR}/utilities",
+		"-iquote{PROJECT_DIR}/xpc_services",
+		"-iquote{PROJECT_DIR}/../mDNSCore",
+		"-iquote{PROJECT_DIR}/../mDNSShared",
+		"-iquote{PROJECT_DIR}/../mDNSShared/discover_resolver",
+		"-iquote{PROJECT_DIR}/../ServiceRegistration",
+		"-I{INSTALL_ROOT}/usr/local/include",
+		"-I{INSTALL_ROOT}/usr/include",
+		"-I{BUILT_PRODUCTS_DIR}/usr/include",
+		"-I{BUILT_PRODUCTS_DIR}/usr/local/include",
+		"-I{BUILT_PRODUCTS_DIR}/usr/local/include/mdns"
+	],
+	"clang_tidy_c_flags"		: [],
+	"clang_tidy_cpp_flags"		: [],
+	"clang_tidy_objc_flags"		: [],
+	"clang_tidy_objcpp_flags"	: []
+}

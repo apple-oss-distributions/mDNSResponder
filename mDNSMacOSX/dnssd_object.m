@@ -15,6 +15,7 @@
  */
 
 #import "dnssd_object.h"
+#import "mdns_strict.h"
 
 #import <stdlib.h>
 #import <os/object_private.h>

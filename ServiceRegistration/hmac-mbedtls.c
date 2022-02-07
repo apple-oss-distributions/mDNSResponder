@@ -30,7 +30,6 @@
 
 #include "srp.h"
 #include "dns-msg.h"
-#define SRP_CRYPTO_MBEDTLS_INTERNAL
 #include "srp-crypto.h"
 
 // Function to generate a signature given some data and a private key

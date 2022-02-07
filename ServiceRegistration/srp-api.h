@@ -19,6 +19,10 @@
 
 #include "srp.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef void (*srp_hostname_conflict_callback_t)(const char *NONNULL hostname);
 typedef void (*srp_wakeup_callback_t)(void *NONNULL state);
 typedef void (*srp_datagram_callback_t)(void *NONNULL state, void *NONNULL message, size_t message_length);
@@ -51,12 +55,12 @@ int srp_add_server_address(const uint8_t *NONNULL port, uint16_t rrtype, const u
 // If the hostname is changed by the callback, then it is used immediately on return from the callback;
 // if the hostname is changed in any other situation, nothing is done with the new name until
 // srp_network_state_stable() is called.
-int srp_set_hostname(const char *NONNULL hostname, srp_hostname_conflict_callback_t NONNULL callback);
+int srp_set_hostname(const char *NONNULL hostname, srp_hostname_conflict_callback_t NULLABLE callback);
 
 // Called when a network state change is complete (that is, all new addresses have been saved and
 // any update to the SRP server address has been provided).   This is only needed when not using the
 // refresh mechanism.
-int srp_network_state_stable(void);
+int srp_network_state_stable(bool *NULLABLE did_something);
 
 // Delete a previously-configured SRP server address.  This should not be done during a refresh.
 int srp_delete_interface_address(uint16_t rrtype, const uint8_t *NONNULL rdata, uint16_t rdlen);
@@ -73,7 +77,7 @@ int srp_delete_server_address(uint16_t rrtype, const uint8_t *NONNULL port, cons
 int srp_start_address_refresh(void);
 
 // Call this when the address refresh is done.   This invokes srp_network_state_stable().
-int srp_finish_address_refresh(void);
+int srp_finish_address_refresh(bool *NULLABLE did_something);
 
 // Call this to deregister everything that's currently registered.  A return value other than kDNSServiceErr_NoError
 // means that there's nothing to deregister.
@@ -144,6 +148,10 @@ int srp_set_wakeup(void *NULLABLE host_context,
 
 // This is called to cancel a wakeup, and should not fail even if there is no wakeup pending.
 int srp_cancel_wakeup(void *NULLABLE host_context, void *NONNULL context);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 // Local Variables:
 // mode: C

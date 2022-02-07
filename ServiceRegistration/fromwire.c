@@ -1,6 +1,6 @@
 /* fromwire.c
  *
- * Copyright (c) 2018, 2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -81,7 +81,7 @@ dns_opt_parse(dns_edns0_t *NONNULL *NULLABLE ret, dns_rr_t *rr)
 }
 
 dns_label_t * NULLABLE
-dns_label_parse(const uint8_t *buf, unsigned mlen, unsigned *NONNULL offp)
+dns_label_parse_(const uint8_t *buf, unsigned mlen, unsigned *NONNULL offp, const char *file, int line)
 {
     uint8_t llen = buf[*offp];
     dns_label_t *rv;
@@ -92,7 +92,12 @@ dns_label_parse(const uint8_t *buf, unsigned mlen, unsigned *NONNULL offp)
         return NULL;
     }
 
+#ifdef MALLOC_DEBUG_LOGGING
+    rv = debug_calloc(1, (sizeof(*rv) - DNS_MAX_LABEL_SIZE) + llen + 1, file, line);
+#else
+    (void)file; (void)line;
     rv = calloc(1, (sizeof(*rv) - DNS_MAX_LABEL_SIZE) + llen + 1);
+#endif
     if (rv == NULL) {
         DEBUG("memory allocation for %u byte label (%.*s) failed.\n",
               *offp + llen + 1, *offp + llen + 1, &buf[*offp + 1]);
@@ -108,7 +113,7 @@ dns_label_parse(const uint8_t *buf, unsigned mlen, unsigned *NONNULL offp)
 
 static bool
 dns_name_parse_in(dns_label_t *NONNULL *NULLABLE ret, const uint8_t *buf, unsigned len,
-                  unsigned *NONNULL offp, unsigned base)
+                   unsigned *NONNULL offp, unsigned base, const char *file, int line)
 {
     dns_label_t *rv;
 
@@ -148,7 +153,7 @@ dns_name_parse_in(dns_label_t *NONNULL *NULLABLE ret, const uint8_t *buf, unsign
                   pointer, buf[pointer]);
             return false;
         }
-        return dns_name_parse_in(ret, buf, len, &pointer, pointer);
+        return dns_name_parse_in(ret, buf, len, &pointer, pointer, file, line);
     }
     // We don't support binary labels, which are historical, and at this time there are no other valid
     // DNS label types.
@@ -157,7 +162,7 @@ dns_name_parse_in(dns_label_t *NONNULL *NULLABLE ret, const uint8_t *buf, unsign
         return false;
     }
 
-    rv = dns_label_parse(buf, len, offp);
+    rv = dns_label_parse_(buf, len, offp, file, line);
     if (rv == NULL) {
         return false;
     }
@@ -167,16 +172,16 @@ dns_name_parse_in(dns_label_t *NONNULL *NULLABLE ret, const uint8_t *buf, unsign
     if (rv->len == 0) {
         return true;
     }
-    return dns_name_parse_in(&rv->next, buf, len, offp, base);
+    return dns_name_parse_in(&rv->next, buf, len, offp, base, file, line);
 }
 
 bool
-dns_name_parse(dns_label_t *NONNULL *NULLABLE ret, const uint8_t *buf,
-               unsigned len, unsigned *NONNULL offp, unsigned base)
+dns_name_parse_(dns_label_t *NONNULL *NULLABLE ret, const uint8_t *buf,
+                unsigned len, unsigned *NONNULL offp, unsigned base, const char *file, int line)
 {
     dns_label_t *rv = NULL, *next;
 
-    if (!dns_name_parse_in(&rv, buf, len, offp, base)) {
+    if (!dns_name_parse_in(&rv, buf, len, offp, base, file, line)) {
         for (; rv != NULL; rv = next) {
             next = rv->next;
             free(rv);
@@ -229,6 +234,24 @@ dns_u32_parse(const uint8_t *buf, unsigned len, unsigned *NONNULL offp, uint32_t
     rv = (((uint32_t)(buf[*offp]) << 24) | ((uint32_t)(buf[*offp + 1]) << 16) |
           ((uint32_t)(buf[*offp + 2]) << 8) | (uint32_t)(buf[*offp + 3]));
     *offp += 4;
+    *ret = rv;
+    return true;
+}
+
+bool
+dns_u64_parse(const uint8_t *buf, unsigned len, unsigned *NONNULL offp, uint64_t *NONNULL ret)
+{
+    uint64_t rv;
+    if (*offp + 8 > len) {
+        DEBUG("dns_u64_parse: not enough room: %u > %u.\n", *offp + 8, len);
+        return false;
+    }
+
+    rv = (((uint64_t)(buf[*offp]    ) << 56) | ((uint64_t)(buf[*offp + 1]) << 48) |
+          ((uint64_t)(buf[*offp + 2]) << 40) | ((uint64_t)(buf[*offp + 3]) << 32) |
+          ((uint64_t)(buf[*offp + 4]) << 24) | ((uint64_t)(buf[*offp + 5]) << 16) |
+          ((uint64_t)(buf[*offp + 6]) <<  8) | ((uint64_t)(buf[*offp + 7])));
+    *offp += 8;
     *ret = rv;
     return true;
 }
@@ -361,8 +384,8 @@ dns_rrdata_dump(dns_rr_t *rr)
 }
 
 bool
-dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNULL offp, unsigned target, unsigned rdlen,
-                     unsigned rrstart)
+dns_rdata_parse_data_(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNULL offp, unsigned target, unsigned rdlen,
+                      unsigned rrstart, const char *file, int line)
 {
     switch(rr->type) {
     case dns_rrtype_key:
@@ -372,7 +395,11 @@ dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNULL
             return false;
         }
         rr->data.key.len = target - *offp;
+#ifdef MALLOC_DEBUG_LOGGING
+        rr->data.key.key = debug_malloc(rr->data.key.len, file, line);
+#else
         rr->data.key.key = malloc(rr->data.key.len);
+#endif
         if (!rr->data.key.key) {
             return false;
         }
@@ -389,13 +416,17 @@ dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNULL
             !dns_u32_parse(buf, target, offp, &rr->data.sig.expiry) ||
             !dns_u32_parse(buf, target, offp, &rr->data.sig.inception) ||
             !dns_u16_parse(buf, target, offp, &rr->data.sig.key_tag) ||
-            !dns_name_parse(&rr->data.sig.signer, buf, target, offp, *offp)) {
+            !dns_name_parse_(&rr->data.sig.signer, buf, target, offp, *offp, file, line)) {
             return false;
         }
         // The signature is what's left of the RRDATA.  It covers the message up to the signature, so we
         // remember where it starts so as to know what memory to cover to validate it.
         rr->data.sig.len = target - *offp;
+#ifdef MALLOC_DEBUG_LOGGING
+        rr->data.sig.signature = debug_malloc(rr->data.sig.len, file, line);
+#else
         rr->data.sig.signature = malloc(rr->data.sig.len);
+#endif
         if (!rr->data.sig.signature) {
             return false;
         }
@@ -415,7 +446,7 @@ dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNULL
     case dns_rrtype_ns:
     case dns_rrtype_ptr:
     case dns_rrtype_cname:
-        if (!dns_name_parse(&rr->data.ptr.name, buf, target, offp, *offp)) {
+        if (!dns_name_parse_(&rr->data.ptr.name, buf, target, offp, *offp, file, line)) {
             return false;
         }
         break;
@@ -440,7 +471,11 @@ dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNULL
 
     case dns_rrtype_txt:
         rr->data.txt.len = target - *offp;
+#ifdef MALLOC_DEBUG_LOGGING
+        rr->data.txt.data = debug_malloc(rr->data.txt.len, file, line);
+#else
         rr->data.txt.data = malloc(rr->data.txt.len);
+#endif
         if (rr->data.txt.data == NULL) {
             DEBUG("dns_rdata_parse: no memory for TXT RR");
             return false;
@@ -451,7 +486,11 @@ dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNULL
 
     default:
         if (rdlen > 0) {
+#ifdef MALLOC_DEBUG_LOGGING
+            rr->data.unparsed.data = debug_malloc(rdlen, file, line);
+#else
             rr->data.unparsed.data = malloc(rdlen);
+#endif
             if (rr->data.unparsed.data == NULL) {
                 return false;
             }
@@ -469,8 +508,8 @@ dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNULL
 }
 
 static bool
-dns_rdata_parse(dns_rr_t *NONNULL rr,
-                const uint8_t *buf, unsigned len, unsigned *NONNULL offp, unsigned rrstart)
+dns_rdata_parse_(dns_rr_t *NONNULL rr,
+                 const uint8_t *buf, unsigned len, unsigned *NONNULL offp, unsigned rrstart, const char *file, int line)
 {
     uint16_t rdlen;
     unsigned target;
@@ -482,17 +521,17 @@ dns_rdata_parse(dns_rr_t *NONNULL rr,
     if (target > len) {
         return false;
     }
-    return dns_rdata_parse_data(rr, buf, offp, target, rdlen, rrstart);
+    return dns_rdata_parse_data_(rr, buf, offp, target, rdlen, rrstart, file, line);
 }
 
 bool
-dns_rr_parse(dns_rr_t *NONNULL rr,
-             const uint8_t *buf, unsigned len, unsigned *NONNULL offp, bool rrdata_expected)
+dns_rr_parse_(dns_rr_t *NONNULL rr,
+              const uint8_t *buf, unsigned len, unsigned *NONNULL offp, bool rrdata_expected, const char *file, int line)
 {
     int rrstart = *offp; // Needed to mark the start of the SIG RR for SIG(0).
 
     memset(rr, 0, sizeof(*rr));
-    if (!dns_name_parse(&rr->name, buf, len, offp, *offp)) {
+    if (!dns_name_parse_(&rr->name, buf, len, offp, *offp, file, line)) {
         return false;
     }
 
@@ -508,7 +547,7 @@ dns_rr_parse(dns_rr_t *NONNULL rr,
         if (!dns_u32_parse(buf, len, offp, &rr->ttl)) {
             return false;
         }
-        if (!dns_rdata_parse(rr, buf, len, offp, rrstart)) {
+        if (!dns_rdata_parse_(rr, buf, len, offp, rrstart, file, line)) {
             return false;
         }
     }
@@ -525,6 +564,9 @@ dns_rr_parse(dns_rr_t *NONNULL rr,
 void
 dns_rrdata_free(dns_rr_t *rr)
 {
+    if (rr == NULL) {
+        return;
+    }
     switch(rr->type) {
     case dns_rrtype_a:
     case dns_rrtype_aaaa:
@@ -541,6 +583,7 @@ dns_rrdata_free(dns_rr_t *rr)
 
     case dns_rrtype_srv:
     case dns_rrtype_ptr:
+    case dns_rrtype_ns:
     case dns_rrtype_cname:
         dns_name_free(rr->data.ptr.name);
 #ifndef __clang_analyzer__
@@ -593,13 +636,21 @@ dns_message_free(dns_message_t *message)
 }
 
 bool
-dns_wire_parse(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsigned len)
+dns_wire_parse_(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsigned len, const char *file, int line)
 {
     unsigned offset = 0;
     unsigned data_len = len - DNS_HEADER_SIZE;
-    dns_message_t *rv = calloc(1, sizeof(*rv));
+    dns_message_t *rv;
     int i;
 
+    if (len < DNS_HEADER_SIZE) {
+        return false;
+    }
+#ifdef MALLOC_DEBUG_LOGGING
+    rv = debug_calloc(1, sizeof(*rv), file, line);
+#else
+    rv = calloc(1, sizeof(*rv));
+#endif
     if (rv == NULL) {
         return false;
     }
@@ -622,7 +673,7 @@ dns_wire_parse(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsign
     }                                                                               \
                                                                                     \
     for (i = 0; i < rv->count; i++) {                                               \
-        if (!dns_rr_parse(&rv->sets[i], message->data, data_len, &offset, rrdata_expected)) {    \
+        if (!dns_rr_parse_(&rv->sets[i], message->data, data_len, &offset, rrdata_expected, file, line)) {    \
             dns_message_free(rv);                                                   \
             ERROR(name " %d RR parse failed.\n", i);                                \
             return false;                                                           \

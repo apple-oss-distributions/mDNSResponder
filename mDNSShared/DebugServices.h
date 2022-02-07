@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 1997-2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 1997-2004, 2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1103,7 +1103,7 @@ typedef uint32_t DebugPropertyTag;
 // without asserting, the DEBUG_EXPECT_VERIFIED conditional can be set to eliminate the error checking entirely. It can
 // also be useful to measure the cost of error checking code by profiling with it enable and with it disabled.
 
-#if ( DEBUG_EXPECT_VERIFIED )
+#if ( defined(DEBUG_EXPECT_VERIFIED) && DEBUG_EXPECT_VERIFIED )
     #define require_expect
     #define require_string_expect
     #define require_quiet_expect
@@ -1497,7 +1497,7 @@ DEBUG_EXPORT size_t DebugSNPrintFVAList(char *sbuffer, size_t buflen, const char
  */
 
 #if ( DEBUG )
-DEBUG_EXPORT const char *   DebugGetErrorString( int_least32_t inErrorCode, char *inBuffer, size_t inBufferSize );
+DEBUG_EXPORT const char *   DebugGetErrorString( long inErrorCode, char *inBuffer, size_t inBufferSize );
 #endif
 
 //---------------------------------------------------------------------------------------------------------------------------

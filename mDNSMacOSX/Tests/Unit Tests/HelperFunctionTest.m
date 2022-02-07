@@ -7,7 +7,6 @@
 
 #import <XCTest/XCTest.h>
 #include "unittest_common.h"
-#include "helper.h"
 
 @interface HelperFunctionTest : XCTestCase
 
@@ -54,13 +53,6 @@
 
         CFRelease(name_ref);
     }
-}
-
-- (void)testHelperRequestBPF
-{
-    fprintf(stdout, "Start %s\n", __FUNCTION__);
-    mDNSRequestBPF();
-    fprintf(stdout, "Completed %s\n", __FUNCTION__);
 }
 
 @end

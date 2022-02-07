@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2019-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -45,11 +45,11 @@
     mDNSPlatformMemZero(&q, sizeof(DNSQuestion));
     q.TargetQID.NotAnInteger = 1;
     q.pid = getpid();
-    q.InterfaceID = if_nametoindex( "pdp_ip0" );
+    q.InterfaceID = (mDNSInterfaceID)((uintptr_t)if_nametoindex("pdp_ip0"));
     fprintf(stdout, "%s %s with cellular index %d named pdp_ip0\n", q.InterfaceID ? "Starting" : "Exiting (no cellular interface)", __FUNCTION__, q.InterfaceID);
     if (!q.InterfaceID) return;
 
-    routableIndex = IndexForInterfaceByName_ut( "pdp_ip0" );
+    routableIndex = (mDNSInterfaceID)((uintptr_t)IndexForInterfaceByName_ut("pdp_ip0"));
     fprintf(stdout, "Testing blocked by (%s)\n", routableIndex ? "policy" : "no route");
 
     mDNSPlatformGetDNSRoutePolicy(&q);

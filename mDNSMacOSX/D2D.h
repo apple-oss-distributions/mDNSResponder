@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2015-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2015-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,8 +22,8 @@
 #include "dnssd_ipc.h"
 #include <DeviceToDeviceManager/DeviceToDeviceManager.h>
 
-extern void internal_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, DNS_TypeValues qtype, DNSServiceFlags flags, pid_t clientPID);
-extern void internal_stop_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, DNS_TypeValues qtype, DNSServiceFlags flags, pid_t clientPID);
+extern void internal_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, mDNSu16 qtype, DNSServiceFlags flags, pid_t clientPID);
+extern void internal_stop_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, mDNSu16 qtype, DNSServiceFlags flags, pid_t clientPID);
 extern void internal_start_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags, pid_t clientPID);
 extern void internal_stop_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags, pid_t clientPID);
 
@@ -32,8 +32,8 @@ void xD2DRemoveFromCache(D2DStatus result, D2DServiceInstance instanceHandle, D2
 
 extern mDNSBool callExternalHelpers(mDNSInterfaceID InterfaceID, const domainname *const domain, DNSServiceFlags flags);
 extern mDNSu32 deriveD2DFlagsFromAuthRecType(AuthRecType authRecType);
-extern void external_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, DNS_TypeValues qtype, DNSServiceFlags flags, pid_t clientPID);
-extern void external_stop_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, DNS_TypeValues qtype, DNSServiceFlags flags, pid_t clientPID);
+extern void external_start_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, mDNSu16 qtype, DNSServiceFlags flags, pid_t clientPID);
+extern void external_stop_browsing_for_service(mDNSInterfaceID InterfaceID, const domainname *const type, mDNSu16 qtype, DNSServiceFlags flags, pid_t clientPID);
 extern void external_start_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags, pid_t clientPID);
 extern void external_stop_advertising_service(const ResourceRecord *const resourceRecord, DNSServiceFlags flags, pid_t clientPID);
 extern void external_start_resolving_service(mDNSInterfaceID InterfaceID, const domainname *const fqdn, DNSServiceFlags flags, pid_t clientPID);
@@ -44,13 +44,6 @@ extern void D2D_start_advertising_interface(NetworkInterfaceInfo *interface);
 extern void D2D_stop_advertising_interface(NetworkInterfaceInfo *interface);
 extern void D2D_start_advertising_record(AuthRecord *ar);
 extern void D2D_stop_advertising_record(AuthRecord *ar);
-
-#if ENABLE_BLE_TRIGGERED_BONJOUR
-// Just define as the current max value for now for BLE.c prototype.
-// TODO: Will need to define in DeviceToDeviceManager.framework if we convert the
-// BLE discovery code to a D2D plugin.
-#define D2DBLETransport D2DTransportMax
-#endif // ENABLE_BLE_TRIGGERED_BONJOUR
 
 #ifdef UNIT_TEST
 #pragma mark - Unit test declarations

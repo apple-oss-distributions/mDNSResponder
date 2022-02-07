@@ -26,9 +26,16 @@ BJIPAddr::BJIPAddr()
 
 BJIPAddr::BJIPAddr(const BJIPAddr& src)
 {
+    *this = src;
+}
+
+BJIPAddr &BJIPAddr::operator=(const BJIPAddr& src)
+{
     memcpy(&sockAddrStorage,&src.sockAddrStorage,sizeof(sockAddrStorage));
     IPv4SubNet = src.IPv4SubNet;
+    return *this;
 }
+
 void BJIPAddr::Empty()
 {
     memset(&sockAddrStorage,0,sizeof(sockAddrStorage));

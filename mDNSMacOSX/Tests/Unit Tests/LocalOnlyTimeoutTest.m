@@ -19,7 +19,7 @@
 #import <XCTest/XCTest.h>
 
 // This query request message was generated from the following command: "dns-sd -lo -timeout -Q cardinal2.apple.com. A"
-char query_req_msgbuf[33]= {
+const uint8_t query_req_msgbuf[33]= {
 	0x00, 0x01, 0x90, 0x00,
 	// DNSServiceFlags.L = (kDNSServiceFlagsReturnIntermediates |kDNSServiceFlagsSuppressUnusable | kDNSServiceFlagsTimeout)
 	0xff, 0xff, 0xff, 0xff,
@@ -123,8 +123,8 @@ mDNSlocal mStatus InitEtcHostsRecords(void)
 {
 	mDNS *const m = &mDNSStorage;
     request_state* req = client_request_message;
-	char *msgptr = (char *)query_req_msgbuf;
-	size_t msgsz = sizeof(query_req_msgbuf);
+	const uint8_t *const msgptr = query_req_msgbuf;
+	const uint32_t msgsz = sizeof(query_req_msgbuf);
 	DNSQuestion *q;
 	mDNSs32 min_size = sizeof(DNSServiceFlags) + sizeof(mDNSu32) + 4;
 	mStatus err = mStatus_NoError;
@@ -198,7 +198,7 @@ mDNSlocal mStatus InitEtcHostsRecords(void)
 					(DNSServiceErrorType)htonl(kDNSServiceErr_NoSuchRecord));	// Regress <rdar://problem/24827555>
 
 	// Simulate what udsserver_idle normally does for clean up
-	freeL("StartLocalOnlyClientQueryRequest:reply", reply);
+	free(reply);
 	req->replies = NULL;
 
 	// Simulate the query time out of the local-only question.
@@ -270,8 +270,9 @@ mDNSlocal mStatus InitEtcHostsRecords(void)
 {
 	mDNS *const m = &mDNSStorage;
 	request_state* req = client_request_message;
-	char *msgptr = (char *)query_req_msgbuf;
-	size_t msgsz = sizeof(query_req_msgbuf);	DNSQuestion *q;
+	const uint8_t *const msgptr = query_req_msgbuf;
+	const uint32_t msgsz = sizeof(query_req_msgbuf);
+	DNSQuestion *q;
 	mDNSs32 min_size = sizeof(DNSServiceFlags) + sizeof(mDNSu32) + 4;
 	mStatus err = mStatus_NoError;
 	char qname_cstr[MAX_ESCAPED_DOMAIN_NAME];

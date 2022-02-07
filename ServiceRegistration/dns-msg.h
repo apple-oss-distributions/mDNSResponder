@@ -1,12 +1,12 @@
 /* dns-msg.h
  *
- * Copyright (c) 2018, 2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -102,6 +102,7 @@ struct dns_rdata_unparsed {
 };
 
 typedef struct dns_rdata_single_name dns_rdata_ptr_t;
+typedef struct dns_rdata_single_name dns_rdata_ns_t;
 typedef struct dns_rdata_single_name dns_rdata_cname_t;
 struct dns_rdata_single_name {
     dns_label_t *NONNULL name;
@@ -149,6 +150,7 @@ struct dns_rr {
         dns_rdata_unparsed_t unparsed;
         dns_rdata_ptr_t ptr;
         dns_rdata_cname_t cname;
+        dns_rdata_ns_t ns;
         struct in_addr a;
         struct in6_addr aaaa;
         dns_rdata_srv_t srv;
@@ -347,6 +349,7 @@ struct dns_message {
 #define dns_opt_padding       12 // [RFC7830]
 #define dns_opt_chain         13 // [RFC7901]
 #define dns_opt_key_tag       14 // [RFC8145]
+#define dns_opt_srp_serial 65186 // ???
 
 // towire.c:
 
@@ -374,6 +377,9 @@ void dns_u16_to_wire_(dns_towire_state_t *NONNULL txn, uint16_t val, int line);
 
 void dns_u32_to_wire_(dns_towire_state_t *NONNULL txn, uint32_t val, int line);
 #define dns_u32_to_wire(txn, val) dns_u32_to_wire_(txn, val, __LINE__)
+
+void dns_u64_to_wire_(dns_towire_state_t *NONNULL txn, uint64_t val, int line);
+#define dns_u64_to_wire(txn, val) dns_u64_to_wire_(txn, val, __LINE__)
 
 void dns_ttl_to_wire_(dns_towire_state_t *NONNULL txn, int32_t val, int line);
 #define dns_ttl_to_wire(txn, val) dns_ttl_to_wire_(txn, val, __LINE__)
@@ -428,23 +434,35 @@ int dns_send_to_server(dns_transaction_t *NONNULL txn,
                        dns_response_callback_t NONNULL callback);
 
 // fromwire.c:
-dns_label_t *NULLABLE dns_label_parse(const uint8_t *NONNULL buf, unsigned mlen, unsigned *NONNULL offp);
+#define dns_label_parse(buf, mlen, offp) dns_label_parse_(buf, mlen, offp, __FILE__, __LINE__)
+dns_label_t *NULLABLE dns_label_parse_(const uint8_t *NONNULL buf, unsigned mlen, unsigned *NONNULL offp,
+                                       const char *NONNULL file, int line);
 bool dns_opt_parse(dns_edns0_t *NONNULL *NULLABLE ret, dns_rr_t *NONNULL rrset);
-bool dns_name_parse(dns_label_t *NONNULL *NULLABLE ret, const uint8_t *NONNULL buf, unsigned len,
-                    unsigned *NONNULL offp, unsigned base);
+#define dns_name_parse(ret, buf, len, offp, base) dns_name_parse_(ret, buf, len, offp, base, __FILE__, __LINE__)
+bool dns_name_parse_(dns_label_t *NONNULL *NULLABLE ret, const uint8_t *NONNULL buf, unsigned len,
+                     unsigned *NONNULL offp, unsigned base, const char *NONNULL file, int line);
 bool dns_u8_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp, uint8_t *NONNULL ret);
 bool dns_u16_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp, uint16_t *NONNULL ret);
 bool dns_u32_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp, uint32_t *NONNULL ret);
-bool dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *NONNULL buf, unsigned *NONNULL offp,
-                          unsigned target, unsigned rdlen, unsigned rrstart);
-bool dns_rr_parse(dns_rr_t *NONNULL rrset,
-                  const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp, bool rrdata_permitted);
+bool dns_u64_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp, uint64_t *NONNULL ret);
+#define dns_rdata_parse_data(rr, buf, offp, target, rdlen, rrstart) \
+    dns_rdata_parse_data_(rr, buf, offp, target, rdlen, rrstart, __FILE__, __LINE__)
+bool dns_rdata_parse_data_(dns_rr_t *NONNULL rr, const uint8_t *NONNULL buf, unsigned *NONNULL offp,
+                           unsigned target, unsigned rdlen, unsigned rrstart, const char *NONNULL file, int line);
+#define dns_rr_parse(rrset, buf, len, offp, rrdata_permitted) \
+    dns_rr_parse_(rrset, buf, len, offp, rrdata_permitted, __FILE__, __LINE__)
+bool dns_rr_parse_(dns_rr_t *NONNULL rrset, const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp,
+                   bool rrdata_permitted, const char *NONNULL file, int line);
 void dns_name_free(dns_label_t *NONNULL name);
 void dns_rrdata_free(dns_rr_t *NONNULL rr);
 void dns_message_free(dns_message_t *NONNULL message);
-bool dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *NONNULL buf, unsigned *NONNULL offp,
-                          unsigned target, unsigned rdlen, unsigned rrstart);
-bool dns_wire_parse(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *NONNULL message, unsigned len);
+#define dns_rdata_parse_data(rr, buf, offp, target, rdlen, rrstart) \
+    dns_rdata_parse_data_(rr, buf, offp, target, rdlen, rrstart, __FILE__, __LINE__)
+bool dns_rdata_parse_data_(dns_rr_t *NONNULL rr, const uint8_t *NONNULL buf, unsigned *NONNULL offp,
+                          unsigned target, unsigned rdlen, unsigned rrstart, const char *NONNULL file, int line);
+#define dns_wire_parse(ret, message, len) dns_wire_parse_(ret, message, len, __FILE__, __LINE__)
+bool dns_wire_parse_(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *NONNULL message, unsigned len,
+                     const char *NONNULL FILE, int line);
 bool dns_names_equal(dns_label_t *NONNULL name1, dns_label_t *NONNULL name2);
 
 // wireutils.c
@@ -459,7 +477,7 @@ void dns_concatenate_name_to_wire_(dns_towire_state_t *NONNULL towire,
     dns_concatenate_name_to_wire_(txn, labels_prefix, prefix, suffix, __LINE__)
 
 const char *NONNULL dns_name_print_to_limit(dns_name_t *NONNULL name, dns_name_t *NULLABLE limit, char *NULLABLE buf,
-                                            int bufmax);
+                                            size_t bufmax);
 const char *NONNULL dns_name_print(dns_name_t *NONNULL name, char *NONNULL buf, int bufmax);
 bool dns_labels_equal(const char *NONNULL label1, const char *NONNULL label2, size_t len);
 bool dns_names_equal_text(dns_label_t *NONNULL name1, const char *NONNULL name2);
@@ -469,6 +487,66 @@ dns_name_t *NULLABLE dns_pres_name_parse(const char *NONNULL pname);
 dns_name_t *NULLABLE dns_name_subdomain_of(dns_name_t *NONNULL name, dns_name_t *NONNULL domain);
 const char *NONNULL dns_rcode_name(int rcode);
 bool dns_keys_rdata_equal(dns_rr_t *NONNULL key1, dns_rr_t *NONNULL key2);
+
+/*!
+ *  @brief
+ *      Check if the IPv4 address represented by a 4-byte array is a link-local address.
+ *
+ *  @param bytes
+ *      A bytes array whose length is 4, which represents an IPv4 address in the network byte order.
+ *
+ *  @result
+ *      True if the IPv4 address is a link-local address, otherwise, false.
+ */
+static inline bool is_ipv4_bytes_link_local(const uint8_t bytes[static const 4])
+{
+    return bytes[0] == 169 && bytes[1] == 254;
+}
+
+/*!
+ *  @brief
+ *      Check if the IPv4 address represented by a 4-byte array is a loopback address.
+ *
+ *  @param bytes
+ *      A bytes array whose length is 4, which represents an IPv4 address in the network byte order.
+ *
+ *  @result
+ *      True if the IPv4 address is a loopback address, otherwise, false.
+ */
+static inline bool is_ipv4_bytes_loopback(const uint8_t bytes[static const 4])
+{
+    return bytes[0] == 127;
+}
+
+/*!
+ *  @brief
+ *      Check if the IPv4 address represented by a pointer to struct in_addr is a link-local address.
+ *
+ *  @param addr
+ *      A pointer to struct in_addr structure.
+ *
+ *  @result
+ *      True if the IPv4 address is a link-local address, otherwise, false.
+ */
+static inline bool is_in_addr_link_local(const struct in_addr *const NONNULL addr)
+{
+    return is_ipv4_bytes_link_local((const uint8_t *)&addr->s_addr);
+}
+
+/*!
+ *  @brief
+ *      Check if the IPv4 address represented by a pointer to struct in_addr is a loopback address.
+ *
+ *  @param addr
+ *      A pointer to struct in_addr structure.
+ *
+ *  @result
+ *      True if the IPv4 address is a loopback address, otherwise, false.
+ */
+static inline bool is_in_addr_loopback(const struct in_addr *const NONNULL addr)
+{
+    return is_ipv4_bytes_loopback((const uint8_t *)&addr->s_addr);
+}
 
 #endif // _DNS_MSG_H
 

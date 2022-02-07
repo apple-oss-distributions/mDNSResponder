@@ -52,7 +52,7 @@ mDNSexport mStatus init_mdns_storage()
 	return mStatus_NoError;
 }
 
-mDNSlocal void init_client_request(request_state* req, char *msgbuf, size_t msgSize, uint32_t op)
+mDNSlocal void init_client_request(request_state* req, const uint8_t *msgbuf, uint32_t msgSize, uint32_t op)
 {
 	// Simulate read_msg behavior since unit test does not open a socket
 	memset(req, 0, sizeof(request_state));
@@ -76,7 +76,7 @@ mDNSlocal void init_client_request(request_state* req, char *msgbuf, size_t msgS
 
 // This function calls the mDNSResponder handle_client_request() API.  It initializes
 // the request and query data structures.
-mDNSexport mStatus start_client_request(request_state* req, char *msgbuf, size_t msgsz, uint32_t op, UDPSocket* socket)
+mDNSexport mStatus start_client_request(request_state* req, const uint8_t *msgbuf, uint32_t msgsz, uint32_t op, UDPSocket* socket)
 {
 	// Process the unit test's client request
 	init_client_request(req, msgbuf, msgsz, op);

@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2003-2018 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -66,7 +66,7 @@
  */
 
 #ifndef _DNS_SD_H
-#define _DNS_SD_H 13104042
+#define _DNS_SD_H 15566009
 
 #ifdef  __cplusplus
 extern "C" {
@@ -140,6 +140,20 @@ typedef INT32 int32_t;
 #include <stdint.h>
 #endif
 
+#if !defined(__has_extension)
+    #define __has_extension(X)              0
+#endif
+
+#if !defined(__has_feature)
+    #define __has_feature(X)                0
+#endif
+
+#if __has_feature(objc_fixed_enum) || __has_extension(cxx_fixed_enum) || __has_extension(cxx_strong_enums)
+    #define DNS_SERVICE_FLAGS_ENUM          enum : uint32_t
+#else
+    #define DNS_SERVICE_FLAGS_ENUM          enum
+#endif
+
 #if _DNS_SD_LIBDISPATCH
 #include <dispatch/dispatch.h>
 #endif
@@ -171,14 +185,15 @@ struct sockaddr;
  * The reliable way to test whether a particular bit is set is not with an equality test,
  * but with a bitwise mask:
  *     if (flags & kDNSServiceFlagsAdd) ...
- * With the exception of kDNSServiceFlagsValidate, each flag can be valid(be set) 
+ * With the exception of kDNSServiceFlagsValidate, each flag can be valid(be set)
  * EITHER only as an input to one of the DNSService*() APIs OR only as an output
  * (provide status) through any of the callbacks used. For example, kDNSServiceFlagsAdd
  * can be set only as an output in the callback, whereas the kDNSServiceFlagsIncludeP2P
- * can be set only as an input to the DNSService*() APIs. See comments on kDNSServiceFlagsValidate  
+ * can be set only as an input to the DNSService*() APIs. See comments on kDNSServiceFlagsValidate
  * defined in enum below.
  */
-enum
+
+DNS_SERVICE_FLAGS_ENUM
 {
     kDNSServiceFlagsMoreComing          = 0x1,
     /* MoreComing indicates to a callback that at least one more result is
@@ -253,7 +268,7 @@ enum
     kDNSServiceFlagsForce               = 0x800,    // This flag is deprecated.
 
     kDNSServiceFlagsKnownUnique         = 0x800,
-    /* 
+    /*
      * Client guarantees that record names are unique, so we can skip sending out initial
      * probe messages.  Standard name conflict resolution is still done if a conflict is discovered.
      */
@@ -347,8 +362,8 @@ enum
      * 5. Thread Safety
      * The dns_sd.h API does not presuppose any particular threading model, and consequently
      * does no locking internally (which would require linking with a specific threading library).
-     * If the client concurrently, from multiple threads (or contexts), calls API routines using 
-     * the same DNSServiceRef, it is the client's responsibility to provide mutual exclusion for 
+     * If the client concurrently, from multiple threads (or contexts), calls API routines using
+     * the same DNSServiceRef, it is the client's responsibility to provide mutual exclusion for
      * that DNSServiceRef.
      *
      * For example, use of DNSServiceRefDeallocate requires caution. A common mistake is as follows:
@@ -397,7 +412,7 @@ enum
 
     kDNSServiceFlagsBackgroundTrafficClass  = 0x80000,
     /*
-    * This flag is meaningful for Unicast DNS queries. When set, it uses the background traffic 
+    * This flag is meaningful for Unicast DNS queries. When set, it uses the background traffic
     * class for packets that service the request.
     */
 
@@ -414,32 +429,32 @@ enum
 
     kDNSServiceFlagsValidate               = 0x200000,
    /*
-    * This flag is meaningful in DNSServiceGetAddrInfo and DNSServiceQueryRecord. This is the ONLY flag to be valid 
+    * This flag is meaningful in DNSServiceGetAddrInfo and DNSServiceQueryRecord. This is the ONLY flag to be valid
     * as an input to the APIs and also an output through the callbacks in the APIs.
     *
-    * When this flag is passed to DNSServiceQueryRecord and DNSServiceGetAddrInfo to resolve unicast names, 
-    * the response  will be validated using DNSSEC. The validation results are delivered using the flags field in 
+    * When this flag is passed to DNSServiceQueryRecord and DNSServiceGetAddrInfo to resolve unicast names,
+    * the response  will be validated using DNSSEC. The validation results are delivered using the flags field in
     * the callback and kDNSServiceFlagsValidate is marked in the flags to indicate that DNSSEC status is also available.
-    * When the callback is called to deliver the query results, the validation results may or may not be available. 
+    * When the callback is called to deliver the query results, the validation results may or may not be available.
     * If it is not delivered along with the results, the validation status is delivered when the validation completes.
-    * 
+    *
     * When the validation results are delivered in the callback, it is indicated by marking the flags with
     * kDNSServiceFlagsValidate and kDNSServiceFlagsAdd along with the DNSSEC status flags (described below) and a NULL
     * sockaddr will be returned for DNSServiceGetAddrInfo and zero length rdata will be returned for DNSServiceQueryRecord.
     * DNSSEC validation results are for the whole RRSet and not just individual records delivered in the callback. When
-    * kDNSServiceFlagsAdd is not set in the flags, applications should implicitly assume that the DNSSEC status of the 
+    * kDNSServiceFlagsAdd is not set in the flags, applications should implicitly assume that the DNSSEC status of the
     * RRSet that has been delivered up until that point is not valid anymore, till another callback is called with
     * kDNSServiceFlagsAdd and kDNSServiceFlagsValidate.
     *
     * The following four flags indicate the status of the DNSSEC validation and marked in the flags field of the callback.
-    * When any of the four flags is set, kDNSServiceFlagsValidate will also be set. To check the validation status, the 
+    * When any of the four flags is set, kDNSServiceFlagsValidate will also be set. To check the validation status, the
     * other applicable output flags should be masked.
     */
 
     kDNSServiceFlagsSecure                 = 0x200010,
    /*
     * The response has been validated by verifying all the signatures in the response and was able to
-    * build a successful authentication chain starting from a known trust anchor.   
+    * build a successful authentication chain starting from a known trust anchor.
     */
 
     kDNSServiceFlagsInsecure               = 0x200020,
@@ -489,27 +504,33 @@ enum
     kDNSServiceFlagsThresholdFinder        = 0x4000000,
     kDNSServiceFlagsThresholdReached       = kDNSServiceFlagsThresholdOne,
     /*
-     * kDNSServiceFlagsThresholdOne is meaningful only in DNSServiceBrowse. When set,
-     * the system will stop issuing browse queries on the network once the number
-     * of answers returned is one or more.  It will issue queries on the network
-     * again if the number of answers drops to zero.
-     * This flag is for Apple internal use only. Third party developers
-     * should not rely on this behavior being supported in any given software release.
+     * kDNSServiceFlagsThresholdOne is used only with DNSServiceBrowse, and is not meaningful
+     * with any other API call. This flag limits the number of retries that are performed when
+     * doing mDNS service discovery. As soon as a single answer is received, retransmission
+     * is discontinued. This allows the caller to determine whether or not a particular service
+     * is present on the network in as efficient a way as possible. As answers expire from the
+     * cache or are explicitly removed as a consequence of the service being discontinued, if
+     * the number of still-valid answers reaches zero, mDNSResponder will resume periodic querying
+     * on the network until at least one valid answer is present. Because this flag only controls
+     * retransmission, when more than one service of the type being browsed is present on the
+     * network, it is quite likely that more than one answer will be delivered to the callback.
      *
-     * kDNSServiceFlagsThresholdFinder is meaningful only in DNSServiceBrowse. When set,
-     * the system will stop issuing browse queries on the network once the number
-     * of answers has reached the threshold set for Finder.
-     * It will issue queries on the network again if the number of answers drops below
-     * this threshold.
-     * This flag is for Apple internal use only. Third party developers
-     * should not rely on this behavior being supported in any given software release.
+     * kDNSServiceFlagsThresholdFinder is used only in DNSServiceBrowse, and is not meaningful
+     * in other API calls. When set, this flag limits the number of retries that are performed
+     * when doing mDNS service discovery, similar to kDNSServiceFlagsThresholdOne. The difference
+     * is that the threshold here is higher: retransmissions will continue until some system-
+     * dependent number of answers are present, or the retransmission process is complete.
+     * Because the number of answers that ends retransmission varies, developers should not
+     * depend on there being some specific threshold; rather, this flag can be used in cases
+     * where it is preferred to give the user a choice, but where once a small number of
+     * such services are discovered, retransmission is discontinued.
      *
      * When kDNSServiceFlagsThresholdReached is set in the client callback add or remove event,
-     * it indicates that the browse answer threshold has been reached and no 
+     * it indicates that the browse answer threshold has been reached and no
      * browse requests will be generated on the network until the number of answers falls
      * below the threshold value.  Add and remove events can still occur based
      * on incoming Bonjour traffic observed by the system.
-     * The set of services return to the client is not guaranteed to represent the 
+     * The set of services return to the client is not guaranteed to represent the
      * entire set of services present on the network once the threshold has been reached.
      *
      * Note, while kDNSServiceFlagsThresholdReached and kDNSServiceFlagsThresholdOne
@@ -517,6 +538,7 @@ enum
      * is only set in the callbacks and kDNSServiceFlagsThresholdOne is only set on
      * input to a DNSServiceBrowse call.
      */
+
      kDNSServiceFlagsPrivateOne          = 0x2000,
     /*
      * This flag is private and should not be used.
@@ -556,7 +578,7 @@ enum
      * client, and in parallel a network query for that name is issued. All returned records from the query will
      * remain in the cache after expiration.
      */
-    
+
     kDNSServiceFlagsExpiredAnswer         = 0x80000000
     /*
      * When kDNSServiceFlagsAllowExpiredAnswers is passed to DNSServiceQueryRecord or DNSServiceGetAddrInfo,
@@ -708,7 +730,9 @@ enum
     kDNSServiceErr_PollingMode               = -65567,
     kDNSServiceErr_Timeout                   = -65568,
     kDNSServiceErr_DefunctConnection         = -65569,  /* Connection to daemon returned a SO_ISDEFUNCT error result */
-    kDNSServiceErr_PolicyDenied              = -65570
+    kDNSServiceErr_PolicyDenied              = -65570,
+    kDNSServiceErr_NotPermitted              = -65571
+
 
                                                /* mDNS Error codes are in the range
                                                 * FFFE FF00 (-65792) to FFFE FFFF (-65537) */
@@ -739,7 +763,7 @@ enum
  * the backslash ('\') character, which is the DNS escape character, and
  * the ASCII NUL (0) byte value, which is the C-string terminator character.
  * The escape character ('\') is interpreted as described below:
- * 
+ *
  *   '\ddd', where ddd is a three-digit decimal value from 000 to 255,
  *        represents a single literal byte with that value. Any byte value may be
  *        represented in '\ddd' format, even characters that don't strictly need to be escaped.
@@ -750,7 +774,7 @@ enum
  *        string terminator character, so ASCII NUL in a domain name has to be represented in a C-string as '\000'.
  *        Other characters like space (ASCII code 32) are sometimes represented as '\032'
  *        in contexts where having an actual space character in a C-string would be inconvenient.
- *        
+ *
  *   Otherwise, for all cases where a '\' is followed by anything other than a three-digit decimal value
  *        from 000 to 255, the character sequence '\x' represents a single literal occurrence of character 'x'.
  *        This is legal for any character, so, for example, '\w' is equivalent to 'w'.
@@ -876,7 +900,7 @@ enum
  *
  * - If kDNSServiceInterfaceIndexP2P is passed to DNSServiceResolve, it is
  *   mapped internally to kDNSServiceInterfaceIndexAny with the kDNSServiceFlagsIncludeP2P
- *   set, because resolving a P2P service may create and/or enable an interface whose 
+ *   set, because resolving a P2P service may create and/or enable an interface whose
  *   index is not known a priori. The resolve callback will indicate the index of the
  *   interface via which the service can be accessed.
  *
@@ -1026,7 +1050,7 @@ DNSServiceErrorType DNSSD_API DNSServiceProcessResult(DNSServiceRef sdRef);
  * is invalidated when this function is called - the DNSRecordRef may not be used in subsequent
  * functions.
  *
- * If the reference was passed to DNSServiceSetDispatchQueue(), DNSServiceRefDeallocate() must 
+ * If the reference was passed to DNSServiceSetDispatchQueue(), DNSServiceRefDeallocate() must
  * be called on the same queue originally passed as an argument to DNSServiceSetDispatchQueue().
  *
  * Note: This call is to be used only with the DNSServiceRef defined by this API.
@@ -1994,7 +2018,13 @@ typedef void (DNSSD_API *DNSServiceRegisterRecordReply)
  *                  and deallocate each of their corresponding DNSServiceRecordRefs, call
  *                  DNSServiceRefDeallocate()).
  *
- * flags:           One of either kDNSServiceFlagsShared, kDNSServiceFlagsUnique or kDNSServiceFlagsKnownUnique must be set.
+ * flags:           Required values are:
+ *                  One of kDNSServiceFlagsShared, kDNSServiceFlagsUnique or kDNSServiceFlagsKnownUnique flags.
+ *
+ *                  Possible values are:
+ *                  kDNSServiceFlagsForceMulticast: If it is specified, the registration will be performed just like
+ *                  a link-local mDNS registration even if the name is an apparently non-local name (i.e. a name not
+ *                  ending in ".local.")
  *
  * interfaceIndex:  If non-zero, specifies the interface on which to register the record
  *                  (the index for a given interface is determined via the if_nametoindex()
@@ -2363,7 +2393,7 @@ typedef union _TXTRecordRef_t { char PrivateData[16]; char *ForceNaturalAlignmen
  * an existing TXT record buffer should not be passed to TXTRecordCreate
  * to create a copy of another TXT Record. The correct way to copy TXTRecordRef
  * is creating an empty TXTRecordRef with TXTRecordCreate() first, and using
- * TXTRecordSetValue to set the same value.  
+ * TXTRecordSetValue to set the same value.
  *
  * On some platforms, when memory is low, malloc() may fail. In this
  * case, TXTRecordSetValue() will return kDNSServiceErr_NoMemory, and this
@@ -2718,7 +2748,7 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
  * DNSServiceSetDispatchQueue a second time to schedule the DNSServiceRef onto a different serial dispatch
  * queue. Once scheduled onto a dispatch queue a DNSServiceRef will deliver events to that queue until
  * the application no longer requires that operation and terminates it using DNSServiceRefDeallocate.
- * Note that the call to DNSServiceRefDeallocate() must be done on the same queue originally passed 
+ * Note that the call to DNSServiceRefDeallocate() must be done on the same queue originally passed
  * as an argument to DNSServiceSetDispatchQueue().
  *
  * service:         DNSServiceRef that was allocated and returned to the application, when the

@@ -1,12 +1,12 @@
 /* dso-transport.h
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,8 @@
 
 #ifndef __DSO_TRANSPORT_H
 #define __DSO_TRANSPORT_H
+
+#include "mdns_addr_tailq.h"   // For mdns_addr_tailq_t.
 
 #ifdef DSO_USES_NETWORK_FRAMEWORK
 #include <Network/Network.h>
@@ -34,19 +36,23 @@
 // allow us to use TCP_NOTSENT_LOWAT directly.
 #define MAX_UNSENT_BYTES 60000
 
+// Use 0 to represent an invalid ID for the object dso_connect_state_t and dso_transport_t.
+#define DSO_CONNECT_STATE_INVALID_SERIAL 0
+#define DSO_TRANSPORT_INVALID_SERIAL 0
+
 struct dso_transport {
-    dso_state_t *dso;			   // DSO state for which this is the transport 
+    dso_state_t *dso;              // DSO state for which this is the transport
     struct dso_transport *next;    // Transport is on list of transports.
     void *event_context;           // I/O event context
     mDNSAddr remote_addr;          // The IP address to which we have connected
     int remote_port;               // The port to which we have connected
 
+    uint32_t serial;               // Serial number for locating possibly freed dso_transport_t structs.
 #ifdef DSO_USES_NETWORK_FRAMEWORK
     nw_connection_t connection;
     dispatch_data_t to_write;
     size_t bytes_to_write;
     size_t unsent_bytes;
-    uint32_t serial;               // Serial number for locating possibly freed dso_transport_t structs
     bool write_failed;             // This is set if any of the parts of the dso_write process fail
 #else
     TCPSocket *connection;         // Socket connected to Discovery Proxy
@@ -76,25 +82,48 @@ struct dso_lookup {
 };
 
 typedef struct dso_connect_state dso_connect_state_t;
+
+typedef enum {
+    // When the object is created and holds a reference to the context, the callback(see below) is called with
+    // dso_connect_life_cycle_create.
+    dso_connect_life_cycle_create,
+    // When the object is canceled, the callback(see below) is called with dso_connect_life_cycle_cancel to provide a
+    // chance for the context to do the corresponding cleaning work(cancel or release/free).
+    dso_connect_life_cycle_cancel,
+    // When the object is freed, the callback(see below) is called with dso_connect_life_cycle_free to provide a chance
+    // for the context to clean anything remains allocated.
+    dso_connect_life_cycle_free
+} dso_connect_life_cycle_t;
+
+typedef void (*dso_connect_life_cycle_context_callback_t)(const dso_connect_life_cycle_t life_cycle,
+     void *const context, dso_connect_state_t *const dso_connect);
+
 struct dso_connect_state {
     dso_connect_state_t *next;
     dso_event_callback_t callback;
     dso_state_t *dso;
     char *detail;
     void *context;
+
+    // The callback gets called when dso_state_t is created, canceled or finalized to do some status maintaining
+    // operation for the context. This is passed into dso_state_create(), when dso_connect_state_t uses the context to
+    // create a new dso_state_t in dso_connection_succeeded().
+    dso_life_cycle_context_callback_t dso_context_callback;
+    // The callback gets called when dso_connect_t is created, canceled or finalized to do some status maintaining
+    // operation for the context.
+    dso_connect_life_cycle_context_callback_t dso_connect_context_callback;
     TCPListener *listener;
 
+    uint32_t serial; // Serial number that identifies a specific dso_connect_state_t.
     char *hostname;
-    int num_addrs;
-    int cur_addr;
-    mDNSAddr addresses[MAX_DSO_CONNECT_ADDRS];
-    mDNSIPPort ports[MAX_DSO_CONNECT_ADDRS];
+
+    mdns_addr_tailq_t *addrs; // A list that contains all the resolved/added addresses and ports of the DSO server.
     DNSServiceRef lookup;
+    mDNSBool canceled; // Indicates if the dso_connect_state_t has been canceled and should be ignored for processing.
 
     mDNSBool connecting;
     mDNSIPPort config_port, connect_port;
 #ifdef DSO_USES_NETWORK_FRAMEWORK
-    uint32_t serial;
     nw_connection_t connection;
     bool tls_enabled;
 #else
@@ -112,20 +141,28 @@ typedef struct {
 	void *context;
 } dso_listen_context_t;
 
+typedef struct {
+    const uint8_t *message;
+    size_t length;
+} dso_message_payload_t;
+
 void dso_transport_init(void);
 mStatus dso_set_connection(dso_state_t *dso, TCPSocket *socket);
 void dso_schedule_reconnect(mDNS *m, dso_connect_state_t *cs, mDNSs32 when);
 void dso_set_callback(dso_state_t *dso, void *context, dso_event_callback_t cb);
 mStatus dso_message_write(dso_state_t *dso, dso_message_t *msg, bool disregard_low_water);
-dso_connect_state_t *dso_connect_state_create(const char *host, mDNSAddr *addr, mDNSIPPort port,
-                                              int num_outstanding_queries,
-                                              size_t inbuf_size, size_t outbuf_size,
-                                              dso_event_callback_t callback,
-                                              dso_state_t *dso, void *context, const char *detail);
+dso_connect_state_t *dso_connect_state_create(
+    const char *hostname, mDNSAddr *addr, mDNSIPPort port,
+    int max_outstanding_queries, size_t inbuf_size, size_t outbuf_size,
+    dso_event_callback_t callback,
+    dso_state_t *dso, void *context,
+    const dso_life_cycle_context_callback_t dso_context_callback,
+    const dso_connect_life_cycle_context_callback_t dso_connect_context_callback,
+    const char *detail);
 #ifdef DSO_USES_NETWORK_FRAMEWORK
 void dso_connect_state_use_tls(dso_connect_state_t *cs);
 #endif
-void dso_connect_state_drop(dso_connect_state_t *cs);
+void dso_connect_state_cancel(dso_connect_state_t *const cs);
 bool dso_connect(dso_connect_state_t *connect_state);
 mStatus dso_listen(dso_connect_state_t *listen_context);
 bool dso_write_start(dso_transport_t *transport, size_t length);

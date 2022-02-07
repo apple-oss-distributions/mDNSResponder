@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>Project</key>
@@ -80,9 +80,91 @@
 		</dict>
 		<dict>
 			<key>TestName</key>
+			<string>DNS Querying</string>
+			<key>Description</key>
+			<string>Tests mDNSResponder&apos;s DNS querying. Verifies that mDNSResponder doesn&apos;t send more A/AAAA queries than necessary.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>90</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>dnsquery</string>
+				<string>--format</string>
+				<string>json</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>10</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Fast Querier Recovery</string>
+			<key>Description</key>
+			<string>Tests mDNSResponder&apos;s ability to quickly recover from a transient DNS outage.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>fastrecovery</string>
+				<string>--format</string>
+				<string>json</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>10</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
 			<string>DNS Server Retry</string>
 			<key>Description</key>
-			<string>Tests whether mDNSResponder retries queries with a different server if a given server is unresponsive. Also tests mDNSResponder's handling of DNS responses with every possible RCODE.</string>
+			<string>Tests whether mDNSResponder retries queries with a different server if a given server is unresponsive. Also tests mDNSResponder&apos;s handling of DNS responses with every possible RCODE.</string>
 			<key>AsRoot</key>
 			<true/>
 			<key>RequiresWiFi</key>
@@ -2816,6 +2898,50 @@
 				<string>xctest</string>
 				<string>-c</string>
 				<string>NSEC3HashTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>SignatureValidationTest</string>
+			<key>Description</key>
+			<string>Test if the DNSSEC signature validation works with multiple DNSKEY algorithm.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>SignatureValidationTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSDigestTest</string>
+			<key>Description</key>
+			<string>Test if the HMAC MD5 utilities in DNSDigest.c can generate the correct digest.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSDigestTest</string>
 			</array>
 		</dict>
 	</array>

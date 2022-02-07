@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2007-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@
 #include <sys/cdefs.h>
 #include <arpa/inet.h>
 #include <bsm/libbsm.h>
+#include <mdns/bpf.h>
 #include <net/if.h>
 #include <net/route.h>
 #include <net/if_dl.h>
@@ -40,41 +41,28 @@
 #include <unistd.h>
 #include <Security/Security.h>
 #include <SystemConfiguration/SystemConfiguration.h>
-#include <SystemConfiguration/SCPreferencesSetSpecific.h>
 #include <TargetConditionals.h>
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #include <net/bpf.h>
-#include <sys/sysctl.h>
 
 #include "mDNSEmbeddedAPI.h"
 #include "dns_sd.h"
 #include "dnssd_ipc.h"
 #include "helper.h"
 #include "helper-server.h"
-#include "P2PPacketFilter.h"
 #include "setup_assistant_helper.h"
 #include <stdatomic.h>
 
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 
-#include <IOKit/pwr_mgt/IOPMLibPrivate.h>
-
 #ifndef RTF_IFSCOPE
 #define RTF_IFSCOPE 0x1000000
 #endif
 
 #if TARGET_OS_IPHONE
-#define NO_CFUSERNOTIFICATION 1
 #define NO_SECURITYFRAMEWORK 1
 #endif
-
-// Embed the client stub code here, so we can access private functions like ConnectToServer, create_hdr, deliver_request
-#define XPC_AUTH_CONNECTION   0
-#include "../mDNSShared/dnssd_ipc.c"
-#include "../mDNSShared/dnssd_clientstub.c"
-
-typedef struct sadb_x_policy *ipsec_policy_t;
 
 uid_t mDNSResponderUID;
 gid_t mDNSResponderGID;
@@ -85,105 +73,19 @@ void helper_exit()
     exit(0);
 }
 
-mDNSexport void RequestBPF()
+int PowerSleepSystem(void)
 {
-    DNSServiceRef ref;
-    
-    DNSServiceErrorType err = ConnectToServer(&ref, 0, send_bpf, NULL, NULL, NULL);
-    if (err)
+    IOReturn r = IOPMSleepSystem(IOPMFindPowerManagement(MACH_PORT_NULL));
+    if (r)
     {
-        os_log(log_handle, "RequestBPF: ConnectToServer %d", err);
-        return;
+        usleep(100000);
+        os_log_info(log_handle, "IOPMSleepSystem %d", r);
     }
-    
-    char *ptr;
-    size_t len = sizeof(DNSServiceFlags);
-    ipc_msg_hdr *hdr = create_hdr(send_bpf, &len, &ptr, 0, ref);
-    if (!hdr)
-    {
-        os_log(log_handle, "RequestBPF: No mem to allocate");
-        DNSServiceRefDeallocate(ref);
-        return;
-    }
-    
-    put_flags(0, &ptr);
-    deliver_request(hdr, ref);      // Will free hdr for us
-    DNSServiceRefDeallocate(ref);
     update_idle_timer();
-
-    os_log_info(log_handle,"RequestBPF: Successful");
+    return r;
 }
 
-
-void PowerRequest(int key, int interval, int *err)
-{
-    *err = kHelperErr_DefaultErr;
-    
-    os_log_info(log_handle,"PowerRequest: key %d interval %d, err %d", key, interval, *err);
-    
-    CFArrayRef events = IOPMCopyScheduledPowerEvents();
-    if (events)
-    {
-        int i;
-        CFIndex count = CFArrayGetCount(events);
-        for (i=0; i<count; i++)
-        {
-            CFDictionaryRef dict = CFArrayGetValueAtIndex(events, i);
-            CFStringRef id = CFDictionaryGetValue(dict, CFSTR(kIOPMPowerEventAppNameKey));
-            if (CFEqual(id, CFSTR("mDNSResponderHelper")))
-            {
-                CFDateRef EventTime = CFDictionaryGetValue(dict, CFSTR(kIOPMPowerEventTimeKey));
-                CFStringRef EventType = CFDictionaryGetValue(dict, CFSTR(kIOPMPowerEventTypeKey));
-                IOReturn result = IOPMCancelScheduledPowerEvent(EventTime, id, EventType);
-                //os_log(log_handle, "Deleting old event %s");
-                if (result)
-                    os_log(log_handle, "IOPMCancelScheduledPowerEvent %d failed %d", i, result);
-            }
-        }
-        CFRelease(events);
-    }
-    
-    if (key < 0) // mDNSPowerRequest(-1,-1) means "clear any stale schedules" (see above)
-    {
-        *err = kHelperErr_NoErr;
-    }
-    else if (key == 0)      // mDNSPowerRequest(0, 0) means "sleep now"
-    {
-        IOReturn r = IOPMSleepSystem(IOPMFindPowerManagement(MACH_PORT_NULL));
-        if (r)
-        {
-            usleep(100000);
-            os_log_info(log_handle, "IOPMSleepSystem %d", r);
-        }
-        *err = r;
-    }
-    else if (key > 0)
-    {
-        CFDateRef wakeTime = CFDateCreate(NULL, CFAbsoluteTimeGetCurrent() + interval);
-        if (wakeTime)
-        {
-            CFMutableDictionaryRef scheduleDict = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-            
-            CFDictionaryAddValue(scheduleDict, CFSTR(kIOPMPowerEventTimeKey), wakeTime);
-            CFDictionaryAddValue(scheduleDict, CFSTR(kIOPMPowerEventAppNameKey), CFSTR("mDNSResponderHelper"));
-            CFDictionaryAddValue(scheduleDict, CFSTR(kIOPMPowerEventTypeKey), key ? CFSTR(kIOPMAutoWake) : CFSTR(kIOPMAutoSleep));
-            
-            IOReturn r = IOPMRequestSysWake(scheduleDict);
-            if (r)
-            {
-                usleep(100000);
-                os_log_info(log_handle, "IOPMRequestSysWake(%d) %d %x", interval, r, r);
-            }
-            *err = r;
-            CFRelease(wakeTime);
-            CFRelease(scheduleDict);
-        }
-    }
-    
-    update_idle_timer();
-}
-
-void SetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const ethaddr_t eth, int *err)
+void SetLocalAddressCacheEntry(uint32_t ifindex, int family, const v6addr_t ip, const ethaddr_t eth, int *err)
 {
     
 #define IPv6FMTSTRING "%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X"
@@ -222,7 +124,7 @@ void SetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const
             rtmsg.hdr.rtm_msglen         = sizeof(rtmsg);
             rtmsg.hdr.rtm_version        = RTM_VERSION;
             rtmsg.hdr.rtm_type           = RTM_ADD;
-            rtmsg.hdr.rtm_index          = ifindex;
+            rtmsg.hdr.rtm_index          = (u_short)ifindex;
             rtmsg.hdr.rtm_flags          = RTF_HOST | RTF_STATIC | RTF_IFSCOPE;
             rtmsg.hdr.rtm_addrs          = RTA_DST | RTA_GATEWAY;
             rtmsg.hdr.rtm_pid            = 0;
@@ -230,7 +132,7 @@ void SetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const
             rtmsg.hdr.rtm_errno          = 0;
             rtmsg.hdr.rtm_use            = 0;
             rtmsg.hdr.rtm_inits          = RTV_EXPIRE;
-            rtmsg.hdr.rtm_rmx.rmx_expire = tv.tv_sec + 30;
+            rtmsg.hdr.rtm_rmx.rmx_expire = (int32_t)(tv.tv_sec + 30);
             
             rtmsg.dst.sin_len            = sizeof(rtmsg.dst);
             rtmsg.dst.sin_family         = AF_INET;
@@ -242,7 +144,7 @@ void SetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const
             
             rtmsg.sdl.sdl_len            = sizeof(rtmsg.sdl);
             rtmsg.sdl.sdl_family         = AF_LINK;
-            rtmsg.sdl.sdl_index          = ifindex;
+            rtmsg.sdl.sdl_index          = (u_short)ifindex;
             rtmsg.sdl.sdl_type           = IFT_ETHER;
             rtmsg.sdl.sdl_nlen           = 0;
             rtmsg.sdl.sdl_alen           = ETHER_ADDR_LEN;
@@ -251,13 +153,13 @@ void SetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const
             // Target MAC address goes in rtmsg.sdl.sdl_data[0..5]; (See LLADDR() in /usr/include/net/if_dl.h)
             memcpy(rtmsg.sdl.sdl_data, eth, sizeof(ethaddr_t));
             
-            int len = write(s, (char *)&rtmsg, sizeof(rtmsg));
+            ssize_t len = write(s, (char *)&rtmsg, sizeof(rtmsg));
             if (len < 0)
-                os_log(log_handle, "SetLocalAddressCacheEntry: write(%zu) interface %d address %d.%d.%d.%d seq %d result %d errno %d (%s)",
+                os_log(log_handle, "SetLocalAddressCacheEntry: write(%zu) interface %d address %d.%d.%d.%d seq %d result %zd errno %d (%s)",
                         sizeof(rtmsg), ifindex, ip[0], ip[1], ip[2], ip[3], rtmsg.hdr.rtm_seq, len, errno, strerror(errno));
             len = read(s, (char *)&rtmsg, sizeof(rtmsg));
             if (len < 0 || rtmsg.hdr.rtm_errno)
-                os_log(log_handle, "SetLocalAddressCacheEntry: read (%zu) interface %d address %d.%d.%d.%d seq %d result %d errno %d (%s) %d",
+                os_log(log_handle, "SetLocalAddressCacheEntry: read (%zu) interface %d address %d.%d.%d.%d seq %d result %zd errno %d (%s) %d",
                         sizeof(rtmsg), ifindex, ip[0], ip[1], ip[2], ip[3], rtmsg.hdr.rtm_seq, len, errno, strerror(errno), rtmsg.hdr.rtm_errno);
             
             *err = kHelperErr_NoErr;
@@ -270,7 +172,7 @@ void SetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const
             rtmsg.hdr.rtm_msglen         = sizeof(rtmsg);
             rtmsg.hdr.rtm_version        = RTM_VERSION;
             rtmsg.hdr.rtm_type           = RTM_ADD;
-            rtmsg.hdr.rtm_index          = ifindex;
+            rtmsg.hdr.rtm_index          = (u_short)ifindex;
             rtmsg.hdr.rtm_flags          = RTF_HOST | RTF_STATIC | RTF_IFSCOPE;
             rtmsg.hdr.rtm_addrs          = RTA_DST | RTA_GATEWAY;
             rtmsg.hdr.rtm_pid            = 0;
@@ -278,7 +180,7 @@ void SetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const
             rtmsg.hdr.rtm_errno          = 0;
             rtmsg.hdr.rtm_use            = 0;
             rtmsg.hdr.rtm_inits          = RTV_EXPIRE;
-            rtmsg.hdr.rtm_rmx.rmx_expire = tv.tv_sec + 30;
+            rtmsg.hdr.rtm_rmx.rmx_expire = (int32_t)(tv.tv_sec + 30);
             
             rtmsg.dst.sin6_len           = sizeof(rtmsg.dst);
             rtmsg.dst.sin6_family        = AF_INET6;
@@ -289,7 +191,7 @@ void SetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const
             
             rtmsg.sdl.sdl_len            = sizeof(rtmsg.sdl);
             rtmsg.sdl.sdl_family         = AF_LINK;
-            rtmsg.sdl.sdl_index          = ifindex;
+            rtmsg.sdl.sdl_index          = (u_short)ifindex;
             rtmsg.sdl.sdl_type           = IFT_ETHER;
             rtmsg.sdl.sdl_nlen           = 0;
             rtmsg.sdl.sdl_alen           = ETHER_ADDR_LEN;
@@ -298,13 +200,13 @@ void SetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const
             // Target MAC address goes in rtmsg.sdl.sdl_data[0..5]; (See LLADDR() in /usr/include/net/if_dl.h)
             memcpy(rtmsg.sdl.sdl_data, eth, sizeof(ethaddr_t));
             
-            int len = write(s, (char *)&rtmsg, sizeof(rtmsg));
+            ssize_t len = write(s, (char *)&rtmsg, sizeof(rtmsg));
             if (len < 0)
-                os_log(log_handle, "SetLocalAddressCacheEntry: write(%zu) interface %d address " IPv6FMTSTRING " seq %d result %d errno %d (%s)",
+                os_log(log_handle, "SetLocalAddressCacheEntry: write(%zu) interface %d address " IPv6FMTSTRING " seq %d result %zd errno %d (%s)",
                         sizeof(rtmsg), ifindex, IPv6FMTARGS, rtmsg.hdr.rtm_seq, len, errno, strerror(errno));
             len = read(s, (char *)&rtmsg, sizeof(rtmsg));
             if (len < 0 || rtmsg.hdr.rtm_errno)
-                os_log(log_handle, "SetLocalAddressCacheEntry: read (%zu) interface %d address " IPv6FMTSTRING " seq %d result %d errno %d (%s) %d",
+                os_log(log_handle, "SetLocalAddressCacheEntry: read (%zu) interface %d address " IPv6FMTSTRING " seq %d result %zd errno %d (%s) %d",
                         sizeof(rtmsg), ifindex, IPv6FMTARGS, rtmsg.hdr.rtm_seq, len, errno, strerror(errno), rtmsg.hdr.rtm_errno);
             
             *err = kHelperErr_NoErr;
@@ -315,38 +217,12 @@ void SetLocalAddressCacheEntry(int ifindex, int family, const v6addr_t ip, const
 }
 
 
-void UserNotify(const char *title, const char *msg)
-{
-    
-#ifndef NO_CFUSERNOTIFICATION
-    static const char footer[] = "(Note: This message only appears on machines with 17.x.x.x IP addresses"
-    " or on debugging builds with ForceAlerts set — i.e. only at Apple — not on customer machines.)";
-    CFStringRef alertHeader  = CFStringCreateWithCString(NULL, title,  kCFStringEncodingUTF8);
-    CFStringRef alertBody    = CFStringCreateWithCString(NULL, msg,    kCFStringEncodingUTF8);
-    CFStringRef alertFooter  = CFStringCreateWithCString(NULL, footer, kCFStringEncodingUTF8);
-    CFStringRef alertMessage = CFStringCreateWithFormat(NULL, NULL, CFSTR("%@\r\r%@"), alertBody, alertFooter);
-    CFRelease(alertBody);
-    CFRelease(alertFooter);
-    int err = CFUserNotificationDisplayNotice(0.0, kCFUserNotificationStopAlertLevel, NULL, NULL, NULL, alertHeader, alertMessage, NULL);
-    if (err)
-        os_log(log_handle, "CFUserNotificationDisplayNotice returned %d", err);
-    CFRelease(alertHeader);
-    CFRelease(alertMessage);
-#else
-    (void)title;
-    (void)msg;
-#endif /* NO_CFUSERNOTIFICATION */
-    
-    update_idle_timer();
-}
-
-
 char usercompname[MAX_DOMAIN_LABEL+1] = {0}; // the last computer name the user saw
 char userhostname[MAX_DOMAIN_LABEL+1] = {0}; // the last local host name the user saw
 char lastcompname[MAX_DOMAIN_LABEL+1] = {0}; // the last computer name saved to preferences
 char lasthostname[MAX_DOMAIN_LABEL+1] = {0}; // the last local host name saved to preferences
 
-#ifndef NO_CFUSERNOTIFICATION
+#if MDNSRESPONDER_HELPER_NOTIFIES_USER_OF_NAME_CHANGES
 static CFStringRef CFS_OQ = NULL;
 static CFStringRef CFS_CQ = NULL;
 static CFStringRef CFS_Format = NULL;
@@ -490,11 +366,11 @@ static CFMutableArrayRef CreateAlertHeader(const char* oldname, const char* newn
 
     return alertHeader;
 }
-#endif /* ndef NO_CFUSERNOTIFICATION */
+#endif // MDNSRESPONDER_HELPER_NOTIFIES_USER_OF_NAME_CHANGES
 
 static void update_notification(void)
 {
-#ifndef NO_CFUSERNOTIFICATION
+#if MDNSRESPONDER_HELPER_NOTIFIES_USER_OF_NAME_CHANGES
     os_log_debug(log_handle,"entry ucn=%s, uhn=%s, lcn=%s, lhn=%s", usercompname, userhostname, lastcompname, lasthostname);
     buddy_state_t buddy_state = assistant_helper_get_buddy_state();
     if (buddy_state != buddy_state_done)
@@ -570,15 +446,11 @@ static void update_notification(void)
         ShowNameConflictNotification(header, *subtext);
         CFRelease(header);
     }
-#endif
+#endif // MDNSRESPONDER_HELPER_NOTIFIES_USER_OF_NAME_CHANGES
 }
 
 void PreferencesSetName(int key, const char* old, const char* new)
 {
-    SCPreferencesRef session = NULL;
-    Boolean ok = FALSE;
-    Boolean locked = FALSE;
-    CFStringRef cfstr = NULL;
     char* user = NULL;
     char* last = NULL;
     Boolean needUpdate = FALSE;
@@ -647,74 +519,7 @@ void PreferencesSetName(int key, const char* old, const char* new)
         needUpdate = TRUE;
     }
     
-    if (!new[0]) // we've given up trying to construct a name that doesn't conflict
-        goto fin;
-    
-    cfstr = CFStringCreateWithCString(NULL, new, kCFStringEncodingUTF8);
-    
-    session = SCPreferencesCreate(NULL, CFSTR(kHelperService), NULL);
-    
-    if (cfstr == NULL || session == NULL)
-    {
-        os_log(log_handle, "PreferencesSetName: SCPreferencesCreate failed");
-        goto fin;
-    }
-    if (!SCPreferencesLock(session, 0))
-    {
-        os_log(log_handle,"PreferencesSetName: lock failed");
-        goto fin;
-    }
-    locked = TRUE;
-    
-    switch ((enum mDNSPreferencesSetNameKey)key)
-    {
-        case kmDNSComputerName:
-        {
-            // We want to write the new Computer Name to System Preferences, without disturbing the user-selected
-            // system-wide default character set used for things like AppleTalk NBP and NETBIOS service advertising.
-            // Note that this encoding is not used for the computer name, but since both are set by the same call,
-            // we need to take care to set the name without changing the character set.
-            CFStringEncoding encoding = kCFStringEncodingUTF8;
-            CFStringRef unused = SCDynamicStoreCopyComputerName(NULL, &encoding);
-            if (unused)
-            {
-                CFRelease(unused);
-                unused = NULL;
-            }
-            else
-            {
-                encoding = kCFStringEncodingUTF8;
-            }
-            
-            ok = SCPreferencesSetComputerName(session, cfstr, encoding);
-        }
-            break;
-            
-        case kmDNSLocalHostName:
-            ok = SCPreferencesSetLocalHostName(session, cfstr);
-            break;
-            
-        default:
-            break;
-    }
-    
-    if (!ok || !SCPreferencesCommitChanges(session) ||
-        !SCPreferencesApplyChanges(session))
-    {
-        os_log(log_handle, "PreferencesSetName: SCPreferences update failed");
-        goto fin;
-    }
-    os_log_info(log_handle,"PreferencesSetName: succeeded");
-    
 fin:
-    if (NULL != cfstr)
-        CFRelease(cfstr);
-    if (NULL != session)
-    {
-        if (locked)
-            SCPreferencesUnlock(session);
-        CFRelease(session);
-    }
     update_idle_timer();
     if (needUpdate)
         update_notification();
@@ -919,14 +724,14 @@ void KeychainGetSecrets(__unused unsigned int *numsecrets,__unused unsigned long
         *err = kHelperErr_ApiErr;
         goto fin;
     }
-    if (noErr != (status = SecKeychainCopyDefault(&skc)))
+    if (noErr != SecKeychainCopyDefault(&skc))
     {
         *err = kHelperErr_ApiErr;
         goto fin;
     }
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    if (noErr != (status = SecKeychainSearchCreateFromAttributes(skc, kSecGenericPasswordItemClass, NULL, &search)))
+    if (noErr != SecKeychainSearchCreateFromAttributes(skc, kSecGenericPasswordItemClass, NULL, &search))
     {
         *err = kHelperErr_ApiErr;
         goto fin;
@@ -962,7 +767,7 @@ void KeychainGetSecrets(__unused unsigned int *numsecrets,__unused unsigned long
     }
     result = CFWriteStreamCopyProperty(stream, kCFStreamPropertyDataWritten);
     
-    if (KERN_SUCCESS != vm_allocate(mach_task_self(), secrets, CFDataGetLength(result), VM_FLAGS_ANYWHERE))
+    if (KERN_SUCCESS != vm_allocate(mach_task_self(), secrets, (vm_size_t)CFDataGetLength(result), VM_FLAGS_ANYWHERE))
     {
         *err = kHelperErr_ApiErr;
         os_log(log_handle, "KeychainGetSecrets: vm_allocate failed");
@@ -970,8 +775,8 @@ void KeychainGetSecrets(__unused unsigned int *numsecrets,__unused unsigned long
     }
     
     CFDataGetBytes(result, CFRangeMake(0, CFDataGetLength(result)), (void *)*secrets);
-    *secretsCnt = CFDataGetLength(result);
-    *numsecrets = CFArrayGetCount(keys);
+    *secretsCnt = (unsigned int)CFDataGetLength(result);
+    *numsecrets = (unsigned int)CFArrayGetCount(keys);
     
     os_log_info(log_handle,"KeychainGetSecrets: succeeded");
     
@@ -1011,15 +816,13 @@ CF_EXPORT const CFStringRef _kCFSystemVersionBuildVersionKey;
 
 void SendWakeupPacket(unsigned int ifid, const char *eth_addr, const char *ip_addr, int iteration)
 {
-    int bpf_fd, i, j;
+    int bpf_fd = -1;
+    int i, j;
     struct ifreq ifr;
     char ifname[IFNAMSIZ];
-    char packet[512];
-    char *ptr = packet;
-    char bpf_device[12];
+    uint8_t packet[512];
+    uint8_t *ptr = packet;
     struct ether_addr *ea;
-    // (void) ip_addr; // unused
-    // (void) iteration; // unused
     
     os_log_info(log_handle,"SendWakeupPacket() ether_addr[%s] ip_addr[%s] if_id[%d] iteration[%d]",
                    eth_addr, ip_addr, ifid, iteration);
@@ -1027,31 +830,21 @@ void SendWakeupPacket(unsigned int ifid, const char *eth_addr, const char *ip_ad
     if (if_indextoname(ifid, ifname) == NULL)
     {
         os_log(log_handle, "SendWakeupPacket: invalid interface index %u", ifid);
-        return;
+        goto exit;
     }
     
     ea = ether_aton(eth_addr);
     if (ea == NULL)
     {
         os_log(log_handle, "SendWakeupPacket: invalid ethernet address %s", eth_addr);
-        return;
+        goto exit;
     }
     
-    for (i = 0; i < 100; i++)
-    {
-        snprintf(bpf_device, sizeof(bpf_device), "/dev/bpf%d", i);
-        bpf_fd = open(bpf_device, O_RDWR, 0);
-        
-        if (bpf_fd == -1)
-            continue;
-        else
-            break;
-    }
-    
-    if (bpf_fd == -1)
+    bpf_fd = mdns_bpf_open(O_RDWR, NULL);
+    if (bpf_fd < 0)
     {
         os_log(log_handle, "SendWakeupPacket: cannot find a bpf device");
-        return;
+        goto exit;
     }
     
     memset(&ifr, 0, sizeof(ifr));
@@ -1060,7 +853,7 @@ void SendWakeupPacket(unsigned int ifid, const char *eth_addr, const char *ip_ad
     if (ioctl(bpf_fd, BIOCSETIF, (char *)&ifr) < 0)
     {
         os_log(log_handle, "SendWakeupPacket: BIOCSETIF failed %s", strerror(errno));
-        return;
+        goto exit;
     }
     
     // 0x00 Destination address
@@ -1089,10 +882,10 @@ void SendWakeupPacket(unsigned int ifid, const char *eth_addr, const char *ip_ad
     for (i=0; i<6; i++)
         *ptr++ = 0;
     
-    if (write(bpf_fd, packet, ptr - packet) < 0)
+    if (write(bpf_fd, packet, (size_t)(ptr - packet)) < 0)
     {
         os_log(log_handle, "SendWakeupPacket: write failed %s", strerror(errno));
-        return;
+        goto exit;
     }
     os_log(log_handle, "SendWakeupPacket: sent unicast eth_addr %s, ip_addr %s", eth_addr, ip_addr);
     
@@ -1101,46 +894,18 @@ void SendWakeupPacket(unsigned int ifid, const char *eth_addr, const char *ip_ad
     for (i=0; i<6; i++)
         packet[i] = 0xFF;
     
-    if (write(bpf_fd, packet, ptr - packet) < 0)
+    if (write(bpf_fd, packet, (size_t)(ptr - packet)) < 0)
     {
         os_log(log_handle, "SendWakeupPacket: write failed %s", strerror(errno));
-        return;
+        goto exit;
     }
     os_log(log_handle, "SendWakeupPacket: sent broadcast eth_addr %s, ip_addr %s", eth_addr, ip_addr);
-    
-    close(bpf_fd);
 
-}
-
-
-// Open the specified port for protocol in the P2P firewall.
-void PacketFilterControl(uint32_t command, const char * ifname, uint32_t count, pfArray_t portArray, pfArray_t protocolArray)
-{
-    int error;
-    
-    os_log_info(log_handle,"PacketFilterControl: command %d ifname %s, count %d",
-                   command, ifname, count);
-    os_log_info(log_handle,"PacketFilterControl: portArray0[%d] portArray1[%d] portArray2[%d] portArray3[%d] protocolArray0[%d] protocolArray1[%d] protocolArray2[%d] protocolArray3[%d]", portArray[0], portArray[1], portArray[2], portArray[3], protocolArray[0], protocolArray[1], protocolArray[2], protocolArray[3]);
-    
-    switch (command)
+exit:
+    if (bpf_fd >= 0)
     {
-        case PF_SET_RULES:
-            error = P2PPacketFilterAddBonjourRuleSet(ifname, count, portArray, protocolArray);
-            if (error)
-                os_log(log_handle, "P2PPacketFilterAddBonjourRuleSet failed %s", strerror(error));
-            break;
-            
-        case PF_CLEAR_RULES:
-            error = P2PPacketFilterClearBonjourRules();
-            if (error)
-                os_log(log_handle, "P2PPacketFilterClearBonjourRules failed %s", strerror(error));
-            break;
-            
-        default:
-            os_log(log_handle, "PacketFilterControl: invalid command %d", command);
-            break;
+        close(bpf_fd);
     }
-
 }
 
 static unsigned long in_cksum(unsigned short *ptr, int nbytes)
@@ -1234,7 +999,7 @@ static void TCPCheckSum(int af, struct tcphdr *t, int tcplen, const v6addr_t sad
     while (sum >> 16)
         sum = (sum >> 16) + (sum & 0xFFFF);
     
-    t->th_sum = ~sum;
+    t->th_sum = (unsigned short)~sum;
     
 }
 
@@ -1264,7 +1029,7 @@ void SendKeepalive(const v6addr_t sadd6, const v6addr_t dadd6, uint16_t lport, u
     struct sockaddr_in *sin_to = (struct sockaddr_in *)&ss_to;
     struct sockaddr_in6 *sin6_to = (struct sockaddr_in6 *)&ss_to;
     void *packet;
-    ssize_t packetlen;
+    size_t packetlen;
     char ctlbuf[CMSG_SPACE(sizeof(struct in6_pktinfo))];
     struct msghdr msghdr;
     struct iovec iov;
@@ -1399,7 +1164,7 @@ again:
             goto again;
     }
     
-    if (len != packetlen)
+    if ((len < 0) || (((size_t)len) != packetlen))
     {
         os_log(log_handle, "SendKeepalive: sendmsg failed %s", strerror(errno));
     }
@@ -1416,75 +1181,4 @@ again:
     }
     close(sock);
 
-}
-
-
-void RetrieveTCPInfo(int family, const v6addr_t laddr, uint16_t lport, const v6addr_t raddr, uint16_t  rport, uint32_t *seq, uint32_t *ack, uint16_t *win, int32_t *intfid, int *err)
-{
-    
-    struct tcp_info   ti;
-    struct info_tuple itpl;
-    int               mib[4];
-    unsigned int      miblen;
-    size_t            len;
-    size_t            sz;
-    
-    memset(&itpl, 0, sizeof(struct info_tuple));
-    memset(&ti,   0, sizeof(struct tcp_info));
-    
-    char buf1[INET6_ADDRSTRLEN];
-    char buf2[INET6_ADDRSTRLEN];
-    
-    buf1[0] = 0;
-    buf2[0] = 0;
-    
-    inet_ntop(AF_INET6, laddr, buf1, sizeof(buf1));
-    inet_ntop(AF_INET6, raddr, buf2, sizeof(buf2));
-
-    os_log_info(log_handle, "RetrieveTCPInfo invoked: laddr is %s, raddr is %s", buf1, buf2);
-    
-    os_log_info(log_handle,"RetrieveTCPInfo invoked: lport is[%d] rport is[%d] family is [%d]",
-                   lport, rport, family);
-
-    if (family == AF_INET)
-    {
-        memcpy(&itpl.itpl_local_sin.sin_addr,  laddr, sizeof(struct in_addr));
-        memcpy(&itpl.itpl_remote_sin.sin_addr, raddr, sizeof(struct in_addr));
-        itpl.itpl_local_sin.sin_port    = lport;
-        itpl.itpl_remote_sin.sin_port   = rport;
-        itpl.itpl_local_sin.sin_family  = AF_INET;
-        itpl.itpl_remote_sin.sin_family = AF_INET;
-    }
-    else
-    {
-        memcpy(&itpl.itpl_local_sin6.sin6_addr,  laddr, sizeof(struct in6_addr));
-        memcpy(&itpl.itpl_remote_sin6.sin6_addr, raddr, sizeof(struct in6_addr));
-        itpl.itpl_local_sin6.sin6_port    = lport;
-        itpl.itpl_remote_sin6.sin6_port   = rport;
-        itpl.itpl_local_sin6.sin6_family  = AF_INET6;
-        itpl.itpl_remote_sin6.sin6_family = AF_INET6;
-    }
-    itpl.itpl_proto = IPPROTO_TCP;
-    sz = sizeof(mib)/sizeof(mib[0]);
-    if (sysctlnametomib("net.inet.tcp.info", mib, &sz) == -1)
-    {
-        const int sysctl_errno = errno;
-        os_log(log_handle, "RetrieveTCPInfo: sysctlnametomib failed %d, %s", sysctl_errno, strerror(sysctl_errno));
-        *err = sysctl_errno;
-    }
-    miblen = (unsigned int)sz;
-    len    = sizeof(struct tcp_info);
-    if (sysctl(mib, miblen, &ti, &len, &itpl, sizeof(struct info_tuple)) == -1)
-    {
-        const int sysctl_errno = errno;
-        os_log(log_handle, "RetrieveTCPInfo: sysctl failed %d, %s", sysctl_errno, strerror(sysctl_errno));
-        *err = sysctl_errno;
-    }
-    
-    *seq    = ti.tcpi_snd_nxt - 1;
-    *ack    = ti.tcpi_rcv_nxt;
-    *win    = ti.tcpi_rcv_space >> ti.tcpi_rcv_wscale;
-    *intfid = ti.tcpi_last_outif;
-    *err    = KERN_SUCCESS;
-    
 }

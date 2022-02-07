@@ -1,18 +1,22 @@
 /* route.h
  *
- * Copyright (c) 2019-2020 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * This code adds border router support to 3rd party HomeKit Routers as part of Apple’s commitment to the CHIP project.
+ *
+ * Definitions for route.c
  */
 
 #ifndef __SERVICE_REGISTRATION_ROUTE_H
@@ -23,20 +27,21 @@
 #endif
 
 #define MIN_DELAY_BETWEEN_RAS 4000
-#define MSEC_PER_SEC (NSEC_PER_SEC / NSEC_PER_MSEC)
 #define MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE 600 * MSEC_PER_SEC
 
-// Fix this
-#ifndef IPV6_ROUTER_MODE_EXCLUSIVE
-#define IPV6_ROUTER_MODE_DISABLED	0
-#define IPV6_ROUTER_MODE_EXCLUSIVE	1
-#define IPV6_ROUTER_MODE_HYBRID		2
+
+#ifndef RTR_SOLICITATION_INTERVAL
+#define RTR_SOLICITATION_INTERVAL       4       /* 4sec */
 #endif
+
+#ifndef ND6_INFINITE_LIFETIME
+#define ND6_INFINITE_LIFETIME           0xffffffff
+#endif
+
 
 
 typedef struct interface interface_t;
 typedef struct icmp_message icmp_message_t;
-typedef struct network_link network_link_t;
 struct interface {
     int ref_count;
 
@@ -59,11 +64,13 @@ struct interface {
     // Wakeup event to detect that vicarious router discovery is complete
     wakeup_t *NULLABLE vicarious_discovery_complete;
 
+    // Wakeup event to periodically notice whether routers we have heard previously on this interface have gone stale.
+    wakeup_t *NULLABLE stale_evaluation_wakeup;
+
     // List of ICMP messages from different routers.
     icmp_message_t *NULLABLE routers;
 
-    // The link to which this interface is connected.
-    network_link_t *NULLABLE link;
+    int prefix_number;
 
 #if defined(USE_IPCONFIGURATION_SERVICE)
     // The service used to configure this interface with an address in the on-link prefix
@@ -71,6 +78,8 @@ struct interface {
 
     // SCDynamicStoreRef
     SCDynamicStoreRef NULLABLE ip_configuration_store;
+#else
+    subproc_t *NULLABLE link_route_adder_process;
 #endif
 
     struct in6_addr link_local;  // Link-local address
@@ -135,6 +144,15 @@ struct interface {
     // and are waiting 20 seconds to snoop for replies to that RD message that are
     // multicast.   If we hear no replies during that time, we trigger router discovery.
     bool vicarious_router_discovery_in_progress;
+
+    // Indicates that we have received an interface removal event, it is useful when srp-mdns-proxy is changed to a new
+    // network where the network signature are the same and they both have no IPv6 service (so no IPv6 prefix will be
+    // removed), in such case there will be no change from srp-mdns-proxy's point of view. However, configd may still
+    // flush the IPv6 routing since changing network would cause interface up/down. When the flushing happens,
+    // srp-mdns-proxy should be able to reconfigure the IPv6 routing by reconfiguring IPv6 prefix. By setting
+    // need_reconfigure_prefix only when interface address removal happens and check it during the routing evaluation
+    // srp-mdns-proxy can reconfigure it after the routing evaluation finishes, like router discovery.
+    bool need_reconfigure_prefix;
 };
 
 typedef enum icmp_option_type {
@@ -189,9 +207,8 @@ struct icmp_message {
     icmp_message_t *NULLABLE next;
     interface_t *NULLABLE interface;
     icmp_option_t *NULLABLE options;
-    bool new_router;                // If this router information is a newly recevied one.
-    bool received_time_already_adjusted;    // if the received time of the message is already adjusted by
-                                                    // vicarious mode
+    bool new_router;                     // If this router information is a newly recevied one.
+    bool received_time_already_adjusted; // if the received time of the message is already adjusted by vicarious mode
     struct in6_addr source;
     struct in6_addr destination;
 
@@ -210,7 +227,10 @@ struct icmp_message {
     int hop_limit;                  // Hop limit provided by the kernel, must be 255.
 };
 
-void ula_generate(void);
+extern struct in6_addr ula_prefix;
+
+void route_ula_setup(void);
+void route_ula_generate(void);
 bool start_route_listener(void);
 bool start_icmp_listener(void);
 void icmp_leave_join(int sock, int ifindex, bool join);
@@ -227,6 +247,7 @@ void thread_network_startup(void);
 void thread_network_shutdown(void);
 void partition_stop_advertising_pref_id(void);
 void partition_start_srp_listener(void);
+void partition_publish_my_prefix(void);
 #endif // __SERVICE_REGISTRATION_ROUTE_H
 
 // Local Variables:

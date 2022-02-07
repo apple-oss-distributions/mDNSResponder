@@ -25,7 +25,7 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdlib.h>
-#include <CommonCrypto/CommonDigestSPI.h>
+#include <CommonCrypto/CommonDigest.h>
 #include <AssertMacros.h>
 
 #include "srp.h"
@@ -168,35 +168,30 @@ static CFDataRef
 create_data_to_verify(dns_wire_t *const message, const dns_rr_t *const signature)
 {
     bool encounter_error;
-    CCDigestAlgorithm cc_digest_algorithm;
     CFDataRef data_to_verify_cfdata = NULL;
     uint8_t *canonical_signer_name = NULL;
-#define MAX_HASH_SIZE ECDSA_SHA256_HASH_SIZE
-    uint8_t digest[MAX_HASH_SIZE];
-    size_t digest_length;
+    uint8_t digest[ECDSA_SHA256_HASH_SIZE];
 
-    switch (signature->data.sig.algorithm) {
-        case dnssec_keytype_ecdsa:
-            cc_digest_algorithm = kCCDigestSHA256;
-            digest_length = ECDSA_SHA256_HASH_SIZE;
-            break;
+    // Right now, the only supported KEY algorithm is ECDSAP256.
+    require_action_quiet(signature->data.sig.algorithm == dnssec_keytype_ecdsa, exit, encounter_error = true;
+        FAULT("Unsupported SIG(0) algorithm - SIG(0) algorithm: %u", signature->data.sig.algorithm));
 
-        default:
-            encounter_error = true;
-            FAULT("Unsupported SIG(0) algorithm - SIG(0) algorithm: %u", signature->data.sig.algorithm);
-            goto exit;
-    }
-    CCDigestCtx cc_digest_context;
-    CCDigestInit(cc_digest_algorithm, &cc_digest_context);
+    CC_SHA256_CTX cc_digest_context;
+    CC_SHA256_Init(&cc_digest_context);
 
     // data to be hashed = (SIG(0) RDATA without signature field) + (request - SIG(0)).
 
     // (SIG(0) RDATA without signature field) = SIG(0) fields without signer name + canonical signer name.
     // Copy SIG(0) fields without signer name.
-    CCDigestUpdate(&cc_digest_context, &message->data[signature->data.sig.start + SIG_HEADERLEN], SIG_STATIC_RDLEN);
+    CC_SHA256_Update(&cc_digest_context, &message->data[signature->data.sig.start + SIG_HEADERLEN], SIG_STATIC_RDLEN);
 
     // Construct and copy canonical signer name.
     size_t canonical_signer_name_length = dns_name_wire_length(signature->data.sig.signer);
+    // CC_SHA256_Update only accepts CC_LONG type (which is uint32_t) length parameter, so we need to check if the
+    // canonical_signer_name_length has invalid value.
+    require_action_quiet(canonical_signer_name_length <= MAXDOMNAMELEN, exit, encounter_error = true;
+        FAULT("Invalid signer name length - signer name length: %zu", canonical_signer_name_length));
+
     canonical_signer_name = malloc(canonical_signer_name_length);
     require_action_quiet(canonical_signer_name != NULL, exit, encounter_error = true;
                          ERROR("malloc failed when allocating memory - for canonical_signer_name, len: %lu",
@@ -208,20 +203,20 @@ create_data_to_verify(dns_wire_t *const message, const dns_rr_t *const signature
                          ERROR("Failed to write canonical name - canonical_signer_name_length: %lu",
                                canonical_signer_name_length));
 
-    CCDigestUpdate(&cc_digest_context, canonical_signer_name, canonical_signer_name_length);
+    CC_SHA256_Update(&cc_digest_context, canonical_signer_name, (CC_LONG)canonical_signer_name_length);
 
     // Copy (request - SIG(0)).
     // The authority response count is before the counts have been adjusted for the inclusion of the SIG(0).
     message->arcount = htons(ntohs(message->arcount) - 1);
-    CCDigestUpdate(&cc_digest_context, (uint8_t *)message, offsetof(dns_wire_t, data) + signature->data.sig.start);
+    CC_SHA256_Update(&cc_digest_context, (uint8_t *)message, offsetof(dns_wire_t, data) + signature->data.sig.start);
     // Recover the count after copying.
     message->arcount = htons(ntohs(message->arcount) + 1);
 
     // Generate the final digest.
-    CCDigestFinal(&cc_digest_context, digest);
+    CC_SHA256_Final(digest, &cc_digest_context);
 
     // Create CFDataRef.
-    data_to_verify_cfdata = CFDataCreate(kCFAllocatorDefault, digest, digest_length);
+    data_to_verify_cfdata = CFDataCreate(kCFAllocatorDefault, digest, sizeof(digest));
     require_action_quiet(data_to_verify_cfdata != NULL, exit, encounter_error = true;
                          ERROR("CFDataCreate failed when creating data_to_verify_cfdata"));
 

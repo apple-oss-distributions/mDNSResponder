@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 #include "mDNSEmbeddedAPI.h"
 #include "mDNSMacOSX.h"
+#include "mdns_strict.h"
 
 #include <sys/types.h>
 #include <sys/time.h>
@@ -57,7 +58,7 @@ mDNSlocal int ProxyTCPRead(ProxyTCPInfo_t *tcpInfo)
             return -1;
         }
 
-        tcpInfo->nread += n;
+        tcpInfo->nread += (unsigned long)n;
         if (tcpInfo->nread < 2)
         {
             LogMsg("ProxyTCPRead: nread %d, n %d", tcpInfo->nread, n);
@@ -86,7 +87,7 @@ mDNSlocal int ProxyTCPRead(ProxyTCPInfo_t *tcpInfo)
         LogMsg("ProxyTCPRead: read failure n %d, closed %d", n, closed);
         return -1;
     }
-    tcpInfo->nread += n;
+    tcpInfo->nread += (unsigned long)n;
     if ((tcpInfo->nread - 2) != tcpInfo->replyLen)
         return 0;
     else 

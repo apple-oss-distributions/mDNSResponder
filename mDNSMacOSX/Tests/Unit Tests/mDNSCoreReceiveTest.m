@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2017-2018 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2019, 2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -108,7 +108,7 @@ mDNSlocal void InitmDNSStorage(mDNS *const m)
     end = udns_query_request_message + sizeof(udns_query_request_message);
     
     // Execute mDNSCoreReceive using a valid DNS message
-    mDNSCoreReceive(m, msg, end, &srcaddr, srcport, &dstaddr, dstport, if_nametoindex("en0"));
+    mDNSCoreReceive(m, msg, end, &srcaddr, srcport, &dstaddr, dstport, (mDNSInterfaceID)((uintptr_t)if_nametoindex("en0")));
     
     // Verify that mDNSCoreReceiveQuery traversed the normal code path
     XCTAssertEqual(m->mDNSStats.NormalQueries,  1);
@@ -142,7 +142,7 @@ mDNSlocal void InitmDNSStorage(mDNS *const m)
     end = udns_query_request_message_with_invalid_id + sizeof(udns_query_request_message_with_invalid_id);
 
     // Execute mDNSCoreReceive to regress <rdar://problem/28556513>
-    mDNSCoreReceive(m, msg, end, &srcaddr, srcport, NULL, dstport, if_nametoindex("en0"));
+    mDNSCoreReceive(m, msg, end, &srcaddr, srcport, NULL, dstport, (mDNSInterfaceID)((uintptr_t)if_nametoindex("en0")));
 
     // Verify that mDNSCoreReceiveQuery was NOT traversed through the normal code path
     XCTAssertEqual(m->mDNSStats.NormalQueries,  0);

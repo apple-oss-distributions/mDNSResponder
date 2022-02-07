@@ -1,0 +1,9 @@
+//
+// secure-coding.xcconfig
+//
+// Copyright (c) 2019 Apple Inc.
+// All rights reserved.
+//
+// https://confluence.sd.apple.com/display/NETWORKING/Code+Safety+Checklist
+//
+WARNING_CFLAGS = $(inherited) -Weverything -Wno-missing-variable-declarations -Wno-reserved-id-macro -Wno-gnu-zero-variadic-macro-arguments -Wno-zero-length-array -Wno-cast-align -Wno-cstring-format-directive -Wno-nullability-extension -Wno-format-pedantic -Wno-objc-missing-property-synthesis -Wno-c++98-compat-pedantic -Wno-gnu-empty-initializer -Werror -Wno-error=deprecated-declarations -Wno-error=deprecated-implementations -Wno-error=objc-designated-initializers -Wno-error=nonnull -Wno-error=nullable-to-nonnull-conversion -Wno-error=nullability-declspec -Wno-error=#warnings

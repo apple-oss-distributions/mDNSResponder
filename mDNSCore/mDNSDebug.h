@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2002-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,8 +30,9 @@
 // (If you edit the file here to turn on MDNS_DEBUGMSGS while you're debugging some code, be careful
 // not to accidentally check-in that change by mistake when you check in your other changes.)
 
-//#undef MDNS_DEBUGMSGS
-//#define MDNS_DEBUGMSGS 2
+#ifndef MDNS_DEBUGMSGS
+#define MDNS_DEBUGMSGS 0
+#endif
 
 // Set MDNS_CHECK_PRINTF_STYLE_FUNCTIONS to 1 to enable extra GCC compiler warnings
 // Note: You don't normally want to do this, because it generates a bunch of
@@ -69,6 +70,8 @@ typedef enum
     extern os_log_t mDNSLogCategory_mDNS;
     extern os_log_t mDNSLogCategory_uDNS;
     extern os_log_t mDNSLogCategory_SPS;
+    extern os_log_t mDNSLogCategory_NAT;
+    extern os_log_t mDNSLogCategory_D2D;
     extern os_log_t mDNSLogCategory_XPC;
     extern os_log_t mDNSLogCategory_Analytics;
     extern os_log_t mDNSLogCategory_DNSSEC;
@@ -82,6 +85,8 @@ typedef enum
 #define MDNS_LOG_CATEGORY_MDNS      MDNS_LOG_CATEGORY_DEFINITION(mDNS)
 #define MDNS_LOG_CATEGORY_UDNS      MDNS_LOG_CATEGORY_DEFINITION(uDNS)
 #define MDNS_LOG_CATEGORY_SPS       MDNS_LOG_CATEGORY_DEFINITION(SPS)
+#define MDNS_LOG_CATEGORY_NAT       MDNS_LOG_CATEGORY_DEFINITION(NAT)
+#define MDNS_LOG_CATEGORY_D2D       MDNS_LOG_CATEGORY_DEFINITION(D2D)
 #define MDNS_LOG_CATEGORY_XPC       MDNS_LOG_CATEGORY_DEFINITION(XPC)
 #define MDNS_LOG_CATEGORY_ANALYTICS MDNS_LOG_CATEGORY_DEFINITION(Analytics)
 #define MDNS_LOG_CATEGORY_DNSSEC    MDNS_LOG_CATEGORY_DEFINITION(DNSSEC)
@@ -91,13 +96,15 @@ typedef enum
 
 // Set this symbol to 1 to do extra debug checks on malloc() and free()
 // Set this symbol to 2 to write a log message for every malloc() and free()
-// #define MDNS_MALLOC_DEBUGGING 1
+#ifndef MDNS_MALLOC_DEBUGGING
+#define MDNS_MALLOC_DEBUGGING 0
+#endif
 
 #if (MDNS_MALLOC_DEBUGGING > 0) && defined(WIN32)
 #error "Malloc debugging does not yet work on Windows"
 #endif
 
-//#define ForceAlerts 1
+#define ForceAlerts 0
 //#define LogTimeStamps 1
 
 // Developer-settings section ends here
@@ -197,6 +204,13 @@ extern int mDNS_PacketLoggingEnabled;
 extern int mDNS_McastLoggingEnabled;
 extern int mDNS_McastTracingEnabled;
 extern int mDNS_DebugMode;          // If non-zero, LogMsg() writes to stderr instead of syslog
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+extern int gNumOfPrivateLogRedactionEnabledQueries;
+extern int gPrivateLogRedactionEnabled; // If true, LogRedact() will redact all private level logs. The content of state
+                                        // dump that is related to user's privacy will also be redacted.
+#endif
+
 extern const char ProgramName[];
 
 extern void LogMsgWithLevel(mDNSLogCategory_t category, mDNSLogLevel_t level, const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(3,4);
@@ -204,25 +218,17 @@ extern void LogMsgWithLevel(mDNSLogCategory_t category, mDNSLogLevel_t level, co
 // (or completely overhauled to use the new "log to a separate file" facility)
 #define LogMsgNoIdent LogMsg
 
-#if APPLE_OSX_mDNSResponder
-extern void LogFatalError(const char *format, ...);
-#else
 #define LogFatalError LogMsg
-#endif
 
 #if MDNS_MALLOC_DEBUGGING >= 1
 extern void *mallocL(const char *msg, mDNSu32 size);
 extern void *callocL(const char *msg, mDNSu32 size);
 extern void freeL(const char *msg, void *x);
-#if APPLE_OSX_mDNSResponder
-extern void LogMemCorruption(const char *format, ...);
-#else
 #define LogMemCorruption LogMsg
-#endif
 #else
-#define mallocL(MSG, SIZE) malloc(SIZE)
-#define callocL(MSG, SIZE) calloc(1, SIZE)
-#define freeL(MSG, PTR) free(PTR)
+#define mallocL(MSG, SIZE) mdns_malloc(SIZE)
+#define callocL(MSG, SIZE) mdns_calloc(1, SIZE)
+#define freeL(MSG, PTR) mdns_free(PTR)
 #endif
 
 #ifdef __cplusplus
@@ -325,6 +331,16 @@ extern void LogMemCorruption(const char *format, ...);
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_DM_LABEL "%{public, mdnsresponder:domain_label}.*P"
+    #define PRI_DM_LABEL "%{private, mask.hash, mdnsresponder:domain_label}.*P"
+    #define DM_LABEL_PARAM(label) 1 + ((label)->c[0]), ((label)->c)
+#else
+    #define PUB_DM_LABEL "%#s"
+    #define PRI_DM_LABEL PUB_DM_LABEL
+    #define DM_LABEL_PARAM(label) (label)
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_IP_ADDR "%{public, mdnsresponder:ip_addr}.20P"
     #define PRI_IP_ADDR "%{private, mask.hash, mdnsresponder:ip_addr}.20P"
 
@@ -350,6 +366,16 @@ extern void LogMemCorruption(const char *format, ...);
 #else
     #define PUB_MAC_ADDR "%.6a"
     #define PRI_MAC_ADDR PUB_MAC_ADDR
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_HEX "%{public, mdnsresponder:hex_sequence}.*P"
+    #define PRI_HEX "%{private, mask.hash, mdnsresponder:hex_sequence}.*P"
+    #define HEX_PARAM(hex, hex_length) (int)(hex_length), (hex)
+#else
+    #define PUB_HEX "%p"
+    #define PRI_HEX PUB_HEX
+    #define HEX_PARAM(hex, hex_length) (hex)
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)

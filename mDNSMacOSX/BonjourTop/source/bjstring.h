@@ -24,9 +24,9 @@ public:
     BJString& operator=(const char* str);
     BJString& operator=(const BJString& str);
     bool operator==(const char* str);
-    bool operator!=(const char* str){return !operator==(str);};
+    bool operator!=(const char* str){return !operator==(str);}
     bool operator==(const BJString& str);
-    bool operator!=(const BJString& str) {return !operator==(str);};
+    bool operator!=(const BJString& str) {return !operator==(str);}
     bool operator<(const BJString& str) const;
 
     BJ_COMPARE Compare(const BJString& str);

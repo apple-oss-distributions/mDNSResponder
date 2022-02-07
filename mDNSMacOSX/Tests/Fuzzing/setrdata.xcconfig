@@ -1,0 +1,4 @@
+FUZZER_NAME = FUZZING_SETRDATA
+EXECUTABLE_NAME = fuzz-setrdata
+
+#include "Tests/Fuzzing/fuzzer.xcconfig"

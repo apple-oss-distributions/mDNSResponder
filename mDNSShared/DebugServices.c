@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 1997-2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 1997-2004, 2020-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -1159,6 +1159,13 @@ DEBUG_EXPORT size_t DebugSNPrintFVAList(char *sbuffer, size_t buflen, const char
 
     size_t nwritten = 0;
     int c;
+#if TYPE_LONGLONG_NATIVE
+    unsigned_long_long_compat n;
+    unsigned_long_long_compat base;
+#else
+    unsigned long n;
+    unsigned long base;
+#endif
     if (buflen == 0) return(0);
     buflen--;       // Pre-reserve one space in the buffer for the terminating nul
     if (buflen == 0) goto exit;
@@ -1222,13 +1229,6 @@ DEBUG_EXPORT size_t DebugSNPrintFVAList(char *sbuffer, size_t buflen, const char
 conv:
             switch (c)  //  perform appropriate conversion
             {
-                #if TYPE_LONGLONG_NATIVE
-                unsigned_long_long_compat n;
-                unsigned_long_long_compat base;
-                #else
-                unsigned long n;
-                unsigned long base;
-                #endif
             case 'h':  F.hSize = 1; c = *++fmt; goto conv;
             case 'l':       // fall through
             case 'L':  F.lSize++; c = *++fmt; goto conv;
@@ -1567,7 +1567,7 @@ exit:
 //	DebugGetErrorString
 //===========================================================================================================================
 
-DEBUG_EXPORT const char *   DebugGetErrorString( int_least32_t inErrorCode, char *inBuffer, size_t inBufferSize )
+DEBUG_EXPORT const char *   DebugGetErrorString( long inErrorCode, char *inBuffer, size_t inBufferSize )
 {
     const char *        s;
     char *              dst;
@@ -1944,7 +1944,10 @@ DEBUG_EXPORT const char *   DebugGetErrorString( int_least32_t inErrorCode, char
         if( !s )
         {
                 #if ( !TARGET_API_MAC_OSX_KERNEL && !TARGET_OS_WINDOWS_CE )
-            s = strerror( inErrorCode );
+            if( ( inErrorCode >= INT_MIN ) && ( inErrorCode <= INT_MAX ) )
+            {
+                s = strerror( (int) inErrorCode );
+            }
                 #endif
             if( !s )
             {

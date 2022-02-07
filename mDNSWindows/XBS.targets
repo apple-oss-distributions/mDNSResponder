@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <!-- From BonjourSDKBinaries (Taman train):
+
+    ./AppleInternal/Bonjour SDK/include/dns_sd.h
+
+    ./AppleInternal/Bonjour SDK/lib/Win32/dnssd.lib -> dnssd_stub.lib
+
+    ./AppleInternal/Bonjour SDK/lib/x64/dnssd.lib -> dnssd_stub.lib
+
+    ./AppleInternal/Bonjour SDK/WINDOWS/system32/Win32/dns-sd.exe -> bin/Win32/
+    ./AppleInternal/Bonjour SDK/WINDOWS/system32/Win32/dnssd.dll -> bin/Win32/
+
+    ./AppleInternal/Bonjour SDK/WINDOWS/system32/x64/dns-sd.exe -> bin/x64/
+    ./AppleInternal/Bonjour SDK/WINDOWS/system32/x64/dnssd.dll -> bin/x64/
+
+    Added (2021):
+
+    ./AppleInternal/Bonjour SDK/bin/Win32/mDNSResponderDLL.dll
+    ./AppleInternal/Bonjour SDK/bin/Win32/mDNSResponderDLL.pdb
+
+    ./AppleInternal/Bonjour SDK/bin/x64/mDNSResponderDLL.dll
+    ./AppleInternal/Bonjour SDK/bin/x64/mDNSResponderDLL.pdb
+
+    ./AppleInternal/Bonjour SDK/bin/Win32/dnssd.dll
+    ./AppleInternal/Bonjour SDK/bin/Win32/dnssd.pdb
+
+    ./AppleInternal/Bonjour SDK/bin/x64/dnssd.dll
+    ./AppleInternal/Bonjour SDK/bin/x64/dnssd.pdb
+
+    Removed (2021):
+
+    ./AppleInternal/Bonjour SDK/bin/Win32/mDNSNetMonitor.exe
+
+    ./AppleInternal/Bonjour SDK/lib/Win32/dnssd.lib.pdb
+
+    ./AppleInternal/Bonjour SDK/lib/x64/dnssd.lib.pdb
+
+    ./AppleInternal/Bonjour SDK/bin/Win32/ExplorerPlugin.dll
+    ./AppleInternal/Bonjour SDK/bin/Win32/ExplorerPlugin.Resources/ExplorerPluginResources.dll
+    ./AppleInternal/Bonjour SDK/bin/Win32/ExplorerPlugin.Resources/en.lproj/ExplorerPluginLocalized.dll
+
+    ./AppleInternal/Bonjour SDK/bin/x64/ExplorerPlugin.dll
+    ./AppleInternal/Bonjour SDK/bin/x64/ExplorerPlugin.Resources/ExplorerPluginResources.dll
+    ./AppleInternal/Bonjour SDK/bin/x64/ExplorerPlugin.Resources/en.lproj/ExplorerPluginLocalized.dll
+
+    ./AppleInternal/Bonjour SDK/bin/Win32/ControlPanel.Resources/ControlPanelResources.dll
+    ./AppleInternal/Bonjour SDK/bin/Win32/ControlPanel.Resources/en.lproj/ControlPanelLocalized.dll
+    ./AppleInternal/Bonjour SDK/bin/Win32/ControlPanel.exe
+
+    ./AppleInternal/Bonjour SDK/bin/x64/ControlPanel.Resources/ControlPanelResources.dll
+    ./AppleInternal/Bonjour SDK/bin/x64/ControlPanel.Resources/en.lproj/ControlPanelLocalized.dll
+    ./AppleInternal/Bonjour SDK/bin/x64/ControlPanel.exe
+    
+    ./AppleInternal/Bonjour SDK/WINDOWS/system32/Win32/jdns_sd.dll
+    ./AppleInternal/Bonjour SDK/WINDOWS/system32/Win32/dnssdX.dll
+
+    ./AppleInternal/Bonjour SDK/WINDOWS/system32/x64/dnssdX.dll
+    ./AppleInternal/Bonjour SDK/WINDOWS/system32/x64/jdns_sd.dll
+  -->
+
+  <Target Name="CopyFilesToDSTROOT" AfterTargets="Build" Condition="'$(RC_XBS)' == 'YES'">
+
+    <Error Text="DSTROOT not defined" Condition="'$(DSTROOT)' == ''" />
+
+    <PropertyGroup>
+      <ProjectRootDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\'))</ProjectRootDirectory>
+      <ProjectRootDirectory Condition="!HasTrailingSlash('$(ProjectRootDirectory)')">$(ProjectRootDirectory)\</ProjectRootDirectory>
+      <!-- -->
+      <OutputPrefix>$(DSTROOT)</OutputPrefix>
+      <OutputPrefix Condition="!HasTrailingSlash('$(OutputPrefix)')">$(OutputPrefix)\</OutputPrefix>
+      <!-- -->
+      <SDKOutputPrefix>$(OutputPrefix)AppleInternal\Bonjour SDK\</SDKOutputPrefix>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ExcludedExtensions Include="exp;ilk" />
+      <ExcludedFiles Include="@(ExcludedExtensions->'$(OutDir)**\*.%(Identity)')" />
+      <ExcludedFiles Include="$(OutDir)obj\**\*" />
+      <!-- -->
+      <OutputFiles Include="$(OutDir)**\$(TargetName).*" Exclude="@(ExcludedFiles)" />
+      <OutputFiles Include="$(ProjectRootDirectory)mDNSShared\dns_sd.h" Condition="'$(ProjectName)' == 'dnssd'" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <IncludeFiles Include="@(OutputFiles)" Condition="'%(Extension)' == '.h'" />
+      <BinFiles Include="@(OutputFiles)" Condition="'%(Extension)' == '.dll' OR '%(Extension)' == '.exe'" />
+      <LibFiles Include="@(OutputFiles)" Condition="'%(Extension)' == '.lib'" />
+      <PdbFiles Include="@(OutputFiles)" Condition="'%(Extension)' == '.pdb'" />
+    </ItemGroup>
+
+    <!-- Headers -> include/ -->
+    <Copy SourceFiles="@(IncludeFiles)"
+          DestinationFolder="$(SDKOutputPrefix)include\%(RecursiveDir)"
+          OverwriteReadOnlyFiles="true"
+          SkipUnchangedFiles="true" />
+
+    <!-- DLL/EXE -> bin/ -->
+    <Copy SourceFiles="@(BinFiles)"
+          DestinationFolder="$(SDKOutputPrefix)bin\$(Platform)\%(RecursiveDir)"
+          OverwriteReadOnlyFiles="true"
+          SkipUnchangedFiles="true" />
+
+    <!-- PDB -> bin/ -->
+    <Copy SourceFiles="@(PdbFiles)"
+          DestinationFolder="$(SDKOutputPrefix)bin\$(Platform)\%(RecursiveDir)"
+          OverwriteReadOnlyFiles="true"
+          SkipUnchangedFiles="true" />
+
+    <!-- LIB -> lib/ -->
+    <Copy SourceFiles="@(LibFiles)"
+          DestinationFolder="$(SDKOutputPrefix)lib\$(Platform)\%(RecursiveDir)"
+          OverwriteReadOnlyFiles="true"
+          SkipUnchangedFiles="true" />
+
+  </Target>
+
+</Project>

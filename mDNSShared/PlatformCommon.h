@@ -17,6 +17,23 @@
 
 #ifndef __PLATFORM_COMMON_H
 #define __PLATFORM_COMMON_H
+
+#ifndef NSEC_PER_SEC
+    #define NSEC_PER_SEC 1000000000ull
+#endif
+#ifndef USEC_PER_SEC
+    #define USEC_PER_SEC 1000000ull
+#endif
+#ifndef NSEC_PER_USEC
+    #define NSEC_PER_USEC 1000ull
+#endif
+#ifndef NSEC_PER_MSEC
+    #define NSEC_PER_MSEC 1000000ull
+#endif
+#ifndef USEC_PER_MSEC
+    #define USEC_PER_MSEC (NSEC_PER_MSEC / NSEC_PER_USEC)
+#endif
+
 extern void ReadDDNSSettingsFromConfFile(mDNS *const m, const char *const filename,
 										 domainname *const hostname, domainname *const domain,
 										 mDNSBool *DomainDiscoveryDisabled);

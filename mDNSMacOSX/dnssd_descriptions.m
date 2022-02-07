@@ -21,6 +21,8 @@
 #import "dnssd_object.h"
 
 #import <CoreFoundation/CoreFoundation.h>
+#import <CoreUtils/CoreUtils.h>
+#import "mdns_strict.h"
 
 #if 0
 //======================================================================================================================
@@ -34,10 +36,10 @@
 
 - (NSString *)description
 {
-	char * const desc = dnssd_object_copy_description((dnssd_any_t)self, false, false);
+	char *desc = dnssd_object_copy_description((dnssd_any_t)self, false, false);
 	if (desc) {
 		NSString * const string = (__bridge_transfer NSString *)CFStringCreateWithCString(kCFAllocatorDefault, desc, kCFStringEncodingUTF8);
-		free(desc);
+		ForgetMem(&desc);
 		return string;
 	} else {
 		return nil;
@@ -46,10 +48,10 @@
 
 - (NSString *)debugDescription
 {
-	char * const desc = dnssd_object_copy_description((dnssd_any_t)self, true, false);
+	char *desc = dnssd_object_copy_description((dnssd_any_t)self, true, false);
 	if (desc) {
 		NSString * const string = (__bridge_transfer NSString *)CFStringCreateWithCString(kCFAllocatorDefault, desc, kCFStringEncodingUTF8);
-		free(desc);
+		ForgetMem(&desc);
 		return string;
 	} else {
 		return nil;
@@ -58,10 +60,10 @@
 
 - (NSString *)redactedDescription
 {
-	char * const desc = dnssd_object_copy_description((dnssd_any_t)self, false, true);
+	char *desc = dnssd_object_copy_description((dnssd_any_t)self, false, true);
 	if (desc) {
 		NSString * const string = (__bridge_transfer NSString *)CFStringCreateWithCString(kCFAllocatorDefault, desc, kCFStringEncodingUTF8);
-		free(desc);
+		ForgetMem(&desc);
 		return string;
 	} else {
 		return nil;

@@ -44,7 +44,6 @@
 
 #include "srp.h"
 #include "dns-msg.h"
-#define SRP_CRYPTO_MBEDTLS_INTERNAL 1
 #include "srp-crypto.h"
 #include "dns_sd.h"
 
@@ -89,13 +88,10 @@ srp_mbedtls_sha256_finish_ret(mbedtls_sha256_context *sha, uint8_t *hash)
 void
 srp_keypair_free(srp_key_t *key)
 {
-#ifndef EXCLUDE_CRYPTO
     mbedtls_pk_free(&key->key);
-#endif
     free(key);
 }
 
-#ifndef EXCLUDE_CRYPTO
 // Needed to seed the RNG with good entropy data.
 static int
 get_entropy(void *data, unsigned char *output, size_t len, size_t *outlen)
@@ -168,7 +164,6 @@ rng_state_fetch(void)
     }
     return true;
 }
-#endif // EXCLUDE_CRYPTO
 
 static srp_key_t *
 srp_key_setup(void)
@@ -179,7 +174,6 @@ srp_key_setup(void)
         return key;
     }
 
-#ifndef EXCLUDE_CRYPTO
     mbedtls_pk_init(&key->key);
     if (rng_state_fetch()) {
         return key;
@@ -187,18 +181,11 @@ srp_key_setup(void)
     mbedtls_pk_free(&key->key);
     free(key);
     return NULL;
-#else
-    return key;
-#endif
 }
 
 uint16_t
 srp_random16()
 {
-#ifdef EXCLUDE_CRYPTO
-    // Note that this is the wrong thing to return here and needs to be fixed.
-    return otRandomNonCryptoGetUint16();
-#else
     int status;
     uint16_t ret;
     char errbuf[64];
@@ -212,24 +199,56 @@ srp_random16()
         return ret;
     }
     return 0xffff;
-#endif
+}
+
+uint32_t
+srp_random32()
+{
+    int status;
+    uint32_t ret;
+    char errbuf[64];
+    if (rng_state_fetch()) {
+        status = mbedtls_ctr_drbg_random(&rng_state->rng_context, (unsigned char *)&ret, sizeof ret);
+        if (status != 0) {
+            mbedtls_strerror(status, errbuf, sizeof errbuf);
+            ERROR("mbedtls_ctr_drbg_random failed: %s", errbuf);
+            return 0xffff;
+        }
+        return ret;
+    }
+    return 0xffffffff;
+}
+
+uint64_t
+srp_random64()
+{
+    int status;
+    uint64_t ret;
+    char errbuf[64];
+    if (rng_state_fetch()) {
+        status = mbedtls_ctr_drbg_random(&rng_state->rng_context, (unsigned char *)&ret, sizeof ret);
+        if (status != 0) {
+            mbedtls_strerror(status, errbuf, sizeof errbuf);
+            ERROR("mbedtls_ctr_drbg_random failed: %s", errbuf);
+            return 0xffff;
+        }
+        return ret;
+    }
+    return 0xffffffffffffffffull;
 }
 
 srp_key_t *
 srp_load_key_from_buffer(const uint8_t *buffer, size_t length)
 {
     srp_key_t *key;
-#ifndef EXCLUDE_CRYPTO
     int status;
     char errbuf[64];
-#endif
 
     key = srp_key_setup();
     if (key == NULL) {
         return NULL;
     }
 
-#ifndef EXCLUDE_CRYPTO
     if ((status = mbedtls_pk_parse_key(&key->key, buffer, length, NULL, 0)) != 0) {
         mbedtls_strerror(status, errbuf, sizeof errbuf);
         ERROR("mbedtls_pk_parse_key failed: %s", errbuf);
@@ -238,12 +257,6 @@ srp_load_key_from_buffer(const uint8_t *buffer, size_t length)
     } else {
         return key;
     }
-#else
-    if (length == ECDSA_KEY_SIZE) {
-        memcpy(key->key, buffer, length);
-        return key;
-    }
-#endif
     srp_keypair_free(key);
     return NULL;
 }
@@ -253,11 +266,9 @@ srp_key_t *
 srp_generate_key(void)
 {
     srp_key_t *key;
-#ifndef EXCLUDE_CRYPTO
     int status;
     char errbuf[64];
     const mbedtls_pk_info_t *key_type;
-#endif
 
     INFO("srp_key_setup");
     key = srp_key_setup();
@@ -265,7 +276,6 @@ srp_generate_key(void)
         ERROR("srp_key_setup() failed.");
         return NULL;
     }
-#ifndef EXCLUDE_CRYPTO
     key_type = mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY);
     if (key_type == NULL) {
         INFO("mbedtls_pk_info_from_type failed");
@@ -288,10 +298,6 @@ srp_generate_key(void)
     }
     srp_keypair_free(key);
     return NULL;
-#else
-    HAPPlatformRandomNumberFill(key->key, sizeof key->key);
-    return key;
-#endif
 }
 
 // Copy an srp_key_t into a buffer.   Key is not necessarily aligned with the beginning of the
@@ -300,16 +306,6 @@ srp_generate_key(void)
 uint8_t *
 srp_store_key_to_buffer(uint8_t *buffer, size_t *length, srp_key_t *key)
 {
-#ifdef EXCLUDE_CRYPTO
-    if (*length < ECDSA_KEY_SIZE) {
-        return NULL;
-    }
-    if (*length > sizeof key->key) {
-        *length = sizeof key->key;
-    }
-    memcpy(buffer, key->key, *length);
-    return buffer;
-#else
     size_t len = mbedtls_pk_write_key_der(&key->key, buffer, *length);
     uint8_t *ret;
     char errbuf[64];
@@ -321,7 +317,6 @@ srp_store_key_to_buffer(uint8_t *buffer, size_t *length, srp_key_t *key)
     ret = &buffer[*length - len];
     *length = len;
     return ret;
-#endif
 }
 
 srp_key_t *
@@ -389,7 +384,6 @@ srp_signature_length(srp_key_t *key)
 int
 srp_pubkey_copy(uint8_t *buf, size_t max, srp_key_t *key)
 {
-#ifndef EXCLUDE_CRYPTO
     mbedtls_ecp_keypair *ecp = mbedtls_pk_ec(key->key);
     char errbuf[64];
     int status;
@@ -405,14 +399,6 @@ srp_pubkey_copy(uint8_t *buf, size_t max, srp_key_t *key)
         ERROR("mbedtls_mpi_write_binary: %s", errbuf);
         return 0;
     }
-#else
-    if (max < ECDSA_KEY_SIZE) {
-        return 0;
-    }
-
-    memcpy(buf, key->key, ECDSA_KEY_SIZE);
-    return ECDSA_KEY_SIZE;
-#endif // EXCLUDE_CRYPTO
 
 #ifdef MBEDTLS_PUBKEY_DUMP
     int i;
@@ -421,7 +407,7 @@ srp_pubkey_copy(uint8_t *buf, size_t max, srp_key_t *key)
         fprintf(stderr, "%02x", buf[i]);
     }
     putc('\n', stderr);
-#endif // EXCLUDE_CRYPTO
+#endif // MBEDTLS_PUBKEY_DUMP
     return ECDSA_KEY_SIZE;
 }
 
@@ -429,9 +415,6 @@ srp_pubkey_copy(uint8_t *buf, size_t max, srp_key_t *key)
 int
 srp_sign(uint8_t *output, size_t max, uint8_t *message, size_t msglen, uint8_t *rr, size_t rdlen, srp_key_t *key)
 {
-#ifdef EXCLUDE_CRYPTO
-    return 1;
-#else
     int success = 1;
     int status;
     unsigned char hash[ECDSA_SHA256_HASH_SIZE];
@@ -442,12 +425,6 @@ srp_sign(uint8_t *output, size_t max, uint8_t *message, size_t msglen, uint8_t *
     mbedtls_ecp_keypair *ecp = mbedtls_pk_ec(key->key);
     mbedtls_mpi r, s;
 
-#ifdef THREAD_DEVKIT_ADK
-    int i;
-    INFO("srp_sign(output=%p  max=%d  message=%p  msglen=%d  rr=%p  rdlen=%d)",
-         output, max, message, msglen, rr, rdlen);
-#endif
-
     if (max < ECDSA_SHA256_SIG_SIZE) {
         ERROR("srp_sign: not enough space in output buffer (%lu) for signature (%d).",
               (unsigned long)max, ECDSA_SHA256_SIG_SIZE);
@@ -457,15 +434,6 @@ srp_sign(uint8_t *output, size_t max, uint8_t *message, size_t msglen, uint8_t *
     sbp = (uint32_t *)shabuf;
     sha = (mbedtls_sha256_context *)sbp;
     mbedtls_sha256_init(sha);
-#ifdef THREAD_DEVKIT_ADK
-    for (i = 0; i < sizeof shabuf; i += 16) {
-        INFO("%03x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-             i, shabuf[i], shabuf[i + 1], shabuf[i + 2], shabuf[i + 3], shabuf[i + 4], shabuf[i + 5], shabuf[i + 6],
-             shabuf[i + 7], shabuf[i + 8], shabuf[i + 9], shabuf[i + 10], shabuf[i + 11], shabuf[i + 12],
-             shabuf[i + 13], shabuf[i + 14], shabuf[i + 15]);
-    }
-    INFO("1 rdlen=%d", rdlen);
-#endif
     memset(hash, 0, sizeof hash);
     mbedtls_mpi_init(&r);
     mbedtls_mpi_init(&s);
@@ -473,9 +441,6 @@ srp_sign(uint8_t *output, size_t max, uint8_t *message, size_t msglen, uint8_t *
     // Calculate the hash across first the SIG RR (minus the signature) and then the message
     // up to but not including the SIG RR.
     status = mbedtls_sha256_starts_ret(sha, 0);
-#ifdef THREAD_DEVKIT_ADK
-    INFO("5 rdlen=%d", rdlen);
-#endif
     if (status == 0) {
         status = srp_mbedtls_sha256_update_ret("rr", sha, rr, rdlen);
     }
@@ -513,8 +478,15 @@ cleanup:
     mbedtls_mpi_free(&r);
     mbedtls_mpi_free(&s);
     return success;
-#endif
 }
+
+#ifndef THREAD_DEVKIT_ADK
+int
+srp_reset_key(const char *key_name, void *UNUSED os_context)
+{
+    return srp_remove_key_file(os_context, key_name);
+}
+#endif
 
 // Local Variables:
 // mode: C

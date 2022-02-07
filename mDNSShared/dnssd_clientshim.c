@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2003-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,11 +26,11 @@
 #include "mDNSEmbeddedAPI.h"        // The interface we're building on top of
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include "DNSCommon.h"          // For mDNSPlatformInterfaceIndexfromInterfaceID().
 extern mDNS mDNSStorage;        // We need to pass the address of this storage to the lower-layer functions
 
-#if MDNS_BUILDINGSHAREDLIBRARY || MDNS_BUILDINGSTUBLIBRARY
-#pragma export on
-#endif
+// If a target complies this file, then it should be using the shim layer.
+#define MDNS_BUILDINGSHAREDLIBRARY 1
 
 //*************************************************************************************************************
 // General Utility Functions
@@ -137,7 +137,7 @@ static mDNSInterfaceID DNSServiceInterfaceIndexToID(mDNSu32 interfaceIndex, DNSS
 // We DO include it in the actual Extension, so that if a later client compiled to use this
 // is run against this Extension, it will get a reasonable error code instead of just
 // failing to launch (Strong Link) or calling an unresolved symbol and crashing (Weak Link)
-#if !MDNS_BUILDINGSTUBLIBRARY
+#if MDNS_BUILDINGSHAREDLIBRARY
 DNSServiceErrorType DNSServiceEnumerateDomains
 (
     DNSServiceRef                       *sdRef,
@@ -285,7 +285,7 @@ DNSServiceErrorType DNSServiceRegister
     err = mDNS_RegisterService(&mDNSStorage, &x->s,
                                &x->name, &t, &d, // Name, type, domain
                                &x->host, port, // Host and port
-							   mDNSNULL,
+                               mDNSNULL,
                                txtRecord, txtLen, // TXT data, length
                                SubTypes, NumSubTypes, // Subtypes
                                mDNSInterface_Any, // Interface ID
@@ -310,7 +310,7 @@ fail:
 // We DO include it in the actual Extension, so that if a later client compiled to use this
 // is run against this Extension, it will get a reasonable error code instead of just
 // failing to launch (Strong Link) or calling an unresolved symbol and crashing (Weak Link)
-#if !MDNS_BUILDINGSTUBLIBRARY
+#if MDNS_BUILDINGSHAREDLIBRARY
 DNSServiceErrorType DNSServiceAddRecord
 (
     DNSServiceRef sdRef,
@@ -584,7 +584,7 @@ fail:
 // We DO include it in the actual Extension, so that if a later client compiled to use this
 // is run against this Extension, it will get a reasonable error code instead of just
 // failing to launch (Strong Link) or calling an unresolved symbol and crashing (Weak Link)
-#if !MDNS_BUILDINGSTUBLIBRARY
+#if MDNS_BUILDINGSHAREDLIBRARY
 DNSServiceErrorType DNSServiceCreateConnection(DNSServiceRef *sdRef)
 {
     (void)sdRef;    // Unused
@@ -718,16 +718,14 @@ mDNSlocal void DNSServiceGetAddrInfoResponse(mDNS *const m, DNSQuestion *questio
     mDNS_DirectOP_GetAddrInfo *x = (mDNS_DirectOP_GetAddrInfo*)question->QuestionContext;
     char fullname[MAX_ESCAPED_DOMAIN_NAME];
 
-    struct sockaddr_storage sas;
-	struct sockaddr_in *sin = (struct sockaddr_in *)&sas;
-	struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&sas;
+    struct sockaddr_storage sas; // NOLINT(misc-uninitialized-record-variable): Initialized below by mDNSPlatformMemZero.
+    struct sockaddr_in *sin = (struct sockaddr_in *)&sas;
+    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&sas;
     void *sa_ap = mDNSNULL;
     int sa_as = 0;
     mStatus err = mStatus_NoError;
 
-    (void)m;    // Unused
-
-	mDNSPlatformMemZero(&sas, sizeof sas);
+    mDNSPlatformMemZero(&sas, sizeof sas);
 
     ConvertDomainNameToCString(answer->name, fullname);
 
@@ -735,7 +733,11 @@ mDNSlocal void DNSServiceGetAddrInfoResponse(mDNS *const m, DNSQuestion *questio
     {
         err = mStatus_NoSuchRecord;
     }
-        
+
+    mDNS_Lock(m);
+    const mDNSu32 interfaceIndex = mDNSPlatformInterfaceIndexfromInterfaceID(m, answer->InterfaceID, mDNStrue);
+    mDNS_Unlock(m);
+
     // There are three checks here for bad data: class != IN, RRTYPE not in {A,AAAA} and wrong length.
     // None of these should be possible, because the cache code wouldn't cache malformed data and wouldn't
     // return records we didn't ask for, but it doesn't hurt to check.
@@ -749,7 +751,7 @@ mDNSlocal void DNSServiceGetAddrInfoResponse(mDNS *const m, DNSQuestion *questio
 #ifndef NOT_HAVE_SA_LEN
             sin->sin_len = sizeof *sin;
 #endif
-            x->callback((DNSServiceRef)x, 0, x->interfaceIndex, kDNSServiceErr_Invalid, fullname,
+            x->callback((DNSServiceRef)x, 0, interfaceIndex, kDNSServiceErr_Invalid, fullname,
                         (const struct sockaddr *)&sas, 0, x->context);
         }
         if (x->aaaa.ThisQInterval >= 0)
@@ -758,7 +760,7 @@ mDNSlocal void DNSServiceGetAddrInfoResponse(mDNS *const m, DNSQuestion *questio
 #ifndef NOT_HAVE_SA_LEN
             sin6->sin6_len = sizeof *sin6;
 #endif
-            x->callback((DNSServiceRef)x, 0, x->interfaceIndex, kDNSServiceErr_Invalid, fullname,
+            x->callback((DNSServiceRef)x, 0, interfaceIndex, kDNSServiceErr_Invalid, fullname,
                         (const struct sockaddr *)&sas, 0, x->context);
         }
         return;
@@ -786,7 +788,7 @@ mDNSlocal void DNSServiceGetAddrInfoResponse(mDNS *const m, DNSQuestion *questio
         LogMsg("DNSServiceGetAddrInfoResponse: response of type %d received, which is bogus", answer->rrtype);
         goto totally_invalid;
     }
-    
+
     if (err == kDNSServiceErr_NoError && sa_ap != mDNSNULL)
     {
         if (err == mStatus_NoError)
@@ -804,8 +806,8 @@ mDNSlocal void DNSServiceGetAddrInfoResponse(mDNS *const m, DNSQuestion *questio
         }
     }
 
-    x->callback((DNSServiceRef)x, addRecord ? kDNSServiceFlagsAdd : (DNSServiceFlags)0, x->interfaceIndex, err,
-                fullname, (const struct sockaddr *)&sas, answer->rroriginalttl, x->context);
+    x->callback((DNSServiceRef)x, addRecord ? kDNSServiceFlagsAdd : (DNSServiceFlags)0, interfaceIndex, err, fullname,
+                (const struct sockaddr *)&sas, answer->rroriginalttl, x->context);
 }
 
 DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo(
@@ -832,19 +834,19 @@ DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo(
     x->interfaceIndex = inInterfaceIndex;
 
     // Validate and default the protocols.
-    if ((inProtocol & ~(kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6)) != 0)
+    if ((inProtocol & (uint32_t)(~(kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6))) != 0)
     {
         err = mStatus_BadParamErr;
         errormsg = "Unsupported protocol";
         goto fail;
     }
-    // In theory this API checks to see if we have a routable IPv6 address, but 
+    // In theory this API checks to see if we have a routable IPv6 address, but
     if ((inProtocol & (kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6)) == 0)
     {
         inProtocol = kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6;
         inFlags |= kDNSServiceFlagsSuppressUnusable;
     }
-    
+
     x->a.ThisQInterval        = -1;      // So we know whether to cancel this question
     x->a.InterfaceID          = DNSServiceInterfaceIndexToID(inInterfaceIndex, &inFlags);
     x->a.flags                = inFlags;
@@ -865,8 +867,8 @@ DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo(
     x->a.QuestionCallback     = DNSServiceGetAddrInfoResponse;
     x->a.QuestionContext      = x;
 
-	x->aaaa = x->a;
-	x->aaaa.qtype = kDNSType_AAAA;
+    x->aaaa = x->a;
+    x->aaaa.qtype = kDNSType_AAAA;
 
     if (inProtocol & kDNSServiceProtocol_IPv4)
     {
@@ -894,7 +896,7 @@ fail:
 // We DO include it in the actual Extension, so that if a later client compiled to use this
 // is run against this Extension, it will get a reasonable error code instead of just
 // failing to launch (Strong Link) or calling an unresolved symbol and crashing (Weak Link)
-#if !MDNS_BUILDINGSTUBLIBRARY
+#if MDNS_BUILDINGSHAREDLIBRARY
 DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
 (
     DNSServiceFlags flags,
@@ -916,7 +918,7 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
     return(kDNSServiceErr_Unsupported);
 }
 
-#endif // !MDNS_BUILDINGSTUBLIBRARY
+#endif // MDNS_BUILDINGSHAREDLIBRARY
 
 // Local Variables:
 // mode: C

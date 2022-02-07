@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,9 +34,7 @@ extern "C" {
 #define STRINGIFY(s) STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s)
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark - DNS Protocol Constants
-#endif
+// MARK: - DNS Protocol Constants
 
 typedef enum
 {
@@ -88,10 +86,7 @@ typedef enum
 
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - General Utility Functions
-#endif
+// MARK: - General Utility Functions
 
 extern NetworkInterfaceInfo *GetFirstActiveInterface(NetworkInterfaceInfo *intf);
 extern mDNSInterfaceID GetNextActiveInterfaceID(const NetworkInterfaceInfo *intf);
@@ -103,17 +98,15 @@ extern mDNSu32 mDNS_GetNextResolverGroupID(void);
 #endif
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - Domain Name Utility Functions
-#endif
+// MARK: - Domain Name Utility Functions
 
 #define mDNSSubTypeLabel   "\x04_sub"
 
-#define mDNSIsDigit(X)     ((X) >= '0' && (X) <= '9')
-#define mDNSIsUpperCase(X) ((X) >= 'A' && (X) <= 'Z')
-#define mDNSIsLowerCase(X) ((X) >= 'a' && (X) <= 'z')
-#define mDNSIsLetter(X)    (mDNSIsUpperCase(X) || mDNSIsLowerCase(X))
+#define mDNSIsDigit(X)      ((X) >= '0' && (X) <= '9')
+#define mDNSIsUpperCase(X)  ((X) >= 'A' && (X) <= 'Z')
+#define mDNSIsLowerCase(X)  ((X) >= 'a' && (X) <= 'z')
+#define mDNSIsLetter(X)     (mDNSIsUpperCase(X) || mDNSIsLowerCase(X))
+#define mDNSIsPrintASCII(X) (((X) >= 32) && ((X) <= 126))
     
 // We believe we have adequate safeguards to protect against cache poisoning.
 // In the event that someone does find a workable cache poisoning attack, we want to limit the lifetime of the poisoned entry.
@@ -135,11 +128,10 @@ extern mDNSu32 RemoveLabelSuffix(domainlabel *name, mDNSBool RichText);
 extern void AppendLabelSuffix(domainlabel *const name, mDNSu32 val, const mDNSBool RichText);
 #define ValidateDomainName(N) (DomainNameLength(N) <= MAX_DOMAIN_NAME)
 
+extern mDNSBool IsSubdomain(const domainname *const subdomain, const domainname *const domain);
+
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - Resource Record Utility Functions
-#endif
+// MARK: - Resource Record Utility Functions
 
 // IdenticalResourceRecord returns true if two resources records have
 // the same name, type, class, and identical rdata (InterfaceID and TTL may differ)
@@ -198,10 +190,7 @@ extern mStatus DNSNameToLowerCase(domainname *d, domainname *result);
 #define LocalRecordReady(X) ((X)->resrec.RecordType != kDNSRecordTypeUnique)
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - DNS Message Creation Functions
-#endif
+// MARK: - DNS Message Creation Functions
 
 extern void InitializeDNSMessage(DNSMessageHeader *h, mDNSOpaque16 id, mDNSOpaque16 flags);
 extern const mDNSu8 *FindCompressionPointer(const mDNSu8 *const base, const mDNSu8 *const end, const mDNSu8 *const domname);
@@ -245,10 +234,7 @@ extern int baseEncode(char *buffer, int blen, const mDNSu8 *data, int len, int e
 extern void NSEC3Parse(const ResourceRecord *const rr, mDNSu8 **salt, int *hashLength, mDNSu8 **nxtName, int *bitmaplen, mDNSu8 **bitmap);
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - DNS Message Parsing Functions
-#endif
+// MARK: - DNS Message Parsing Functions
 
 #define HashSlotFromNameHash(X) ((X) % CACHE_HASH_SLOTS)
 extern mDNSu32 DomainNameHashValue(const domainname *const name);
@@ -275,7 +261,7 @@ extern void DumpPacket(mStatus status, mDNSBool sent, const char *transport, con
     mDNSInterfaceID interfaceID);
 extern mDNSBool RRAssertsNonexistence(const ResourceRecord *const rr, mDNSu16 type);
 extern mDNSBool RRAssertsExistence(const ResourceRecord *const rr, mDNSu16 type);
-extern mDNSBool BitmapTypeCheck(mDNSu8 *bmap, int bitmaplen, mDNSu16 type);
+extern mDNSBool BitmapTypeCheck(const mDNSu8 *bmap, int bitmaplen, mDNSu16 type);
 
 extern mDNSu16 swap16(mDNSu16 x);
 extern mDNSu32 swap32(mDNSu32 x);
@@ -283,19 +269,13 @@ extern mDNSu32 swap32(mDNSu32 x);
 extern mDNSBool GetReverseIPv6Addr(const domainname *inQName, mDNSu8 outIPv6[16]);
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - Packet Sending Functions
-#endif
+// MARK: - Packet Sending Functions
 extern mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNSu8 *end,
                                   mDNSInterfaceID InterfaceID, TCPSocket *tcpSrc, UDPSocket *udpSrc, const mDNSAddr *dst,
                                   mDNSIPPort dstport, DomainAuthInfo *authInfo, mDNSBool useBackgroundTrafficClass);
 
 // ***************************************************************************
-#if COMPILER_LIKES_PRAGMA_MARK
-#pragma mark -
-#pragma mark - RR List Management & Task Management
-#endif
+// MARK: - RR List Management & Task Management
 
 extern void ShowTaskSchedulingError(mDNS *const m);
 extern void mDNS_Lock_(mDNS *const m, const char * const functionname);
@@ -309,16 +289,40 @@ extern void mDNS_Unlock_(mDNS *const m, const char * const functionname);
 
 #define mDNS_Unlock(X) mDNS_Unlock_((X), __func__)
 
-#define mDNS_CheckLock(X) \
-    if ((X)->mDNS_busy != (X)->mDNS_reentrancy+1) LogMsg("%s: Lock not held! mDNS_busy (%ld) mDNS_reentrancy (%ld)", __func__, (X)->mDNS_busy, (X)->mDNS_reentrancy)
-
-#define mDNS_DropLockBeforeCallback() do { m->mDNS_reentrancy++; \
-    if (m->mDNS_busy != m->mDNS_reentrancy) LogMsg("%s: Locking Failure! mDNS_busy (%ld) != mDNS_reentrancy (%ld)", __func__, m->mDNS_busy, m->mDNS_reentrancy); \
+#define mDNS_CheckLock(X)                                                                           \
+    do                                                                                              \
+    {                                                                                               \
+        if ((X)->mDNS_busy != (X)->mDNS_reentrancy+1)                                               \
+        {                                                                                           \
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, PUB_S                              \
+                ": Lock not held! mDNS_busy (%u) mDNS_reentrancy (%u)", __func__, (X)->mDNS_busy,   \
+                (X)->mDNS_reentrancy);                                                              \
+        }                                                                                           \
     } while (0)
 
-#define mDNS_ReclaimLockAfterCallback() do { \
-    if (m->mDNS_busy != m->mDNS_reentrancy) LogMsg("%s: Unlocking Failure! mDNS_busy (%ld) != mDNS_reentrancy (%ld)", __func__, m->mDNS_busy, m->mDNS_reentrancy); \
-    m->mDNS_reentrancy--; } while (0)
+#define mDNS_DropLockBeforeCallback()                                                                   \
+    do                                                                                                  \
+    {                                                                                                   \
+        m->mDNS_reentrancy++;                                                                           \
+        if (m->mDNS_busy != m->mDNS_reentrancy)                                                         \
+        {                                                                                               \
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, PUB_S                                  \
+                ": Locking Failure! mDNS_busy (%u) != mDNS_reentrancy (%u)", __func__, m->mDNS_busy,    \
+                m->mDNS_reentrancy);                                                                    \
+        }                                                                                               \
+    } while (0)
+
+#define mDNS_ReclaimLockAfterCallback()                                                                 \
+    do                                                                                                  \
+    {                                                                                                   \
+        if (m->mDNS_busy != m->mDNS_reentrancy)                                                         \
+        {                                                                                               \
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, PUB_S                                  \
+                ": Unlocking Failure! mDNS_busy (%u) != mDNS_reentrancy (%u)", __func__, m->mDNS_busy,  \
+                m->mDNS_reentrancy);                                                                    \
+        }                                                                                               \
+        m->mDNS_reentrancy--;                                                                           \
+    } while (0)
 
 #ifdef  __cplusplus
 }

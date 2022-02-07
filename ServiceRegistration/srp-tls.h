@@ -1,12 +1,12 @@
 /* srp-tls.h
  *
- * Copyright (c) 2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,6 +33,9 @@ struct tls_context {
     enum { handshake_in_progress, handshake_complete } state;
 };
 #endif // SRP_CRYPTO_MBEDTLS_INTERNAL
+#ifdef SRP_CRYPTO_MACOS
+#include "tls-macos.h"
+#endif
 
 // tls_*.c:
 bool srp_tls_init(void);
@@ -45,6 +48,43 @@ bool srp_tls_connect_callback(comm_t *NONNULL comm);
 ssize_t srp_tls_read(comm_t *NONNULL comm, unsigned char *NONNULL buf, size_t max);
 void srp_tls_context_free(comm_t *NONNULL comm);
 ssize_t srp_tls_write(comm_t *NONNULL comm, struct iovec *NONNULL iov, int iov_len);
+
+/*!
+ *  @brief
+ *      Configure TLS with the identity.
+ *
+ *  @param context
+ *      Context passed to this function to let it finish the configuration process.
+ *
+ *  @discussion
+ *      This function can only be called after srp_tls_init() is called to fetch the necessary identity.
+ *
+ */
+void
+srp_tls_configure(void *NULLABLE context);
+
+/*!
+ *  @brief
+ *      Gets the remaining valid time for the TLS certificate that is initialized by <code>srp_tls_init()</code>.
+ *
+ *  @result
+ *      The remaining time valid time before TLS certificate expires.
+ *
+ *  @discussion
+ *      <code>srp_tls_init()</code> has to be called to initialize the TLS certificate before calling this function.
+ */
+uint32_t
+srp_tls_get_next_rotation_time(void);
+
+/*!
+ *  @brief
+ *      Destroy the TLS certificate that is initialized by <code>srp_tls_init()</code>.
+ *
+ *  @discussion
+ *      <code>srp_tls_init()</code> has to be called to initialize the TLS certificate before calling this function.
+ */
+void
+srp_tls_dispose(void);
 
 #endif // __SRP_TLS_H
 

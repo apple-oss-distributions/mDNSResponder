@@ -42,6 +42,10 @@ uint8_t *
 dnssd_svcb_copy_ech_config(const uint8_t *buffer, size_t buffer_size,
 						   size_t *out_length);
 
+uint8_t *
+dnssd_svcb_copy_odoh_config(const uint8_t *buffer, size_t buffer_size,
+							size_t *out_length);
+
 #ifdef __BLOCKS__
 
 typedef bool (^_dnssd_svcb_access_alpn_t)(const char *alpn);

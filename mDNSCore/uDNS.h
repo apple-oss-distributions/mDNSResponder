@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,10 +17,10 @@
 #ifndef __UDNS_H_
 #define __UDNS_H_
 
+#include "nullability.h"
 #include "mDNSEmbeddedAPI.h"
 #include "DNSCommon.h"
 #include <sys/types.h>
-#include "dns_sd.h"
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
 #include "dso.h"
@@ -72,31 +72,56 @@ extern "C" {
 #define DEFAULT_UDNS_TIMEOUT    30 // in seconds
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
-// Push notification structures
-struct mDNS_DNSPushNotificationServer
+
+// Reference count helper for DNSPushServer and DNSPushZone.
+#define DNS_PUSH_RETAIN(OBJ)                                                                                    \
+    do                                                                                                          \
+    {                                                                                                           \
+        (OBJ)->refCount++;                                                                                      \
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG,                                                    \
+            "DNS push object retained - object: %p, refCount after retaining: %u.", (OBJ), (OBJ)->refCount);    \
+    } while (mDNSfalse)
+
+#define DNS_PUSH_RELEASE(OBJ, FINALIZER)                                                                        \
+    do                                                                                                          \
+    {                                                                                                           \
+        (OBJ)->refCount--;                                                                                      \
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG,                                                    \
+            "DNS push object released - object: %p, refCount after releasing: %u.", (OBJ), (OBJ)->refCount);    \
+        if ((OBJ)->refCount == 0)                                                                               \
+        {                                                                                                       \
+            FINALIZER((OBJ));                                                                                   \
+            (OBJ) = NULL;                                                                                       \
+        }                                                                                                       \
+    } while (mDNSfalse)
+
+// Push notification structures.
+struct mDNS_DNSPushServer
 {
-    dso_connect_state_t       *connectInfo;       // DSO Connection state information
+    uint32_t                   serial;            // The serial number that can be used to identify a specific server.
+    uint32_t                   refCount;          // Reference count used by DNS_PUSH_RETAIN and DNS_PUSH_RELEASE.
+    dso_connect_state_t       *connectInfo;       // DSO Connection state information.
     dso_state_t               *connection;        // DNS Stateful Operations/TCP Connection pointer, might be null.
-    mDNSu32                    numberOfQuestions; // Number of questions for this server
-    DNSPushServer_ConnectState connectState;      // Current status of connection attempt to this server
-    mDNSs32                    lastDisconnect;    // Last time we got a disconnect, used to avoid constant reconnects
-    domainname                 serverName;        // The hostname returned by the _dns-push-tls._tcp.<zone> SRV lookup
-    mDNSIPPort                 port;              // The port from the SRV lookup
+    DNSPushServer_ConnectState connectState;      // Current status of connection attempt to this server.
+    mDNSs32                    lastDisconnect;    // Last time we got a disconnect, used to avoid constant reconnects.
+    domainname                 serverName;        // The hostname returned by the _dns-push-tls._tcp.<zone> SRV lookup.
+    mDNSIPPort                 port;              // The port from the SRV lookup.
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     mdns_dns_service_t         dnsservice;
 #else
     DNSServer                 *qDNSServer;        // DNS server stolen from the question that created this server structure.
 #endif
     mDNS                      *m;
-    DNSPushNotificationServer *next;
+    mDNSBool                   canceling;         // Indicates if the current server is being canceled.
+    DNSPushServer *next;
 } ;
 
-struct mDNS_DNSPushNotificationZone
+struct mDNS_DNSPushZone
 {
+    uint32_t refCount;                // Reference count used by DNS_PUSH_RETAIN and DNS_PUSH_RELEASE.
     domainname zoneName;
-    DNSPushNotificationServer *server; // DNS Push Notification Servers for this zone
-    mDNSu32 numberOfQuestions;          // Number of questions for this zone
-    DNSPushNotificationZone *next;
+    DNSPushServer *server; // DNS Push Servers for this zone.
+    DNSPushZone *next;
 } ;
 #endif
 
@@ -107,13 +132,15 @@ extern void startLLQHandshake(mDNS *m, DNSQuestion *q);
 extern void sendLLQRefresh(mDNS *m, DNSQuestion *q);
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
-extern void DNSPushNotificationGotZoneData(mDNS *const m, mStatus err, const ZoneData *zoneInfo);
-extern void DiscoverDNSPushNotificationServer(mDNS *m, DNSQuestion *q);
-extern DNSPushNotificationServer *GetConnectionToDNSPushNotificationServer(mDNS *m, DNSQuestion *q);
-extern DNSPushNotificationServer *SubscribeToDNSPushNotificationServer(mDNS *m, DNSQuestion *q);
-extern void UnSubscribeToDNSPushNotificationServer(mDNS *m, DNSQuestion *q);
-extern void DNSPushReconcileConnection(mDNS *m, DNSQuestion *q);
-extern void DNSPushServerDrop(DNSPushNotificationServer *server);
+extern void DNSPushGotZoneData(mDNS *m, mStatus err, const ZoneData *zoneInfo);
+extern void DiscoverDNSPushServer(mDNS *m, DNSQuestion *q);
+extern void UnsubscribeQuestionFromDNSPushServer(mDNS *m, DNSQuestion *q, mDNSBool fallBackToLLQPoll);
+extern void UnsubscribeAllQuestionsFromDNSPushServer(mDNS *m, DNSPushServer *server);
+extern void DNSPushZoneRemove(mDNS *m, const DNSPushServer *server);
+extern void DNSPushZoneFinalize(DNSPushZone *zone);
+extern void DNSPushServerCancel(DNSPushServer *server, mDNSBool alreadyRemovedFromSystem);
+extern void DNSPushServerFinalize(DNSPushServer *server);
+extern void DNSPushUpdateQuestionDuplicate(DNSQuestion *primary, DNSQuestion *duplicate);
 #endif
 
 extern void SleepRecordRegistrations(mDNS *m);
@@ -178,11 +205,6 @@ extern void DisposeTCPConn(struct tcpInfo_t *tcp);
 extern void uDNS_ReceiveNATPacket(mDNS *m, const mDNSInterfaceID InterfaceID, mDNSu8 *pkt, mDNSu16 len); // Called for each received PCP or NAT-PMP packet
 extern void natTraversalHandleAddressReply(mDNS *const m, mDNSu16 err, mDNSv4Addr ExtAddr);
 extern void natTraversalHandlePortMapReply(mDNS *const m, NATTraversalInfo *n, const mDNSInterfaceID InterfaceID, mDNSu16 err, mDNSIPPort extport, mDNSu32 lease, NATTProtocol protocol);
-
-#if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
-// DNS Push Notification
-extern void SubscribeToDNSPushNotification(mDNS *m, DNSQuestion *q);
-#endif
 
 extern CacheRecord* mDNSCoreReceiveCacheCheck(mDNS *const m, const DNSMessage *const response, uDNS_LLQType LLQType,
 											  const mDNSu32 slot, CacheGroup *cg,

@@ -1,0 +1,18 @@
+//
+//  fuzzer.xcconfig
+//  AVConference
+//
+//  Created by Patrick Miauton on 6/5/19.
+//  Copyright © 2019 Apple Inc. All rights reserved.
+//
+
+// Configuration settings file format documentation can be found at: https://help.apple.com/xcode/#/dev745c5c974
+
+FUZZ_CFLAGS_mh_execute = -fsanitize=address,fuzzer
+FUZZ_CFLAGS_mh_dylib   = -fsanitize=address,fuzzer-no-link
+
+FUZZ_LDFLAGS_mh_execute = -fsanitize=address,fuzzer
+FUZZ_LDFLAGS_mh_dylib   = -fsanitize=address,fuzzer-no-link
+
+OTHER_CFLAGS  = $(inherited) $(FUZZ_CFLAGS_$(MACH_O_TYPE)) -DFUZZING -D_FUZZ_$(MACH_O_TYPE) -D$(FUZZER_NAME) -Wno-missing-prototypes -Wno-unused-variable -Wno-unused-parameter -Wno-unreachable-code -ftrivial-auto-var-init=pattern
+OTHER_LDFLAGS = $(inherited) $(FUZZ_LDFLAGS_$(MACH_O_TYPE)) -lbsm

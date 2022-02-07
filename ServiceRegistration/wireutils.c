@@ -1,12 +1,12 @@
 /* wireutils.c
  *
- * Copyright (c) 2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -44,7 +44,9 @@
 // The only functions that aren't excluded by STANDALONE are FindCompressionPointer and
 // putDomainNameAsLabels.
 
+#ifndef STANDALONE
 #define STANDALONE
+#endif
 #include "../mDNSCore/DNSCommon.c"
 
 void dns_name_free(dns_label_t *name)
@@ -172,11 +174,11 @@ dns_concatenate_name_to_wire_(dns_towire_state_t *towire, dns_name_t *labels_pre
 // Convert a dns_name_t to presentation format.   Stop conversion at the specified limit.
 // A trailing dot is only written if a null label is present.
 const char *NONNULL
-dns_name_print_to_limit(dns_name_t *NONNULL name, dns_name_t *NULLABLE limit, char *buf, int bufmax)
+dns_name_print_to_limit(dns_name_t *NONNULL name, dns_name_t *NULLABLE limit, char *buf, size_t bufmax)
 {
     dns_label_t *lp;
-    int ix = 0;
-    int i;
+    size_t ix = 0;
+    size_t i;
 
     // Copy the labels in one at a time, putting a dot between each one; if there isn't room
     // in the buffer (shouldn't be the case), copy as much as will fit, leaving room for a NUL

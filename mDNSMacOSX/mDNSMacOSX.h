@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2018 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ extern "C" {
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include "mDNSEmbeddedAPI.h"        // for domain name structure
-#include "mdns_private.h"           // for mdns_interface_monitor_t struct
+#include <mdns/private.h>           // for mdns_interface_monitor_t struct
 
 #include <net/if.h>
 #include <os/log.h>
@@ -49,6 +49,9 @@ extern "C" {
 #include <Security/SecureTransport.h>
 #include <Security/Security.h>
 #endif /* NO_SECURITYFRAMEWORK */
+
+#define kMDNSResponderIDStr "com.apple.mDNSResponder"
+#define kMDNSResponderID    CFSTR(kMDNSResponderIDStr)
 
 enum mDNSDynamicStoreSetConfigKey
 {
@@ -246,16 +249,15 @@ extern void SetDomainSecrets(mDNS *m);
 extern void mDNSMacOSXNetworkChanged(void);
 extern void mDNSMacOSXSystemBuildNumber(char *HINFO_SWstring);
 extern NetworkInterfaceInfoOSX *IfindexToInterfaceInfoOSX(mDNSInterfaceID ifindex);
-extern void mDNSUpdatePacketFilter(const ResourceRecord *const excludeRecord);
 extern void myKQSocketCallBack(int s1, short filter, void *context, mDNSBool encounteredEOF);
-extern void mDNSDynamicStoreSetConfig(int key, const char *subkey, CFPropertyListRef value);
+extern void mDNSDynamicStoreSetConfig(enum mDNSDynamicStoreSetConfigKey key, const char *subkey, CFPropertyListRef value);
 extern void UpdateDebugState(void);
 
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 extern int KQueueSet(int fd, u_short flags, short filter, KQueueEntry *const entryRef);
 mDNSexport void TriggerEventCompletion(void);
 #else
-extern int KQueueSet(int fd, u_short flags, short filter, const KQueueEntry *const entryRef);
+extern int KQueueSet(int fd, u_short flags, short filter, KQueueEntry *const entryRef);
 #endif
 
 // When events are processed on the non-kqueue thread (i.e. CFRunLoop notifications like Sleep/Wake,

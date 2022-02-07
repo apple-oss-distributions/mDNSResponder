@@ -57,9 +57,6 @@ struct hmac_key {
 #include <CoreServices/CoreServices.h>
 #include <Security/SecAsn1Coder.h>
 #include <Security/SecAsn1Templates.h>
-#ifndef OPEN_SOURCE
-#include <Security/SecItemPriv.h>
-#endif
 
 struct srp_key {
     SecKeyRef NONNULL public;
@@ -80,11 +77,10 @@ struct srp_key {
     };
 
 #if !TARGET_OS_IPHONE && !TARGET_OS_TV && !TARGET_OS_WATCH
-# define SECTRANSFORM_AVAILABLE 1
 #endif // MACOS only
 #endif // SRP_CRYPTO_MACOS_INTERNAL
 
-#ifdef SRP_CRYPTO_MBEDTLS_INTERNAL
+#ifdef SRP_CRYPTO_MBEDTLS
 #include <mbedtls/error.h>
 #include <mbedtls/pk.h>
 #include <mbedtls/md.h>
@@ -95,13 +91,6 @@ struct srp_key {
 #include <mbedtls/sha256.h>
 #include <mbedtls/base64.h>
 
-#ifdef THREAD_DEVKIT_ADK
-#ifndef EXCLUDE_CRYPTO
-// Defines EXCLUDE_CRYPTO to skip all crypto operations.
-// #define EXCLUDE_CRYPTO // rdar://57313692
-#endif
-#endif
-
 // Works just fine with mbedtls.
 #define KEYCOPY_WORKS 1
 
@@ -110,20 +99,17 @@ struct srp_key {
 // This structure assumes that we are just using this one key; if we want to support multiple keys then
 // the entropy source and PRNG should be shared by all keys (of course, that's not thread-safe, so...)
 struct srp_key {
-#ifndef EXCLUDE_CRYPTO
     mbedtls_pk_context key;
-#else
-    uint8_t key[ECDSA_KEY_SIZE];
-#endif
 };
 
-#define DEBUG_SHA256
+// Uncomment the following line to print the data being feed into the hash operation for debugging purpose.
+// #define DEBUG_SHA256
 #ifdef DEBUG_SHA256
 int srp_mbedtls_sha256_update_ret(const char *NONNULL thing_name,
                                   mbedtls_sha256_context *NONNULL sha, uint8_t *NONNULL message, size_t msglen);
 int srp_mbedtls_sha256_finish_ret(mbedtls_sha256_context *NONNULL sha, uint8_t *NONNULL hash);
 #else
-#define srp_mbedtls_sha256_update_ret(name, ...) mbedtls_sha256_update_ret(##__VA_ARGS__)
+#define srp_mbedtls_sha256_update_ret(name, ...) mbedtls_sha256_update_ret(__VA_ARGS__)
 #define srp_mbedtls_sha256_finish_ret mbedtls_sha256_finish_ret
 #endif // DEBUG_SHA256
 #ifdef THREAD_DEVKIT_ADK
@@ -148,10 +134,13 @@ int srp_load_key_data(void *NULLABLE host_context, const char *NONNULL key_name,
 int srp_store_key_data(void *NULLABLE host_context, const char *NONNULL key_name, uint8_t *NONNULL buffer,
                        uint16_t length);
 
-#endif // SRP_CRYPTO_MBEDTLS_INTERNAL
+int srp_remove_key_file(void *NULLABLE host_context, const char *NONNULL key_name);
+#endif // SRP_CRYPTO_MBEDTLS
 
 // sign_*.c:
 void srp_keypair_free(srp_key_t *NONNULL key);
+uint64_t srp_random64(void);
+uint32_t srp_random32(void);
 uint16_t srp_random16(void);
 int srp_key_algorithm(srp_key_t *NONNULL key);
 size_t srp_pubkey_length(srp_key_t *NONNULL key);

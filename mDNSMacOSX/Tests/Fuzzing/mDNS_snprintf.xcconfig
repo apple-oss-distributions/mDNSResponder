@@ -1,0 +1,4 @@
+FUZZER_NAME = FUZZING_MDNS_SNPRINTF
+EXECUTABLE_NAME = fuzz-mdns-snprintf
+
+#include "Tests/Fuzzing/fuzzer.xcconfig"

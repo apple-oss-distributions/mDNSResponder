@@ -19,9 +19,6 @@
 
 // The mDNSResponder daemon doesn't call the private DNS-SD API.
 
-#if !defined(DNS_SD_EXCLUDE_PRIVATE_API)
-    #define DNS_SD_EXCLUDE_PRIVATE_API  1
-#endif
 
 #include "dns_sd_private.h"
 

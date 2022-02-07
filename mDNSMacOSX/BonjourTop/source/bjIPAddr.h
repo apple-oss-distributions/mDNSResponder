@@ -18,6 +18,7 @@ class BJIPAddr
 public:
     BJIPAddr();
     BJIPAddr(const BJIPAddr& src);
+    BJIPAddr &operator=(const BJIPAddr& src);
 
     void Empty();
 

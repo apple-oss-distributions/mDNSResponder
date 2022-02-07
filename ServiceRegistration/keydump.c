@@ -33,7 +33,7 @@ main(int argc, char **argv)
     const char *key_name = "com.apple.srp-client.host-key";
     srp_key_t *key;
 
-    key = srp_get_key(key_name);
+    key = srp_get_key(key_name, NULL);
     if (key == NULL) {
         if (key == NULL) {
             printf("Unable to load key from %s.", key_name);

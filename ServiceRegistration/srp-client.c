@@ -1,12 +1,12 @@
 /* srp-client.c
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <errno.h>
 #ifdef THREAD_DEVKIT
 #include "../mDNSShared/dns_sd.h"
 #else
@@ -97,7 +98,8 @@ struct client_state {
     service_addr_t stable_server;
     bool srp_server_synced;
 
-    int client_serial;
+    uint32_t client_serial;
+    bool client_serial_set;
 
     // Currently we only ever have one update in flight.  If we decide we need to send another,
     // we need to cancel the one we're currently doing.
@@ -119,7 +121,7 @@ client_state_t *clients;
 client_state_t *current_client;
 
 // Forward references
-static int do_srp_update(client_state_t *client, bool definite);
+static int do_srp_update(client_state_t *client, bool definite, bool *did_something);
 static void udp_response(void *v_update_context, void *v_message, size_t message_length);
 static dns_wire_t *NULLABLE generate_srp_update(client_state_t *client, uint32_t update_lease_time,
                                                 uint32_t update_key_lease_time, size_t *NONNULL p_length,
@@ -348,14 +350,14 @@ srp_is_network_active(void)
 }
 
 int
-srp_network_state_stable(void)
+srp_network_state_stable(bool *did_something)
 {
     client_state_t *client;
     int status = kDNSServiceErr_NoError;
     if (network_state_changed && srp_is_network_active()) {
         network_state_changed = false;
         for (client = clients; client; client = client->next) {
-            int ret = do_srp_update(client, false);
+            int ret = do_srp_update(client, false, did_something);
             // In the normal case, there will only be one client, and therefore one return status.  For testing,
             // we allow more than one client; if we get an error here, we return it, but we still launch all the
             // updates.
@@ -428,7 +430,7 @@ srp_start_address_refresh(void)
 
 // Call this when the address refresh is done.   This invokes srp_network_state_stable().
 int
-srp_finish_address_refresh(void)
+srp_finish_address_refresh(bool *did_something)
 {
     service_addr_t *addr, *next;
     int i;
@@ -462,7 +464,7 @@ srp_finish_address_refresh(void)
         }
     }
     doing_refresh = false;
-    return srp_network_state_stable();
+    return srp_network_state_stable(did_something);
 }
 
 // Implementation of the API that the application will call to update the TXT record after having registered
@@ -633,6 +635,7 @@ static void
 update_finalize(update_context_t *update)
 {
     client_state_t *client = update->client;
+    INFO("update_finalize: %p %p %p", update, update->udp_context, update->message);
     if (update->udp_context != NULL) {
         srp_deactivate_udp_context(client->os_context, update->udp_context);
     }
@@ -667,11 +670,12 @@ do_callbacks(client_state_t *client, uint32_t serial, int err, bool succeeded)
             }
             work = true;
             rp->called_back = true;
-            if (rp->callback != NULL) {
-                rp->callback(rp, kDNSServiceFlagsAdd, err, rp->name, rp->regtype, rp->domain, rp->context);
-            }
             if (succeeded) {
                 rp->succeeded = true;
+            }
+            if (rp->callback != NULL) {
+                rp->callback(rp, kDNSServiceFlagsAdd, err, rp->name, rp->regtype, rp->domain, rp->context);
+                break;
             }
         }
     } while (work);
@@ -739,7 +743,7 @@ udp_retransmit(void *v_update_context)
                 break;
             }
         }
-        
+
         // If we run off the end of the list, give up for a bit.
         if (next_server == NULL) {
             context->next_retransmission_time = 0;
@@ -751,7 +755,7 @@ udp_retransmit(void *v_update_context)
     else {
         context->next_retransmission_time *= 2;
     }
-    
+
     // If we are giving up on the current server, get rid of any udp state.
     if (context->next_retransmission_time == 0 || next_server != NULL) {
         if (next_server != NULL) {
@@ -800,9 +804,25 @@ udp_retransmit(void *v_update_context)
         }
     }
 
-    // If we've given up for now, schedule a next attempt; otherwise, schedule the next retransmission.
+    // If we've given up for now, either schedule a next attempt or notify the caller; otherwise, schedule the next retransmission.
     if (context->next_retransmission_time == 0) {
-        err = srp_set_wakeup(client->os_context, context->udp_context, context->next_attempt_time, udp_retransmit);
+        bool timeout_requested = false;
+        reg_state_t *registration;
+        for (registration = client->registrations; registration; registration = registration->next) {
+            if (registration->callback != NULL && registration->serial <= context->serial &&
+                (registration->flags & kDNSServiceFlagsTimeout))
+            {
+                timeout_requested = true;
+            }
+        }
+        // If any of the callers requested a timeout, we treat it as if they all did, and call all the callbacks with the "timed out"
+        // error.
+        if (timeout_requested) {
+            do_callbacks(client, context->serial, kDNSServiceErr_Timeout, false);
+            err = kDNSServiceErr_NoError;
+        } else {
+            err = srp_set_wakeup(client->os_context, context->udp_context, context->next_attempt_time, udp_retransmit);
+        }
     } else {
         err = srp_set_wakeup(client->os_context, context->udp_context,
                              context->next_retransmission_time - 512 + srp_random16() % 1024, udp_retransmit);
@@ -819,7 +839,7 @@ renew_callback(void *v_update_context)
     update_context_t *context = v_update_context;
     client_state_t *client = context->client;
     INFO("renew callback");
-    do_srp_update(client, true);
+    do_srp_update(client, true, NULL);
 }
 
 // This function will, if hostname_rename_number is nonzero, create a hostname using the chosen hostname plus
@@ -866,24 +886,28 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
     int err;
     int rcode = dns_rcode_get(message);
     (void)message_length;
-    uint32_t new_lease_time;
+    uint32_t new_lease_time = 0;
+    bool lease_time_sent = false;
     reg_state_t *registration;
     const uint8_t *p = message->data;
     const uint8_t *end = (const uint8_t *)v_message + message_length;
     bool resolve_name_conflict = false;
     char *conflict_hostname = NULL, *chosen_hostname;
-    uint32_t retry_time;
 
     INFO("Got a response for %p, rcode = %d", client, dns_rcode_get(message));
 
-    // Cancel the retransmit wakeup.
+    // Cancel the existing retransmit wakeup, since we definitely don't want to retransmit to the current
+    // server.
     err = srp_cancel_wakeup(client->os_context, context->udp_context);
     if (err != kDNSServiceErr_NoError) {
         INFO("udp_response: %d", err);
     }
-    // We want a different UDP source port for each transaction, so cancel the current UDP state.
-    srp_disconnect_udp(context->udp_context);
-    context->connected = false;
+
+    if (rcode == dns_rcode_noerror || rcode == dns_rcode_yxdomain) {
+        // We want a different UDP source port for each transaction, so cancel the current UDP state.
+        srp_disconnect_udp(context->udp_context);
+        context->connected = false;
+    }
 
     // When we are doing a remove, we don't actually care what the result is--if we get back an answer, we call
     // the callback.
@@ -918,37 +942,71 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
         // At present, there's no code to actually parse a real DNS packet in the client, so
         // we rely on the server returning just an EDNS0 option; if this assumption fails, we
         // are out of luck.
-        if (message->qdcount == 0 && message->ancount == 0 &&
-            message->nscount == 0 && ntohs(message->arcount) == 1 &&
-
+        if (message->qdcount == 0 && message->ancount == 0 && message->nscount == 0 && ntohs(message->arcount) == 1 &&
             // We expect the edns0 option to be:
             // root label - 1 byte
             // type = 2 bytes
             // class = 2 bytes
             // ttl = 4 bytes
             // rdlength = 2 bytes
-            // lease option code = 2
-            // lease option length = 2
-            // lease = 4
-            // key lease = 4
-            // total = 23
-            end - p == 23 && // right number of bytes for an EDNS0 OPT containing an update lease option
+            // total of 11 bytes
+            // data
+            end - p > 11 && // Enough room for an EDNS0 option
             *p == 0 &&       // root label
-            p[1] == (dns_rrtype_opt >> 8) && p[2] == (dns_rrtype_opt & 255) &&
-            // skip class and ttl, we don't care
-            p[9] == 0 && p[10] == 12 && // rdlength
-            p[11] == (dns_opt_update_lease >> 8) && p[12] == (dns_opt_update_lease & 255) &&
-            p[13] == 0 && p[14] == 8) // opt_length
+            p[1] == (dns_rrtype_opt >> 8) && p[2] == (dns_rrtype_opt & 255)) // opt rrtype
         {
-            new_lease_time = (((uint32_t)p[15] << 12) | ((uint32_t)p[16] << 8) |
-                              ((uint32_t)p[17] << 8) | ((uint32_t)p[18]));
-            INFO("Lease time set to %" PRIu32, new_lease_time);
-        } else {
+            // skip class and ttl, we don't care
+            const uint8_t *opt_start = &p[11]; // Start of opt data
+            uint16_t opt_len = (((uint16_t)p[9]) << 8) + p[10]; // length of opt data
+            const uint8_t *opt_cur = opt_start;
+            uint16_t opt_remaining = opt_len;
+            // Scan for options until there's no room.
+            while (opt_cur + 4 <= end) {
+                int option_code = (((uint16_t)opt_cur[0]) << 8) + opt_cur[1];
+                int option_len =  (((uint16_t)opt_cur[2]) << 8) + opt_cur[3];
+                const uint8_t *option_data = opt_cur + 4;
+                if (option_len + option_data <= end) {
+                    if (option_code == dns_opt_update_lease) {
+                        if (option_len == 8) {
+                            new_lease_time = (((uint32_t)option_data[0] << 24) | ((uint32_t)option_data[1] << 16) |
+                                              ((uint32_t)option_data[2] << 8) | ((uint32_t)option_data[3]));
+                            INFO("Lease time set to %" PRIu32, new_lease_time);
+                            lease_time_sent = true;
+                        }
+                    } else if (option_code == dns_opt_srp_serial) {
+                        if (option_len == 4) {
+                            if (client->client_serial_set) {
+                                ERROR("Response erroneously contains serial number when we sent one.");
+                            } else {
+                                client->client_serial =
+                                    (((uint32_t)option_data[0] << 24) | ((uint32_t)option_data[1] << 16) |
+                                     ((uint32_t)option_data[2] << 8) | ((uint32_t)option_data[3]));
+                                client->client_serial_set = true;
+                            }
+                        }
+                    }
+                }
+                opt_cur = option_data + option_len;
+                opt_remaining = opt_remaining - (option_len + 4);
+            }
+        }
+
+        // If we didn't get back a serial number, generate a random one. This should never happen.
+        // Of course, since earlier versions of SRP didn't have a serial number, it /will/ happen
+        // when communicating with older SRP servers, which is why we do this.
+        if (!client->client_serial_set) {
+            client->client_serial = srp_random32();
+            client->client_serial_set = true;
+            ERROR("Server didn't offer a serial number when we didn't send one: set to %" PRIx32 "!",
+                  client->client_serial );
+        }
+
+        if (!lease_time_sent) {
             new_lease_time = context->lease_time;
             INFO("Lease time defaults to %" PRIu32, new_lease_time);
-            DEBUG("len %ld qd %d an %d ns %d ar %d data %02x %02x %02x %02x %02x %02x %02x %02x %02x"
+            DEBUG("len %zd qd %d an %d ns %d ar %d data %02x %02x %02x %02x %02x %02x %02x %02x %02x"
                   " %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-                  (unsigned long)(end - p), ntohs(message->qdcount), ntohs(message->ancount),
+                  end - p, ntohs(message->qdcount), ntohs(message->ancount),
                   ntohs(message->nscount), ntohs(message->arcount),
                   p[0], p[1], p[2], p[3], p[3], p[5], p[6], p[7], p[8], p[9], p[10], p[11],
                   p[12], p[13], p[14], p[15], p[16], p[17], p[18], p[19], p[20], p[21], p[22]);
@@ -995,20 +1053,18 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
             }
             // When we get a name conflict response, we need to re-do the update immediately
             // (with a 0-500ms delay of course).
-            do_srp_update(client, true);
+            do_srp_update(client, true, NULL);
         }
         break;
 
     default:
-        // Any other response has to be treated as a transient failure, so we need to retry
-        // This sort of failure is essentially unacceptable in a real deployment--it indicates
-        // that something is seriously broken.   But it's not up to the client to debug that.
-        retry_time = context->lease_time * 4 / 5;
-        // We don't want to retry _too_ often.
-        if (retry_time < 120) {
-            retry_time = 120;
-        }
-        srp_set_wakeup(client->os_context, context->udp_context, retry_time * 1000, renew_callback);
+        // If we get here, it means that the server failed to process the transmission, and there is no
+        // action we can take to change the situation other than trying another server. We set the
+        // retransmission time for the current server long enough to force a switch to the next server,
+        // if any.
+        context->next_retransmission_time = client->srp_max_retry_interval + 1;
+        // Immediately invoke the retransmit timer--there is no reason to wait.
+        udp_retransmit(context);
         break;
     }
 }
@@ -1168,24 +1224,66 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
         //     TTL = 3600
         //     RDLENGTH = 2
         //     RDATA = service instance name
-        dns_name_to_wire(&p_service_name, &towire, reg->regtype == NULL ? service_type : reg->regtype); CH;
-        dns_pointer_to_wire(&p_service_name, &towire, &p_zone_name); CH;
-        dns_u16_to_wire(&towire, dns_rrtype_ptr); CH;
-        dns_u16_to_wire(&towire, dns_qclass_in); CH;
-        dns_ttl_to_wire(&towire, 3600); CH;
-        dns_rdlength_begin(&towire); CH;
-        if (reg->name != NULL) {
-            char *service_instance_name, *to_free = conflict_print(client, &towire, &service_instance_name, reg->name);
-            dns_name_to_wire(&p_service_instance_name, &towire, service_instance_name); CH;
-            if (to_free != NULL) {
-                free(to_free);
+
+        // Service registrations can have subtypes, in which case we need to send multiple PTR records, one for
+        // the main type and one for each subtype. Subtypes are represented in the regtype by following the
+        // primary service type with subtypes, separated by commas. So we have to parse through that to get
+        // the actual domain names to register.
+        const char *commap = reg->regtype == NULL ? service_type : reg->regtype;
+        dns_name_pointer_t p_sub_service_name;
+        bool primary = true;
+        do {
+            char regtype[DNS_MAX_LABEL_SIZE_ESCAPED + 6]; // plus NUL, ._sub
+            int i;
+            // Copy the next service type into regtype, ending when we hit the end of reg->regtype
+            // or when we hit a comma.
+            for (i = 0; *commap != '\0' && *commap != ',' && i < DNS_MAX_LABEL_SIZE_ESCAPED; i++) {
+                regtype[i] = *commap;
+                commap++;
             }
-        } else {
-            dns_name_to_wire(&p_service_instance_name, &towire, chosen_hostname); CH;
-        }
-        dns_pointer_to_wire(&p_service_instance_name, &towire, &p_service_name); CH;
-        dns_rdlength_end(&towire); CH;
-        INCREMENT(message->nscount);
+
+            // If we hit a comma, skip over the comma for the beginning of the next subtype.
+            if (*commap == ',') {
+                commap++;
+            }
+
+            // If we aren't at a NULL or a comma, it means that the label was too long, so the output
+            // is invalid.
+            else if (*commap != '\0') {
+                towire.error = ENOBUFS; CH;
+            }
+
+            // First time through, it's the base type, so emit the service name and a pointer to the
+            // zone name. Other times through, it's a subtype, so the pointer is now to the base type,
+            // and since the API makes ._sub implicit, we have to add that.
+            if (primary) {
+                regtype[i] = 0;
+                dns_name_to_wire(&p_service_name, &towire, regtype); CH;
+                dns_pointer_to_wire(&p_service_name, &towire, &p_zone_name); CH;
+            } else {
+                // Copy in the string and the NUL. We know there's space (see above).
+                memcpy(&regtype[i], "._sub", 6);
+                dns_name_to_wire(&p_sub_service_name, &towire, regtype); CH;
+                dns_pointer_to_wire(&p_sub_service_name, &towire, &p_service_name); CH;
+            }
+            dns_u16_to_wire(&towire, dns_rrtype_ptr); CH;
+            dns_u16_to_wire(&towire, dns_qclass_in); CH;
+            dns_ttl_to_wire(&towire, 3600); CH;
+            dns_rdlength_begin(&towire); CH;
+            if (reg->name != NULL) {
+                char *service_instance_name, *to_free = conflict_print(client, &towire, &service_instance_name, reg->name);
+                dns_name_to_wire(&p_service_instance_name, &towire, service_instance_name); CH;
+                if (to_free != NULL) {
+                    free(to_free);
+                }
+            } else {
+                dns_name_to_wire(&p_service_instance_name, &towire, chosen_hostname); CH;
+            }
+            dns_pointer_to_wire(&p_service_instance_name, &towire, &p_service_name); CH;
+            dns_rdlength_end(&towire); CH;
+            INCREMENT(message->nscount);
+            primary = false;
+        } while (*commap != '\0');
 
         // Service Instance:
         //   * Delete all RRsets from service instance name
@@ -1263,6 +1361,17 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
         dns_u32_to_wire(&towire, update_key_lease_time); CH; // KEY-LEASE (7 days)
     }
     dns_edns0_option_end(&towire); CH;                   // Now we know OPTION-LENGTH
+    // Now send a serial number if we have one. We send the current serial number plus one.
+    if (client->client_serial_set) {
+        // Increment the serial number. We increment the serial number each time we generate a new update, which can
+        // mean that if we have to switch to a new server, the serial number increases by more than one before we get
+        // a success response. This should be okay.
+        client->client_serial = client->client_serial + 1;
+        dns_u16_to_wire(&towire, dns_opt_srp_serial); CH;
+        dns_edns0_option_begin(&towire); CH;
+        dns_u32_to_wire(&towire, client->client_serial);
+        dns_edns0_option_end(&towire); CH;                   // Now we know OPTION-LENGTH
+    }
     dns_rdlength_end(&towire); CH;
     INCREMENT(message->arcount);
 
@@ -1297,7 +1406,7 @@ fail:
 
 // Send SRP updates for host records that have changed.
 static int
-do_srp_update(client_state_t *client, bool definite)
+do_srp_update(client_state_t *client, bool definite, bool *did_something)
 {
     int err;
     service_addr_t *server;
@@ -1327,6 +1436,11 @@ do_srp_update(client_state_t *client, bool definite)
             INFO("do_srp_update: addresses to register are the same; server is the same.");
             return kDNSServiceErr_NoError;
         }
+    }
+
+    // At this point we're definitely doing something.
+    if (did_something) {
+        *did_something = true;
     }
 
     // Get rid of the previous update, if any.

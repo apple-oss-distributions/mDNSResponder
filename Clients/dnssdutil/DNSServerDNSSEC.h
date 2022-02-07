@@ -30,7 +30,7 @@ typedef const union DNSKeyInfo *		DNSKeyInfoRef;
 	@param		inIndex			The desired DNSKeyInfo object's index number.
 	@param		inGetZSK		If true, gets a zone-signing key. Otherwise a key-signing key.
 	
-	@result		If a reference to the DNSKeyInfo object if it exists, otherwise, NULL.
+	@result		A reference to the DNSKeyInfo object if it exists, otherwise, NULL.
 */
 DNSKeyInfoRef _Nullable	GetDNSKeyInfoEx( uint32_t inAlgorithm, uint32_t inIndex, Boolean inGetZSK );
 #define GetDNSKeyInfoKSK( ALGORITHM, INDEX )		GetDNSKeyInfoEx( ALGORITHM, INDEX, false )

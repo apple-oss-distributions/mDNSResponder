@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 #define __QUERIER_SUPPORT_H__
 
 #include "mDNSEmbeddedAPI.h"
-#include "mdns_private.h"
+#include <mdns/private.h>
 
 // Threshold value for problematic QTYPE workaround.
 extern int PQWorkaroundThreshold;
@@ -32,12 +32,15 @@ extern void Querier_RegisterPathResolver(const uuid_t resolverUUID);
 extern mdns_dns_service_id_t Querier_RegisterCustomDNSService(xpc_object_t resolverConfigDict);
 extern mdns_dns_service_id_t Querier_RegisterCustomDNSServiceWithPListData(const uint8_t *dataPtr, size_t dataLen);
 extern void Querier_DeregisterCustomDNSService(mdns_dns_service_id_t ident);
-extern DNSQuestion *Querier_GetDNSQuestion(mdns_querier_t querier);
+extern mdns_dns_service_id_t Querier_RegisterNativeDNSService(mdns_dns_service_definition_t dns_service_definition);
+extern void Querier_DeregisterNativeDNSService(mdns_dns_service_id_t ident);
+extern DNSQuestion *Querier_GetDNSQuestion(mdns_querier_t querier, mDNSBool *outIsNew);
 extern mDNSBool Querier_ResourceRecordIsAnswer(const ResourceRecord *rr, mdns_querier_t querier);
 extern mDNSBool Querier_SameNameCacheRecordIsAnswer(const CacheRecord *cr, mdns_querier_t querier);
 extern void Querier_HandleStoppedDNSQuestion(DNSQuestion *q);
 extern void Querier_RegisterDoHURI(const char *doh_uri, const char *domain);
-extern void Querier_PrepareQuestionForCNAMERestart(DNSQuestion *q);
+extern mdns_querier_t Querier_HandlePreCNAMERestart(DNSQuestion *q);
+extern void Querier_HandlePostCNAMERestart(DNSQuestion *q, mdns_querier_t querier);
 extern void Querier_PrepareQuestionForUnwindRestart(DNSQuestion *q);
 extern void Querier_HandleSleep(void);
 extern void Querier_HandleWake(void);

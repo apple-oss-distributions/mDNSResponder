@@ -1,0 +1,4 @@
+FUZZER_NAME = FUZZING_DNS_WIRE_PARSE
+EXECUTABLE_NAME = fuzz-dns-wire-parse
+
+#include "Tests/Fuzzing/fuzzer.xcconfig"

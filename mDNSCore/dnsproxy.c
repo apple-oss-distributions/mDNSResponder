@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,6 +16,7 @@
  */
 
 #include "dnsproxy.h"
+#include "mdns_strict.h"
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
 #include <nw/private.h>
@@ -75,8 +76,16 @@ typedef enum
 }   DNSProxyDNS64State;
 #endif
 
-struct DNSProxyClient_struct {
+// Note: This needs to maintain compatibility with struct DNSMessage defined in mDNSEmbeddedAPI.h
+typedef struct
+{
+    DNSMessageHeader h;             // Note: Size 12 bytes
+    mDNSu8 data[];                  // Flexible storage. Start at NormalUDPDNSMessageData,
+                                    // then try rcvBufSize if present or AbsoluteMaxDNSMessageData if tcp
+} _DNSMessage;
 
+struct DNSProxyClient_struct
+{
     DNSProxyClient *next; 
     mDNSAddr    addr;               // Client's IP address 
     mDNSIPPort  port;               // Client's port number
@@ -86,7 +95,7 @@ struct DNSProxyClient_struct {
     mDNSBool tcp;                   // TCP or UDP ?
     mDNSOpaque16 requestFlags;      // second 16 bit word in the DNSMessageHeader of the request
     mDNSu8 *optRR;                  // EDNS0 option
-    mDNSu16 optLen;                 // Total Length of the EDNS0 option 
+    mDNSu32 optLen;                 // Total Length of the EDNS0 option
     mDNSu16 rcvBufSize;             // How much can the client receive ?
     void *context;                  // Platform context to be disposed if non-NULL
     domainname qname;               // q->qname can't be used for duplicate check
@@ -95,43 +104,114 @@ struct DNSProxyClient_struct {
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
     DNSProxyDNS64State dns64state;
 #endif
+    mDNSu8 *omsg_ptr;               // Where we are in the omsg->data
+    mDNSu16 omsg_size;              // The current size of omsg->data
+    _DNSMessage *omsg;                // Outgoing message we're building
 };
 
-#define MIN_DNS_MESSAGE_SIZE    512
+typedef struct
+{
+    DNSMessageHeader h;
+    size_t omsg_offset;
+} _MsgResourceState;
+
+// 12 (DNS message header) + 500 (DNS message body) = 512 total
+#define NormalUDPDNSMessageData 500
+
+// OPT pseudo-resource record fixed-length fields without RDATA
+// See <https://tools.ietf.org/html/rfc6891#section-6.1.2>
+typedef struct
+{
+    mDNSu8 name[1];
+    mDNSu8 type[2];
+    mDNSu8 udpPayloadSize[2];
+    mDNSu8 extendedRCode[1];
+    mDNSu8 version[1];
+    mDNSu8 extendedFlags[2];
+    mDNSu8 rdLen[2];
+} OPTRecordFixedFields;
+
+extern int sizecheck_OPTRecordFixedFields[(sizeof(OPTRecordFixedFields) == 11) ? 1 : -1];
+
 static DNSProxyClient *DNSProxyClients;
 
 mDNSlocal void FreeDNSProxyClient(DNSProxyClient *pc)
 {
     if (pc->optRR)
         mDNSPlatformMemFree(pc->optRR);
+    if (pc->omsg)
+        mDNSPlatformMemFree(pc->omsg);
     mDNSPlatformMemFree(pc);
 }
 
-mDNSlocal mDNSBool ParseEDNS0(DNSProxyClient *pc, const mDNSu8 *ptr, int length, const mDNSu8 *limit)
+mDNSlocal mDNSBool DNSProxyPrepareOmsg(const mDNSu16 size, DNSProxyClient *const pc)
 {
-    if (ptr + length > limit)
+    mDNSu32 allocation_size = sizeof(_DNSMessage) + size; // Handle values up to UINT16_MAX + sizeof(_DNSMessage)
+    size_t offset = 0;
+    if (!pc->omsg)
     {
-        LogInfo("ParseEDNS0: Not enough space in the packet");
-        return mDNSfalse;
+        pc->omsg = mDNSPlatformMemAllocateClear(allocation_size);
+        if (!pc->omsg)
+        {
+            return mDNSfalse;
+        }
     }
-    // Skip the root label
-    ptr++;
-    mDNSu16 rrtype  = (mDNSu16) ((mDNSu16)ptr[0] <<  8 | ptr[1]);
-    if (rrtype != kDNSType_OPT)
+    else
     {
-        LogInfo("ParseEDNS0: Not the right type %d", rrtype);
-        return mDNSfalse;
+        void * new_ptr = mDNSPlatformMemAllocateClear(allocation_size);
+        if (!new_ptr)
+        {
+            return mDNSfalse;
+        }
+        offset = pc->omsg_ptr - pc->omsg->data;
+        LogInfo("DNSProxyPrepareOmsg: Preserving offset %ld in size %d", offset, pc->omsg_size);
+        memcpy(new_ptr, pc->omsg, MIN(sizeof(_DNSMessage) + pc->omsg_size, allocation_size));
+        mDNSPlatformMemFree(pc->omsg);
+        pc->omsg = new_ptr;
     }
-    mDNSu16 rrclass = (mDNSu16) ((mDNSu16)ptr[2] <<  8 | ptr[3]);
-#if MDNS_DEBUGMSGS
-    mDNSu8  rcode   = ptr[4];
-    mDNSu8  version = ptr[5];
-    mDNSu16 flag    = (mDNSu16) ((mDNSu16)ptr[6] <<  8 | ptr[7]);
-    debugf("rrtype is %s, length is %d, rcode %d, version %d, flag 0x%x", DNSTypeName(rrtype), rrclass, rcode, version, flag);
-#endif
-    pc->rcvBufSize = rrclass;
-    
+    pc->omsg_size = size;
+    pc->omsg_ptr = pc->omsg->data + offset;
     return mDNStrue;
+}
+
+mDNSlocal mDNSBool DNSProxyMsgCanGrow(const DNSProxyClient *const pc, mDNSu16 *out_size)
+{
+    mDNSu16 max_size;
+    if (!pc->tcp)
+    {
+        if (!pc->rcvBufSize)
+        {
+            max_size = NormalUDPDNSMessageData;
+        }
+        else
+        {
+            mDNSu16 bufSize = (pc->rcvBufSize > sizeof(_DNSMessage)) ? (pc->rcvBufSize - sizeof(_DNSMessage)) : NormalUDPDNSMessageData;
+            max_size = (bufSize > AbsoluteMaxDNSMessageData ? AbsoluteMaxDNSMessageData : bufSize);
+        }
+    }
+    else
+    {
+        // For TCP, max_size is not determined by EDNS0 but by 16 bit rdlength field and
+        // AbsoluteMaxDNSMessageData is smaller than 64k.
+        max_size = AbsoluteMaxDNSMessageData;
+    }
+    if (out_size)
+    {
+        *out_size = max_size;
+    }
+    return (pc->omsg_size < max_size);
+}
+
+mDNSlocal void DNSMsgStateSave(const DNSProxyClient *const pc, _MsgResourceState *const state)
+{
+    mDNSPlatformMemCopy(&state->h, &pc->omsg->h, sizeof(DNSMessageHeader));
+    state->omsg_offset = pc->omsg_ptr - pc->omsg->data;
+}
+
+mDNSlocal void DNSMsgStateRestore(DNSProxyClient *const pc, const _MsgResourceState *const state)
+{
+    mDNSPlatformMemCopy(&pc->omsg->h, &state->h, sizeof(DNSMessageHeader));
+    pc->omsg_ptr = pc->omsg->data + state->omsg_offset;
 }
 
 mDNSexport mDNSu8 *DNSProxySetAttributes(DNSQuestion *q, DNSMessageHeader *h, DNSMessage *msg, mDNSu8 *ptr, mDNSu8 *limit)
@@ -155,7 +235,7 @@ mDNSexport mDNSu8 *DNSProxySetAttributes(DNSQuestion *q, DNSMessageHeader *h, DN
     return ptr;
 }
 
-mDNSlocal mDNSu8 *AddEDNS0Option(mDNSu8 *ptr, mDNSu8 *limit)
+mDNSlocal mDNSu8 *AddEDNS0Option(_DNSMessage *const msg, mDNSu8 *ptr, mDNSu8 *limit)
 {
     int len = 4096;
 
@@ -164,7 +244,7 @@ mDNSlocal mDNSu8 *AddEDNS0Option(mDNSu8 *ptr, mDNSu8 *limit)
         LogInfo("AddEDNS0Option: not enough space");
         return mDNSNULL;
     }
-    mDNSStorage.omsg.h.numAdditionals++;
+    msg->h.numAdditionals++;
     ptr[0] = 0;
     ptr[1] = (mDNSu8) (kDNSType_OPT >> 8);
     ptr[2] = (mDNSu8) (kDNSType_OPT & 0xFF);
@@ -177,7 +257,7 @@ mDNSlocal mDNSu8 *AddEDNS0Option(mDNSu8 *ptr, mDNSu8 *limit)
     ptr[9] = 0;     // rdlength
     ptr[10] = 0;    // rdlength
 
-    debugf("AddEDNS0 option");
+    LogInfo("AddEDNS0 option added to response");
 
     return (ptr + 11);
 }
@@ -205,22 +285,17 @@ mDNSlocal mDNSOpaque16 SetResponseFlags(DNSProxyClient *pc, const mDNSOpaque16 r
     return rFlags;
 }
 
-mDNSlocal mDNSu8 *AddResourceRecords(DNSProxyClient *pc, mDNSu8 **prevptr, mStatus *error)
+mDNSlocal mDNSu8 *AddResourceRecord(DNSProxyClient *pc, mDNSu8 **prevptr, mStatus *error, mDNSBool final_answer)
 {
     mDNS *const m = &mDNSStorage;
     CacheGroup *cg;
     CacheRecord *cr;
     int len = sizeof(DNSMessageHeader);
-    mDNSu8 *orig = m->omsg.data;
-    mDNSBool first = mDNStrue;
     mDNSu8 *ptr = mDNSNULL;
     mDNSs32 now;
     mDNSs32 ttl;
     const CacheRecord *soa = mDNSNULL;
-    const CacheRecord *cname = mDNSNULL;
     mDNSu8 *limit;
-    domainname tempQName;
-    mDNSu32 tempQNameHash;
 
     *error = mStatus_NoError;
     *prevptr = mDNSNULL;
@@ -228,49 +303,21 @@ mDNSlocal mDNSu8 *AddResourceRecords(DNSProxyClient *pc, mDNSu8 **prevptr, mStat
     mDNS_Lock(m);
     now = m->timenow;
     mDNS_Unlock(m);
-
-    if (!pc->tcp)
+    
+    if (pc->tcp || !pc->rcvBufSize || pc->rcvBufSize > pc->omsg_size)
     {
-        if (!pc->rcvBufSize)
-        {
-            limit = m->omsg.data + MIN_DNS_MESSAGE_SIZE;
-        }
-        else
-        {
-            limit = (pc->rcvBufSize > AbsoluteMaxDNSMessageData ? m->omsg.data + AbsoluteMaxDNSMessageData : m->omsg.data + pc->rcvBufSize);
-        }
+        limit = pc->omsg->data + pc->omsg_size;
     }
     else
     {
-        // For TCP, limit is not determined by EDNS0 but by 16 bit rdlength field and
-        // AbsoluteMaxDNSMessageData is smaller than 64k.
-        limit = m->omsg.data + AbsoluteMaxDNSMessageData;
+        limit = pc->omsg->data + pc->rcvBufSize;
     }
-    LogInfo("AddResourceRecords: Limit is %d", limit - m->omsg.data);
+    LogInfo("AddResourceRecord: Limit is %d", limit - pc->omsg_ptr);
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
-    if (pc->dns64state == kDNSProxyDNS64State_PTRSynthesisSuccess)
-    {
-        // We're going to synthesize a CNAME record to map the originally requested ip6.arpa domain name to the
-        // in-addr.arpa domain name, so we use pc->q.qname, which contains the in-addr.arpa domain name, to get the
-        // in-addr.arpa PTR record.
-        AssignDomainName(&tempQName, &pc->q.qname);
-        tempQNameHash = DomainNameHashValue(&tempQName);
-    }
-    else
-#endif
-    {
-        AssignDomainName(&tempQName, &pc->qname);
-        tempQNameHash = DomainNameHashValue(&tempQName);
-    }
-
-again:
-    soa = cname = mDNSNULL;
-
-    cg = CacheGroupForName(m, tempQNameHash, &tempQName);
+    cg = CacheGroupForName(m, pc->q.qnamehash, &pc->q.qname);
     if (!cg)
     {
-        LogInfo("AddResourceRecords: CacheGroup not found for %##s", tempQName.c);
+        LogInfo("AddResourceRecord: CacheGroup not found for %##s", pc->q.qname.c);
         *error = mStatus_NoSuchRecord;
         return mDNSNULL;
     }
@@ -278,20 +325,21 @@ again:
     {
         if (SameNameCacheRecordAnswersQuestion(cr, &pc->q))
         {
-            if (first)
+            if (pc->omsg->h.numQuestions == 0)
             {
                 // If this is the first time, initialize the header and the question.
                 // This code needs to be here so that we can use the responseFlags from the
                 // cache record
                 mDNSOpaque16 responseFlags = SetResponseFlags(pc, cr->responseFlags);
-                InitializeDNSMessage(&m->omsg.h, pc->msgid, responseFlags);
-                ptr = putQuestion(&m->omsg, m->omsg.data, m->omsg.data + AbsoluteMaxDNSMessageData, &pc->qname, pc->qtype, pc->q.qclass);
+                InitializeDNSMessage(&pc->omsg->h, pc->msgid, responseFlags);
+                ptr = putQuestion((DNSMessage*)pc->omsg, pc->omsg->data, limit, &pc->qname, pc->qtype, pc->q.qclass);
                 if (!ptr)
                 {
-                    LogInfo("AddResourceRecords: putQuestion NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
+                    LogInfo("AddResourceRecord: putQuestion NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
                     return mDNSNULL;
                 }
-                first = mDNSfalse;
+                len += (ptr - pc->omsg_ptr);
+                pc->omsg_ptr = ptr;
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
                 if (pc->dns64state == kDNSProxyDNS64State_PTRSynthesisSuccess)
                 {
@@ -308,14 +356,20 @@ again:
                     AssignDomainName(&rdata.u.name, &pc->q.qname);
                     rdata.MaxRDLength   = (mDNSu32)sizeof(rdata.u);
                     newRR.rdata         = &rdata;
-                    ptr = PutResourceRecordTTLWithLimit(&m->omsg, ptr, &m->omsg.h.numAnswers, &newRR, 0, limit);
+                    ptr = PutResourceRecordTTLWithLimit((DNSMessage*)pc->omsg, ptr, &pc->omsg->h.numAnswers, &newRR, 0, limit);
                     if (!ptr)
                     {
-                        *prevptr = orig;
+                        *prevptr = pc->omsg_ptr;
                         return mDNSNULL;
                     }
+                    len += (ptr - pc->omsg_ptr);
+                    pc->omsg_ptr = ptr;
                 }
 #endif
+            }
+            else if (!ptr)
+            {
+                ptr = pc->omsg_ptr;
             }
             // - For NegativeAnswers there is nothing to add
             // - If DNSSECOK is set, we also automatically lookup the RRSIGs which
@@ -355,20 +409,20 @@ again:
                 {
                     rr = &cr->resrec;
                 }
-                LogInfo("AddResourceRecords: Answering question with %s", RRDisplayString(m, rr));
+                LogInfo("AddResourceRecord: Answering question with %s", RRDisplayString(m, rr));
                 ttl = cr->resrec.rroriginalttl - (now - cr->TimeRcvd) / mDNSPlatformOneSecond;
-                ptr = PutResourceRecordTTLWithLimit(&m->omsg, ptr, &m->omsg.h.numAnswers, rr, ttl, limit);
+                ptr = PutResourceRecordTTLWithLimit((DNSMessage*)pc->omsg, ptr, &pc->omsg->h.numAnswers, rr, ttl, limit);
                 if (!ptr)
                 {
-                    *prevptr = orig;
+                    *prevptr = pc->omsg_ptr;
                     return mDNSNULL;
                 }
-                len += (ptr - orig); 
-                orig = ptr;
+                len += (ptr - pc->omsg_ptr);
+                pc->omsg_ptr = ptr;
             }
             if (cr->soa)
             {
-                LogInfo("AddResourceRecords: soa set for %s", CRDisplayString(m ,cr));
+                LogInfo("AddResourceRecord: soa set for %s", CRDisplayString(m ,cr));
                 soa = cr->soa;
             }
             // If we are using CNAME to answer a question and CNAME is not the type we
@@ -377,8 +431,7 @@ again:
             // expanded) if any.
             if ((pc->q.qtype != cr->resrec.rrtype) && cr->resrec.rrtype == kDNSType_CNAME)
             {
-                LogInfo("AddResourceRecords: cname set for %s", CRDisplayString(m ,cr));
-                cname = cr;
+                LogInfo("AddResourceRecord: cname set for %s", CRDisplayString(m ,cr));
             }
         }
     }
@@ -396,38 +449,32 @@ again:
     //   in this case we return all the DNSSEC records we have.
     if (soa)
     {
-        LogInfo("AddResourceRecords: SOA Answering question with %s", CRDisplayString(m, soa));
-        ptr = PutResourceRecordTTLWithLimit(&m->omsg, ptr, &m->omsg.h.numAuthorities, &soa->resrec, soa->resrec.rroriginalttl, limit);
+        LogInfo("AddResourceRecord: SOA Answering question with %s", CRDisplayString(m, soa));
+        ptr = PutResourceRecordTTLWithLimit((DNSMessage*)pc->omsg, ptr, &pc->omsg->h.numAuthorities, &soa->resrec, soa->resrec.rroriginalttl, limit);
         if (!ptr)
         {
-            *prevptr = orig;
+            *prevptr = pc->omsg_ptr;
             return mDNSNULL;
         }
-        len += (ptr - orig); 
-        orig = ptr;
-    }
-    if (cname)
-    {
-        AssignDomainName(&tempQName, &cname->resrec.rdata->u.name);
-        tempQNameHash = DomainNameHashValue(&tempQName);
-        goto again;
+        len += (ptr - pc->omsg_ptr);
+        pc->omsg_ptr = ptr;
     }
     if (!ptr)
     {
-        LogInfo("AddResourceRecords: Did not find any valid ResourceRecords");
+        LogInfo("AddResourceRecord: Did not find any valid ResourceRecords");
         *error = mStatus_NoSuchRecord;
         return mDNSNULL;
     }
-    if (pc->rcvBufSize)
+    if (final_answer && pc->rcvBufSize)
     {
-        ptr = AddEDNS0Option(ptr, limit);
+        ptr = AddEDNS0Option(pc->omsg, ptr, limit);
         if (!ptr)
         {
-            *prevptr = orig;
+            *prevptr = pc->omsg_ptr;
             return mDNSNULL;
         }
-        len += (ptr - orig); 
-        // orig = ptr; Commented out to avoid ‘value never read’ error message
+        len += (ptr - pc->omsg_ptr);
+        pc->omsg_ptr = ptr;
     }
     LogInfo("AddResourceRecord: Added %d bytes to the packet", len);
     return ptr;
@@ -438,13 +485,14 @@ mDNSlocal void ProxyClientCallback(mDNS *const m, DNSQuestion *question, const R
     DNSProxyClient *pc = question->QuestionContext;
     DNSProxyClient **ppc = &DNSProxyClients;
     mDNSu8 *ptr;
-    mDNSu8 *prevptr;
+    mDNSu8 *prevptr = mDNSNULL;
     mStatus error;
+    mDNSBool final_answer = ((answer->RecordType == kDNSRecordTypePacketNegative) || (answer->rrtype == question->qtype));
 
     if (!AddRecord)
         return;
 
-    LogInfo("ProxyClientCallback: ResourceRecord %s", RRDisplayString(m, answer));
+    LogInfo("ProxyClientCallback: %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
     if (gDNS64Enabled)
@@ -482,8 +530,8 @@ mDNSlocal void ProxyClientCallback(mDNS *const m, DNSQuestion *question, const R
     if (pc->dns64state == kDNSProxyDNS64State_PTRSynthesisNXDomain)
     {
         const mDNSOpaque16 flags = { { kDNSFlag0_QR_Response | kDNSFlag0_OP_StdQuery, kDNSFlag1_RC_NXDomain } };
-        InitializeDNSMessage(&m->omsg.h, pc->msgid, flags);
-        ptr = putQuestion(&m->omsg, m->omsg.data, m->omsg.data + AbsoluteMaxDNSMessageData, &pc->qname, pc->qtype,
+        InitializeDNSMessage(&pc->omsg->h, pc->msgid, flags);
+        ptr = putQuestion((DNSMessage*)pc->omsg, pc->omsg->data, pc->omsg->data + pc->omsg_size, &pc->qname, pc->qtype,
             pc->q.qclass);
         if (!ptr)
         {
@@ -493,16 +541,33 @@ mDNSlocal void ProxyClientCallback(mDNS *const m, DNSQuestion *question, const R
     else
 #endif
     {
-        if ((answer->RecordType != kDNSRecordTypePacketNegative) && (answer->rrtype != question->qtype))
+        for(;;)
         {
-            // Wait till we get called for the real response
-            LogInfo("ProxyClientCallback: Received %s, not answering yet", RRDisplayString(m, answer));
-            return;
+            _MsgResourceState save;
+            DNSMsgStateSave(pc, &save);
+            ptr = AddResourceRecord(pc, &prevptr, &error, final_answer);
+            if (!ptr)
+            {
+                mDNSu16 max_size;
+                if (DNSProxyMsgCanGrow(pc, &max_size))
+                {
+                    LogInfo("ProxyClientCallback: Increase omsg buffer size to %d for %##s (%s)", max_size, &pc->qname.c, DNSTypeName(pc->qtype));
+                    if (!DNSProxyPrepareOmsg(max_size, pc))
+                    {
+                        LogMsg("ProxyClientCallback: AbsoluteMaxDNSMessageData memory failure for %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
+                    }
+                    else
+                    {
+                        DNSMsgStateRestore(pc, &save);
+                        continue;   // try again
+                    }
+                }
+            }
+            break;
         }
-        ptr = AddResourceRecords(pc, &prevptr, &error);
         if (!ptr)
         {
-            LogInfo("ProxyClientCallback: AddResourceRecords NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
+            LogInfo("ProxyClientCallback: AddResourceRecord NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
             if (error == mStatus_NoError && prevptr)
             {
                 // No space to add the record. Set the Truncate bit for UDP.
@@ -512,7 +577,7 @@ mDNSlocal void ProxyClientCallback(mDNS *const m, DNSQuestion *question, const R
                 // of the data.
                 if (!pc->tcp)
                 {
-                    m->omsg.h.flags.b[0] |= kDNSFlag0_TC;
+                    pc->omsg->h.flags.b[0] |= kDNSFlag0_TC;
                     ptr = prevptr;
                 }
                 else
@@ -529,8 +594,8 @@ mDNSlocal void ProxyClientCallback(mDNS *const m, DNSQuestion *question, const R
                 LogInfo("ProxyClientCallback: No response");
                 if (!mDNSOpaque16IsZero(pc->q.responseFlags))
                     flags = pc->q.responseFlags;
-                InitializeDNSMessage(&m->omsg.h, pc->msgid, flags);
-                ptr = putQuestion(&m->omsg, m->omsg.data, m->omsg.data + AbsoluteMaxDNSMessageData, &pc->qname, pc->qtype, pc->q.qclass);
+                InitializeDNSMessage(&pc->omsg->h, pc->msgid, flags);
+                ptr = putQuestion((DNSMessage*)pc->omsg, pc->omsg->data, pc->omsg->data + pc->omsg_size, &pc->qname, pc->qtype, pc->q.qclass);
                 if (!ptr)
                 {
                     LogInfo("ProxyClientCallback: putQuestion NULL for %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
@@ -538,16 +603,22 @@ mDNSlocal void ProxyClientCallback(mDNS *const m, DNSQuestion *question, const R
                 }
             }
         }
+        if (!final_answer)
+        {
+            // Wait till we get called for the real response
+            LogInfo("ProxyClientCallback: Received %s, not answering yet", RRDisplayString(m, answer));
+            return;
+        }
     }
     debugf("ProxyClientCallback: InterfaceID is %p for response to client", pc->interfaceID);
 
     if (!pc->tcp)
     {
-        mDNSSendDNSMessage(m, &m->omsg, ptr, pc->interfaceID, mDNSNULL, (UDPSocket *)pc->socket, &pc->addr, pc->port, mDNSNULL, mDNSfalse);
+        mDNSSendDNSMessage(m, (DNSMessage*)pc->omsg, ptr, pc->interfaceID, mDNSNULL, (UDPSocket *)pc->socket, &pc->addr, pc->port, mDNSNULL, mDNSfalse);
     }
     else
     {
-        mDNSSendDNSMessage(m, &m->omsg, ptr, pc->interfaceID, (TCPSocket *)pc->socket, mDNSNULL, &pc->addr, pc->port, mDNSNULL, mDNSfalse);
+        mDNSSendDNSMessage(m, (DNSMessage*)pc->omsg, ptr, pc->interfaceID, (TCPSocket *)pc->socket, mDNSNULL, &pc->addr, pc->port, mDNSNULL, mDNSfalse);
     }
 
 done:
@@ -649,7 +720,7 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
     DNSQuestion q, *qptr;
     DNSProxyClient *pc;
     const mDNSu8 *optRR = mDNSNULL;
-    int optLen = 0;
+    mDNSu32 optLen = 0;
     DNSProxyClient **ppc = &DNSProxyClients;
 
     (void) dstaddr;
@@ -715,8 +786,8 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
         }
         else
         {
-            optLen = (int)(ptr - optRR);
-            LogInfo("ProxyCallbackCommon: EDNS0 opt length %d present in Question %##s (%s)", optLen, q.qname.c, DNSTypeName(q.qtype));
+            optLen = (mDNSu32)(ptr - optRR);
+            LogInfo("ProxyCallbackCommon: EDNS0 opt length %u present in Question %##s (%s)", optLen, q.qname.c, DNSTypeName(q.qtype));
         }
     }
     else
@@ -736,6 +807,12 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
         LogMsg("ProxyCallbackCommon: Memory failure for pkt from %#a:%d, ignoring this", srcaddr, mDNSVal16(srcport));
         return;
     }
+    if (!DNSProxyPrepareOmsg(NormalUDPDNSMessageData, pc))
+    {
+        LogMsg("ProxyCallbackCommon: NormalUDPDNSMessageData memory failure for pkt from %#a:%d, ignoring this", srcaddr, mDNSVal16(srcport));
+        FreeDNSProxyClient(pc);
+        return;
+    }
     pc->addr = *srcaddr;
     pc->port = srcport;
     pc->msgid = msg->h.id;
@@ -747,12 +824,14 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
     AssignDomainName(&pc->qname, &q.qname);
     if (optRR)
     {
-        if (!ParseEDNS0(pc, optRR, optLen, end))
+        if (optLen < sizeof(OPTRecordFixedFields))
         {
             LogInfo("ProxyCallbackCommon: Invalid EDNS0 option for pkt from %#a:%d, ignoring this", srcaddr, mDNSVal16(srcport));
         }
         else
         {
+            const OPTRecordFixedFields *const fields = (const OPTRecordFixedFields *)optRR;
+            pc->rcvBufSize = (mDNSu16)((fields->udpPayloadSize[0] << 8) | fields->udpPayloadSize[1]);
             pc->optRR = (mDNSu8 *) mDNSPlatformMemAllocate(optLen);
             if (!pc->optRR)
             {

@@ -27,7 +27,6 @@
 #include <stdlib.h>
 
 #include "srp.h"
-#define SRP_CRYPTO_MBEDTLS_INTERNAL
 #include "dns-msg.h"
 #include "srp-crypto.h"
 

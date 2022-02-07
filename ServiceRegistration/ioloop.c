@@ -1,12 +1,12 @@
 /* ioloop.c
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,6 @@
  * Simple event dispatcher for DNS.
  */
 
-#define __APPLE_USE_RFC_3542
 #define _GNU_SOURCE
 
 #include <stdlib.h>
@@ -29,6 +28,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <inttypes.h>
 #ifdef USE_KQUEUE
 #include <sys/event.h>
 #endif
@@ -38,6 +38,7 @@
 #include <signal.h>
 #include <net/if.h>
 #include <ifaddrs.h>
+#include <spawn.h>
 
 #include "dns_sd.h"
 
@@ -49,14 +50,22 @@
 #include "srp-tls.h"
 #endif
 
+typedef struct async_event {
+    struct async_event *next;
+    async_callback_t callback;
+    void *context;
+} async_event_t;
+
 io_t *ios;
 wakeup_t *wakeups;
 subproc_t *subprocesses;
+async_event_t *async_events;
 int64_t ioloop_now;
 
 #ifdef USE_KQUEUE
 int kq;
 #endif
+static void subproc_finalize(subproc_t *subproc);
 
 int
 getipaddr(addr_t *addr, const char *p)
@@ -88,41 +97,31 @@ ioloop_timenow()
     return now;
 }
 
-message_t *
-message_allocate(size_t message_size)
-{
-    message_t *message = (message_t *)malloc(message_size + (sizeof (message_t)) - (sizeof (dns_wire_t)));
-    if (message)
-        memset(message, 0, (sizeof (message_t)) - (sizeof (dns_wire_t)));
-    return message;
-}
-
-void
-message_free(message_t *message)
+static void
+message_finalize(message_t *message)
 {
     free(message);
 }
 
 void
-comm_free(comm_t *comm)
+ioloop_message_retain_(message_t *message, const char *file, int line)
 {
-    if (comm->name) {
-        free(comm->name);
-        comm->name = NULL;
-    }
-    if (comm->message) {
-        message_free(comm->message);
-        comm->message = NULL;
-        comm->buf = NULL;
-    }
-    free(comm);
+    (void)file; (void)line;
+    RETAIN(message);
+}
+
+void
+ioloop_message_release_(message_t *message, const char *file, int line)
+{
+    (void)file; (void)line;
+    RELEASE(message, message_finalize);
 }
 
 void
 ioloop_close(io_t *io)
 {
-    close(io->sock);
-    io->sock = -1;
+    close(io->fd);
+    io->fd = -1;
 }
 
 static void
@@ -136,16 +135,16 @@ add_io(io_t *io)
     if (*iop == NULL) {
         *iop = io;
         io->next = NULL;
+        RETAIN_HERE(io);
     }
 }
 
 void
-ioloop_add_reader(io_t *io, io_callback_t callback, io_callback_t finalize)
+ioloop_add_reader(io_t *io, io_callback_t callback)
 {
     add_io(io);
 
     io->read_callback = callback;
-    io->finalize = finalize;
 #ifdef USE_SELECT
     io->want_read = true;
 #endif
@@ -154,7 +153,7 @@ ioloop_add_reader(io_t *io, io_callback_t callback, io_callback_t finalize)
 #ifdef USE_KQUEUE
     struct kevent ev;
     int rv;
-    EV_SET(&ev, io->sock, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, io);
+    EV_SET(&ev, io->fd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, io);
     rv = kevent(kq, &ev, 1, NULL, 0, NULL);
     if (rv < 0) {
         ERROR("kevent add: %s", strerror(errno));
@@ -164,7 +163,7 @@ ioloop_add_reader(io_t *io, io_callback_t callback, io_callback_t finalize)
 }
 
 void
-ioloop_add_writer(io_t *io, io_callback_t callback, io_callback_t finalize)
+ioloop_add_writer(io_t *io, io_callback_t callback)
 {
     add_io(io);
 
@@ -177,7 +176,7 @@ ioloop_add_writer(io_t *io, io_callback_t callback, io_callback_t finalize)
 #ifdef USE_KQUEUE
     struct kevent ev;
     int rv;
-    EV_SET(&ev, io->sock, EVFILT_WRITE, EV_ADD | EV_ENABLE, 0, 0, io);
+    EV_SET(&ev, io->fd, EVFILT_WRITE, EV_ADD | EV_ENABLE, 0, 0, io);
     rv = kevent(kq, &ev, 1, NULL, 0, NULL);
     if (rv < 0) {
         ERROR("kevent add: %s", strerror(errno));
@@ -197,7 +196,7 @@ drop_writer(io_t *io)
 #ifdef USE_KQUEUE
     struct kevent ev;
     int rv;
-    EV_SET(&ev, io->sock, EVFILT_WRITE, EV_ADD | EV_DISABLE, 0, 0, io);
+    EV_SET(&ev, io->fd, EVFILT_WRITE, EV_ADD | EV_DISABLE, 0, 0, io);
     rv = kevent(kq, &ev, 1, NULL, 0, NULL);
     if (rv < 0) {
         ERROR("kevent add: %s", strerror(errno));
@@ -207,33 +206,79 @@ drop_writer(io_t *io)
 }
 
 static void
-add_remove_wakeup(wakeup_t *io, bool remove)
+add_remove_wakeup(wakeup_t *wakeup, bool remove)
 {
     wakeup_t **p_wakeups;
 
     // Add the new reader to the end of the list if it's not on the list.
-    for (p_wakeups = &wakeups; *p_wakeups != NULL && *p_wakeups != io; p_wakeups = &((*p_wakeups)->next))
+    for (p_wakeups = &wakeups; *p_wakeups != NULL && *p_wakeups != wakeup; p_wakeups = &((*p_wakeups)->next))
         ;
     if (remove) {
         if (*p_wakeups != NULL) {
-            *p_wakeups = io->next;
-            io->next = NULL;
+            *p_wakeups = wakeup->next;
+            wakeup->next = NULL;
         }
     } else {
         if (*p_wakeups == NULL) {
-            *p_wakeups = io;
-            io->next = NULL;
+            *p_wakeups = wakeup;
+            wakeup->next = NULL;
         }
     }
 }
 
-void
-ioloop_add_wake_event(wakeup_t *wakeup, void *context, wakeup_callback_t callback, int milliseconds)
+static void
+wakeup_finalize(void *context)
 {
+    wakeup_t *wakeup = context;
+    add_remove_wakeup(wakeup, true);
+    if (wakeup->finalize != NULL) {
+        wakeup->finalize(wakeup->context);
+    }
+    free(wakeup);
+}
+
+void
+ioloop_wakeup_retain_(wakeup_t *wakeup, const char *file, int line)
+{
+    (void)file; (void)line;
+    RETAIN(wakeup);
+}
+
+void
+ioloop_wakeup_release_(wakeup_t *wakeup, const char *file, int line)
+{
+    (void)file; (void)line;
+    RELEASE(wakeup, wakeup_finalize);
+}
+
+wakeup_t *
+ioloop_wakeup_create_(const char *file, int line)
+{
+    wakeup_t *ret = calloc(1, sizeof(*ret));
+    if (ret) {
+        RETAIN(ret);
+    }
+    return ret;
+}
+
+bool
+ioloop_add_wake_event(wakeup_t *wakeup, void *context, wakeup_callback_t callback, wakeup_callback_t finalize, int milliseconds)
+{
+    if (callback == NULL) {
+        ERROR("ioloop_add_wake_event called with null callback");
+        return false;
+    }
+    if (milliseconds < 0) {
+        ERROR("ioloop_add_wake_event called with negative timeout");
+        return false;
+    }
+    INFO("ioloop_add_wake_event: %p %p %d", wakeup, context, milliseconds);
     add_remove_wakeup(wakeup, false);
     wakeup->wakeup_time = ioloop_timenow() + milliseconds;
+    wakeup->finalize = finalize;
     wakeup->wakeup = callback;
     wakeup->context = context;
+    return true;
 }
 
 void
@@ -241,16 +286,6 @@ ioloop_cancel_wake_event(wakeup_t *wakeup)
 {
     add_remove_wakeup(wakeup, true);
     wakeup->wakeup_time = 0;
-}
-
-static void
-subproc_free(subproc_t *subproc)
-{
-    int i;
-    for (i = 0; i < subproc->argc; i++) {
-        free(subproc->argv[i]);
-    }
-    free(subproc);
 }
 
 bool
@@ -267,6 +302,16 @@ ioloop_init(void)
     return true;
 }
 
+static void
+ioloop_io_finalize(io_t *io)
+{
+    if (io->io_finalize) {
+        io->io_finalize(io);
+    } else {
+        free(io);
+    }
+}
+
 int
 ioloop_events(int64_t timeout_when)
 {
@@ -274,7 +319,7 @@ ioloop_events(int64_t timeout_when)
     wakeup_t *wakeup, **p_wakeup;
     int nev = 0, rv;
     int64_t now = ioloop_timenow();
-    int64_t next_event = timeout_when;
+    int64_t next_event;
     int64_t timeout = 0;
 
     if (ioloop_now != 0) {
@@ -282,13 +327,6 @@ ioloop_events(int64_t timeout_when)
              (long long)((now - ioloop_now) / 1000), (long long)((now - ioloop_now) % 1000));
     }
     ioloop_now = now;
-
-    // A timeout of zero means don't time out.
-    if (timeout_when == 0) {
-        next_event = INT64_MAX;
-    } else {
-        next_event = timeout_when;
-    }
 
 #ifdef USE_SELECT
     int nfds = 0;
@@ -302,47 +340,73 @@ ioloop_events(int64_t timeout_when)
 #ifdef USE_KQUEUE
     struct timespec ts;
 #endif
+
+start_over:
     p_wakeup = &wakeups;
+
+    // A timeout of zero means don't time out.
+    if (timeout_when == 0) {
+        next_event = INT64_MAX;
+    } else {
+        next_event = timeout_when;
+    }
+
+    // Cycle through the list of timeouts.
     while (*p_wakeup) {
         wakeup = *p_wakeup;
         if (wakeup->wakeup_time != 0) {
-            // We loop here in case the wakeup callback sets another wakeup--if it does, we check
-            // again.
-            while (wakeup->wakeup_time <= ioloop_now) {
+            if (wakeup->wakeup_time <= ioloop_now) {
+                *p_wakeup = wakeup->next;
                 wakeup->wakeup_time = 0;
                 wakeup->wakeup(wakeup->context);
                 ++nev;
-                if (wakeup->wakeup_time == 0) {
-                    // Take the wakeup off the list.
-                    *p_wakeup = wakeup->next;
-                    wakeup->next = NULL;
-                    break;
-                }
+
+                // In case either wakeup has been freed, or a new wakeup has been added, we need to start
+                // at the beginning again. This wakeup will never still be on the list unless it's been
+                // re-added with a later time, so this should always have the effect that every wakeup that's
+                // ready gets its callback called, and when all wakeups that are ready have been called,
+                // there are no wakeups that are ready remaining on the list, so our loop exits.
+                goto start_over;
+            } else {
+                p_wakeup = &wakeup->next;
             }
-            if (wakeup->wakeup_time < next_event) {
+            if (wakeup->wakeup_time < next_event && wakeup->wakeup_time != 0) {
                 next_event = wakeup->wakeup_time;
             }
+        } else {
+            *p_wakeup = wakeup->next;
         }
+    }
+
+    // Deliver and consume any asynchronous events
+    while (async_events != NULL) {
+        async_event_t *event = async_events;
+        async_events = event->next;
+        event->callback(event->context);
+        free(event);
     }
 
     iop = &ios;
     while (*iop) {
         io = *iop;
         // If the I/O is dead, finalize or free it.
-        if (io->sock == -1) {
+        if (io->fd == -1) {
             *iop = io->next;
-            if (io->finalize) {
-                io->finalize(io);
-            } else {
-                free(io);
-            }
+            RELEASE_HERE(io, ioloop_io_finalize);
             continue;
+        }
+
+        // One-time callback, used to call the listener ready callback after ioloop_listener_create() has
+        // returned;
+        if (io->ready != NULL) {
+            io->ready(io, io->context);
+            io->ready = NULL;
         }
 
         iop = &io->next;
     }
 
-    // INFO("now: %ld  io %d wakeup_time %ld  next_event %ld", ioloop_now, io->sock, io->wakeup_time, next_event);
+    INFO("now: %" PRIu64 " next_event %" PRIu64, ioloop_now, next_event);
 
     // If we were given a timeout in the future, or told to wait indefinitely, wait until the next event.
     if (timeout_when == 0 || timeout_when > ioloop_now) {
@@ -375,9 +439,9 @@ ioloop_events(int64_t timeout_when)
                 if (!WIFSTOPPED(status)) {
                     *sp = subproc->next;
                 }
-                subproc->callback(subproc, status, NULL);
+                subproc->callback(subproc->context, status, NULL);
                 if (!WIFSTOPPED(status)) {
-                    subproc_free(subproc);
+                    RELEASE_HERE(subproc, subproc_finalize);
                     break;
                 }
             }
@@ -386,15 +450,15 @@ ioloop_events(int64_t timeout_when)
 
 #ifdef USE_SELECT
     for (io = ios; io; io = io->next) {
-        if (io->sock != -1 && (io->want_read || io->want_write)) {
-            if (io->sock >= nfds) {
-                nfds = io->sock + 1;
+        if (io->fd != -1 && (io->want_read || io->want_write)) {
+            if (io->fd >= nfds) {
+                nfds = io->fd + 1;
             }
             if (io->want_read) {
-                FD_SET(io->sock, &reads);
+                FD_SET(io->fd, &reads);
             }
             if (io->want_write) {
-                FD_SET(io->sock, &writes);
+                FD_SET(io->fd, &writes);
             }
         }
     }
@@ -412,11 +476,15 @@ ioloop_events(int64_t timeout_when)
          (long long)((now - ioloop_now) % 1000), rv);
     ioloop_now = now;
     for (io = ios; io; io = io->next) {
-        if (io->sock != -1) {
-            if (FD_ISSET(io->sock, &reads)) {
-                io->read_callback(io);
-            } else if (FD_ISSET(io->sock, &writes)) {
-                io->write_callback(io);
+        if (io->fd != -1) {
+            if (FD_ISSET(io->fd, &reads)) {
+                if (io->read_callback != NULL) {
+                    io->read_callback(io, io->context);
+                }
+            } else if (FD_ISSET(io->fd, &writes)) {
+                if (io->write_callback != NULL) {
+                    io->write_callback(io, io->context);
+                }
             }
         }
     }
@@ -447,9 +515,9 @@ ioloop_events(int64_t timeout_when)
         for (i = 0; i < rv; i++) {
             io = evs[i].udata;
             if (evs[i].filter == EVFILT_WRITE) {
-                io->write_callback(io);
+                io->write_callback(io, io->context);
             } else if (evs[i].filter == EVFILT_READ) {
-                io->read_callback(io);
+                io->read_callback(io, io->context);
             }
         }
         nev += rv;
@@ -458,8 +526,20 @@ ioloop_events(int64_t timeout_when)
     return nev;
 }
 
+int
+ioloop(void)
+{
+    int nev;
+    do {
+        nev = ioloop_events(0);
+        INFO("ioloop_events: %d", nev);
+    } while (nev >= 0);
+    ERROR("ioloop returned %d.", nev);
+    return -1;
+}
+
 static void
-udp_read_callback(io_t *io)
+udp_read_callback(io_t *io, void *context)
 {
     comm_t *connection = (comm_t *)io;
     addr_t src;
@@ -470,6 +550,7 @@ udp_read_callback(io_t *io)
     char cmsgbuf[128];
     struct cmsghdr *cmh;
     message_t *message;
+    (void)context;
 
     bufp.iov_base = msgbuf;
     bufp.iov_len = DNS_MAX_UDP_PAYLOAD;
@@ -480,12 +561,12 @@ udp_read_callback(io_t *io)
     msg.msg_control = cmsgbuf;
     msg.msg_controllen = sizeof cmsgbuf;
 
-    rv = recvmsg(connection->io.sock, &msg, 0);
+    rv = recvmsg(connection->io.fd, &msg, 0);
     if (rv < 0) {
         ERROR("udp_read_callback: %s", strerror(errno));
         return;
     }
-    message = message_allocate(rv);
+    message = ioloop_message_create(rv);
     if (!message) {
         ERROR("udp_read_callback: out of memory");
         return;
@@ -524,17 +605,18 @@ udp_read_callback(io_t *io)
 #endif
         }
     }
-    connection->message = message;
-    connection->datagram_callback(connection);
+    connection->datagram_callback(connection, message, connection->context);
+    RELEASE_HERE(message, message_finalize);
 }
 
 static void
-tcp_read_callback(io_t *context)
+tcp_read_callback(io_t *io, void *context)
 {
     uint8_t *read_ptr;
     size_t read_len;
-    comm_t *connection = (comm_t *)context;
+    comm_t *connection = (comm_t *)io;
     ssize_t rv;
+    (void)context;
     if (connection->message_length_len < 2) {
         read_ptr = connection->message_length_bytes;
         read_len = 2 - connection->message_length_len;
@@ -553,8 +635,8 @@ tcp_read_callback(io_t *context)
             return;
         } else if (rv < 0) {
             ERROR("TLS return that we can't handle.");
-            close(connection->io.sock);
-            connection->io.sock = -1;
+            close(connection->io.fd);
+            connection->io.fd = -1;
             srp_tls_context_free(connection);
             return;
         }
@@ -563,12 +645,12 @@ tcp_read_callback(io_t *context)
         return;
 #endif
     } else {
-        rv = read(connection->io.sock, read_ptr, read_len);
+        rv = read(connection->io.fd, read_ptr, read_len);
 
         if (rv < 0) {
             ERROR("tcp_read_callback: %s", strerror(errno));
-            close(connection->io.sock);
-            connection->io.sock = -1;
+            close(connection->io.fd);
+            connection->io.fd = -1;
             // connection->io.finalize() will be called from the io loop.
             return;
         }
@@ -577,9 +659,12 @@ tcp_read_callback(io_t *context)
         // effectively the same--if we are sensitive to read events, that means that we are done processing
         // the previous message.
         if (rv == 0) {
-            ERROR("tcp_read_callback: remote end (%s) closed connection on %d", connection->name, connection->io.sock);
-            close(connection->io.sock);
-            connection->io.sock = -1;
+            ERROR("tcp_read_callback: remote end (%s) closed connection on %d", connection->name, connection->io.fd);
+            close(connection->io.fd);
+            connection->io.fd = -1;
+            if (connection->disconnected) {
+                connection->disconnected(connection, connection->context, 0);
+            }
             // connection->io.finalize() will be called from the io loop.
             return;
         }
@@ -591,7 +676,7 @@ tcp_read_callback(io_t *context)
                                           ((uint16_t)connection->message_length_bytes[1]));
 
             if (connection->message == NULL) {
-                connection->message = message_allocate(connection->message_length);
+                connection->message = ioloop_message_create(connection->message_length);
                 if (!connection->message) {
                     ERROR("udp_read_callback: out of memory");
                     return;
@@ -605,15 +690,17 @@ tcp_read_callback(io_t *context)
         connection->message_cur += rv;
         if (connection->message_cur == connection->message_length) {
             connection->message_cur = 0;
-            connection->datagram_callback(connection);
-            // Caller is expected to consume the message, we are immediately ready for the next read.
+            connection->datagram_callback(connection, connection->message, connection->io.context);
+            // The callback may retain the message; we need to make way for the next one.
+            RELEASE_HERE(connection->message, message_finalize);
+            connection->message = NULL;
             connection->message_length = connection->message_length_len = 0;
         }
     }
 }
 
 
-static void
+static bool
 tcp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int iov_len)
 {
     struct msghdr mh;
@@ -626,9 +713,9 @@ tcp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int
     // We don't anticipate ever needing more than four hunks, but if we get more, handle then?
     if (iov_len > 3) {
         ERROR("tcp_send_response: too many io buffers");
-        close(comm->io.sock);
-        comm->io.sock = -1;
-        return;
+        close(comm->io.fd);
+        comm->io.fd = -1;
+        return false;
     }
 
     iovec[0].iov_base = &lenbuf[0];
@@ -651,6 +738,7 @@ tcp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int
         ERROR("TLS context not null with TLS excluded.");
         status = -1;
         errno = ENOTSUP;
+        return false;
 #endif
     } else {
         memset(&mh, 0, sizeof mh);
@@ -658,7 +746,7 @@ tcp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int
         mh.msg_iovlen = iov_len + 1;
         mh.msg_name = 0;
 
-        status = sendmsg(comm->io.sock, &mh, MSG_NOSIGNAL);
+        status = sendmsg(comm->io.fd, &mh, MSG_NOSIGNAL);
     }
     if (status < 0 || status != payload_length) {
         if (status < 0) {
@@ -666,12 +754,14 @@ tcp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int
         } else {
             ERROR("tcp_send_response: short write (%zd out of %zu bytes)", status, payload_length);
         }
-        close(comm->io.sock);
-        comm->io.sock = -1;
+        close(comm->io.fd);
+        comm->io.fd = -1;
+        return false;
     }
+    return true;
 }
 
-static void
+static bool
 udp_send_message(comm_t *comm, addr_t *source, addr_t *dest, int ifindex, struct iovec *iov, int iov_len)
 {
     struct msghdr mh;
@@ -722,74 +812,167 @@ udp_send_message(comm_t *comm, addr_t *source, addr_t *dest, int ifindex, struct
             abort();
         }
     }
-    status = sendmsg(comm->io.sock, &mh, 0);
+    status = sendmsg(comm->io.fd, &mh, 0);
     if (status < 0) {
         ERROR("udp_send_message: %s", strerror(errno));
+        return false;
     }
+    return true;
 }
 
-static void
+static bool
 udp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int iov_len)
 {
-    udp_send_message(comm, &responding_to->local, &responding_to->src, responding_to->ifindex, iov, iov_len);
-}
-
-static void
-udp_send_multicast(comm_t *comm, int ifindex, struct iovec *iov, int iov_len)
-{
-    udp_send_message(comm, NULL, &comm->multicast, ifindex, iov, iov_len);
-}
-
-static void
-udp_send_connected_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int iov_len)
-{
-    int status = writev(comm->io.sock, iov, iov_len);
-    (void)responding_to;
-    if (status < 0) {
-        ERROR("udp_send_connected: %s", strerror(errno));
-    }
-}
-
-// When a communication is closed, scan the io event list to see if any other ios are referencing this one.
-void
-comm_finalize(io_t *io_in)
-{
-    comm_t *comm = (comm_t *)io_in;
-    comm_free(comm);
+    return udp_send_message(comm, &responding_to->local, &responding_to->src, responding_to->ifindex, iov, iov_len);
 }
 
 bool
-comm_valid(comm_t *comm)
+ioloop_send_multicast(comm_t *comm, int ifindex, struct iovec *iov, int iov_len)
 {
-    if (comm->io.sock != -1) {
-        return true;
-    }
-    return false;
+    return udp_send_message(comm, NULL, &comm->multicast, ifindex, iov, iov_len);
 }
 
-void
-comm_close(comm_t *comm)
+static bool
+udp_send_connected_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int iov_len)
 {
-    close(comm->io.sock);
-    comm->io.sock = -1;
+    int status = writev(comm->io.fd, iov, iov_len);
+    (void)responding_to;
+    if (status < 0) {
+        ERROR("udp_send_connected: %s", strerror(errno));
+        return false;
+    }
+    return true;
+}
+
+bool
+ioloop_send_message(comm_t *connection, message_t *responding_to, struct iovec *iov, int iov_len)
+{
+    if (connection->tcp_stream) {
+        return tcp_send_response(connection, responding_to, iov, iov_len);
+    } else {
+        if (connection->is_connected) {
+            return udp_send_connected_response(connection, responding_to, iov, iov_len);
+        } else if (connection->is_multicast) {
+            ERROR("ioloop_send_message: multicast send must use ioloop_send_multicast!");
+            return false;
+        } else if (responding_to == NULL) {
+            ERROR("ioloop_send_message: not connected and no responding_to message.");
+            return false;
+        } else {
+            return udp_send_response(connection, responding_to, iov, iov_len);
+        }
+    }
 }
 
 static void
-listen_callback(io_t *context)
+io_finalize(io_t *io)
 {
-    comm_t *listener = (comm_t *)context;
+    io_t **iop;
+    for (iop = &ios; *iop; iop = &(*iop)->next) {
+        if (*iop == io) {
+            *iop = io->next;
+            break;
+        }
+    }
+    free(io);
+}
+
+// When a communication is closed, scan the io event list to see if any other ios are referencing this one.
+static void
+comm_finalize(io_t *io)
+{
+    comm_t *comm = (comm_t *)io;
+    ERROR("comm_finalize");
+    if (comm->name != NULL) {
+        free(comm->name);
+    }
+    if (comm->finalize != NULL) {
+        comm->finalize(comm->context);
+    }
+    if (comm->message != NULL) {
+        RELEASE_HERE(comm->message, message_finalize);
+    }
+    io_finalize(&comm->io);
+}
+
+void
+ioloop_comm_retain_(comm_t *comm, const char *file, int line)
+{
+    (void)file; (void)line;
+    RETAIN(&comm->io);
+}
+
+void
+ioloop_comm_release_(comm_t *comm, const char *file, int line)
+{
+    (void)file; (void)line;
+    RELEASE(&comm->io, comm_finalize);
+}
+
+void
+ioloop_comm_cancel(comm_t *comm)
+{
+    close(comm->io.fd);
+    comm->io.fd = -1;
+}
+
+void
+ioloop_comm_context_set(comm_t *comm, void *context, finalize_callback_t callback)
+{
+    comm->finalize = callback;
+    comm->context = context;
+}
+
+void
+ioloop_comm_connect_callback_set(comm_t *comm, connect_callback_t callback)
+{
+    comm->connected = callback;
+}
+
+void
+ioloop_comm_disconnect_callback_set(comm_t *comm, disconnect_callback_t callback)
+{
+    comm->disconnected = callback;
+}
+
+void
+ioloop_listener_retain_(comm_t *listener, const char *file, int line)
+{
+    RETAIN(&listener->io);
+}
+
+void
+ioloop_listener_release_(comm_t *listener, const char *file, int line)
+{
+    RELEASE(&listener->io, comm_finalize);
+}
+
+void
+ioloop_listener_cancel(comm_t *connection)
+{
+    if (connection->io.fd != -1) {
+        close(connection->io.fd);
+        connection->io.fd = -1;
+    }
+}
+
+static void
+listen_callback(io_t *io, void *context)
+{
+    comm_t *listener = (comm_t *)io;
     int rv;
     addr_t addr;
     socklen_t addr_len = sizeof addr;
     comm_t *comm;
     char addrbuf[INET6_ADDRSTRLEN + 7];
     int addrlen;
+    (void)context;
 
-    rv = accept(listener->io.sock, &addr.sa, &addr_len);
+    rv = accept(listener->io.fd, &addr.sa, &addr_len);
     if (rv < 0) {
         ERROR("accept: %s", strerror(errno));
-        close(listener->io.sock);
-        listener->io.sock = -1;
+        close(listener->io.fd);
+        listener->io.fd = -1;
         return;
     }
     inet_ntop(addr.sa.sa_family, (addr.sa.sa_family == AF_INET
@@ -800,18 +983,16 @@ listen_callback(io_t *context)
              ntohs((addr.sa.sa_family == AF_INET ? addr.sin.sin_port : addr.sin6.sin6_port)));
     comm = calloc(1, sizeof *comm);
     comm->name = strdup(addrbuf);
-    comm->io.sock = rv;
-    comm->io.container = comm;
+    comm->io.fd = rv;
     comm->address = addr;
     comm->datagram_callback = listener->datagram_callback;
-    comm->send_response = tcp_send_response;
     comm->tcp_stream = true;
 
     if (listener->tls_context == (tls_context_t *)-1) {
 #ifndef EXCLUDE_TLS
         if (!srp_tls_listen_callback(comm)) {
             ERROR("TLS  setup failed.");
-            close(comm->io.sock);
+            close(comm->io.fd);
             free(comm);
             return;
         }
@@ -821,74 +1002,87 @@ listen_callback(io_t *context)
 #endif
     }
     if (listener->connected) {
-        listener->connected(comm);
+        listener->connected(comm, listener->context);
     }
-    ioloop_add_reader(&comm->io, tcp_read_callback, listener->connection_finalize);
+    ioloop_add_reader(&comm->io, tcp_read_callback);
 
 #ifdef SO_NOSIGPIPE
     int one = 1;
-    rv = setsockopt(comm->io.sock, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+    rv = setsockopt(comm->io.fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
     if (rv < 0) {
         ERROR("SO_NOSIGPIPE failed: %s", strerror(errno));
     }
 #endif
 }
 
+static void
+listener_ready_callback(io_t *io, void *context)
+{
+    comm_t *listener = (comm_t *)io;
+    if (listener->ready) {
+        listener->ready(listener->context, listener->listen_port);
+    }
+}
+
 comm_t *
-ioloop_setup_listener(int family, bool stream, bool tls, uint16_t port, const char *ip_address, const char *multicast,
-                      const char *name, comm_callback_t datagram_callback,
-                      comm_callback_t connected, comm_callback_t disconnected,
-                      io_callback_t finalize, io_callback_t connection_finalize, void *context)
+ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avoid_ports,
+                       const addr_t *ip_address, const char *multicast, const char *name,
+                       datagram_callback_t datagram_callback, connect_callback_t connected, cancel_callback_t cancel,
+                       ready_callback_t ready, finalize_callback_t finalize, tls_config_callback_t tls_config,
+                       void *context)
 {
     comm_t *listener;
     socklen_t sl;
     int rv;
     int false_flag = 0;
     int true_flag = 1;
+    uint16_t port;
+    int family = (ip_address != NULL) ? ip_address->sa.sa_family : AF_UNSPEC;
+    int real_family = family == AF_UNSPEC ? AF_INET6 : family;
+    addr_t sockname;
 
     listener = calloc(1, sizeof *listener);
     if (listener == NULL) {
         return NULL;
     }
-    listener->io.container = listener;
+    RETAIN_HERE(&listener->io);
     listener->name = strdup(name);
     if (!listener->name) {
-        free(listener);
+        RELEASE_HERE(&listener->io, comm_finalize);
         return NULL;
     }
-    listener->io.sock = socket(family, stream ? SOCK_STREAM : SOCK_DGRAM, stream ? IPPROTO_TCP : IPPROTO_UDP);
-    if (listener->io.sock < 0) {
+    listener->io.fd = socket(real_family, stream ? SOCK_STREAM : SOCK_DGRAM, stream ? IPPROTO_TCP : IPPROTO_UDP);
+    if (listener->io.fd < 0) {
         ERROR("Can't get socket: %s", strerror(errno));
         goto out;
     }
-    rv = setsockopt(listener->io.sock, SOL_SOCKET, SO_REUSEADDR, &true_flag, sizeof true_flag);
+    rv = setsockopt(listener->io.fd, SOL_SOCKET, SO_REUSEADDR, &true_flag, sizeof true_flag);
     if (rv < 0) {
         ERROR("SO_REUSEADDR failed: %s", strerror(errno));
         goto out;
     }
 
-    rv = setsockopt(listener->io.sock, SOL_SOCKET, SO_REUSEPORT, &true_flag, sizeof true_flag);
+    rv = setsockopt(listener->io.fd, SOL_SOCKET, SO_REUSEPORT, &true_flag, sizeof true_flag);
     if (rv < 0) {
         ERROR("SO_REUSEPORT failed: %s", strerror(errno));
         goto out;
     }
 
-    if (ip_address != NULL) {
-        sl = getipaddr(&listener->address, ip_address);
-        if (sl == 0) {
-            goto out;
-        }
-        if (family == AF_UNSPEC) {
-            family = listener->address.sa.sa_family;
-        } else if (listener->address.sa.sa_family != family) {
-            ERROR("%s is not a %s address.", ip_address, family == AF_INET ? "IPv4" : "IPv6");
-            goto out;
-        }
+    if (ip_address == NULL || family == AF_LOCAL) {
+        port = 0;
+    } else {
+        port = (family == AF_INET) ? ip_address->sin.sin_port : ip_address->sin6.sin6_port;
+        listener->address = *ip_address;
     }
+    listener->address.sa.sa_family = real_family;
 
     if (multicast != 0) {
         if (stream) {
             ERROR("Unable to do non-datagram multicast.");
+            goto out;
+        }
+        if (family == AF_LOCAL) {
+            ERROR("Multicast not supported on local sockets.");
             goto out;
         }
         sl = getipaddr(&listener->multicast, multicast);
@@ -896,7 +1090,9 @@ ioloop_setup_listener(int family, bool stream, bool tls, uint16_t port, const ch
             goto out;
         }
         if (listener->multicast.sa.sa_family != family) {
-            ERROR("multicast address %s from different family than listen address %s.", multicast, ip_address);
+            SEGMENTED_IPv6_ADDR_GEN_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
+            ERROR("multicast address %s from different family than listen address " PRI_SEGMENTED_IPv6_ADDR_SRP ".",
+                  multicast, SEGMENTED_IPv6_ADDR_PARAM_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf));
             goto out;
         }
         listener->is_multicast = true;
@@ -906,22 +1102,22 @@ ioloop_setup_listener(int family, bool stream, bool tls, uint16_t port, const ch
             int ttl = 255;
             im.imr_multiaddr = listener->multicast.sin.sin_addr;
             im.imr_interface.s_addr = 0;
-            rv = setsockopt(listener->io.sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &im, sizeof im);
+            rv = setsockopt(listener->io.fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &im, sizeof im);
             if (rv < 0) {
                 ERROR("Unable to join %s multicast group: %s", multicast, strerror(errno));
                 goto out;
             }
-            rv = setsockopt(listener->io.sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl);
+            rv = setsockopt(listener->io.fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl);
             if (rv < 0) {
                 ERROR("Unable to set IP multicast TTL to 255 for %s: %s", multicast, strerror(errno));
                 goto out;
             }
-            rv = setsockopt(listener->io.sock, IPPROTO_IP, IP_TTL, &ttl, sizeof ttl);
+            rv = setsockopt(listener->io.fd, IPPROTO_IP, IP_TTL, &ttl, sizeof ttl);
             if (rv < 0) {
                 ERROR("Unable to set IP TTL to 255 for %s: %s", multicast, strerror(errno));
                 goto out;
             }
-            rv = setsockopt(listener->io.sock, IPPROTO_IP, IP_MULTICAST_LOOP, &false_flag, sizeof false_flag);
+            rv = setsockopt(listener->io.fd, IPPROTO_IP, IP_MULTICAST_LOOP, &false_flag, sizeof false_flag);
             if (rv < 0) {
                 ERROR("Unable to set IP Multcast loopback to false for %s: %s", multicast, strerror(errno));
                 goto out;
@@ -931,22 +1127,22 @@ ioloop_setup_listener(int family, bool stream, bool tls, uint16_t port, const ch
             int hops = 255;
             im.ipv6mr_multiaddr = listener->multicast.sin6.sin6_addr;
             im.ipv6mr_interface = 0;
-            rv = setsockopt(listener->io.sock, IPPROTO_IPV6, IPV6_JOIN_GROUP, &im, sizeof im);
+            rv = setsockopt(listener->io.fd, IPPROTO_IPV6, IPV6_JOIN_GROUP, &im, sizeof im);
             if (rv < 0) {
                 ERROR("Unable to join %s multicast group: %s", multicast, strerror(errno));
                 goto out;
             }
-            rv = setsockopt(listener->io.sock, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hops, sizeof hops);
+            rv = setsockopt(listener->io.fd, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hops, sizeof hops);
             if (rv < 0) {
                 ERROR("Unable to set IPv6 multicast hops to 255 for %s: %s", multicast, strerror(errno));
                 goto out;
             }
-            rv = setsockopt(listener->io.sock, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &hops, sizeof hops);
+            rv = setsockopt(listener->io.fd, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &hops, sizeof hops);
             if (rv < 0) {
                 ERROR("Unable to set IPv6 hops to 255 for %s: %s", multicast, strerror(errno));
                 goto out;
             }
-            rv = setsockopt(listener->io.sock, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &false_flag, sizeof false_flag);
+            rv = setsockopt(listener->io.fd, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &false_flag, sizeof false_flag);
             if (rv < 0) {
                 ERROR("Unable to set IPv6 Multcast loopback to false for %s: %s", multicast, strerror(errno));
                 goto out;
@@ -954,34 +1150,51 @@ ioloop_setup_listener(int family, bool stream, bool tls, uint16_t port, const ch
         }
     }
 
-    if (family == AF_INET) {
-        sl = sizeof listener->address.sin;
-        listener->address.sin.sin_port = port ? htons(port) : htons(53);
-    } else {
-        sl = sizeof listener->address.sin6;
-        listener->address.sin6.sin6_port = port ? htons(port) : htons(53);
+    if (family == AF_INET6) {
         // Don't use a dual-stack socket.
-        rv = setsockopt(listener->io.sock, IPPROTO_IPV6, IPV6_V6ONLY, &true_flag, sizeof true_flag);
+        rv = setsockopt(listener->io.fd, IPPROTO_IPV6, IPV6_V6ONLY, &true_flag, sizeof true_flag);
         if (rv < 0) {
-            ERROR("Unable to set IPv6-only flag on %s socket for %s",
-                  tls ? "TLS" : (stream ? "TCP" : "UDP"), ip_address == NULL ? "<0>" : ip_address);
+            SEGMENTED_IPv6_ADDR_GEN_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
+            ERROR("Unable to set IPv6-only flag on %s socket for " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                  tls ? "TLS" : (stream ? "TCP" : "UDP"),
+                  SEGMENTED_IPv6_ADDR_PARAM_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf));
             goto out;
         }
     }
 
-    listener->address.sa.sa_family = family;
 #ifndef NOT_HAVE_SA_LEN
-    listener->address.sa.sa_len = sl;
+    sl = listener->address.sa.sa_len;
+#else
+    sl = real_family == AF_INET ? sizeof(listener->address.sin) : sizeof(listener->address.sin6);
 #endif
-    if (bind(listener->io.sock, &listener->address.sa, sl) < 0) {
-        ERROR("Can't bind to %s#%d/%s%s: %s", ip_address == NULL ? "<0>" : ip_address, port,
-                stream ? "tcp" : "udp", family == AF_INET ? "v4" : "v6",
-                strerror(errno));
+    if (bind(listener->io.fd, &listener->address.sa, sl) < 0) {
+        if (family == AF_INET) {
+            IPv4_ADDR_GEN_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf);
+            ERROR("Can't bind to " PRI_IPv4_ADDR_SRP "#%d/%s: %s",
+                  IPv4_ADDR_PARAM_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf), ntohs(port),
+                  tls ? "tlsv4" : "tcpv4", strerror(errno));
+        } else {
+            SEGMENTED_IPv6_ADDR_GEN_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
+            ERROR("Can't bind to " PRI_SEGMENTED_IPv6_ADDR_SRP "#%d/%s: %s",
+                  SEGMENTED_IPv6_ADDR_PARAM_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf), ntohs(port),
+                  tls ? "tlsv6" : "tcpv6", strerror(errno));
+        }
     out:
-        close(listener->io.sock);
-        free(listener);
+        close(listener->io.fd);
+        listener->io.fd = -1;
+        RELEASE_HERE(&listener->io, comm_finalize);
         return NULL;
     }
+
+    // We may have bound to an unspecified port, so fetch the port we got.
+    if (port == 0 && family != AF_LOCAL) {
+        if (getsockname(listener->io.fd, (struct sockaddr *)&sockname, &sl) < 0) {
+            ERROR("ioloop_listener_create: getsockname: %s", strerror(errno));
+            goto out;
+        }
+        port = ntohs(real_family == AF_INET6 ? sockname.sin6.sin6_port : sockname.sin.sin_port);
+    }
+    listener->listen_port = port;
 
     if (tls) {
 #ifndef EXCLUDE_TLS
@@ -997,47 +1210,62 @@ ioloop_setup_listener(int family, bool stream, bool tls, uint16_t port, const ch
     }
 
     if (stream) {
-        if (listen(listener->io.sock, 5 /* xxx */) < 0) {
-            ERROR("Can't listen on %s#%d/%s%s: %s", ip_address == NULL ? "<0>" : ip_address, ntohs(port),
-                    tls ? "tls" : "tcp", family == AF_INET ? "v4" : "v6",
-                    strerror(errno));
+        if (listen(listener->io.fd, 5 /* xxx */) < 0) {
+            if (family == AF_INET) {
+                IPv4_ADDR_GEN_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf);
+                ERROR("Can't listen on " PRI_IPv4_ADDR_SRP "#%d/%s: %s",
+                      IPv4_ADDR_PARAM_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf), ntohs(port),
+                      tls ? "tlsv4" : "tcpv4", strerror(errno));
+            } else {
+                SEGMENTED_IPv6_ADDR_GEN_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
+                ERROR("Can't listen on " PRI_SEGMENTED_IPv6_ADDR_SRP "#%d/%s: %s",
+                      SEGMENTED_IPv6_ADDR_PARAM_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf), ntohs(port),
+                      tls ? "tlsv6" : "tcpv6", strerror(errno));
+            }
             goto out;
         }
-        listener->connection_finalize = connection_finalize;
-        ioloop_add_reader(&listener->io, listen_callback, finalize);
+        listener->finalize = finalize;
+        ioloop_add_reader(&listener->io, listen_callback);
+        listener->tcp_stream = true;
     } else {
-        rv = setsockopt(listener->io.sock, family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6,
+        rv = setsockopt(listener->io.fd, family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6,
                         family == AF_INET ? IP_PKTINFO : IPV6_RECVPKTINFO, &true_flag, sizeof true_flag);
         if (rv < 0) {
             ERROR("Can't set %s: %s.", family == AF_INET ? "IP_PKTINFO" : "IPV6_RECVPKTINFO",
                     strerror(errno));
             goto out;
         }
-        ioloop_add_reader(&listener->io, udp_read_callback, finalize);
-        listener->send_response = udp_send_response;
-        listener->send_message = udp_send_message;
-        if (listener->is_multicast) {
-            listener->send_multicast = udp_send_multicast;
-        }
+        ioloop_add_reader(&listener->io, udp_read_callback);
     }
     listener->datagram_callback = datagram_callback;
     listener->connected = connected;
+    listener->context = context;
+    listener->ready = ready;
+    listener->io.ready = listener_ready_callback;
+    listener->is_listener = true;
     return listener;
 }
 
+// This is the callback for when we complete the handshake when connecting to a remote listener.
 static void
-connect_callback(io_t *context)
+connect_callback(io_t *io, void *context)
 {
     int result;
     socklen_t len = sizeof result;
-    comm_t *connection = (comm_t *)context;
+    comm_t *connection = (comm_t *)io;
+    bool getsockopt_failed = false;
+    (void)context;
 
     // If connect failed, indicate that it failed.
-    if (getsockopt(context->sock, SOL_SOCKET, SO_ERROR, &result, &len) < 0) {
-        ERROR("connect_callback: unable to get connect error: socket %d: Error %d (%s)",
-              context->sock, result, strerror(result));
-        connection->disconnected(connection, result);
-        comm_close(connection);
+    if (getsockopt(io->fd, SOL_SOCKET, SO_ERROR, &result, &len) < 0) {
+        result = errno;
+        getsockopt_failed = true;
+    }
+    if (result != 0) {
+        ERROR("connect_callback: %ssocket %d: Error %d (%s)", getsockopt_failed ? "getsockopt " : "",
+              io->fd, result, strerror(result));
+        connection->disconnected(connection, connection->context, result);
+        ioloop_comm_cancel(connection);
         return;
     }
 
@@ -1047,23 +1275,23 @@ connect_callback(io_t *context)
         srp_tls_connect_callback(connection);
 #else
         ERROR("connect_callback: tls_context triggered with TLS excluded.");
-        connection->disconnected(connection, 0);
-        comm_close(connection);
+        connection->disconnected(connection, connection->context, 0);
+        ioloop_comm_cancel(connection);
         return;
 #endif
     }
 
-    connection->send_response = tcp_send_response;
-    connection->connected(connection);
+    connection->connected(connection, connection->context);
     drop_writer(&connection->io);
-    ioloop_add_reader(&connection->io, tcp_read_callback, connection->io.finalize);
+    ioloop_add_reader(&connection->io, tcp_read_callback);
 }
 
 // Currently we don't do DNS lookups, despite the host identifier being an IP address.
-comm_t *
-ioloop_connect(addr_t *NONNULL remote_address, bool tls, bool stream,
-               comm_callback_t datagram_callback, comm_callback_t connected,
-               disconnect_callback_t disconnected, io_callback_t finalize, void *context)
+comm_t *NULLABLE
+ioloop_connection_create(addr_t *remote_address, bool tls, bool stream, bool stable, bool opportunistic,
+                         datagram_callback_t datagram_callback, connect_callback_t connected,
+                         disconnect_callback_t disconnected, finalize_callback_t finalize,
+                         void * context)
 {
     comm_t *connection;
     socklen_t sl;
@@ -1083,13 +1311,13 @@ ioloop_connect(addr_t *NONNULL remote_address, bool tls, bool stream,
         ERROR("No memory for connection structure.");
         return NULL;
     }
-    connection->io.container = connection;
+    RETAIN_HERE(&connection->io);
     if (inet_ntop(remote_address->sa.sa_family, (remote_address->sa.sa_family == AF_INET
                                                  ? (void *)&remote_address->sin.sin_addr
                                                  : (void *)&remote_address->sin6.sin6_addr), buf,
                   INET6_ADDRSTRLEN) == NULL) {
         ERROR("inet_ntop failed to convert remote address: %s", strerror(errno));
-        free(connection);
+        RELEASE_HERE(&connection->io, comm_finalize);
         return NULL;
     }
     s = buf + strlen(buf);
@@ -1098,21 +1326,37 @@ ioloop_connect(addr_t *NONNULL remote_address, bool tls, bool stream,
                               : remote_address->sin6.sin6_port));
     connection->name = strdup(buf);
     if (!connection->name) {
-        free(connection);
+        RELEASE_HERE(&connection->io, comm_finalize);
         return NULL;
     }
-    connection->io.sock = socket(remote_address->sa.sa_family,
+    connection->io.fd = socket(remote_address->sa.sa_family,
                                  stream ? SOCK_STREAM : SOCK_DGRAM, stream ? IPPROTO_TCP : IPPROTO_UDP);
-    if (connection->io.sock < 0) {
+    if (connection->io.fd < 0) {
         ERROR("Can't get socket: %s", strerror(errno));
-        comm_free(connection);
+        RELEASE_HERE(&connection->io, comm_finalize);
         return NULL;
     }
     connection->address = *remote_address;
-    if (fcntl(connection->io.sock, F_SETFL, O_NONBLOCK) < 0) {
+    if (fcntl(connection->io.fd, F_SETFL, O_NONBLOCK) < 0) {
         ERROR("connect_to_host: %s: Can't set O_NONBLOCK: %s", connection->name, strerror(errno));
-        comm_free(connection);
+        RELEASE_HERE(&connection->io, comm_finalize);
         return NULL;
+    }
+    // If a stable address has been requested, request a public address in source address selection.
+    if (stable) {
+// Linux doesn't currently follow RFC5014. These values are defined in linux/in6.h, but this can't be
+// safely included because it's incompatible with netinet/in.h. So until this is fixed, these values
+// are just copied out of the header; when it is fixed, the #if condition will evaluate to false.
+#if defined(LINUX) && !defined(IPV6_PREFER_SRC_PUBLIC)
+#  define IPV6_PREFER_SRC_TMP            0x0001
+#  define IPV6_PREFER_SRC_PUBLIC         0x0002
+#  define IPV6_PREFER_SRC_PUBTMP_DEFAULT 0x0100
+#endif
+        int value = IPV6_PREFER_SRC_PUBLIC;
+        if (setsockopt(connection->io.fd, IPPROTO_IPV6, IPV6_ADDR_PREFERENCES, &value, sizeof(value)) < 0) {
+            ERROR("unable to request stable (public) address.");
+            return NULL;
+        }
     }
 #ifdef NOT_HAVE_SA_LEN
     sl = (remote_address->sa.sa_family == AF_INET
@@ -1122,10 +1366,10 @@ ioloop_connect(addr_t *NONNULL remote_address, bool tls, bool stream,
     sl = remote_address->sa.sa_len;
 #endif
     // Connect to the host
-    if (connect(connection->io.sock, &connection->address.sa, sl) < 0) {
+    if (connect(connection->io.fd, &connection->address.sa, sl) < 0) {
         if (errno != EINPROGRESS && errno != EAGAIN) {
             ERROR("Can't connect to %s: %s", connection->name, strerror(errno));
-            comm_free(connection);
+            RELEASE_HERE(&connection->io, comm_finalize);
             return NULL;
         }
     }
@@ -1139,7 +1383,7 @@ ioloop_connect(addr_t *NONNULL remote_address, bool tls, bool stream,
         connection->tls_context = (tls_context_t *)-1;
 #else
         ERROR("connect_to_host: tls requested when excluded.");
-        comm_free(connection);
+        RELEASE_HERE(&connection->io, comm_finalize);
         return NULL;
 #endif
     }
@@ -1148,216 +1392,319 @@ ioloop_connect(addr_t *NONNULL remote_address, bool tls, bool stream,
     connection->disconnected = disconnected;
     connection->datagram_callback = datagram_callback;
     connection->context = context;
+    connection->finalize = finalize;
+    connection->opportunistic = opportunistic;
     if (!stream) {
-        connection->send_response = udp_send_connected_response;
-        ioloop_add_reader(&connection->io, udp_read_callback, finalize);
+        connection->is_connected = true;
+        connection->tcp_stream = false;
+        ioloop_add_reader(&connection->io, udp_read_callback);
     } else {
-        ioloop_add_writer(&connection->io, connect_callback, finalize);
+        connection->tcp_stream = true;
+        ioloop_add_writer(&connection->io, connect_callback);
     }
 
     return connection;
 }
 
-typedef struct interface_addr interface_addr_t;
-struct interface_addr {
-    interface_addr_t *next;
-    char *name;
-    addr_t addr;
-    addr_t mask;
-    int index;
-};
-interface_addr_t *interface_addresses;
-
-bool
-ioloop_map_interface_addresses(void *context, interface_callback_t callback)
+static void
+subproc_finalize(subproc_t *subproc)
 {
-    struct ifaddrs *ifaddrs, *ifp;
-    interface_addr_t *kept_ifaddrs = NULL, **ki_end = &kept_ifaddrs;
-    interface_addr_t *new_ifaddrs = NULL, **ni_end = &new_ifaddrs;
-    interface_addr_t **ip, *nif;
-    char *ifname = NULL;
-    int ifindex = 0;
-
-    if (getifaddrs(&ifaddrs) < 0) {
-        ERROR("getifaddrs failed: %s", strerror(errno));
-        return false;
-    }
-
-    for (ifp = ifaddrs; ifp; ifp = ifp->ifa_next) {
-        // Is this an interface address we can use?
-        if (ifp->ifa_addr != NULL && ifp->ifa_netmask != NULL &&
-            (ifp->ifa_addr->sa_family == AF_INET ||
-             ifp->ifa_addr->sa_family == AF_INET6) &&
-            (ifp->ifa_flags & IFF_UP) &&
-            !(ifp->ifa_flags & IFF_POINTOPOINT))
-        {
-            bool keep = false;
-            for (ip = &interface_addresses; *ip != NULL; ) {
-                interface_addr_t *ia = *ip;
-                // Same interface and address?
-                if (!strcmp(ia->name, ifp->ifa_name) &&
-                    ifp->ifa_addr->sa_family == ia->addr.sa.sa_family &&
-                    ((ifp->ifa_addr->sa_family == AF_INET &&
-                      ((struct sockaddr_in *)ifp->ifa_addr)->sin_addr.s_addr == ia->addr.sin.sin_addr.s_addr) ||
-                     (ifp->ifa_addr->sa_family == AF_INET6 &&
-                      !memcmp(&((struct sockaddr_in6 *)ifp->ifa_addr)->sin6_addr,
-                              &ia->addr.sin6.sin6_addr, sizeof ia->addr.sin6.sin6_addr))) &&
-                    ((ifp->ifa_netmask->sa_family == AF_INET &&
-                      ((struct sockaddr_in *)ifp->ifa_netmask)->sin_addr.s_addr == ia->mask.sin.sin_addr.s_addr) ||
-                     (ifp->ifa_netmask->sa_family == AF_INET6 &&
-                      !memcmp(&((struct sockaddr_in6 *)ifp->ifa_netmask)->sin6_addr,
-                              &ia->mask.sin6.sin6_addr, sizeof ia->mask.sin6.sin6_addr))))
-                {
-                    *ki_end = ia;
-                    ki_end = &ia->next;
-                    keep = true;
-                    break;
-                } else {
-                    ip = &ia->next;
-                }
-            }
-            // If keep is false, this is a new interface.
-            if (!keep) {
-                nif = calloc(1, strlen(ifp->ifa_name) + 1 + sizeof *nif);
-                // We don't have a way to fix nif being null; what this means is that we don't detect a new
-                // interface address.
-                if (nif != NULL) {
-                    nif->name = (char *)(nif + 1);
-                    strcpy(nif->name, ifp->ifa_name);
-                    if (ifp->ifa_addr->sa_family == AF_INET) {
-                        nif->addr.sin = *((struct sockaddr_in *)ifp->ifa_addr);
-                        nif->mask.sin = *((struct sockaddr_in *)ifp->ifa_netmask);
-                    } else {
-                        nif->addr.sin6 = *((struct sockaddr_in6 *)ifp->ifa_addr);
-                        nif->mask.sin6 = *((struct sockaddr_in6 *)ifp->ifa_netmask);
-                    }
-                    *ni_end = nif;
-                    ni_end = &nif->next;
-                }
-            }
+    int i;
+    for (i = 0; i < subproc->argc; i++) {
+        if (subproc->argv[i] != NULL) {
+            free(subproc->argv[i]);
+            subproc->argv[i] = NULL;
         }
     }
-
-    // Report and free deleted interface addresses...
-    for (nif = interface_addresses; nif; ) {
-        interface_addr_t *next = nif->next;
-        callback(context, nif->name, &nif->addr, &nif->mask, nif->index, interface_address_deleted);
-        free(nif);
-        nif = next;
+    if (subproc->output_fd != NULL) {
+        ioloop_file_descriptor_release(subproc->output_fd);
     }
-
-    // Report added interface addresses...
-    for (nif = new_ifaddrs; nif; nif = nif->next) {
-        // Get interface index using standard API if AF_LINK didn't work.
-        if (nif->index == 0) {
-            if (ifindex != 0 && ifname != NULL && !strcmp(ifname, nif->name)) {
-                nif->index = ifindex;
-            } else {
-                ifname = nif->name;
-                ifindex = if_nametoindex(nif->name);
-                nif->index = ifindex;
-                INFO("Got interface index for " PUB_S_SRP " the hard way: %d", nif->name, nif->index);
-            }
-        }
-        callback(context, nif->name, &nif->addr, &nif->mask, nif->index, interface_address_added);
+    if (subproc->finalize != NULL) {
+        subproc->finalize(subproc->context);
     }
+    free(subproc);
+}
 
-    // Restore kept interface addresses and append new addresses to the list.
-    interface_addresses = kept_ifaddrs;
-    for (ip = &new_ifaddrs; *ip; ip = &(*ip)->next)
-        ;
-    *ip = new_ifaddrs;
-    return true;
+static void
+subproc_output_finalize(void *context)
+{
+    subproc_t *subproc = context;
+    if (subproc->output_fd) {
+        subproc->output_fd = NULL;
+    }
+    RELEASE_HERE(subproc, subproc_finalize);
+}
+
+void
+ioloop_subproc_release_(subproc_t *subproc, const char *file, int line)
+{
+    RELEASE(subproc, subproc_finalize);
 }
 
 // Invoke the specified executable with the specified arguments.   Call callback when it exits.
 // All failures are reported through the callback.
 subproc_t *
-ioloop_subproc(const char *exepath, char *NULLABLE *argv, int argc, subproc_callback_t callback)
+ioloop_subproc(const char *exepath, char **argv, int argc, subproc_callback_t callback,
+               io_callback_t output_callback, void *context)
 {
-    subproc_t *subproc = calloc(1, sizeof *subproc);
-    int i;
-    pid_t pid;
+    subproc_t *subproc;
+    int i, rv;
+    posix_spawn_file_actions_t actions;
+    posix_spawnattr_t attrs;
 
+    if (callback == NULL) {
+        ERROR("ioloop_add_wake_event called with null callback");
+        return NULL;
+    }
+
+    if (argc > MAX_SUBPROC_ARGS) {
+        callback(NULL, 0, "too many subproc args");
+        return NULL;
+    }
+
+    subproc = calloc(1, sizeof(*subproc));
     if (subproc == NULL) {
         callback(NULL, 0, "out of memory");
         return NULL;
     }
-    if (argc > MAX_SUBPROC_ARGS) {
-        callback(NULL, 0, "too many subproc args");
-        subproc_free(subproc);
-        return NULL;
+    RETAIN_HERE(subproc);
+    if (output_callback != NULL) {
+        rv = pipe(subproc->pipe_fds);
+        if (rv < 0) {
+            callback(NULL, 0, "unable to create pipe.");
+            RELEASE_HERE(subproc, subproc_finalize);
+            return NULL;
+        }
+        subproc->output_fd = ioloop_file_descriptor_create(subproc->pipe_fds[0], subproc, subproc_output_finalize);
+        if (subproc->output_fd == NULL) {
+            // subproc->output_fd holds a reference to subproc.
+            RETAIN_HERE(subproc);
+            callback(NULL, 0, "out of memory.");
+            close(subproc->pipe_fds[0]);
+            close(subproc->pipe_fds[1]);
+            RELEASE_HERE(subproc, subproc_finalize);
+            return NULL;
+        }
     }
 
     subproc->argv[0] = strdup(exepath);
     if (subproc->argv[0] == NULL) {
-        subproc_free(subproc);
+        RELEASE_HERE(subproc, subproc_finalize);
+        callback(NULL, 0, "out of memory");
         return NULL;
     }
     subproc->argc++;
     for (i = 0; i < argc; i++) {
         subproc->argv[i + 1] = strdup(argv[i]);
         if (subproc->argv[i + 1] == NULL) {
-            subproc_free(subproc);
+            RELEASE_HERE(subproc, subproc_finalize);
+            callback(NULL, 0, "out of memory");
             return NULL;
         }
         subproc->argc++;
     }
-    pid = vfork();
-    if (pid == 0) {
-        execv(exepath, subproc->argv);
-        _exit(errno);
-        // NOTREACHED
+
+    // Set up for posix_spawn
+    posix_spawn_file_actions_init(&actions);
+    if (output_callback != NULL) {
+        posix_spawn_file_actions_adddup2(&actions, subproc->pipe_fds[1], STDOUT_FILENO);
+        posix_spawn_file_actions_addclose(&actions, subproc->pipe_fds[0]);
+        posix_spawn_file_actions_addclose(&actions, subproc->pipe_fds[1]);
     }
-    if (pid == -1) {
+    posix_spawnattr_init(&attrs);
+    extern char **environ;
+    rv = posix_spawn(&subproc->pid, exepath, &actions, &attrs, subproc->argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    posix_spawnattr_destroy(&attrs);
+    if (rv < 0) {
+        ERROR("posix_spawn failed for %s: %s", subproc->argv[0], strerror(errno));
         callback(subproc, 0, strerror(errno));
-        subproc_free(subproc);
+        RELEASE_HERE(subproc, subproc_finalize);
         return NULL;
     }
-
     subproc->callback = callback;
-    subproc->pid = pid;
+    subproc->context = context;
     subproc->next = subprocesses;
     subprocesses = subproc;
+    RETAIN_HERE(subproc);
+
+    // Now that we have a viable subprocess, add the reader callback.
+    if (output_callback != NULL && subproc->output_fd != NULL) {
+        close(subproc->pipe_fds[1]);
+        ioloop_add_reader(subproc->output_fd, output_callback);
+    }
     return subproc;
 }
 
+#ifndef EXCLUDE_DNSSD_TXN_SUPPORT
 static void
-dnssd_txn_callback(io_t *io)
+dnssd_txn_callback(io_t *io, void *context)
 {
-    dnssd_txn_t *txn = (dnssd_txn_t *)io;
-    int status = DNSServiceProcessResult(txn->sdref);
-    if (status != kDNSServiceErr_NoError) {
-        if (txn->close_callback != NULL) {
-            txn->close_callback(txn->context, status);
+    dnssd_txn_t *txn = (dnssd_txn_t *)context;
+    // It's only safe to process the I/O if the DNSServiceRef hasn't been deallocated.
+    if (txn->sdref != NULL) {
+        int status = DNSServiceProcessResult(txn->sdref);
+        if (status != kDNSServiceErr_NoError) {
+            if (txn->failure_callback != NULL) {
+                txn->failure_callback(txn->context, status);
+            } else {
+                INFO("dnssd_txn_callback: status %d", status);
+            }
+            ioloop_dnssd_txn_cancel(txn);
         }
     }
 }
 
 void
-dnssd_txn_finalize(io_t *io)
+dnssd_txn_finalize(dnssd_txn_t *txn)
 {
-    dnssd_txn_t *txn = (dnssd_txn_t *)io;
-
+    if (txn->sdref != NULL) {
+        ioloop_dnssd_txn_cancel(txn);
+    }
     if (txn->finalize_callback) {
         txn->finalize_callback(txn->context);
     }
 }
 
+void
+dnssd_txn_io_finalize(void *context)
+{
+    dnssd_txn_t *txn = context;
+    txn->io = NULL;
+    RELEASE_HERE(txn, dnssd_txn_finalize);
+}
+
+void
+ioloop_dnssd_txn_cancel(dnssd_txn_t *txn)
+{
+    if (txn->sdref != NULL) {
+        DNSServiceRefDeallocate(txn->sdref);
+        txn->sdref = NULL;
+    } else {
+        INFO("ioloop_dnssd_txn_cancel: dead transaction.");
+    }
+    if (txn->io != NULL) {
+        txn->io->fd = -1;
+        RELEASE_HERE(txn->io, dnssd_txn_io_finalize);
+    }
+}
+
+void
+ioloop_dnssd_txn_retain_(dnssd_txn_t *dnssd_txn, const char *file, int line)
+{
+    (void)file; (void)line;
+    RETAIN(dnssd_txn);
+}
+
+void
+ioloop_dnssd_txn_release_(dnssd_txn_t *dnssd_txn, const char *file, int line)
+{
+    (void)file; (void)line;
+    RELEASE(dnssd_txn, dnssd_txn_finalize);
+}
+
 dnssd_txn_t *
-ioloop_dnssd_txn_add(DNSServiceRef ref,
-                     dnssd_txn_finalize_callback_t finalize_callback, dnssd_txn_close_callback_t close_callback)
+ioloop_dnssd_txn_add_(DNSServiceRef ref, void *context,
+                      dnssd_txn_finalize_callback_t callback, dnssd_txn_failure_callback_t failure_callback,
+                      const char *file, int line)
 {
     dnssd_txn_t *txn = calloc(1, sizeof(*txn));
     if (txn != NULL) {
         RETAIN(txn);
-        io->sdref = sdref;
-        txn->io.sock = DNSServiceRefSockFD(txn->sdref);
-        txn->finalize_callback = finalize_callback;
-        txn->close_callback = close_callback;
-        ioloop_add_reader(&txn->io, dnssd_txn_callback, dnssd_txn_finalize);
+        txn->sdref = ref;
+        txn->io = ioloop_file_descriptor_create(DNSServiceRefSockFD(txn->sdref), txn, dnssd_txn_io_finalize);
+        if (txn->io == NULL) {
+            RELEASE_HERE(txn, dnssd_txn_finalize);
+            return NULL;
+        }
+        // io holds a reference to txn
+        RETAIN_HERE(txn);
+        txn->finalize_callback = callback;
+        txn->failure_callback = failure_callback;
+        txn->context = context;
+        ioloop_add_reader(txn->io, dnssd_txn_callback);
     }
     return txn;
+}
+
+void
+ioloop_dnssd_txn_set_aux_pointer(dnssd_txn_t *NONNULL txn, void *aux_pointer)
+{
+    txn->aux_pointer = aux_pointer;
+}
+
+void *
+ioloop_dnssd_txn_get_aux_pointer(dnssd_txn_t *NONNULL txn)
+{
+    return txn->aux_pointer;
+}
+
+void *
+ioloop_dnssd_txn_get_context(dnssd_txn_t *NONNULL txn)
+{
+    return txn->context;
+}
+#endif // EXCLUDE_DNSSD_TXN_SUPPORT
+
+static void
+file_descriptor_finalize(void *context)
+{
+    io_t *file_descriptor = context;
+    if (file_descriptor->finalize) {
+        file_descriptor->finalize(file_descriptor->context);
+    }
+    if (file_descriptor->fd != -1) {
+        close(file_descriptor->fd);
+    }
+    free(file_descriptor);
+}
+
+void
+ioloop_file_descriptor_retain_(io_t *file_descriptor, const char *file, int line)
+{
+    (void)file; (void)line;
+    RETAIN(file_descriptor);
+}
+
+void
+ioloop_file_descriptor_release_(io_t *file_descriptor, const char *file, int line)
+{
+    (void)file; (void)line;
+    RELEASE(file_descriptor, file_descriptor_finalize);
+}
+
+io_t *
+ioloop_file_descriptor_create_(int fd, void *context, finalize_callback_t finalize, const char *file, int line)
+{
+    io_t *ret;
+    ret = calloc(1, sizeof(*ret));
+    if (ret) {
+        ret->fd = fd;
+        ret->context = context;
+        ret->finalize = finalize;
+        ret->io_finalize = file_descriptor_finalize;
+        RETAIN(ret);
+    }
+    return ret;
+}
+
+void
+ioloop_run_async(async_callback_t callback, void *context)
+{
+    async_event_t **epp, *event = calloc(1, sizeof(*event));
+    if (event == NULL) {
+        ERROR("no memory for async callback to %p, context %p", callback, context);
+    }
+
+    event->callback = callback;
+    event->context = context;
+
+    epp = &async_events;
+    while (*epp) {
+        epp = &(*epp)->next;
+    }
+
+    *epp = event;
 }
 
 // Local Variables:

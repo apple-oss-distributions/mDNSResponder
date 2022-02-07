@@ -25,18 +25,6 @@
       <Configuration>Release</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
-    <ProjectConfiguration Include="Template|ARM64">
-      <Configuration>Template</Configuration>
-      <Platform>ARM64</Platform>
-    </ProjectConfiguration>
-    <ProjectConfiguration Include="Template|Win32">
-      <Configuration>Template</Configuration>
-      <Platform>Win32</Platform>
-    </ProjectConfiguration>
-    <ProjectConfiguration Include="Template|x64">
-      <Configuration>Template</Configuration>
-      <Platform>x64</Platform>
-    </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{967F5375-0176-43D3-ADA3-22EE25551C37}</ProjectGuid>
@@ -54,14 +42,6 @@
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfMfc>Static</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v142</PlatformToolset>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Template|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v142</PlatformToolset>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Template|ARM64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
     <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
@@ -88,9 +68,6 @@
     <CharacterSet>MultiByte</CharacterSet>
     <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
-  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Template|Win32'">
-    <PlatformToolset>v142</PlatformToolset>
-  </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
@@ -101,12 +78,6 @@
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="$(VCTargetsPath)Microsoft.CPP.UpgradeFromVC71.props" />
-  </ImportGroup>
-  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Template|x64'" Label="PropertySheets">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  </ImportGroup>
-  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Template|ARM64'" Label="PropertySheets">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -128,35 +99,21 @@
   <PropertyGroup>
     <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(Platform)\$(Configuration)\PrinterWizard.Resources\en.lproj\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</LinkIncremental>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\PrinterWizard.Resources\en.lproj\</OutDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(Platform)\$(Configuration)\PrinterWizard.Resources\en.lproj\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</LinkIncremental>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(Platform)\$(Configuration)\PrinterWizard.Resources\en.lproj\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</LinkIncremental>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\PrinterWizard.Resources\en.lproj\</OutDir>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">$(Platform)\$(Configuration)\PrinterWizard.Resources\en.lproj\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">false</LinkIncremental>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Template|Win32'">$(Platform)\$(Configuration)\PrinterWizard.Resources\en.lproj\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Template|Win32'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Template|x64'">$(Platform)\$(Configuration)\PrinterWizard.Resources\en.lproj\</OutDir>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Template|ARM64'">$(Platform)\$(Configuration)\PrinterWizard.Resources\en.lproj\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Template|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Template|ARM64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">PrinterWizardLocalized</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">.dll</TargetExt>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">PrinterWizardLocalized</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">.dll</TargetExt>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='Template|Win32'">PrinterWizardLocalized</TargetName>
-    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Template|Win32'">.dll</TargetExt>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">PrinterWizardLocalized</TargetName>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">PrinterWizardLocalized</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.dll</TargetExt>
@@ -165,10 +122,6 @@
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">PrinterWizardLocalized</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.dll</TargetExt>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">.dll</TargetExt>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='Template|x64'">PrinterWizardLocalized</TargetName>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='Template|ARM64'">PrinterWizardLocalized</TargetName>
-    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Template|x64'">.dll</TargetExt>
-    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Template|ARM64'">.dll</TargetExt>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Midl>
@@ -197,15 +150,7 @@
       <Culture>0x0409</Culture>
       <AdditionalIncludeDirectories>$(IntDir);../../mDNSWindows;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-    <PreLinkEvent>
-      <Message>Building Output Directories</Message>
-      <Command>if not exist $(OutDir)PrinterWizard.Resources mkdir $(OutDir)PrinterWizard.Resources
-if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWizard.Resources\en.lproj
-</Command>
-    </PreLinkEvent>
     <Link>
-      <OutputFile>$(OutDir)PrinterWizardLocalized.dll</OutputFile>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <EntryPointSymbol>
       </EntryPointSymbol>
@@ -242,15 +187,7 @@ if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWiz
       <Culture>0x0409</Culture>
       <AdditionalIncludeDirectories>$(IntDir);../../mDNSWindows;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-    <PreLinkEvent>
-      <Message>Building Output Directories</Message>
-      <Command>if not exist $(OutDir)PrinterWizard.Resources mkdir $(OutDir)PrinterWizard.Resources
-if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWizard.Resources\en.lproj
-</Command>
-    </PreLinkEvent>
     <Link>
-      <OutputFile>$(OutDir)PrinterWizardLocalized.dll</OutputFile>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <EntryPointSymbol>
       </EntryPointSymbol>
@@ -286,15 +223,7 @@ if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWiz
       <Culture>0x0409</Culture>
       <AdditionalIncludeDirectories>$(IntDir);../../mDNSWindows;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-    <PreLinkEvent>
-      <Message>Building Output Directories</Message>
-      <Command>if not exist $(OutDir)PrinterWizard.Resources mkdir $(OutDir)PrinterWizard.Resources
-if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWizard.Resources\en.lproj
-</Command>
-    </PreLinkEvent>
     <Link>
-      <OutputFile>$(OutDir)PrinterWizardLocalized.dll</OutputFile>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <EntryPointSymbol>
       </EntryPointSymbol>
@@ -329,15 +258,7 @@ if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWiz
       <Culture>0x0409</Culture>
       <AdditionalIncludeDirectories>$(IntDir);../../mDNSWindows;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-    <PreLinkEvent>
-      <Message>Building Output Directories</Message>
-      <Command>if not exist $(OutDir)PrinterWizard.Resources mkdir $(OutDir)PrinterWizard.Resources
-if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWizard.Resources\en.lproj
-</Command>
-    </PreLinkEvent>
     <Link>
-      <OutputFile>$(OutDir)PrinterWizardLocalized.dll</OutputFile>
-      <GenerateDebugInformation>false</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>
       </OptimizeReferences>
@@ -349,13 +270,6 @@ if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWiz
       <ImportLibrary>$(IntDir)$(TargetName).lib</ImportLibrary>
       <TargetMachine>MachineX86</TargetMachine>
     </Link>
-    <PostBuildEvent>
-      <Command>if not "%RC_XBS%" == "YES" goto END
-if not exist "$(DSTROOT)\Program Files\Bonjour Print Services\$(Platform)\PrinterWizard.Resources\en.lproj"   mkdir "$(DSTROOT)\Program Files\Bonjour Print Services\$(Platform)\PrinterWizard.Resources\en.lproj"
-xcopy /I/Y "$(TargetPath)"                                                                                                                         "$(DSTROOT)\Program Files\Bonjour Print Services\$(Platform)\PrinterWizard.Resources\en.lproj"
-:END
-</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Midl>
@@ -385,15 +299,7 @@ xcopy /I/Y "$(TargetPath)"                                                      
       <Culture>0x0409</Culture>
       <AdditionalIncludeDirectories>$(IntDir);../../mDNSWindows;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-    <PreLinkEvent>
-      <Message>Building Output Directories</Message>
-      <Command>if not exist $(OutDir)PrinterWizard.Resources mkdir $(OutDir)PrinterWizard.Resources
-if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWizard.Resources\en.lproj
-</Command>
-    </PreLinkEvent>
     <Link>
-      <OutputFile>$(OutDir)PrinterWizardLocalized.dll</OutputFile>
-      <GenerateDebugInformation>false</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>
       </OptimizeReferences>
@@ -405,13 +311,6 @@ if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWiz
       <ImportLibrary>$(IntDir)$(TargetName).lib</ImportLibrary>
       <TargetMachine>MachineX64</TargetMachine>
     </Link>
-    <PostBuildEvent>
-      <Command>if not "%RC_XBS%" == "YES" goto END
-if not exist "$(DSTROOT)\Program Files\Bonjour Print Services\$(Platform)\PrinterWizard.Resources\en.lproj"   mkdir "$(DSTROOT)\Program Files\Bonjour Print Services\$(Platform)\PrinterWizard.Resources\en.lproj"
-xcopy /I/Y "$(TargetPath)"                                                                                                                         "$(DSTROOT)\Program Files\Bonjour Print Services\$(Platform)\PrinterWizard.Resources\en.lproj"
-:END
-</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <Midl>
@@ -440,15 +339,7 @@ xcopy /I/Y "$(TargetPath)"                                                      
       <Culture>0x0409</Culture>
       <AdditionalIncludeDirectories>$(IntDir);../../mDNSWindows;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-    <PreLinkEvent>
-      <Message>Building Output Directories</Message>
-      <Command>if not exist $(OutDir)PrinterWizard.Resources mkdir $(OutDir)PrinterWizard.Resources
-if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWizard.Resources\en.lproj
-</Command>
-    </PreLinkEvent>
     <Link>
-      <OutputFile>$(OutDir)PrinterWizardLocalized.dll</OutputFile>
-      <GenerateDebugInformation>false</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>
       </OptimizeReferences>
@@ -458,28 +349,6 @@ if not exist $(OutDir)PrinterWizard.Resources\en.lproj mkdir $(OutDir)PrinterWiz
       </EntryPointSymbol>
       <NoEntryPoint>true</NoEntryPoint>
       <ImportLibrary>$(IntDir)$(TargetName).lib</ImportLibrary>
-    </Link>
-    <PostBuildEvent>
-      <Command>if not "%RC_XBS%" == "YES" goto END
-if not exist "$(DSTROOT)\Program Files\Bonjour Print Services\$(Platform)\PrinterWizard.Resources\en.lproj"   mkdir "$(DSTROOT)\Program Files\Bonjour Print Services\$(Platform)\PrinterWizard.Resources\en.lproj"
-xcopy /I/Y "$(TargetPath)"                                                                                                                         "$(DSTROOT)\Program Files\Bonjour Print Services\$(Platform)\PrinterWizard.Resources\en.lproj"
-:END
-</Command>
-    </PostBuildEvent>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Template|Win32'">
-    <Link>
-      <OutputFile>$(OutDir)PrinterWizardLocalized.dll</OutputFile>
-    </Link>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Template|x64'">
-    <Link>
-      <OutputFile>$(OutDir)PrinterWizardLocalized.dll</OutputFile>
-    </Link>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Template|ARM64'">
-    <Link>
-      <OutputFile>$(OutDir)PrinterWizardLocalized.dll</OutputFile>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

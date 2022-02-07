@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2017-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS64)
 
 #include <AssertMacros.h>
+#include <CoreUtils/CommonServices.h>
 #include <nw/private.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,7 @@
 #include "dns_sd_internal.h"
 #include "mDNSMacOSX.h"
 #include "uDNS.h"
+#include "mdns_strict.h"
 
 //===========================================================================================================================
 //  Constants
@@ -35,8 +37,6 @@
 #define kDNS64IPv4OnlyFQDNString    "\x8" "ipv4only" "\x4" "arpa"
 #define kDNS64IPv4OnlyFQDN          ((const domainname *) kDNS64IPv4OnlyFQDNString)
 #define kDNS64IPv4OnlyFQDNLength    15  // 9 bytes for first label, 5 bytes for second label, and 1 byte for the root label.
-
-#define sizeof_field(TYPE, FIELD)   sizeof(((TYPE *)0)->FIELD)    // From CoreUtils.h
 
 check_compile_time(sizeof(kDNS64IPv4OnlyFQDNString) == kDNS64IPv4OnlyFQDNLength);
 check_compile_time(sizeof_field(DNSQuestion, qname) >= kDNS64IPv4OnlyFQDNLength);
@@ -183,7 +183,9 @@ mDNSexport mDNSBool DNS64StateMachine(mDNS *m, DNSQuestion *inQ, const ResourceR
     case kDNS64State_ReverseIPv6:
         break;
 
+    CUClangWarningIgnoreBegin(-Wcovered-switch-default);
     default:
+    CUClangWarningIgnoreEnd();
         LogMsg("DNS64StateMachine: unrecognized DNS64 state %d", inQ->dns64.state);
         break;
     }
@@ -239,7 +241,7 @@ mDNSexport mStatus DNS64AnswerCurrentQuestion(mDNS *m, const ResourceRecord *inR
     err = mStatus_NoError;
 
 exit:
-    if (prefixes) free(prefixes);
+    ForgetMem(&prefixes);
     return (err);
 }
 
@@ -288,7 +290,7 @@ mDNSexport void DNS64HandleNewQuestion(mDNS *m, DNSQuestion *inQ)
                     break;
                 }
             }
-            free(prefixes);
+            ForgetMem(&prefixes);
         }
     }
 
@@ -328,7 +330,9 @@ mDNSexport void DNS64ResetState(DNSQuestion *inQ)
     case kDNS64State_ReverseIPv6:
         break;
 
+    CUClangWarningIgnoreBegin(-Wcovered-switch-default);
     default:
+    CUClangWarningIgnoreEnd();
         LogMsg("DNS64ResetState: unrecognized DNS64 state %d", inQ->dns64.state);
         break;
     }
@@ -431,7 +435,7 @@ mDNSlocal mStatus _DNS64GetIPv6Addrs(mDNS *m, const mDNSu32 inResGroupID, struct
     }
     require_action_quiet(recordCount > 0, exit, err = mStatus_NoSuchRecord);
 
-    addrs = (struct in6_addr *)calloc(recordCount, sizeof(*addrs));
+    addrs = (struct in6_addr *)mdns_calloc(recordCount, sizeof(*addrs));
     require_action_quiet(addrs, exit, err = mStatus_NoMemoryErr);
 
     addrCount = 0;
@@ -454,7 +458,7 @@ mDNSlocal mStatus _DNS64GetIPv6Addrs(mDNS *m, const mDNSu32 inResGroupID, struct
     err = mStatus_NoError;
 
 exit:
-    if (addrs) free(addrs);
+    ForgetMem(&addrs);
     return (err);
 }
 
@@ -482,11 +486,11 @@ mDNSlocal mStatus _DNS64GetPrefixes(mDNS *m, mDNSu32 inResGroupID, nw_nat64_pref
     require_noerr_quiet(err, exit);
 
     prefixCount = nw_nat64_copy_prefixes_from_ipv4only_records(v6Addrs, v6AddrCount, &prefixes);
-    free(v6Addrs);
+    ForgetMem(&v6Addrs);
     require_action_quiet(prefixCount > 0, exit, err = mStatus_UnknownErr);
 
     *outPrefixes    = prefixes;
-    *outPrefixCount = prefixCount;
+    *outPrefixCount = (uint32_t)prefixCount;
 
 exit:
     return (err);
@@ -545,7 +549,9 @@ mDNSlocal void _DNS64RestartQuestion(mDNS *const m, DNSQuestion *inQ, DNS64State
         inQ->qtype = kDNSType_AAAA;
         break;
 
+    CUClangWarningIgnoreBegin(-Wcovered-switch-default);
     default:
+    CUClangWarningIgnoreEnd();
         LogMsg("DNS64RestartQuestion: unrecognized DNS64 state %d", inQ->dns64.state);
         break;
     }
@@ -560,7 +566,7 @@ mDNSlocal void _DNS64RestartQuestion(mDNS *const m, DNSQuestion *inQ, DNS64State
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 mDNSlocal mDNSBool _DNS64InterfaceSupportsNAT64(mdns_dns_service_t inDNSService)
 {
-    if (!mdns_dns_service_interface_has_ipv4_connectivity(inDNSService) &&
+    if (mdns_dns_service_is_default(inDNSService) && !mdns_dns_service_interface_has_ipv4_connectivity(inDNSService) &&
         mdns_dns_service_interface_has_ipv6_connectivity(inDNSService))
     {
         return (mDNStrue);
@@ -619,7 +625,7 @@ mDNSlocal mDNSBool _DNS64TestIPv6Synthesis(mDNS *m, mDNSu32 inResGroupID, const 
     }
 
 exit:
-    if (prefixes) free(prefixes);
+    ForgetMem(&prefixes);
     return (result);
 }
 #endif  // MDNSRESPONDER_SUPPORTS(APPLE, DNS64)

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" DefaultTargets="install" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup>
+		<ProjectRootDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))</ProjectRootDirectory>
+		<ProjectRootDirectory Condition="!HasTrailingSlash('$(ProjectRootDirectory)')">$(ProjectRootDirectory)\</ProjectRootDirectory>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
+    <Platform Condition="'$(Platform)' == ''">Win32;x64</Platform>
+  </PropertyGroup>
+
+  <Target Name="install" DependsOnTargets="mDNSResponder" />
+
+  <Target Name="mDNSResponder">
+
+    <PropertyGroup>
+      <SolutionFile>$(ProjectRootDirectory)mDNSWindows\mDNSResponder.sln</SolutionFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <Platforms Include="$(Platform)" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <SolutionTargets Include="dnssd;mDNSResponder;mDNSResponderDLL;dns-sd;mdnsNSP">
+        <Platform>%(Platforms.Identity)</Platform>
+      </SolutionTargets>
+    </ItemGroup>
+
+    <MSBuild Projects="$(SolutionFile)" Targets="%(SolutionTargets.Identity)" Properties="Configuration=$(Configuration);Platform=%(SolutionTargets.Platform)" />
+
+  </Target>
+
+</Project>

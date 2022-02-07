@@ -57,6 +57,20 @@ srp_random16()
     return arc4random_uniform(65536);
 }
 
+uint32_t
+srp_random32()
+{
+    return arc4random();
+}
+
+uint64_t
+srp_random64()
+{
+    uint64_t ret;
+    arc4random_buf(&ret, sizeof(ret));
+    return ret;
+}
+
 static void
 srp_sec_error_print(const char *reason, OSStatus status)
 {
@@ -106,17 +120,15 @@ srp_get_key_internal(const char *key_name, bool delete)
             CFDictionaryAddValue(pubkey_parameters, kSecAttrKeyClass, kSecAttrKeyClassPublic);
             CFDictionaryAddValue(pubkey_parameters, kSecAttrIsExtractable, kCFBooleanTrue);
             CFDictionaryAddValue(key_parameters, kSecAttrIsExtractable, kCFBooleanTrue);
-#if !defined(OPEN_SOURCE) && TARGET_OS_TV
-            CFDictionaryAddValue(pubkey_parameters, kSecAttrAccessible,
-                                 kSecAttrAccessibleAlwaysThisDeviceOnlyPrivate);
-#else
             CFDictionaryAddValue(pubkey_parameters, kSecAttrAccessible,
                                  kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly);
-#endif
             if (delete) {
                 status = SecItemDelete(key_parameters);
                 if (status == errSecSuccess) {
                     status = SecItemDelete(pubkey_parameters);
+                    if (status != errSecSuccess) {
+                        ERROR("srp_get_key_internal: failed to delete the public key");
+                    }
                 }
                 key = NULL;
             } else {

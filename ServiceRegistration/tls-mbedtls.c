@@ -1,6 +1,6 @@
 /* tls-mbedtls.c
  *
- * Copyright (c) 2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -145,7 +145,7 @@ srp_tls_io_send(void *ctx, const unsigned char *buf, size_t len)
 {
     ssize_t ret;
     comm_t *comm = ctx;
-    ret = write(comm->io.sock, buf, len);
+    ret = write(comm->io.fd, buf, len);
     if (ret < 0) {
         if (errno == EAGAIN) {
             return MBEDTLS_ERR_SSL_WANT_WRITE;
@@ -162,7 +162,7 @@ srp_tls_io_recv(void *ctx, unsigned char *buf, size_t max)
 {
     ssize_t ret;
     comm_t *comm = ctx;
-    ret = read(comm->io.sock, buf, max);
+    ret = read(comm->io.fd, buf, max);
     if (ret < 0) {
         if (errno == EWOULDBLOCK || errno == EAGAIN) {
             return MBEDTLS_ERR_SSL_WANT_READ;
@@ -320,6 +320,13 @@ srp_tls_write(comm_t *comm, struct iovec *iov, int iov_len)
         }
     }
     return bytes_written;
+}
+
+// Dummy function for now; should eventually fetch the TLS context to use for validating
+// a cert presented by a remote connection.
+void
+configure_tls(void *const NULLABLE UNUSED context)
+{
 }
 
 // Local Variables:

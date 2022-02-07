@@ -1,6 +1,6 @@
 /* towire.c
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -280,6 +280,27 @@ dns_u32_to_wire_(dns_towire_state_t *NONNULL txn, uint32_t val, int line)
 }
 
 void
+dns_u64_to_wire_(dns_towire_state_t *NONNULL txn, uint64_t val, int line)
+{
+    if (!txn->error) {
+        if (txn->p + 8 >= txn->lim) {
+            txn->error = ENOBUFS;
+            txn->truncated = true;
+            txn->line = line;
+            return;
+        }
+        *txn->p++ = val >> 56;
+        *txn->p++ = (val >> 48) & 0xff;
+        *txn->p++ = (val >> 40) & 0xff;
+        *txn->p++ = (val >> 32) & 0xff;
+        *txn->p++ = (val >> 24) & 0xff;
+        *txn->p++ = (val >> 16) & 0xff;
+        *txn->p++ = (val >> 8) & 0xff;
+        *txn->p++ = val & 0xff;
+    }
+}
+
+void
 dns_ttl_to_wire_(dns_towire_state_t *NONNULL txn, int32_t val, int line)
 {
     if (!txn->error) {
@@ -435,7 +456,7 @@ void
 dns_rdata_raw_data_to_wire_(dns_towire_state_t *NONNULL txn, const void *NONNULL raw_data, size_t length, int line)
 {
     if (!txn->error) {
-        if (txn->p + length >= txn->lim) {
+        if (txn->p + length > txn->lim) {
             txn->error = ENOBUFS;
             txn->truncated = true;
             txn->line = line;
@@ -516,7 +537,7 @@ dns_sig0_signature_to_wire_(dns_towire_state_t *NONNULL txn, srp_key_t *key, uin
 
     // 1 name (root)
     // 2 type (SIG)
-    // 2 class (0)
+    // 2 class (255) ANY
     // 4 TTL (0)
     // 18 SIG RDATA up to signer name
     // 2 signer name (always a pointer)
@@ -527,7 +548,7 @@ dns_sig0_signature_to_wire_(dns_towire_state_t *NONNULL txn, srp_key_t *key, uin
     if (!txn->error) {
         dns_u8_to_wire(txn, 0);	// root label
         dns_u16_to_wire(txn, dns_rrtype_sig);
-        dns_u16_to_wire(txn, 0); // class
+        dns_u16_to_wire(txn, dns_qclass_any); // class
         dns_ttl_to_wire(txn, 0); // SIG RR TTL
         dns_rdlength_begin(txn);
         start = txn->p;

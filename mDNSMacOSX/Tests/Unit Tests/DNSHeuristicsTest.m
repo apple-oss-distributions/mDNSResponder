@@ -44,7 +44,7 @@
     NSDictionary *existingState = @{
         DNSHeuristicsLastFailureTimestamp: [NSNumber numberWithUnsignedInteger:now],
         DNSHeuristicsLongCounterKey: [NSNumber numberWithInt:1],
-        DNSHeuristicsBurstCounterKey: [NSNumber numberWithInt:DNSHeuristicsDefaultBurstTokenBucketCapacity],
+        DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(NO),
     };
     OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);
@@ -62,8 +62,8 @@
     NSURL *url = [NSURL URLWithString:@"https://example.com"];
     NSDictionary *existingState = @{
         DNSHeuristicsLastFailureTimestamp: [NSNumber numberWithUnsignedInteger:now],
-        DNSHeuristicsLongCounterKey: [NSNumber numberWithInt:DNSHeuristicDefaultLongCounterThreshold], // reporting an error will cause this count to exceed the threshold
-        DNSHeuristicsBurstCounterKey: [NSNumber numberWithInt:DNSHeuristicsDefaultBurstTokenBucketCapacity],
+        DNSHeuristicsLongCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicDefaultLongCounterThreshold], // reporting an error will cause this count to exceed the threshold
+        DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(NO),
     };
     OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);
@@ -81,8 +81,8 @@
     NSURL *url = [NSURL URLWithString:@"https://example.com"];
     NSDictionary *existingState = @{
         DNSHeuristicsLastFailureTimestamp: [NSNumber numberWithUnsignedInteger:now],
-        DNSHeuristicsLongCounterKey: [NSNumber numberWithInt:DNSHeuristicDefaultLongCounterThreshold],
-        DNSHeuristicsBurstCounterKey: [NSNumber numberWithInt:DNSHeuristicsDefaultBurstTokenBucketCapacity],
+        DNSHeuristicsLongCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicDefaultLongCounterThreshold],
+        DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(YES),
     };
     OCMStub(ClassMethod([mockHeuristics getNetworkFilteredFlag:[OCMArg anyPointer]])).andReturn(YES);
@@ -101,8 +101,8 @@
     NSUInteger now = [DNSHeuristics currentTimeMs];
     NSDictionary *existingState = @{
         DNSHeuristicsLastFailureTimestamp: [NSNumber numberWithUnsignedInteger:now],
-        DNSHeuristicsLongCounterKey: [NSNumber numberWithInt:DNSHeuristicDefaultLongCounterThreshold],
-        DNSHeuristicsBurstCounterKey: [NSNumber numberWithInt:DNSHeuristicsDefaultBurstTokenBucketCapacity],
+        DNSHeuristicsLongCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicDefaultLongCounterThreshold],
+        DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(YES),
     };
     OCMStub(ClassMethod([mockHeuristics getNetworkFilteredFlag:[OCMArg anyPointer]])).andReturn(YES);
@@ -162,7 +162,7 @@
     NSDictionary *existingState = @{
         DNSHeuristicsLastFailureTimestamp: [NSNumber numberWithUnsignedInteger:now],
         DNSHeuristicsLongCounterKey: [NSNumber numberWithInt:0],
-        DNSHeuristicsBurstCounterKey: [NSNumber numberWithInt:DNSHeuristicsDefaultBurstTokenBucketCapacity],
+		DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(YES),
     };
     OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);
@@ -182,7 +182,7 @@
     NSDictionary *existingState = @{
         DNSHeuristicsLastFailureTimestamp: [NSNumber numberWithUnsignedInteger:(now - DNSHeuristicDefaultLongCounterTimeWindow)],
         DNSHeuristicsLongCounterKey: [NSNumber numberWithInt:0],
-        DNSHeuristicsBurstCounterKey: [NSNumber numberWithInt:DNSHeuristicsDefaultBurstTokenBucketCapacity],
+        DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(YES),
     };
     OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);

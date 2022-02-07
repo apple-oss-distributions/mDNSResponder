@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 
 #ifndef __DNSSD_XPC_H__
 #define __DNSSD_XPC_H__
+
+#include "dnssd_private.h"
 
 #include <CoreUtils/CommonServices.h>
 #include <dns_sd.h>
@@ -256,12 +258,25 @@ dnssd_xpc_parameters_get_hostname_object(xpc_object_t params);
 
 /*!
  *	@brief
+ *		Gets the hostname from a command parameters dictionary as a C string.
+ *
+ *	@param params
+ *		The command parameters dictionary.
+ *
+ *	@result
+ *		The hostname, if present, as C string. Otherwise, NULL.
+ */
+const char * _Nullable
+dnssd_xpc_parameters_get_hostname(xpc_object_t params);
+
+/*!
+ *	@brief
  *		Gets interface index from a command parameters dictionary.
  *
  *	@param params
  *		Command parameters dictionary.
  *
- *	@para out_valid
+ *	@param out_valid
  *		If non-NULL, set to true if value is present and of correct type, otherwise, set to false.
  *
  *	@result
@@ -350,6 +365,33 @@ dnssd_xpc_parameters_get_protocols(xpc_object_t params, bool * _Nullable out_val
  */
 const char * _Nullable
 dnssd_xpc_parameters_get_service_scheme(xpc_object_t params);
+
+/*!
+ *	@brief
+ *		Gets the truth value of whether DNS service failover should be used from a command parameters dictionary.
+ *
+ *	@param params
+ *		Command parameters dictionary.
+ *
+ *	@result
+ *		True if DNS service failover should be used. Otherwise, false.
+ */
+bool
+dnssd_xpc_parameters_get_use_failover(xpc_object_t params);
+
+/*!
+ *	@brief
+ *		Gets the enum value of whether or not the private level logs and the content of state dump should be redacted,
+ *		from a command parameters dictionary.
+ *
+ *	@param params
+ *		Command parameters dictionary.
+ *
+ *	@result
+ *		The log privacy level.
+ */
+dnssd_log_privacy_level_t
+dnssd_xpc_parameters_get_log_privacy_level(xpc_object_t params);
 
 /*!
  *	@brief
@@ -511,6 +553,33 @@ dnssd_xpc_parameters_set_service_scheme(xpc_object_t params, const char *service
  */
 void
 dnssd_xpc_parameters_set_protocols(xpc_object_t params, DNSServiceProtocol protocols);
+
+/*!
+ *	@brief
+ *		Specifies in a command parameters dictionary whether or not DNS service failover should be used if
+ *		necessary and applicable.
+ *
+ *	@param params
+ *		Command parameters dictionary.
+ *
+ *	@param use_failover
+ *		Pass true if DNS service failover should be used, otherwise, pass false.
+ */
+void
+dnssd_xpc_parameters_set_use_failover(xpc_object_t params, bool use_failover);
+
+/*!
+ *	@brief
+ *		Specifies the log privacy level in a command parameters dictionary.
+ *
+ *	@param params
+ *		Command parameters dictionary.
+ *
+ *	@param level
+ *		The log privacy level.
+ */
+void
+dnssd_xpc_parameters_set_log_privacy_level(xpc_object_t params, dnssd_log_privacy_level_t level);
 
 /*!
  *	@brief
@@ -688,6 +757,61 @@ dnssd_xpc_result_get_cname_update(xpc_object_t result);
 
 /*!
  *	@brief
+ *		Gets the verified tracker hostname in a command result dictionary.
+ *
+ *	@param result
+ *		The command result dictionary.
+ *
+ *	@result
+ *		The tracker hostname, if present, as an XPC string object. Otherwise, NULL.
+ *
+ * @discussion
+ *		No tracker hostname means that the result is not associated with a known tracker.
+ */
+xpc_object_t _Nullable
+dnssd_xpc_result_get_tracker_hostname_object(xpc_object_t result);
+
+/*!
+ *	@brief
+ *		Gets the tracker owner in a command result dictionary.
+ *
+ *	@param result
+ *		The command result dictionary.
+ *
+ *	@result
+ *		The tracker owner, if present, as an XPC string object. Otherwise, NULL.
+ */
+xpc_object_t _Nullable
+dnssd_xpc_result_get_tracker_owner_object(xpc_object_t result);
+
+/*!
+ *	@brief
+ *		Gets whether or not the tracker is an approved app domain.
+ *
+ *	@param result
+ *		The command result dictionary.
+ *
+ *	@result
+ *		A boolean indiciating if the domain is approved for the app.
+ */
+bool
+dnssd_xpc_result_get_tracker_is_approved(xpc_object_t result);
+
+/*!
+ *	@brief
+ *		Gets the reason why a result is negative from a command result dictionary.
+ *
+ *	@param result
+ *		The command result dictionary.
+ *
+ *	@result
+ *		The negative reason, if present. Otherwise, dnssd_negative_reason_none.
+ */
+dnssd_negative_reason_t
+dnssd_xpc_result_get_negative_reason(xpc_object_t result);
+
+/*!
+ *	@brief
  *		Sets the authentication tag in a command result dictionary.
  *
  *	@param result
@@ -847,6 +971,58 @@ dnssd_xpc_result_set_provider_name(xpc_object_t result, const char *provider_nam
  */
 void
 dnssd_xpc_result_set_cname_update(xpc_object_t result, xpc_object_t cname_update);
+
+/*!
+ *	@brief
+ *		Sets the tracker hostname in a command result dictionary.
+ *
+ *	@param result
+ *		The command result dictionary.
+ *
+ *	@param hostname
+ *		The hostname that was verified.
+ */
+void
+dnssd_xpc_result_set_tracker_hostname(xpc_object_t result, xpc_object_t hostname);
+
+/*!
+ *	@brief
+ *		Sets the tracker owner in a command result dictionary.
+ *
+ *	@param result
+ *		The command result dictionary.
+ *
+ *	@param owner
+ *		The tracker owner.
+ */
+void
+dnssd_xpc_result_set_tracker_owner(xpc_object_t result, xpc_object_t owner);
+
+/*!
+ *	@brief
+ *		Sets whether or not the tracker is an approved app domain.
+ *
+ *	@param result
+ *		The command result dictionary.
+ *
+ *	@param approved
+ *		A boolean indiciating if the domain is approved for the app.
+ */
+void
+dnssd_xpc_result_set_tracker_is_approved(xpc_object_t result, bool approved);
+
+/*!
+ *	@brief
+ *		Sets the reason why a result is negative in a command result dictionary.
+ *
+ *	@param result
+ *		The command result dictionary.
+ *
+ *	@param reason
+ *		The negative reason.
+ */
+void
+dnssd_xpc_result_set_negative_reason(xpc_object_t result, dnssd_negative_reason_t reason);
 
 __END_DECLS
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
+#include "dnssd_private.h"
 #include "dnssd_xpc.h"
+#include "mdns_strict.h"
 
 //======================================================================================================================
 // MARK: - XPC Dictionary Helper Declarations
@@ -41,7 +43,7 @@ static uint64_t
 _dnssd_xpc_dictionary_get_uint64_limited(xpc_object_t dict, const char *key, uint64_t min, uint64_t max,
 	bool *out_valid);
 
-static xpc_object_t
+static xpc_object_t _Nullable
 _dnssd_xpc_dictionary_get_value(xpc_object_t dict, const char *key, xpc_type_t type);
 
 //======================================================================================================================
@@ -136,17 +138,19 @@ dnssd_xpc_message_set_results(xpc_object_t msg, xpc_object_t results)
 //======================================================================================================================
 // MARK: - Parameter Dictionaries
 
-#define DNSSD_XPC_PARAMETERS_KEY_DELEGATE_ID		"delegate_id"
-#define DNSSD_XPC_PARAMETERS_KEY_FLAGS				"flags"
 #define DNSSD_XPC_PARAMETERS_KEY_ACCOUNT_ID			"account_id"
+#define DNSSD_XPC_PARAMETERS_KEY_DELEGATE_ID		"delegate_id"
+#define DNSSD_XPC_PARAMETERS_KEY_FALLBACK_CONFIG	"fallback_config"
+#define DNSSD_XPC_PARAMETERS_KEY_FLAGS				"flags"
 #define DNSSD_XPC_PARAMETERS_KEY_HOSTNAME			"hostname"
 #define DNSSD_XPC_PARAMETERS_KEY_INTERFACE_INDEX	"interface_index"
+#define DNSSD_XPC_PARAMETERS_KEY_LOG_PRIVACY_LEVEL	"log_privacy_level"
 #define DNSSD_XPC_PARAMETERS_KEY_NEED_AUTH_TAGS		"need_auth_tags"
-#define DNSSD_XPC_PARAMETERS_KEY_PROTOCOLS			"protocols"
 #define DNSSD_XPC_PARAMETERS_KEY_NEED_ENCRYPTION	"need_encryption"
-#define DNSSD_XPC_PARAMETERS_KEY_FALLBACK_CONFIG	"fallback_config"
+#define DNSSD_XPC_PARAMETERS_KEY_PROTOCOLS			"protocols"
 #define DNSSD_XPC_PARAMETERS_KEY_RESOLVER_UUIDS		"resolver_uuids"
 #define DNSSD_XPC_PARAMETERS_KEY_SERVICE_SCHEME		"service_scheme"
+#define DNSSD_XPC_PARAMETERS_KEY_USE_FAILOVER		"use_failover"
 
 //======================================================================================================================
 
@@ -245,6 +249,14 @@ dnssd_xpc_parameters_get_hostname_object(xpc_object_t params)
 
 //======================================================================================================================
 
+const char *
+dnssd_xpc_parameters_get_hostname(xpc_object_t params)
+{
+	return xpc_dictionary_get_string(params, DNSSD_XPC_PARAMETERS_KEY_HOSTNAME);
+}
+
+//======================================================================================================================
+
 void
 dnssd_xpc_parameters_set_hostname(xpc_object_t params, const char *hostname)
 {
@@ -327,7 +339,8 @@ dnssd_xpc_parameters_add_resolver_uuid(xpc_object_t params, uuid_t _Nonnull uuid
 	if (resolver_uuid_array == NULL) {
 		resolver_uuid_array = xpc_array_create(NULL, 0);
 		xpc_dictionary_set_value(params, DNSSD_XPC_PARAMETERS_KEY_RESOLVER_UUIDS, resolver_uuid_array);
-		xpc_release(resolver_uuid_array);
+		xpc_object_t tmp = resolver_uuid_array;
+		xpc_forget(&tmp);
 	}
 	xpc_array_set_uuid(resolver_uuid_array, XPC_ARRAY_APPEND, uuid);
 }
@@ -365,6 +378,52 @@ dnssd_xpc_parameters_set_service_scheme(xpc_object_t params, const char *service
 }
 
 //======================================================================================================================
+
+bool
+dnssd_xpc_parameters_get_use_failover(const xpc_object_t params)
+{
+	return xpc_dictionary_get_bool(params, DNSSD_XPC_PARAMETERS_KEY_USE_FAILOVER);
+}
+
+//======================================================================================================================
+
+void
+dnssd_xpc_parameters_set_use_failover(const xpc_object_t params, const bool use_failover)
+{
+	xpc_dictionary_set_bool(params, DNSSD_XPC_PARAMETERS_KEY_USE_FAILOVER, use_failover);
+}
+
+//======================================================================================================================
+
+dnssd_log_privacy_level_t
+dnssd_xpc_parameters_get_log_privacy_level(const xpc_object_t params)
+{
+	bool valid;
+	// Make sure that dnssd_log_privacy_level_t is indeed a 32-bit signed integer.
+	check_compile_time_code(sizeof(dnssd_log_privacy_level_t) == sizeof(int32_t));
+	check_compile_time_code(((dnssd_log_privacy_level_t)-1) < 0);
+	const dnssd_log_privacy_level_t level = _dnssd_xpc_dictionary_get_int32(params,
+		DNSSD_XPC_PARAMETERS_KEY_LOG_PRIVACY_LEVEL, &valid);
+	if (valid) {
+		// A default case isn't used to allow the compiler to catch missing dnssd_log_privacy_level_t enum values.
+		switch (level) {
+			case dnssd_log_privacy_level_default:
+			case dnssd_log_privacy_level_private:
+				return level;
+		}
+	}
+	return dnssd_log_privacy_level_default;
+}
+
+//======================================================================================================================
+
+void
+dnssd_xpc_parameters_set_log_privacy_level(const xpc_object_t params, const dnssd_log_privacy_level_t level)
+{
+	xpc_dictionary_set_int64(params, DNSSD_XPC_PARAMETERS_KEY_LOG_PRIVACY_LEVEL, level);
+}
+
+//======================================================================================================================
 // MARK: - Result Dictionaries
 
 #define DNSSD_XPC_RESULT_KEY_AUTH_TAG			"auth_tag"
@@ -372,12 +431,16 @@ dnssd_xpc_parameters_set_service_scheme(xpc_object_t params, const char *service
 #define DNSSD_XPC_RESULT_KEY_ERROR				"error"
 #define DNSSD_XPC_RESULT_KEY_FLAGS				"flags"
 #define DNSSD_XPC_RESULT_KEY_INTERFACE_INDEX	"interface_index"
+#define DNSSD_XPC_RESULT_KEY_NEGATIVE_REASON	"negative_reason"
 #define DNSSD_XPC_RESULT_KEY_PROVIDER_NAME		"provider_name"
 #define DNSSD_XPC_RESULT_KEY_RECORD_CLASS		"rclass"
 #define DNSSD_XPC_RESULT_KEY_RECORD_DATA		"rdata"
 #define DNSSD_XPC_RESULT_KEY_RECORD_NAME		"rname"
 #define DNSSD_XPC_RESULT_KEY_RECORD_PROTOCOL	"rprotocol"
 #define DNSSD_XPC_RESULT_KEY_RECORD_TYPE		"rtype"
+#define DNSSD_XPC_RESULT_KEY_TRACKER_HOSTNAME	"tracker_hostname"
+#define DNSSD_XPC_RESULT_KEY_TRACKER_OWNER		"tracker_owner"
+#define DNSSD_XPC_RESULT_KEY_TRACKER_APPROVED	"tracker_approved"
 
 //======================================================================================================================
 
@@ -470,9 +533,12 @@ dnssd_xpc_result_get_record_data_object(xpc_object_t result)
 //======================================================================================================================
 
 void
-dnssd_xpc_result_set_record_data(xpc_object_t result, const void *data_ptr, size_t data_len)
+dnssd_xpc_result_set_record_data(xpc_object_t result, const void * const data_ptr, const size_t data_len)
 {
-	xpc_dictionary_set_data(result, DNSSD_XPC_RESULT_KEY_RECORD_DATA, data_ptr, data_len);
+	if (data_ptr || (data_len == 0)) {
+		const void * const safe_data_ptr = data_ptr ? data_ptr : "";
+		xpc_dictionary_set_data(result, DNSSD_XPC_RESULT_KEY_RECORD_DATA, safe_data_ptr, data_len);
+	}
 }
 
 //======================================================================================================================
@@ -553,6 +619,88 @@ void
 dnssd_xpc_result_set_cname_update(xpc_object_t result, xpc_object_t cname_update)
 {
 	xpc_dictionary_set_value(result, DNSSD_XPC_RESULT_KEY_CNAME_UPDATE, cname_update);
+}
+
+//======================================================================================================================
+
+xpc_object_t
+dnssd_xpc_result_get_tracker_hostname_object(const xpc_object_t result)
+{
+	return _dnssd_xpc_dictionary_get_value(result, DNSSD_XPC_RESULT_KEY_TRACKER_HOSTNAME, XPC_TYPE_STRING);
+}
+
+//======================================================================================================================
+
+void
+dnssd_xpc_result_set_tracker_hostname(const xpc_object_t result, const xpc_object_t hostname)
+{
+	xpc_dictionary_set_value(result, DNSSD_XPC_RESULT_KEY_TRACKER_HOSTNAME, hostname);
+}
+
+//======================================================================================================================
+
+xpc_object_t
+dnssd_xpc_result_get_tracker_owner_object(const xpc_object_t result)
+{
+	return _dnssd_xpc_dictionary_get_value(result, DNSSD_XPC_RESULT_KEY_TRACKER_OWNER, XPC_TYPE_STRING);
+}
+
+//======================================================================================================================
+
+void
+dnssd_xpc_result_set_tracker_owner(const xpc_object_t result, const xpc_object_t owner)
+{
+	xpc_dictionary_set_value(result, DNSSD_XPC_RESULT_KEY_TRACKER_OWNER, owner);
+}
+
+//======================================================================================================================
+
+bool
+dnssd_xpc_result_get_tracker_is_approved(const xpc_object_t result)
+{
+	return xpc_dictionary_get_bool(result, DNSSD_XPC_RESULT_KEY_TRACKER_APPROVED);
+}
+
+//======================================================================================================================
+
+void
+dnssd_xpc_result_set_tracker_is_approved(const xpc_object_t result, const bool approved)
+{
+	xpc_dictionary_set_bool(result, DNSSD_XPC_RESULT_KEY_TRACKER_APPROVED, approved);
+}
+
+//======================================================================================================================
+
+dnssd_negative_reason_t
+dnssd_xpc_result_get_negative_reason(const xpc_object_t result)
+{
+	bool valid;
+	// Make sure that dnssd_negative_reason_t is indeed a 32-bit signed integer.
+	check_compile_time_code(sizeof(dnssd_negative_reason_t) == sizeof(int32_t));
+	check_compile_time_code(((dnssd_negative_reason_t)-1) < 0);
+	const dnssd_negative_reason_t reason = _dnssd_xpc_dictionary_get_int32(result,
+		DNSSD_XPC_RESULT_KEY_NEGATIVE_REASON, &valid);
+	if (valid) {
+		// A default case isn't used to allow the compiler to catch missing dnssd_negative_reason_t enum values.
+		switch (reason) {
+			case dnssd_negative_reason_none:
+			case dnssd_negative_reason_no_data:
+			case dnssd_negative_reason_nxdomain:
+			case dnssd_negative_reason_query_suppressed:
+			case dnssd_negative_reason_no_dns_service:
+			case dnssd_negative_reason_server_error:
+				return reason;
+		}
+	}
+	return dnssd_negative_reason_none;
+}
+
+//======================================================================================================================
+
+void
+dnssd_xpc_result_set_negative_reason(const xpc_object_t result, const dnssd_negative_reason_t reason)
+{
+	xpc_dictionary_set_int64(result, DNSSD_XPC_RESULT_KEY_NEGATIVE_REASON, reason);
 }
 
 //======================================================================================================================

@@ -14,17 +14,12 @@
  * limitations under the License.
  */
 
-#include "unittest_common.h"
+#import "unittest_common.h"
+#import "mDNSMacOSX.h"
 #import <XCTest/XCTest.h>
 
-struct UDPSocket_struct
-{
-	mDNSIPPort port; // MUST BE FIRST FIELD -- mDNSCoreReceive expects every UDPSocket_struct to begin with mDNSIPPort port
-};
-typedef struct UDPSocket_struct UDPSocket;
-
 // This client request was generated using the following command: "dns-sd -Q web.mydomain.test".
-uint8_t test_order_query_msgbuf[30] = {
+const uint8_t test_order_query_msgbuf[30] = {
     0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x77, 0x65, 0x62, 0x2e, 0x6d, 0x79, 0x64,
     0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x00, 0x00, 0x01, 0x00, 0x01
 };
@@ -109,7 +104,7 @@ char test_order_domainname_cstr[] = "web.mydomain.test.";
     
     // Create memory for a socket that is never used or opened.
     local_socket = (UDPSocket *) mDNSPlatformMemAllocateClear(sizeof(*local_socket));
-    
+
     // Create memory for a request that is used to make this unit test's client request.
     client_request_message = calloc(1, sizeof(request_state));
 }
@@ -155,8 +150,8 @@ char test_order_domainname_cstr[] = "web.mydomain.test.";
 {
     mDNS *const m = &mDNSStorage;
     request_state* req = client_request_message;
-    char *msgptr = (char *)test_order_query_msgbuf;
-    size_t msgsz = sizeof(test_order_query_msgbuf);
+    const uint8_t *const msgptr = test_order_query_msgbuf;
+    const uint32_t msgsz = sizeof(test_order_query_msgbuf);
     mDNSs32 min_size = sizeof(DNSServiceFlags) + sizeof(mDNSu32) + 4;
     DNSQuestion *q;
     mStatus err = mStatus_NoError;

@@ -1,12 +1,12 @@
 /* posix.c
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,11 +21,15 @@
 
 #include <netinet/in.h>
 #include <net/if.h>
+#ifndef LINUX
 #include <netinet/in_var.h>
+#include <net/if_dl.h>
+#endif
 #include <sys/ioctl.h>
 #include <errno.h>
 #include <ifaddrs.h>
 #include <stdlib.h>
+#include <string.h>
 #include <dirent.h>
 #include <arpa/inet.h>
 #include "dns_sd.h"
@@ -33,23 +37,22 @@
 #include "dns-msg.h"
 #include "ioloop.h"
 
-typedef struct interface_addr interface_addr_t;
-struct interface_addr {
-    interface_addr_t *next;
-    char *name;
-    addr_t addr;
-    addr_t mask;
-    uint32_t flags;
-};
-interface_addr_t *interface_addresses;
+interface_address_state_t *interface_addresses;
 
 bool
-ioloop_map_interface_addresses(void *context, interface_callback_t callback)
+ioloop_map_interface_addresses(const char *ifname, void *context, interface_callback_t callback)
+{
+    return ioloop_map_interface_addresses_here(&interface_addresses, ifname, context, callback);
+}
+
+bool
+ioloop_map_interface_addresses_here_(interface_address_state_t **here, const char *ifname, void *context,
+                                     interface_callback_t callback, const char *file, int line)
 {
     struct ifaddrs *ifaddrs, *ifp;
-    interface_addr_t *kept_ifaddrs = NULL, **ki_end = &kept_ifaddrs;
-    interface_addr_t *new_ifaddrs = NULL, **ni_end = &new_ifaddrs;
-    interface_addr_t **ip, *nif;
+    interface_address_state_t *kept_ifaddrs = NULL, **ki_end = &kept_ifaddrs;
+    interface_address_state_t *new_ifaddrs = NULL, **ni_end = &new_ifaddrs;
+    interface_address_state_t **ip, *nif;
 
     if (getifaddrs(&ifaddrs) < 0) {
         ERROR("getifaddrs failed: " PUB_S_SRP, strerror(errno));
@@ -60,11 +63,26 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
         bool remove = false;
         bool keep = true;
 
+        // It is impossible to have an interface without interface name.
+        if (ifp->ifa_name == NULL) {
+            continue;
+        }
+        if (ifname != NULL && strcmp(ifname, ifp->ifa_name)) {
+            continue;
+        }
+
+#ifndef LINUX
         // Check for temporary addresses, etc.
         if (ifp->ifa_addr != NULL && ifp->ifa_addr->sa_family == AF_INET6) {
             struct in6_ifreq ifreq;
             int sock;
-            strlcpy(ifreq.ifr_name, ifp->ifa_name, sizeof(ifp->ifa_name));
+            size_t len;
+            len = strlen(ifp->ifa_name);
+            if (len >= sizeof(ifreq.ifr_name)) {
+                len = sizeof(ifreq.ifr_name) - 1;
+            }
+            memcpy(ifreq.ifr_name, ifp->ifa_name, len);
+            ifreq.ifr_name[len] = 0;
             if ((sock = socket(AF_INET6, SOCK_DGRAM, 0)) < 0) {
                 ERROR("socket(AF_INET6, SOCK_DGRAM): " PUB_S_SRP, strerror(errno));
                 continue;
@@ -75,7 +93,7 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
                 close(sock);
                 continue;
             }
-            uint32_t flags = ifreq.ifr_ifru.ifru_flags6;
+            int flags = ifreq.ifr_ifru.ifru_flags6;
             if (flags & (IN6_IFF_ANYCAST | IN6_IFF_TENTATIVE | IN6_IFF_DETACHED | IN6_IFF_TEMPORARY)) {
                 keep = false;
             }
@@ -90,25 +108,30 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
             struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifp->ifa_addr;
             const uint8_t *addr = (uint8_t *)LLADDR(sdl);
             INFO("%.*s index %d alen %d dlen %d SDL: %02x:%02x:%02x:%02x:%02x:%02x",
-                 sdl->sdl_nlen, sdl->sdl_data, sdl->sdl_index, sdl->sdl_alen, sdl->sdl_slen, 
+                 sdl->sdl_nlen, sdl->sdl_data, sdl->sdl_index, sdl->sdl_alen, sdl->sdl_slen,
                  addr[0],  addr[1],  addr[2], addr[3],  addr[4],  addr[5]);
         }
 #endif // DEBUG_AF_LINK
+#endif // LINUX
 
         // Is this an interface address we can use?
-        if (keep && ifp->ifa_addr != NULL &&
-            (ifp->ifa_addr->sa_family == AF_LINK ||
-             ((ifp->ifa_addr->sa_family == AF_INET6 || ifp->ifa_addr->sa_family == AF_INET) && ifp->ifa_netmask != NULL)
-             ) &&
+        if (keep && ifp->ifa_addr != NULL && (
+#ifndef LINUX
+                ifp->ifa_addr->sa_family == AF_LINK ||
+#endif
+             ((ifp->ifa_addr->sa_family == AF_INET6 || ifp->ifa_addr->sa_family == AF_INET) && ifp->ifa_netmask != NULL)) &&
             (ifp->ifa_flags & IFF_UP))
         {
             keep = false;
-            for (ip = &interface_addresses; *ip != NULL; ) {
-                interface_addr_t *ia = *ip;
+            for (ip = here; *ip != NULL; ) {
+                interface_address_state_t *ia = *ip;
                 // Same interface and address?
                 if (!remove && !strcmp(ia->name, ifp->ifa_name) &&
                     ifp->ifa_addr->sa_family == ia->addr.sa.sa_family &&
-                    (ifp->ifa_addr->sa_family == AF_LINK ||
+                    (
+#ifndef LINUX
+                        ifp->ifa_addr->sa_family == AF_LINK ||
+#endif
                      (((ifp->ifa_addr->sa_family == AF_INET &&
                         ((struct sockaddr_in *)ifp->ifa_addr)->sin_addr.s_addr == ia->addr.sin.sin_addr.s_addr) ||
                        (ifp->ifa_addr->sa_family == AF_INET6 &&
@@ -133,30 +156,38 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
             // If keep is false, this is a new interface/address.
             if (!keep) {
                 size_t len = strlen(ifp->ifa_name);
-                nif = calloc(1, len + 1 + sizeof *nif);
+#ifdef MALLOC_DEBUG_LOGGING
+                nif = debug_calloc(1, len + 1 + sizeof(*nif), file, line);
+#else
+                (void)file;
+                (void)line;
+                nif = calloc(1, len + 1 + sizeof(*nif));
+#endif
                 // We don't have a way to fix nif being null; what this means is that we don't detect a new
                 // interface address.
                 if (nif != NULL) {
                     nif->name = (char *)(nif + 1);
-                    strlcpy(nif->name, ifp->ifa_name, len + 1);
+                    memcpy(nif->name, ifp->ifa_name, len);
+                    nif->name[len] = 0;
                     if (ifp->ifa_addr->sa_family == AF_INET) {
                         nif->addr.sin = *((struct sockaddr_in *)ifp->ifa_addr);
                         nif->mask.sin = *((struct sockaddr_in *)ifp->ifa_netmask);
 
-                        IPv4_ADDR_GEN_SRP(&nif->mask.sin.sin_addr.s_addr, __new_interface_ipv4_addr);
-                        INFO("ioloop_map_interface_addresses: new IPv4 interface address added - ifname: " PUB_S_SRP
+                        IPv4_ADDR_GEN_SRP(&nif->addr.sin.sin_addr.s_addr, __new_interface_ipv4_addr);
+                        INFO("new IPv4 interface address added - ifname: " PUB_S_SRP
                              ", addr: " PRI_IPv4_ADDR_SRP, nif->name,
-                             IPv4_ADDR_PARAM_SRP(&nif->mask.sin.sin_addr.s_addr, __new_interface_ipv4_addr));
+                             IPv4_ADDR_PARAM_SRP(&nif->addr.sin.sin_addr.s_addr, __new_interface_ipv4_addr));
                     } else if (ifp->ifa_addr->sa_family == AF_INET6) {
                         nif->addr.sin6 = *((struct sockaddr_in6 *)ifp->ifa_addr);
                         nif->mask.sin6 = *((struct sockaddr_in6 *)ifp->ifa_netmask);
 
                         SEGMENTED_IPv6_ADDR_GEN_SRP(nif->addr.sin6.sin6_addr.s6_addr, __new_interface_ipv6_addr);
-                        INFO("ioloop_map_interface_addresses: new IPv6 interface address added - ifname: " PUB_S_SRP
+                        INFO("new IPv6 interface address added - ifname: " PUB_S_SRP
                              ", addr: " PRI_SEGMENTED_IPv6_ADDR_SRP, nif->name,
                              SEGMENTED_IPv6_ADDR_PARAM_SRP(nif->addr.sin6.sin6_addr.s6_addr,
                                                            __new_interface_ipv6_addr));
                     } else {
+#ifndef LINUX
                         struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifp->ifa_addr;
                         memset(&nif->mask, 0, sizeof(nif->mask));
                         if (sdl->sdl_alen == 6) {
@@ -167,6 +198,7 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
                         }
                         nif->addr.ether_addr.index = sdl->sdl_index;
                         nif->addr.ether_addr.family = AF_LINK;
+#endif // LINUX
                     }
                     nif->flags = ifp->ifa_flags;
                     *ni_end = nif;
@@ -176,6 +208,7 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
         }
     }
 
+#ifndef LINUX
     // Get rid of any link-layer addresses for which there is no other address on that interface
     // This is clunky, but we can't assume that the AF_LINK address will come after some other
     // address, so there's no more efficient way to do this that I can think of.
@@ -199,6 +232,7 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
             ip = &(*ip)->next;
         }
     }
+#endif // LINUX
 
 #ifdef TOO_MUCH_INFO
     char infobuf[1000];
@@ -210,7 +244,7 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
         switch(i) {
         case 0:
             title = "deleted";
-            nif = interface_addresses;
+            nif = *here;
             break;
         case 1:
             title = "   kept";
@@ -243,26 +277,32 @@ ioloop_map_interface_addresses(void *context, interface_callback_t callback)
 #endif
 
     // Report and free deleted interface addresses...
-    for (nif = interface_addresses; nif; ) {
-        interface_addr_t *next = nif->next;
-        callback(context, nif->name, &nif->addr, &nif->mask, nif->flags, interface_address_deleted);
+    for (ip = here; *ip; ) {
+        nif = *ip;
+        *ip = nif->next;
+        if (callback != NULL) {
+            callback(context, nif->name, &nif->addr, &nif->mask, nif->flags, interface_address_deleted);
+        }
         free(nif);
-        nif = next;
     }
 
     // Report added interface addresses...
     for (nif = new_ifaddrs; nif; nif = nif->next) {
-        callback(context, nif->name, &nif->addr, &nif->mask, nif->flags, interface_address_added);
+        if (callback != NULL) {
+            callback(context, nif->name, &nif->addr, &nif->mask, nif->flags, interface_address_added);
+        }
     }
 
     // Report unchanged interface addresses...
     for (nif = kept_ifaddrs; nif; nif = nif->next) {
-        callback(context, nif->name, &nif->addr, &nif->mask, nif->flags, interface_address_unchanged);
+        if (callback != NULL) {
+            callback(context, nif->name, &nif->addr, &nif->mask, nif->flags, interface_address_unchanged);
+        }
     }
 
     // Restore kept interface addresses and append new addresses to the list.
-    interface_addresses = kept_ifaddrs;
-    for (ip = &interface_addresses; *ip; ip = &(*ip)->next)
+    *here = kept_ifaddrs;
+    for (ip = here; *ip; ip = &(*ip)->next)
         ;
     *ip = new_ifaddrs;
     freeifaddrs(ifaddrs);
@@ -302,7 +342,7 @@ ioloop_recvmsg(int sock, uint8_t *buffer, size_t buffer_length, int *ifindex, in
             struct in6_pktinfo pktinfo;
 
             memcpy(&pktinfo, CMSG_DATA(cmh), sizeof pktinfo);
-            *ifindex = pktinfo.ipi6_ifindex;
+            *ifindex = (int)pktinfo.ipi6_ifindex;
 
             /* Get the destination address, for use when replying. */
             destination->sin6.sin6_family = AF_INET6;
@@ -316,7 +356,7 @@ ioloop_recvmsg(int sock, uint8_t *buffer, size_t buffer_length, int *ifindex, in
             struct in_pktinfo pktinfo;
 
             memcpy(&pktinfo, CMSG_DATA(cmh), sizeof pktinfo);
-            *ifindex = pktinfo.ipi_ifindex;
+            *ifindex = (int)pktinfo.ipi_ifindex;
 
             destination->sin.sin_family = AF_INET;
             destination->sin.sin_port = 0;
@@ -330,6 +370,25 @@ ioloop_recvmsg(int sock, uint8_t *buffer, size_t buffer_length, int *ifindex, in
         }
     }
     return rv;
+}
+
+message_t *
+ioloop_message_create_(size_t message_size, const char *file, int line)
+{
+    message_t *message;
+
+    // Never should have a message shorter than this.
+    if (message_size < DNS_HEADER_SIZE || message_size > UINT16_MAX) {
+        return NULL;
+    }
+
+    message = (message_t *)malloc(message_size + (sizeof(message_t)) - (sizeof(dns_wire_t)));
+    if (message) {
+        memset(message, 0, (sizeof(message_t)) - (sizeof(dns_wire_t)));
+        RETAIN(message);
+        message->length = (uint16_t)message_size;
+    }
+    return message;
 }
 
 #ifdef DEBUG_FD_LEAKS

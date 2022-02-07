@@ -22,6 +22,7 @@
 // We want to use much of the functionality provided by "mDNS.c",
 // except we'll steal the packets that would be sent to normal mDNSCoreReceive() routine
 #define mDNSCoreReceive __NOT__mDNSCoreReceive__NOT__
+#define MDNS_NO_STRICT 1
 #include "../mDNSCore/mDNS.c"
 #undef mDNSCoreReceive
 
@@ -53,6 +54,7 @@ void setlinebuf( FILE * fp ) {}
 #   include <net/if.h>          // For IF_NAMESIZE
 #   include <netinet/in.h>      // For INADDR_NONE
 #   include <arpa/inet.h>       // For inet_addr()
+#   define UDPSocket_struct _UDPSocket_struct
 #   include "mDNSPosix.h"      // Defines the specific types needed to run mDNS on this platform
 #endif
 #include "ExampleClientApp.h"
@@ -960,6 +962,10 @@ mDNSlocal mStatus mDNSNetMonitor(void)
     mDNS_Close(&mDNSStorage);
     return(0);
 }
+
+#ifdef FUZZING
+#define main main_NetMonitor
+#endif
 
 mDNSexport int main(int argc, char **argv)
 {

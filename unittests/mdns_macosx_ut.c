@@ -46,12 +46,12 @@ mDNSexport void SetInterfaces_ut(mDNSInterfaceID* pri_id, mDNSAddr *pri_v4, mDNS
 		addr = (pri_v4->type == mDNSAddrType_IPv4) ? pri_v4 : pri_v6;
 		*pri_id = SearchForInterfaceByAddr(addr);
 
-		CFRelease(NetworkChangedKey_IPv4);
-		CFRelease(NetworkChangedKey_IPv6);
-		CFRelease(NetworkChangedKey_Hostnames);
-		CFRelease(NetworkChangedKey_Computername);
-		CFRelease(NetworkChangedKey_DNS);
-		CFRelease(NetworkChangedKey_StateInterfacePrefix);
+        MDNS_DISPOSE_CF_OBJECT(NetworkChangedKey_IPv4);
+        MDNS_DISPOSE_CF_OBJECT(NetworkChangedKey_IPv6);
+        MDNS_DISPOSE_CF_OBJECT(NetworkChangedKey_Hostnames);
+        MDNS_DISPOSE_CF_OBJECT(NetworkChangedKey_Computername);
+        MDNS_DISPOSE_CF_OBJECT(NetworkChangedKey_DNS);
+        MDNS_DISPOSE_CF_OBJECT(NetworkChangedKey_StateInterfacePrefix);
 	}
 }
 

@@ -134,23 +134,6 @@ const NSString *    _CNInstanceKey_resolveInstance      = @"resolveInstance";
 
 @end
 
-@implementation NSBrowser( PathArray )
-
-- (NSArray *)pathArrayToColumn:(NSInteger)column includeSelectedRow:(BOOL)includeSelection
-{
-	NSMutableArray * pathArray = [NSMutableArray array];
-	if( !includeSelection ) column--;
-	for( NSInteger c = 0 ; c <= column ; c++ )
-	{
-		NSBrowserCell *cell = [self selectedCellInColumn: c];
-		if( cell ) [pathArray addObject: [cell stringValue]];
-	}
-	
-	return( pathArray );
-}
-
-@end
-
 static void resolveReply( DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, DNSServiceErrorType errorCode, const char *fullname, const char *hosttarget, uint16_t port, uint16_t txtLen, const unsigned char *txtRecord, void *context );
 static void browseReply( DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, DNSServiceErrorType errorCode, const char *serviceName, const char *regtype, const char *replyDomain, void *context );
 
@@ -434,7 +417,7 @@ static void browseReply( DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t in
         
         if( !self.instancePathPopupColumn.hidden )
         {
-            maxWidthDomain += (EDGE_GAP * 2) + needRoomForPopup ? POPUP_ARROW : 0;
+            maxWidthDomain += (EDGE_GAP * 2) + (needRoomForPopup ? POPUP_ARROW : 0);
             if( self.instancePathPopupColumn.width != maxWidthDomain )
             {
                 self.instancePathPopupColumn.width = self.instancePathPopupColumn.minWidth = self.instancePathPopupColumn.maxWidth = maxWidthDomain;

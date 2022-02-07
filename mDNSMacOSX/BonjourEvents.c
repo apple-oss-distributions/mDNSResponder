@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2010-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2010-2015, 2020 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -514,7 +514,7 @@ void RemoveEventFromPlugin(BonjourUserEventsPlugin* plugin, CFNumberRef launchdT
     // Check to see if anyone else is using this browser.
     CFIndex i;
     CFIndex count = CFDictionaryGetCount(plugin->_tokenToBrowserMap);
-    NetBrowserInfo** browsers = malloc(count * sizeof(NetBrowserInfo*));
+    NetBrowserInfo** browsers = malloc(((size_t)count) * sizeof(NetBrowserInfo*));
 
     // Fetch the values of the token dictionary
     CFDictionaryGetKeysAndValues(plugin->_tokenToBrowserMap, NULL, (const void**)browsers);
@@ -556,8 +556,8 @@ NetBrowserInfo* CreateBrowser(BonjourUserEventsPlugin* plugin, CFStringRef type,
     CFIndex i;
     CFIndex count = CFDictionaryGetCount(plugin->_browsers);
     NetBrowserInfo* browser = NULL;
-    CFDictionaryRef* dicts = malloc(count * sizeof(CFDictionaryRef));
-    NetBrowserInfo** browsers = malloc(count * sizeof(NetBrowserInfo*));
+    CFDictionaryRef* dicts = malloc(((size_t)count) * sizeof(CFDictionaryRef));
+    NetBrowserInfo** browsers = malloc(((size_t)count) * sizeof(NetBrowserInfo*));
 
     // Fetch the values of the browser dictionary
     CFDictionaryGetKeysAndValues(plugin->_browsers, (const void**)browsers, (const void**)dicts);
@@ -626,7 +626,7 @@ NetBrowserInfo* BrowserForSDRef(BonjourUserEventsPlugin* plugin, DNSServiceRef s
     CFIndex i;
     CFIndex count = CFDictionaryGetCount(plugin->_browsers);
     NetBrowserInfo* browser = NULL;
-    NetBrowserInfo** browsers = malloc(count * sizeof(NetBrowserInfo*));
+    NetBrowserInfo** browsers = malloc(((size_t)count) * sizeof(NetBrowserInfo*));
 
     // Fetch the values of the browser dictionary
     CFDictionaryGetKeysAndValues(plugin->_browsers, (const void**)browsers, NULL);
@@ -857,7 +857,7 @@ NetBrowserInfo* NetBrowserInfoCreate(CFStringRef serviceType, CFStringRef domain
     Boolean success = true;
 
     CFIndex serviceSize = CFStringGetMaximumSizeForEncoding(CFStringGetLength(serviceType), kCFStringEncodingUTF8);
-    cServiceType = calloc(serviceSize, 1);
+    cServiceType = calloc((size_t)serviceSize, 1);
     success = CFStringGetCString(serviceType, cServiceType, serviceSize, kCFStringEncodingUTF8);
 
 
@@ -866,7 +866,7 @@ NetBrowserInfo* NetBrowserInfoCreate(CFStringRef serviceType, CFStringRef domain
         CFIndex domainSize = CFStringGetMaximumSizeForEncoding(CFStringGetLength(domain), kCFStringEncodingUTF8);
         if (domainSize)
         {
-            cDomain = calloc(domainSize, 1);
+            cDomain = calloc((size_t)domainSize, 1);
             success = success && CFStringGetCString(domain, cDomain, domainSize, kCFStringEncodingUTF8);
         }
     }

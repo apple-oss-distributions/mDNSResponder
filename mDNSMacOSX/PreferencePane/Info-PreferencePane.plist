@@ -11,7 +11,7 @@
 	<key>CFBundleIconFile</key>
 	<string>BonjourPref</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.apple.preference.bonjour</string>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -30,9 +30,9 @@
 	<string>BonjourPref.tiff</string>
 	<key>NSPrefPaneIconLabel</key>
 	<string>Bonjour</string>
-	<key>NSPrincipalClass</key>
-	<string>DNSServiceDiscoveryPref</string>
 	<key>NSPrefPaneRemoteViewClass</key>
 	<string>BonjourPrefRemoteViewService</string>
+	<key>NSPrincipalClass</key>
+	<string>DNSServiceDiscoveryPref</string>
 </dict>
 </plist>

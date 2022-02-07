@@ -1,6 +1,6 @@
 /* srp-thread.c
  *
- * Copyright (c) 2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2019-2020 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,6 @@
 #include "HAPPlatformRandomNumber.h"
 #include "dns-msg.h"
 #include "dns_sd.h"
-#define SRP_CRYPTO_MBEDTLS_INTERNAL 1
 #include "srp-crypto.h"
 
 APP_TIMER_DEF(m_srp_timer);

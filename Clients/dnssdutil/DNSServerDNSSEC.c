@@ -4,8 +4,7 @@
 
 #include "DNSServerDNSSEC.h"
 
-#include "DNSMessage.h"
-
+#include <mdns/DNSMessage.h>
 #include <Security/SecKeyPriv.h>
 
 //===========================================================================================================================
@@ -3219,7 +3218,7 @@ _DNSKeySetsCompileTimeChecks( Ed25519 );
 	case kDNSSECAlgorithm_ ## ALG_NAME:																		\
 		if( inIndex < countof( kDNSKey ## ALG_NAME ## Sets ) )												\
 		{																									\
-			const DNSKey ## ALG_NAME ## Set * const		    _set = &kDNSKey ## ALG_NAME ## Sets[ inIndex ];	\
+			const DNSKey ## ALG_NAME ## Set * const			_set = &kDNSKey ## ALG_NAME ## Sets[ inIndex ];	\
 			const DNSKey ## ALG_NAME ## Info * const		_keyInfo = inGetZSK ? &_set->zsk : &_set->ksk;	\
 																											\
 			return( (DNSKeyInfoRef) _keyInfo );																\
@@ -3321,7 +3320,6 @@ uint16_t	DNSKeyInfoGetKeyTag( const DNSKeyInfoRef inKeyInfo )
 
 //===========================================================================================================================
 
-#define SHA1_OUTPUT_SIZE		20
 #define SHA256_OUTPUT_SIZE		32
 #define SHA384_OUTPUT_SIZE		48
 

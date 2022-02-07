@@ -21,6 +21,25 @@
 # the order it's going to run the rc.d scripts at startup time.
 # PROVIDE: mdnsd
 # REQUIRE: NETWORKING
+#
+### BEGIN INIT INFO
+# Provides:          mdnsd
+# Required-Start:    $network $local_fs
+# Required-Stop:     $network $local_fs
+# Should-Start:
+# Should-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Apple Multicast DNS / DNS Service Discovery daemon
+# Description:       This daemon adds support for multicast DNS to the system built-in resolver
+#                    and provides a mechanism that programs can use to advertise and discover services
+#                    using multicast DNS on the local network automatically,
+#                    without requiring the user to configure a discovery service.
+### END INIT INFO
+
+if [ -f /lib/lsb/init-functions ]; then
+    . /lib/lsb/init-functions
+fi
 
 if [ -r /usr/sbin/mdnsd ]; then
     DAEMON=/usr/sbin/mdnsd

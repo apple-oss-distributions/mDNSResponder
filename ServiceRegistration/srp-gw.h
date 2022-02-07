@@ -1,12 +1,12 @@
 /* srp-gw.c
  *
- * Copyright (c) 2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -58,6 +58,7 @@ struct dns_host_description {
 typedef struct service service_t;
 struct service {
     service_t *NULLABLE next;
+    service_t *NULLABLE base_type; // A pointer back in the list, or to self
     dns_rr_t *NONNULL rr; // The service name is rr->name.
     dns_name_t *NONNULL zone;
 };
