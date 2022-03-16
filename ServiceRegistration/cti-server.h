@@ -27,6 +27,7 @@
 #define CTI_EVENT_ROLE         (1 << 3)
 #define CTI_EVENT_PARTITION_ID (1 << 4)
 #define CTI_EVENT_STATE        (1 << 5)
+#define CTI_EVENT_XPANID       (1 << 6)
 
 #ifndef NO_IOLOOP
 #define NO_IOLOOP 1
@@ -56,6 +57,7 @@ int ctiAddMeshPrefix(struct in6_addr *NONNULL prefix,
 int ctiRemoveMeshPrefix(struct in6_addr *NONNULL prefix, size_t prefix_length) GCCATTR((nonnull (1)));
 int ctiRetrievePrefixList(cti_connection_t NONNULL connection, int event) GCCATTR((nonnull (1)));
 int ctiRetrievePartitionId(cti_connection_t NONNULL connection, int event) GCCATTR((nonnull (1)));
+int ctiRetrieveXPANID(cti_connection_t NONNULL connection, int event) GCCATTR((nonnull (1)));
 int ctiRetrieveTunnel(cti_connection_t NONNULL connection) GCCATTR((nonnull (1)));
 int ctiRetrieveNodeType(cti_connection_t NONNULL connection, int event) GCCATTR((nonnull (1)));
 

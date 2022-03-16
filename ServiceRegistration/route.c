@@ -151,6 +151,7 @@ uint16_t srp_service_listen_port;
 uint8_t thread_partition_id[4];
 srp_proxy_listener_state_t *srp_listener;
 struct in6_addr ula_prefix;
+struct in6_addr xpanid_prefix;
 int num_thread_interfaces; // Should be zero or one.
 int ula_serial = 1;
 bool advertise_default_route_on_thread;
@@ -165,6 +166,7 @@ char *home_interface_name;
 bool thread_proxy_service_setup_done;
 bool interface_state_stable = false;
 bool have_non_thread_interface = false;
+uint64_t xpanid;
 
 #ifndef RA_TESTER
 cti_network_state_t current_thread_state = kCTI_NCPState_Uninitialized;
@@ -173,6 +175,7 @@ cti_connection_t thread_state_context;
 cti_connection_t thread_service_context;
 cti_connection_t thread_prefix_context;
 cti_connection_t thread_partition_id_context;
+cti_connection_t thread_xpanid_context;
 #endif
 
 #if !defined(RA_TESTER)
@@ -238,6 +241,7 @@ static bool partition_tunnel_name_is_known;
 static bool partition_can_advertise_service;
 static bool partition_service_blocked;
 static bool partition_can_provide_routing;
+static bool partition_has_xpanid;
 static bool partition_may_offer_service = false;
 static bool partition_settle_satisfied = true;
 static wakeup_t *partition_settle_wakeup;
@@ -654,19 +658,27 @@ interface_beacon(void *context)
     interface_t *interface = context;
     uint64_t now = ioloop_timenow();
 
-    INFO("interface_beacon:" PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
+    INFO("interface_beacon:" PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
          interface->deprecate_deadline > now ? " ddl>now" : "",
 #ifdef RA_TESTER
-         "",
+         "", "",
 #else
          partition_can_provide_routing ? " canpr" : " !canpr",
+         partition_has_xpanid ? " havexp" : " !havexp",
 #endif
          interface->advertise_ipv6_prefix ? " advert" : " !advert",
          interface->sent_first_beacon ? "" : " first beacon");
 
     if (interface->deprecate_deadline > now) {
-        // The remaining valid lifetime is the time left until the deadline.
+        // The remaining valid and preferred lifetimes is the time left until the deadline.
         interface->valid_lifetime = (uint32_t)((interface->deprecate_deadline - now) / 1000);
+        interface->preferred_lifetime = (uint32_t)((interface->deprecate_deadline - now) / 1000);
+        // When we're deprecating the prefix, we don't actually want to make the preferred lifetime zero, because
+        // this will cause IP address flapping if we miss a router advertisement.
+#define FIVE_MINUTES 5 * 60
+        if (interface->preferred_lifetime > FIVE_MINUTES) {
+            interface->preferred_lifetime = FIVE_MINUTES;
+        }
         if (interface->valid_lifetime < icmp_listener.unsolicited_interval / 1000) {
             SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
             INFO("interface_beacon: prefix valid life time is less than the unsolicited interval, stop advertising it "
@@ -684,7 +696,7 @@ interface_beacon(void *context)
 #ifndef RA_TESTER
     // If we have been beaconing, and router mode has been disabled, and we don't have
     // an on-link prefix to advertise, discontinue beaconing.
-    if (partition_can_provide_routing || interface->advertise_ipv6_prefix) {
+    if ((partition_can_provide_routing && partition_has_xpanid) || interface->advertise_ipv6_prefix) {
 #endif
 
     // Send an RA.
@@ -693,8 +705,10 @@ interface_beacon(void *context)
         interface->last_beacon = ioloop_timenow();;
 #ifndef RA_TESTER
     } else {
-        INFO("Didn't send: %s %s", partition_can_provide_routing ? "canpr" : "can'tpr",
-             interface->advertise_ipv6_prefix ? "advert" : "!advert");
+        INFO("Didn't send: " PRI_S_SRP PRI_S_SRP PRI_S_SRP,
+             partition_can_provide_routing ? "canpr" : "can'tpr",
+             partition_has_xpanid ? " xpanid" : " !xpanid",
+             interface->advertise_ipv6_prefix ? " advert" : " !advert");
     }
 #endif
     if (interface->num_beacons_sent < 3) {
@@ -800,13 +814,15 @@ router_discovery_stop(interface_t *interface, uint64_t now)
     if (interface->post_solicit_wakeup != NULL) {
         ioloop_cancel_wake_event(interface->post_solicit_wakeup);
     }
+#if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     if (interface->vicarious_discovery_complete != NULL) {
         ioloop_cancel_wake_event(interface->vicarious_discovery_complete);
         INFO("router_discovery_stop: stopping vicarious router discovery on " PUB_S_SRP, interface->name);
     }
+    interface->vicarious_router_discovery_in_progress = false;
+#endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     interface->router_discovery_complete = true;
     interface->router_discovery_in_progress = false;
-    interface->vicarious_router_discovery_in_progress = false;
     // clear out need_reconfigure_prefix when router_discovery_complete is set back to true.
     interface->need_reconfigure_prefix = false;
     flush_stale_routers(interface, now);
@@ -859,6 +875,7 @@ exit:
     return;
 }
 
+#if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
 static void
 make_all_routers_nearly_stale(interface_t *interface, uint64_t now)
 {
@@ -879,6 +896,7 @@ vicarious_discovery_callback(void *context)
     // RAs containing on-link prefixes.
     routing_policy_evaluate(interface, false);
 }
+#endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
 
 #ifndef RA_TESTER
 static void
@@ -941,9 +959,23 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
                     prefix_information_t *prefix = &option->option.prefix_information;
                     if ((prefix->flags & ND_OPT_PI_FLAG_ONLINK) &&
                         ((prefix->flags & ND_OPT_PI_FLAG_AUTO) || (router->flags & ND_RA_FLAG_MANAGED)) &&
-                        prefix->preferred_lifetime > 0)
+                        prefix->preferred_lifetime > 0 &&
+                        // We don't consider the prefix we would advertise to be infrastructure-provided if we see it
+                        // advertised by another router, because that router is also a Thread BR, and we don't want
+                        // to get into dueling prefixes with it.
+                        memcmp(&option->option.prefix_information.prefix, &xpanid_prefix, 8))
                     {
                         uint32_t preferred_lifetime_offset = MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE / MSEC_PER_SEC;
+
+                        SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, router_src_addr_buf);
+                        SEGMENTED_IPv6_ADDR_GEN_SRP(option->option.prefix_information.prefix.s6_addr, pref_buf);
+                        SEGMENTED_IPv6_ADDR_GEN_SRP(xpanid_prefix.s6_addr, xpanid_buf);
+                        INFO("Router " PRI_SEGMENTED_IPv6_ADDR_SRP " advertising " PRI_SEGMENTED_IPv6_ADDR_SRP
+                             " which is different from our prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                             SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, router_src_addr_buf),
+                             SEGMENTED_IPv6_ADDR_PARAM_SRP(option->option.prefix_information.prefix.s6_addr, pref_buf),
+                             SEGMENTED_IPv6_ADDR_PARAM_SRP(xpanid_prefix.s6_addr, xpanid_buf));
+
                         // If the remaining time on this prefix is less than the stale time gap, use an offset that's the
                         // valid lifetime minus sixty seconds so that we have time if the prefix expires.
                         if (prefix->preferred_lifetime < preferred_lifetime_offset + 60) {
@@ -1021,7 +1053,6 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
         if (interface->preferred_lifetime != 0) {
             INFO("routing_policy_evaluate: deprecating interface prefix in 30 minutes - prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
-            interface->preferred_lifetime = 0;
             interface->deprecate_deadline = now + 30 * 60 * 1000;
             something_changed = true;
         } else {
@@ -1133,6 +1164,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
     }
 }
 
+#if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
 static void
 start_vicarious_router_discovery_if_appropriate(interface_t *const interface)
 {
@@ -1158,6 +1190,7 @@ start_vicarious_router_discovery_if_appropriate(interface_t *const interface)
              interface->name);
     }
 }
+#endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
 
 static void
 router_solicit(icmp_message_t *message)
@@ -1195,11 +1228,13 @@ router_solicit(icmp_message_t *message)
         interface_beacon_schedule(interface, 0);
     }
 
+#if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     // When we receive a router solicit, it means that a host is looking for a router.   We should
     // expect to hear replies if they are multicast.   If we hear no replies, it could mean there is
     // no on-link prefix.   In this case, we restart our own router discovery process.  There is no
     // need to do this if we are the one advertising a prefix.
     start_vicarious_router_discovery_if_appropriate(interface);
+#endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
 }
 
 static void
@@ -1397,7 +1432,8 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
 #ifdef CONFIGURE_STATIC_INTERFACE_ADDRESSES
     struct in6_addr interface_address = prefix;
     char addrbuf[INET6_ADDRSTRLEN + 4];
-    interface_address.s6_addr[15] = 1;
+    // Use our ULA prefix as the host identifier.
+    memcpy(&interface_address.s6_addr[10], &ula_prefix.s6_addr[0], 6);
     inet_ntop(AF_INET6, &interface_address, addrbuf, INET6_ADDRSTRLEN);
 #if   defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG)
     char *args[] = { "set", interface->name, "MANUAL-V6", addrbuf, "64" };
@@ -1715,7 +1751,6 @@ router_advertisement_send(interface_t *interface)
 
     }
 
-
 #ifndef ND_OPT_ROUTE_INFORMATION
 #define ND_OPT_ROUTE_INFORMATION 24
 #endif
@@ -1740,6 +1775,7 @@ router_advertisement_send(interface_t *interface)
         if (
 #ifndef RA_TESTER
             partition_can_provide_routing &&
+            partition_has_xpanid &&
 #endif
             ifroute->advertise_ipv6_prefix &&
 #ifdef SEND_ON_LINK_ROUTE
@@ -2154,7 +2190,7 @@ start_icmp_listener(void)
     }
 
     // Beacon out a router advertisement every three minutes.
-    icmp_listener.unsolicited_interval = 180 * 1000;
+    icmp_listener.unsolicited_interval = 3 * 60 * 1000;
     ioloop_add_reader(icmp_listener.io_state, icmp_callback);
 
     return true;
@@ -2287,9 +2323,12 @@ interface_shutdown(interface_t *interface)
     if (interface->deconfigure_wakeup != NULL) {
         ioloop_cancel_wake_event(interface->deconfigure_wakeup);
     }
+#if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     if (interface->vicarious_discovery_complete != NULL) {
         ioloop_cancel_wake_event(interface->vicarious_discovery_complete);
     }
+    interface->vicarious_router_discovery_in_progress = false;
+#endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     for (router = interface->routers; router; router = next) {
         next = router->next;
         icmp_message_free(router);
@@ -2308,7 +2347,6 @@ interface_shutdown(interface_t *interface)
     interface->num_beacons_sent = 0;
     interface->router_discovery_complete = false;
     interface->router_discovery_in_progress = false;
-    interface->vicarious_router_discovery_in_progress = false;
     interface->need_reconfigure_prefix = false;
 }
 
@@ -2316,12 +2354,10 @@ static void
 interface_prefix_evaluate(interface_t *interface)
 {
     // Set up the interface prefix using the prefix number for the link.
-    interface->ipv6_prefix = ula_prefix;
+    interface->ipv6_prefix = xpanid_prefix;
     if (interface->prefix_number == 0) {
         interface->prefix_number = ula_serial++;
     }
-    interface->ipv6_prefix.s6_addr[6] = interface->prefix_number >> 8;
-    interface->ipv6_prefix.s6_addr[7] = interface->prefix_number & 255;
 }
 
 static void
@@ -2369,7 +2405,7 @@ interface_active_state_evaluate(interface_t *interface, bool active_known, bool 
 
                 interface_prefix_evaluate(interface);
 #ifndef RA_TESTER
-                if (partition_can_provide_routing) {
+                if (partition_can_provide_routing && partition_has_xpanid) {
 #endif
                     router_discovery_start(interface);
 
@@ -2802,16 +2838,17 @@ cti_get_state_callback(void *UNUSED context, cti_network_state_t state, cti_stat
 }
 
 static void
-cti_get_partition_id_callback(void *UNUSED context, int32_t partition_id, cti_status_t status)
+cti_get_partition_id_callback(void *UNUSED context, uint64_t partition_id, cti_status_t status)
 {
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
-        INFO("cti_get_partition_id_callback: disconnected");
+        INFO("disconnected");
         attempt_wpan_reconnect();
         return;
     }
 
     if (status == kCTIStatus_NoError) {
-        INFO("Partition ID changed to %" PRIu32, partition_id);
+        INFO("Partition ID changed to %" PRIu64, partition_id);
+        // Partition ID is actually only 32 bits
         thread_partition_id[0] = (uint8_t)((partition_id >> 24) & 255);
         thread_partition_id[1] = (uint8_t)((partition_id >> 16) & 255);
         thread_partition_id[2] = (uint8_t)((partition_id >> 8) & 255);
@@ -2819,8 +2856,42 @@ cti_get_partition_id_callback(void *UNUSED context, int32_t partition_id, cti_st
 
         partition_id_changed();
     } else {
-        ERROR("cti_get_state_callback: nonzero status %d", status);
+        ERROR("nonzero status %d", status);
     }
+}
+
+static void
+cti_get_xpanid_callback(void *UNUSED context, uint64_t new_xpanid, cti_status_t status)
+{
+    if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
+        INFO("disconnected");
+        attempt_wpan_reconnect();
+        return;
+    }
+
+    if (status == kCTIStatus_NoError) {
+        if (partition_has_xpanid) {
+            ERROR("Unexpected change to XPANID from %" PRIu64 " to %" PRIu64, xpanid, new_xpanid);
+        } else {
+            INFO("XPANID is now %" PRIu64, new_xpanid);
+        }
+    } else {
+        ERROR("nonzero status %d", status);
+        return;
+    }
+
+    xpanid = new_xpanid;
+    partition_has_xpanid = true;
+    memset(&xpanid_prefix, 0, sizeof(xpanid_prefix));
+    xpanid_prefix.s6_addr[0] = 0xfd;
+    for (int i = 1; i < 8; i++) {
+        xpanid_prefix.s6_addr[i] = ((xpanid >> ((15 - i) * 8)) & 255);
+    }
+    for (interface_t *interface = interfaces; interface != NULL; interface = interface->next) {
+        interface_prefix_evaluate(interface);
+    }
+
+    partition_maybe_enable_services();
 }
 
 static void
@@ -3242,6 +3313,9 @@ thread_network_startup(void)
     if (status == kCTIStatus_NoError) {
         status = cti_get_partition_id(&thread_partition_id_context, NULL, cti_get_partition_id_callback, NULL);
     }
+    if (status == kCTIStatus_NoError) {
+        status = cti_get_extended_pan_id(&thread_xpanid_context, NULL, cti_get_xpanid_callback, NULL);
+    }
     if (status != kCTIStatus_NoError) {
         if (status == kCTIStatus_DaemonNotRunning) {
             attempt_wpan_reconnect();
@@ -3345,6 +3419,7 @@ partition_state_reset(void)
     partition_tunnel_name_is_known = false;
     partition_can_advertise_service = false;
     partition_can_provide_routing = false;
+    partition_has_xpanid = false;
     partition_may_offer_service = false;
     partition_settle_satisfied = true;
 
@@ -4337,13 +4412,13 @@ partition_id_changed(void)
 
     // If we get a partition ID when we aren't a router, we should (I think!) ignore it.
     if (!partition_can_provide_routing) {
-        INFO("partition_id_changed: we aren't able to offer routing yet, so ignoring.");
+        INFO("we aren't able to offer routing yet, so ignoring.");
         return;
     }
 
     // If we are advertising a prefix, update our pref:id
     if (published_thread_prefix != NULL) {
-        INFO("partition_id_changed: updating advertised prefix id");
+        INFO("updating advertised prefix id");
         partition_id_update();
         // In principle we didn't change anything material to the routing subsystem, so no need to re-evaluate current
         // policy.

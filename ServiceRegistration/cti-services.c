@@ -40,6 +40,8 @@ static void cti_message_parse(cti_connection_t connection);
 //*************************************************************************************************************
 // Globals
 
+#include "cti-common.h"
+
 #include "cti-proto.h"
 
 
@@ -373,14 +375,15 @@ cti_get_state_(cti_connection_t *ref, void *NULLABLE context, cti_state_reply_t 
     return ret;
 }
 
-// For event comamnds, we return failure and close; on success, we just wait for events to flow and return those.
+typedef uint32_t cti_property_name_t;
+
+// For event commands, we return failure and close; on success, we just wait for events to flow and return those.
 static void
-cti_internal_partition_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
+cti_internal_uint64_property_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
-    cti_partition_id_reply_t callback;
-    INFO("cti_internal_partition_event_callback: conn_ref = %p", conn_ref);
+    cti_uint64_property_reply_t callback = conn_ref->callback.uint64_property_reply;
+    INFO("conn_ref = %p", conn_ref);
     if (status != kCTIStatus_NoError) {
-        callback = conn_ref->callback.partition_id_reply;
         if (callback != NULL) {
             callback(conn_ref->context, 0, status);
             // Only one error callback ever.
@@ -390,18 +393,18 @@ cti_internal_partition_event_callback(cti_connection_t conn_ref, void *UNUSED ob
     }
 }
 
-cti_status_t
-cti_get_partition_id_(cti_connection_t *ref, void *NULLABLE context, cti_partition_id_reply_t NONNULL callback,
-                      run_context_t NULLABLE client_queue, const char *file, int line)
+static cti_status_t
+cti_get_uint64_property(cti_connection_t *ref, void *NULLABLE context, cti_uint64_property_reply_t NONNULL callback,
+                        run_context_t NULLABLE client_queue, cti_property_name_t property_name, const char *file, int line)
 {
     cti_callback_t app_callback;
-    app_callback.partition_id_reply = callback;
+    app_callback.uint64_property_reply = callback;
     int ret;
     cti_connection_t conn_ref;
-    ret = cti_connection_create(context, app_callback, cti_internal_partition_event_callback, &conn_ref);
+    ret = cti_connection_create(context, app_callback, cti_internal_uint64_property_callback, &conn_ref);
     if (ret == kCTIStatus_NoError) {
-        if (cti_connection_message_create(conn_ref, kCTIMessageType_RequestPartitionEvents, 4)) {
-            if (!cti_connection_message_send(conn_ref)) {
+        if (cti_connection_message_create(conn_ref, kCTIMessageType_RequestUInt64PropEvent, 4)) {
+            if (!cti_connection_u32_put(conn_ref, property_name) || !cti_connection_message_send(conn_ref)) {
                 ret = kCTIStatus_Disconnected;
             }
         } else {
@@ -414,7 +417,23 @@ cti_get_partition_id_(cti_connection_t *ref, void *NULLABLE context, cti_partiti
     return ret;
 }
 
-// For event comamnds, we return failure and close; on success, we just wait for events to flow and return those.
+cti_status_t
+cti_get_partition_id_(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+                      cti_uint64_property_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                      const char *NONNULL file, int line)
+{
+    return cti_get_uint64_property(ref, context, callback, client_queue, kCTIPropertyPartitionID, file, line);
+}
+
+cti_status_t
+cti_get_extended_pan_id_(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+                         cti_uint64_property_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                         const char *NONNULL file, int line)
+{
+    return cti_get_uint64_property(ref, context, callback, client_queue, kCTIPropertyExtendedPANID, file, line);
+}
+
+// For event commands, we return failure and close; on success, we just wait for events to flow and return those.
 static void
 cti_internal_node_type_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
@@ -713,16 +732,16 @@ cti_state_event_parse(cti_connection_t connection)
 }
 
 static void
-cti_partition_event_parse(cti_connection_t connection)
+cti_uint64_property_event_parse(cti_connection_t connection)
 {
-    uint32_t partition_id;
+    uint64_t property_value;
 
     // And statement will fail as soon as anything fails to parse.
-    if (cti_connection_u32_parse(connection, &partition_id) &&
+    if (cti_connection_u64_parse(connection, &property_value) &&
         cti_connection_parse_done(connection))
     {
-        INFO("cti_partition_event_parse: %d", partition_id);
-        connection->callback.partition_id_reply(connection, partition_id, kCTIStatus_NoError);
+        INFO("%" PRIx64, property_value);
+        connection->callback.uint64_property_reply(connection, property_value, kCTIStatus_NoError);
     }
 }
 
@@ -865,8 +884,8 @@ cti_message_parse(cti_connection_t connection)
     case kCTIMessageType_StateEvent:
         cti_state_event_parse(connection);
         break;
-    case kCTIMessageType_PartitionEvent:
-        cti_partition_event_parse(connection);
+    case kCTIMessageType_UInt64PropEvent:
+        cti_uint64_property_event_parse(connection);
         break;
     case kCTIMessageType_RoleEvent:
         cti_role_event_parse(connection);

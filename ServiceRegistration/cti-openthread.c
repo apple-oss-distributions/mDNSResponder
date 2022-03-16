@@ -308,9 +308,26 @@ int ctiRetrievePrefixList(cti_connection_t connection, int UNUSED event)
 
 int ctiRetrievePartitionId(cti_connection_t connection, int UNUSED event)
 {
-    uint32_t partitionId = otThreadGetPartitionId(gInstance);
-    SuccessOrFailure(cti_connection_message_create(connection, kCTIMessageType_PartitionEvent, sizeof(partitionId)));
-    SuccessOrFailure(cti_connection_u32_put(connection, partitionId));
+    uint32_t partitionId = otThreadGetPartitionId(cti_instance);
+    SuccessOrFailure(cti_connection_message_create(connection, kCTIMessageType_UInt64PropEvent,
+                                                   sizeof(partitionId) + sizeof(uint32_t)));
+    SuccessOrFailure(cti_connection_u32_put(connection, kCTIPropertyPartitionID));
+    SuccessOrFailure(cti_connection_u64_put(connection, partitionId));
+    SuccessOrFailure(cti_connection_message_send(connection));
+    return kCTIStatus_NoError;
+}
+
+int ctiRetrieveXPANID(cti_connection_t connection, int UNUSED event)
+{
+    const otExtendedPanId *panid_buf = otThreadGetExtendedPanId(cti_instance);
+    uint64_t xpanid = 0;
+    for (int i = 7; i >= 0; i--) {
+        xpanid = (xpanid << 8) | panid_buf->m8[i];
+    }
+    SuccessOrFailure(cti_connection_message_create(connection, kCTIMessageType_UInt64PropEvent,
+                                                   sizeof(xpanid) + sizeof(uint32_t)));
+    SuccessOrFailure(cti_connection_u32_put(connection, kCTIPropertyExtendedPANID));
+    SuccessOrFailure(cti_connection_u64_put(connection, xpanid));
     SuccessOrFailure(cti_connection_message_send(connection));
     return kCTIStatus_NoError;
 }
@@ -418,6 +435,12 @@ handleThreadStateChanged(uint32_t flags, void UNUSED *context)
         syslog(LOG_INFO, "    Thread Partition ID changed.  Notify registered clients" );
         cti_notify_event(CTI_EVENT_PARTITION_ID, ctiRetrievePartitionId);
     }
+    if ( flags & OT_CHANGED_THREAD_EXT_PANID)
+    {
+        syslog(LOG_INFO, "    Thread Partition ID changed.  Notify registered clients" );
+        cti_notify_event(CTI_EVENT_XPANID, ctiRetrievePartitionId);
+    }
+
 }
 
 // Functions to be called by ot-daemon's main:

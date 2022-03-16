@@ -460,22 +460,22 @@ DNS_SERVICES_EXPORT cti_status_t
 cti_get_state_(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context, cti_state_reply_t NONNULL callback,
                run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
-/* cti_partition_id_reply: Callback from cti_get_partition_id()
+/* cti_uint64_property_reply: Callback from cti_get_partition_id() or cti_get_xpanid()
  *
- * Called when an error occurs during processing of the cti_get_partition_id call, or when network partition ID
- * information is available.
+ * Called when an error occurs during processing of the cti_get_* call, or when a new value for the requested property
+ * is available.
  *
  * In the case of an error, the callback will not be called again, and the caller is responsible for
- * releasing the connection partition_id and restarting if needed.
+ * releasing the connection and restarting if needed.
  *
- * The callback will be called initially to report the network partition ID, and subsequently whenever the
- * network partition ID changes.
+ * The callback will be called initially to report the current value for the property, and subsequently whenever the
+ * property changes.
  *
- * cti_reply parameters:
+ * cti_uint64_property_reply parameters:
  *
  * context:           The context that was passed to the cti prefix call to which this is a callback.
  *
- * partition_id:      The network partition ID, or -1 if it is not known.
+ * property_value     The value of the property (only valid if status is kCTIStatus_NoError).
  *
  * status:	          Will be kCTIStatus_NoError if the partition ID request is successful, or will indicate the failure
  *                    that occurred.
@@ -483,7 +483,7 @@ cti_get_state_(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context, 
  */
 
 typedef void
-(*cti_partition_id_reply_t)(void *NULLABLE context, int32_t partition_id, cti_status_t status);
+(*cti_uint64_property_reply_t)(void *NULLABLE context, uint64_t property_value, cti_status_t status);
 
 /* cti_get_partition_id
  *
@@ -514,8 +514,40 @@ typedef void
     cti_get_partition_id_(ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
 cti_get_partition_id_(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
-                      cti_partition_id_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                      cti_uint64_property_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
                       const char *NONNULL file, int line);
+
+/* cti_get_extended_pan_id
+ *
+ * Requests wpantund to immediately send the current extended_pan_id of the thread network.  Whenever the thread
+ * network extended_pan_id changes, the callback will be called again with the new extended_pan_id.  A return value of
+ * kCTIStatus_NoError means that the caller can expect the reply callback to be called at least once.  Any
+ * other error means that the request could not be sent, and the callback will never be called.
+ *
+ * To discontinue receiving extended_pan_id change callbacks, the calling program should call
+ * cti_connection_ref_deallocate on the conn_ref returned by a successful call to cti_get_extended_pan_id();
+ *
+ * ref:            A pointer to a reference to the connection is stored through ref if ref is not NULL.
+ *                 When events are no longer needed, call cti_discontinue_events() on the returned pointer.
+ *
+ * context:        An anonymous pointer that will be passed along to the callback when
+ *                 an event occurs.
+ * client_queue:   Queue the client wants to schedule the callback on (Note: Must not be NULL)
+ *
+ * callback:       CallBack function for the client that indicates success or failure.
+ *
+ * return value:   Returns kCTIStatus_NoError when no error otherwise returns an error code indicating
+ *                 the error that occurred. Note: A return value of kCTIStatus_NoError does not mean
+ *                 that the request succeeded, merely that it was successfully started.
+ *
+ */
+
+#define cti_get_extended_pan_id(ref, context, callback, client_queue) \
+    cti_get_extended_pan_id_(ref, context, callback, client_queue, __FILE__, __LINE__)
+DNS_SERVICES_EXPORT cti_status_t
+cti_get_extended_pan_id_(cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+                         cti_uint64_property_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                         const char *NONNULL file, int line);
 
 /* cti_network_node_type_reply: Callback from cti_get_network_node_type()
  *
@@ -730,7 +762,7 @@ typedef union cti_callback {
     cti_service_reply_t NONNULL service_reply;
     cti_prefix_reply_t NONNULL prefix_reply;
     cti_state_reply_t NONNULL state_reply;
-    cti_partition_id_reply_t NONNULL partition_id_reply;
+    cti_uint64_property_reply_t NONNULL uint64_property_reply;
     cti_network_node_type_reply_t NONNULL network_node_type_reply;
 } cti_callback_t;
 

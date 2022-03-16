@@ -192,6 +192,8 @@ cti_get_tunnel_name_parse(cti_connection_t connection)
 static void
 cti_message_parse(cti_connection_t connection)
 {
+    uint32_t propertyName;
+
     cti_connection_parse_start(connection);
     if (!cti_connection_u16_parse(connection, &connection->message_type)) {
         return;
@@ -222,12 +224,23 @@ cti_message_parse(cti_connection_t connection)
 #endif
         }
         break;
-    case kCTIMessageType_RequestPartitionEvents:
-        if (cti_connection_parse_done(connection)) {
-            connection->registered_event_flags |= CTI_EVENT_PARTITION_ID;
+    case kCTIMessageType_RequestUInt64PropEvents:
+        if (cti_connection_u32_parse(connection, &propertyName) && cti_connection_parse_done(connection)) {
             cti_send_response(connection, kCTIStatus_NoError);
 #ifndef POSIX_BUILD
-            ctiRetrievePartitionId(connection, CTI_EVENT_PARTITION_ID);
+            switch(propertyName) {
+            case kCTIPropertyPartitionID:
+                connection->registered_event_flags |= CTI_EVENT_PARTITION_ID;
+                ctiRetrievePartitionId(connection, CTI_EVENT_PARTITION_ID);
+                break;
+            case kCTIPropertyExtendedPANID:
+                connection->registered_event_flags |= CTI_EVENT_XPANID;
+                ctiRetrieveXPANID(connection, CTI_EVENT_XPANID);
+                break;
+            default:
+                cti_connection_close(connection);
+                break;
+            }
 #endif
         }
         break;
