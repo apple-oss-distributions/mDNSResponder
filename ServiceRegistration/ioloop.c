@@ -441,6 +441,7 @@ start_over:
                 }
                 subproc->callback(subproc->context, status, NULL);
                 if (!WIFSTOPPED(status)) {
+                    subproc->finished = true;
                     RELEASE_HERE(subproc, subproc_finalize);
                     break;
                 }
@@ -690,7 +691,7 @@ tcp_read_callback(io_t *io, void *context)
         connection->message_cur += rv;
         if (connection->message_cur == connection->message_length) {
             connection->message_cur = 0;
-            connection->datagram_callback(connection, connection->message, connection->io.context);
+            connection->datagram_callback(connection, connection->message, connection->context);
             // The callback may retain the message; we need to make way for the next one.
             RELEASE_HERE(connection->message, message_finalize);
             connection->message = NULL;
@@ -1272,7 +1273,11 @@ connect_callback(io_t *io, void *context)
     // If this is a TLS connection, set up TLS.
     if (connection->tls_context == (tls_context_t *)-1) {
 #ifndef EXCLUDE_TLS
-        srp_tls_connect_callback(connection);
+        if (!srp_tls_connect_callback(connection)) {
+            connection->disconnected(connection, connection->context, 0);
+            ioloop_comm_cancel(connection);
+            return;
+        }
 #else
         ERROR("connect_callback: tls_context triggered with TLS excluded.");
         connection->disconnected(connection, connection->context, 0);
@@ -1281,7 +1286,10 @@ connect_callback(io_t *io, void *context)
 #endif
     }
 
-    connection->connected(connection, connection->context);
+    // We don't want to say we're connected until the TLS handshake is complete.
+    if (!connection->tls_handshake_incomplete) {
+        connection->connected(connection, connection->context);
+    }
     drop_writer(&connection->io);
     ioloop_add_reader(&connection->io, tcp_read_callback);
 }
@@ -1343,20 +1351,29 @@ ioloop_connection_create(addr_t *remote_address, bool tls, bool stream, bool sta
         return NULL;
     }
     // If a stable address has been requested, request a public address in source address selection.
-    if (stable) {
+    if (stable && remote_address->sa.sa_family == AF_INET6) {
 // Linux doesn't currently follow RFC5014. These values are defined in linux/in6.h, but this can't be
 // safely included because it's incompatible with netinet/in.h. So until this is fixed, these values
 // are just copied out of the header; when it is fixed, the #if condition will evaluate to false.
-#if defined(LINUX) && !defined(IPV6_PREFER_SRC_PUBLIC)
-#  define IPV6_PREFER_SRC_TMP            0x0001
-#  define IPV6_PREFER_SRC_PUBLIC         0x0002
-#  define IPV6_PREFER_SRC_PUBTMP_DEFAULT 0x0100
-#endif
+#if defined(LINUX)
+#  if !defined(IPV6_PREFER_SRC_PUBLIC)
+#    define IPV6_PREFER_SRC_TMP            0x0001
+#    define IPV6_PREFER_SRC_PUBLIC         0x0002
+#    define IPV6_PREFER_SRC_PUBTMP_DEFAULT 0x0100
+#  endif
         int value = IPV6_PREFER_SRC_PUBLIC;
         if (setsockopt(connection->io.fd, IPPROTO_IPV6, IPV6_ADDR_PREFERENCES, &value, sizeof(value)) < 0) {
+            ERROR("unable to request stable (public) address: %s", strerror(errno));
+            return NULL;
+        }
+#else // Assume BSD
+// BSD doesn't follow RFC5014 either (at least xnu).
+        int value = 0;
+        if (setsockopt(connection->io.fd, IPPROTO_IPV6, IPV6_PREFER_TEMPADDR, &value, sizeof(value)) < 0) {
             ERROR("unable to request stable (public) address.");
             return NULL;
         }
+#endif // LINUX
     }
 #ifdef NOT_HAVE_SA_LEN
     sl = (remote_address->sa.sa_family == AF_INET
@@ -1516,9 +1533,10 @@ ioloop_subproc(const char *exepath, char **argv, int argc, subproc_callback_t ca
     rv = posix_spawn(&subproc->pid, exepath, &actions, &attrs, subproc->argv, environ);
     posix_spawn_file_actions_destroy(&actions);
     posix_spawnattr_destroy(&attrs);
-    if (rv < 0) {
-        ERROR("posix_spawn failed for %s: %s", subproc->argv[0], strerror(errno));
-        callback(subproc, 0, strerror(errno));
+    if (rv != 0) {
+        int err = rv < 0 ? errno : rv;
+        ERROR("posix_spawn failed for %s: %s", subproc->argv[0], strerror(err));
+        callback(subproc, 0, strerror(err));
         RELEASE_HERE(subproc, subproc_finalize);
         return NULL;
     }
@@ -1534,6 +1552,22 @@ ioloop_subproc(const char *exepath, char **argv, int argc, subproc_callback_t ca
         ioloop_add_reader(subproc->output_fd, output_callback);
     }
     return subproc;
+}
+
+void
+ioloop_subproc_run_sync(subproc_t *subproc)
+{
+    int nev;
+    RETAIN_HERE(subproc);
+    do {
+        nev = ioloop_events(0);
+        INFO("%d events", nev);
+        if (subproc->finished) {
+            RELEASE_HERE(subproc, subproc_finalize);
+            return;
+        }
+    } while (nev >= 0);
+    ERROR("ioloop returned %d.", nev);
 }
 
 #ifndef EXCLUDE_DNSSD_TXN_SUPPORT

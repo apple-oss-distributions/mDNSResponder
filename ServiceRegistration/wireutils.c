@@ -129,13 +129,13 @@ dns_concatenate_name_to_wire_(dns_towire_state_t *towire, dns_name_t *labels_pre
         size_t bytes_written;
 
         if (!namewire.error) {
-            bytes_written = namewire.lim - namewire.p;
+            bytes_written = (size_t)(namewire.lim - namewire.p);
             if (bytes_written > INT16_MAX) {
                 towire->error = true;
                 towire->line = __LINE__;
                 return;
             }
-            bytes_written = dns_name_to_wire_canonical(namewire.p,  (int)bytes_written, labels_prefix);
+            bytes_written = dns_name_to_wire_canonical(namewire.p, bytes_written, labels_prefix);
             // This can never occur with a valid name.
             if (bytes_written == 0) {
                 namewire.truncated = true;
@@ -215,7 +215,7 @@ dns_name_print_to_limit(dns_name_t *NONNULL name, dns_name_t *NULLABLE limit, ch
 }
 
 const char *NONNULL
-dns_name_print(dns_name_t *NONNULL name, char *buf, int bufmax)
+dns_name_print(dns_name_t *NONNULL name, char *buf, size_t bufmax)
 {
     return dns_name_print_to_limit(name, NULL, buf, bufmax);
 }
@@ -374,7 +374,7 @@ dns_pres_name_parse(const char *pname)
         if (dot == NULL) {
             dot = label + strlen(label);
         }
-        len = dot - label;
+        len = (size_t)(dot - label);
         if (len > 0) {
             t = buf;
             for (s = label; s < dot; s++) {
@@ -387,12 +387,15 @@ dns_pres_name_parse(const char *pname)
                         goto fail;
                     }
                     s += 3;
-                    *t++ = val;
+                    *t++ = (char)val;
                 } else {
                     *t++ = *s;
                 }
+                if ((size_t)(t - buf) >= sizeof(buf)) {
+                    goto fail;
+                }
             }
-            len = t - buf;
+            len = (size_t)(t - buf);
         }
         next = calloc(1, len + 1 + (sizeof *next) - DNS_MAX_LABEL_SIZE);
         if (next == NULL) {
@@ -400,7 +403,7 @@ dns_pres_name_parse(const char *pname)
         }
         *prev = next;
         prev = &next->next;
-        next->len = len;
+        next->len = (uint8_t)len;
         if (next->len > 0) {
             memcpy(next->data, buf, next->len);
         }

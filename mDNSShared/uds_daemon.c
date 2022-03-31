@@ -2884,6 +2884,8 @@ mDNSexport void udsserver_handle_configchange(mDNS *const m)
     SCPrefBrowseDomains = BrowseDomains;
 }
 
+#if !TARGET_OS_WATCH
+
 mDNSlocal void FoundNonLocalOnlyAutomaticBrowseDomain(mDNS *const m, DNSQuestion *const q,
     const ResourceRecord *const answer, QC_result add_record)
 {
@@ -2922,6 +2924,8 @@ mDNSlocal void FoundNonLocalOnlyAutomaticBrowseDomain(mDNS *const m, DNSQuestion
 exit:
     return;
 }
+
+#endif // !TARGET_OS_WATCH
 
 mDNSlocal void AutomaticBrowseDomainChange(mDNS *const m, DNSQuestion *q, const ResourceRecord *const answer,
     QC_result AddRecord)
@@ -3013,7 +3017,17 @@ mDNSlocal mStatus _handle_browse_request_with_trust(request_state *request, cons
     {
         char typestr[MAX_ESCAPED_DOMAIN_NAME];
         typestr[0] = 0;
-        (void)ConvertDomainNameToCString(&request->u.browser.regtype, typestr);
+        domainlabel dName;
+        domainname dType, dDomain;
+        if (DeconstructServiceName(&request->u.browser.regtype, &dName, &dType, &dDomain))
+        {
+            ConvertDomainNameToCString(&dType, typestr);
+        }
+        else
+        {
+            ConvertDomainNameToCString(&request->u.browser.regtype, typestr);
+        }
+
         mdns_trust_flags_t flags = mdns_trust_flags_none;
         mdns_trust_status_t status = mdns_trust_check_bonjour(request->audit_token, typestr, &flags);
         switch (status)
@@ -5118,12 +5132,14 @@ mDNSexport int udsserver_init(dnssd_sock_t skts[], const size_t count)
     mDNS_GetDomains(&mDNSStorage, &mDNSStorage.AutomaticBrowseDomainQ, mDNS_DomainTypeBrowseAutomatic,
         mDNSNULL, mDNSInterface_LocalOnly, AutomaticBrowseDomainChange, mDNSNULL);
 
+#if !TARGET_OS_WATCH
     // Also start a Non-localonly query for automatic browsing domain, to discover the dnssd-proxy via mDNS.
     // However, we do not use this callback to add automatic browsing domain. Instead, we create new auth records in
     // cache to let mDNSResponder process the duplicates from multiple sources, and all the new browsing domain will be
     // added by the callback set above.
     mDNS_GetDomains(&mDNSStorage, &mDNSStorage.NonLocalOnlyAutomaticBrowseDomainQ, mDNS_DomainTypeBrowseAutomatic,
         mDNSNULL, mDNSInterface_Any, FoundNonLocalOnlyAutomaticBrowseDomain, mDNSNULL);
+#endif
 
     // Add "local" as recommended registration domain ("dns-sd -E"), recommended browsing domain ("dns-sd -F"), and automatic browsing domain
     RegisterLocalOnlyDomainEnumPTR(&mDNSStorage, &localdomain, mDNS_DomainTypeRegistration);

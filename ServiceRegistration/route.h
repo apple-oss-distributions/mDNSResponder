@@ -1,6 +1,6 @@
 /* route.h
  *
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,8 +26,32 @@
 #include "IPConfigurationService.h"
 #endif
 
+// RFC 4861 specifies a minimum of 4 seconds between RAs. We add a bit of fuzz.
 #define MIN_DELAY_BETWEEN_RAS 4000
-#define MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE 600 * MSEC_PER_SEC
+#define RA_FUZZ_TIME          1000
+
+// RFC 4861 specifies a maximum of three transmissions when sending an RA.
+#define MAX_RA_RETRANSMISSION 3
+
+// There's no limit for unicast neighbor solicits, but we limit it to three.
+#define MAX_NS_RETRANSMISSIONS 3
+
+// 60 seconds between router probes, three retries, four seconds per retry. We should have an answer from the router at
+// most 76 seconds after the previous answer, assuming that it takes four seconds for the response to arrive, which is
+// of course ridiculously long.
+#define MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_UNREACHABLE 76 * MSEC_PER_SEC
+
+// The end of the valid lifetime of the prefix is the time we received it plus the valid lifetime that was expressed in
+// the PIO option of the RA that advertised the prefix. If we have a prefix that is within ten minutes of expiring, we
+// consider it stale and start advertising a prefix. This should never happen in a network where a router is advertising
+// a prefix--if it does, either we're having trouble receiving multicast RAs (meaning that we don't get every beacon) or
+// the router has gone away.
+#define MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE      600 * MSEC_PER_SEC
+
+// The Thread BR prefix needs to stick around long enough that it's not likely to accidentally disappear because of
+// dropped multicasts, but short enough that it goes away quickly when a router that's advertising IPv6 connectivity
+// comes online.
+#define BR_PREFIX_LIFETIME 30 * 60
 
 
 #ifndef RTR_SOLICITATION_INTERVAL
@@ -55,20 +79,32 @@ struct interface {
     // old; if none are left, then we assume there's no IPv6 service on the interface.
     wakeup_t *NULLABLE post_solicit_wakeup;
 
-    // Wakeup event to trigger the next router solicit to be sent.
+    // Wakeup event to trigger the next router solicit or neighbor solicit to be sent.
     wakeup_t *NULLABLE router_solicit_wakeup;
+
+    // Wakeup event to trigger the next router solicit to be sent.
+    wakeup_t *NULLABLE neighbor_solicit_wakeup;
 
     // Wakeup event to deconfigure the on-link prefix after it is no longer valid.
     wakeup_t *NULLABLE deconfigure_wakeup;
 
+#if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     // Wakeup event to detect that vicarious router discovery is complete
     wakeup_t *NULLABLE vicarious_discovery_complete;
+#endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
 
     // Wakeup event to periodically notice whether routers we have heard previously on this interface have gone stale.
     wakeup_t *NULLABLE stale_evaluation_wakeup;
 
-    // List of ICMP messages from different routers.
+    // Wakeup event to periodically probe routers for reachability
+    wakeup_t *NULLABLE router_probe_wakeup;
+
+    // List of Router Advertisement messages from different routers.
     icmp_message_t *NULLABLE routers;
+
+    // List of Router Solicit messages from different hosts for which we are still transmitting unicast
+    // RAs (we sent three unicast RAs per solicit to ensure delivery).
+    icmp_message_t *NULLABLE solicits;
 
     int prefix_number;
 
@@ -91,6 +127,9 @@ struct interface {
     // Absolute deadline for deprecating the on-link prefix we've been announcing
     uint64_t deprecate_deadline;
 
+    // Last time we did a router probe
+    uint64_t last_router_probe;
+
     // Preferred lifetime for the on-link prefix
     uint32_t preferred_lifetime;
 
@@ -98,6 +137,7 @@ struct interface {
     uint32_t valid_lifetime;
 
     // When the interface becomes active, we send up to three solicits.
+    // Later on, we send three neighbor solicit probes every sixty seconds to verify router reachability
     int num_solicits_sent;
 
     // The interface index according to the operating systme.
@@ -121,8 +161,15 @@ struct interface {
     // True if we've determined that it's the thread interface.
     bool is_thread;
 
-    // True if we should advertise an on-link prefix.
-    bool advertise_ipv6_prefix;
+    // True if we have (or intended to) advertised our own prefix on this link. It should be true until the prefix
+    // we advertised should have expired on all hosts that might have received it. This will be set before we actually
+    // advertise a prefix, so before the first time we advertise a prefix it may be set even though the prefix can't
+    // appear in any host's routing table yet.
+    bool our_prefix_advertised;
+
+    // True if we should suppress on-link prefix. This would be the case when deprecating if we aren't sending
+    // periodic updates of the deprecated prefix.
+    bool suppress_ipv6_prefix;
 
     // True if we've gotten a link-layer address.
     bool have_link_layer_address;
@@ -132,6 +179,9 @@ struct interface {
 
     // True if we've sent our first beacon since the interface came up.
     bool sent_first_beacon;
+
+    // Indicates whether or not router discovery was ever started for this interface.
+    bool router_discovery_started;
 
     // Indicates whether or not router discovery has completed for this interface.
     bool router_discovery_complete;
@@ -144,6 +194,9 @@ struct interface {
     // and are waiting 20 seconds to snoop for replies to that RD message that are
     // multicast.   If we hear no replies during that time, we trigger router discovery.
     bool vicarious_router_discovery_in_progress;
+
+    // True if we are probing usable routers with neighbor solicits to see if they are still alive.
+    bool probing;
 
     // Indicates that we have received an interface removal event, it is useful when srp-mdns-proxy is changed to a new
     // network where the network signature are the same and they both have no IPv6 service (so no IPv6 prefix will be
@@ -185,6 +238,7 @@ typedef struct prefix_information {
     uint8_t flags;
     uint32_t valid_lifetime;
     uint32_t preferred_lifetime;
+    bool found; // For comparing RAs
 } prefix_information_t;
 
 typedef struct route_information {
@@ -207,12 +261,22 @@ struct icmp_message {
     icmp_message_t *NULLABLE next;
     interface_t *NULLABLE interface;
     icmp_option_t *NULLABLE options;
-    bool new_router;                     // If this router information is a newly recevied one.
+    wakeup_t *NULLABLE wakeup;
+
+    bool usable;                         // True if this router was usable at the last policy evaluation
+    bool reachable;                      // True if this router was reachable when last probed
+    bool reached;                        // Set to true when we get a neighbor advertise from the router
+    bool new_router;                     // If this router information is a newly received one.
     bool received_time_already_adjusted; // if the received time of the message is already adjusted by vicarious mode
+    int retransmissions_received;        // # times we've received a solicit from this host during retransmit window
+    int messages_sent;                   // # of unicast RAs we've sent in response to a solicit, or # of unicast NSs
+                                         // we've sent to confirm router aliveness
+
     struct in6_addr source;
     struct in6_addr destination;
 
     uint64_t received_time;
+    uint64_t latest_na;                 // Most recent time at which we successfully got a neighbor advertise
 
     uint32_t reachable_time;
     uint32_t retransmission_timer;
@@ -234,6 +298,7 @@ void route_ula_generate(void);
 bool start_route_listener(void);
 bool start_icmp_listener(void);
 void icmp_leave_join(int sock, int ifindex, bool join);
+void route_evaluate_registration(int rrtype, const uint8_t *NONNULL rdata, size_t rdlen);
 
 #define interface_create(name, iface) interface_create_(name, iface, __FILE__, __LINE__)
 interface_t *NULLABLE interface_create_(const char *NONNULL name, int ifindex,
@@ -243,8 +308,8 @@ void interface_retain_(interface_t *NONNULL interface, const char *NONNULL file,
 #define interface_release(interface) interface_release_(interface, __FILE__, __LINE__)
 void interface_release_(interface_t *NONNULL interface, const char *NONNULL file, int line);
 bool interface_monitor_start(void);
-void thread_network_startup(void);
-void thread_network_shutdown(void);
+void infrastructure_network_startup(void);
+void infrastructure_network_shutdown(void);
 void partition_stop_advertising_pref_id(void);
 void partition_start_srp_listener(void);
 void partition_publish_my_prefix(void);

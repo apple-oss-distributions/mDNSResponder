@@ -46,6 +46,7 @@ mbedtls_x509_crt srvcert_struct, *srvcert = NULL;
 mbedtls_pk_context srvkey;
 mbedtls_ssl_config tls_server_config;
 mbedtls_ssl_config tls_client_config;
+mbedtls_ssl_config tls_opportunistic_config;
 
 bool
 srp_tls_init(void)
@@ -80,12 +81,21 @@ mbedtls_config_init(mbedtls_ssl_config *config, int flags)
     return true;
 }
 
+void
+srp_tls_configure(void *const NULLABLE context)
+{
+}
+
 bool
 srp_tls_client_init(void)
 {
     if (!mbedtls_config_init(&tls_client_config, MBEDTLS_SSL_IS_CLIENT)) {
         return false;
     }
+    if (!mbedtls_config_init(&tls_opportunistic_config, MBEDTLS_SSL_IS_CLIENT)) {
+        return false;
+    }
+    mbedtls_ssl_conf_authmode(&tls_opportunistic_config, MBEDTLS_SSL_VERIFY_OPTIONAL);
     return true;
 }
 
@@ -209,13 +219,13 @@ bool
 srp_tls_connect_callback(comm_t *comm)
 {
     int status;
-
+    mbedtls_ssl_config *config = comm->opportunistic ? &tls_opportunistic_config : &tls_client_config;
     // Allocate the TLS config and state structures.
     comm->tls_context = calloc(1, sizeof *comm->tls_context);
     if (comm->tls_context == NULL) {
         return false;
     }
-    status = mbedtls_ssl_setup(&comm->tls_context->context, &tls_client_config);
+    status = mbedtls_ssl_setup(&comm->tls_context->context, config);
     if (status != 0) {
         ERROR("Unable to set up TLS connect state: %x", -status);
         return false;
@@ -229,14 +239,35 @@ srp_tls_connect_callback(comm_t *comm)
     if (status != 0 && status != MBEDTLS_ERR_SSL_WANT_READ && status != MBEDTLS_ERR_SSL_WANT_WRITE) {
         ERROR("TLS handshake failed: %x", -status);
         srp_tls_context_free(comm);
-        ioloop_close(&comm->io);
+        return false;
     }
+    if (status == MBEDTLS_ERR_SSL_WANT_READ) {
+        comm->tls_handshake_incomplete = true;
+    }
+    INFO(PRI_S_SRP ": TLS handshake progress %d", comm->name, -status);
     return true;
 }
 
 ssize_t
 srp_tls_read(comm_t *comm, unsigned char *buf, size_t max)
 {
+    // If we aren't done with the TLS handshake, continue it.
+    if (comm->tls_handshake_incomplete) {
+        int status = mbedtls_ssl_handshake(&comm->tls_context->context);
+        if (status != 0 && status != MBEDTLS_ERR_SSL_WANT_READ && status != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            ERROR("TLS handshake failed: %x", -status);
+            srp_tls_context_free(comm);
+            return -1;
+        }
+        if (status == 0) {
+            comm->tls_handshake_incomplete = false;
+            comm->connected(comm, comm->context);
+        }
+        INFO(PRI_S_SRP ": TLS handshake progress %d", comm->name, -status);
+        return 0;
+    }
+
+    // Otherwise, read application data.
     int ret = mbedtls_ssl_read(&comm->tls_context->context, buf, max);
     if (ret < 0) {
         switch (ret) {
@@ -270,6 +301,7 @@ srp_tls_read(comm_t *comm, unsigned char *buf, size_t max)
         // when the remote end is done writing, so a clean close should be different than
         // an abrupt close.
         if (ret == 0) {
+            ERROR("mbedtls_ssl_read returned zero.");
             return -1;
         }
         return ret;

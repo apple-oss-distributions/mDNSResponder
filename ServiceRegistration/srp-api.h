@@ -18,6 +18,9 @@
  */
 
 #include "srp.h"
+#ifdef THREAD_DEVKIT_ADK
+#include "../mDNSShared/dns_sd.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -82,6 +85,10 @@ int srp_finish_address_refresh(bool *NULLABLE did_something);
 // Call this to deregister everything that's currently registered.  A return value other than kDNSServiceErr_NoError
 // means that there's nothing to deregister.
 int srp_deregister(void *NULLABLE os_context);
+
+// Call this to deregister a specific service instance, identified by the DNSServiceRef.  A return value
+// other than kDNSServiceErr_NoError means that the specified service instance wasn't found.
+int srp_deregister_instance(DNSServiceRef NULLABLE sdRef);
 
 // The below functions must be provided by the host.
 

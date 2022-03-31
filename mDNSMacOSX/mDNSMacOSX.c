@@ -6289,13 +6289,9 @@ mDNSlocal void FreeNewHosts(AuthHash *newhosts)
         }
 }
 
-mDNSlocal void mDNSMacOSXUpdateEtcHosts(mDNS *const m)
+mDNSlocal void mDNSMacOSXUpdateEtcHosts_internal(mDNS *const m)
 {
     AuthHash newhosts;
-
-    // As we will be modifying the core, we can only have one thread running at
-    // any point in time.
-    KQueueLock();
 
     mDNSPlatformMemZero(&newhosts, sizeof(AuthHash));
 
@@ -6331,10 +6327,7 @@ mDNSlocal void mDNSMacOSXUpdateEtcHosts(mDNS *const m)
         if (!EtcHostsDeleteOldEntries(&newhosts, mDNStrue))
         {
             LogInfo("mDNSMacOSXUpdateEtcHosts: No work");
-            FreeNewHosts(&newhosts);
-            mDNS_Unlock(m);
-            KQueueUnlock("/etc/hosts changed");
-            return;
+            goto exit;
         }
     }
 
@@ -6356,8 +6349,16 @@ mDNSlocal void mDNSMacOSXUpdateEtcHosts(mDNS *const m)
     // is called back where we do the Registration of the record. This results in RMV followed by ADD which
     // looks normal.
     mDNSCoreRestartAddressQueries(m, mDNSfalse, FlushAllCacheRecords, UpdateEtcHosts, &newhosts);
+
+exit:
     FreeNewHosts(&newhosts);
     mDNS_Unlock(m);
+}
+
+mDNSlocal void mDNSMacOSXUpdateEtcHosts(mDNS *const m)
+{
+    KQueueLock();
+    mDNSMacOSXUpdateEtcHosts_internal(m);
     KQueueUnlock("/etc/hosts changed");
 }
 
@@ -6771,7 +6772,7 @@ mDNSlocal mStatus mDNSPlatformInit_setup(mDNS *const m)
     else
 #endif
     {
-        mDNSMacOSXUpdateEtcHosts(m);
+        mDNSMacOSXUpdateEtcHosts_internal(m);
     }
     SetupLocalHostRecords();
 

@@ -221,12 +221,15 @@ mDNSexport void external_connection_release(const domainname *instance)
 mDNSlocal void xD2DClearCache(const domainname *regType, mDNSu16 qtype)
 {
     D2DRecordListElem *ptr = D2DRecords;
-    for ( ; ptr ; ptr = ptr->next)
+    while (ptr)
     {
-        if ((ptr->ar.resrec.rrtype == qtype) && SameDomainName(&ptr->ar.namestorage, regType))
+        D2DRecordListElem *tmp = ptr;
+        ptr = ptr->next;
+        if ((tmp->ar.resrec.rrtype == qtype) && SameDomainName(&tmp->ar.namestorage, regType))
         {
-            LogInfo("xD2DClearCache: Clearing cache record and deregistering %s", ARDisplayString(&mDNSStorage, &ptr->ar));
-            mDNS_Deregister(&mDNSStorage, &ptr->ar);
+            LogInfo("xD2DClearCache: Clearing cache record and deregistering %s", ARDisplayString(&mDNSStorage, &tmp->ar));
+            mDNS_Deregister(&mDNSStorage, &tmp->ar);
+            // Memory will be freed and element removed in FreeD2DARElemCallback
         }
     }
 }

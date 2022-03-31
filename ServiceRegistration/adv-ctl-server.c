@@ -1,6 +1,6 @@
 /* adv-ctl-proxy.c
  *
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -82,9 +82,9 @@ adv_ctl_regenerate_ula(void)
 
 #if THREAD_BORDER_ROUTER
     partition_stop_advertising_pref_id();
-    thread_network_shutdown();
+    infrastructure_network_shutdown();
     route_ula_generate();
-    thread_network_startup();
+    infrastructure_network_startup();
 #endif
     return status;
 }
@@ -136,7 +136,7 @@ adv_ctl_list_services(advertising_proxy_conn_ref connection)
 			!cti_connection_string_put(connection, host->registered_name) ||
 			!cti_connection_u32_put(connection, host->lease_expiry >= now ? host->lease_expiry - now : 0) ||
 			!cti_connection_bool_put(connection, host->removed) ||
-			!cti_connection_u64_put(connection, host->update_server_id));
+			!cti_connection_u64_put(connection, host->update_server_id))
 		{
 			ERROR("adv_ctl_list_services: unable to write host info for host %s", host->name);
 			cti_connection_close(connection);

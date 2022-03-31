@@ -1,12 +1,12 @@
-/* sign.c
+/* sign-macos.c
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -54,7 +54,7 @@ srp_keypair_free(srp_key_t *key)
 uint16_t
 srp_random16()
 {
-    return arc4random_uniform(65536);
+    return (uint16_t)(arc4random_uniform(65536));
 }
 
 uint32_t
@@ -69,6 +69,13 @@ srp_random64()
     uint64_t ret;
     arc4random_buf(&ret, sizeof(ret));
     return ret;
+}
+
+bool
+srp_randombytes(uint8_t *dest, size_t num)
+{
+    arc4random_buf(dest, num);
+    return true;
 }
 
 static void
@@ -187,7 +194,7 @@ srp_pubkey_length(srp_key_t *key)
     return ECDSA_KEY_SIZE;
 }
 
-int
+uint8_t
 srp_key_algorithm(srp_key_t *key)
 {
     (void)key;
@@ -202,11 +209,11 @@ srp_signature_length(srp_key_t *key)
 }
 
 // Function to copy out the public key as binary data
-int
+size_t
 srp_pubkey_copy(uint8_t *buf, size_t max, srp_key_t *key)
 {
     CFErrorRef error = NULL;
-    int ret = 0;
+    size_t ret = 0;
     CFDataRef pubkey = SecKeyCopyExternalRepresentation(key->public, &error);
     if (pubkey == NULL) {
         if (error != NULL) {
@@ -216,7 +223,7 @@ srp_pubkey_copy(uint8_t *buf, size_t max, srp_key_t *key)
         }
     } else {
         const uint8_t *bytes = CFDataGetBytePtr(pubkey);
-        unsigned long len = CFDataGetLength(pubkey);
+        unsigned long len = (unsigned long)CFDataGetLength(pubkey);
 
         // Should be 04 | X | Y
         if (bytes[0] != 4) {
@@ -246,26 +253,19 @@ srp_sign(uint8_t *output, size_t max, uint8_t *message, size_t msglen,
     unsigned long len;
     int ret = 0;
 
-    typedef struct {
-        SecAsn1Item r, s;
-    } raw_signature_data_t;
-    raw_signature_data_t raw_signature;
-
-    ECDSA_SIG_TEMPLATE(sig_template);
-
     if (max < ECDSA_SHA256_SIG_SIZE) {
         ERROR("srp_sign: not enough space in output buffer (%lu) for signature (%d).",
               (unsigned long)max, ECDSA_SHA256_SIG_SIZE);
         return 0;
     }
 
-    payload = CFDataCreateMutable(NULL, msglen + rdlen);
+    payload = CFDataCreateMutable(NULL, (CFIndex)(msglen + rdlen));
     if (payload == NULL) {
         ERROR("srp_sign: CFDataCreateMutable failed on length %zd", msglen + rdlen);
         return 0;
     }
-    CFDataAppendBytes(payload, rr, rdlen);
-    CFDataAppendBytes(payload, message, msglen);
+    CFDataAppendBytes(payload, rr, (CFIndex)rdlen);
+    CFDataAppendBytes(payload, message, (CFIndex)msglen);
 
     signature = SecKeyCreateSignature(key->private,
                                       kSecKeyAlgorithmECDSASignatureMessageX962SHA256, payload, &error);
@@ -280,37 +280,80 @@ srp_sign(uint8_t *output, size_t max, uint8_t *message, size_t msglen,
         return 0;
     }
 
-    SecAsn1CoderRef decoder;
-    OSStatus status = SecAsn1CoderCreate(&decoder);
-    if (status == errSecSuccess) {
-        len = CFDataGetLength(signature);
-        bytes = CFDataGetBytePtr(signature);
-
-        status = SecAsn1Decode(decoder, bytes, len, sig_template, &raw_signature);
-        if (status == errSecSuccess) {
-            if (raw_signature.r.Length + raw_signature.s.Length > ECDSA_SHA256_SIG_SIZE) {
-                ERROR("Unexpected length %zd + %zd is not %d", raw_signature.r.Length,
-                      raw_signature.s.Length, ECDSA_SHA256_SIG_SIZE);
-            } else {
-                unsigned long diff = ECDSA_SHA256_SIG_PART_SIZE - raw_signature.r.Length;
-                if (diff > 0) {
-                    memset(output, 0, diff);
-                }
-                memcpy(output + diff, raw_signature.r.Data, raw_signature.r.Length);
-                diff = ECDSA_SHA256_SIG_PART_SIZE - raw_signature.s.Length;
-                if (diff > 0) {
-                    memset(output + ECDSA_SHA256_SIG_PART_SIZE, 0, diff);
-                }
-                memcpy(output + ECDSA_SHA256_SIG_PART_SIZE + diff, raw_signature.s.Data, raw_signature.s.Length);
-                ret = 1;
-            }
+    len = (unsigned long)CFDataGetLength(signature);
+    bytes = CFDataGetBytePtr(signature);
+    // The buffer is ASN.1 DER encoded as two numbers, so should be 30 <len> 02 <len> <bytes> 02 <len> <bytes>.
+    if (len < 8) {
+        ERROR("signature is too short to parse: %lu bytes", len);
+        goto out;
+    }
+#define ASN1_SEQUENCE 0x30
+    if (bytes[0] != ASN1_SEQUENCE) {
+        ERROR("Unexpected ASN.1 type for signature: %x", bytes[0]);
+        goto out;
+    }
+    unsigned len_sequence = bytes[1];
+    if (len_sequence != len - 2) { // This is the length of the sequence, which is the remainder of the buffer
+        ERROR("Unexpected ASN.1 sequence length %u when %lu bytes remain", len_sequence, len - 2);
+        goto out;
+    }
+    const uint8_t *sequence_start = &bytes[2];
+    unsigned sequence_available = len_sequence;
+    int index = 0;
+    while (sequence_available > 0) {
+        if (index > 1) {
+            ERROR("Unexpected extra datum in top-level ASN.1 sequence for signature.");
+            goto out;
         }
-        SecAsn1CoderRelease(decoder);
+#define ASN1_INTEGER 0x02
+        if (sequence_start[0] != ASN1_INTEGER) {
+            ERROR("Unexpected ASN.1 type for key half %d: %x", index, bytes[2]);
+            goto out;
+        }
+        unsigned len_half = sequence_start[1];
+        if (len_half > sequence_available - 2 || len_half > ECDSA_SHA256_SIG_PART_SIZE + 1) {
+            ERROR("key half %d is too long: length %u, sequence length %u, sig part size %d",
+                  index, len_half, len_sequence, ECDSA_SHA256_SIG_PART_SIZE);
+            goto out;
+        }
+        // Now that we've bounds-checked this key half, reduce the available space by its length for
+        // the next round.
+        sequence_available = sequence_available - len_half - 2;
+
+        // The key data are bignums. If the first byte of either bignum is >0x7f, it will include a leading zero
+        // to make it unsigned, which we don't need.
+        const uint8_t *key_half = sequence_start[2] == 0 ? &sequence_start[3] : &sequence_start[2];
+        if (sequence_start[2] == 0) {
+            len_half--;
+        }
+
+        unsigned long diff = ECDSA_SHA256_SIG_PART_SIZE - len_half;
+        uint8_t *output_start = output + index * ECDSA_SHA256_SIG_PART_SIZE;
+        if (diff > 0) {
+            memset(output_start, 0, diff);
+        }
+        memcpy(output_start + diff, key_half, len_half);
+        sequence_start = key_half + len_half;
+        index++;
     }
-    if (status != errSecSuccess) {
-        srp_sec_error_print("srp_sign", status);
+    ret = ECDSA_SHA256_SIG_PART_SIZE * 2;
+
+    for (int j = 0; j < 2; j++) {
+        const uint8_t *buf = j == 0 ? bytes : output;
+        char sigbuf[300];
+        char *sigbufp = sigbuf;
+        for (unsigned i = 0; i < len && (size_t)(sigbufp - sigbuf) < sizeof(sigbuf) - 3; i++) {
+            snprintf(sigbufp, 4, "%02x ", buf[i]);
+            sigbufp += 3;
+        }
+        *sigbufp = 0;
+        INFO("%s: %s", j == 0 ? "input" : "output", sigbuf);
     }
-    CFRelease(signature);
+
+out:
+    if (signature != NULL) {
+        CFRelease(signature);
+    }
     return ret;
 }
 

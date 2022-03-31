@@ -199,7 +199,7 @@ adv_service_list_callback(cti_connection_t connection, void *UNUSED object, cti_
 		}
 
         if (!cti_connection_u64_parse(connection, &host->server_id)) {
-            ERROR("adv_ctl_list_callback: unable to parse stable server ID for host %s", i, host->hostname);
+            ERROR("adv_ctl_list_callback: unable to parse stable server ID for host %s", host->hostname);
             goto fail;
         }
 
@@ -252,8 +252,8 @@ adv_ula_callback(cti_connection_t connection, void *UNUSED object, cti_status_t 
 {
     uint64_t ula_prefix;
 
-    if (!cti_connection_u32_parse(connection, &ula_prefix)) {
-        ERROR("error parsing ula prefix");
+	if (!cti_connection_u64_parse(connection, &ula_prefix)) {
+		ERROR("error parsing ula prefix");
         goto fail;
     }
 

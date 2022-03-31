@@ -45,10 +45,11 @@ static dns_name_t *service_update_zone; // The zone to update when we receive an
 // structures point to are owned by the parsed DNS message, and so these do not need to be freed here.
 void
 srp_update_free_parts(service_instance_t *service_instances, service_instance_t *added_instances,
-                      service_t *services, dns_host_description_t *host_description)
+                      service_t *services, delete_t *removes, dns_host_description_t *host_description)
 {
     service_instance_t *sip;
     service_t *sp;
+    delete_t *dp;
 
     for (sip = service_instances; sip; ) {
         service_instance_t *next = sip->next;
@@ -64,6 +65,11 @@ srp_update_free_parts(service_instance_t *service_instances, service_instance_t 
         service_t *next = sp->next;
         free(sp);
         sp = next;
+    }
+    for (dp = removes; dp != NULL; ) {
+        delete_t *next = dp->next;
+        free(dp);
+        dp = next;
     }
     if (host_description != NULL) {
         host_addr_t *host_addr, *next;
@@ -135,12 +141,69 @@ send_fail_response(comm_t *connection, message_t *message, int rcode)
     ioloop_send_message(connection, message, &iov, 1);
 }
 
+static int
+make_delete(delete_t **delete_list, delete_t **delete_out, dns_rr_t *rr, dns_name_t *update_zone)
+{
+    int status = dns_rcode_noerror;
+    delete_t *dp, **dpp;
+
+    for (dpp = delete_list; *dpp;) {
+        dp = *dpp;
+        if (dns_names_equal(dp->name, rr->name)) {
+            DNS_NAME_GEN_SRP(rr->name, name_buf);
+            ERROR("two deletes for the same name: " PRI_DNS_NAME_SRP,
+                  DNS_NAME_PARAM_SRP(rr->name, name_buf));
+            return dns_rcode_formerr;
+        }
+        dpp = &dp->next;
+    }
+    dp = calloc(1, sizeof *dp);
+    if (!dp) {
+        ERROR("no memory.");
+        return dns_rcode_servfail;
+    }
+    // Add to the deletes list
+    *dpp = dp;
+
+    // Make sure the name is a subdomain of the zone being updated.
+    dp->zone = dns_name_subdomain_of(rr->name, update_zone);
+    if (dp->zone == NULL) {
+        DNS_NAME_GEN_SRP(update_zone, update_zone_buf);
+        DNS_NAME_GEN_SRP(rr->name, name_buf);
+        ERROR("delete for record not in update zone " PRI_DNS_NAME_SRP ": " PRI_DNS_NAME_SRP,
+              DNS_NAME_PARAM_SRP(update_zone, update_zone_buf), DNS_NAME_PARAM_SRP(rr->name, name_buf));
+        status = dns_rcode_formerr;
+        goto out;
+    }
+    dp->name = rr->name;
+    if (delete_out != NULL) {
+        *delete_out = dp;
+    }
+out:
+    if (status != dns_rcode_noerror) {
+        free(dp);
+    }
+    return status;
+}
+
+// Find a delete in the delete list that has target as its target.
+static delete_t *
+srp_find_delete(delete_t *deletes, dns_rr_t *target)
+{
+    for (delete_t *dp = deletes; dp; dp = dp->next) {
+        if (dns_names_equal(dp->name, target->name)) {
+            return dp;
+        }
+    }
+    return NULL;
+}
+
 bool
 srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_t *raw_message)
 {
-    int i;
+    unsigned i;
     dns_host_description_t *host_description = NULL;
-    delete_t *deletes = NULL, *dp, **dpp = &deletes;
+    delete_t *deletes = NULL, *dp, **dpp = NULL, **rpp = NULL, *removes = NULL;
     service_instance_t *service_instances = NULL, *sip, **sipp = &service_instances;
     service_t *services = NULL, *sp, **spp = &services;
     dns_rr_t *signature;
@@ -150,8 +213,8 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
     dns_name_t *uzp;
     dns_rr_t *key = NULL;
     dns_rr_t **keys = NULL;
-    int num_keys = 0;
-    int max_keys = 1;
+    unsigned num_keys = 0;
+    unsigned max_keys = 1;
     bool found_key = false;
     uint32_t lease_time, key_lease_time, serial_number;
     dns_edns0_t *edns0;
@@ -198,35 +261,11 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
 
         // If this is a delete for all the RRs on a name, record it in the list of deletes.
         if (rr->type == dns_rrtype_any && rr->qclass == dns_qclass_any && rr->ttl == 0) {
-            for (dp = deletes; dp; dp = dp->next) {
-                if (dns_names_equal(dp->name, rr->name)) {
-                    DNS_NAME_GEN_SRP(rr->name, name_buf);
-                    ERROR("two deletes for the same name: " PRI_DNS_NAME_SRP,
-                          DNS_NAME_PARAM_SRP(rr->name, name_buf));
-                    rcode = dns_rcode_formerr;
-                    goto out;
-                }
-            }
-            dp = calloc(1, sizeof *dp);
-            if (!dp) {
-                ERROR("no memory.");
+            int status = make_delete(&deletes, NULL, rr, update_zone);
+            if (status != dns_rcode_noerror) {
+                rcode = status;
                 goto out;
             }
-            // Add to the deletes list
-            *dpp = dp;
-            dpp = &dp->next;
-
-            // Make sure the name is a subdomain of the zone being updated.
-            dp->zone = dns_name_subdomain_of(rr->name, update_zone);
-            if (dp->zone == NULL) {
-                DNS_NAME_GEN_SRP(update_zone, update_zone_buf);
-                DNS_NAME_GEN_SRP(rr->name, name_buf);
-                ERROR("delete for record not in update zone " PRI_DNS_NAME_SRP ": " PRI_DNS_NAME_SRP,
-                      DNS_NAME_PARAM_SRP(update_zone, update_zone_buf), DNS_NAME_PARAM_SRP(rr->name, name_buf));
-                rcode = dns_rcode_formerr;
-                goto out;
-            }
-            dp->name = rr->name;
         }
 
         // The update should really only contain one key, but it's allowed for keys to appear on
@@ -271,11 +310,7 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
 
             // Make sure it's preceded by a deletion of all the RRs on the name.
             if (!host_description->delete) {
-                for (dp = deletes; dp; dp = dp->next) {
-                    if (dns_names_equal(dp->name, rr->name)) {
-                        break;
-                    }
-                }
+                dp = srp_find_delete(deletes, rr);
                 if (dp == NULL) {
                     DNS_NAME_GEN_SRP(rr->name, name_buf);
                     ERROR("ADD for hostname " PRI_DNS_NAME_SRP " without a preceding delete.",
@@ -302,11 +337,7 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
         // Otherwise if it's an SRV entry, that should be a service instance name.
         else if (rr->type == dns_rrtype_srv || rr->type == dns_rrtype_txt) {
             // Should be a delete that precedes this service instance.
-            for (dp = deletes; dp; dp = dp->next) {
-                if (dns_names_equal(dp->name, rr->name)) {
-                    break;
-                }
-            }
+            dp = srp_find_delete(deletes, rr);
             if (dp == NULL) {
                 DNS_NAME_GEN_SRP(rr->name, name_buf);
                 ERROR("ADD for service instance not preceded by delete: " PRI_DNS_NAME_SRP,
@@ -394,32 +425,41 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
                 }
             }
 
-            sp = calloc(1, sizeof *sp);
-            if (sp == NULL) {
-                ERROR("no memory");
-                goto out;
-            }
-
-            // Add to the services list
-            *spp = sp;
-            spp = &sp->next;
-            sp->rr = rr;
-            if (base_type != NULL) {
-                sp->base_type = base_type;
+            // If qclass is none and ttl is zero, this is a delete specific RR from RRset, not an add RR to RRset.
+            if (rr->qclass == dns_qclass_none && rr->ttl == 0) {
+                int status = make_delete(&deletes, &dp, rr, update_zone);
+                if (status != dns_rcode_noerror) {
+                    rcode = status;
+                    goto out;
+                }
             } else {
-                sp->base_type = sp;
-            }
+                sp = calloc(1, sizeof *sp);
+                if (sp == NULL) {
+                    ERROR("no memory");
+                    goto out;
+                }
 
-            // Make sure the service name is in the update zone.
-            sp->zone = dns_name_subdomain_of(sp->rr->name, update_zone);
-            if (sp->zone == NULL) {
-                DNS_NAME_GEN_SRP(rr->name, name_buf);
-                DNS_NAME_GEN_SRP(rr->data.ptr.name, data_name_buf);
-                ERROR("service name " PRI_DNS_NAME_SRP " for " PRI_DNS_NAME_SRP
-                      " is not in the update zone", DNS_NAME_PARAM_SRP(rr->name, name_buf),
-                      DNS_NAME_PARAM_SRP(rr->data.ptr.name, data_name_buf));
-                rcode = dns_rcode_formerr;
-                goto out;
+                // Add to the services list
+                *spp = sp;
+                spp = &sp->next;
+                sp->rr = rr;
+                if (base_type != NULL) {
+                    sp->base_type = base_type;
+                } else {
+                    sp->base_type = sp;
+                }
+
+                // Make sure the service name is in the update zone.
+                sp->zone = dns_name_subdomain_of(sp->rr->name, update_zone);
+                if (sp->zone == NULL) {
+                    DNS_NAME_GEN_SRP(rr->name, name_buf);
+                    DNS_NAME_GEN_SRP(rr->data.ptr.name, data_name_buf);
+                    ERROR("service name " PRI_DNS_NAME_SRP " for " PRI_DNS_NAME_SRP
+                          " is not in the update zone", DNS_NAME_PARAM_SRP(rr->name, name_buf),
+                          DNS_NAME_PARAM_SRP(rr->data.ptr.name, data_name_buf));
+                    rcode = dns_rcode_formerr;
+                    goto out;
+                }
             }
         }
 
@@ -436,8 +476,58 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
     // Now that we've scanned the whole update, do the consistency checks for updates that might
     // not have come in order.
 
-    // First, make sure there's a host description.
-    if (host_description == NULL) {
+    // Get the lease time. We need this to differentiate between a mass host deletion and an add.
+    lease_time = 3600;
+    key_lease_time = 604800;
+    serial_number = 0;
+    for (edns0 = message->edns0; edns0; edns0 = edns0->next) {
+        if (edns0->type == dns_opt_update_lease) {
+            unsigned off = 0;
+            if (edns0->length != 4 && edns0->length != 8) {
+                ERROR("edns0 update-lease option length bogus: %d", edns0->length);
+                rcode = dns_rcode_formerr;
+                goto out;
+            }
+            dns_u32_parse(edns0->data, edns0->length, &off, &lease_time);
+            if (edns0->length == 8) {
+                dns_u32_parse(edns0->data, edns0->length, &off, &key_lease_time);
+            } else {
+                key_lease_time = 7 * lease_time;
+            }
+            found_lease = true;
+        } else if (edns0->type == dns_opt_srp_serial) {
+            unsigned off = 0;
+            if (edns0->length != 4) {
+                ERROR("edns0 srp serial number length bogus: %d", edns0->length);
+                rcode = dns_rcode_formerr;
+                goto out;
+            }
+            dns_u32_parse(edns0->data, edns0->length, &off, &serial_number);
+            found_serial = true;
+        }
+    }
+
+    // If we don't yet have a host description, but this is a delete of the entire host registration (lease_time == 0) and
+    // we do have a delete record and a key record for the host, create a host description with no addresses here.
+    if (host_description == NULL && lease_time == 0) {
+        // If we get here and we have a key, then that suggests that this SRP update is a host remove with a KEY RR to
+        // authenticate it (and possibly leave behind).
+        if (key != NULL) {
+            dp = srp_find_delete(deletes, key);
+            if (dp != NULL) {
+                host_description = calloc(1, sizeof *host_description);
+                if (host_description == NULL) {
+                    ERROR("no memory");
+                    goto out;
+                }
+                host_description->delete = dp;
+                host_description->name = dp->name;
+                dp->consumed = true; // This delete is accounted for.
+            }
+        }
+    }
+    // Make sure there's a host description.
+    if (!host_description) {
         ERROR("SRP update does not include a host description.");
         rcode = dns_rcode_formerr;
         goto out;
@@ -487,8 +577,8 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
         }
     }
 
-    // Make sure that at least one service instance references the host description
-    if (host_description->num_instances == 0) {
+    // Make sure that at least one service instance references the host description, unless the update is deleting the host address records.
+    if (host_description->num_instances == 0 && host_description->addrs != NULL) {
         DNS_NAME_GEN_SRP(host_description->name, name_buf);
         ERROR("host description " PRI_DNS_NAME_SRP " is not referenced by any service instances.",
               DNS_NAME_PARAM_SRP(host_description->name, name_buf));
@@ -496,10 +586,10 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
         goto out;
     }
 
-    // Make sure the host description has at least one address record.
-    if (host_description->addrs == NULL) {
+    // Make sure the host description has at least one address record, unless we're deleting the host.
+    if (host_description->addrs == NULL && host_description->num_instances != 0 && lease_time != 0) {
         DNS_NAME_GEN_SRP(host_description->name, name_buf);
-        ERROR("host description " PRI_DNS_NAME_SRP " doesn't contain any IP addresses.",
+        ERROR("host description " PRI_DNS_NAME_SRP " doesn't contain any IP addresses, but services are being added.",
               DNS_NAME_PARAM_SRP(host_description->name, name_buf));
         rcode = dns_rcode_formerr;
         goto out;
@@ -552,14 +642,22 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
         goto out;
     }
 
-    // Make sure that all the deletes are for things that are then added.
-    for (dp = deletes; dp; dp = dp->next) {
+    // Find any deletes that weren't consumed. These will be presumed to be removes of service instances previously
+    // registered. These can't be validated here--we have to actually go look at the database.
+    dpp = &deletes;
+    rpp = &removes;
+    while (*dpp) {
+        dp = *dpp;
         if (!dp->consumed) {
-            DNS_NAME_GEN_SRP(host_description->name, host_name_buf);
-            ERROR("delete for which there is no subsequent add: " PRI_DNS_NAME_SRP,
-                  DNS_NAME_PARAM_SRP(host_description->name, host_name_buf));
-            rcode = dns_rcode_formerr;
-            goto out;
+            DNS_NAME_GEN_SRP(dp->name, delete_name_buf);
+            INFO("delete for presumably previously-registered instance which is being withdrawn: " PRI_DNS_NAME_SRP,
+                  DNS_NAME_PARAM_SRP(dp->name, delete_name_buf));
+            *rpp = dp;
+            rpp = &dp->next;
+            *dpp = dp->next;
+            dp->next = NULL;
+        } else {
+            dpp = &dp->next;
         }
     }
 
@@ -662,45 +760,14 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
         // the name of a delete.
     }
 
-    // Get the lease time.
-    lease_time = 3600;
-    key_lease_time = 604800;
-    serial_number = 0;
-    for (edns0 = message->edns0; edns0; edns0 = edns0->next) {
-        if (edns0->type == dns_opt_update_lease) {
-            unsigned off = 0;
-            if (edns0->length != 4 && edns0->length != 8) {
-                ERROR("edns0 update-lease option length bogus: %d", edns0->length);
-                rcode = dns_rcode_formerr;
-                goto out;
-            }
-            dns_u32_parse(edns0->data, edns0->length, &off, &lease_time);
-            if (edns0->length == 8) {
-                dns_u32_parse(edns0->data, edns0->length, &off, &key_lease_time);
-            } else {
-                key_lease_time = 7 * lease_time;
-            }
-            found_lease = true;
-        } else if (edns0->type == dns_opt_srp_serial) {
-            unsigned off = 0;
-            if (edns0->length != 4) {
-                ERROR("edns0 srp serial number length bogus: %d", edns0->length);
-                rcode = dns_rcode_formerr;
-                goto out;
-            }
-            dns_u32_parse(edns0->data, edns0->length, &off, &serial_number);
-            found_serial = true;
-        }
-    }
-
     // Start the update.
     DNS_NAME_GEN_SRP(host_description->name, host_description_name_buf);
     INFO("update for " PRI_DNS_NAME_SRP " xid %x validates, lease time %d%s, serial %" PRIu32 "%s.",
          DNS_NAME_PARAM_SRP(host_description->name, host_description_name_buf), raw_message->wire.id,
          lease_time, found_lease ? " (found)" : "", serial_number, found_serial ? " (found)" : " (not sent)");
     rcode = dns_rcode_noerror;
-    ret = srp_update_start(connection, context, message, raw_message, host_description, service_instances, services,
-                           replacement_zone == NULL ? update_zone : replacement_zone,
+    ret = srp_update_start(connection, context, message, raw_message, host_description, service_instances,
+                           services, removes, replacement_zone == NULL ? update_zone : replacement_zone,
                            lease_time, key_lease_time, serial_number, found_serial);
     if (ret) {
         goto success;
@@ -721,11 +788,11 @@ out:
     if (keys != NULL) {
         free(keys);
     }
-    srp_update_free_parts(service_instances, NULL, services, host_description);
+    srp_update_free_parts(service_instances, NULL, services, removes, host_description);
 
 success:
-    // No matter how we get out of this, we free the delete structures, because they are not
-    // used to do the update.
+    // No matter how we get out of this, we free the delete structures that weren't dangling removes,
+    // because they are not used to do the update.
     for (dp = deletes; dp; ) {
         delete_t *next = dp->next;
         free(dp);

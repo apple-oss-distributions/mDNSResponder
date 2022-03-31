@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,11 @@
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_ANALYTICS)
 #include "dnssd_analytics.h"
+#endif
+
+
+#if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
+#include "discover_resolver.h"
 #endif
 
 #include "mdns_strict.h"
@@ -137,6 +142,8 @@ mDNSlocal mdns_dns_service_t _Querier_GetNonNativeDNSService(const mdns_dns_serv
 {
     mdns_dns_service_t service;
     const uint32_t ifIndex = (uint32_t)((uintptr_t)q->InterfaceID);
+    const mdns_dns_service_opts_t options = excludeNonStandardServices ? mdns_dns_service_opt_none :
+        mdns_dns_service_opt_prefer_discovered;
     if (!excludeNonStandardServices && !uuid_is_null(q->ResolverUUID))
     {
         service = mdns_dns_service_manager_get_uuid_scoped_service(manager, q->ResolverUUID, ifIndex);
@@ -149,11 +156,21 @@ mDNSlocal mdns_dns_service_t _Querier_GetNonNativeDNSService(const mdns_dns_serv
                 // even if they have a resolver UUID.
                 service = discovered_service;
             }
+			else
+			{
+				mdns_dns_service_t oblivious_service = mdns_dns_service_manager_get_discovered_oblivious_service(manager, service, q->qname.c);
+				if (oblivious_service && (mdns_dns_service_get_class(oblivious_service) == nw_resolver_class_oblivious))
+				{
+					// Prefer discovered oblivious resolver
+					service = oblivious_service;
+				}
+			}
         }
     }
     else if (q->InterfaceID)
     {
-        service = mdns_dns_service_manager_get_interface_scoped_system_service(manager, q->qname.c, ifIndex);
+        service = mdns_dns_service_manager_get_interface_scoped_system_service_with_options(manager, q->qname.c, ifIndex,
+            options);
     }
     else if (q->ServiceID >= 0)
     {
@@ -169,7 +186,7 @@ mDNSlocal mdns_dns_service_t _Querier_GetNonNativeDNSService(const mdns_dns_serv
         }
         if (!service)
         {
-            service = mdns_dns_service_manager_get_unscoped_system_service(manager, q->qname.c);
+            service = mdns_dns_service_manager_get_unscoped_system_service_with_options(manager, q->qname.c, options);
         }
     }
     if (!excludeNonStandardServices && service && !mdns_dns_service_interface_is_vpn(service))
@@ -196,6 +213,22 @@ mDNSlocal mdns_dns_service_t _Querier_GetNonNativeDNSService(const mdns_dns_serv
     return service;
 }
 
+mDNSlocal mDNSBool _Querier_QuestionIsEligibleForNonNativeDNSService(const DNSQuestion *const q)
+{
+    mDNSBool eligible = mDNStrue;
+
+#if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
+    if (IsSubdomain(&q->qname, THREAD_DOMAIN_NAME))
+    {
+        // We do not want the query ends with "openthread.thread.home.arpa." to choose a non-native DNS service to go
+        // outside of the home network.
+        eligible = mDNSfalse;
+    }
+#endif
+
+    return eligible;
+}
+
 mDNSlocal mdns_dns_service_t _Querier_GetDNSService(const DNSQuestion *q, const mDNSBool excludeNonStandardServices)
 {
     mdns_dns_service_t service = mDNSNULL;
@@ -206,7 +239,7 @@ mDNSlocal mdns_dns_service_t _Querier_GetDNSService(const DNSQuestion *q, const 
     }
 
     service = _Querier_GetNativeDNSService(manager, q);
-    if (!service)
+    if (!service && _Querier_QuestionIsEligibleForNonNativeDNSService(q))
     {
         service = _Querier_GetNonNativeDNSService(manager, q, excludeNonStandardServices);
     }
@@ -803,10 +836,27 @@ mDNSexport void Querier_ProcessDNSServiceChanges(void)
             }
             if (m->RestartQuestion == q)
             {
+            #if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
+                // Since we are restarting the question, retain the resolver discovery object to prevent it from being
+                // stopped and deallocated.
+                const domainname *domain_to_discover_resolver = mDNSNULL;
+                if (dns_question_requires_resolver_discovery(q, &domain_to_discover_resolver))
+                {
+                    resolver_discovery_add(domain_to_discover_resolver, mDNSfalse);
+                }
+            #endif
                 mDNS_StopQuery_internal(m, q);
                 q->ForcePathEval = forcePathEval;
                 q->next = mDNSNULL;
                 mDNS_StartQuery_internal(m, q);
+            #if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
+                // Release the resolver discovery object retained above so that the reference count of the object goes
+                // back to its original value, after the restart process has finished.
+                if (dns_question_requires_resolver_discovery(q, &domain_to_discover_resolver))
+                {
+                    resolver_discovery_remove(domain_to_discover_resolver, mDNSfalse);
+                }
+            #endif
             }
         }
         if (m->RestartQuestion == q) m->RestartQuestion = q->next;

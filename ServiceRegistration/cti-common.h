@@ -73,14 +73,22 @@ typedef struct _cti_connection_t *cti_connection_t;
 #define kCTIMessageType_TunnelNameResponse      6
 #define kCTIMessageType_RequestStateEvents      7
 #define kCTIMessageType_StateEvent              8
-#define kCTIMessageType_RequestPartitionEvents  9
-#define kCTIMessageType_PartitionEvent         10
+#define kCTIMessageType_RequestUInt64PropEvents 9
+#define kCTIMessageType_UInt64PropEvent        10
 #define kCTIMessageType_RequestRoleEvents      11
 #define kCTIMessageType_RoleEvent              12
 #define kCTIMessageType_RequestServiceEvents   13
 #define kCTIMessageType_ServiceEvent           14
 #define kCTIMessageType_RequestPrefixEvents    15
 #define kCTIMessageType_PrefixEvent            16
+
+#if defined(POSIX_BUILD) || OPENTHREAD_PLATFORM_POSIX
+#define kCTIPropertyPartitionID                 1
+#define kCTIPropertyExtendedPANID               2
+#else
+#define kCTIPropertyPartitionID                 "Network:PartitionID"
+#define kCTIPropertyExtendedPANID               "Network:XPANID"
+#endif // POSIX_BUILD
 
 typedef enum
 {

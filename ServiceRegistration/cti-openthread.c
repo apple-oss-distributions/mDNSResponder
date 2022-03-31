@@ -48,7 +48,7 @@
 #include <openthread/platform/misc.h>
 #include <openthread/openthread-system.h>
 
-otInstance* gInstance = NULL;
+static otInstance* cti_instance = NULL;
 void handleThreadStateChanged(uint32_t flags, void UNUSED *context);
 
 #define SuccessOrFailure(eval)                      \
@@ -66,12 +66,12 @@ int ctiAddService( uint32_t enterprise_number,
                    const uint8_t* service_data,
                    size_t service_data_length,
                    const uint8_t* server_data,
-                   size_t server_data_length){
+                   size_t server_data_length) {
 
     otError error = OT_ERROR_NONE;
     otServiceConfig serviceCfg;
 
-    if ( !gInstance) {
+    if ( !cti_instance) {
         return kCTIStatus_UnknownError;
     }
 
@@ -87,13 +87,13 @@ int ctiAddService( uint32_t enterprise_number,
     serviceCfg.mServerConfig.mServerDataLength = server_data_length;
     serviceCfg.mServerConfig.mStable = true;
 
-    error = otServerAddService(gInstance, &serviceCfg);
+    error = otServerAddService(cti_instance, &serviceCfg);
 
     if (error != OT_ERROR_NONE) {
         syslog(LOG_INFO, "Failed to add service: %d", error);
         return kCTIStatus_UnknownError;
     }
-    error = otBorderRouterRegister(gInstance);
+    error = otBorderRouterRegister(cti_instance);
     if (error != OT_ERROR_NONE) {
         syslog(LOG_INFO, "Failed to push service: %d", error);
         return kCTIStatus_UnknownError;
@@ -104,13 +104,13 @@ int ctiAddService( uint32_t enterprise_number,
 
 int ctiRemoveService( uint32_t enterprise_number,
                       const uint8_t *service_data,
-                      size_t service_data_length){
+                      size_t service_data_length) {
 
-    if ( !gInstance){
+    if ( !cti_instance) {
         return kCTIStatus_UnknownError;
     }
 
-    otError error = otServerRemoveService(gInstance,
+    otError error = otServerRemoveService(cti_instance,
                                           enterprise_number,
                                           service_data,
                                           service_data_length);
@@ -118,7 +118,7 @@ int ctiRemoveService( uint32_t enterprise_number,
         syslog(LOG_INFO, "Failed to remove service %d", enterprise_number);
         return kCTIStatus_UnknownError;
     }
-    error = otBorderRouterRegister(gInstance);
+    error = otBorderRouterRegister(cti_instance);
     if (error != OT_ERROR_NONE) {
         syslog(LOG_INFO, "Failed to push service: %d", error);
         return kCTIStatus_UnknownError;
@@ -130,14 +130,14 @@ int ctiRetrieveServiceList(cti_connection_t connection, int UNUSED event)
 {
     otNetworkDataIterator iterator = OT_NETWORK_DATA_ITERATOR_INIT;
     otServiceConfig config;
-    if ( !gInstance){
+    if ( !cti_instance) {
         return kCTIStatus_UnknownError;
     }
 
     uint16_t numServices = 0;
     uint16_t totalSize = 0;
     // Walk through the list and calculate the number and size of services
-    while (otNetDataGetNextService(gInstance, &iterator, &config) == OT_ERROR_NONE) {
+    while (otNetDataGetNextService(cti_instance, &iterator, &config) == OT_ERROR_NONE) {
         numServices++;
 
         // We will send the data back in this order:
@@ -166,7 +166,7 @@ int ctiRetrieveServiceList(cti_connection_t connection, int UNUSED event)
     iterator = OT_NETWORK_DATA_ITERATOR_INIT;
 
     int i = 0;
-    while ((otNetDataGetNextService(gInstance, &iterator, &config) == OT_ERROR_NONE) && i < numServices) {
+    while ((otNetDataGetNextService(cti_instance, &iterator, &config) == OT_ERROR_NONE) && i < numServices) {
         SuccessOrFailure(cti_connection_u32_put(connection, config.mEnterpriseNumber));
         SuccessOrFailure(cti_connection_data_put(connection, config.mServiceData, config.mServiceDataLength));
         SuccessOrFailure(cti_connection_data_put(connection,
@@ -182,7 +182,7 @@ int ctiRetrieveServiceList(cti_connection_t connection, int UNUSED event)
 int ctiAddMeshPrefix(struct in6_addr *prefix, size_t prefix_length, bool on_mesh, bool preferred, bool slaac, bool stable)
 {
     otError error = OT_ERROR_NONE;
-    if ( !gInstance){
+    if ( !cti_instance) {
         return kCTIStatus_UnknownError;
     }
     otBorderRouterConfig borderRouterConfig;
@@ -204,11 +204,11 @@ int ctiAddMeshPrefix(struct in6_addr *prefix, size_t prefix_length, bool on_mesh
     borderRouterConfig.mDefaultRoute = true;
     borderRouterConfig.mDhcp = false;
 
-    error = otBorderRouterAddOnMeshPrefix(gInstance, &borderRouterConfig);
+    error = otBorderRouterAddOnMeshPrefix(cti_instance, &borderRouterConfig);
     if (error != OT_ERROR_NONE) {
         return kCTIStatus_UnknownError;
     }
-    error = otBorderRouterRegister(gInstance);
+    error = otBorderRouterRegister(cti_instance);
     if (error != OT_ERROR_NONE) {
         syslog(LOG_INFO, "Failed to push service: %d", error);
         return kCTIStatus_UnknownError;
@@ -217,9 +217,9 @@ int ctiAddMeshPrefix(struct in6_addr *prefix, size_t prefix_length, bool on_mesh
     return kCTIStatus_NoError;
 }
 
-int ctiRemoveMeshPrefix(struct in6_addr *prefix, size_t prefix_length){
+int ctiRemoveMeshPrefix(struct in6_addr *prefix, size_t prefix_length) {
 
-    if (!gInstance){
+    if (!cti_instance) {
         return kCTIStatus_UnknownError;
     }
 
@@ -231,11 +231,11 @@ int ctiRemoveMeshPrefix(struct in6_addr *prefix, size_t prefix_length){
     }
     memcpy(ip6Prefix.mPrefix.mFields.m8, prefix, sizeof(*prefix));
     ip6Prefix.mLength = prefix_length;
-    otError error = otBorderRouterRemoveOnMeshPrefix(gInstance, &ip6Prefix);
+    otError error = otBorderRouterRemoveOnMeshPrefix(cti_instance, &ip6Prefix);
     if (error != OT_ERROR_NONE && error != OT_ERROR_NOT_FOUND) {
         return kCTIStatus_UnknownError;
     }
-    error = otBorderRouterRegister(gInstance);
+    error = otBorderRouterRegister(cti_instance);
     if (error != OT_ERROR_NONE) {
         syslog(LOG_INFO, "Failed to push service: %d", error);
         return kCTIStatus_UnknownError;
@@ -245,7 +245,7 @@ int ctiRemoveMeshPrefix(struct in6_addr *prefix, size_t prefix_length){
 
 int ctiRetrievePrefixList(cti_connection_t connection, int UNUSED event)
 {
-    if (!gInstance){
+    if (!cti_instance) {
         return kCTIStatus_UnknownError;
     }
     otBorderRouterConfig config;
@@ -254,7 +254,7 @@ int ctiRetrievePrefixList(cti_connection_t connection, int UNUSED event)
     uint16_t numPrefixes = 0;
     int totalSize = 0;
     do {
-        int error = otNetDataGetNextOnMeshPrefix(gInstance, &iterator, &config);
+        int error = otNetDataGetNextOnMeshPrefix(cti_instance, &iterator, &config);
         if (error != OT_ERROR_NONE) {
             if (error != OT_ERROR_NOT_FOUND) {
                 syslog(LOG_ERR, "ctiRetrievePrefixList: otBorderRouterGetNextRoute: %d", error);
@@ -284,7 +284,7 @@ int ctiRetrievePrefixList(cti_connection_t connection, int UNUSED event)
     int i = 0;
     while (i < numPrefixes)
     {
-        int error = otNetDataGetNextOnMeshPrefix(gInstance, &iterator, &config);
+        int error = otNetDataGetNextOnMeshPrefix(cti_instance, &iterator, &config);
         if (error != OT_ERROR_NONE) {
             if (error != OT_ERROR_NOT_FOUND) {
                 syslog(LOG_ERR, "ctiRetrievePrefixList: otBorderRouterGetNextRoute: %d", error);
@@ -308,18 +308,35 @@ int ctiRetrievePrefixList(cti_connection_t connection, int UNUSED event)
 
 int ctiRetrievePartitionId(cti_connection_t connection, int UNUSED event)
 {
-    uint32_t partitionId = otThreadGetPartitionId(gInstance);
-    SuccessOrFailure(cti_connection_message_create(connection, kCTIMessageType_PartitionEvent, sizeof(partitionId)));
-    SuccessOrFailure(cti_connection_u32_put(connection, partitionId));
+    uint32_t partitionId = otThreadGetPartitionId(cti_instance);
+    SuccessOrFailure(cti_connection_message_create(connection, kCTIMessageType_UInt64PropEvent,
+                                                   sizeof(partitionId) + sizeof(uint32_t)));
+    SuccessOrFailure(cti_connection_u32_put(connection, kCTIPropertyPartitionID));
+    SuccessOrFailure(cti_connection_u64_put(connection, partitionId));
     SuccessOrFailure(cti_connection_message_send(connection));
     return kCTIStatus_NoError;
 }
 
-int ctiRetrieveTunnel(cti_connection_t connection){
+int ctiRetrieveXPANID(cti_connection_t connection, int UNUSED event)
+{
+    const otExtendedPanId *panid_buf = otThreadGetExtendedPanId(cti_instance);
+    uint64_t xpanid = 0;
+    for (int i = 7; i >= 0; i--) {
+        xpanid = (xpanid << 8) | panid_buf->m8[i];
+    }
+    SuccessOrFailure(cti_connection_message_create(connection, kCTIMessageType_UInt64PropEvent,
+                                                   sizeof(xpanid) + sizeof(uint32_t)));
+    SuccessOrFailure(cti_connection_u32_put(connection, kCTIPropertyExtendedPANID));
+    SuccessOrFailure(cti_connection_u64_put(connection, xpanid));
+    SuccessOrFailure(cti_connection_message_send(connection));
+    return kCTIStatus_NoError;
+}
+
+int ctiRetrieveTunnel(cti_connection_t connection) {
     const char *interfaceName = "wpan0";
     uint32_t interfaceIndex = 0;
 #if defined(OPENTHREAD_CONFIG_PLATFORM_NETIF_ENABLE) && OPENTHREAD_CONFIG_PLATFORM_NETIF_ENABLE
-    otError error = otPlatGetNetif(gInstance, &interfaceName, &interfaceIndex);
+    otError error = otPlatGetNetif(cti_instance, &interfaceName, &interfaceIndex);
     if (error != OT_ERROR_NONE) {
         return kCTIStatus_UnknownError;
     }
@@ -344,7 +361,7 @@ int ctiRetrieveTunnel(cti_connection_t connection){
 int
 ctiRetrieveNodeType(cti_connection_t connection, int event)
 {
-    otDeviceRole role = otThreadGetDeviceRole(gInstance);
+    otDeviceRole role = otThreadGetDeviceRole(cti_instance);
     uint8_t datum;
     int event_type;
 
@@ -395,7 +412,7 @@ handleThreadStateChanged(uint32_t flags, void UNUSED *context)
 {
     syslog(LOG_INFO, "handleThreadStateChanged: flags = %" PRIx32, flags);
 
-    if ( !gInstance){
+    if ( !cti_instance) {
         return;
     }
 
@@ -418,13 +435,19 @@ handleThreadStateChanged(uint32_t flags, void UNUSED *context)
         syslog(LOG_INFO, "    Thread Partition ID changed.  Notify registered clients" );
         cti_notify_event(CTI_EVENT_PARTITION_ID, ctiRetrievePartitionId);
     }
+    if ( flags & OT_CHANGED_THREAD_EXT_PANID)
+    {
+        syslog(LOG_INFO, "    Thread Partition ID changed.  Notify registered clients" );
+        cti_notify_event(CTI_EVENT_XPANID, ctiRetrievePartitionId);
+    }
+
 }
 
 // Functions to be called by ot-daemon's main:
 // Called from main after InitInstance()
-void otCtiServerInit(otInstance*  aInstance){
-    gInstance = aInstance;
-    otError error = otSetStateChangedCallback(gInstance, handleThreadStateChanged, NULL);
+void otCtiServerInit(otInstance*  aInstance) {
+    cti_instance = aInstance;
+    otError error = otSetStateChangedCallback(cti_instance, handleThreadStateChanged, NULL);
     if(error != OT_ERROR_NONE && error != OT_ERROR_ALREADY) {
         syslog(LOG_INFO, "otCtiServerInit: otSetStateChangedCallback: Unable to register: %d", error);
     }
@@ -433,20 +456,20 @@ void otCtiServerInit(otInstance*  aInstance){
 }
 
 // Called in main's idle loop after FD Prep.
-void otCtiServerUpdate(otInstance* aInstance, otSysMainloopContext *aMainloop){
+void otCtiServerUpdate(otInstance* aInstance, otSysMainloopContext *aMainloop) {
     int nfds = 0;
-    gInstance = aInstance;
+    cti_instance = aInstance;
     // Note:  This will not compile as it requires a change to cti_fd_init's arg list since
     // ot-daemon's make does not allow unused arguments.
     cti_fd_init(&nfds, &aMainloop->mReadFdSet);
-    if (aMainloop->mMaxFd < nfds){
+    if (aMainloop->mMaxFd < nfds) {
         aMainloop->mMaxFd = nfds;
     }
 }
 
 // Called in main loop after a successful otSysMainloopPoll
-void otCtiServerProcess(otInstance* aInstance, otSysMainloopContext *aMainloop){
-    gInstance = aInstance;
+void otCtiServerProcess(otInstance* aInstance, otSysMainloopContext *aMainloop) {
+    cti_instance = aInstance;
     // Note: this will not compile as it is as it removes unused args in cti_fd_process
     cti_fd_process(&aMainloop->mReadFdSet);
 }

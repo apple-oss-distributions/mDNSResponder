@@ -527,20 +527,18 @@ cti_accept(int listen_fd, uid_t *p_uid, gid_t *p_gid, pid_t *p_pid)
     struct sockaddr_un addr;
     socklen_t socksize = sizeof(addr);
     int fd = accept(listen_fd, (struct sockaddr *)&addr, &socksize);
-    size_t len;
-    struct ucred ucred;
 
     if (fd < 0) {
         syslog(LOG_ERR, "cti_accept: accept: %s", strerror(errno));
         return -1;
     }
 
-    len = sizeof(struct ucred);
+#if defined(LINUX) || OPENTHREAD_PLATFORM_POSIX
+    struct ucred ucred;
+    socklen_t len = sizeof(struct ucred);
     if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &ucred, &len) < 0) {
         syslog(LOG_ERR, "cti_accept: unable to get peer credentials for incoming connection: %s", strerror(errno));
-    out:
-        close(fd);
-        return -1;
+        goto out;
     }
 
     if (ucred.uid != 0) {
@@ -571,17 +569,22 @@ cti_accept(int listen_fd, uid_t *p_uid, gid_t *p_gid, pid_t *p_pid)
             }
         }
     }
+#else
+    syslog(LOG_ERR, "cti_accept: no way to validate user credentials.");
+#endif
 
 #ifdef SO_NOSIGPIPE
+    int one = 1;
     if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one) < 0) {
         syslog(LOG_ERR, "SO_NOSIGPIPE failed: %s", strerror(errno));
-
+    }
 #endif
     if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0) {
         syslog(LOG_ERR, "cti_accept: can't set O_NONBLOCK: %s", strerror(errno));
         goto out;
     }
 
+#ifdef LINUX
     if (p_uid != NULL) {
         *p_uid = ucred.uid;
     }
@@ -591,8 +594,16 @@ cti_accept(int listen_fd, uid_t *p_uid, gid_t *p_gid, pid_t *p_pid)
     if (p_pid != NULL) {
         *p_pid = ucred.pid;
     }
-
     syslog(LOG_INFO, "cti_accept: connection from user %d accepted", ucred.uid);
+#else
+    syslog(LOG_INFO, "cti_accept: connection from unknown user accepted");
+#endif
+    goto done;
+
+out:
+    close(fd);
+    fd = -1;
+done:
     return fd;
 }
 

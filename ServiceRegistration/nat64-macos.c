@@ -80,10 +80,11 @@ nat64_set_ula_prefix(const struct in6_addr *const ula_prefix)
         changed = false;
     }
     if (changed) {
-        // Set the 40-bit ULA prefix, then set the next 24 bits to all-ones to make the 64-bit IPv6 prefix.
+        // Set the 48-bit ULA prefix (0xfd + global identifier), then set the next 16 bits to all-ones to make the
+        // 64-bit IPv6 prefix.
         memset(&nat64_prefix, 0, sizeof(nat64_prefix));
-        memcpy(&nat64_prefix.s6_addr[0], ula_prefix->s6_addr, 5);
-        memset(&nat64_prefix.s6_addr[5], 0xFF, 3);
+        memcpy(&nat64_prefix.s6_addr[0], ula_prefix->s6_addr, 6);
+        memset(&nat64_prefix.s6_addr[6], 0xFF, 2);
         nat64_prefix_is_set = true;
         if (nat64_primary_ipv4.sin_family == AF_INET) {
             nat64_reset();

@@ -266,12 +266,14 @@ struct srpl_instance {
     wakeup_t *NULLABLE reconnect_timeout;
     uint64_t server_id;
     uint16_t outgoing_port;
-    int num_copies; // We might get an NS record on more than one interface, so count them.
+    int num_copies;     // Tracks adds and deletes from the DNSServiceBrowse for this instance.
+    bool discontinuing; // True if we are in the process of discontinuing this instance.
     bool is_me;
     bool have_server_id;
 };
 
 struct srpl_domain {
+    int ref_count;
     srpl_domain_t *NULLABLE next;
     char *NONNULL name;
     srpl_instance_t *NULLABLE instances;

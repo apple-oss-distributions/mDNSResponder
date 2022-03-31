@@ -1,6 +1,6 @@
 /* ra-tester.c
  *
- * Copyright (c) 2020 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2020-2022 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -101,7 +101,7 @@ main(int argc, char **argv)
         return 1;
     }
 
-    thread_network_startup();
+    infrastructure_network_startup();
 
     do {
         int something = 0;

@@ -6372,7 +6372,7 @@ static void DNSPushDSOCallback(void *context, void *event_context,
             else
             {
                 // Don't use this server.
-                q->dnsPushServer->connectState = DNSPushServerNoDNSPush;
+                server->connectState = DNSPushServerNoDNSPush;
                 StartLLQPolling(m, q);
 
                 LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,

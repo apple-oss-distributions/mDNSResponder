@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -149,6 +149,7 @@ struct dnssd_getaddrinfo_result_s {
 	xpc_object_t						ech_config;			// SVCB ECH config.
 	xpc_object_t						address_hints;		// SVCB address hints.
 	xpc_object_t						doh_uri;			// SVCB DoH URI.
+	xpc_object_t						doh_path;			// SVCB DoH Path.
 	xpc_object_t						odoh_config;		// SVCB Oblivious DoH config.
 	xpc_object_t						alpn_values;		// SVCB ALPN values.
 	xpc_object_t						service_name;		// SVCB name.
@@ -762,6 +763,14 @@ dnssd_getaddrinfo_result_get_doh_uri(dnssd_getaddrinfo_result_t me)
 
 //======================================================================================================================
 
+const char *
+dnssd_getaddrinfo_result_get_doh_path(dnssd_getaddrinfo_result_t me)
+{
+	return xpc_string_get_string_ptr(me->doh_path);
+}
+
+//======================================================================================================================
+
 uint16_t
 dnssd_getaddrinfo_result_get_service_port(dnssd_getaddrinfo_result_t me)
 {
@@ -1047,6 +1056,7 @@ _dnssd_getaddrinfo_result_finalize(dnssd_getaddrinfo_result_t me)
 	xpc_forget(&me->auth_tag);
 	xpc_forget(&me->provider_name);
 	xpc_forget(&me->doh_uri);
+	xpc_forget(&me->doh_path);
 	xpc_forget(&me->odoh_config);
 	xpc_forget(&me->alpn_values);
 	xpc_forget(&me->service_name);
@@ -1868,9 +1878,9 @@ _dnssd_getaddrinfo_result_create_svcb(xpc_object_t hostname, xpc_object_t actual
 		obj->priority = dnssd_svcb_get_priority(svcb_data, svcb_length);
 		obj->port = dnssd_svcb_get_port(svcb_data, svcb_length);
 
-		char *service_name = dnssd_svcb_copy_domain(svcb_data, svcb_length);
+		char *service_name = dnssd_svcb_copy_service_name_string(svcb_data, svcb_length);
 		if (service_name != NULL) {
-			if (strcmp(service_name, ".") == 0) {
+			if (dnssd_svcb_service_name_is_empty(svcb_data, svcb_length)) {
 				// The empty name is an placeholder for the name for the record
 				obj->service_name = xpc_copy(obj->hostname);
 			} else {
@@ -1885,6 +1895,13 @@ _dnssd_getaddrinfo_result_create_svcb(xpc_object_t hostname, xpc_object_t actual
 			obj->doh_uri = xpc_string_create(doh_uri);
 			ForgetMem(&doh_uri);
 			require_action_quiet(obj->doh_uri, exit, err = kNoResourcesErr);
+		}
+
+		char *doh_path = dnssd_svcb_copy_doh_path(svcb_data, svcb_length);
+		if (doh_path != NULL) {
+			obj->doh_path = xpc_string_create(doh_path);
+			ForgetMem(&doh_path);
+			require_action_quiet(obj->doh_path, exit, err = kNoResourcesErr);
 		}
 
 		size_t ech_config_length = 0;

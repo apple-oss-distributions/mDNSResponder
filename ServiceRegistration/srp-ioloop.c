@@ -31,6 +31,8 @@
 #include "dns-msg.h"
 #include "srp-crypto.h"
 #include "ioloop.h"
+#include "dso-utils.h"
+#include "dso.h"
 
 #include "cti-services.h"
 
@@ -39,8 +41,15 @@ static bool random_leases = false;
 static bool delete_registrations = false;
 static bool use_thread_services = false;
 static bool change_txt_record = false;
+static bool random_txt_record = false;
+static bool remove_added_service = false;
+static bool let_added_service_expire = false;
+static bool expecting_second_add = true;
 static int num_clients = 1;
 static int bogusify_signatures = false;
+static int bogus_remove = false;
+static int push_query = false;
+static int push_unsubscribe = false;
 
 const uint64_t thread_enterprise_number = 52627;
 
@@ -356,8 +365,44 @@ static void
 remove_callback(void *context)
 {
     srp_client_t *client = context;
+    if (bogus_remove) {
+        srp_set_hostname("bogus-api-test", NULL);
+    }
     srp_deregister(client);
 }
+
+static void
+second_register_callback(DNSServiceRef sdref, DNSServiceFlags flags, DNSServiceErrorType errorCode,
+                         const char *name, const char *regtype, const char *domain, void *context)
+{
+    srp_client_t *client = context;
+
+    (void)regtype;
+    (void)flags;
+    (void)name;
+    (void)regtype;
+    (void)domain;
+    INFO("Second Register Reply for %s: %d", client->name, errorCode);
+
+    if (errorCode == kDNSServiceErr_NoError) {
+        if (expecting_second_add) {
+            expecting_second_add = false;
+            if (remove_added_service) {
+                srp_deregister_instance(sdref);
+                srp_network_state_stable(NULL);
+            } else if (let_added_service_expire) {
+                DNSServiceRefDeallocate(sdref);
+            }
+        } else {
+            // Test succeeded
+            exit(0);
+        }
+    } else {
+        // Test failed
+        exit(1);
+    }
+}
+
 
 static void
 register_callback(DNSServiceRef sdref, DNSServiceFlags flags, DNSServiceErrorType errorCode,
@@ -402,13 +447,299 @@ register_callback(DNSServiceRef sdref, DNSServiceFlags flags, DNSServiceErrorTyp
     }
 }
 
+comm_t *dso_connection;
+uint16_t subscribe_xid;
+uint16_t keepalive_xid;
+
+static void
+send_push_unsubscribe(void)
+{
+    struct iovec iov;
+    INFO("unsubscribe");
+    dns_wire_t dns_message;
+    uint8_t *buffer = (uint8_t *)&dns_message;
+    dns_towire_state_t towire;
+    dso_message_t message;
+    dso_make_message(&message, buffer, sizeof(dns_message), dso_connection->dso, true, false, 0, 0, NULL);
+    memset(&towire, 0, sizeof(towire));
+    towire.p = &buffer[DNS_HEADER_SIZE];
+    towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);
+    towire.message = &dns_message;
+    dns_u16_to_wire(&towire, kDSOType_DNSPushUnsubscribe);
+    dns_rdlength_begin(&towire);
+    dns_full_name_to_wire(NULL, &towire, "_hap._udp.openthread.thread.home.arpa");
+    dns_u16_to_wire(&towire, dns_rrtype_ptr);
+    dns_u16_to_wire(&towire, dns_qclass_in);
+    dns_rdlength_end(&towire);
+
+    memset(&iov, 0, sizeof(iov));
+    iov.iov_len = towire.p - buffer;
+    iov.iov_base = buffer;
+    ioloop_send_message(dso_connection, NULL, &iov, 1);
+    subscribe_xid = dns_message.id; // We need this to identify the response.
+
+    // Send a keepalive message so that we can get the response, since the unsubscribe is not a response-requiring request.
+    dso_make_message(&message, buffer, sizeof(dns_message), dso_connection->dso, false, false, 0, 0, NULL);
+    memset(&towire, 0, sizeof(towire));
+    towire.p = &buffer[DNS_HEADER_SIZE];
+    towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);
+    towire.message = &dns_message;
+    dns_u16_to_wire(&towire, kDSOType_Keepalive);
+    dns_rdlength_begin(&towire);
+    dns_u32_to_wire(&towire, 600);
+    dns_u32_to_wire(&towire, 600);
+    dns_rdlength_end(&towire);
+    keepalive_xid = dns_message.id;
+    memset(&iov, 0, sizeof(iov));
+    iov.iov_len = towire.p - buffer;
+    iov.iov_base = buffer;
+    ioloop_send_message(dso_connection, NULL, &iov, 1);
+}
+
+static void
+dso_message(message_t *message, dso_state_t *dso, bool response)
+{
+#if PRINT_TO_STDERR
+    char name[DNS_MAX_NAME_SIZE_ESCAPED + 1];
+    char ptrname[DNS_MAX_NAME_SIZE_ESCAPED + 1];
+#endif
+    unsigned offset, max;
+    dns_rr_t rr;
+    uint8_t *message_bytes;
+
+    switch(dso->primary.opcode) {
+    case kDSOType_Keepalive:
+        if (response) {
+            INFO("Keepalive response from server, rcode = %d", dns_rcode_get(&message->wire));
+            exit(0);
+        } else {
+            INFO("Keepalive from server");
+        }
+        break;
+
+    case kDSOType_DNSPushSubscribe:
+        if (response) {
+            // This is a protocol error--the response isn't supposed to contain a primary TLV.
+            INFO("DNS Push response from server, rcode = %d", dns_rcode_get(&message->wire));
+            exit(1);
+        } else {
+            INFO("Unexpected DNS Push request from server, rcode = %d", dns_rcode_get(&message->wire));
+        }
+        break;
+
+    case kDSOType_DNSPushUpdate:
+        // DNS Push Updates are never responses.
+        // DNS Push updates are compressed, so we can't just parse data out of the primary--we need to align
+        // our parse with the start of the message data.
+        message_bytes = (uint8_t *)message->wire.data;
+        offset = (unsigned)(dso->primary.payload - message_bytes); // difference can never be greater than sizeof(message->wire).
+        max = offset + dso->primary.length;
+        while (offset < max) {
+            if (!dns_rr_parse(&rr, message_bytes, max, &offset, true)) {
+                // Should have emitted an error earlier
+                break;
+            }
+#if PRINT_TO_STDERR
+            dns_name_print(rr.name, name, sizeof(name));
+            if (rr.type != dns_rrtype_ptr) {
+                fprintf(stderr, "%s: type %u class %u ttl %" PRIu32 "\n", name, rr.type, rr.qclass, rr.ttl);
+            } else {
+                dns_name_print(rr.data.ptr.name, ptrname, sizeof(ptrname));
+                fprintf(stderr, "%s IN PTR %s\n", name, ptrname);
+            }
+#endif
+        }
+        if (push_unsubscribe) {
+            send_push_unsubscribe();
+        } else {
+            exit(0);
+        }
+        break;
+
+    case kDSOType_NoPrimaryTLV: // No Primary TLV
+        if (response) {
+            if (message->wire.id == subscribe_xid) {
+                int rcode = dns_rcode_get(&message->wire);
+                INFO("DNS Push Subscribe response from server, rcode = %d", rcode);
+                if (rcode != dns_rcode_noerror) {
+                    exit(0);
+                }
+            } else if (message->wire.id == keepalive_xid) {
+                int rcode = dns_rcode_get(&message->wire);
+                INFO("DNS Keepalive response from server, rcode = %d", rcode);
+                exit(0);
+            } else {
+                int rcode = dns_rcode_get(&message->wire);
+                INFO("Unexpected DSO response from server, rcode = %d", rcode);
+            }
+        } else {
+            INFO("DSO request with no primary TLV.");
+            exit(1);
+        }
+        break;
+
+    default:
+        INFO("dso_message: unexpected primary TLV %d", dso->primary.opcode);
+        dso_simple_response(dso_connection, NULL, &message->wire, dns_rcode_dsotypeni);
+        break;
+    }
+}
+
+static void
+dso_event_callback(void *UNUSED context, void *event_context, dso_state_t *dso, dso_event_type_t eventType)
+{
+    message_t *message;
+    dso_query_receive_context_t *response_context;
+    dso_disconnect_context_t *disconnect_context;
+
+    switch(eventType)
+    {
+    case kDSOEventType_DNSMessage:
+        // We shouldn't get here because we already handled any DNS messages
+        message = event_context;
+        INFO("DNS Message (opcode=%d) received from " PRI_S_SRP, dns_opcode_get(&message->wire),
+             dso->remote_name);
+        break;
+    case kDSOEventType_DNSResponse:
+        // We shouldn't get here because we already handled any DNS messages
+        message = event_context;
+        INFO("DNS Response (opcode=%d) received from " PRI_S_SRP, dns_opcode_get(&message->wire),
+             dso->remote_name);
+        break;
+    case kDSOEventType_DSOMessage:
+        INFO("DSO Message (Primary TLV=%d) received from " PRI_S_SRP,
+               dso->primary.opcode, dso->remote_name);
+        message = event_context;
+        dso_message(message, dso, false);
+        break;
+    case kDSOEventType_DSOResponse:
+        INFO("DSO Response (Primary TLV=%d) received from " PRI_S_SRP,
+               dso->primary.opcode, dso->remote_name);
+        response_context = event_context;
+        message = response_context->message_context;
+        dso_message(message, dso, true);
+        break;
+
+    case kDSOEventType_Finalize:
+        INFO("Finalize");
+        break;
+
+    case kDSOEventType_Connected:
+        INFO("Connected to " PRI_S_SRP, dso->remote_name);
+        break;
+
+    case kDSOEventType_ConnectFailed:
+        INFO("Connection to " PRI_S_SRP " failed", dso->remote_name);
+        break;
+
+    case kDSOEventType_Disconnected:
+        INFO("Connection to " PRI_S_SRP " disconnected", dso->remote_name);
+        break;
+    case kDSOEventType_ShouldReconnect:
+        INFO("Connection to " PRI_S_SRP " should reconnect (not for a server)", dso->remote_name);
+        break;
+    case kDSOEventType_Inactive:
+        INFO("Inactivity timer went off, closing connection.");
+        break;
+    case kDSOEventType_Keepalive:
+        INFO("should send a keepalive now.");
+        break;
+    case kDSOEventType_KeepaliveRcvd:
+        INFO("keepalive received.");
+        break;
+    case kDSOEventType_RetryDelay:
+        disconnect_context = event_context;
+        INFO("retry delay received, %d seconds", disconnect_context->reconnect_delay);
+        // Ignore it for now
+        break;
+    }
+}
+
+static void
+dso_connected(comm_t *connection, void *UNUSED context)
+{
+    struct iovec iov;
+    INFO("connected");
+    connection->dso = dso_state_create(false, 1, connection->name, dso_event_callback,
+                                       dso_connection, NULL, dso_connection);
+    if (connection->dso == NULL) {
+        ERROR("can't create dso state object.");
+        exit(1);
+    }
+    dns_wire_t dns_message;
+    uint8_t *buffer = (uint8_t *)&dns_message;
+    dns_towire_state_t towire;
+    dso_message_t message;
+    dso_make_message(&message, buffer, sizeof(dns_message), connection->dso, false, false, 0, 0, NULL);
+    memset(&towire, 0, sizeof(towire));
+    towire.p = &buffer[DNS_HEADER_SIZE];
+    towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);
+    towire.message = &dns_message;
+    dns_u16_to_wire(&towire, kDSOType_DNSPushSubscribe);
+    dns_rdlength_begin(&towire);
+    dns_full_name_to_wire(NULL, &towire, "_hap._udp.openthread.thread.home.arpa");
+    dns_u16_to_wire(&towire, dns_rrtype_ptr);
+    dns_u16_to_wire(&towire, dns_qclass_in);
+    dns_rdlength_end(&towire);
+
+    memset(&iov, 0, sizeof(iov));
+    iov.iov_len = towire.p - buffer;
+    iov.iov_base = buffer;
+    ioloop_send_message(dso_connection, NULL, &iov, 1);
+    subscribe_xid = dns_message.id; // We need this to identify the response.
+}
+
+static void
+dso_disconnected(comm_t *UNUSED connection, void *UNUSED context, int UNUSED error)
+{
+    fprintf(stderr, "disconnected.");
+    exit(0);
+}
+
+static void
+dso_datagram_callback(comm_t *connection, message_t *message, void *UNUSED context)
+{
+    // If this is a DSO message, see if we have a session yet.
+    switch(dns_opcode_get(&message->wire)) {
+    case dns_opcode_dso:
+        if (connection->dso == NULL) {
+            INFO("dso message received with no DSO object on connection " PRI_S_SRP, connection->name);
+            exit(1);
+        }
+        dso_message_received(connection->dso, (uint8_t *)&message->wire, message->length, message);
+        return;
+        break;
+    }
+    INFO("datagram on connection " PRI_S_SRP " not handled, type = %d.",
+         connection->name, dns_opcode_get(&message->wire));
+}
+
+static void
+start_push_query(void)
+{
+    addr_t address;
+    memset(&address, 0, sizeof(address));
+    address.sa.sa_family = AF_INET;
+    address.sin.sin_port = htons(853);
+    address.sin.sin_addr.s_addr = htonl(0x7f000001);  // localhost.
+                                                      // tls, stream, stable, opportunistic
+    dso_connection = ioloop_connection_create(&address, true,   true,   true, true,
+                                              dso_datagram_callback, dso_connected, dso_disconnected, NULL, NULL);
+    if (dso_connection == NULL) {
+        ERROR("Unable to create dso connection.");
+        exit(1);
+    }
+}
+
 static void
 usage(void)
 {
     fprintf(stderr,
             "srp-client [--lease-time <seconds>] [--client-count <client count>] [--server <address>%%<port>]\n"
+            "           [--push-query] [--push-unsubscribe]\n"
             "           [--random-leases] [--delete-registrations] [--use-thread-services] [--log-stderr]\n"
-            "           [--interface <interface name>] [--bogusify-signatures]\n");
+            "           [--interface <interface name>] [--bogusify-signatures] [--remove-added-service]\n"
+            "           [--expire-added-service] [--random-txt-record] [--bogus-remove]\n");
     exit(1);
 }
 
@@ -455,6 +786,7 @@ main(int argc, char **argv)
     bool have_server_address = false;
     bool log_stderr = false;
     const char *service_type = "_ipps._tcp";
+    bool bogus_server = false;
 
     ioloop_init();
 
@@ -525,8 +857,22 @@ main(int argc, char **argv)
             OPENLOG("srp-client", true);
         } else if (!strcmp(argv[i], "--change-txt-record")) {
             change_txt_record = true;
+        } else if (!strcmp(argv[i], "--random-txt-record")) {
+            random_txt_record = true;
+        } else if (!strcmp(argv[i], "--remove-added-service")) {
+            remove_added_service = true;
+        } else if (!strcmp(argv[i], "--expire-added-service")) {
+            let_added_service_expire = true;
+        } else if (!strcmp(argv[1], "--bogus-server-test")) {
+            bogus_server = true;
         } else if (!strcmp(argv[i], "--bogusify-signatures")) {
             bogusify_signatures = true;
+        } else if (!strcmp(argv[i], "--bogus-remove")) {
+            bogus_remove = true;
+        } else if (!strcmp(argv[i], "--push-query")) {
+            push_query = true;
+        } else if (!strcmp(argv[i], "--push-unsubscribe")) {
+            push_unsubscribe = true;
         } else if (!strcmp(argv[i], "--service-type")) {
             if (i + 1 == argc) {
                 usage();
@@ -542,6 +888,13 @@ main(int argc, char **argv)
         OPENLOG("srp-client", false);
     }
 
+    // If we're asked to do a push query, we're not actually going to act as an SRP client, just do the push query.
+    if (push_query) {
+        start_push_query();
+        ioloop();
+        exit(1);
+    }
+
     if (!use_thread_services) {
         ioloop_map_interface_addresses(interface_name, NULL, interface_callback);
     }
@@ -549,7 +902,9 @@ main(int argc, char **argv)
     if (!have_server_address && !use_thread_services) {
         port[0] = 0;
         port[1] = 53;
-        srp_add_server_address(port, dns_rrtype_aaaa, bogus_address, 16);
+        if (bogus_server) {
+            srp_add_server_address(port, dns_rrtype_aaaa, bogus_address, 16);
+        }
         srp_add_server_address(port, dns_rrtype_aaaa, server_address, 16);
     }
 
@@ -588,6 +943,8 @@ main(int argc, char **argv)
             srp_set_lease_times(random_lease_time, 7 * 24 * 3600); // random host lease, 7 day key lease
         } else if (lease_time > 0) {
             srp_set_lease_times(lease_time, 7 * 24 * 3600); // specified host lease, 7 day key lease
+        } else if (let_added_service_expire) {
+            srp_set_lease_times(30, 30); // Use short lease times so the lease expires quickly.
         }
 
         if (change_txt_record) {
@@ -597,13 +954,31 @@ main(int argc, char **argv)
             txt_data = TXTRecordGetBytesPtr(&txt);
             txt_len = TXTRecordGetLength(&txt);
         }
-        iport = (port[0] << 8) + port[1];
+        if (random_txt_record) {
+            char rbuf[6];
+            snprintf(rbuf, sizeof(rbuf), "%u", srp_random16());
+            TXTRecordCreate(&txt, sizeof(txt_buf), txt_buf);
+            TXTRecordSetValue(&txt, "foo", strlen(rbuf), rbuf);
+            INFO("TXTRecordSetValue(..., \"foo\", %zd, %s)", strlen(rbuf), rbuf);
+            txt_data = TXTRecordGetBytesPtr(&txt);
+            txt_len = TXTRecordGetLength(&txt);
+        }
+        iport = (((uint16_t)port[0]) << 8) + port[1];
 
         err = DNSServiceRegister(&sdref, 0, 0, hnbuf, service_type,
                                  0, 0, iport, txt_len, txt_data, register_callback, client);
         if (err != kDNSServiceErr_NoError) {
             ERROR("DNSServiceRegister failed: %d", err);
             exit(1);
+        }
+        if (remove_added_service || let_added_service_expire) {
+            expecting_second_add = true;
+            err = DNSServiceRegister(&sdref, 0, 0, hnbuf, "_second._tcp,foo", 0, 0, iport, txt_len, txt_data,
+                                     second_register_callback, client);
+            if (err != kDNSServiceErr_NoError) {
+                ERROR("second DNSServiceRegister failed: %d", err);
+                exit(1);
+            }
         }
     }
 

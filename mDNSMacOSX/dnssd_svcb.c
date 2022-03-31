@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,11 +29,22 @@ typedef enum
     dnssd_svcb_key_ipv4_hint = 4,
     dnssd_svcb_key_ech_config = 5,
     dnssd_svcb_key_ipv6_hint = 6,
+	dnssd_svcb_key_doh_path = 7,
     dnssd_svcb_key_doh_uri = 32768,
 	dnssd_svcb_key_odoh_config = 32769,
 } dnssd_svcb_key_t;
 
 typedef bool (^_dnssd_svcb_access_value_block_t)(const void *value, size_t value_size);
+
+bool
+dnssd_svcb_is_alias(const uint8_t *buffer, size_t buffer_size)
+{
+	if (buffer_size < sizeof(uint16_t)) {
+		return false;
+	}
+
+	return (dnssd_svcb_get_priority(buffer, buffer_size) == 0);
+}
 
 uint16_t
 dnssd_svcb_get_priority(const uint8_t *buffer, size_t buffer_size)
@@ -51,7 +62,7 @@ dnssd_svcb_get_priority(const uint8_t *buffer, size_t buffer_size)
 #define DNSSD_MAX_ESCAPED_DOMAIN_NAME 1009
 
 static bool
-_dnssd_svcb_get_domain_name_length(const uint8_t *buffer, size_t buffer_size, size_t *out_name_length)
+_dnssd_svcb_get_service_name_length(const uint8_t *buffer, size_t buffer_size, size_t *out_name_length)
 {
 	const uint8_t *limit = buffer + buffer_size;
 	const uint8_t *cursor = buffer;
@@ -118,7 +129,7 @@ _dnssd_svcb_get_string_from_domain_name(const uint8_t *source, char *string_buff
 }
 
 char *
-dnssd_svcb_copy_domain(const uint8_t *buffer, size_t buffer_size)
+dnssd_svcb_copy_service_name_string(const uint8_t *buffer, size_t buffer_size)
 {
 	if (buffer_size < sizeof(uint16_t)) {
 		return NULL;
@@ -127,8 +138,8 @@ dnssd_svcb_copy_domain(const uint8_t *buffer, size_t buffer_size)
 	buffer += sizeof(uint16_t);
 	buffer_size -= sizeof(uint16_t);
 
-	size_t domain_length = 0;
-	if (!_dnssd_svcb_get_domain_name_length(buffer, buffer_size, &domain_length)) {
+	size_t service_name_length = 0;
+	if (!_dnssd_svcb_get_service_name_length(buffer, buffer_size, &service_name_length)) {
 		return NULL;
 	}
 
@@ -138,6 +149,43 @@ dnssd_svcb_copy_domain(const uint8_t *buffer, size_t buffer_size)
 		return NULL;
 	}
 	return name_str;
+}
+
+bool
+dnssd_svcb_service_name_is_empty(const uint8_t *buffer, size_t buffer_size)
+{
+	if (buffer_size < sizeof(uint16_t)) {
+		return false;
+	}
+
+	buffer += sizeof(uint16_t);
+	buffer_size -= sizeof(uint16_t);
+
+	size_t service_name_length = 0;
+	if (!_dnssd_svcb_get_service_name_length(buffer, buffer_size, &service_name_length)) {
+		return false;
+	}
+
+	// If the label length is 1, it's just an empty ".".
+	return (service_name_length == 1);
+}
+
+const uint8_t *
+dnssd_svcb_get_service_name_raw(const uint8_t *buffer, size_t buffer_size)
+{
+	if (buffer_size < sizeof(uint16_t)) {
+		return NULL;
+	}
+
+	buffer += sizeof(uint16_t);
+	buffer_size -= sizeof(uint16_t);
+
+	size_t service_name_length = 0;
+	if (!_dnssd_svcb_get_service_name_length(buffer, buffer_size, &service_name_length)) {
+		return NULL;
+	}
+
+	return buffer;
 }
 
 static bool
@@ -158,13 +206,13 @@ _dnssd_svcb_extract_values(const uint8_t *buffer, size_t buffer_size,
 	buffer += sizeof(uint16_t);
 	buffer_size -= sizeof(uint16_t);
 
-	size_t domain_length = 0;
-	if (!_dnssd_svcb_get_domain_name_length(buffer, buffer_size, &domain_length)) {
+	size_t service_name_length = 0;
+	if (!_dnssd_svcb_get_service_name_length(buffer, buffer_size, &service_name_length)) {
 		return false;
 	}
 
-	buffer += domain_length;
-	buffer_size -= domain_length;
+	buffer += service_name_length;
+	buffer_size -= service_name_length;
 
 	while (buffer != NULL && buffer_size >= (sizeof(uint16_t) + sizeof(uint16_t))) {
 		const uint16_t *param_key_p = (const uint16_t *)buffer;
@@ -206,7 +254,10 @@ dnssd_svcb_is_valid(const uint8_t *buffer, size_t buffer_size)
 
 	uint16_t priority = dnssd_svcb_get_priority(buffer, buffer_size);
 	if (priority == 0) {
-		// Alias forms don't need further validation
+		// Alias forms with an empty name are treated as non-existent
+		if (dnssd_svcb_service_name_is_empty(buffer, buffer_size)) {
+			return false;
+		}
 		return true;
 	}
 
@@ -234,6 +285,7 @@ dnssd_svcb_is_valid(const uint8_t *buffer, size_t buffer_size)
 						case dnssd_svcb_key_ipv6_hint:
 						case dnssd_svcb_key_doh_uri:
 						case dnssd_svcb_key_odoh_config:
+						case dnssd_svcb_key_doh_path:
 							// Known keys are fine
 							break;
 						default:
@@ -277,6 +329,19 @@ dnssd_svcb_copy_doh_uri(const uint8_t *buffer, size_t buffer_size)
 		return false;
 	});
 	return doh_uri;
+}
+
+char *
+dnssd_svcb_copy_doh_path(const uint8_t *buffer, size_t buffer_size)
+{
+	__block char *doh_path = NULL;
+	(void)_dnssd_svcb_extract_values(buffer, buffer_size, dnssd_svcb_key_doh_path, ^bool(const void *value, size_t value_size) {
+		if (value != NULL && value_size > 0) {
+			asprintf(&doh_path, "%.*s", (int)value_size, value);
+		}
+		return false;
+	});
+	return doh_path;
 }
 
 uint8_t *

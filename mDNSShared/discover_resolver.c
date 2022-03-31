@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -590,6 +590,22 @@ exit:
 
 //======================================================================================================================
 
+bool
+dns_question_requires_resolver_discovery(const DNSQuestion * NONNULL q, const domainname ** const out_domain)
+{
+	// Currently, we only support discovering local resolvers for "openthread.thread.home.arpa."
+	// We only do the discovery when the question is not forced to use multicast DNS, because mDNS does not use resolver.
+	if (!q->ForceMCast && IsSubdomain(&q->qname, THREAD_DOMAIN_NAME)) {
+		*out_domain = THREAD_DOMAIN_NAME;
+		return true;
+	} else {
+		*out_domain = NULL;
+		return false;
+	}
+}
+
+//======================================================================================================================
+
 discover_resolver_t * NULLABLE
 discover_resolver_create(const domainname * const NONNULL domain)
 {
@@ -626,6 +642,9 @@ discover_resolver_finalize(discover_resolver_t * const NULLABLE discover_resolve
 	if (discover_resolver == NULL) {
 		return;
 	}
+
+	LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Stopping the resolver discovery for domain - "
+		"domain: " PRI_DM_NAME, DM_NAME_PARAM(&discover_resolver->domain));
 
 	if (discover_resolver->context != NULL) {
 		discover_resolver_stop(discover_resolver->context);
@@ -985,8 +1004,8 @@ discover_resolver_start(discover_resolver_context_t * const NULLABLE context,
 	bool succeeded;
 	require_action(context != NULL, exit, succeeded = false);
 
-	LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Starting to discover resolver for browsing domain - "
-		"browsing domain: " PRI_DM_NAME, DM_NAME_PARAM(domain));
+	LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Starting the resolver discovery for domain - "
+		"domain: " PRI_DM_NAME, DM_NAME_PARAM(domain));
 	// Start NS query with kDNSServiceFlagsForceMulticast to learn about the browsing domain with mDNS.
 	succeeded = discover_resolver_start_ns_query(context, domain);
 

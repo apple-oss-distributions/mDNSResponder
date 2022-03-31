@@ -160,10 +160,6 @@ struct dso_transport {
     nw_parameters_t NULLABLE parameters;
     int ref_count;
     int writes_pending;
-    bool read_pending: 1; // Only ever one.
-    bool server: 1;       // Indicates that this connection was created by a listener
-    bool connection_ready: 1;
-    bool tls_rotation_ready: 1; // Indicates if the listener should rotate its TLS certificate.
     wakeup_t *NULLABLE idle_timer;
     // nw_connection objects aren't necessarily ready to write to immediately. But when we create an outgoing connection, we
     // typically want to write to it immediately. So we have a one-datum queue in case this happens; if the connection takes
@@ -196,6 +192,14 @@ struct dso_transport {
     size_t message_length_len;
     size_t message_length, message_cur;
     uint8_t message_length_bytes[2];
+#ifdef IOLOOP_MACOS
+    bool read_pending: 1; // Only ever one.
+    bool server: 1;       // Indicates that this connection was created by a listener
+    bool connection_ready: 1;
+    bool tls_rotation_ready: 1; // Indicates if the listener should rotate its TLS certificate.
+#else
+    bool tls_handshake_incomplete: 1;
+#endif // IOLOOP_MACOS
     bool tcp_stream: 1;
     bool is_multicast: 1;
     bool is_connected: 1;
@@ -219,6 +223,7 @@ struct subproc {
     char *NULLABLE argv[MAX_SUBPROC_ARGS + 1];
     int argc;
     pid_t pid;
+    bool finished : 1;
 };
 
 struct dnssd_txn {
@@ -279,7 +284,7 @@ comm_t *NULLABLE ioloop_connection_create(addr_t *NONNULL remote_address, bool t
                                           connect_callback_t NULLABLE connected,
                                           disconnect_callback_t NULLABLE disconnected,
                                           finalize_callback_t NULLABLE finalize,
-                                          void *NONNULL context);
+                                          void *NULLABLE context);
 #define ioloop_message_create(x) ioloop_message_create_(x, __FILE__, __LINE__)
 message_t *NULLABLE ioloop_message_create_(size_t message_size, const char *NONNULL file, int line);
 #define ioloop_message_retain(wakeup) ioloop_message_retain_(wakeup, __FILE__, __LINE__)
@@ -304,6 +309,7 @@ void ioloop_subproc_retain_(subproc_t *NONNULL subproc, const char *NONNULL file
 subproc_t *NULLABLE ioloop_subproc(const char *NONNULL exepath, char *NULLABLE *NONNULL argv, int argc,
                                    subproc_callback_t NULLABLE callback, io_callback_t NULLABLE output_callback,
                                    void *NULLABLE context);
+void ioloop_subproc_run_sync(subproc_t *NONNULL subproc);
 #define ioloop_dnssd_txn_add(ref, context, finalize_callback, failure_callback) \
     ioloop_dnssd_txn_add_(ref, context, finalize_callback, failure_callback, __FILE__, __LINE__)
 dnssd_txn_t *NULLABLE

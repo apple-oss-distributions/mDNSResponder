@@ -197,16 +197,16 @@ uint16_t udp_port;
 uint16_t tcp_port;
 uint16_t tls_port;
 const char *my_name = "discoveryproxy.home.arpa.";
-char *listen_addrs[MAX_ADDRS] = {NULL};
-int num_listen_addrs = 0;
-char *publish_addrs[MAX_ADDRS] = {NULL};
-int num_publish_addrs = 0;
-char *tls_cacert_filename = NULL;
+char *listen_addrs[MAX_ADDRS];
+int num_listen_addrs;
+char *publish_addrs[MAX_ADDRS];
+int num_publish_addrs;
+char *tls_cacert_filename;
 char *tls_cert_filename = "/etc/dnssd-proxy/server.crt";
 char *tls_key_filename = "/etc/dnssd-proxy/server.key";
 
-comm_t *listener[4 + MAX_ADDRS] = {NULL};
-int num_listeners = 0;
+comm_t *listener[4 + MAX_ADDRS];
+int num_listeners;
 served_domain_t *served_domains;
 
 static dnssd_proxy_advertisements_t advertisements;
@@ -473,8 +473,17 @@ dp_tracker_disconnected(comm_t *UNUSED connection, void *context, int UNUSED err
 
     INFO("tracker %p queries %p dso %p comm %p", tracker, dns_queries, tracker->dso, tracker_connection);
 
-    // This should release any dns push queries.
+    // If there is a DSO state outstanding on the tracker, cancel any activities connected to it.
     if (tracker->dso != NULL) {
+        dso_activity_t *activity = tracker->dso->activities;
+        while (activity != NULL) {
+            dso_drop_activity(tracker->dso, tracker->dso->activities);
+            // Failsafe in case dso_drop_activity for some reason doesn't drop the activity.
+            if (tracker->dso->activities == activity) {
+                break;
+            }
+            activity = tracker->dso->activities;
+        }
         dso_state_cancel(tracker->dso);
         tracker->dso = NULL;
     }
@@ -515,7 +524,14 @@ dns_push_cancel(dso_activity_t *activity)
 {
     dnssd_query_t *query = (dnssd_query_t *)activity->context;
     INFO(PUB_S_SRP, activity->name);
-    dnssd_query_cancel(query);
+    // We can either get here because the dso object is being finalized, or because the activity is being dropped.
+    // In the former case, we need to cancel the query. In the latter case, we've been called as a result of
+    // dnssd_query_cancel calling dso_drop_activity. dnssd_query_cancel sets query->activity to NULL before dropping
+    // it, so we mustn't call back in to dnssd_query_cancel.
+    if (query->activity != NULL) {
+        query->activity = NULL;
+        dnssd_query_cancel(query);
+    }
     // The activity held a reference to the query.
     RELEASE_HERE(query, dnssd_query_finalize);
 }
@@ -595,7 +611,7 @@ truncate_local(dns_name_t *name)
 
 static bool
 dp_query_add_data_to_response(dnssd_query_t *query, const char *fullname, uint16_t rrtype, uint16_t rrclass,
-                              uint16_t rdlen, const void *rdata, int32_t ttl)
+                              uint16_t rdlen, const void *rdata, int32_t ttl, const bool hardwired_response)
 {
     bool record_added;
     dns_towire_state_t *towire = &query->towire;
@@ -604,7 +620,10 @@ dp_query_add_data_to_response(dnssd_query_t *query, const char *fullname, uint16
     char pbuf[DNS_MAX_NAME_SIZE + 1];
     char rbuf[DNS_MAX_NAME_SIZE + 1];
     uint8_t *revert = query->towire.p; // Remember where we were in case there's no room.
-    const bool translate = query->served_domain != NULL;
+    // Only do the translation if:
+    // 1. We serve the domain.
+    // 2. The response we will add does not come from our hardwired response set.
+    const bool translate = (query->served_domain != NULL) && (!hardwired_response);
 
     if (rdlen == 0) {
         INFO("Eliding zero-length response for " PRI_S_SRP " %d %d", fullname, rrtype, rrclass);
@@ -649,7 +668,7 @@ dp_query_add_data_to_response(dnssd_query_t *query, const char *fullname, uint16
     INFO("dp_query_add_data_to_response: survived for rrtype %d rdlen %d", rrtype, rdlen);
 
     // Rewrite the domain if it's .local.
-    if (translate) {
+    if (query->served_domain != NULL) {
         TOWIRE_CHECK("concatenate_name_to_wire", towire,
                      dns_concatenate_name_to_wire(towire, NULL, query->name, query->served_domain->domain));
         INFO(PUB_S_SRP " answer:  type %02d class %02d " PRI_S_SRP "." PRI_S_SRP, query->dso != NULL ? "PUSH" : "DNS ",
@@ -1772,13 +1791,13 @@ dnssd_hardwired_response(dnssd_query_t *query, DNSServiceQueryRecordReply UNUSED
             if (query->dso != NULL) {
                 dns_push_start(query);
                 // Since hardwired response is set by the dnssd-proxy itself, do not do ".local" translation.
-                dp_query_add_data_to_response(query, hp->fullname, hp->type, dns_qclass_in, hp->rdlen, hp->rdata, 3600);
+                dp_query_add_data_to_response(query, hp->fullname, hp->type, dns_qclass_in, hp->rdlen, hp->rdata, 3600, true);
             } else {
                 // Store the response
                 if (!query->towire.truncated) {
                     // Since hardwired response is set by the dnssd-proxy itself, do not do ".local" translation.
                     bool record_added = dp_query_add_data_to_response(query, hp->fullname, hp->type, dns_qclass_in,
-                        hp->rdlen, hp->rdata, 3600);
+                        hp->rdlen, hp->rdata, 3600, true);
                     if (!query->towire.truncated) {
                         query->response->ancount = htons(ntohs(query->response->ancount) + (record_added ? 1 : 0));
                     }
@@ -1818,7 +1837,7 @@ dp_query_append_nat64_prefix_records(dnssd_query_t *query)
     for (size_t i = 0; i < countof(ipv4_addrs);) {
         memcpy(&rdata[12], ipv4_addrs[i], 4);
         const bool added = dp_query_add_data_to_response(query, "ipv4only.arpa.", dns_rrtype_aaaa, query->qclass,
-                                                         (uint16_t)sizeof(rdata), rdata, 10);
+                                                         (uint16_t)sizeof(rdata), rdata, 10, true);
         if (query->towire.truncated) {
             if (query->tracker->connection->tcp_stream) {
                 if (embiggen(query)) {
@@ -1861,7 +1880,7 @@ dns_query_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t U
 #endif
     re_add:
         record_added = dp_query_add_data_to_response(query, fullname, rrtype, rrclass, rdlen, rdata,
-            ttl > 10 ? 10 : ttl); // Per dnssd-hybrid 5.5.1, limit ttl to 10 seconds
+            ttl > 10 ? 10 : ttl, false); // Per dnssd-hybrid 5.5.1, limit ttl to 10 seconds
         if (query->towire.truncated) {
             if (query->tracker->connection->tcp_stream) {
                 if (embiggen(query)) {
@@ -2177,7 +2196,7 @@ dns_push_query_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint3
         }
 
         // Do the update.
-        dp_query_add_data_to_response(query, fullname, rrtype, rrclass, rdlen, rdata_to_send, ttl_to_send);
+        dp_query_add_data_to_response(query, fullname, rrtype, rrclass, rdlen, rdata_to_send, ttl_to_send, false);
 
         if (query->towire.truncated) {
             query->towire.truncated = false;
@@ -2215,10 +2234,18 @@ dns_push_subscribe(dp_tracker_t *tracker, const dns_wire_t *header, dso_state_t 
                                                 dns_push_cancel);
     RETAIN_HERE(query); // The activity holds a reference to the query.
     query->activity = activity;
-    if (!dp_query_start(query, &rcode, false, dns_push_query_callback)) {
+    bool dns64 = false;
+#if SRP_FEATURE_NAT64
+    if (srp_nat64_enabled) {
+        dns64 = nat64_is_active() && !srp_adv_host_is_homekit_accessory(&tracker->connection->address);
+    }
+#endif
+    if (!dp_query_start(query, &rcode, dns64, dns_push_query_callback)) {
         dso_simple_response(tracker->connection, NULL, header, rcode);
         dnssd_query_cancel(query);
-        RELEASE_HERE(query, dnssd_query_finalize);
+        // That the only thing holding a reference to the query is the activity, and when we call dnssd_query_cancel,
+        // we drop the activity, which in turn dereferences the query. So when we get to here, the query should have
+        // already been finalized.
         return;
     }
     dso_simple_response(tracker->connection, NULL, header, dns_rcode_noerror);
@@ -2491,7 +2518,7 @@ dp_dns_query(dp_tracker_t *tracker, message_t *message, dns_rr_t *question)
     bool dns64 = false;
 #if SRP_FEATURE_NAT64
     if (srp_nat64_enabled) {
-        dns64 = nat64_is_active();
+        dns64 = nat64_is_active() && !srp_adv_host_is_homekit_accessory(&tracker->connection->address);
     }
 #endif
     if (dp_query_start(query, &rcode, dns64, dns_query_callback)) {
@@ -3029,43 +3056,9 @@ config_file_verb_t dp_verbs[] = {
 static wakeup_t *tls_listener_wakeup;
 static int tls_listener_index;
 static void dnssd_tls_listener_restart(void *NULLABLE context);
-static void tls_certificate_rotate(void *NONNULL context);
-
-static void schedule_tls_certificate_rotation(void)
-{
-    if (tls_listener_wakeup == NULL) {
-        tls_listener_wakeup = ioloop_wakeup_create();
-    }
-    if (tls_listener_wakeup == NULL) {
-        FAULT("Unable to allocate wakeup in order to set up TLS certificate rotation timer.");
-        goto exit;
-    }
-
-    const uint32_t remaining_time_to_rotate = srp_tls_get_next_rotation_time();
-    if (remaining_time_to_rotate > INT32_MAX / MSEC_PER_SEC) {
-        FAULT("Remaining time too long, unable to set the timer - remaining time: %u.", remaining_time_to_rotate);
-        goto exit;
-    }
-
-    const bool succeed = ioloop_add_wake_event(tls_listener_wakeup, NULL, tls_certificate_rotate, NULL,
-                                               (int32_t)remaining_time_to_rotate * MSEC_PER_SEC);
-    if (!succeed) {
-        FAULT("Failed to schedule the wake event for the next TLS certificate rotation - remaining_time_to_rotate: %d.",
-              remaining_time_to_rotate);
-    }
-
-exit:
-    return;
-}
 
 static void dnssd_tls_listener_listen(void *UNUSED context)
 {
-    const bool succeeded = srp_tls_init();
-    if (!succeeded) {
-        FAULT("srp_tls_init failed.");
-        goto exit;
-    }
-
     addr_t addr;
     INFO("starting DoT listener");
     memset(&addr, 0, sizeof(addr));
@@ -3079,9 +3072,9 @@ static void dnssd_tls_listener_listen(void *UNUSED context)
                                                     dns_proxy_input, NULL, dnssd_tls_listener_restart, NULL,
                                                     NULL, srp_tls_configure, NULL);
 #else
-    listener[tls_listener] = ioloop_listener_create(true, true, NULL, 0, &addr, NULL, "DNS Push Listener",
-                                                    dns_proxy_input, NULL, dnssd_tls_listener_restart, NULL,
-                                                    NULL, NULL, NULL);
+    listener[tls_listener_index] = ioloop_listener_create(true, true, NULL, 0, &addr, NULL, "DNS Push Listener",
+                                                          dns_proxy_input, NULL, dnssd_tls_listener_restart, NULL,
+                                                          NULL, NULL, NULL);
 #endif
     if (listener[tls_listener_index] == NULL) {
         ERROR("DNS Push listener: fail.");
@@ -3089,7 +3082,6 @@ static void dnssd_tls_listener_listen(void *UNUSED context)
     }
 
     // Schedule a wake up timer to rotate the expired TLS certificate.
-    schedule_tls_certificate_rotation();
 exit:
     return;
 }
@@ -3097,13 +3089,10 @@ exit:
 static void
 dnssd_tls_listener_restart(void *const NULLABLE context)
 {
-    const bool doing_rotation = listener[tls_listener_index]->tls_rotation_ready;
     ioloop_listener_release(listener[tls_listener_index]);
     listener[tls_listener_index] = NULL;
 
-    if (doing_rotation) {
-        dnssd_tls_listener_listen(context);
-    } else {
+    {
         INFO("Creation of TLS listener failed; reattempting in 10s.");
 
         if (tls_listener_wakeup == NULL) {
@@ -3117,21 +3106,6 @@ dnssd_tls_listener_restart(void *const NULLABLE context)
     }
 }
 
-static void tls_certificate_rotate(void *const NONNULL UNUSED context)
-{
-    // Destroy the expired TLS certificate.
-    srp_tls_dispose();
-
-    comm_t *const rotated_tls_listener = listener[tls_listener_index];
-    if (tls_listener_index == 0 || rotated_tls_listener == NULL || rotated_tls_listener->listener == NULL) {
-        FAULT("TLS listener does not exist while the TLS certificate rotation timer is triggered.");
-        return;
-    }
-
-    // By canceling the listener, the event handler will restart the listener with the new TLS certificate.
-    rotated_tls_listener->tls_rotation_ready = true;
-    nw_listener_cancel(rotated_tls_listener->listener);
-}
 
 static void
 dnssd_push_setup(void)
@@ -3166,6 +3140,7 @@ keyprogram_start(const char *program, subproc_callback_t callback, ...)
     int argc = 0;
     va_list vl;
     int i;
+    subproc_t *subproc = NULL;
 
     va_start(vl, callback);
     while (true) {
@@ -3202,7 +3177,11 @@ keyprogram_start(const char *program, subproc_callback_t callback, ...)
         argv[argc++] = arg;
     }
     argv[argc] = NULL;
-    ioloop_subproc(program, argv, argc, callback, NULL, NULL);
+    subproc = ioloop_subproc(program, argv, argc, callback, NULL, NULL);
+    if (subproc != NULL) {
+        ioloop_subproc_run_sync(subproc);
+        ioloop_subproc_release(subproc);
+    }
 out:
     for (i = 0; i < num_vars; i++) {
         free(vars[i]);
@@ -3267,7 +3246,7 @@ keyfile_finished_callback(void *context, int status, const char *error)
     // XXX dates need to not be constant!!!
     keyprogram_start(CERTWRITE_PROGRAM, certfile_finished_callback,
                      "selfsign=1", NULL, "issuer_key", tls_key_filename, "issuer_name=CN", my_name,
-                     "not_before=20190226000000", NULL, "not_after=20211231235959", NULL, "is_ca=1", NULL,
+                     "not_before=20210825000000", NULL, "not_after=20230824235959", NULL, "is_ca=1", NULL,
                      "max_pathlen=0", NULL, "output_file", tls_cert_filename, NULL);
     }
 
@@ -4107,6 +4086,9 @@ init_dnssd_proxy(void)
     dnssd_hardwired_setup();
 #endif // SRP_FEATURE_DYNAMIC_CONFIGURATION
 
+    succeeded = srp_tls_init();
+    require_action_quiet(succeeded, exit, ERROR("srp_tls_init failed."));
+
 #if !SRP_FEATURE_CAN_GENERATE_TLS_CERT
     // The tls_fail flag allows us to run the proxy in such a way that TLS connections will fail.
     // This is never what you want in production, but is useful for testing.
@@ -4116,10 +4098,13 @@ init_dnssd_proxy(void)
                              "type=rsa", NULL, "rsa_keysize=4096", NULL, "filename", tls_key_filename, NULL);
         } else if (access(tls_cert_filename, R_OK) < 0) {
             keyfile_finished_callback(NULL, 0, NULL);
-        } else if (srp_tls_server_init(NULL, tls_cert_filename, tls_key_filename)) {
-            // If we've been able to set up TLS, then we can do DNS push.
-            dnssd_push_setup();
         }
+        require_action_quiet(access(tls_key_filename, R_OK) >= 0, exit, ERROR("failed to create tls listener key."));
+        require_action_quiet(access(tls_cert_filename, R_OK) >= 0, exit, ERROR("failed to create tls listener cert."));
+
+        require_action_quiet(srp_tls_server_init(NULL, tls_cert_filename, tls_key_filename),
+                             exit, ERROR("srp_tls_server_init failed."));
+        require_action_quiet(srp_tls_client_init(), exit, ERROR("srp_tls_client_init failed."));
     }
 #endif
 

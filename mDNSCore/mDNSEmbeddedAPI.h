@@ -2233,7 +2233,9 @@ struct mDNS_struct
 
     DNSQuestion ReverseMap;                 // Reverse-map query to find static hostname for service target
     DNSQuestion AutomaticBrowseDomainQ;
-	DNSQuestion NonLocalOnlyAutomaticBrowseDomainQ;
+#if !TARGET_OS_WATCH
+    DNSQuestion NonLocalOnlyAutomaticBrowseDomainQ;
+#endif
     domainname StaticHostname;              // Current answer to reverse-map query
     domainname FQDN;
     HostnameInfo     *Hostnames;            // List of registered hostnames + hostname metadata

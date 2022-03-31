@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12046,14 +12046,13 @@ mDNSexport mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const qu
     }
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
-    // Only start the resolver discovery for the domain <THREAD_DOMAIN_NAME>, when the question is not forced
-    // to use multicast and the question name is a subdomain of <THREAD_DOMAIN_NAME>. The two conditions combined
-    // together ensures that we do not recursively start resolver discovery when we start a query to discover the
-    // DNS resolver.
-    if (!question->ForceMCast && IsSubdomain(&question->qname, THREAD_DOMAIN_NAME))
+    // Only start the resolver discovery if the question meets condition to do so.
+    // This ensures that we do not recursively start resolver discovery when we start a query to discover the DNS resolver.
+    const domainname *domain_to_discover_resolver = mDNSNULL;
+    if (dns_question_requires_resolver_discovery(question, &domain_to_discover_resolver))
     {
         // Inside mDNS_StartQuery_internal(), we already grabbed the lock, so no need to lock it again.
-        resolver_discovery_add(THREAD_DOMAIN_NAME, mDNSfalse);
+        resolver_discovery_add(domain_to_discover_resolver, mDNSfalse);
     }
 #endif // MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
 
@@ -12281,12 +12280,12 @@ mDNSexport mStatus mDNS_StopQuery_internal(mDNS *const m, DNSQuestion *const que
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
-    // Only stop the resolver discovery for the domain <THREAD_DOMAIN_NAME>, when the question is not forced
-    // to use multicast and the question name is a subdomain of <THREAD_DOMAIN_NAME>.
-    if (!question->ForceMCast && IsSubdomain(&question->qname, THREAD_DOMAIN_NAME))
+    const domainname *domain_to_discover_resolver = mDNSNULL;
+    // Only stop the resolver discover if the question has required the discovery when it is started.
+    if (dns_question_requires_resolver_discovery(question, &domain_to_discover_resolver))
     {
         // Inside mDNS_StopQuery_internal(), we already grabbed the lock, so no need to lock it again.
-        resolver_discovery_remove(THREAD_DOMAIN_NAME, mDNSfalse);
+        resolver_discovery_remove(domain_to_discover_resolver, mDNSfalse);
     }
 #endif
 

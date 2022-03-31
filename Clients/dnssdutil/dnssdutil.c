@@ -2365,6 +2365,7 @@ static const char *		gQuerier_ResolverType		= NULL;
 static char **			gQuerier_ServerAddrs		= NULL;
 static size_t			gQuerier_ServerAddrCount	= 0;
 static const char *		gQuerier_ProviderName		= NULL;
+static const char *		gQuerier_ConnectionHostname	= NULL;
 static const char *		gQuerier_URLPath			= NULL;
 static const char *		gQuerier_ODoHConfig			= NULL;
 static int				gQuerier_NoConnectionReuse	= false;
@@ -2413,11 +2414,12 @@ static CLIOption		kQuerierOpts[] =
 		"is specified.\n"
 		"\n"
 	),
-	StringOption( 'p', "providerName",      &gQuerier_ProviderName,      "domain name", "Provider's domain name for DNS over TLS/HTTPS.", false ),
-	StringOption( 'q', "urlPath",           &gQuerier_URLPath,           "path", "URL path for DNS over HTTPS.", false ),
-	StringOption( 'o', "odohConfig",        &gQuerier_ODoHConfig,        "odoh config", "Config for Oblivious DNS over HTTPS.", false ),
-	BooleanOption( 0 , "noConnectionReuse", &gQuerier_NoConnectionReuse, "Disable connection reuse." ),
-	BooleanOption( 0 , "squashCNAMEs",      &gQuerier_SquashCNAMEs,      "Squash CNAME chains in responses." ),
+	StringOption( 'p', "providerName",       &gQuerier_ProviderName,       "domain name", "Provider's domain name for DNS over TLS/HTTPS.", false ),
+	StringOption(  0 , "connectionHostname", &gQuerier_ConnectionHostname, "hostname",    "Overrides hostname used for transport layer connection for DNS over TLS/HTTPS.", false ),
+	StringOption( 'q', "urlPath",            &gQuerier_URLPath,            "path", "URL path for DNS over HTTPS.", false ),
+	StringOption( 'o', "odohConfig",         &gQuerier_ODoHConfig,         "odoh config", "Config for Oblivious DNS over HTTPS.", false ),
+	BooleanOption( 0 , "noConnectionReuse",  &gQuerier_NoConnectionReuse,  "Disable connection reuse." ),
+	BooleanOption( 0 , "squashCNAMEs",       &gQuerier_SquashCNAMEs,       "Squash CNAME chains in responses." ),
 	CLI_OPTION_END()
 };
 
@@ -7651,7 +7653,7 @@ static void	MDNSQueryCmd( void )
 exit:
 	ForgetSocket( &sockV4 );
 	ForgetSocket( &sockV6 );
-	if( err ) exit( 1 );
+	exit( 1 );
 }
 
 //===========================================================================================================================
@@ -8589,12 +8591,15 @@ static OSStatus	_DNSServerSetUpSockets( DNSServerRef me )
 	
 	require_action_quiet( addrCount > 0, exit, err = kNoErr );
 	
-	sockPairs = sockPairsStack;
 	if( me->addrCount > countof( sockPairsStack ) )
 	{
 		sockPairsHeap = (_DNSServerSocketPair *) calloc( me->addrCount, sizeof( *sockPairsHeap ) );
 		require_action( sockPairsHeap, exit, err = kNoMemoryErr );
 		sockPairs = sockPairsHeap;
+	}
+	else
+	{
+		sockPairs = sockPairsStack;
 	}
 	for( i = 0; i < addrCount; ++i )
 	{
@@ -22114,7 +22119,7 @@ static OSStatus	_DNSQueryTestStopSubtest( const DNSQueryTestRef me, const OSStat
 		CFStringRef		resultStr;
 		
 		resultStr = CFStringCreateF( &err, "%@", CFArrayGetValueAtIndex( me->gaiResults, i ) );
-		require_noerr( err, exit );
+		require( resultStr, exit );
 		
 		CFArrayAppendValue( gaiResultStrings, resultStr );
 		CFForget( &resultStr );
@@ -22125,7 +22130,7 @@ static OSStatus	_DNSQueryTestStopSubtest( const DNSQueryTestRef me, const OSStat
 		CFStringRef		resultStr;
 		
 		resultStr = CFStringCreateF( &err, "%@", CFArrayGetValueAtIndex( me->unexpectedResults, i ) );
-		require_noerr( err, exit );
+		require( resultStr, exit );
 		
 		CFArrayAppendValue( unexpectedResultStrings, resultStr );
 		CFForget( &resultStr );
@@ -22940,7 +22945,7 @@ static Boolean	_RegistrationTestInterfaceIsWiFi( const char *inIfName );
 static void	RegistrationTestCmd( void )
 {
 	OSStatus				err;
-	RegistrationTest *		test;
+	RegistrationTest *		test = NULL;
 	
 	err = _RegistrationTestCreate( &test );
 	require_noerr( err, exit );
@@ -26870,6 +26875,7 @@ typedef struct
 	mdns_resolver_t					resolver;				// Resolver.
 	CFMutableArrayRef				serverAddrs;			// Server addresses to use for resolver.
 	char *							providerName;			// Provider name for resolver.
+	char *							connectionHostname;		// Overrides hostname used for transport layer connection.
 	char *							urlPath;				// URL path for resolver.
 	void *							odohCfgPtr;				// Oblivious DoH configuration.
 	size_t							odohCfgLen;				// Oblivious DoH configuration length.
@@ -26972,6 +26978,11 @@ static void	QuerierCommand( void )
 		{
 			cmd->providerName = strdup( gQuerier_ProviderName );
 			require_action( cmd->providerName, exit, err = kNoMemoryErr );
+		}
+		if( gQuerier_ConnectionHostname )
+		{
+			cmd->connectionHostname = strdup( gQuerier_ConnectionHostname );
+			require_action( cmd->connectionHostname, exit, err = kNoMemoryErr );
 		}
 		if( gQuerier_URLPath )
 		{
@@ -27090,6 +27101,7 @@ static void	_QuerierCmdRelease( QuerierCmd *inCmd )
 		ForgetMem( &inCmd->qname );
 		ForgetCF( &inCmd->serverAddrs );
 		ForgetMem( &inCmd->providerName );
+		ForgetMem( &inCmd->connectionHostname );
 		ForgetMem( &inCmd->urlPath );
 		ForgetPtrLen( &inCmd->odohCfgPtr, &inCmd->odohCfgLen );
 		mdns_forget( &inCmd->definition );
@@ -27131,10 +27143,10 @@ static void	_QuerierCmdStart( void *inCtx )
 	dispatch_resume( cmd->sourceSigTerm );
 	
 	ifNamePtr = if_indextoname( cmd->ifIndex, ifNameBuf );
-	FPrintF( stdout, "Interface:      %u (%s)\n",		cmd->ifIndex, ifNamePtr ? ifNamePtr : "?" );
-	FPrintF( stdout, "Name:           %{du:dname}\n",	cmd->qname );
-	FPrintF( stdout, "Type:           %s (%u)\n",		RecordTypeToString( cmd->qtype ), cmd->qtype );
-	FPrintF( stdout, "Class:          %s (%u)\n",		RecordClassToString( cmd->qclass ), cmd->qclass );
+	FPrintF( stdout, "Interface:            %u (%s)\n",		cmd->ifIndex, ifNamePtr ? ifNamePtr : "?" );
+	FPrintF( stdout, "Name:                 %{du:dname}\n",	cmd->qname );
+	FPrintF( stdout, "Type:                 %s (%u)\n",		RecordTypeToString( cmd->qtype ), cmd->qtype );
+	FPrintF( stdout, "Class:                %s (%u)\n",		RecordClassToString( cmd->qclass ), cmd->qclass );
 	
 	if( cmd->definition || ( cmd->resolverType == mdns_resolver_type_null ) )
 	{
@@ -27220,18 +27232,22 @@ static void	_QuerierCmdStart( void *inCtx )
 	{
 		CFIndex		n, i;
 		
-		FPrintF( stdout, "Resolver Type:  %s\n", mdns_resolver_type_to_string( cmd->resolverType ) );
-		if( cmd->providerName )	FPrintF( stdout, "Provider Name:  %s\n", cmd->providerName );
-		if( cmd->urlPath )		FPrintF( stdout, "URL path:       %s\n", cmd->urlPath );
-		if( cmd->odohCfgPtr )	FPrintF( stdout, "ODoH Config:    %H\n", cmd->odohCfgPtr, (int) cmd->odohCfgLen, INT_MAX );
-		FPrintF( stdout, "Server(s):      " );
+		FPrintF( stdout, "Resolver Type:        %s\n", mdns_resolver_type_to_string( cmd->resolverType ) );
+		if( cmd->providerName )			FPrintF( stdout, "Provider Name:        %s\n", cmd->providerName );
+		if( cmd->connectionHostname )	FPrintF( stdout, "Connection Hostname:  %s\n", cmd->connectionHostname );
+		if( cmd->urlPath )				FPrintF( stdout, "URL path:             %s\n", cmd->urlPath );
+		if( cmd->odohCfgPtr )
+		{
+			FPrintF( stdout, "ODoH Config:          %H\n", cmd->odohCfgPtr, (int) cmd->odohCfgLen, INT_MAX );
+		}
+		FPrintF( stdout, "Server(s):            " );
 		n = CFArrayGetCount( cmd->serverAddrs );
 		for( i = 0; i < n; ++i )
 		{
 			FPrintF( stdout, "%s%@", ( i == 0 ) ? "" : ", ", CFArrayGetValueAtIndex( cmd->serverAddrs, i ) );
 		}
 		FPrintF( stdout, "\n" );
-		FPrintF( stdout, "Start time:     %{du:time}\n", NULL );
+		FPrintF( stdout, "Start time:           %{du:time}\n", NULL );
 		FPrintF( stdout, "---\n" );
 		
 		cmd->resolver = mdns_resolver_create( cmd->resolverType, cmd->ifIndex, &err );
@@ -27240,6 +27256,11 @@ static void	_QuerierCmdStart( void *inCtx )
 		if( cmd->providerName )
 		{
 			err = mdns_resolver_set_provider_name( cmd->resolver, cmd->providerName );
+			require_noerr( err, exit );
+		}
+		if( cmd->connectionHostname )
+		{
+			err = mdns_resolver_set_connection_hostname( cmd->resolver, cmd->connectionHostname );
 			require_noerr( err, exit );
 		}
 		if( cmd->urlPath )

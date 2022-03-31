@@ -49,12 +49,10 @@
 #include "dso.h"
 #include "dso-utils.h"
 
-#define SRP_REPLICATION_DISCOVER_WITH_NS 0
-
 #if SRP_FEATURE_REPLICATION
 #include "srp-replication.h"
 
-static char *current_thread_domain;
+static char *current_thread_domain_name;
 static srpl_domain_t *srpl_domains;
 static unclaimed_connection_t *unclaimed_connections;
 static uint64_t server_id;
@@ -214,7 +212,7 @@ address_query_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32
 #endif
         addr.sa.sa_family = AF_INET;
         memcpy(&addr.sin.sin_addr, rdata, rdlen);
-        if (IN_LINKLOCAL(&addr.sin.sin_addr)) {
+        if (IN_LINKLOCAL(addr.sin.sin_addr.s_addr)) {
             ADDR_NAME_LOGGER(INFO, &addr, "Skipping link-local address ", " received for instance ", " index ",
                              fullname, interfaceIndex);
             return;
@@ -365,8 +363,23 @@ exit_no_free:
 }
 
 static void
+srpl_domain_finalize(srpl_domain_t *domain)
+{
+    free(domain->name);
+    if (domain->query != NULL) {
+        ioloop_dnssd_txn_cancel(domain->query);
+        ioloop_dnssd_txn_release(domain->query);
+    }
+    free(domain);
+}
+
+static void
 srpl_instance_finalize(srpl_instance_t *instance)
 {
+    if (instance->domain != NULL) {
+        RELEASE_HERE(instance->domain, srpl_domain_finalize);
+    }
+    free(instance->instance_name);
     free(instance->name);
     free(instance);
 }
@@ -519,16 +532,16 @@ srpl_connection_create(srpl_instance_t *instance, bool outgoing)
     srpl_connection_t *srpl_connection = calloc(1, sizeof (*srpl_connection));
     size_t srpl_connection_name_length;
     if (outgoing) {
-        srpl_connection_name_length = strlen(instance->name) + 2;
+        srpl_connection_name_length = strlen(instance->instance_name) + 2;
     } else {
-        srpl_connection_name_length = strlen(instance->name) + 2;
+        srpl_connection_name_length = strlen(instance->instance_name) + 2;
     }
     srpl_connection->name = malloc(srpl_connection_name_length);
     if (srpl_connection->name == NULL) {
         free(srpl_connection);
         return NULL;
     }
-    snprintf(srpl_connection->name, srpl_connection_name_length, "%s%s", outgoing ? ">" : "<", instance->name);
+    snprintf(srpl_connection->name, srpl_connection_name_length, "%s%s", outgoing ? ">" : "<", instance->instance_name);
     srpl_connection->is_server = !outgoing;
     srpl_connection->instance = instance;
     RETAIN_HERE(instance);
@@ -541,7 +554,7 @@ srpl_instance_discontinue_timeout(void *context)
 {
     srpl_instance_t **sp = NULL, *instance = context;
 
-    INFO("discontinuing instance " PRI_S_SRP, instance->name);
+    INFO("discontinuing instance " PRI_S_SRP, instance->instance_name);
     for (sp = &instance->domain->instances; *sp; sp = &(*sp)->next) {
         if (*sp == instance) {
             *sp = instance->next;
@@ -568,25 +581,37 @@ srpl_instance_discontinue_timeout(void *context)
             srpl_connection_discontinue(srpl_connection);
         }
     }
+    if (instance->resolve_txn != NULL) {
+        ioloop_dnssd_txn_cancel(instance->resolve_txn);
+        ioloop_dnssd_txn_release(instance->resolve_txn);
+        instance->resolve_txn = NULL;
+    }
     RELEASE_HERE(instance, srpl_instance_finalize);
 }
 
 static void
-srpl_instance_discontinue(srpl_instance_t *instance, bool unconditional)
+srpl_instance_discontinue(srpl_instance_t *instance)
 {
-    if (!unconditional) {
-        if (instance->num_copies > 0) {
-            instance->num_copies--;
-        }
-        if (instance->num_copies > 0) {
-            return;
-        }
-    }
     // Already discontinuing.
-    if (instance->num_copies <= 0) {
+    if (instance->discontinuing) {
+        INFO("Replication service instance " PRI_S_SRP " went away, already discontinuing", instance->instance_name);
         return;
     }
-    INFO("Replication service instance " PRI_S_SRP " went away", instance->name);
+    if (instance->num_copies > 0) {
+        INFO("Replication service instance " PRI_S_SRP " went away, %d still left", instance->name, instance->num_copies);
+        return;
+    }
+    INFO("Replication service instance " PRI_S_SRP " went away, none left, discontinuing", instance->instance_name);
+    instance->discontinuing = true;
+
+    // DNSServiceResolve doesn't give us the kDNSServiceFlagAdd flag--apparently it's assumed that we know the
+    // service was removed because we get a remove on the browse. So we need to restart the resolve if the
+    // instance comes back, rather than continuing to use the old resolve transaction.
+    if (instance->resolve_txn != NULL) {
+        ioloop_dnssd_txn_cancel(instance->resolve_txn);
+        ioloop_dnssd_txn_release(instance->resolve_txn);
+        instance->resolve_txn = NULL;
+    }
 
     // It's not uncommon for a name to drop and then come back immediately. Wait 30s before
     // discontinuing the instance.
@@ -1595,7 +1620,7 @@ srpl_datagram_callback(comm_t *comm, message_t *message, void *context)
     switch(dns_opcode_get(&message->wire)) {
     case dns_opcode_dso:
         if (srpl_connection->dso == NULL) {
-            INFO("dso message received with no DSO object on instance " PRI_S_SRP, instance->name);
+            INFO("dso message received with no DSO object on instance " PRI_S_SRP, instance->instance_name);
             srpl_disconnect(srpl_connection);
             return;
         }
@@ -1722,7 +1747,7 @@ srpl_instance_is_me(srpl_instance_t *instance, const char *ifname, const addr_t 
 {
     instance->is_me = true;
     if (ifname != NULL) {
-        INFO(PRI_S_SRP "/" PUB_S_SRP ": this name server is me.", instance->name, ifname);
+        INFO(PRI_S_SRP "/" PUB_S_SRP ": name server for instance " PRI_S_SRP " is me.", instance->name, ifname, instance->instance_name);
     } else if (address != NULL) {
         ADDR_NAME_LOGGER(INFO, address, "", " instance ", " is me. ", instance->name, 0);
     } else {
@@ -1763,8 +1788,11 @@ srpl_instance_address_callback(void *context, addr_t *address, bool added, int e
 {
     srpl_instance_t *instance = context;
     if (err != kDNSServiceErr_NoError) {
-        ERROR("service instance resolution for " PRI_S_SRP " failed with %d", instance->name, err);
-        srpl_instance_discontinue(instance, true);
+        ERROR("service instance address resolution for " PRI_S_SRP " failed with %d", instance->name, err);
+        if (instance->address_query) {
+            address_query_cancel(instance->address_query);
+            instance->address_query = NULL;
+        }
         return;
     }
     if (added) {
@@ -1829,72 +1857,79 @@ srpl_instance_address_callback(void *context, addr_t *address, bool added, int e
     }
 }
 
-static srpl_instance_t *
+static void
 srpl_instance_add(const char *hostname, const char *instance_name,
-                  const char *ifname, srpl_domain_t *domain, srpl_instance_t *allocated_instance,
+                  const char *ifname, srpl_domain_t *domain, srpl_instance_t *instance,
                   bool have_server_id, uint64_t advertised_server_id)
 {
-    srpl_instance_t *instance, **sp;
+    srpl_instance_t **sp;
 
-    // Find or create an instance.
+    // Find the instance on the instance list for this domain.
     for (sp = &domain->instances; *sp != NULL; sp = &(*sp)->next) {
-        instance = *sp;
-        if ((instance_name == NULL
-             ? !strcasecmp(instance->name, hostname)
-             : !strcasecmp(instance->instance_name, instance_name)))
-        {
+        if (instance == *sp) {
             break;
         }
     }
 
     if (*sp == NULL) {
-        if (allocated_instance == NULL) {
-            instance = calloc(1, sizeof(*instance));
-            if (instance == NULL) {
-                ERROR("unable to allocate newly discovered instance " PRI_S_SRP " for " PRI_S_SRP "/" PUB_S_SRP,
-                      instance_name == NULL ? instance_name : "<null>", hostname, ifname);
-                return NULL;
-            }
-            instance->domain = domain;
+        INFO("instance " PRI_S_SRP " for " PRI_S_SRP "/" PUB_S_SRP " " PUB_S_SRP "id %" PRIx64 " no longer on list",
+             instance_name != NULL ? instance_name : "<NULL>", hostname, ifname, have_server_id ? "" : "!", advertised_server_id);
+        if (instance->resolve_txn != NULL) {
+            ioloop_dnssd_txn_cancel(instance->resolve_txn);
+            ioloop_dnssd_txn_release(instance->resolve_txn);
+            instance->resolve_txn = NULL;
+        }
+        return;
+    }
+
+    INFO("instance " PRI_S_SRP " for " PRI_S_SRP "/" PUB_S_SRP " " PUB_S_SRP "id %" PRIx64 " " PUB_S_SRP "found",
+         instance_name != NULL ? instance_name : "<NULL>", hostname, ifname, have_server_id ? "" : "!", advertised_server_id,
+         *sp == NULL ? "!" : "");
+
+
+    // If the hostname changed, we need to restart the address query.
+    if (instance->name == NULL || strcmp(instance->name, hostname)) {
+        if (instance->address_query != NULL) {
+            address_query_cancel(instance->address_query);
+            instance->address_query = NULL;
+        }
+
+        if (instance->name != NULL) {
+            INFO("name server name change from " PRI_S_SRP " to " PRI_S_SRP " for " PRI_S_SRP "/" PUB_S_SRP " in domain " PRI_S_SRP,
+                 instance->name, hostname, instance_name == NULL ? "<NULL>" : instance_name, ifname, domain->name);
         } else {
-            instance = allocated_instance;
+            INFO("new name server " PRI_S_SRP " for " PRI_S_SRP "/" PUB_S_SRP " in domain " PRI_S_SRP,
+                 hostname, instance_name == NULL ? "<NULL>" : instance_name, ifname, domain->name);
         }
 
-        instance->name = strdup(hostname);
-        if (instance->name == NULL) {
-            ERROR("no memory for instance hostname " PRI_S_SRP, hostname);
-            free(instance);
-            return NULL;
+        char *new_name = strdup(hostname);
+        if (new_name == NULL) {
+            // This should never happen, and if it does there's actually no clean way to recover from it.  This approach
+            // will result in no crash, and since we don't start an address query in this case, we will just wind up in
+            // a quiescent state for this replication peer until something changes.
+            ERROR("no memory for instance name.");
+            return;
+        } else {
+            free(instance->name);
+            instance->name = new_name;
         }
-        if (instance_name != NULL) {
-            instance->instance_name = strdup(instance_name);
-            if (instance->instance_name == NULL) {
-                ERROR("no memory for instance name " PRI_S_SRP, instance_name);
-                free(instance->name);
-                free(instance);
-                return NULL;
-            }
-        }
+        // The instance may be connected. It's possible its IP address hasn't changed. If it has changed, we should
+        // get a disconnect due to a connection timeout or (if something else got the same address, a reset) if for
+        // no other reason, and then we'll try to reconnect, so this should be harmless.
+    }
 
-        *sp = instance;
-        RETAIN_HERE(instance);
-
-        INFO("new name server " PRI_S_SRP " for " PRI_S_SRP "/" PUB_S_SRP " in domain " PRI_S_SRP,
-             hostname, instance_name, ifname, domain->name);
+    // The address query can be NULL either because we only just created the instance, or because the instance name changed (e.g.
+    // as the result of a hostname conflict).
+    if (instance->address_query == NULL) {
         instance->address_query = address_query_create(instance->name, instance,
                                                        srpl_instance_address_callback,
                                                        srpl_instance_context_release);
         if (instance->address_query == NULL) {
-            RELEASE_HERE(instance, srpl_instance_finalize);
-            return NULL;
+            INFO("unable to create address query");
+        } else {
+            RETAIN_HERE(instance->address_query);
+            RETAIN_HERE(instance); // retain for the address query.
         }
-        RETAIN_HERE(instance);
-        RETAIN_HERE(instance->address_query);
-    } else {
-        if (allocated_instance != NULL) {
-            free(allocated_instance);
-        }
-        instance = *sp;
     }
 
     if (instance->outgoing == NULL && !instance->is_me) {
@@ -1903,10 +1938,13 @@ srpl_instance_add(const char *hostname, const char *instance_name,
     }
 
     if (instance->discontinue_timeout != NULL) {
-        INFO("discontinue on instance " PRI_S_SRP " canceled.", instance->name);
+        if (instance->discontinuing) {
+            INFO("discontinue on instance " PRI_S_SRP " canceled.", instance->name);
+        }
         ioloop_cancel_wake_event(instance->discontinue_timeout);
     }
     instance->num_copies++;
+    instance->discontinuing = false;
 
     // If this add changed the server ID, we may want to re-attempt a connect.
     if (have_server_id && (!instance->have_server_id || instance->server_id != advertised_server_id)) {
@@ -1916,61 +1954,7 @@ srpl_instance_add(const char *hostname, const char *instance_name,
             srpl_connection_next_state(instance->outgoing, srpl_state_disconnected);
         }
     }
-
-    return instance;
 }
-
-#if SRP_REPLICATION_DISCOVER_WITH_NS
-static void
-srpl_ns_query_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t interfaceIndex,
-                              DNSServiceErrorType errorCode, const char *fullname, uint16_t rrtype, uint16_t rrclass,
-                              uint16_t rdlen, const void *rdata, uint32_t UNUSED ttl, void *context)
-{
-    srpl_domain_t *domain = context;
-    dns_rr_t rr;
-    unsigned offset = 0;
-    char hosttarget[kDNSServiceMaxDomainName];
-    char ifname[IFNAMSIZ];
-
-    if (errorCode != kDNSServiceErr_NoError) {
-        ERROR("service instance resolution for " PRI_S_SRP " failed with %d", domain->name, errorCode);
-        return;
-    }
-    if (rrclass != dns_qclass_in || rrtype != dns_rrtype_ns) {
-        ERROR("Invalid response record type (%d) or class (%d) provided for " PRI_S_SRP, rrtype, rrclass, fullname);
-        return;
-    }
-    memset(&rr, 0, sizeof(rr));
-    rr.type = rrtype;
-    if (!dns_rdata_parse_data(&rr, rdata, &offset, rdlen, rdlen, 0)) {
-        ERROR("service instance data parse failed for " PRI_S_SRP, fullname);
-        return;
-    }
-    dns_name_print(rr.data.ns.name, hosttarget, sizeof(hosttarget));
-    dns_rrdata_free(&rr);
-    if (if_indextoname(interfaceIndex, ifname) == NULL) {
-        snprintf(ifname, sizeof(ifname), "%d", interfaceIndex);
-    }
-    INFO("%x " PUB_S_SRP " instance " PRI_S_SRP "/" PUB_S_SRP " (%d) -> " PRI_S_SRP,
-         flags, (flags & kDNSServiceFlagsAdd) ? "Add" : "Remove", fullname, ifname, interfaceIndex, hosttarget);
-
-    if (flags & kDNSServiceFlagsAdd) {
-        srpl_instance_t *instance = srpl_instance_add(hosttarget, NULL, ifname, domain, NULL, false, 0);
-        if (instance != NULL) {
-            instance->outgoing_port = 853; // DoT reserved port
-        }
-    } else {
-        for (srpl_instance_t *instance = domain->instances; instance != NULL; instance = instance->next) {
-            if (instance->instance_name == NULL && !strcmp(instance->name, fullname)) {
-                srpl_instance_discontinue(instance, false);
-                break;
-            }
-        }
-    }
-    return;
-}
-
-#else
 
 static void
 srpl_resolve_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags UNUSED flags, uint32_t interfaceIndex,
@@ -1979,42 +1963,44 @@ srpl_resolve_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags UNUSED flags, 
 {
     char ifname[IFNAMSIZ];
     srpl_instance_t *instance = context;
+    srpl_domain_t *domain = instance->domain;
     const char *domain_name;
     uint8_t domain_len;
-    char *domain_terminated = NULL;
     const char *server_id_string;
     uint8_t server_id_string_len;
     char server_id_buf[INT64_HEX_STRING_MAX];
     uint64_t advertised_server_id = 0;
     bool have_server_id = false;
 
-    // Supposedly we have to free the instance query regardless.
-    ioloop_dnssd_txn_release(instance->resolve_txn);
-    instance->resolve_txn = NULL;
-
     if (errorCode != kDNSServiceErr_NoError) {
         ERROR("resolve for " PRI_S_SRP " failed with %d", fullname, errorCode);
-        goto exit;
+        return;
     }
 
     domain_name = TXTRecordGetValuePtr(txtLen, txtRecord, "domain", &domain_len);
     if (domain_name == NULL) {
         INFO("resolve for " PRI_S_SRP " succeeded, but there is no domain name.", fullname);
-        goto exit;
+        return;
     }
-    if (domain_len != strlen(current_thread_domain) || memcmp(domain_name, current_thread_domain, domain_len)) {
-        const char *domain;
-        domain_terminated = malloc(domain_len + 1);
+
+    if (domain_len != strlen(domain->name) || memcmp(domain_name, domain->name, domain_len)) {
+        const char *domain_print;
+        char *domain_terminated = malloc(domain_len + 1);
         if (domain_terminated == NULL) {
-            domain = "<no memory for domain name>";
+            domain_print = "<no memory for domain name>";
         } else {
             memcpy(domain_terminated, domain_name, domain_len);
             domain_terminated[domain_len] = 0;
-            domain = domain_terminated;
+            domain_print = domain_terminated;
         }
-        INFO("domain (" PRI_S_SRP ") for " PRI_S_SRP " doesn't match current thread domain " PRI_S_SRP,
-             domain, fullname, current_thread_domain);
-        goto exit;
+        INFO("domain (" PRI_S_SRP ") for " PRI_S_SRP " doesn't match expected domain " PRI_S_SRP,
+             domain_print, fullname, domain->name);
+        free(domain_terminated);
+        return;
+    }
+    if (strcmp(domain->name, current_thread_domain_name)) {
+        INFO("discovered srpl instance is not for current thread domain, so not setting up replication.");
+        return;
     }
 
     server_id_string = TXTRecordGetValuePtr(txtLen, txtRecord, "server-id", &server_id_string_len);
@@ -2042,12 +2028,6 @@ srpl_resolve_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags UNUSED flags, 
     }
 
     srpl_instance_add(hosttarget, fullname, ifname, instance->domain, instance, have_server_id, advertised_server_id);
-	// srpl_instance_add either frees or retains instance, so we are no longer responsible for
-    // it.
-    instance = NULL;
-exit:
-    free(instance);
-    free(domain_terminated);
 }
 
 static void
@@ -2060,55 +2040,83 @@ srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t
     if (errorCode != kDNSServiceErr_NoError) {
         ERROR("browse on domain " PRI_S_SRP " failed with %d", domain->name, errorCode);
         if (domain->query != NULL) {
+            ioloop_dnssd_txn_cancel(domain->query);
             ioloop_dnssd_txn_release(domain->query);
             domain->query = NULL;
         }
         return;
     }
 
-    if (flags & kDNSServiceFlagsAdd) {
-        // We're allocating the instance here so that we can use it as a place to remember the domain and then pass it
-        // in to the query as the query's context. It's not actually valid at this point, and will just be freed if the
-        // query fails.
-        srpl_instance_t *instance = calloc(1, sizeof(*instance));
-        if (instance == NULL) {
-            ERROR("unable to allocate new instance for " PRI_S_SRP "." PUB_S_SRP "." PRI_S_SRP,
-                  serviceName, regtype, replyDomain);
-            return;
-        }
-        instance->domain = context;
+    char instance_name[kDNSServiceMaxDomainName];
+    DNSServiceConstructFullName(instance_name, serviceName, regtype, replyDomain);
 
-        int err = DNSServiceResolve(&sdref, 0, interfaceIndex,
-                                    serviceName, regtype, replyDomain, srpl_resolve_callback, instance);
-        if (err != kDNSServiceErr_NoError) {
-            ERROR("unable to resolve " PRI_S_SRP "." PUB_S_SRP "." PRI_S_SRP ": code %d",
-                  serviceName, regtype, replyDomain, err);
-            free(instance);
-            return;
+    if (flags & kDNSServiceFlagsAdd) {
+        srpl_instance_t *instance = NULL, **sp;
+        // See if we already have an instance going; if so, just increment the number of copies of the instance that we've found.
+        for (sp = &domain->instances; *sp; sp = &(*sp)->next) {
+            instance = *sp;
+            if (!strcmp(instance->instance_name, instance_name) && instance->resolve_txn != NULL) {
+                instance->num_copies++;
+                INFO("duplicate add for " PRI_S_SRP, instance_name);
+                return;
+            }
         }
-        instance->resolve_txn = ioloop_dnssd_txn_add(sdref, instance, NULL, NULL);
-        if (instance->resolve_txn == NULL) {
-            ERROR("unable to allocate dnssd_txn_t for " PRI_S_SRP "." PUB_S_SRP "." PRI_S_SRP,
-                  serviceName, regtype, replyDomain);
-            DNSServiceRefDeallocate(sdref);
-            free(instance);
-            return;
+
+        if (*sp == NULL) {
+            instance = calloc(1, sizeof(*instance));
+            if (instance == NULL) {
+                ERROR("no memory for instance" PRI_S_SRP, instance_name);
+                return;
+            }
+            // Retain the instance object in case it gets removed while the resolve is still active. We do this here in case the
+            // resolve_txn allocation fails. When the transaction is canceled, the reference to the instance object will be dropped.
+            RETAIN_HERE(instance);
+            instance->domain = domain;
+            RETAIN_HERE(instance->domain);
+
+            instance->instance_name = strdup(instance_name);
+            if (instance->instance_name == NULL) {
+                ERROR("no memory for instance " PRI_S_SRP, instance_name);
+                RELEASE_HERE(instance, srpl_instance_finalize);
+                return;
+            }
+
+            int err = DNSServiceResolve(&sdref, 0, interfaceIndex,
+                                        serviceName, regtype, replyDomain, srpl_resolve_callback, instance);
+            if (err != kDNSServiceErr_NoError) {
+                ERROR("unable to resolve " PRI_S_SRP ": code %d", instance_name, err);
+                RELEASE_HERE(instance, srpl_instance_finalize);
+                return;
+            }
+            instance->resolve_txn = ioloop_dnssd_txn_add(sdref, instance, srpl_instance_context_release, NULL);
+            if (instance->resolve_txn == NULL) {
+                ERROR("unable to allocate dnssd_txn_t for " PRI_S_SRP, instance_name);
+                DNSServiceRefDeallocate(sdref);
+                RELEASE_HERE(instance, srpl_instance_finalize);
+                return;
+            }
+            INFO("resolving " PRI_S_SRP, instance_name);
+            *sp = instance;
+            RETAIN_HERE(instance);
         }
-        INFO("resolving " PRI_S_SRP "." PUB_S_SRP "." PRI_S_SRP ".", serviceName, regtype, replyDomain);
     } else {
-        char instance_name[kDNSServiceMaxDomainName];
-        DNSServiceConstructFullName(instance_name, serviceName, regtype, replyDomain);
-        INFO("_srpl-tls._tcp service instance " PRI_S_SRP "." PUB_S_SRP "." PRI_S_SRP " went away.",
-             serviceName, regtype, replyDomain);
+        INFO("_srpl-tls._tcp service instance " PRI_S_SRP " went away.", instance_name);
         for (srpl_instance_t *instance = domain->instances; instance; instance = instance->next) {
             if (!strcmp(instance->instance_name, instance_name)) {
-                srpl_instance_discontinue(instance, false);
+                instance->num_copies--;
+                srpl_instance_discontinue(instance);
                 break;
             }
         }
     }
 }
-#endif //  SRP_REPLICATION_DISCOVER_WITH_NS
+
+static void
+srpl_domain_context_release(void *context)
+{
+    srpl_domain_t *domain = context;
+    RELEASE_HERE(domain, srpl_domain_finalize);
+}
 
 static void
 srpl_dnssd_txn_fail(void *context, int err)
@@ -2141,6 +2149,8 @@ srpl_domain_add(const char *domain_name)
             return;
         }
         *dp = domain;
+        // Hold a reference for the domain list
+        RETAIN_HERE(domain);
         INFO("New service replication browsing domain: " PRI_S_SRP, domain->name);
     } else {
         ERROR("Unexpected duplicate replication domain: " PRI_S_SRP, domain_name);
@@ -2148,23 +2158,19 @@ srpl_domain_add(const char *domain_name)
     }
 
     // Look for an NS record for the specified domain using mDNS, not DNS.
-#if SRP_REPLICATION_DISCOVER_WITH_NS
-    ret = DNSServiceQueryRecord(&sdref, kDNSServiceFlagsForceMulticast | kDNSServiceFlagsLongLivedQuery,
-                                kDNSServiceInterfaceIndexAny, domain_name, kDNSServiceType_NS,
-                                kDNSServiceClass_IN, srpl_ns_query_callback, domain);
-#else
     ret = DNSServiceBrowse(&sdref, kDNSServiceFlagsLongLivedQuery,
                                 kDNSServiceInterfaceIndexAny, "_srpl-tls._tcp", NULL, srpl_browse_callback, domain);
-#endif // SRP_REPLICATION_DISCOVER_WITH_NS
     if (ret != kDNSServiceErr_NoError) {
         ERROR("Unable to query for NS records for " PRI_S_SRP, domain_name);
         return;
     }
-    domain->query = ioloop_dnssd_txn_add(sdref, NULL, NULL, srpl_dnssd_txn_fail);
+    domain->query = ioloop_dnssd_txn_add(sdref, srpl_domain_context_release, NULL, srpl_dnssd_txn_fail);
     if (domain->query == NULL) {
         ERROR("Unable to set up ioloop transaction for NS query on " PRI_S_SRP, domain_name);
         DNSServiceRefDeallocate(sdref);
+        return;
     }
+    RETAIN_HERE(domain);
 }
 
 static void
@@ -3750,9 +3756,9 @@ srpl_domain_advertise(void)
 
     TXTRecordCreate(&txt_record, 0, NULL);
 
-    int err = TXTRecordSetValue(&txt_record, "domain", strlen(current_thread_domain), current_thread_domain);
+    int err = TXTRecordSetValue(&txt_record, "domain", strlen(current_thread_domain_name), current_thread_domain_name);
     if (err != kDNSServiceErr_NoError) {
-        ERROR("unable to set domain in TXT record for _srpl-tls._tcp to " PRI_S_SRP, current_thread_domain);
+        ERROR("unable to set domain in TXT record for _srpl-tls._tcp to " PRI_S_SRP, current_thread_domain_name);
         goto exit;
     }
 
@@ -3765,6 +3771,7 @@ srpl_domain_advertise(void)
 
     // If there is already a registration, get rid of it
     if (srpl_advertise_txn != NULL) {
+        ioloop_dnssd_txn_cancel(srpl_advertise_txn);
         ioloop_dnssd_txn_release(srpl_advertise_txn);
         srpl_advertise_txn = NULL;
     }
@@ -3796,7 +3803,7 @@ srpl_thread_network_name_callback(void *UNUSED NULLABLE context, const char *NUL
 {
     size_t thread_domain_size;
     char domain_buf[kDNSServiceMaxDomainName];
-    char *new_thread_domain;
+    char *new_thread_domain_name;
 
     if (thread_network_name == NULL || status != kCTIStatus_NoError) {
         ERROR("unable to get thread network name.");
@@ -3805,18 +3812,18 @@ srpl_thread_network_name_callback(void *UNUSED NULLABLE context, const char *NUL
     thread_domain_size = snprintf(domain_buf, sizeof(domain_buf),
                                   "%s.%s", thread_network_name, SRP_THREAD_DOMAIN);
     if (thread_domain_size < 0 || thread_domain_size >= sizeof (domain_buf) ||
-        (new_thread_domain = strdup(domain_buf)) == NULL)
+        (new_thread_domain_name = strdup(domain_buf)) == NULL)
     {
         ERROR("no memory for new thread network name: " PRI_S_SRP, thread_network_name);
         return;
     }
 
-    if (current_thread_domain != NULL) {
-        srpl_domain_rename(current_thread_domain, new_thread_domain);
+    if (current_thread_domain_name != NULL) {
+        srpl_domain_rename(current_thread_domain_name, new_thread_domain_name);
     }
-    srpl_domain_add(new_thread_domain);
-    free(current_thread_domain);
-    current_thread_domain = new_thread_domain;
+    srpl_domain_add(new_thread_domain_name);
+    free(current_thread_domain_name);
+    current_thread_domain_name = new_thread_domain_name;
 
     srpl_domain_advertise();
 }

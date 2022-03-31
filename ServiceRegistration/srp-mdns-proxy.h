@@ -42,6 +42,11 @@ struct adv_instance {
     int port;                      // Port on which service can be found.
     char *NULLABLE txt_data;       // Contents of txt record
     uint16_t txt_length;           // length of txt record contents
+    message_t *NULLABLE message;   // Message that produces the current value of this instance
+    ptrdiff_t recent_message;      // Most recent message (never dereference--this is for comparison only).
+    int64_t lease_expiry;          // Time when lease expires, relative to ioloop_timenow().
+    bool removed;                  // True if this instance is being kept around for replication.
+    bool update_pending;           // True if we got a conflict while updating and are waiting to try again
 };
 
 // An address registration
@@ -90,7 +95,7 @@ struct adv_host {
     // True if we have a pending late conflict resolution. If we get a conflict after the update for the
     // host registration has expired, and there happens to be another update in progress, then we want
     // to defer the host registration.
-    bool hostname_update_pending;
+    bool update_pending;
 };
 
 struct adv_update {
@@ -122,6 +127,9 @@ struct adv_update {
     // The set of instances that exist and need to be removed.
     adv_instance_vec_t *NONNULL remove_instances;
 
+    // The set of instances that exist and were renewed
+    adv_instance_vec_t *NONNULL renew_instances;
+
     // The set of instances that need to be added.
     adv_instance_vec_t *NONNULL add_instances;
 
@@ -135,7 +143,7 @@ struct adv_update {
     // If nonzero, this is an explicit expiry time for the lease, because the update is restoring
     // a host after a server restart, or else renaming a host after a late name conflict. In this
     // case, we do not want to extend the lease--just get the host registration right.
-    uint64_t lease_expiry;
+    int64_t lease_expiry;
 
     // True if we are registering the key to hold the hostname.
     bool registering_key;
@@ -168,6 +176,7 @@ struct client_update {
     dns_host_description_t *NONNULL host;     // Host data parsed from message
     service_instance_t *NULLABLE instances;   // Service instances parsed from message
     service_t *NONNULL services;              // Services parsed from message
+    delete_t *NULLABLE removes;               // Removes parsed from message
     dns_name_t *NONNULL update_zone;          // Zone being updated
     uint32_t host_lease, key_lease;           // Lease intervals for host entry and key entry.
     uint32_t serial_number;                   // Serial number sent by client, if one was sent
@@ -186,6 +195,7 @@ void srp_adv_host_release_(adv_host_t *NONNULL host, const char *NONNULL file, i
 void srp_adv_host_retain_(adv_host_t *NONNULL host, const char *NONNULL file, int line);
 #define srp_adv_host_copy(name) srp_adv_host_copy_(name, __FILE__, __LINE__)
 adv_host_t *NULLABLE srp_adv_host_copy_(dns_name_t *NONNULL name, const char *NONNULL file, int line);
+bool srp_adv_host_is_homekit_accessory(addr_t *NONNULL address);
 int srp_current_valid_host_count(void);
 int srp_hosts_to_array(adv_host_t *NONNULL *NULLABLE host_array, int max_hosts);
 bool srp_adv_host_valid(adv_host_t *NONNULL host);

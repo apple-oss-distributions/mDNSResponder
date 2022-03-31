@@ -212,7 +212,7 @@ srp_random32()
         if (status != 0) {
             mbedtls_strerror(status, errbuf, sizeof errbuf);
             ERROR("mbedtls_ctr_drbg_random failed: %s", errbuf);
-            return 0xffff;
+            return 0xffffffff;
         }
         return ret;
     }
@@ -230,11 +230,28 @@ srp_random64()
         if (status != 0) {
             mbedtls_strerror(status, errbuf, sizeof errbuf);
             ERROR("mbedtls_ctr_drbg_random failed: %s", errbuf);
-            return 0xffff;
+            return 0xffffffffffffffffull;
         }
         return ret;
     }
     return 0xffffffffffffffffull;
+}
+
+bool
+srp_randombytes(uint8_t *dest, size_t num)
+{
+    int status;
+    char errbuf[64];
+    if (rng_state_fetch()) {
+        status = mbedtls_ctr_drbg_random(&rng_state->rng_context, (unsigned char *)dest, num);
+        if (status != 0) {
+            mbedtls_strerror(status, errbuf, sizeof errbuf);
+            ERROR("mbedtls_ctr_drbg_random failed: %s", errbuf);
+            return false;
+        }
+        return true;
+    }
+    return false;
 }
 
 srp_key_t *
@@ -368,7 +385,7 @@ srp_pubkey_length(srp_key_t *key)
     return ECDSA_KEY_SIZE;
 }
 
-int
+uint8_t
 srp_key_algorithm(srp_key_t *key)
 {
     return dnssec_keytype_ecdsa;
@@ -381,7 +398,7 @@ srp_signature_length(srp_key_t *key)
 }
 
 // Function to copy out the public key as binary data
-int
+size_t
 srp_pubkey_copy(uint8_t *buf, size_t max, srp_key_t *key)
 {
     mbedtls_ecp_keypair *ecp = mbedtls_pk_ec(key->key);

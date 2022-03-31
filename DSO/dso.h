@@ -30,6 +30,9 @@
 #define DSO_STATE_INVALID_SERIAL 0
 
 typedef enum {
+    // When we get a DSO query or response with no primary TLV, the TLV type will be "No Primary TLV," which is not
+    // otherwise a valid DSO TLV type.
+    kDSOType_NoPrimaryTLV = 0,
     // Standard DSO Types from RFC 8490
     kDSOType_Keepalive = 1,
     kDSOType_RetryDelay = 2,

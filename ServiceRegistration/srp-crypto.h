@@ -1,12 +1,12 @@
 /* srp-crypto.h
  *
- * Copyright (c) 2018-2020 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -55,8 +55,6 @@ struct hmac_key {
 #include <Security/Security.h>
 // #include <Security/SecTransform.h>
 #include <CoreServices/CoreServices.h>
-#include <Security/SecAsn1Coder.h>
-#include <Security/SecAsn1Templates.h>
 
 struct srp_key {
     SecKeyRef NONNULL public;
@@ -142,10 +140,11 @@ void srp_keypair_free(srp_key_t *NONNULL key);
 uint64_t srp_random64(void);
 uint32_t srp_random32(void);
 uint16_t srp_random16(void);
-int srp_key_algorithm(srp_key_t *NONNULL key);
+bool srp_randombytes(uint8_t *NONNULL dest, size_t num);
+uint8_t srp_key_algorithm(srp_key_t *NONNULL key);
 size_t srp_pubkey_length(srp_key_t *NONNULL key);
 size_t srp_signature_length(srp_key_t *NONNULL key);
-int srp_pubkey_copy(uint8_t *NONNULL buf, size_t max, srp_key_t *NONNULL key);
+size_t srp_pubkey_copy(uint8_t *NONNULL buf, size_t max, srp_key_t *NONNULL key);
 int srp_sign(uint8_t *NONNULL output, size_t max, uint8_t *NONNULL message, size_t msglen,
              uint8_t *NONNULL rdata, size_t rdlen, srp_key_t *NONNULL key);
 

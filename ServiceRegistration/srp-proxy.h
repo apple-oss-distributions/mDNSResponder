@@ -31,10 +31,11 @@ bool srp_evaluate(comm_t *NONNULL comm, void *NULLABLE context,
 bool srp_update_start(comm_t *NONNULL connection, void *NULLABLE context,
                       dns_message_t *NONNULL parsed_message, message_t *NONNULL raw_message,
                       dns_host_description_t *NONNULL new_host, service_instance_t *NONNULL instances,
-                      service_t *NONNULL services, dns_name_t *NONNULL update_zone,
+                      service_t *NONNULL services, delete_t *NULLABLE removes, dns_name_t *NONNULL update_zone,
                       uint32_t lease_time, uint32_t key_lease_time, uint32_t serial_number, bool found_serial);
 void srp_update_free_parts(service_instance_t *NULLABLE service_instances, service_instance_t *NULLABLE added_instances,
-                           service_t *NULLABLE services, dns_host_description_t *NULLABLE host_description);
+                           service_t *NULLABLE services, delete_t *NULLABLE removes,
+                           dns_host_description_t *NULLABLE host_description);
 void srp_update_free(update_t *NONNULL update);
 
 

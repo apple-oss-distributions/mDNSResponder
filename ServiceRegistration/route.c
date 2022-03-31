@@ -1,6 +1,6 @@
 /* route.c
  *
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,13 +28,13 @@
 #include <netinet6/in6_var.h>
 #include <netinet6/nd6.h>
 #include <net/if_media.h>
+#include <sys/stat.h>
 #else
 #define _GNU_SOURCE
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <bsd/stdlib.h>
 #include <net/if.h>
-#include "../mDNSShared/DebugServices.h"
 #endif
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -47,9 +47,11 @@
 #include <string.h>
 #include <ctype.h>
 #include <arpa/inet.h>
-#if USE_SYSCTL_COMMAND_TO_ENABLE_FORWARDING
+#if !USE_SYSCTL_COMMAND_TO_ENABLE_FORWARDING
+#ifndef LINUX
 #include <sys/sysctl.h>
-#endif
+#endif // LINUX
+#endif // !USE_SYSCTL_COMMAND_TO_ENABLE_FORWARDING
 #include <stdlib.h>
 #include <stddef.h>
 #include <dns_sd.h>
@@ -74,6 +76,7 @@
 #include "ioloop.h"
 #include "route.h"
 #include "adv-ctl-server.h"
+#include "srp-crypto.h"
 
 # define THREAD_DATA_DIR "/var/lib/openthread"
 # define THREAD_ULA_FILE THREAD_DATA_DIR "/thread-mesh-ula"
@@ -141,6 +144,14 @@ struct in6_addr in6addr_linklocal_allrouters = {{{ 0xff, 0x02, 0x00, 0x00, 0x00,
                                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02 }}};
 #endif
 
+// If true, a prefix with L=1, A=0 in an RA with M=1 is treated as usable. The reason it's not treated as
+// usable by default is that this will break Thread for Android phones on networks where IPv6 is present
+// but only DHCPv6 is supported.
+bool config_enable_dhcpv6_prefixes = false;
+
+// If true, we actually want stub router functionality. If false, we don't (yet) have a need for it.
+bool stub_router_needed = false;
+
 interface_t *interfaces;
 icmp_listener_t icmp_listener;
 bool have_thread_prefix = false;
@@ -151,6 +162,8 @@ uint16_t srp_service_listen_port;
 uint8_t thread_partition_id[4];
 srp_proxy_listener_state_t *srp_listener;
 struct in6_addr ula_prefix;
+struct in6_addr xpanid_prefix;
+bool have_xpanid_prefix = false;
 int num_thread_interfaces; // Should be zero or one.
 int ula_serial = 1;
 bool advertise_default_route_on_thread;
@@ -165,6 +178,7 @@ char *home_interface_name;
 bool thread_proxy_service_setup_done;
 bool interface_state_stable = false;
 bool have_non_thread_interface = false;
+uint64_t xpanid;
 
 #ifndef RA_TESTER
 cti_network_state_t current_thread_state = kCTI_NCPState_Uninitialized;
@@ -173,6 +187,8 @@ cti_connection_t thread_state_context;
 cti_connection_t thread_service_context;
 cti_connection_t thread_prefix_context;
 cti_connection_t thread_partition_id_context;
+cti_connection_t thread_xpanid_context;
+static bool thread_network_running = false;
 #endif
 
 #if !defined(RA_TESTER)
@@ -182,7 +198,8 @@ static wakeup_t *wpan_reconnect_wakeup;
 #define CONFIGURE_STATIC_INTERFACE_ADDRESSES 1
 
 static void refresh_interface_list(void);
-static void router_advertisement_send(interface_t *NONNULL interface);
+static void router_advertisement_send(interface_t *NONNULL interface, const struct in6_addr *destination);
+static void neighbor_solicit_send(interface_t *interface, struct in6_addr *destination);
 static void icmp_send(uint8_t *NONNULL message, size_t length,
                       interface_t *NONNULL interface, const struct in6_addr *NONNULL destination);
 static void interface_beacon_schedule(interface_t *NONNULL interface, unsigned when);
@@ -195,8 +212,11 @@ static void routing_policy_evaluate_all_interfaces(bool assume_changed);
 static void routing_policy_evaluate(interface_t *interface, bool assume_changed);
 static void post_solicit_policy_evaluate(void *context);
 static void interface_active_state_evaluate(interface_t *interface, bool active_known, bool active);
+static void schedule_next_router_probe(interface_t *interface);
 
 #ifndef RA_TESTER
+static void thread_network_startup(void);
+static void thread_network_shutdown(void);
 static void partition_state_reset(void);
 static void partition_unpublish_prefix(thread_prefix_t *NONNULL prefix);
 static void partition_unpublish_adopted_prefix(bool wait);
@@ -238,6 +258,7 @@ static bool partition_tunnel_name_is_known;
 static bool partition_can_advertise_service;
 static bool partition_service_blocked;
 static bool partition_can_provide_routing;
+static bool partition_has_xpanid;
 static bool partition_may_offer_service = false;
 static bool partition_settle_satisfied = true;
 static wakeup_t *partition_settle_wakeup;
@@ -267,6 +288,12 @@ interface_finalize(void *context)
     }
     if (interface->deconfigure_wakeup != NULL) {
         ioloop_wakeup_release(interface->deconfigure_wakeup);
+    }
+    if (interface->neighbor_solicit_wakeup != NULL) {
+        ioloop_wakeup_release(interface->neighbor_solicit_wakeup);
+    }
+    if (interface->router_probe_wakeup != NULL) {
+        ioloop_wakeup_release(interface->router_probe_wakeup);
     }
     free(interface);
 }
@@ -392,6 +419,10 @@ icmp_message_free(icmp_message_t *message)
 {
     if (message->options != NULL) {
         free(message->options);
+    }
+    if (message->wakeup != NULL) {
+        ioloop_cancel_wake_event(message->wakeup);
+        ioloop_wakeup_release(message->wakeup);
     }
     free(message);
 }
@@ -648,33 +679,52 @@ interface_prefix_deconfigure(void *context)
     interface->deprecate_deadline = 0;
 }
 
-static void
-interface_beacon(void *context)
+static bool
+want_routing(void)
 {
-    interface_t *interface = context;
+#ifdef RA_TESTER
+    return true;
+#else
+    return partition_can_provide_routing && partition_has_xpanid && stub_router_needed;
+#endif
+}
+
+static void
+interface_beacon_send(interface_t *interface, const struct in6_addr *destination)
+{
     uint64_t now = ioloop_timenow();
 
-    INFO("interface_beacon:" PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
+    INFO(PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
          interface->deprecate_deadline > now ? " ddl>now" : "",
+         stub_router_needed ? " stubn" : " !stubn",
 #ifdef RA_TESTER
-         "",
+         "", "", "",
 #else
          partition_can_provide_routing ? " canpr" : " !canpr",
+         partition_has_xpanid ? " havexp" : " !havexp",
+         interface->suppress_ipv6_prefix ? " suppress" : " !suppress",
 #endif
-         interface->advertise_ipv6_prefix ? " advert" : " !advert",
+         interface->our_prefix_advertised ? " advert" : " !advert",
          interface->sent_first_beacon ? "" : " first beacon");
 
     if (interface->deprecate_deadline > now) {
-        // The remaining valid lifetime is the time left until the deadline.
+        // The remaining valid and preferred lifetimes is the time left until the deadline.
         interface->valid_lifetime = (uint32_t)((interface->deprecate_deadline - now) / 1000);
+        interface->preferred_lifetime = (uint32_t)((interface->deprecate_deadline - now) / 1000);
+        // When we're deprecating the prefix, we don't actually want to make the preferred lifetime zero, because
+        // this will cause IP address flapping if we miss a router advertisement.
+#define FIVE_MINUTES 5 * 60
+        if (interface->preferred_lifetime > FIVE_MINUTES) {
+            interface->preferred_lifetime = FIVE_MINUTES;
+        }
         if (interface->valid_lifetime < icmp_listener.unsolicited_interval / 1000) {
             SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
-            INFO("interface_beacon: prefix valid life time is less than the unsolicited interval, stop advertising it "
+            INFO("prefix valid life time is less than the unsolicited interval, stop advertising it "
                  "and prepare to deconfigure the prefix - ifname: " PUB_S_SRP "prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP
                  ", preferred time: %" PRIu32 ", valid time: %" PRIu32 ", unsolicited interval: %" PRIu32,
                  interface->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf),
                  interface->preferred_lifetime, interface->valid_lifetime, icmp_listener.unsolicited_interval / 1000);
-            interface->advertise_ipv6_prefix = false;
+            interface->our_prefix_advertised = false;
             ioloop_add_wake_event(interface->deconfigure_wakeup,
                                   interface, interface_prefix_deconfigure,
                                   interface_deconfigure_finalize, interface->valid_lifetime * 1000);
@@ -684,26 +734,48 @@ interface_beacon(void *context)
 #ifndef RA_TESTER
     // If we have been beaconing, and router mode has been disabled, and we don't have
     // an on-link prefix to advertise, discontinue beaconing.
-    if (partition_can_provide_routing || interface->advertise_ipv6_prefix) {
+    if (want_routing() || interface->our_prefix_advertised) {
 #endif
 
     // Send an RA.
-        router_advertisement_send(interface);
-        interface->sent_first_beacon = true;
-        interface->last_beacon = ioloop_timenow();;
+        router_advertisement_send(interface, destination);
+        if (destination == &in6addr_linklocal_allnodes) {
+            interface->sent_first_beacon = true;
+            interface->last_beacon = ioloop_timenow();;
+        }
+#ifndef CONTINUE_ADVERTISING_DURING_DEPRECATION
+        // If we are deprecating, just send the initial deprecation to shorten the preferred lifetime, and then go silent.
+        if (interface->deprecate_deadline > now && !interface->suppress_ipv6_prefix) {
+            INFO("suppressing ipv6 prefix on " PUB_S_SRP, interface->name);
+            interface->suppress_ipv6_prefix = true;
+        }
+#endif
+
 #ifndef RA_TESTER
     } else {
-        INFO("Didn't send: %s %s", partition_can_provide_routing ? "canpr" : "can'tpr",
-             interface->advertise_ipv6_prefix ? "advert" : "!advert");
+        INFO("didn't send: " PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
+             partition_can_provide_routing ? "canpr" : "!canpr",
+             stub_router_needed ? " stubn" : " !stubn",
+             partition_has_xpanid ? " xpanid" : " !xpanid",
+             interface->our_prefix_advertised ? " advert" : " !advert");
     }
 #endif
-    if (interface->num_beacons_sent < 3) {
-        // Schedule a beacon for between 8 and 16 seconds in the future (<MAX_INITIAL_RTR_ADVERT_INTERVAL)
-        interface_beacon_schedule(interface, 8000 + srp_random16() % 8000);
-    } else {
-        interface_beacon_schedule(interface, icmp_listener.unsolicited_interval);
+    if (destination == &in6addr_linklocal_allnodes) {
+        if (interface->num_beacons_sent < MAX_RA_RETRANSMISSION - 1) {
+            // Schedule a beacon for between 8 and 16 seconds in the future (<MAX_INITIAL_RTR_ADVERT_INTERVAL)
+            interface_beacon_schedule(interface, 8000 + srp_random16() % 8000);
+        } else {
+            interface_beacon_schedule(interface, icmp_listener.unsolicited_interval);
+        }
+        interface->num_beacons_sent++;
     }
-    interface->num_beacons_sent++;
+}
+
+static void
+interface_beacon(void *context)
+{
+    interface_t *interface = context;
+    interface_beacon_send(interface, &in6addr_linklocal_allnodes);
 }
 
 static void
@@ -765,8 +837,10 @@ router_discovery_start(interface_t *interface)
                               NULL, 20 * 1000);
     }
     interface->router_discovery_in_progress = true;
+    interface->router_discovery_started = true;
 }
 
+#ifdef FLUSH_STALE_ROUTERS
 static void
 flush_stale_routers(interface_t *interface, uint64_t now)
 {
@@ -787,10 +861,15 @@ flush_stale_routers(interface_t *interface, uint64_t now)
         }
     }
 }
+#endif // FLUSH_STALE_ROUTERS
 
 static void
 router_discovery_stop(interface_t *interface, uint64_t now)
 {
+    if (!interface->router_discovery_started) {
+        INFO("router discovery not yet started.");
+        return;
+    }
     if (!interface->router_discovery_complete) {
         INFO("router_discovery_stop: stopping router discovery on " PUB_S_SRP, interface->name);
     }
@@ -800,28 +879,35 @@ router_discovery_stop(interface_t *interface, uint64_t now)
     if (interface->post_solicit_wakeup != NULL) {
         ioloop_cancel_wake_event(interface->post_solicit_wakeup);
     }
+#if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     if (interface->vicarious_discovery_complete != NULL) {
         ioloop_cancel_wake_event(interface->vicarious_discovery_complete);
         INFO("router_discovery_stop: stopping vicarious router discovery on " PUB_S_SRP, interface->name);
     }
+    interface->vicarious_router_discovery_in_progress = false;
+#endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     interface->router_discovery_complete = true;
     interface->router_discovery_in_progress = false;
-    interface->vicarious_router_discovery_in_progress = false;
     // clear out need_reconfigure_prefix when router_discovery_complete is set back to true.
     interface->need_reconfigure_prefix = false;
+#ifdef FLUSH_STALE_ROUTERS
     flush_stale_routers(interface, now);
+#else
+    (void)now;
+#endif // FLUSH_STALE_ROUTERS
 
     // See if we need a new prefix on the interface.
     interface_prefix_evaluate(interface);
 }
 
+#if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
 static void
 adjust_router_received_time(interface_t *const interface, const uint64_t now, const int64_t time_adjusted)
 {
     icmp_message_t *router;
 
     if (interface->routers == NULL) {
-        if (interface->advertise_ipv6_prefix) {
+        if (interface->our_prefix_advertised) {
             SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __ipv6_prefix);
             INFO("adjust_router_received_time: No router information available for the interface - "
                  "ifname: " PUB_S_SRP ", prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
@@ -879,6 +965,7 @@ vicarious_discovery_callback(void *context)
     // RAs containing on-link prefixes.
     routing_policy_evaluate(interface, false);
 }
+#endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
 
 #ifndef RA_TESTER
 static void
@@ -892,6 +979,7 @@ routing_policy_evaluate_all_interfaces(bool assume_changed)
 }
 #endif
 
+#ifdef FLUSH_STALE_ROUTERS
 static void
 stale_router_policy_evaluate(void *context)
 {
@@ -904,6 +992,16 @@ stale_router_policy_evaluate(void *context)
     interface_prefix_evaluate(interface);
 
     routing_policy_evaluate(interface, true);
+}
+#endif // FLUSH_STALE_ROUTERS
+
+static bool
+prefix_usable(icmp_message_t *router, prefix_information_t *prefix)
+{
+    return ((prefix->flags & ND_OPT_PI_FLAG_ONLINK) &&
+            ((prefix->flags & ND_OPT_PI_FLAG_AUTO) ||
+             (config_enable_dhcpv6_prefixes && (router->flags & ND_RA_FLAG_MANAGED))) &&
+            prefix->preferred_lifetime > 0);
 }
 
 static void
@@ -925,89 +1023,158 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
         return;
     }
 
-    // See if we have a prefix from some other router
-    for (router = interface->routers; router; router = router->next) {
-        icmp_option_t *option = router->options;
-        int i;
-        if (now - router->received_time > MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE)  {
-            stale_routers_exist = true;
-            SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, router_src_addr_buf);
-            INFO("Router " PRI_SEGMENTED_IPv6_ADDR_SRP " is stale by %" PRIu64 " milliseconds",
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, router_src_addr_buf),
-                 now - router->received_time);
-        } else {
-            for (i = 0; i < router->num_options; i++) {
+    // We can't tell whether any particular prefix is usable until we've gotten the xpanid.
+    if (have_xpanid_prefix) {
+        // Look at all the router advertisements we've seen to see if any contain a usable prefix which is not the
+        // prefix we'd advertise. Routers advertising that prefix are all Thread BRs, and it's fine for more than
+        // one router to advertise a prefix, so we will also advertise it for redundancy.
+        for (router = interface->routers; router; router = router->next) {
+            icmp_option_t *option = router->options;
+            int i;
+            bool usable = false;
+            for (i = 0; i < router->num_options; i++, option++) {
                 if (option->type == icmp_option_prefix_information) {
                     prefix_information_t *prefix = &option->option.prefix_information;
-                    if ((prefix->flags & ND_OPT_PI_FLAG_ONLINK) &&
-                        ((prefix->flags & ND_OPT_PI_FLAG_AUTO) || (router->flags & ND_RA_FLAG_MANAGED)) &&
-                        prefix->preferred_lifetime > 0)
-                    {
-                        uint32_t preferred_lifetime_offset = MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE / MSEC_PER_SEC;
-                        // If the remaining time on this prefix is less than the stale time gap, use an offset that's the
-                        // valid lifetime minus sixty seconds so that we have time if the prefix expires.
-                        if (prefix->preferred_lifetime < preferred_lifetime_offset + 60) {
-                            // If the preferred lifetime is less than a minute, we're not going to count this as a valid
-                            // on-link prefix.
-                            if (prefix->preferred_lifetime < 60) {
+                    if (prefix_usable(router, prefix)) {
+                        // We don't consider the prefix we would advertise to be infrastructure-provided if we see it
+                        // advertised by another router, because that router is also a Thread BR, and we don't want
+                        // to get into dueling prefixes with it.
+                        if (memcmp(&option->option.prefix_information.prefix, &xpanid_prefix, 8))
+                        {
+                            uint32_t preferred_lifetime_offset = MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE / MSEC_PER_SEC;
+                            uint32_t preferred_lifetime = prefix->preferred_lifetime;
+
+                            // Infinite preferred lifetime. Bogus.
+                            if (preferred_lifetime == UINT32_MAX) {
+                                preferred_lifetime = 60 * 60;   // One hour
+                            }
+
+                            // If the remaining time on this prefix is less than the stale time gap, use an offset that's the
+                            // valid lifetime minus sixty seconds so that we have time if the prefix expires.
+                            if (preferred_lifetime < preferred_lifetime_offset + 60) {
+                                // If the preferred lifetime is less than a minute, we're not going to count this as a valid
+                                // on-link prefix.
+                                if (preferred_lifetime < 60) {
+                                    SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, router_src_addr_buf);
+                                    SEGMENTED_IPv6_ADDR_GEN_SRP(option->option.prefix_information.prefix.s6_addr, pref_buf);
+                                    INFO("router " PRI_SEGMENTED_IPv6_ADDR_SRP " advertising " PRI_SEGMENTED_IPv6_ADDR_SRP
+                                         " has a preferred lifetime of %d, which is not enough to count as usable.",
+                                         SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, router_src_addr_buf),
+                                         SEGMENTED_IPv6_ADDR_PARAM_SRP(option->option.prefix_information.prefix.s6_addr, pref_buf),
+                                         preferred_lifetime);
+                                    continue;
+                                }
+                                preferred_lifetime_offset = preferred_lifetime - 60;
+                            }
+
+                            // Lifetimes are in seconds, but henceforth we will compare with clock times, which are in ms.
+                            preferred_lifetime_offset *= MSEC_PER_SEC;
+
+                            // If the prefix' preferred lifetime plus the time received is in the past, the prefix doesn't
+                            // count as an on-link prefix that's present.
+                            if (router->received_time + preferred_lifetime_offset < now) {
+                                SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, router_src_addr_buf);
+                                SEGMENTED_IPv6_ADDR_GEN_SRP(option->option.prefix_information.prefix.s6_addr, pref_buf);
+                                INFO("router " PRI_SEGMENTED_IPv6_ADDR_SRP " advertising " PRI_SEGMENTED_IPv6_ADDR_SRP
+                                     " was received %d seconds ago with a preferred lifetime of %d.",
+                                     SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, router_src_addr_buf),
+                                     SEGMENTED_IPv6_ADDR_PARAM_SRP(option->option.prefix_information.prefix.s6_addr, pref_buf),
+                                     (int)((now - router->received_time) / 1000), preferred_lifetime);
+
                                 continue;
                             }
-                            preferred_lifetime_offset = prefix->preferred_lifetime - 60;
+
+                            // This prefix is in principle usable. It may not actually be usable if it is stale, but we mark it usable so it
+                            // will continue to be probed.
+                            usable = true;
+
+                            // router->reachable will be true immediately after receiving a router advertisement until we do a
+                            // probe and don't get a response. It will become true again if, during a later probe, we get a
+                            // response.
+                            if (!router->reachable) {
+                                SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, router_src_addr_buf);
+                                SEGMENTED_IPv6_ADDR_GEN_SRP(option->option.prefix_information.prefix.s6_addr, pref_buf);
+                                INFO("router %p " PRI_SEGMENTED_IPv6_ADDR_SRP " advertising %d %p " PRI_SEGMENTED_IPv6_ADDR_SRP
+                                     " was last known to be reachable %d seconds ago.",
+                                     router,
+                                     SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, router_src_addr_buf),
+                                     i, option,
+                                     SEGMENTED_IPv6_ADDR_PARAM_SRP(option->option.prefix_information.prefix.s6_addr, pref_buf),
+                                     (int)((now - router->latest_na) / 1000));
+                                continue;
+                            }
+
+                            // Otherwise, if this router's on-link prefix will expire later than any other we've seen
+                            if (stale_refresh_time < router->received_time + preferred_lifetime_offset) {
+                                stale_refresh_time = router->received_time + preferred_lifetime_offset;
+                            }
+
+                            // If this is a new icmp_message received now and contains PIO.
+                            if (router->new_router) {
+                                new_prefix = true;
+                                router->new_router = false; // clear the bit since srp-mdns-proxy already processed it.
+                            }
+
+                            // This router has a usable prefix.
+                            usable = true;
+
+                            // Right now all we need is to see if there is an on-link prefix.
+                            on_link_prefix_present = true;
+                            SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, __router_src_add_buf);
+                            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, __pio_prefix_buf);
+                            INFO("router has usable PIO - ifname: " PUB_S_SRP ", router src: " PRI_SEGMENTED_IPv6_ADDR_SRP
+                                 ", prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                                 interface->name,
+                                 SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, __router_src_add_buf),
+                                 SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, __pio_prefix_buf));
+                        } else {
+                            SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, router_src_addr_buf);
+                            INFO("Router " PRI_SEGMENTED_IPv6_ADDR_SRP
+                                 " is advertising the xpanid prefix: not counting as usable ",
+                                 SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, router_src_addr_buf));
                         }
-
-                        // Lifetimes are in seconds, but henceforth we will compare with clock times, which are in ms.
-                        preferred_lifetime_offset *= MSEC_PER_SEC;
-
-                        // If the prefix' preferred lifetime plus the time received is in the past, the prefix doesn't
-                        // count as an on-link prefix that's present.
-                        if (router->received_time + preferred_lifetime_offset < now) {
-                            continue;
-                        }
-
-                        // Otherwise, if this router's on-link prefix will expire later than any other we've seen
-                        if (stale_refresh_time < router->received_time + preferred_lifetime_offset) {
-                            stale_refresh_time = router->received_time + preferred_lifetime_offset;
-                        }
-
-                        // If this is a new icmp_message received now and contains PIO.
-                        if (router->new_router) {
-                            new_prefix = true;
-                            router->new_router = false; // clear the bit since srp-mdns-proxy already processed it.
-                        }
-
-                        // Right now all we need is to see if there is an on-link prefix.
-                        on_link_prefix_present = true;
+                    } else {
                         SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, __router_src_add_buf);
                         SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, __pio_prefix_buf);
-                        DEBUG("routing_policy_evaluate: router has PIO - ifname: " PUB_S_SRP ", router src: " PRI_SEGMENTED_IPv6_ADDR_SRP
+                        INFO("router has unusable PIO - ifname: " PUB_S_SRP ", router src: " PRI_SEGMENTED_IPv6_ADDR_SRP
                              ", prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
                              interface->name,
                              SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, __router_src_add_buf),
                              SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, __pio_prefix_buf));
                     }
                 }
-                option++;
             }
+            // Remember whether or not this router has a usable prefix.
+            router->usable = usable;
         }
     }
 
     INFO("routing_policy_evaluate: policy on " PUB_S_SRP ": " PUB_S_SRP "stale " /* stale_routers_exist ? */
+         PUB_S_SRP "started " /* interface->router_discovery_started ? */
          PUB_S_SRP "disco " /* interface->router_discovery_complete ? */
          PUB_S_SRP "present " /* on_link_prefix_present ? */
-         PUB_S_SRP "advert " /* interface->advertise_ipv6_prefix ? */
+         PUB_S_SRP "advert " /* interface->our_prefix_advertised ? */
          PUB_S_SRP "conf " /* interface->on_link_prefix_configured ? */
          PUB_S_SRP "new_prefix " /* new_prefix ? */
          "preferred = %" PRIu32 " valid = %" PRIu32 " deadline = %" PRIu64,
-         interface->name, stale_routers_exist ? "" : "!", interface->router_discovery_complete ? "" : "!",
-         on_link_prefix_present ? "" : "!", interface->advertise_ipv6_prefix ? "" : "!",
+         interface->name, stale_routers_exist ? "" : "!", interface->router_discovery_started ? "" : "!",
+         interface->router_discovery_complete ? "" : "!",
+         on_link_prefix_present ? "" : "!", interface->our_prefix_advertised ? "" : "!",
          interface->on_link_prefix_configured ? "" : "!", new_prefix ? "" : "!",
          interface->preferred_lifetime, interface->valid_lifetime, interface->deprecate_deadline);
 
     // If there are stale routers, start doing router discovery again to see if we can get them to respond.
+    // Note that doing router discover just because we haven't seen an RA is actually not allowed in RFC 4861,
+    // so this shouldn't be enabled.
     // Also, if we have not yet done router discovery, do it now.
-    if ((!interface->router_discovery_complete || stale_routers_exist) && !on_link_prefix_present) {
+    if ((!interface->router_discovery_started || !interface->router_discovery_complete
+#if SRP_FEATURE_STALE_ROUTER_DISCOVERY
+         || stale_routers_exist
+#endif //SRP_FEATURE_STALE_ROUTER_DISCOVERY
+            ) && !on_link_prefix_present) {
         if (!interface->router_discovery_in_progress) {
             // Start router discovery.
+            INFO("starting router discovery");
             router_discovery_start(interface);
         } else {
             INFO("routing_policy_evaluate: router discovery in progress");
@@ -1015,15 +1182,15 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
     }
     // If we are advertising a prefix and there's another on-link prefix, deprecate the one we are
     // advertising.
-    else if (interface->advertise_ipv6_prefix && on_link_prefix_present) {
+    else if (interface->our_prefix_advertised && on_link_prefix_present) {
         // If we have been advertising a preferred prefix, deprecate it.
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
-        if (interface->preferred_lifetime != 0) {
+        if (interface->preferred_lifetime == BR_PREFIX_LIFETIME) {
             INFO("routing_policy_evaluate: deprecating interface prefix in 30 minutes - prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
-            interface->preferred_lifetime = 0;
-            interface->deprecate_deadline = now + 30 * 60 * 1000;
+            interface->deprecate_deadline = now + BR_PREFIX_LIFETIME * 1000;
             something_changed = true;
+            interface->preferred_lifetime = FIVE_MINUTES;
         } else {
             INFO("routing_policy_evaluate: prefix deprecating in progress - prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
@@ -1032,7 +1199,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
     // If there is no on-link prefix and we aren't advertising, or have deprecated, start advertising
     // again (or for the first time).
     else if (!on_link_prefix_present && interface->router_discovery_complete &&
-             (!interface->advertise_ipv6_prefix || interface->deprecate_deadline != 0 ||
+             (!interface->our_prefix_advertised || interface->deprecate_deadline != 0 ||
               interface->preferred_lifetime == 0)) {
 
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
@@ -1045,7 +1212,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
         interface->deprecate_deadline = 0;
 
         // Start advertising immediately, 30 minutes.
-        interface->preferred_lifetime = interface->valid_lifetime = 30 * 60;
+        interface->preferred_lifetime = interface->valid_lifetime = BR_PREFIX_LIFETIME;
 
         // If the on-link prefix isn't configured on the interface, do that.
         if (!interface->on_link_prefix_configured) {
@@ -1060,7 +1227,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
 #endif
         } else {
             // Configuring the on-link prefix takes a while, so we want to re-evaluate after it's finished.
-            interface->advertise_ipv6_prefix = true;
+            interface->our_prefix_advertised = true;
             something_changed = true;
         }
     }
@@ -1068,7 +1235,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
     // an on-link prefix, and the interface is not thread interface, and it just got an interface address removal event,
     // it is possible that the IPv6 routing has been flushed due to loss of address in configd, so here we explicitly
     // reconfigure the IPv6 prefix and the routing.
-    else if (interface->need_reconfigure_prefix && !on_link_prefix_present && interface->advertise_ipv6_prefix &&
+    else if (interface->need_reconfigure_prefix && !on_link_prefix_present && interface->our_prefix_advertised &&
              interface->on_link_prefix_configured && !interface->is_thread) {
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
         INFO("routing_policy_evaluate: reconfigure ipv6 prefix due to possible network changes -"
@@ -1076,6 +1243,12 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
              SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
         interface_prefix_configure(interface->ipv6_prefix, interface);
         interface->need_reconfigure_prefix = false;
+    }
+
+    // If the on-link prefix goes away, stop suppressing the one we've been advertising (if it's still valid).
+    if (!on_link_prefix_present && interface->suppress_ipv6_prefix) {
+        INFO("un-suppressing ipv6 prefix.");
+        interface->suppress_ipv6_prefix = false;
     }
 
     // If we've been looking to see if there's an on-link prefix, and we got one from the new router advertisement,
@@ -1088,10 +1261,11 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
     // Also when something changed, set the number of transmissions back to zero so that
     // we send a few initial beacons quickly for reliability.
     if (something_changed) {
-        INFO("change on " PUB_S_SRP ": " PUB_S_SRP "disco " PUB_S_SRP "present " PUB_S_SRP "advert " PUB_S_SRP
+        INFO("change on " PUB_S_SRP ": " PUB_S_SRP "started " PUB_S_SRP "disco " PUB_S_SRP "present " PUB_S_SRP "advert " PUB_S_SRP
              "conf preferred = %" PRIu32 " valid = %" PRIu32 " deadline = %" PRIu64,
-             interface->name, interface->router_discovery_complete ? "" : "!", on_link_prefix_present ? "" : "!",
-             interface->advertise_ipv6_prefix ? "" : "!", interface->on_link_prefix_configured ? "" : "!",
+             interface->name, interface->router_discovery_started ? "" : "!",
+             interface->router_discovery_complete ? "" : "!", on_link_prefix_present ? "" : "!",
+             interface->our_prefix_advertised ? "" : "!", interface->on_link_prefix_configured ? "" : "!",
              interface->preferred_lifetime,
              interface->valid_lifetime, interface->deprecate_deadline);
         interface->num_beacons_sent = 0;
@@ -1105,12 +1279,13 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
     // At this point we have not yet sent a router advertisement with the prefix, so even though it has a preferred
     // lifetime of about 1800 seconds here, we can safely set it to zero without leaving stale information
     // in any host's routing table.
-    if (!interface->advertise_ipv6_prefix && interface->on_link_prefix_configured) {
+    if (!interface->our_prefix_advertised && interface->on_link_prefix_configured) {
         INFO("on-link prefix appeared during interface configuration. removing");
         interface->preferred_lifetime = 0;
         interface_prefix_deconfigure(interface);
     }
 
+#ifdef FLUSH_STALE_ROUTERS
     // If we have an on-link prefix, schedule a policy re-evaluation at the stale router interval.
     if (on_link_prefix_present) {
         if (stale_refresh_time < now) {
@@ -1131,12 +1306,19 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
                                   interface, stale_router_policy_evaluate, NULL, refresh_timeout);
         }
     }
+#endif // FLUSH_STALE_ROUTERS
+
+    // Once router discovery is complete, start doing aliveness checks on whatever we discovered (if anything).
+    if (interface->last_router_probe == 0 && interface->router_discovery_started && interface->router_discovery_complete) {
+        schedule_next_router_probe(interface);
+    }
 }
 
+#if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
 static void
 start_vicarious_router_discovery_if_appropriate(interface_t *const interface)
 {
-    if (!interface->advertise_ipv6_prefix &&
+    if (!interface->our_prefix_advertised &&
         !interface->vicarious_router_discovery_in_progress && !interface->router_discovery_in_progress)
     {
         if (interface->vicarious_discovery_complete == NULL) {
@@ -1158,15 +1340,112 @@ start_vicarious_router_discovery_if_appropriate(interface_t *const interface)
              interface->name);
     }
 }
+#endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
+
+static void
+retransmit_unicast_beacon(void *context)
+{
+    icmp_message_t *message = context;
+
+    // Schedule retranmsission
+    interface_beacon_send(message->interface, &message->source);
+    ioloop_add_wake_event(message->wakeup, message, retransmit_unicast_beacon, NULL,
+                          MIN_DELAY_BETWEEN_RAS + srp_random16() % RA_FUZZ_TIME);
+
+    // Discontinue retransmission after the third we've sent.
+    if (message->messages_sent++ > 2) {
+        icmp_message_t **sp = &message->interface->solicits;
+        while (*sp != NULL) {
+            if (*sp == message) {
+                *sp = message->next;
+                icmp_message_free(message);
+                break;
+            } else {
+                sp = &(*sp)->next;
+            }
+        }
+    }
+}
+
+// This gets called to check to see if any of the usable routers are still responding. It gets called whenever
+// we get a router solicit, to ensure that the solicit gets a quick response, and also gets called once every
+// minute so that we quickly notice when a router becomes unreachable.
+
+static void
+send_router_probes(void *context)
+{
+    interface_t *interface = context;
+
+    // After sending three probes, do a policy evaluation.
+    if (interface->num_solicits_sent++ > MAX_NS_RETRANSMISSIONS - 1) {
+        // Mark routers from which we received neighbor advertises during the probe as reachable. Routers
+        // that did not respond are no longer reachable.
+        for (icmp_message_t *router = interface->routers; router != NULL; router = router->next) {
+            router->reachable = router->reached;
+        }
+        routing_policy_evaluate(interface, false);
+        schedule_next_router_probe(interface);
+        return;
+    }
+
+    // Send Neighbor Solicits to any usable routers that haven't responded yet and schedule the next call to
+    // send_router_probes...
+    for (icmp_message_t *router = interface->routers; router != NULL; router = router->next) {
+        // Don't probe routers that aren't usable, and don't re-probe a router that's already responded in this probe cycle.
+        if (!router->usable || router->reached) {
+            continue;
+        }
+        neighbor_solicit_send(router->interface, &router->source);
+    }
+    ioloop_add_wake_event(interface->neighbor_solicit_wakeup, interface, send_router_probes, NULL,
+                          MIN_DELAY_BETWEEN_RAS + srp_random16() % RA_FUZZ_TIME);
+}
+
+static void
+check_router_aliveness(void *context)
+{
+    interface_t *interface = context;
+
+    if (!interface->probing) {
+        interface->probing = true;
+        if (interface->neighbor_solicit_wakeup == NULL) {
+            interface->neighbor_solicit_wakeup = ioloop_wakeup_create();
+        }
+        if (interface->neighbor_solicit_wakeup != NULL) {
+            interface->num_solicits_sent = 0;
+            // Clear the reached flag on all routers
+            for (icmp_message_t *router = interface->routers; router != NULL; router = router->next) {
+                router->reached = false;
+            }
+            send_router_probes(interface);
+        }
+    }
+}
+
+static void
+schedule_next_router_probe(interface_t *interface)
+{
+    if (interface->router_probe_wakeup == NULL) {
+        interface->router_probe_wakeup = ioloop_wakeup_create();
+    }
+    if (interface->router_probe_wakeup != NULL) {
+        INFO("scheduling router probe in 60 seconds.");
+        ioloop_add_wake_event(interface->router_probe_wakeup, interface, check_router_aliveness, NULL, 60 * 1000);
+        interface->probing = false;
+        interface->last_router_probe = ioloop_timenow();
+    }
+}
 
 static void
 router_solicit(icmp_message_t *message)
 {
     interface_t *iface, *interface;
+    bool is_retransmission = false;
 
     // Further validate the message
     if (message->hop_limit != 255 || message->code != 0) {
         ERROR("Invalid router solicitation, hop limit = %d, code = %d", message->hop_limit, message->code);
+        goto out;
     }
     if (IN6_IS_ADDR_UNSPECIFIED(&message->source)) {
         icmp_option_t *option = message->options;
@@ -1174,7 +1453,7 @@ router_solicit(icmp_message_t *message)
         for (i = 0; i < message->num_options; i++) {
             if (option->type == icmp_option_source_link_layer_address) {
                 ERROR("source link layer address in router solicitation from unspecified IP address");
-                return;
+                goto out;
             }
             option++;
         }
@@ -1184,22 +1463,73 @@ router_solicit(icmp_message_t *message)
             if (iface->have_link_layer_address && !memcmp(&message->source,
                                                           &iface->link_local, sizeof(message->source))) {
                 INFO("dropping router solicitation sent from this host.");
-                return;
+                goto out;
             }
         }
     }
     interface = message->interface;
 
-    // Schedule an immediate send, which will be delayed by up to a second.
-    if (!interface->ineligible && !interface->inactive) {
-        interface_beacon_schedule(interface, 0);
+    SEGMENTED_IPv6_ADDR_GEN_SRP(message->source.s6_addr, source_buf);
+    INFO(PUB_S_SRP " solicit on " PUB_S_SRP ": source address is " PRI_SEGMENTED_IPv6_ADDR_SRP,
+         is_retransmission ? "retransmitted" : "initial",
+         message->interface->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(message->source.s6_addr, source_buf));
+
+    // See if this is a retransmission...
+    icmp_message_t **sp;
+    sp = &interface->solicits;
+    while (*sp != NULL) {
+        icmp_message_t *solicit = *sp;
+        // Same source? Not already found?
+        if (!is_retransmission && !memcmp(&message->source, &solicit->source, sizeof(message->source))) {
+            uint64_t now = ioloop_timenow();
+            // RFC 4861 limits RS transmissions to 3, separated by four seconds. Allowing for a bit of slop,
+            // if it was received in the past 15 seconds, this is a retransmission.
+            if (now - solicit->received_time > 15 * 1000) {
+                *sp = solicit->next;
+                icmp_message_free(solicit);
+            } else {
+                solicit->retransmissions_received++;
+                is_retransmission = true;
+
+                // Since this is a retransmission, that hints that there might not be any live routers
+                // on this link, so check to see if the routers we are aware of are alive.
+                check_router_aliveness(interface);
+
+                sp = &(*sp)->next;
+            }
+        } else {
+            sp = &(*sp)->next;
+        }
     }
 
+    // Schedule an immediate send. If this is a retransmission, just let our retransmission schedule
+    // dictate when to send the next one.
+    if (!is_retransmission && !interface->ineligible && !interface->inactive) {
+        message->wakeup = ioloop_wakeup_create();
+        if (message->wakeup == NULL) {
+            ERROR("no memory for solicit wakeup.");
+        } else {
+            // Save the message for later
+            *sp = message;
+            // Start the unicast RA transmission train for this RS.
+            retransmit_unicast_beacon(message);
+            message = NULL;
+        }
+    } else {
+        INFO("not sending a router advertisement.");
+    }
+
+#if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     // When we receive a router solicit, it means that a host is looking for a router.   We should
     // expect to hear replies if they are multicast.   If we hear no replies, it could mean there is
     // no on-link prefix.   In this case, we restart our own router discovery process.  There is no
     // need to do this if we are the one advertising a prefix.
     start_vicarious_router_discovery_if_appropriate(interface);
+#endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
+out:
+    if (message != NULL) {
+        icmp_message_free(message);
+    }
 }
 
 static void
@@ -1222,22 +1552,152 @@ router_advertisement(icmp_message_t *message)
     }
 
     // See if we've had other advertisements from this router.
+    int num_ras_this_router = 0;
     for (rp = &message->interface->routers; *rp != NULL; rp = &(*rp)->next) {
         router = *rp;
+        // The new RA is from the same router as this previous RA.
         if (!memcmp(&router->source, &message->source, sizeof(message->source))) {
-            message->next = router->next;
-            *rp = message;
-            icmp_message_free(router);
-            break;
+            int router_usable_prefixes = 0, message_usable_prefixes = 0;
+            int prefixes_withdrawn = 0;
+            int prefixes_added = 0;
+            int prefixes_unchanged = 0;
+            icmp_option_t *router_option = router->options;
+            int i, j;
+
+            // Remember how many RAs we have from this router.
+            num_ras_this_router++;
+
+            // Count the number of usable prefixes retained, withdrawn, and revived, as well as the total number of
+            // usable prefixes in the old RA.
+            for (i = 0; i < router->num_options; i++, router_option++) {
+                if (router_option->type == icmp_option_prefix_information) {
+                    icmp_option_t *message_option = message->options;
+                    prefix_information_t *router_prefix = &router_option->option.prefix_information;
+                    bool router_usable = prefix_usable(router, router_prefix);
+
+                    if (router_usable) {
+                        router_usable_prefixes++;
+                    }
+
+                    for (j = 0; j < message->num_options; j++, message_option++) {
+                        if (message_option->type == icmp_option_prefix_information) {
+                            prefix_information_t *message_prefix = &message_option->option.prefix_information;
+
+                            // Same prefix?
+                            if (router_prefix->length == message_prefix->length &&
+                                !memcmp(&router_prefix->prefix, &message_prefix->prefix, sizeof(router_prefix->prefix)))
+                            {
+                                // Is it still usable?
+                                message_prefix->found = true;
+                                bool message_usable = prefix_usable(message, message_prefix);
+                                if (router_usable && !message_usable) {
+                                    prefixes_withdrawn++;
+                                } else if (!router_usable && message_usable) {
+                                    prefixes_added++; // Added in the sense that it became usable.
+                                } else {
+                                    prefixes_unchanged++;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Count the number of /new/ usable prefixes added in the new RA, and the total number of usable prefixes in
+            // the new RA.
+            icmp_option_t *option = message->options;
+            for (i = 0; i < message->num_options; i++, option++) {
+                if (option->type == icmp_option_prefix_information) {
+                    prefix_information_t *prefix = &option->option.prefix_information;
+                    if (prefix_usable(message, prefix)) {
+                        message_usable_prefixes++;
+                        if (!prefix->found) {
+                            prefixes_added++;
+                        }
+                    }
+                }
+            }
+            INFO("router_usable: %d  message_usable: %d  withdrawn: %d  added: %d  unchanged: %d",
+                 router_usable_prefixes, message_usable_prefixes,
+                 prefixes_withdrawn, prefixes_added, prefixes_unchanged);
+            if (
+                // We have to discard the old RA if all its prefixes were withdrawn.
+                (router_usable_prefixes > 0 && prefixes_withdrawn == router_usable_prefixes) ||
+                // We don't need the old RA if all the prefixes that weren't withdrawn are also in the new RA
+                // This is true even if there are no un-withdrawn prefixes in the new RA.
+                (router_usable_prefixes - prefixes_withdrawn == message_usable_prefixes - prefixes_added))
+            {
+                message->next = router->next;
+                *rp = message;
+                icmp_message_free(router);
+                break;
+            }
+            // We need both otherwise, so just continue down the list.
         }
     }
-    // If not, save it.
+    // If we got rid of the old RA, *rp will be non-NULL. If we didn't find a match for the old RA, or if we
+    // need to keep the old RA, then *rp will be NULL, meaning that we should keep the new RA.
     if (*rp == NULL) {
         *rp = message;
     }
 
+    // Limit the number of RAs we'll retain from an individual router to five (arbitrarily). This prevents weird patterns
+    // of prefix adds and withdrawals from causing the list to grow without bound. Because we lose information by doing this,
+    // it's possible that we could wind up advertising a usable prefix when we don't need to, but this is a safe failure
+    // mode.
+#define MAX_RAS_PER_ROUTER 5
+    if (num_ras_this_router > MAX_RAS_PER_ROUTER) {
+        for (rp = &message->interface->routers; *rp != NULL; ) {
+            router = *rp;
+            if (!memcmp(&router->source, &message->source, sizeof(message->source))) {
+                *rp = router->next;
+                icmp_message_free(router);
+                // This should always be true, but it's no problem if it's not.
+                if (--num_ras_this_router <= MAX_RAS_PER_ROUTER) {
+                    break;
+                }
+            } else {
+                rp = &(*rp)->next;
+            }
+        }
+    }
+
+    // When we receive an RA, we can assume that the router is reachable, and skip immediately probing with a
+    // neighbor solicit.
+    message->latest_na = message->received_time;
+    message->reachable = true;
+
     // Something may have changed, so do a policy recalculation for this interface
     routing_policy_evaluate(message->interface, false);
+}
+
+static void
+neighbor_advertisement(icmp_message_t *message)
+{
+    if (message->hop_limit != 255 || message->code != 0) {
+        ERROR("Invalid neighbor advertisement, hop limit = %d, code = %d", message->hop_limit, message->code);
+        return;
+    }
+
+    // If this NA matches a router that has advertised a usable prefix, mark the router as alive by setting the
+    // "latest_na" value to the current time. We don't care about NAs for routers that are not advertising a usable
+    // prefix.
+    for (icmp_message_t *router = message->interface->routers; router != NULL; router = router->next) {
+        if (!memcmp(&message->source, &router->source, sizeof(message->source))) {
+            if (router->usable) {
+                SEGMENTED_IPv6_ADDR_GEN_SRP(message->source.s6_addr, source_buf);
+                INFO("usable neighbor advertisement recieved on " PUB_S_SRP " from " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                     message->interface->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(message->source.s6_addr, source_buf));
+                router->latest_na = ioloop_timenow();
+                router->reached = true;
+                return;
+            } else {
+                router->latest_na = ioloop_timenow();
+                router->reached = true;
+                return;
+            }
+        }
+    }
+    return;
 }
 
 #ifndef FUZZING
@@ -1301,6 +1761,7 @@ icmp_callback(io_t *NONNULL io, void *UNUSED context)
         icmp_message_free(message);
         return;
     }
+    INFO("length %zd", rv);
 
     // The increasingly innaccurately named dns parse functions will work fine for this.
     if (!dns_u8_parse(icmp_buf, length, &offset, &message->type)) {
@@ -1336,9 +1797,8 @@ icmp_callback(io_t *NONNULL io, void *UNUSED context)
         }
         icmp_message_dump(message, &message->source, &message->destination);
         router_advertisement(message);
-        // router_advertisement() is ressponsible for freeing the messaage if it doesn't need it.
+        // router_advertisement() is given ownership of the message
         return;
-        break;
 
     case icmp_type_router_solicitation:
         if (!dns_u32_parse(icmp_buf, length, &offset, &reserved32)) {
@@ -1349,8 +1809,14 @@ icmp_callback(io_t *NONNULL io, void *UNUSED context)
         }
         icmp_message_dump(message, &message->source, &message->destination);
         router_solicit(message);
-        break;
+        // router_solicit() is given ownership of the message.
+        return;
+
     case icmp_type_neighbor_advertisement:
+        icmp_message_dump(message, &message->source, &message->destination);
+        neighbor_advertisement(message);
+        break;
+
     case icmp_type_neighbor_solicitation:
     case icmp_type_echo_request:
     case icmp_type_echo_reply:
@@ -1397,7 +1863,8 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
 #ifdef CONFIGURE_STATIC_INTERFACE_ADDRESSES
     struct in6_addr interface_address = prefix;
     char addrbuf[INET6_ADDRSTRLEN + 4];
-    interface_address.s6_addr[15] = 1;
+    // Use our ULA prefix as the host identifier.
+    memcpy(&interface_address.s6_addr[10], &ula_prefix.s6_addr[0], 6);
     inet_ntop(AF_INET6, &interface_address, addrbuf, INET6_ADDRSTRLEN);
 #if   defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG)
     char *args[] = { "set", interface->name, "MANUAL-V6", addrbuf, "64" };
@@ -1628,7 +2095,7 @@ set_thread_prefix(void)
 #endif // THREAD_BORDER_ROUTRER && !RA_TESTER
 
 static void
-router_advertisement_send(interface_t *interface)
+router_advertisement_send(interface_t *interface, const struct in6_addr *destination)
 {
     uint8_t *message;
     dns_towire_state_t towire;
@@ -1664,12 +2131,12 @@ router_advertisement_send(interface_t *interface)
     dns_u8_to_wire(&towire, 0);                 // Flags.  We don't offer DHCP, so We set neither the M nor the O bit.
     // We are not a home agent, so no H bit.  Lifetime is 0, so Prf is 0.
 #ifdef ROUTER_LIFETIME_HACK
-    dns_u16_to_wire(&towire, 30 * 60);             // Router lifetime, hacked.  This shouldn't ever be enabled.
+    dns_u16_to_wire(&towire, BR_PREFIX_LIFETIME); // Router lifetime, hacked.  This shouldn't ever be enabled.
 #else
 #ifdef RA_TESTER
     // Advertise a default route on the simulated thread network
     if (!strcmp(interface->name, thread_interface_name)) {
-        dns_u16_to_wire(&towire, 30 * 60);         // Router lifetime for default route
+        dns_u16_to_wire(&towire, BR_PREFIX_LIFETIME); // Router lifetime for default route
     } else {
 #endif
         dns_u16_to_wire(&towire, 0);            // Router lifetime for non-default default route(s).
@@ -1700,7 +2167,7 @@ router_advertisement_send(interface_t *interface)
 #endif
 
     // Send Prefix Information option if there's no IPv6 on the link.
-    if (interface->advertise_ipv6_prefix) {
+    if (interface->our_prefix_advertised && !interface->suppress_ipv6_prefix) {
         dns_u8_to_wire(&towire, ND_OPT_PREFIX_INFORMATION);
         dns_u8_to_wire(&towire, 4); // length / 8
         dns_u8_to_wire(&towire, 64); // On-link prefix is always 64 bits
@@ -1714,7 +2181,6 @@ router_advertisement_send(interface_t *interface)
              SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, ipv6_prefix_buf), interface->name);
 
     }
-
 
 #ifndef ND_OPT_ROUTE_INFORMATION
 #define ND_OPT_ROUTE_INFORMATION 24
@@ -1737,11 +2203,8 @@ router_advertisement_send(interface_t *interface)
         if (ifroute->inactive) {
             continue;
         }
-        if (
-#ifndef RA_TESTER
-            partition_can_provide_routing &&
-#endif
-            ifroute->advertise_ipv6_prefix &&
+        if (want_routing() &&
+            ifroute->our_prefix_advertised &&
 #ifdef SEND_ON_LINK_ROUTE
             // In theory we don't want to send RIO for the on-link prefix, but there's this bug, see.
             true &&
@@ -1761,7 +2224,7 @@ router_advertisement_send(interface_t *interface)
             dns_u8_to_wire(&towire, 2); // length / 8
             dns_u8_to_wire(&towire, 64); // Interface prefixes are always 64 bits
             dns_u8_to_wire(&towire, 0); // There's no reason at present to prefer one Thread BR over another
-            dns_u32_to_wire(&towire, 30 * 60); // Route lifetime 1800 seconds (30 minutes)
+            dns_u32_to_wire(&towire, BR_PREFIX_LIFETIME); // Route lifetime 1800 seconds (30 minutes)
             dns_rdata_raw_data_to_wire(&towire, &ifroute->ipv6_prefix, 8); // /64 requires 8 bytes.
             SEGMENTED_IPv6_ADDR_GEN_SRP(ifroute->ipv6_prefix.s6_addr, ipv6_prefix_buf);
             INFO("Sending route to " PRI_SEGMENTED_IPv6_ADDR_SRP "%%" PUB_S_SRP " on " PUB_S_SRP,
@@ -1779,7 +2242,7 @@ router_advertisement_send(interface_t *interface)
         dns_u8_to_wire(&towire, 2); // length / 8
         dns_u8_to_wire(&towire, 64); // Interface prefixes are always 64 bits
         dns_u8_to_wire(&towire, 0); // There's no reason at present to prefer one Thread BR over another
-        dns_u32_to_wire(&towire, 30 * 60); // Route lifetime 1800 seconds (30 minutes)
+        dns_u32_to_wire(&towire, BR_PREFIX_LIFETIME); // Route lifetime 1800 seconds (30 minutes)
         dns_rdata_raw_data_to_wire(&towire, &advertised_thread_prefix->prefix, 8); // /64 requires 8 bytes.
         SEGMENTED_IPv6_ADDR_GEN_SRP(advertised_thread_prefix->prefix.s6_addr, thread_prefix_buf);
         INFO("Sending route to " PRI_SEGMENTED_IPv6_ADDR_SRP "%%" PUB_S_SRP " on " PUB_S_SRP,
@@ -1793,7 +2256,7 @@ router_advertisement_send(interface_t *interface)
     dns_u8_to_wire(&towire, 3); // length / 8
     dns_u8_to_wire(&towire, 48); // ULA prefixes are always 48 bits
     dns_u8_to_wire(&towire, 0); // There's no reason at present to prefer one Thread BR over another
-    dns_u32_to_wire(&towire, 30 * 60); // Route lifetime 1800 seconds (30 minutes)
+    dns_u32_to_wire(&towire, BR_PREFIX_LIFETIME); // Route lifetime 1800 seconds (30 minutes)
     dns_rdata_raw_data_to_wire(&towire, &ula_prefix, 16); // /48 requires 16 bytes
 #endif // SKIP_SLASH_48
 #endif // SEND_INTERFACE_SPECIFIC_RIOS
@@ -1802,7 +2265,11 @@ router_advertisement_send(interface_t *interface)
         ERROR("No space in ICMP output buffer for " PUB_S_SRP " at route.c:%d", interface->name, towire.line);
         towire.error = 0;
     } else {
-        icmp_send(message, towire.p - message, interface, &in6addr_linklocal_allnodes);
+        SEGMENTED_IPv6_ADDR_GEN_SRP(destination->s6_addr, destination_buf);
+        INFO("sending advertisement to " PRI_SEGMENTED_IPv6_ADDR_SRP " on " PUB_S_SRP,
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(destination->s6_addr, destination_buf),
+             interface->name);
+        icmp_send(message, towire.p - message, interface, destination);
     }
     free(message);
 }
@@ -1853,6 +2320,51 @@ router_solicit_send(interface_t *interface)
         ERROR("No space in ICMP output buffer for " PUB_S_SRP " at route.c:%d", interface->name, towire.line);
     } else {
         icmp_send(message, towire.p - message, interface, &in6addr_linklocal_allrouters);
+    }
+    free(message);
+}
+
+static void
+neighbor_solicit_send(interface_t *interface, struct in6_addr *destination)
+{
+    uint8_t *message;
+    dns_towire_state_t towire;
+
+#define MAX_ICMP_MESSAGE 1280
+    message = malloc(MAX_ICMP_MESSAGE);
+    if (message == NULL) {
+        ERROR("Unable to construct ICMP Router Advertisement: no memory");
+        return;
+    }
+
+    // Construct the ICMP header and options for each interface.
+    memset(&towire, 0, sizeof towire);
+    towire.p = message;
+    towire.lim = message + MAX_ICMP_MESSAGE;
+
+    // Construct the ICMP header.
+    // We use the DNS message construction functions because it's easy; probably should just make
+    // the towire functions more generic.
+    dns_u8_to_wire(&towire, ND_NEIGHBOR_SOLICIT);  // icmp6_type
+    dns_u8_to_wire(&towire, 0);                    // icmp6_code
+    dns_u16_to_wire(&towire, 0);                   // The kernel computes the checksum (we don't technically have it).
+    dns_u32_to_wire(&towire, 0);                   // Reserved32
+    dns_rdata_raw_data_to_wire(&towire, destination, sizeof(*destination)); // Target address of solicit
+
+    // Send Source link-layer address option
+    if (interface->have_link_layer_address) {
+        dns_u8_to_wire(&towire, ND_OPT_SOURCE_LINKADDR);
+        dns_u8_to_wire(&towire, 1); // length / 8
+        dns_rdata_raw_data_to_wire(&towire, &interface->link_layer, sizeof(interface->link_layer));
+    }
+
+    if (towire.error) {
+        ERROR("No space in ICMP output buffer for " PUB_S_SRP " at route.c:%d", interface->name, towire.line);
+    } else {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(destination, dest_buf);
+        INFO("sending neighbor solicit on " PUB_S_SRP " to " PRI_SEGMENTED_IPv6_ADDR_SRP,
+             interface->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(destination, dest_buf));
+        icmp_send(message, towire.p - message, interface, destination);
     }
     free(message);
 }
@@ -1938,7 +2450,9 @@ post_solicit_policy_evaluate(void *context)
     INFO("Done waiting for router discovery to finish on " PUB_S_SRP, interface->name);
     interface->router_discovery_complete = true;
     interface->router_discovery_in_progress = false;
+#ifdef FLUSH_STALE_ROUTERS
     flush_stale_routers(interface, ioloop_timenow());
+#endif // FLUSH_STALE_ROUTERS
 
     // See if we need a new prefix on the interface.
     interface_prefix_evaluate(interface);
@@ -1952,21 +2466,6 @@ post_solicit_policy_evaluate(void *context)
 static void
 ula_record(const char *ula_printable)
 {
-#ifdef IOLOOP_MACOS
-    CFStringRef ula_string = CFStringCreateWithCString(NULL, ula_printable, kCFStringEncodingUTF8);
-    if (ula_string == NULL) {
-        ERROR("ula_record: unable to create a ULA prefix string to store in preferences.");
-    } else {
-        CFPreferencesSetValue(CFSTR("ula-prefix"), ula_string,
-                              CFSTR("com.apple.srp-mdns-proxy.preferences"),
-                              kCFPreferencesCurrentUser, kCFPreferencesCurrentHost);
-        if (!CFPreferencesSynchronize(CFSTR("com.apple.srp-mdns-proxy.preferences"),
-                                      kCFPreferencesCurrentUser, kCFPreferencesCurrentHost)) {
-            ERROR("ula_record: CFPreferencesSynchronize: Unable to store ULA prefix.");
-        }
-        CFRelease(ula_string);
-    }
-#else
     size_t len = strlen(ula_printable);
     if (access(THREAD_DATA_DIR, F_OK) < 0) {
         if (mkdir(THREAD_DATA_DIR, 0700) < 0) {
@@ -1975,7 +2474,6 @@ ula_record(const char *ula_printable)
         }
     }
     srp_store_file_data(NULL, THREAD_ULA_FILE, (uint8_t *)ula_printable, len);
-#endif // IOLOOP_MACOS
 }
 
 void
@@ -1994,8 +2492,8 @@ route_ula_generate(void)
     }
 
     memset(&ula_prefix, 0, sizeof(ula_prefix));
+    srp_randombytes(&ula_prefix.s6_addr[1], 5);
     ula_prefix.s6_addr[0] = 0xfd;
-    arc4random_buf(&ula_prefix.s6_addr[1], 5); // 40 bits of randomness
 
     inet_ntop(AF_INET6, &ula_prefix, ula_prefix_buffer, sizeof ula_prefix_buffer);
 
@@ -2027,41 +2525,6 @@ route_ula_setup(void)
 {
     bool have_stored_ula_prefix = false;
 
-#ifdef IOLOOP_MACOS
-    char ula_prefix_buffer[INET6_ADDRSTRLEN];
-
-    // Set up the ULA in case we need it.
-    CFPropertyListRef plist = CFPreferencesCopyValue(CFSTR("ula-prefix"),
-                                                     CFSTR("com.apple.srp-mdns-proxy.preferences"),
-                                                     kCFPreferencesCurrentUser, kCFPreferencesCurrentHost);
-    if (plist != NULL) {
-        if (CFGetTypeID(plist) == CFStringGetTypeID()) {
-            if (CFStringGetCString((CFStringRef)plist, ula_prefix_buffer, sizeof(ula_prefix_buffer),
-                                   kCFStringEncodingUTF8)) {
-                if (inet_pton(AF_INET6, ula_prefix_buffer, &ula_prefix)) {
-                    SEGMENTED_IPv6_ADDR_GEN_SRP(ula_prefix.s6_addr, ula_prefix_buf);
-                    INFO("ula_setup: re-using stored prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
-                         SEGMENTED_IPv6_ADDR_PARAM_SRP(ula_prefix.s6_addr, ula_prefix_buf));
-                    have_stored_ula_prefix = true;
-                }
-            }
-        }
-        CFRelease(plist);
-
-        // Get the list of known network links (identified by network signature)
-        plist = CFPreferencesCopyValue(CFSTR("network-links"),
-                                       CFSTR("com.apple.srp-mdns-proxy.preferences"),
-                                       kCFPreferencesCurrentUser, kCFPreferencesCurrentHost);
-
-        if (plist != NULL) {
-            if (CFGetTypeID(plist) == CFArrayGetTypeID()) {
-                bool success = true;
-                CFArrayApplyFunction(plist, CFRangeMake(0,CFArrayGetCount(plist)), network_link_apply, &success);
-            }
-            CFRelease(plist);
-        }
-    }
-#else
     char ula_buf[INET6_ADDRSTRLEN];
     uint16_t length;
     if (srp_load_file_data(NULL, THREAD_ULA_FILE, (uint8_t *)ula_buf, &length, sizeof(ula_buf) - 1)) {
@@ -2074,7 +2537,6 @@ route_ula_setup(void)
     } else {
         INFO("Couldn't open ULA file " THREAD_ULA_FILE ".");
     }
-#endif // IOLOOP_MACOS
 
     // If we didn't already successfully fetch a stored prefix, try to store one.
     if (!have_stored_ula_prefix) {
@@ -2113,6 +2575,7 @@ start_icmp_listener(void)
     ICMP6_FILTER_SETBLOCKALL(&filter);
     ICMP6_FILTER_SETPASS(ND_ROUTER_SOLICIT, &filter);
     ICMP6_FILTER_SETPASS(ND_ROUTER_ADVERT, &filter);
+    ICMP6_FILTER_SETPASS(ND_NEIGHBOR_ADVERT, &filter);
     rv = setsockopt(sock, IPPROTO_ICMPV6, ICMP6_FILTER, &filter, sizeof(filter));
     if (rv < 0) {
         ERROR("Can't set IPV6_RECVHOPLIMIT: " PUB_S_SRP ".", strerror(errno));
@@ -2154,7 +2617,7 @@ start_icmp_listener(void)
     }
 
     // Beacon out a router advertisement every three minutes.
-    icmp_listener.unsolicited_interval = 180 * 1000;
+    icmp_listener.unsolicited_interval = 3 * 60 * 1000;
     ioloop_add_reader(icmp_listener.io_state, icmp_callback);
 
     return true;
@@ -2231,9 +2694,23 @@ icmp_interface_subscribe(interface_t *interface, bool added)
               added ? "join" : "leave", interface->name, strerror(errno));
         return;
     } else {
-        INFO("icmp_interface_subscribe: " PUB_S_SRP "subscribed on interface " PUB_S_SRP, added ? "" : "un",
+        INFO(PUB_S_SRP "subscribed on interface " PUB_S_SRP, added ? "" : "un",
              interface->name);
     }
+
+    req.ipv6mr_multiaddr = in6addr_linklocal_allnodes;
+    req.ipv6mr_interface = interface->index;
+    rv = setsockopt(icmp_listener.io_state->fd, IPPROTO_IPV6, added ? IPV6_JOIN_GROUP : IPV6_LEAVE_GROUP, &req,
+                    sizeof req);
+    if (rv < 0) {
+        ERROR("Unable to " PUB_S_SRP " all-nodes multicast group on " PUB_S_SRP ": " PUB_S_SRP,
+              added ? "join" : "leave", interface->name, strerror(errno));
+        return;
+    } else {
+        INFO(PUB_S_SRP "subscribed on interface " PUB_S_SRP, added ? "" : "un",
+             interface->name);
+    }
+
 }
 
 static interface_t *
@@ -2287,9 +2764,12 @@ interface_shutdown(interface_t *interface)
     if (interface->deconfigure_wakeup != NULL) {
         ioloop_cancel_wake_event(interface->deconfigure_wakeup);
     }
+#if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     if (interface->vicarious_discovery_complete != NULL) {
         ioloop_cancel_wake_event(interface->vicarious_discovery_complete);
     }
+    interface->vicarious_router_discovery_in_progress = false;
+#endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     for (router = interface->routers; router; router = next) {
         next = router->next;
         icmp_message_free(router);
@@ -2301,14 +2781,15 @@ interface_shutdown(interface_t *interface)
     interface->num_solicits_sent = 0;
     interface->inactive = true;
     interface->ineligible = true;
-    interface->advertise_ipv6_prefix = false;
+    interface->our_prefix_advertised = false;
+    interface->suppress_ipv6_prefix = false;
     interface->have_link_layer_address = false;
     interface->on_link_prefix_configured = false;
     interface->sent_first_beacon = false;
     interface->num_beacons_sent = 0;
+    interface->router_discovery_started = false;
     interface->router_discovery_complete = false;
     interface->router_discovery_in_progress = false;
-    interface->vicarious_router_discovery_in_progress = false;
     interface->need_reconfigure_prefix = false;
 }
 
@@ -2316,24 +2797,42 @@ static void
 interface_prefix_evaluate(interface_t *interface)
 {
     // Set up the interface prefix using the prefix number for the link.
-    interface->ipv6_prefix = ula_prefix;
-    if (interface->prefix_number == 0) {
-        interface->prefix_number = ula_serial++;
-    }
-    interface->ipv6_prefix.s6_addr[6] = interface->prefix_number >> 8;
-    interface->ipv6_prefix.s6_addr[7] = interface->prefix_number & 255;
+    interface->ipv6_prefix = xpanid_prefix;
 }
 
 static void
 interface_active_state_evaluate(interface_t *interface, bool active_known, bool active)
 {
-    INFO("interface_active_state_evaluate: evaluating interface active status - ifname: " PUB_S_SRP
+    INFO("evaluating interface active status - ifname: " PUB_S_SRP
          ", active_known: " PUB_S_SRP ", active: " PUB_S_SRP ", inactive: " PUB_S_SRP,
          interface->name, active_known ? "true" : "false", active ? "true" : "false",
          interface->inactive ? "true" : "false");
 
     if (active_known && !active) {
         if (!interface->inactive) {
+#ifndef RA_TESTER
+            bool active_infrastructure = false;
+            for (interface_t *scan = interfaces; scan != NULL; scan = scan->next) {
+                if (scan != interface && !scan->inactive && !scan->ineligible) {
+                    active_infrastructure = true;
+                }
+            }
+            // Don't be a border router if there is no infrastructure interface left.
+            if (thread_network_running && !active_infrastructure && !interface->inactive && !interface->ineligible) {
+                INFO("interface " PUB_S_SRP " went away, and there is no other infrastructure interface: shutting down thread network",
+                     interface->name);
+
+                thread_network_shutdown();
+            } else {
+                INFO("interface " PUB_S_SRP " went away, "
+                     PUB_S_SRP "thread " PUB_S_SRP "infra " PUB_S_SRP "inactive " PUB_S_SRP "ineligible.",
+                     interface->name,
+                     thread_network_running ? "" : "!", active_infrastructure ? "" : "!",
+                     interface->inactive ? "" : "!", interface->ineligible ? "" : "!");
+            }
+#else // RA_TESTER
+            INFO("interface " PUB_S_SRP " went away.", interface->name);
+#endif
             // Set up the thread-local prefix
             interface_prefix_evaluate(interface);
 
@@ -2348,16 +2847,37 @@ interface_active_state_evaluate(interface_t *interface, bool active_known, bool 
             // Zero IPv4 addresses.
             interface->num_ipv4_addresses = 0;
 
-        #if !defined(RA_TESTER) && SRP_FEATURE_COMBINED_SRP_DNSSD_PROXY && SRP_FEATURE_DYNAMIC_CONFIGURATION
+#if !defined(RA_TESTER) && SRP_FEATURE_COMBINED_SRP_DNSSD_PROXY && SRP_FEATURE_DYNAMIC_CONFIGURATION
             // Clear the corresponding served_domain_t in dnssd-proxy that is associated with this removed interface.
             delete_served_domain_by_interface_name(interface->name);
-        #endif
+#endif
 
-            INFO("interface_active_state_evaluate: interface went down - ifname: " PUB_S_SRP, interface->name);
+            INFO("interface went down - ifname: " PUB_S_SRP, interface->name);
         }
     } else if (active_known) {
         if (interface->inactive) {
-            INFO("interface_active_state_evaluate: interface " PUB_S_SRP " showed up.", interface->name);
+#ifndef RA_TESTER
+            bool active_infrastructure = false;
+            for (interface_t *scan = interfaces; scan != NULL; scan = scan->next) {
+                if (scan != interface && !scan->inactive && !scan->ineligible) {
+                    active_infrastructure = true;
+                }
+            }
+            // If this is the first infrastructure interface to show up, start the thread network
+            if (!thread_network_running && !active_infrastructure && interface->inactive && !interface->ineligible) {
+                INFO("interface " PUB_S_SRP " showed up, and there is no other infrastructure interface: starting thread network",
+                     interface->name);
+                thread_network_startup();
+            } else {
+                INFO("interface " PUB_S_SRP " showed up, "
+                     PUB_S_SRP "thread " PUB_S_SRP "infra " PUB_S_SRP "inactive " PUB_S_SRP "ineligible.",
+                     interface->name,
+                     thread_network_running ? "" : "!", active_infrastructure ? "" : "!",
+                     interface->inactive ? "" : "!", interface->ineligible ? "" : "!");
+            }
+#else // !RA_TESTER
+            INFO("interface " PUB_S_SRP " showed up.", interface->name);
+#endif
 #ifdef RA_TESTER
             if (!strcmp(interface->name, thread_interface_name) || !strcmp(interface->name, home_interface_name)) {
 #endif
@@ -2368,9 +2888,8 @@ interface_active_state_evaluate(interface_t *interface, bool active_known, bool 
                 interface->inactive = false;
 
                 interface_prefix_evaluate(interface);
-#ifndef RA_TESTER
-                if (partition_can_provide_routing) {
-#endif
+                if (want_routing()) {
+                    INFO("starting router discovery");
                     router_discovery_start(interface);
 
                     // If we already have a thread prefix, trigger beaconing now.
@@ -2379,15 +2898,12 @@ interface_active_state_evaluate(interface_t *interface, bool active_known, bool 
                     } else {
                         INFO("No prefix on thread network, so not scheduling beacon.");
                     }
-#ifndef RA_TESTER
                 } else {
                     INFO("Can't provide routing, so not scheduling beacon.");
                 }
-#endif
 #ifdef RA_TESTER
             } else {
-                INFO("interface_active_state_evaluate: skipping interface " PUB_S_SRP
-                     " because it's not home or thread.", interface->name);
+                INFO("skipping interface " PUB_S_SRP " because it's not home or thread.", interface->name);
             }
 #endif
         }
@@ -2522,13 +3038,17 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
                 // routers are flushed, then srp-mdns-proxy will advertise its own prefix and configure the new IPv6
                 // address.
                 if ((address->sa.sa_family == AF_INET || address->sa.sa_family == AF_INET6) &&
-                    change == interface_address_deleted) {
-                    INFO("ifaddr_callback: making all routers stale and start router discovery due to removed address");
+                    change == interface_address_deleted)
+                {
+#ifdef VICARIOUS_ROUTER_DISCOVERY
+                    INFO("making all routers stale and start router discovery due to removed address");
                     adjust_router_received_time(interface, ioloop_timenow(),
                                                 -(MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE + MSEC_PER_SEC));
+#endif
                     // Explicitly set router_discovery_complete to false so we can ensure that srp-mdns-proxy will start
                     // the router discovery immediately.
                     interface->router_discovery_complete = false;
+                    interface->router_discovery_started = false;
                     // Set need_reconfigure_prefix to true to let routing_policy_evaluate know that the router discovery
                     // is caused by interface removal event, so when the router discovery finished and nothing changes,
                     // it can reconfigure the IPv6 routing in case configured does not handle it correctly.
@@ -2577,7 +3097,7 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
         }
 #endif
     }
-#ifdef LINUX
+#if defined(POSIX_BUILD)
     interface_active_state_evaluate(interface, true, true);
 #endif
 }
@@ -2597,11 +3117,11 @@ refresh_interface_list(void)
 #ifndef RA_TESTER
     // Notice if we have lost or gained infrastructure.
     if (have_active && !have_non_thread_interface) {
-        INFO("refresh_interface_list: we have an active interface");
+        INFO("we have an active interface");
         have_non_thread_interface = true;
         partition_can_advertise_service = true;
     } else if (!have_active && have_non_thread_interface) {
-        INFO("refresh_interface_list: we no longer have an active interface");
+        INFO("we no longer have an active interface");
         have_non_thread_interface = false;
         // Stop advertising the service, if we are doing so.
         partition_discontinue_srp_service();
@@ -2691,7 +3211,7 @@ wpan_reconnect_wakeup_callback(void *UNUSED context)
         wpan_reconnect_wakeup = NULL;
     }
     // Attempt to restart the thread network...
-    thread_network_startup();
+    infrastructure_network_startup();
 }
 #endif
 
@@ -2802,16 +3322,17 @@ cti_get_state_callback(void *UNUSED context, cti_network_state_t state, cti_stat
 }
 
 static void
-cti_get_partition_id_callback(void *UNUSED context, int32_t partition_id, cti_status_t status)
+cti_get_partition_id_callback(void *UNUSED context, uint64_t partition_id, cti_status_t status)
 {
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
-        INFO("cti_get_partition_id_callback: disconnected");
+        INFO("disconnected");
         attempt_wpan_reconnect();
         return;
     }
 
     if (status == kCTIStatus_NoError) {
-        INFO("Partition ID changed to %" PRIu32, partition_id);
+        INFO("Partition ID changed to %" PRIu64, partition_id);
+        // Partition ID is actually only 32 bits
         thread_partition_id[0] = (uint8_t)((partition_id >> 24) & 255);
         thread_partition_id[1] = (uint8_t)((partition_id >> 16) & 255);
         thread_partition_id[2] = (uint8_t)((partition_id >> 8) & 255);
@@ -2819,7 +3340,70 @@ cti_get_partition_id_callback(void *UNUSED context, int32_t partition_id, cti_st
 
         partition_id_changed();
     } else {
-        ERROR("cti_get_state_callback: nonzero status %d", status);
+        ERROR("nonzero status %d", status);
+    }
+}
+
+static void
+re_evaluate_interfaces(void)
+{
+    for (interface_t *interface = interfaces; interface != NULL; interface = interface->next) {
+        interface_prefix_evaluate(interface);
+    }
+
+    partition_maybe_enable_services();
+}
+
+static void
+cti_get_xpanid_callback(void *UNUSED context, uint64_t new_xpanid, cti_status_t status)
+{
+    if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
+        INFO("disconnected");
+        attempt_wpan_reconnect();
+        return;
+    }
+
+    if (status == kCTIStatus_NoError) {
+        if (partition_has_xpanid) {
+            ERROR("Unexpected change to XPANID from %" PRIu64 " to %" PRIu64, xpanid, new_xpanid);
+        } else {
+            INFO("XPANID is now %" PRIu64, new_xpanid);
+        }
+    } else {
+        ERROR("nonzero status %d", status);
+        return;
+    }
+
+    xpanid = new_xpanid;
+    partition_has_xpanid = true;
+    memset(&xpanid_prefix, 0, sizeof(xpanid_prefix));
+    xpanid_prefix.s6_addr[0] = 0xfd;
+    for (int i = 1; i < 8; i++) {
+        xpanid_prefix.s6_addr[i] = ((xpanid >> ((15 - i) * 8)) & 255);
+    }
+    have_xpanid_prefix = true;
+    re_evaluate_interfaces();
+}
+
+void
+route_evaluate_registration(int rrtype, const uint8_t *rdata, size_t rdlen)
+{
+    // If we've already enabled the stub router, or this isn't an aaaa record, do nothing.
+    if (stub_router_needed || rrtype != dns_rrtype_aaaa || rdlen != 16) {
+        return;
+    }
+    // See if the address being advertised is on a thread prefix
+    for (thread_prefix_t *prefix = thread_prefixes; prefix != NULL; prefix = prefix->next) {
+        if (!memcmp(&prefix->prefix, rdata, 8)) {
+            SEGMENTED_IPv6_ADDR_GEN_SRP(&prefix->prefix, prefix_buf);
+            SEGMENTED_IPv6_ADDR_GEN_SRP(rdata, rdata_buf);
+            INFO("host address " PRI_SEGMENTED_IPv6_ADDR_SRP " is on thread prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP(rdata, rdata_buf),
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP(&prefix->prefix, prefix_buf));
+            stub_router_needed = true;
+            re_evaluate_interfaces();
+            return;
+        }
     }
 }
 
@@ -3212,20 +3796,23 @@ start_tcpdump_logger(void)
 #endif // TCPDUMP_LOGGER
 
 void
-thread_network_startup(void)
+infrastructure_network_startup(void)
 {
-    INFO("thread_network_startup: Thread network started.");
+    INFO("Thread network started.");
 
 //    ioloop_network_watcher_start(network_watch_event);
-#if defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
-    get_thread_interface_list();
-#endif
     set_thread_forwarding();
 #ifdef TCPDUMP_LOGGER
     start_tcpdump_logger();
 #endif
+}
 
-#ifndef RA_TESTER
+#if defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
+static void
+thread_network_startup(void)
+{
+    get_thread_interface_list();
+
     int status = cti_get_state(&thread_state_context, NULL, cti_get_state_callback, NULL);
     if (status == kCTIStatus_NoError) {
         status = cti_get_network_node_type(&thread_role_context, NULL, cti_get_role_callback, NULL);
@@ -3242,56 +3829,82 @@ thread_network_startup(void)
     if (status == kCTIStatus_NoError) {
         status = cti_get_partition_id(&thread_partition_id_context, NULL, cti_get_partition_id_callback, NULL);
     }
+    if (status == kCTIStatus_NoError) {
+        status = cti_get_extended_pan_id(&thread_xpanid_context, NULL, cti_get_xpanid_callback, NULL);
+    }
     if (status != kCTIStatus_NoError) {
         if (status == kCTIStatus_DaemonNotRunning) {
             attempt_wpan_reconnect();
         } else {
-            ERROR("thread_network_startup: initial network setup failed");
+            ERROR("initial network setup failed");
         }
     }
-#endif
+    thread_network_running = true;
 }
+#endif //  defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
 
-void
+#ifndef RA_TESTER
+static void
 thread_network_shutdown(void)
 {
-    interface_t *interface;
-#ifndef RA_TESTER
+    // Stop publishing a default route on the Thread network.
+    if (adopted_thread_prefix != NULL) {
+        partition_unpublish_prefix(adopted_thread_prefix);
+        INFO("removing adopted thread prefix to remove.");
+    } else {
+        INFO("no adopted thread prefix to remove.");
+    }
+    if (published_thread_prefix != NULL) {
+        partition_unpublish_prefix(published_thread_prefix);
+        INFO("removing published thread prefix to remove.");
+    } else {
+        INFO("no published thread prefix to remove.");
+    }
+
     if (thread_state_context) {
-        INFO("thread_network_shutdown: discontinuing state events");
+        INFO("discontinuing state events");
         cti_events_discontinue(thread_state_context);
         thread_state_context = NULL;
     }
     if (thread_role_context) {
-        INFO("thread_network_shutdown: discontinuing role events");
+        INFO("discontinuing role events");
         cti_events_discontinue(thread_role_context);
         thread_role_context = NULL;
     }
     if (thread_service_context) {
-        INFO("thread_network_shutdown: discontinuing service events");
+        INFO("discontinuing service events");
         cti_events_discontinue(thread_service_context);
         thread_service_context = NULL;
     }
     if (thread_prefix_context) {
-        INFO("thread_network_shutdown: discontinuing prefix events");
+        INFO("discontinuing prefix events");
         cti_events_discontinue(thread_prefix_context);
         thread_prefix_context = NULL;
     }
     if (thread_partition_id_context) {
-        INFO("thread_network_shutdown: discontinuing partition ID events");
+        INFO("discontinuing partition ID events");
         cti_events_discontinue(thread_partition_id_context);
         thread_partition_id_context = NULL;
     }
+    partition_state_reset();
+}
+#endif // RA_TESTER
+
+void
+infrastructure_network_shutdown(void)
+{
+    interface_t *interface;
+
+#ifndef RA_TESTER
+    if (thread_network_running) {
+        thread_network_shutdown();
+    }
 #endif
-    INFO("thread_network_shutdown: Thread network shutdown.");
+    INFO("Infrastructure network shutdown.");
     // Stop all activity on interfaces.
     for (interface = interfaces; interface; interface = interface->next) {
         interface_shutdown(interface);
     }
-
-#ifndef RA_TESTER
-    partition_state_reset();
-#endif
 }
 
 #ifndef RA_TESTER
@@ -3345,6 +3958,7 @@ partition_state_reset(void)
     partition_tunnel_name_is_known = false;
     partition_can_advertise_service = false;
     partition_can_provide_routing = false;
+    partition_has_xpanid = false;
     partition_may_offer_service = false;
     partition_settle_satisfied = true;
 
@@ -3363,6 +3977,8 @@ partition_state_reset(void)
     if (partition_service_add_pending_wakeup != NULL) {
         ioloop_cancel_wake_event(partition_service_add_pending_wakeup);
     }
+
+    thread_network_running = false;
 }
 
 static int UNUSED
@@ -4337,13 +4953,13 @@ partition_id_changed(void)
 
     // If we get a partition ID when we aren't a router, we should (I think!) ignore it.
     if (!partition_can_provide_routing) {
-        INFO("partition_id_changed: we aren't able to offer routing yet, so ignoring.");
+        INFO("we aren't able to offer routing yet, so ignoring.");
         return;
     }
 
     // If we are advertising a prefix, update our pref:id
     if (published_thread_prefix != NULL) {
-        INFO("partition_id_changed: updating advertised prefix id");
+        INFO("updating advertised prefix id");
         partition_id_update();
         // In principle we didn't change anything material to the routing subsystem, so no need to re-evaluate current
         // policy.

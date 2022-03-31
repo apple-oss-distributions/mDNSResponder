@@ -3878,7 +3878,14 @@ mDNSexport void mDNS_Unlock_(mDNS *const m, const char *const functionname)
 
     // Check for locking failures
     if (m->mDNS_busy != m->mDNS_reentrancy)
+    {
+        // If mDNS_busy becomes 4294967295U, which is (uint32_t)0 - 1. We are in an invalid lock state, crash
+        // mDNSResponder immediately so that launchd can restart mDNSResponder accordingly without having the user
+        // to reboot the system to get DNS back.
+        // Also assert() ensures that we will get a crash trace when it happens.
+        assert(m->mDNS_busy != UINT32_MAX);
         LogFatalError("%s: mDNS_Unlock: Locking failure! mDNS_busy (%ld) != mDNS_reentrancy (%ld)", functionname, m->mDNS_busy, m->mDNS_reentrancy);
+    }
 
     // If this is a final exit from the mDNSCore code, set m->NextScheduledEvent and clear m->timenow
     if (m->mDNS_busy == 0)

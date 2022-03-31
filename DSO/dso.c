@@ -218,8 +218,8 @@ dso_state_t *dso_state_create(bool is_server, int max_outstanding_queries, const
     const size_t outsize = (sizeof (dso_outstanding_query_state_t)) + (size_t)max_outstanding_queries * sizeof (dso_outstanding_query_t);
 
     if ((sizeof (*dso) + outsize + namespace) > UINT_MAX) {
-        FAULT("Fatal: sizeof (*dso)[%ld], outsize[%ld], "
-                  "namespace[%ld]", sizeof (*dso), outsize, namespace);
+        FAULT("Fatal: sizeof (*dso)[%zd], outsize[%zd], "
+                  "namespace[%zd]", sizeof (*dso), outsize, namespace);
         dso = NULL;
         goto out;
     }
@@ -644,7 +644,9 @@ void dso_keepalive(dso_state_t *dso, const DNSMessageHeader *header)
     memset(&context, 0, sizeof context);
     if (dso->primary.length != 8) {
         LogMsg("Invalid DSO Keepalive length %d from %s", dso->primary.length, dso->remote_name);
-        dso_send_formerr(dso, header);
+        if (dso->is_server) {
+            dso_send_formerr(dso, header);
+        }
         return;
     }
     memcpy(&context, dso->primary.payload, dso->primary.length);
@@ -653,7 +655,9 @@ void dso_keepalive(dso_state_t *dso, const DNSMessageHeader *header)
     if (context.inactivity_timeout > FutureTime || context.keepalive_interval > FutureTime) {
         LogMsg("[DSO%u] inactivity_timeoutl[%u] keepalive_interva[%u] is unreasonably large.",
                dso->serial, context.inactivity_timeout, context.keepalive_interval);
-        dso_send_formerr(dso, header);
+        if (dso->is_server) {
+            dso_send_formerr(dso, header);
+        }
         return;
     }
     if (dso->is_server) {
@@ -666,6 +670,7 @@ void dso_keepalive(dso_state_t *dso, const DNSMessageHeader *header)
             }
             dso->cb(dso->context, &context, dso, kDSOEventType_KeepaliveRcvd);
         }
+        dso_send_simple_response(dso, kDNSFlag1_RC_NoErr, header, "No Error");
     } else {
         if (dso->keepalive_interval > context.keepalive_interval) {
             dso->keepalive_interval = context.keepalive_interval;
@@ -673,6 +678,7 @@ void dso_keepalive(dso_state_t *dso, const DNSMessageHeader *header)
         if (dso->inactivity_timeout > context.inactivity_timeout) {
             dso->inactivity_timeout = context.inactivity_timeout;
         }
+        // Client does not send response.
     }
 }
 

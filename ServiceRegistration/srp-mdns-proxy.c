@@ -1,6 +1,6 @@
 /* srp-mdns-proxy.c
  *
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -86,6 +86,7 @@ static void register_instance_completion(DNSServiceRef sdref, DNSServiceFlags fl
 static void update_from_host(adv_host_t *host);
 static void start_host_update(adv_host_t *host);
 static void prepare_update(adv_host_t *host);
+static void delete_host(void *context);
 static void lease_callback(void *context);
 static void host_finalize(adv_host_t *host);
 
@@ -116,6 +117,10 @@ adv_instance_finalize(adv_instance_t *instance)
     if (instance->host != NULL) {
         RELEASE_HERE(instance->host, host_finalize);
         instance->host = NULL;
+    }
+    if (instance->message != NULL) {
+        ioloop_message_release(instance->message);
+        instance->message = NULL;
     }
     free(instance);
 }
@@ -337,7 +342,7 @@ wait_retry(adv_host_t *host)
     if (!host->lease_expiry || host->lease_expiry < now) {
         INFO("host lease has expired, not retrying: lease_expiry = %" PRId64
              " now = %" PRId64 " difference = %" PRId64, host->lease_expiry, now, host->lease_expiry - now);
-        lease_callback(host);
+        delete_host(host);
         return;
     }
     if (host->retry_interval == 0) {
@@ -374,8 +379,8 @@ service_disconnected(adv_host_t *host)
 
     // If we don't have any updates we can do, this host is dead.
     if (host->updates == NULL) {
-        // lease_callback will get rid of this host.
-        lease_callback(host);
+        // delete_host will get rid of this host.
+        delete_host(host);
     } else {
         wait_retry(host);
     }
@@ -384,7 +389,7 @@ service_disconnected(adv_host_t *host)
 static void
 client_finalize(client_update_t *client)
 {
-    srp_update_free_parts(client->instances, NULL, client->services, client->host);
+    srp_update_free_parts(client->instances, NULL, client->services, client->removes, client->host);
     if (client->parsed_message != NULL) {
         dns_message_free(client->parsed_message);
     }
@@ -443,6 +448,10 @@ update_finalize(adv_update_t *NONNULL update)
         RELEASE_HERE(update->remove_instances, adv_instance_vec_finalize);
     }
 
+    if (update->renew_instances != NULL) {
+        RELEASE_HERE(update->renew_instances, adv_instance_vec_finalize);
+    }
+
     if (update->add_addresses != NULL) {
         for (i = 0; i < update->num_add_addresses; i++) {
             if (update->add_addresses[i] != NULL) {
@@ -491,7 +500,7 @@ update_failed(adv_update_t *update, int rcode, bool expire)
             if (host->clients != NULL) {
                 FAULT("host " PUB_S_SRP " has expired with client still present", host->name);
             } else {
-                lease_callback(host);
+                delete_host(host);
             }
         }
         return;
@@ -557,7 +566,7 @@ host_invalidate(adv_host_t *host)
     if (host->instances != NULL) {
         for (i = 0; i < host->instances->num; i++) {
             if (host->instances->vec[i] != NULL) {
-                if (host->instances->vec[i]->conn != NULL) {
+                if (host->instances->vec[i] != NULL && host->instances->vec[i]->conn != NULL) {
                     service_connection_cancel_and_release(host->instances->vec[i]->conn);
                     host->instances->vec[i]->conn = NULL;
                 }
@@ -680,6 +689,7 @@ srp_adv_host_copy_(dns_name_t *name, const char *file, int line)
     return NULL;
 }
 
+
 static void
 host_remove(adv_host_t *host)
 {
@@ -692,10 +702,10 @@ host_remove(adv_host_t *host)
     RELEASE_HERE(host, host_finalize);
 }
 
-static void
-lease_callback(void *context)
+static adv_host_t **
+host_ready(adv_host_t *host)
 {
-    adv_host_t **p_hosts, *host = context;
+    adv_host_t **p_hosts;
 
     // Find the host on the list of hosts.
     for (p_hosts = &hosts; *p_hosts != NULL; p_hosts = &(*p_hosts)->next) {
@@ -704,19 +714,109 @@ lease_callback(void *context)
         }
     }
     if (*p_hosts == NULL) {
-        ERROR("lease-callback: called with nonexistent host.");
-        return;
+        ERROR("called with nonexistent host.");
+        return NULL;
     }
 
     // It's possible that we got an update to this host, but haven't processed it yet.  In this
     // case, we don't want to get rid of the host, but we do want to get rid of it later if the
-    // update fails.  So postpone the removal for another lease interval.
+    // update fails.  So postpone the removal for a bit.
     if (host->updates != NULL || host->clients != NULL) {
-        INFO("lease_callback: reached with pending updates on host " PRI_S_SRP ".", host->registered_name);
-        ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, NULL, host->lease_interval * 1000);
-        host->lease_expiry = ioloop_timenow() + host->lease_interval * 1000;
+        INFO("reached with pending updates on host " PRI_S_SRP ".", host->registered_name);
+        ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, NULL, 10 * 1000);
+        host->lease_expiry = ioloop_timenow() + 10 * 1000; // ten seconds
+        return NULL;
+    }
+
+
+    return p_hosts;
+}
+
+static void
+lease_callback(void *context)
+{
+    int64_t now = ioloop_timenow();
+    adv_host_t **p_hosts, *host = context;
+    int i, num_instances = 0;
+
+    p_hosts = host_ready(host);
+    if (p_hosts == NULL) {
+        INFO("host expired");
         return;
     }
+
+    INFO("host " PRI_S_SRP, host->name);
+
+    // If the host entry lease has expired, any instance leases have also.
+    if (host->lease_expiry < now) {
+        delete_host(host);
+        return;
+    }
+
+    INFO("host " PRI_S_SRP " is still alive", host->name);
+
+    if (host->instances == NULL) {
+        INFO("no instances");
+        return;
+    }
+
+    // Find instances that have expired and release them.
+    for (i = 0; i < host->instances->num; i++) {
+        adv_instance_t *instance = host->instances->vec[i];
+        if (instance == NULL) {
+            continue;
+        }
+        if (instance->lease_expiry < now) {
+            INFO("host " PRI_S_SRP " instance " PRI_S_SRP "." PRI_S_SRP " has expired",
+                 host->name, instance->instance_name, instance->service_type);
+            host->instances->vec[i] = NULL;
+            RELEASE_HERE(instance, adv_instance_finalize);
+            continue;
+        } else {
+            INFO("host " PRI_S_SRP " instance " PRI_S_SRP "." PRI_S_SRP " has not expired",
+                 host->name, instance->instance_name, instance->service_type);
+        }
+        num_instances++;
+    }
+
+    int64_t next_lease_expiry = host->lease_expiry;
+
+    // Get rid of holes in the host instance vector and compute the next lease callback time
+    int j = 0;
+
+    for (i = 0; i < host->instances->num; i++) {
+        if (host->instances->vec[i] != NULL) {
+            adv_instance_t *instance = host->instances->vec[i];
+            host->instances->vec[j++] = instance;
+            if (next_lease_expiry > instance->lease_expiry) {
+                next_lease_expiry = instance->lease_expiry;
+            }
+        }
+    }
+    INFO("host " PRI_S_SRP " lost %d instances", host->name, host->instances->num - j);
+    host->instances->num = j;
+
+    // Now set a timer for the next lease expiry event
+    uint64_t when = next_lease_expiry - now;
+    if (when > INT32_MAX) {
+        when = INT32_MAX;
+    }
+
+    ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, NULL, (uint32_t)when);
+}
+
+// Called when we definitely want to make all the advertisements associated with a host go away.
+static void
+delete_host(void *context)
+{
+    adv_host_t **p_hosts, *host = context;
+
+    p_hosts = host_ready(host);
+    if (p_hosts == NULL) {
+        return;
+    }
+
+    INFO("deleting host " PRI_S_SRP, host->name);
 
     // De-link the host.
     *p_hosts = host->next;
@@ -743,8 +843,29 @@ static void next_update(void *context)
     srp_adv_host_release(host);
 }
 
+// We remember the message that produced this instance so that if we get an update that doesn't update everything,
+// we know which instances /were/ updated by this particular message. instance->recent_message is a copy of the pointer
+// to the message that most recently updated this instance. When we set instance->recent_message, we don't yet know
+// if the update is going to succeed; if it fails, we can't have changed update->message. If it succeeds, then when we
+// get down to update_finished, we can compare the message that did the update to instance->recent_message; if they
+// are the same, then we set the message on the instance.
+// Note that we only set instance->recent_message during register_instance_completion, so there's no timing race that
+// could happen as a result of receiving a second update to the same instance before the first has been processed.
 static void
-update_finished(adv_update_t *update, bool not_really)
+set_instance_message(adv_instance_t *instance, message_t *message)
+{
+    if (message != NULL && (ptrdiff_t)message == instance->recent_message) {
+        if (instance->message != NULL) {
+            ioloop_message_release(instance->message);
+        }
+        instance->message = message;
+        ioloop_message_retain(instance->message);
+        instance->recent_message = 0;
+    }
+}
+
+static void
+update_finished(adv_update_t *update)
 {
     adv_host_t *host = update->host;
     client_update_t *client = update->client;
@@ -759,10 +880,12 @@ update_finished(adv_update_t *update, bool not_really)
     int num_add_instances = 0;
     uint8_t *rdata;
     adv_update_t **p_update;
+    message_t *message = NULL;
+    bool do_wait_retry = false;
 
-    if (!not_really) {
-        // Reset the retry interval, since we succeeded in updating.
-        host->retry_interval = 0;
+    // Get the message that produced the update, if any
+    if (client != NULL) {
+        message = client->message;
     }
 
     // Once an update has finished, we need to apply all of the proposed changes to the host object.
@@ -849,9 +972,9 @@ update_finished(adv_update_t *update, bool not_really)
     // Do the same for instances.
     if (host->instances != NULL) {
         for (i = 0; i < host->instances->num; i++) {
-            if (host->instances->vec[i] != NULL &&
-                (update->remove_instances == NULL || update->remove_instances->vec[i] == NULL))
-            {
+            // We're counting the number of non-NULL instances in the host instance vector, which is probably always
+            // going to be the same as host->instances->num, but we are not relying on this.
+            if (host->instances->vec[i] != NULL) {
                 num_host_instances++;
             }
         }
@@ -888,32 +1011,86 @@ update_finished(adv_update_t *update, bool not_really)
         update_failed(update, dns_rcode_servfail, true);
         return;
     }
-    instances->num = num_instances;
 
     j = 0;
     if (host->instances != NULL) {
         for (i = 0; i < host->instances->num; i++) {
-            if (update->remove_instances != NULL && update->remove_instances->vec[i] == NULL) {
-                if (update->update_instances->vec[i] != NULL) {
-                    adv_instance_t *instance = update->update_instances->vec[i];
+            if (j == num_instances) {
+                FAULT("j (%d) == num_instances (%d)", j, num_instances);
+                break;
+            }
+            if (update->update_instances != NULL && update->update_instances->vec[i] != NULL) {
+                adv_instance_t *instance = update->update_instances->vec[i];
+                if (update->remove_instances != NULL && update->remove_instances->vec[i] != NULL) {
+                    adv_instance_t *removed_instance = update->remove_instances->vec[i];
+                    INFO("removed instance " PRI_S_SRP " " PRI_S_SRP " %d",
+                         removed_instance->instance_name, removed_instance->service_type, removed_instance->port);
+                    INFO("added instance " PRI_S_SRP " " PRI_S_SRP " %d",
+                         instance->instance_name, instance->service_type, instance->port);
+                } else {
                     INFO("updated instance " PRI_S_SRP " " PRI_S_SRP " %d",
                          instance->instance_name, instance->service_type, instance->port);
-                    // Implicit RETAIN/RELEASE
+                }
+                // Implicit RETAIN/RELEASE
+                instances->vec[j] = instance;
+                RETAIN_HERE(instances->vec[j]);
+                j++;
+                RELEASE_HERE(update->update_instances->vec[i], adv_instance_finalize);
+                update->update_instances->vec[i] = NULL;
+                instance->update = NULL;
+                set_instance_message(instance, message);
+            } else {
+                if (update->remove_instances != NULL && update->remove_instances->vec[i] != NULL) {
+                    adv_instance_t *instance = update->remove_instances->vec[i];
+                    INFO("removed instance " PRI_S_SRP " " PRI_S_SRP " %d",
+                         instance->instance_name, instance->service_type, instance->port);
                     instances->vec[j] = instance;
-                    update->update_instances->vec[i] = NULL;
-                    instance->update = NULL;
+                    RETAIN_HERE(instances->vec[j]);
+                    j++;
+                    instance->removed = true;
+                    if (message != NULL) {
+                        instance->message = message;
+                        ioloop_message_retain(instance->message);
+                    }
+                    if (instance->conn == NULL) {
+                        ERROR("instance " PRI_S_SRP "." PRI_S_SRP " for host " PRI_S_SRP " has no connection.",
+                              instance->instance_name, instance->service_type, host->name);
+                    } else {
+                        service_connection_cancel_and_release(instance->conn);
+                        instance->conn = NULL;
+                    }
                 } else {
                     if (host->instances->vec[i] != NULL) {
                         adv_instance_t *instance = host->instances->vec[i];
-                        INFO("retained instance " PRI_S_SRP " " PRI_S_SRP " %d",
+                        INFO("kept instance " PRI_S_SRP " " PRI_S_SRP " %d",
                              instance->instance_name, instance->service_type, instance->port);
-                        instances->vec[j++] = instance;
-                        RETAIN_HERE(instance);
+                        instances->vec[j] = instance;
+                        RETAIN_HERE(instances->vec[j]);
+                        j++;
+                        set_instance_message(instance, message);
                     }
                 }
             }
         }
     }
+
+    // Set the message on all of the instances that were renewed to the current message.
+    if (update->renew_instances != NULL) {
+        for (i = 0; i < update->renew_instances->num; i++) {
+            adv_instance_t *instance = update->renew_instances->vec[i];
+            if (instance != NULL) {
+                if (instance->message != NULL) {
+                    ioloop_message_release(instance->message);
+                }
+                instance->message = message;
+                ioloop_message_retain(instance->message);
+                instance->recent_message = 0;
+                INFO("renewed instance " PRI_S_SRP " " PRI_S_SRP " %d",
+                     instance->instance_name, instance->service_type, instance->port);
+            }
+        }
+    }
+
     if (update->add_instances != NULL) {
         for (i = 0; i < update->add_instances->num; i++) {
             adv_instance_t *instance = update->add_instances->vec[i];
@@ -924,7 +1101,15 @@ update_finished(adv_update_t *update, bool not_really)
                 instances->vec[j++] = instance;
                 update->add_instances->vec[i] = NULL;
                 instance->update = NULL;
+                set_instance_message(instance, message);
             }
+        }
+    }
+    instances->num = j;
+
+    for (i = 0; i < instances->num; i++) {
+        if (instances->vec[i] != NULL && instances->vec[i]->update_pending) {
+            do_wait_retry = true;
         }
     }
 
@@ -932,6 +1117,15 @@ update_finished(adv_update_t *update, bool not_really)
     // allocations.
     host_addr_free(host);
     if (host->instances != NULL) {
+        for (i = 0; i < host->instances->num; i++) {
+            adv_instance_t *instance = host->instances->vec[i];
+            if (instance != NULL) {
+                INFO("old host instance %d " PRI_S_SRP "." PRI_S_SRP " for host " PRI_S_SRP " has ref_count %d",
+                     i, instance->instance_name, instance->service_type, host->name, instance->ref_count);
+            } else {
+                INFO("old host instance %d is NULL", i);
+            }
+        }
         RELEASE_HERE(host->instances, adv_instance_vec_finalize);
     }
 
@@ -1006,12 +1200,17 @@ update_finished(adv_update_t *update, bool not_really)
     // return a failure to the client and delete the host, or else we'll have resolved the conflict.
     // Note the "else if" here. We don't want to schedule a retry until we are done processing all
     // updates; if the last update succeeds, there's no need to retry.
-    else if (host->hostname_update_pending) {
+    else if (host->update_pending) {
 #if SRP_ALLOWS_MDNS_CONFLICTS
         try_new_hostname(host);
 #else
-        wait_retry(host);
+        do_wait_retry = true;
 #endif // SRP_ALLOWS_MDNS_CONFLICTS
+    }
+
+    if (!do_wait_retry) {
+        // Reset the retry interval, since we succeeded in updating.
+        host->retry_interval = 0;
     }
 
     // Set the lease time based on this update. Even if we scheduled an update for the next time we
@@ -1020,26 +1219,113 @@ update_finished(adv_update_t *update, bool not_really)
     host->lease_interval = update->host_lease;
     host->key_lease = update->key_lease;
 
+    // We want the lease expiry event to fire the next time the lease on any instance expires, or
+    // at the time the lease for the current update would expire, whichever is sooner.
+    int64_t next_lease_expiry = INT64_MAX;
+    int64_t now = ioloop_timenow();
+
+    // update->lease_expiry is nonzero if we are re-doing a previous registration.
     if (update->lease_expiry != 0) {
-        uint64_t now = ioloop_timenow();
         if (update->lease_expiry < now) {
+#ifdef LEASE_EXPIRY_DEBUGGING
             ERROR("lease expiry for host " PRI_S_SRP " happened %" PRIu64 " milliseconds ago.",
                   host->registered_name, now - update->lease_expiry);
-            // Expire the lease in 1000 ms.
-            ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, NULL, 1000);
+#endif
+            // Expire the lease when next we hit the run loop
+            next_lease_expiry = now;
         } else {
-            uint64_t when = update->lease_expiry - now;
-            if (when > INT32_MAX) {
-                when = INT32_MAX;
-            }
-            ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, NULL, (uint32_t)when);
-            host->lease_expiry = update->lease_expiry;
+#ifdef LEASE_EXPIRY_DEBUGGING
+            INFO("lease_expiry (1) for host " PRI_S_SRP " set to %" PRId64, host->name,
+                 (int64_t)(update->lease_expiry - now));
+#endif
+            next_lease_expiry = update->lease_expiry;
         }
-    } else {
-        ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, NULL, host->lease_interval * 1000);
-        host->lease_expiry = ioloop_timenow() + host->lease_interval * 1000;
+        host->lease_expiry = update->lease_expiry;
     }
+    // This is the more usual case.
+    else {
+#ifdef LEASE_EXPIRY_DEBUGGING
+        INFO("lease_expiry (2) for host " PRI_S_SRP " set to %d", host->name, host->lease_interval * 1000);
+#endif
+        next_lease_expiry = now + host->lease_interval * 1000;
+        host->lease_expiry = next_lease_expiry;
+    }
+
+    // We're doing two things here: setting the lease expiry on instances that were touched by the current
+    // update, and also finding the soonest update.
+    for (i = 0; i < host->instances->num; i++) {
+        adv_instance_t *instance = host->instances->vec[i];
+
+        if (instance != NULL) {
+            // This instance was updated by the current update, so set its lease time to
+            // next_lease_expiry.
+            if (instance->message == message) {
+                if (instance->removed) {
+#ifdef LEASE_EXPIRY_DEBUGGING
+                    INFO("lease_expiry (7) for host " PRI_S_SRP " removed instance " PRI_S_SRP "." PRI_S_SRP
+                         " left at %" PRId64, host->name, instance->instance_name, instance->service_type,
+                         (int64_t)(instance->lease_expiry - now));
+#endif
+                } else {
+#ifdef LEASE_EXPIRY_DEBUGGING
+                    INFO("lease_expiry (4) for host " PRI_S_SRP " instance " PRI_S_SRP "." PRI_S_SRP " set to %" PRId64,
+                         host->name, instance->instance_name, instance->service_type,
+                         (int64_t)(host->lease_expiry - now));
+#endif
+                    instance->lease_expiry = host->lease_expiry;
+                }
+            }
+            // Instance was not updated by this update, so see if it expires sooner than this update
+            // (which is likely).
+            else if (instance->lease_expiry > now && instance->lease_expiry < next_lease_expiry) {
+#ifdef LEASE_EXPIRY_DEBUGGING
+                INFO("lease_expiry (3) for host " PRI_S_SRP " instance " PRI_S_SRP "." PRI_S_SRP " set to %" PRId64,
+                     host->name, instance->instance_name, instance->service_type,
+                     (int64_t)(instance->lease_expiry - now));
+#endif
+                next_lease_expiry = instance->lease_expiry;
+            } else {
+                if (instance->lease_expiry <= now) {
+#ifdef LEASE_EXPIRY_DEBUGGING
+                    INFO("lease_expiry (5) for host " PRI_S_SRP " instance " PRI_S_SRP "." PRI_S_SRP
+                         " in the past at %" PRId64,
+                         host->name, instance->instance_name, instance->service_type,
+                         (int64_t)(now - instance->lease_expiry));
+#endif
+                    next_lease_expiry = now;
+#ifdef LEASE_EXPIRY_DEBUGGING
+                } else {
+                    INFO("lease_expiry (6) for host " PRI_S_SRP " instance " PRI_S_SRP "." PRI_S_SRP
+                         " is later than next_lease_expiry by %" PRId64, host->name, instance->instance_name,
+                         instance->service_type, (int64_t)(next_lease_expiry - instance->lease_expiry));
+
+#endif
+                }
+            }
+        }
+    }
+
+    // Now set a timer for the next lease expiry.
+    uint64_t when = next_lease_expiry - now;
+    if (when > INT32_MAX) {
+        when = INT32_MAX;
+    }
+
+    if (next_lease_expiry == now) {
+        INFO("scheduling immediate call to lease_callback in the run loop for " PRI_S_SRP, host->name);
+        ioloop_run_async(lease_callback, host);
+    } else {
+        INFO("scheduling wakeup to lease_callback in %" PRIu64 " for host " PRI_S_SRP,
+             when / 1000, host->name);
+        ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, NULL, (uint32_t)when);
+    }
+
     update_finalize(update);
+
+    // If any of the updates failed and we need to retry, schedule the retry.
+    if (do_wait_retry) {
+        wait_retry(host);
+    }
 }
 
 // When the host registration has completed, we get this callback.   Completion either means that we succeeded in
@@ -1079,10 +1365,18 @@ register_instance_completion(DNSServiceRef sdref, DNSServiceFlags flags, DNSServ
         // In principle update->instance should always be non-NULL here because a no-error response should
         // only happen once or not at all. But just to be safe...
         if (update != NULL) {
+            instance->update_pending = false;
+#if !SRP_ALLOWS_MDNS_CONFLICTS
+        success:
+#endif // !SRP_ALLOWS_MDNS_CONFLICTS
+            // Remember the message
+            if (update->client != NULL) {
+                instance->recent_message = (ptrdiff_t)update->client->message; // for comparison later in update_finished
+            }
             update->num_instances_completed++;
             if (update->num_instances_completed == update->num_instances_started) {
                 // We have successfully advertised the service.
-                update_finished(update, false);
+                update_finished(update);
             }
         } else {
             ERROR("register_instance_completion: no error, but update is NULL for instance " PRI_S_SRP " (" PRI_S_SRP
@@ -1120,10 +1414,9 @@ register_instance_completion(DNSServiceRef sdref, DNSServiceFlags flags, DNSServ
                 service_connection_cancel_and_release(instance->conn);
                 instance->conn = NULL;
             }
-            update->num_instances_completed++;
-            if (update->num_instances_completed == update->num_instances_started) {
-                update_finished(update, true);
-            }
+            INFO("waiting for the conflict to resolve.");
+            instance->update_pending = true;
+            goto success;
         no_finalize:
             update = NULL;
 #endif // SRP_ALLOWS_MDNS_CONFLICTS
@@ -1133,8 +1426,6 @@ register_instance_completion(DNSServiceRef sdref, DNSServiceFlags flags, DNSServ
 
         if (error_code == kDNSServiceErr_ServiceNotRunning || error_code == kDNSServiceErr_DefunctConnection) {
             service_disconnected(host);
-        } else if (error_code == kDNSServiceErr_NameConflict) {
-            wait_retry(host);
         }
     }
 }
@@ -1271,13 +1562,16 @@ start_service_updates(adv_host_t *host)
             return;
         }
         for (i = 0; i < host->instances->num; i++) {
-            if (update->update_instances->vec[i] != NULL || update->remove_instances->vec[i] != NULL) {
+            if (update->update_instances->vec[i] != NULL && !update->update_instances->vec[i]->removed) {
+                // Here we are removing a registration before we know that the update will succeed. We have no choice,
+                // because mDNSResponder doesn't provide a way to do an atomic update--we have to remove and then add.
+                // If the update as a whole fails, the host entry will remain, but the registration that we tried to
+                // update will be lost, and we don't really have a way to recover it.
                 if (host->instances->vec[i]->conn != NULL) {
                     service_connection_cancel_and_release(host->instances->vec[i]->conn);
                     host->instances->vec[i]->conn = NULL;
                 }
-            }
-            if (update->update_instances->vec[i] != NULL) {
+
                 if (!register_instance(update->update_instances->vec[i])) {
                     INFO("start_service_update: register instance failed.");
                     return;
@@ -1287,7 +1581,7 @@ start_service_updates(adv_host_t *host)
     }
     if (update->num_instances_started == 0) {
         INFO("start_service_update: no service updates, so we're finished.");
-        update_finished(update, false);
+        update_finished(update);
     }
 }
 
@@ -1423,7 +1717,7 @@ try_new_hostname(adv_host_t *host)
     if (host->registered_name == NULL) {
         ERROR("no memory for alternative name for " PRI_S_SRP ": " PRI_S_SRP, host->name, namebuf);
         // We pretty much can't do anything at this point.
-        lease_callback(host);
+        delete_host(host);
         return;
     }
 
@@ -1463,7 +1757,7 @@ register_host_completion(DNSServiceRef sdref, DNSRecordRef rref,
         // If we get here while a hostname update is pending, it means that the conflict was resolved when
         // we re-registered the host as a side effect of the update, so we no longer need to update the
         // hostname.
-        host->hostname_update_pending = false;
+        host->update_pending = false;
 
         // Now that the hostname has been registered, we can register services that point at it.
         INFO("register_host_completion: registration for host " PRI_S_SRP " has completed.", host->registered_name);
@@ -1479,7 +1773,7 @@ register_host_completion(DNSServiceRef sdref, DNSRecordRef rref,
             // quickly; if it's a host that really thinks it owns its name, I'm not sure what happens next.
             if (error_code == kDNSServiceErr_NameConflict) {
                 if (host->updates != NULL || host->clients != NULL) {
-                    host->hostname_update_pending = true;
+                    host->update_pending = true;
                 } else {
 #if SRP_ALLOWS_MDNS_CONFLICTS
                     try_new_hostname(host);
@@ -1496,12 +1790,15 @@ register_host_completion(DNSServiceRef sdref, DNSRecordRef rref,
                 update_failed(update, dns_rcode_servfail, true);
             }
 #else // SRP_ALLOWS_MDNS_CONFLICTS
+            // This code relies on the fact that if we never call start_service_updates, but do call update_finished,
+            // update_finished will blithely assume that all the updates succeeded, and update the host entry
+            // accordingly.
             if (error_code == kDNSServiceErr_NameConflict) {
                 if (host->conn != NULL) {
                     service_connection_cancel_and_release(host->conn);
                     host->conn = NULL;
                 }
-                update_finished(update, true);
+                update_finished(update);
                 wait_retry(host);
             } else {
                 update_failed(update, dns_rcode_servfail, true);
@@ -1552,7 +1849,7 @@ adv_instance_create(service_instance_t *raw, adv_host_t *host, adv_update_t *upd
 
     // Allocate the text record buffer
     if (raw->txt != NULL) {
-    txt_data = malloc(raw->txt->data.txt.len);
+        txt_data = malloc(raw->txt->data.txt.len);
         if (txt_data == NULL) {
             RELEASE_HERE(instance, adv_instance_finalize);
             ERROR("adv_instance:create: unable to allocate txt_data buffer");
@@ -1586,6 +1883,28 @@ adv_address_create_(host_addr_t *addr, adv_host_t *host, const char *file, int l
     memcpy(new_addr->rdata, &addr->rr.data, new_addr->rdlen);
     RETAIN(new_addr);
     return new_addr;
+}
+
+// Given a base type, which might be _foo._tcp, and an instance type, which might also be _foo._tcp or
+// might have subtypes, like _foo.tcp,bar, return true if base_type matches the base type of instance_type,
+// without any subtypes.
+static bool
+service_types_equal(const char *base_type, const char *instance_type)
+{
+    size_t len;
+    char *comma = strchr(instance_type, ',');
+    if (comma == NULL) {
+        len = strlen(instance_type);
+    } else {
+        len = comma - instance_type;
+    }
+    if (strlen(base_type) != len) {
+        return false;
+    }
+    if (memcmp(base_type, instance_type, len)) {
+        return false;
+    }
+    return true;
 }
 
 // When we need to register a host with mDNSResponder, start_host_update is called.   This can be either because
@@ -1754,13 +2073,17 @@ start_host_update(adv_host_t *host)
     if (add_rdata != NULL) {
         const DNSServiceRef service_ref = service_connection_get_service_ref(host->conn);
 
-        INFO("start_host_update: DNSServiceRegisterRecord(%p %p %d %d %p %d %d %d %p %d %p %p)",
-             service_ref, host ? &host->conn->record_ref : 0,
-             kDNSServiceFlagsUnique | kDNSServiceFlagsNoAutoRename,
-             advertise_interface, host ? host->registered_name : 0,
+        INFO("start_host_update: DNSServiceRegisterRecord(%p %p %d %d %s %d %d %d %p %d %p %p)",
+             service_ref, &host->conn->record_ref,
+             kDNSServiceFlagsShared,
+             advertise_interface, host->registered_name,
              add_rrtype, dns_qclass_in, add_rdlen, add_rdata, 3600,
              register_host_completion, host ? host : NULL);
         service_connection_set_context(host->conn, update);
+
+        // Let the routing module evaluate whether this is a Thread address, which would mean we'd want
+        // to start advertising the stub router on the infrastructure network.
+        route_evaluate_registration(add_rrtype, add_rdata, add_rdlen);
 
         DNSRecordRef record_ref;
         err = DNSServiceRegisterRecord(service_ref, &record_ref,
@@ -1812,7 +2135,9 @@ prepare_update(adv_host_t *host)
     int num_update_instances = 0;
     int num_add_instances = 0;
     int num_remove_instances = 0;
-    adv_instance_vec_t *update_instances = NULL, *add_instances = NULL, *remove_instances = NULL;
+    int num_renew_instances = 0;
+    adv_instance_vec_t *update_instances = NULL, *add_instances = NULL;
+    adv_instance_vec_t *remove_instances = NULL, *renew_instances = NULL;
     client_update_t *client_update = host->clients;
     adv_update_t *update = NULL;
 
@@ -1904,6 +2229,7 @@ prepare_update(adv_host_t *host)
     // We can never update more instances than currently exist for this host.
     num_update_instances = host->instances->num;
     num_remove_instances = host->instances->num;
+    num_renew_instances = host->instances->num;
 
     update_instances = adv_instance_vec_create(num_update_instances);
     if (update_instances == NULL) {
@@ -1912,13 +2238,49 @@ prepare_update(adv_host_t *host)
     }
     update_instances->num = num_update_instances;
 
-    // We aren't actually deleting any instances, but...
     remove_instances = adv_instance_vec_create(num_remove_instances);
     if (remove_instances == NULL) {
         ERROR("prepare_update: no memory for remove_instances");
         goto fail;
     }
     remove_instances->num = num_remove_instances;
+
+    renew_instances = adv_instance_vec_create(num_renew_instances);
+    if (renew_instances == NULL) {
+        ERROR("prepare_update: no memory for renew_instances");
+        goto fail;
+    }
+    renew_instances->num = num_renew_instances;
+
+    // Handle removes. Service instance removes have to remove the whole service instance, not some subset.
+    for (delete_t *dp = client_update->removes; dp; dp = dp->next) {
+        // Removes can be for services or service instances. Because we're acting as an
+        // Advertising Proxy and not a regular name server, we don't track service instances,
+        // and so we don't need to match them here. This if statement checks to see if the
+        // name could possibly be a service instance name followed by a service type. We
+        // can then extract the putative service instance name and service type and compare;
+        // if they match, they are in fact those things, and if they don't, we don't care.
+        if (dp->name != NULL && dp->name->next != NULL && dp->name->next->next != NULL) {
+            char instance_name[DNS_MAX_LABEL_SIZE_ESCAPED + 1];
+            char service_type[DNS_MAX_LABEL_SIZE_ESCAPED + 2];
+
+            dns_name_print_to_limit(dp->name, dp->name->next, instance_name, sizeof(instance_name));
+            dns_name_print_to_limit(dp->name->next, dp->name->next->next->next, service_type, sizeof(service_type));
+
+            for (i = 0; i < host->instances->num; i++) {
+                adv_instance_t *remove_instance = host->instances->vec[i];
+                if (remove_instance != NULL) {
+                    if (!strcmp(instance_name, remove_instance->instance_name) &&
+                        service_types_equal(service_type, remove_instance->service_type))
+                    {
+                        remove_instances->vec[i] = remove_instance;
+                        RETAIN_HERE(remove_instances->vec[i]);
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
     // The number of instances to add can be as many as there are instances in the update.
     num_add_instances = 0;
@@ -1949,8 +2311,9 @@ prepare_update(adv_host_t *host)
     }
     add_instances->num = i;
 
-    // The instances in the update are now in add_instances.  If they are updates, move them to update_instances.
-    // If they are unchanged, free them and null them out.   If they are adds, leave them.
+    // The instances in the update are now in add_instances.  If they are updates, move them to update_instances.  If
+    // they are unchanged, free them and null them out, and remember the current instance in renew_instances.  If they
+    // are adds, leave them.
     for (i = 0; i < num_add_instances; i++) {
         adv_instance_t *add_instance = add_instances->vec[i];
 
@@ -1963,13 +2326,17 @@ prepare_update(adv_host_t *host)
                     !strcmp(add_instance->instance_name, host_instance->instance_name) &&
                     !strcmp(add_instance->service_type, host_instance->service_type))
                 {
-                    // If the rdata is the same, it's not an add or an update.
-                    if (add_instance->txt_length == host_instance->txt_length &&
+                    // If the rdata is the same, and it's not deleted, it's not an add or an update.
+                    if (!host_instance->removed && add_instance->txt_length == host_instance->txt_length &&
                         add_instance->port == host_instance->port &&
                         (add_instance->txt_length == 0 ||
                          !memcmp(add_instance->txt_data, host_instance->txt_data, add_instance->txt_length)))
                     {
                         RELEASE_HERE(add_instance, adv_instance_finalize);
+                        renew_instances->vec[j] = host_instance;
+                        RETAIN_HERE(host_instance);
+                        INFO(PRI_S_SRP "." PRI_S_SRP " renewed for host " PRI_S_SRP,
+                             host_instance->instance_name, host_instance->service_type, host->name);
                     } else {
                         // Implicit RETAIN/RELEASE
                         update_instances->vec[j] = add_instance;
@@ -1993,6 +2360,7 @@ prepare_update(adv_host_t *host)
     update->remove_instances = remove_instances;
     update->add_instances = add_instances;
     update->update_instances = update_instances;
+    update->renew_instances = renew_instances;
     update->host_lease = client_update->host_lease;
     update->key_lease = client_update->key_lease;
 
@@ -2052,7 +2420,7 @@ compare_instance(adv_instance_t *instance,
     if (host->removed) {
         return missed;
     }
-    if (!strcmp(instance_name, instance->instance_name) && !strcmp(service_type, instance->service_type)) {
+    if (!strcmp(instance_name, instance->instance_name) && service_types_equal(service_type, instance->service_type)) {
         if (!dns_names_equal_text(new_host->name, host->name)) {
             return conflict;
         }
@@ -2064,12 +2432,11 @@ compare_instance(adv_instance_t *instance,
 bool
 srp_update_start(comm_t *connection, void *context, dns_message_t *parsed_message, message_t *raw_message,
                  dns_host_description_t *new_host, service_instance_t *instances, service_t *services,
-                 dns_name_t *update_zone, uint32_t lease_time, uint32_t key_lease_time,
+                 delete_t *removes, dns_name_t *update_zone, uint32_t lease_time, uint32_t key_lease_time,
                  uint32_t serial_number, bool found_serial)
 {
     adv_host_t *host, **p_hosts = NULL;
     char pres_name[DNS_MAX_NAME_SIZE_ESCAPED + 1];
-    int i;
     service_instance_t *new_instance, *client_instance;
     instance_outcome_t outcome = missed;
     adv_update_t *update;
@@ -2081,10 +2448,11 @@ srp_update_start(comm_t *connection, void *context, dns_message_t *parsed_messag
     host_addr_t *addr;
     const bool remove = lease_time == 0;
     const char *updatestr = lease_time == 0 ? "remove" : "update";
+    delete_t *dp;
     dns_name_print(new_host->name, new_host_name, sizeof new_host_name);
 
     // Compute a checksum on the key, ignoring up to three bytes at the end.
-    for (i = 0; i < new_host->key->data.key.len; i += 4) {
+    for (unsigned i = 0; i < new_host->key->data.key.len; i += 4) {
         key_id += ((new_host->key->data.key.key[i] << 24) | (new_host->key->data.key.key[i + 1] << 16) |
                    (new_host->key->data.key.key[i + 2] << 8) | (new_host->key->data.key.key[i + 3]));
     }
@@ -2131,7 +2499,7 @@ srp_update_start(comm_t *connection, void *context, dns_message_t *parsed_messag
             extract_instance_name(instance_name, sizeof instance_name, service_type, sizeof service_type, new_instance);
 
             // First check for a match or conflict in the host itself.
-            for (i = 0; i < host->instances->num; i++) {
+            for (int i = 0; i < host->instances->num; i++) {
                 outcome = compare_instance(host->instances->vec[i], new_host, host,
                                            instance_name, service_type);
                 if (outcome != missed) {
@@ -2142,7 +2510,7 @@ srp_update_start(comm_t *connection, void *context, dns_message_t *parsed_messag
             // Then look for the same thing in any subsequent updates that have been baked.
             for (update = host->updates; update; update = update->next) {
                 if (update->add_instances != NULL) {
-                    for (i = 0; i < update->add_instances->num; i++) {
+                    for (int i = 0; i < update->add_instances->num; i++) {
                         outcome = compare_instance(update->add_instances->vec[i], new_host, host,
                                                    instance_name, service_type);
                         if (outcome != missed) {
@@ -2174,6 +2542,99 @@ found_something:
               PRI_S_SRP ", not host " PRI_S_SRP, instance_name, service_type, host->name, new_host_name);
         advertise_finished(NULL, host->name, context, connection, raw_message, dns_rcode_yxdomain, NULL);
         goto cleanup;
+    }
+
+    // We may have received removes for individual records. In this case, we need to make sure they only remove
+    // records that have been added to the host that matches.
+    for (adv_host_t *rhp = hosts; rhp != NULL; rhp = rhp->next) {
+        if (rhp->removed) {
+            continue;
+        }
+
+        // Look for removes that conflict
+        for (dp = removes; dp != NULL; dp = dp->next) {
+            // We only need to do this for service instance names. We don't really know what is and isn't a
+            // service instance name, but if it /could/ be a service instance name, we compare; if it matches,
+            // it is a service instance name, and if not, no problem.
+            if (dp->name != NULL && dp->name->next != NULL && dp->name->next->next != NULL) {
+                dns_name_print_to_limit(dp->name, dp->name->next, instance_name, sizeof(instance_name));
+                dns_name_print_to_limit(dp->name->next, dp->name->next->next->next, service_type, sizeof(service_type));
+
+                // See if the delete deletes an instance on the host
+                for (int i = 0; i < rhp->instances->num; i++) {
+                    adv_instance_t *instance = rhp->instances->vec[i];
+                    if (instance != NULL) {
+                        if (!strcmp(instance_name, instance->instance_name) &&
+                            service_types_equal(service_type, instance->service_type))
+                        {
+                            if (!strcmp(new_host_name, rhp->name)) {
+                                ERROR("remove for " PRI_S_SRP "." PRI_S_SRP " matches instance on host " PRI_S_SRP,
+                                      instance_name, service_type, rhp->name);
+                                dp->consumed = true;
+                            } else {
+                                ERROR("remove for " PRI_S_SRP "." PRI_S_SRP " conflicts with instance on host " PRI_S_SRP,
+                                      instance_name, service_type, rhp->name);
+                                advertise_finished(NULL, rhp->name, context, connection, raw_message, dns_rcode_formerr, NULL);
+                                goto cleanup;
+                            }
+                        }
+                    }
+                }
+
+                // See if the remove removes an instance on an update on the host
+                for (update = rhp->updates; update; update = update->next) {
+                    if (update->add_instances != NULL) {
+                        for (int i = 0; i < update->add_instances->num; i++) {
+                            adv_instance_t *instance = update->add_instances->vec[i];
+                            if (instance != NULL) {
+                                if (!strcmp(instance_name, instance->instance_name) &&
+                                    service_types_equal(service_type, instance->service_type))
+                                {
+                                    if (!strcmp(new_host_name, rhp->name)) {
+                                        dp->consumed = true;
+                                    } else {
+                                        ERROR("remove for " PRI_S_SRP " conflicts with instance on update to host " PRI_S_SRP,
+                                              instance->instance_name, rhp->name);
+                                        advertise_finished(NULL, rhp->name, context,
+                                                           connection, raw_message, dns_rcode_formerr, NULL);
+                                        goto cleanup;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Finally, look for removes in any updates that _haven't_ been baked.
+            for (client_update = rhp->clients; client_update; client_update = client_update->next) {
+                for (client_instance = client_update->instances; client_instance;
+                     client_instance = client_instance->next)
+                {
+                    if (dns_names_equal(dp->name, client_instance->name)) {
+                        if (!strcmp(new_host_name, rhp->name)) {
+                            dp->consumed = true;
+                        } else {
+                            DNS_NAME_GEN_SRP(dp->name, name_buf);
+                            ERROR("remove for " PRI_DNS_NAME_SRP " conflicts with instance on client update to host "
+                                  PRI_S_SRP, DNS_NAME_PARAM_SRP(dp->name, name_buf), rhp->name);
+                            advertise_finished(NULL, rhp->name, context,
+                                               connection, raw_message, dns_rcode_formerr, NULL);
+                            goto cleanup;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Log any unmatched deletes, but we don't consider these to be errors.
+    for (dp = removes; dp != NULL; dp = dp->next) {
+        if (!dp->consumed) {
+            DNS_NAME_GEN_SRP(dp->name, name_buf);
+            INFO("remove for " PRI_DNS_NAME_SRP " doesn't match any instance on any host.",
+                 DNS_NAME_PARAM_SRP(dp->name, name_buf));
+        }
     }
 
     // If we fall off the end looking for a matching service instance, there isn't a matching
@@ -2227,7 +2688,7 @@ found_something:
     if (outcome == missed) {
         if (remove) {
             ERROR("Remove for host " PRI_S_SRP " which doesn't exist.", new_host_name);
-            advertise_finished(NULL, new_host_name, context, connection, raw_message, dns_rcode_nxdomain, NULL);
+            advertise_finished(NULL, new_host_name, context, connection, raw_message, dns_rcode_noerror, NULL);
             goto cleanup;
         }
 
@@ -2303,7 +2764,7 @@ found_something:
             srp_replication_advertise_finished(host, host->name, context, connection, dns_rcode_servfail);
 #endif
         cleanup:
-            srp_update_free_parts(instances, NULL, services, new_host);
+            srp_update_free_parts(instances, NULL, services, removes, new_host);
             dns_message_free(parsed_message);
             return true;
         }
@@ -2366,6 +2827,7 @@ found_something:
     client_update->host = new_host;
     client_update->instances = instances;
     client_update->services = services;
+    client_update->removes = removes;
     client_update->update_zone = update_zone;
     if (lease_time < max_lease_time) {
         if (lease_time < min_lease_time) {
@@ -2414,7 +2876,7 @@ srp_mdns_flush(void)
     for (host = hosts; host; host = host_next) {
         INFO("srp_mdns_flush: Flushing services and host entry for " PRI_S_SRP " (" PRI_S_SRP ")",
              host->name, host->registered_name);
-        // Get rid of the updates before calling lease_callback, which will fail if update is not NULL.
+        // Get rid of the updates before calling delete_host, which will fail if update is not NULL.
         if (host->updates != NULL) {
             adv_update_t *update_next, *update = host->updates->next;
             update_failed(host->updates, dns_rcode_refused, false);
@@ -2462,6 +2924,10 @@ main(int argc, char **argv)
     char *end;
     int log_stderr = false;
 
+    srp_replication_enabled = true;
+#  if SRP_FEATURE_NAT64
+    srp_nat64_enabled = true;
+#  endif
 
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--max-lease-time")) {
@@ -2528,7 +2994,7 @@ main(int argc, char **argv)
     }
 #endif
 
-    thread_network_startup();
+    infrastructure_network_startup();
 
     if (adv_ctl_init() != kDNSServiceErr_NoError) {
         ERROR("Can't start advertising proxy control server.");

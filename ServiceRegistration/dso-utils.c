@@ -41,6 +41,13 @@ dso_simple_response(comm_t *comm, message_t *message, const dns_wire_t *wire, in
 }
 
 bool
+dso_send_simple_response(dso_state_t *dso, int rcode, const dns_wire_t *header, const char *UNUSED rcode_name)
+{
+    dso_simple_response((comm_t *)dso->transport, NULL, header, rcode);
+    return true;
+}
+
+bool
 dso_send_formerr(dso_state_t *dso, const dns_wire_t *header)
 {
     comm_t *transport = dso->transport;

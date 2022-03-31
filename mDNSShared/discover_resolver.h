@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,6 +78,9 @@ resolver_discovery_add(const domainname * NONNULL domain_to_discover, bool grab_
 
 bool
 resolver_discovery_remove(const domainname * NONNULL domain_to_discover, bool grab_mdns_lock);
+
+bool
+dns_question_requires_resolver_discovery(const DNSQuestion * NONNULL q, const domainname * NULLABLE * NONNULL out_domain);
 
 #endif // MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
 

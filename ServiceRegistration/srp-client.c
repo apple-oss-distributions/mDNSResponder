@@ -26,7 +26,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <errno.h>
-#ifdef THREAD_DEVKIT
+#ifdef THREAD_DEVKIT_ADK
 #include "../mDNSShared/dns_sd.h"
 #else
 #include <dns_sd.h>
@@ -79,6 +79,8 @@ struct _DNSServiceRef_t {
     DNSServiceRegisterReply callback;
     bool succeeded;
     bool called_back;
+    bool removing;
+    bool skip;
     void *NULLABLE context;
 };
 
@@ -649,7 +651,7 @@ update_finalize(update_context_t *update)
 }
 
 static void
-do_callbacks(client_state_t *client, uint32_t serial, int err, bool succeeded)
+do_callbacks(client_state_t *client, reg_state_t *registration, uint32_t serial, int err, bool succeeded)
 {
     reg_state_t *rp;
     bool work;
@@ -665,6 +667,9 @@ do_callbacks(client_state_t *client, uint32_t serial, int err, bool succeeded)
     do {
         work = false;
         for (rp = client->registrations; rp; rp = rp->next) {
+            if (registration != NULL && registration != rp) {
+                continue;
+            }
             if (rp->serial > serial || rp->callback == NULL || rp->called_back) {
                 continue;
             }
@@ -731,7 +736,7 @@ udp_retransmit(void *v_update_context)
     else if (context->next_retransmission_time > client->srp_max_retry_interval) {
         // If we are removing, there is no point in trying the next server--just give up and report a timeout.
         if (context->removing) {
-            do_callbacks(client, context->serial, kDNSServiceErr_Timeout, false);
+            do_callbacks(client, NULL, context->serial, kDNSServiceErr_Timeout, false);
             // Once the goodbye retransmission has timed out, we're done.
             return;
         }
@@ -818,7 +823,7 @@ udp_retransmit(void *v_update_context)
         // If any of the callers requested a timeout, we treat it as if they all did, and call all the callbacks with the "timed out"
         // error.
         if (timeout_requested) {
-            do_callbacks(client, context->serial, kDNSServiceErr_Timeout, false);
+            do_callbacks(client, NULL, context->serial, kDNSServiceErr_Timeout, false);
             err = kDNSServiceErr_NoError;
         } else {
             err = srp_set_wakeup(client->os_context, context->udp_context, context->next_attempt_time, udp_retransmit);
@@ -912,7 +917,7 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
     // When we are doing a remove, we don't actually care what the result is--if we get back an answer, we call
     // the callback.
     if (context->removing) {
-        do_callbacks(client, context->serial, kDNSServiceErr_NoSuchRecord, false);
+        do_callbacks(client, NULL, context->serial, kDNSServiceErr_NoSuchRecord, false);
         return;
     }
 
@@ -936,6 +941,15 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
                 client->srp_server_synced = false;
             }
             sync_to_stable_storage(client->active_update);
+        }
+
+        for (reg_state_t *rp = client->registrations; rp != NULL; rp = rp->next) {
+            if (rp->removing) {
+                INFO("removal for " PRI_S_SRP "." PRI_S_SRP " completed.", rp->name, rp->regtype);
+                do_callbacks(client, rp, context->serial, kDNSServiceErr_NoSuchRecord, false);
+                rp->skip = true; // The caller should do DNSServiceRefDeallocate, but if they don't, we don't want
+                                 // to either continually send removes, nor to send the update again.
+            }
         }
 
         // Get the renewal time
@@ -1015,7 +1029,7 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
         // Set up to renew.  Time is in milliseconds, and we want to renew at 80% of the lease time.
         srp_set_wakeup(client->os_context, context->udp_context, (new_lease_time * 1000) * 8 / 10, renew_callback);
 
-        do_callbacks(client, context->serial, kDNSServiceErr_NoError, true);
+        do_callbacks(client, NULL, context->serial, kDNSServiceErr_NoError, true);
         break;
     case dns_rcode_yxdomain:
         // Get the actual hostname that we sent.
@@ -1038,7 +1052,7 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
             }
         }
         if (resolve_with_callback) {
-            do_callbacks(client, context->serial, kDNSServiceErr_NameConflict, false);
+            do_callbacks(client, NULL, context->serial, kDNSServiceErr_NameConflict, false);
         } else {
             resolve_name_conflict = true;
         }
@@ -1163,30 +1177,32 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
     //      TTL = 3600 ?
     //      RDLENGTH = number of RRs * RR length (4 or 16)
     //      RDATA = <the data>
-    for (pass = 0; pass < 2; pass++) {
-        bool have_good_address = false;
+    if (!removing) {
+        for (pass = 0; pass < 2; pass++) {
+            bool have_good_address = false;
 
-        for (addr = interfaces; addr; addr = addr->next) {
-            // If we have an IPv6 address that's on the same prefix as the server's address, send only that
-            // IPv6 address.
-            if (addr->rr.type != dns_rrtype_aaaa ||
-                (addr->rr.type == server->rr.type && !memcmp(&addr->rr.data, &server->rr.data, 8)))
-            {
-                have_good_address = true;
-            }
-            if (have_good_address || pass == 1) {
-                dns_pointer_to_wire(NULL, &towire, &p_host_name); CH;
-                dns_u16_to_wire(&towire, addr->rr.type); CH;
-                dns_u16_to_wire(&towire, dns_qclass_in); CH;
-                dns_ttl_to_wire(&towire, 3600); CH;
-                dns_rdlength_begin(&towire); CH;
-                dns_rdata_raw_data_to_wire(&towire, &addr->rr.data,
-                                           addr->rr.type == dns_rrtype_a ? 4 : 16); CH;
-                dns_rdlength_end(&towire); CH;
-                INCREMENT(message->nscount);
-            }
-            if (have_good_address) {
-                break;
+            for (addr = interfaces; addr; addr = addr->next) {
+                // If we have an IPv6 address that's on the same prefix as the server's address, send only that
+                // IPv6 address.
+                if (addr->rr.type != dns_rrtype_aaaa ||
+                    (addr->rr.type == server->rr.type && !memcmp(&addr->rr.data, &server->rr.data, 8)))
+                {
+                    have_good_address = true;
+                }
+                if (have_good_address || pass == 1) {
+                    dns_pointer_to_wire(NULL, &towire, &p_host_name); CH;
+                    dns_u16_to_wire(&towire, addr->rr.type); CH;
+                    dns_u16_to_wire(&towire, dns_qclass_in); CH;
+                    dns_ttl_to_wire(&towire, 3600); CH;
+                    dns_rdlength_begin(&towire); CH;
+                    dns_rdata_raw_data_to_wire(&towire, &addr->rr.data,
+                                               addr->rr.type == dns_rrtype_a ? 4 : 16); CH;
+                    dns_rdlength_end(&towire); CH;
+                    INCREMENT(message->nscount);
+                }
+                if (have_good_address) {
+                    break;
+                }
             }
         }
     }
@@ -1207,136 +1223,151 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
     dns_rdlength_end(&towire); CH;
     INCREMENT(message->nscount);
 
-    // Emit any registrations.
-    for (reg = client->registrations; reg; reg = reg->next) {
-        // Only remove the registrations that are actually registered. Normally this will be all of them, but it's
-        // possible for a registration to be added but not to have been updated yet, and then for us to get a remove
-        // call, in which case we don't need to remove it.
-        if (removing && reg->serial > serial) {
-            continue;
-        }
+    // If we are removing the host, we don't need to send instances.
+    if (!removing) {
 
-        // Service:
-        //   * Update PTR RR
-        //     NAME = service name (_a._b.service.arpa)
-        //     TYPE = PTR
-        //     CLASS = IN
-        //     TTL = 3600
-        //     RDLENGTH = 2
-        //     RDATA = service instance name
-
-        // Service registrations can have subtypes, in which case we need to send multiple PTR records, one for
-        // the main type and one for each subtype. Subtypes are represented in the regtype by following the
-        // primary service type with subtypes, separated by commas. So we have to parse through that to get
-        // the actual domain names to register.
-        const char *commap = reg->regtype == NULL ? service_type : reg->regtype;
-        dns_name_pointer_t p_sub_service_name;
-        bool primary = true;
-        do {
-            char regtype[DNS_MAX_LABEL_SIZE_ESCAPED + 6]; // plus NUL, ._sub
-            int i;
-            // Copy the next service type into regtype, ending when we hit the end of reg->regtype
-            // or when we hit a comma.
-            for (i = 0; *commap != '\0' && *commap != ',' && i < DNS_MAX_LABEL_SIZE_ESCAPED; i++) {
-                regtype[i] = *commap;
-                commap++;
+        // Emit any registrations.
+        for (reg = client->registrations; reg; reg = reg->next) {
+            // Only remove the registrations that are actually registered. Normally this will be all of them, but it's
+            // possible for a registration to be added but not to have been updated yet, and then for us to get a remove
+            // call, in which case we don't need to remove it.
+            if (((removing || reg->removing) && reg->serial > serial) || reg->skip) {
+                continue;
             }
 
-            // If we hit a comma, skip over the comma for the beginning of the next subtype.
-            if (*commap == ',') {
-                commap++;
-            }
+            // Service:
+            //   * Update PTR RR
+            //     NAME = service name (_a._b.service.arpa)
+            //     TYPE = PTR
+            //     CLASS = IN
+            //     TTL = 3600
+            //     RDLENGTH = 2
+            //     RDATA = service instance name
 
-            // If we aren't at a NULL or a comma, it means that the label was too long, so the output
-            // is invalid.
-            else if (*commap != '\0') {
-                towire.error = ENOBUFS; CH;
-            }
-
-            // First time through, it's the base type, so emit the service name and a pointer to the
-            // zone name. Other times through, it's a subtype, so the pointer is now to the base type,
-            // and since the API makes ._sub implicit, we have to add that.
-            if (primary) {
-                regtype[i] = 0;
-                dns_name_to_wire(&p_service_name, &towire, regtype); CH;
-                dns_pointer_to_wire(&p_service_name, &towire, &p_zone_name); CH;
-            } else {
-                // Copy in the string and the NUL. We know there's space (see above).
-                memcpy(&regtype[i], "._sub", 6);
-                dns_name_to_wire(&p_sub_service_name, &towire, regtype); CH;
-                dns_pointer_to_wire(&p_sub_service_name, &towire, &p_service_name); CH;
-            }
-            dns_u16_to_wire(&towire, dns_rrtype_ptr); CH;
-            dns_u16_to_wire(&towire, dns_qclass_in); CH;
-            dns_ttl_to_wire(&towire, 3600); CH;
-            dns_rdlength_begin(&towire); CH;
-            if (reg->name != NULL) {
-                char *service_instance_name, *to_free = conflict_print(client, &towire, &service_instance_name, reg->name);
-                dns_name_to_wire(&p_service_instance_name, &towire, service_instance_name); CH;
-                if (to_free != NULL) {
-                    free(to_free);
+            // Service registrations can have subtypes, in which case we need to send multiple PTR records, one for
+            // the main type and one for each subtype. Subtypes are represented in the regtype by following the
+            // primary service type with subtypes, separated by commas. So we have to parse through that to get
+            // the actual domain names to register.
+            const char *commap = reg->regtype == NULL ? service_type : reg->regtype;
+            dns_name_pointer_t p_sub_service_name;
+            bool primary = true;
+            do {
+                char regtype[DNS_MAX_LABEL_SIZE_ESCAPED + 6]; // plus NUL, ._sub
+                int i;
+                // Copy the next service type into regtype, ending when we hit the end of reg->regtype
+                // or when we hit a comma.
+                for (i = 0; *commap != '\0' && *commap != ',' && i < DNS_MAX_LABEL_SIZE_ESCAPED; i++) {
+                    regtype[i] = *commap;
+                    commap++;
                 }
-            } else {
-                dns_name_to_wire(&p_service_instance_name, &towire, chosen_hostname); CH;
-            }
-            dns_pointer_to_wire(&p_service_instance_name, &towire, &p_service_name); CH;
-            dns_rdlength_end(&towire); CH;
+
+                // If we hit a comma, skip over the comma for the beginning of the next subtype.
+                if (*commap == ',') {
+                    commap++;
+                }
+
+                // If we aren't at a NULL or a comma, it means that the label was too long, so the output
+                // is invalid.
+                else if (*commap != '\0') {
+                    towire.error = ENOBUFS; CH;
+                }
+
+                // First time through, it's the base type, so emit the service name and a pointer to the
+                // zone name. Other times through, it's a subtype, so the pointer is now to the base type,
+                // and since the API makes ._sub implicit, we have to add that.
+                if (primary) {
+                    regtype[i] = 0;
+                    dns_name_to_wire(&p_service_name, &towire, regtype); CH;
+                    dns_pointer_to_wire(&p_service_name, &towire, &p_zone_name); CH;
+                } else {
+                    // Copy in the string and the NUL. We know there's space (see above).
+                    memcpy(&regtype[i], "._sub", 6);
+                    dns_name_to_wire(&p_sub_service_name, &towire, regtype); CH;
+                    dns_pointer_to_wire(&p_sub_service_name, &towire, &p_service_name); CH;
+                }
+                dns_u16_to_wire(&towire, dns_rrtype_ptr); CH;
+                if (reg->removing) {
+                    dns_u16_to_wire(&towire, dns_qclass_none); CH;
+                    dns_ttl_to_wire(&towire, 0); CH;
+                } else {
+                    dns_u16_to_wire(&towire, dns_qclass_in); CH;
+                    dns_ttl_to_wire(&towire, 3600); CH;
+                }
+                dns_rdlength_begin(&towire); CH;
+                if (reg->name != NULL) {
+                    char *service_instance_name, *to_free = conflict_print(client, &towire, &service_instance_name, reg->name);
+                    dns_name_to_wire(&p_service_instance_name, &towire, service_instance_name); CH;
+                    if (to_free != NULL) {
+                        free(to_free);
+                    }
+                } else {
+                    dns_name_to_wire(&p_service_instance_name, &towire, chosen_hostname); CH;
+                }
+                dns_pointer_to_wire(&p_service_instance_name, &towire, &p_service_name); CH;
+                dns_rdlength_end(&towire); CH;
+                INCREMENT(message->nscount);
+                primary = false;
+                // We don't need to remove subtypes: removing the instance removes all its subtypes.
+                if (reg->removing) {
+                    break;
+                }
+            } while (*commap != '\0');
+
+            // Service Instance:
+            //   * Delete all RRsets from service instance name
+            //      NAME = service instance name (save pointer to service name, which is the second label)
+            //      TYPE = ANY
+            //      CLASS = ANY
+            //      TTL = 0
+            //      RDLENGTH = 0
+            dns_pointer_to_wire(NULL, &towire, &p_service_instance_name); CH;
+            dns_u16_to_wire(&towire, dns_rrtype_any); CH;
+            dns_u16_to_wire(&towire, dns_qclass_any); CH;
+            dns_ttl_to_wire(&towire, 0); CH;
+            dns_u16_to_wire(&towire, 0); CH;
             INCREMENT(message->nscount);
-            primary = false;
-        } while (*commap != '\0');
 
-        // Service Instance:
-        //   * Delete all RRsets from service instance name
-        //      NAME = service instance name (save pointer to service name, which is the second label)
-        //      TYPE = ANY
-        //      CLASS = ANY
-        //      TTL = 0
-        //      RDLENGTH = 0
-        dns_pointer_to_wire(NULL, &towire, &p_service_instance_name); CH;
-        dns_u16_to_wire(&towire, dns_rrtype_any); CH;
-        dns_u16_to_wire(&towire, dns_qclass_any); CH;
-        dns_ttl_to_wire(&towire, 0); CH;
-        dns_u16_to_wire(&towire, 0); CH;
-        INCREMENT(message->nscount);
+            if (!reg->removing) {
+                //   * Add one SRV RRset pointing to Host Description
+                //      NAME = pointer to service instance name from above
+                //      TYPE = SRV
+                //      CLASS = IN
+                //      TTL = 3600
+                //      RDLENGTH = 8
+                //      RDATA = <priority(16) = 0, weight(16) = 0, port(16) = service port, target = pointer to hostname>
+                dns_pointer_to_wire(NULL, &towire, &p_service_instance_name); CH;
+                dns_u16_to_wire(&towire, dns_rrtype_srv); CH;
+                dns_u16_to_wire(&towire, dns_qclass_in); CH;
+                dns_ttl_to_wire(&towire, 3600); CH;
+                dns_rdlength_begin(&towire); CH;
+                dns_u16_to_wire(&towire, 0); CH; // priority
+                dns_u16_to_wire(&towire, 0); CH; // weight
+                dns_u16_to_wire(&towire, reg->port); CH; // port
+                dns_pointer_to_wire(NULL, &towire, &p_host_name); CH;
+                dns_rdlength_end(&towire); CH;
+                INCREMENT(message->nscount);
 
-        //   * Add one SRV RRset pointing to Host Description
-        //      NAME = pointer to service instance name from above
-        //      TYPE = SRV
-        //      CLASS = IN
-        //      TTL = 3600
-        //      RDLENGTH = 8
-        //      RDATA = <priority(16) = 0, weight(16) = 0, port(16) = service port, target = pointer to hostname>
-        dns_pointer_to_wire(NULL, &towire, &p_service_instance_name); CH;
-        dns_u16_to_wire(&towire, dns_rrtype_srv); CH;
-        dns_u16_to_wire(&towire, dns_qclass_in); CH;
-        dns_ttl_to_wire(&towire, 3600); CH;
-        dns_rdlength_begin(&towire); CH;
-        dns_u16_to_wire(&towire, 0); CH; // priority
-        dns_u16_to_wire(&towire, 0); CH; // weight
-        dns_u16_to_wire(&towire, reg->port); CH; // port
-        dns_pointer_to_wire(NULL, &towire, &p_host_name); CH;
-        dns_rdlength_end(&towire); CH;
-        INCREMENT(message->nscount);
-
-        //   * Add one or more TXT records
-        //      NAME = pointer to service instance name from above
-        //      TYPE = TXT
-        //      CLASS = IN
-        //      TTL = 3600
-        //      RDLENGTH = <length of text>
-        //      RDATA = <text>
-        dns_pointer_to_wire(NULL, &towire, &p_service_instance_name); CH;
-        dns_u16_to_wire(&towire, dns_rrtype_txt); CH;
-        dns_u16_to_wire(&towire, dns_qclass_in); CH;
-        dns_ttl_to_wire(&towire, 3600); CH;
-        dns_rdlength_begin(&towire); CH;
-        if (reg->txtRecord != NULL) {
-            dns_rdata_raw_data_to_wire(&towire, reg->txtRecord, reg->txtLen);
-        } else {
-            dns_rdata_txt_to_wire(&towire, txt_record); CH;
+                //   * Add one or more TXT records
+                //      NAME = pointer to service instance name from above
+                //      TYPE = TXT
+                //      CLASS = IN
+                //      TTL = 3600
+                //      RDLENGTH = <length of text>
+                //      RDATA = <text>
+                dns_pointer_to_wire(NULL, &towire, &p_service_instance_name); CH;
+                dns_u16_to_wire(&towire, dns_rrtype_txt); CH;
+                dns_u16_to_wire(&towire, dns_qclass_in); CH;
+                dns_ttl_to_wire(&towire, 3600); CH;
+                dns_rdlength_begin(&towire); CH;
+                if (reg->txtRecord != NULL) {
+                    dns_rdata_raw_data_to_wire(&towire, reg->txtRecord, reg->txtLen);
+                } else {
+                    dns_rdata_txt_to_wire(&towire, txt_record); CH;
+                }
+                dns_rdlength_end(&towire); CH;
+                INCREMENT(message->nscount);
+            }
         }
-        dns_rdlength_end(&towire); CH;
-        INCREMENT(message->nscount);
     }
 
     // What about services with more than one name?   Are these multiple service descriptions?
@@ -1353,9 +1384,9 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
     dns_edns0_option_begin(&towire); CH;                 // OPTION-LENGTH
     if (removing) {
         // If we are removing the record, lease time should be zero. Key_lease_time can be nonzero, but we
-        // aren't currently offering a way to do that.
+        // aren't currently offering a way to do that in the server. Nevertheless, we send a key lease time.
         dns_u32_to_wire(&towire, 0); CH;
-        dns_u32_to_wire(&towire, 0); CH;
+        dns_u32_to_wire(&towire, update_key_lease_time); CH;
     } else {
         dns_u32_to_wire(&towire, update_lease_time); CH;     // LEASE (e.g. 1 hour)
         dns_u32_to_wire(&towire, update_key_lease_time); CH; // KEY-LEASE (7 days)
@@ -1536,6 +1567,34 @@ srp_deregister(void *os_context)
     } else {
         return kDNSServiceErr_NoSuchRecord;
     }
+}
+
+// Deregister a specific registration
+int
+srp_deregister_instance(DNSServiceRef sdRef)
+{
+    client_state_t *client;
+    reg_state_t *rp;
+
+    // We only expect to find one match.
+    for (client = clients; client; client = client->next) {
+        for (rp = client->registrations; rp; rp = rp->next) {
+            if (rp == sdRef) {
+                goto found;
+            }
+        }
+    }
+    return kDNSServiceErr_NoSuchRecord;
+found:
+    rp->removing = true;
+    if (client->active_update->message) {
+        free(client->active_update->message);
+        client->active_update->message = NULL;
+    }
+    client->active_update->next_retransmission_time = 2000;
+    client->active_update->next_attempt_time = 1000 * 2 * 60;
+    udp_retransmit(client->active_update);
+    return kDNSServiceErr_NoError;
 }
 
 // Local Variables:

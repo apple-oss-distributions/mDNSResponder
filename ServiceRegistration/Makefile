@@ -27,18 +27,18 @@ INSTALL?=install
 
 INCLUDEDIRS=-I../mDNSShared -I../mDNSMacOSX/xpc_services -I../DSO -I../mDNSCore -I../mDNSShared/utilities
 ifeq ($(os),x)
-SRPCFLAGS = -O0 -g -Wall -Werror -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private $(INCLUDEDIRS) -I../DSO -MMD -MF .depfile-${notdir $@} -DUSE_KQUEUE -DHAVE_SOCKADDR_DL -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DEXCLUDE_TLS -DPOSIX_BUILD -D__APPLE_USE_RFC_3542
+SRPCFLAGS = -O0 -g -Wall -Werror -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private $(INCLUDEDIRS) -I../DSO -MMD -MF .depfile-${notdir $@} -DUSE_KQUEUE -DHAVE_SOCKADDR_DL -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DEXCLUDE_TLS -DPOSIX_BUILD -D__APPLE_USE_RFC_3542 -DSTANDALONE
 SRPLDOPTS = -framework CoreServices -framework Security -framework CoreFoundation -framework Network
 HMACOBJS     = $(OBJDIR)/hmac-macos.o
 SIGNOBJS     = $(OBJDIR)/sign-macos.o $(OBJDIR)/srp-filedata.o
 VERIFYOBJS   = $(OBJDIR)/verify-macos.o
-TLSOBJS      =
+TLSOBJS      = $(OBJDIR)/tls-macos.o
 IOOBJS       = $(OBJDIR)/ioloop.o $(OBJDIR)/posix.o $(OBJDIR)/ioloop-common.o
 IOWOTLSOBJS  = $(OBJDIR)/ioloop.o $(OBJDIR)/posix.o
 else ifeq ($(os), linux)
 SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSMacOSX/Private $(INCLUDEDIRS) -I../DSO -MMD -MF .depfile-${notdir $@} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DUSE_INOTIFY -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE) -DLINUX -DSRP_CRYPTO_MBEDTLS -DPOSIX_BUILD -DMDNS_NO_STRICT
-SRPLDOPTS = /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedx509.a /usr/local/lib/libmbedcrypto.a -lbsd
-#SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
+#SRPLDOPTS = /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedx509.a /usr/local/lib/libmbedcrypto.a -lbsd
+SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 HMACOBJS     = $(OBJDIR)/hmac-mbedtls.o
 SIGNOBJS     = $(OBJDIR)/sign-mbedtls.o $(OBJDIR)/srp-filedata.o
 VERIFYOBJS   = $(OBJDIR)/verify-mbedtls.o
@@ -94,7 +94,7 @@ clean:
 
 SIMPLEOBJS   = $(OBJDIR)/towire.o $(SIGNOBJS)
 DSOOBJS      = $(OBJDIR)/dso.o $(OBJDIR)/dso-utils.o
-MDNSOBJS     = $(OBJDIR)/dnssd_clientstub.o $(OBJDIR)/dnssd_ipc.o
+MDNSOBJS     = $(OBJDIR)/dnssd_clientstub.o $(OBJDIR)/dnssd_ipc.o $(OBJDIR)/dnssd_clientlib.o
 FROMWIREOBJS = $(OBJDIR)/fromwire.o $(VERIFYOBJS) $(OBJDIR)/wireutils.o
 CFOBJS       = $(OBJDIR)/config-parse.o
 CTIOBJS      = $(OBJDIR)/cti-services.o $(OBJDIR)/cti-proto.o
@@ -110,7 +110,7 @@ $(BUILDDIR)/srp-client:	$(OBJDIR)/srp-ioloop.o $(OBJDIR)/srp-client.o $(OBJDIR)/
 $(BUILDDIR)/srp-dns-proxy:	$(OBJDIR)/srp-dns-proxy.o $(OBJDIR)/srp-parse.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
-$(BUILDDIR)/srp-mdns-proxy:	$(OBJDIR)/srp-mdns-proxy.o $(OBJDIR)/srp-parse.o $(OBJDIR)/route.o $(OBJDIR)/adv-ctl-server.o $(OBJDIR)/combined-dnssd-proxy.o $(OBJDIR)/srp-replication.o $(CTIOBJS) $(MDNSOBJS) $(SIMPLEOBJS) $(DSOOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS) $(OBJDIR)/srp-log.o
+$(BUILDDIR)/srp-mdns-proxy:	$(OBJDIR)/srp-mdns-proxy.o $(OBJDIR)/srp-parse.o $(OBJDIR)/route.o $(OBJDIR)/adv-ctl-server.o $(OBJDIR)/combined-dnssd-proxy.o $(OBJDIR)/srp-replication.o $(OBJDIR)/srp-log.o $(CTIOBJS) $(MDNSOBJS) $(SIMPLEOBJS) $(DSOOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(BUILDDIR)/keydump:	$(OBJDIR)/keydump.o $(MDNSOBJS) $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS)
@@ -166,6 +166,7 @@ $(OBJDIR)/%.o:	%.c
 -include .depfile-dnssd_clientlib.o
 -include .depfile-dnssd_clientstub.o
 -include .depfile-dnssd_ipc.o
+-include .depfile-dnssd_clientlib.o
 -include .depfile-dnssd-proxy.o
 -include .depfile-dso.o
 -include .depfile-fromwire.o

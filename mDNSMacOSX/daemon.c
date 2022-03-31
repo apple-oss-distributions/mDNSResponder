@@ -1241,12 +1241,9 @@ mDNSlocal void * KQueueLoop(void *m_param)
         resolved_cache_idle();
 #endif
 #if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
-        if (m->DNSPushServers != mDNSNULL)
-        {
-            mDNS_Lock(m);
-            nextTimerEvent = dso_idle(m, m->timenow, nextTimerEvent);
-            mDNS_Unlock(m);
-        }
+        mDNS_Lock(m);
+        nextTimerEvent = dso_idle(m, m->timenow, nextTimerEvent);
+        mDNS_Unlock(m);
 #endif
         mDNSs32 end            = mDNSPlatformRawTime();
         if (end - start >= WatchDogReportingThreshold)
@@ -1480,6 +1477,10 @@ mDNSexport int main(int argc, char **argv)
     int i;
     kern_return_t status;
 
+#ifndef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
+    mDNSBool bigMutexLocked = mDNSfalse;
+#endif
+
 #if DEBUG
     bool useDebugSocket = mDNSfalse;
     bool useSandbox = mDNStrue;
@@ -1584,6 +1585,9 @@ mDNSexport int main(int argc, char **argv)
     i = pthread_mutex_init(&PlatformStorage.BigMutex, NULL);
     if (i != 0) { LogMsg("pthread_mutex_init() failed error %d (%s)", i, strerror(i)); status = i; goto exit; }
 
+    pthread_mutex_lock(&PlatformStorage.BigMutex);
+    bigMutexLocked = mDNStrue;
+
     int fdpair[2] = {0, 0};
     i = socketpair(AF_UNIX, SOCK_STREAM, 0, fdpair);
     if (i == -1)
@@ -1633,24 +1637,30 @@ mDNSexport int main(int argc, char **argv)
 
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
     LogInfo("Daemon Start: Using LibDispatch");
-    // CFRunLoopRun runs both CFRunLoop sources and dispatch sources
-    CFRunLoopRun();
-#else // MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
+#else
       // Start the kqueue thread
     pthread_t KQueueThread;
     i = pthread_create(&KQueueThread, NULL, KQueueLoop, &mDNSStorage);
     if (i != 0) { LogMsg("pthread_create() failed error %d (%s)", i, strerror(i)); status = i; goto exit; }
+#endif
+
+exit:
+#ifndef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
+    if (bigMutexLocked)
+    {
+        pthread_mutex_unlock(&PlatformStorage.BigMutex);
+    }
+#endif
+
     if (status == 0)
     {
         CFRunLoopRun();
-        LogMsg("ERROR: CFRunLoopRun Exiting.");
+        // This should never happen.
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT, "ERROR: CFRunLoopRun Exiting.");
         mDNS_Close(&mDNSStorage);
     }
-#endif // MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 
     LogMsg("%s exiting", mDNSResponderVersionString);
-
-exit:
     return(status);
 }
 

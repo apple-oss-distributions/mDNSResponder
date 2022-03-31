@@ -173,7 +173,8 @@ services_callback(advertising_proxy_conn_ref cref, void *result, advertising_pro
         for (int j = 1; j < 6; j++) {
             ula = ula << 8 | (((uint8_t *)&host->server_id)[j]);
         }
-        printf("\"%s\" \"%s\" %s %s %s %qd:%qd:%qd.%qd \"%s\" %s %" PRIx64 "\n", host->regname, instance_name, service_type, port,
+        printf("\"%s\" \"%s\" %s %s %s %" PRIu64 ":%" PRIu64 ":%" PRIu64 ".%" PRIu64 " \"%s\" %s %" PRIx64 "\n",
+               host->regname, instance_name, service_type, port,
                address == NULL ? "" : address, hours, minutes, seconds, lease, host->hostname, host->removed ? "invalid" : "valid",
                ula);
     }
@@ -220,6 +221,7 @@ bool unblock = false;
 bool regenerate_ula = false;
 bool adv_prefix = false;
 bool get_ula = false;
+bool dso_test = false;
 #ifdef NOTYET
 bool watch = false;
 bool get = false;
