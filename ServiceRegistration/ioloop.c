@@ -1,6 +1,6 @@
 /* ioloop.c
  *
- * Copyright (c) 2018-2021 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2022 Apple, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -284,6 +284,11 @@ ioloop_add_wake_event(wakeup_t *wakeup, void *context, wakeup_callback_t callbac
 void
 ioloop_cancel_wake_event(wakeup_t *wakeup)
 {
+    if (wakeup->finalize) {
+        wakeup->finalize(wakeup->context);
+        wakeup->finalize = NULL;
+        wakeup->context = NULL;
+    }
     add_remove_wakeup(wakeup, true);
     wakeup->wakeup_time = 0;
 }
@@ -920,6 +925,9 @@ ioloop_comm_cancel(comm_t *comm)
 void
 ioloop_comm_context_set(comm_t *comm, void *context, finalize_callback_t callback)
 {
+    if (comm->context != NULL && comm->finalize != NULL) {
+        comm->finalize(comm->context);
+    }
     comm->finalize = callback;
     comm->context = context;
 }

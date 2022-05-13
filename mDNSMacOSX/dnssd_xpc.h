@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 
 #include <CoreUtils/CommonServices.h>
 #include <dns_sd.h>
+#include <mdns/xpc.h>
 #include <xpc/xpc.h>
 
 #define DNSSD_MACH_SERVICE_NAME	"com.apple.dnssd.service"
@@ -957,7 +958,7 @@ dnssd_xpc_result_set_record_protocol(xpc_object_t result, uint16_t protocol);
  *		DNS provider name.
  */
 void
-dnssd_xpc_result_set_provider_name(xpc_object_t result, const char *provider_name);
+dnssd_xpc_result_set_provider_name(xpc_object_t result, mdns_xpc_string_t provider_name);
 
 /*!
  *	@brief

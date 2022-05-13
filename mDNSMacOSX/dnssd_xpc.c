@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -600,9 +600,9 @@ dnssd_xpc_result_get_provider_name_object(xpc_object_t result)
 //======================================================================================================================
 
 void
-dnssd_xpc_result_set_provider_name(xpc_object_t result, const char *name)
+dnssd_xpc_result_set_provider_name(const xpc_object_t result, const mdns_xpc_string_t name)
 {
-	xpc_dictionary_set_string(result, DNSSD_XPC_RESULT_KEY_PROVIDER_NAME, name);
+	xpc_dictionary_set_value(result, DNSSD_XPC_RESULT_KEY_PROVIDER_NAME, mdns_xpc_string_to_xpc_object(name));
 }
 
 //======================================================================================================================

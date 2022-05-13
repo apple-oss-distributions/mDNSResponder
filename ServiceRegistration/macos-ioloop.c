@@ -284,6 +284,9 @@ ioloop_comm_cancel(comm_t *connection)
 void
 ioloop_comm_context_set(comm_t *comm, void *context, finalize_callback_t callback)
 {
+    if (comm->context != NULL && comm->finalize != NULL) {
+        comm->finalize(comm->context);
+    }
     comm->finalize = callback;
     comm->context = context;
 }
@@ -1156,14 +1159,9 @@ ioloop_connection_create(addr_t *NONNULL remote_address, bool tls, bool stream, 
                 sec_protocol_options_set_verify_block(sec_options,
                                                       ^(sec_protocol_metadata_t metadata, sec_trust_t trust_ref,
                                                         sec_protocol_verify_complete_t complete) {
-#if !defined(__OPEN_SOURCE) && (TARGET_OS_TV || TARGET_OS_IPHONE || TARGET_OS_WATCH)
-                                                          tls_keychain_context_t keychain_context = {metadata, trust_ref};
-                                                          const bool valid = opportunistic ? true : tls_cert_evaluate(&keychain_context);
-#else
                                                           (void) metadata;
                                                           (void) trust_ref;
                                                           const bool valid = true;
-#endif
                                                           complete(valid);
                                                       }, ioloop_main_queue);
                 nw_release(sec_options);

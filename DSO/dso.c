@@ -164,8 +164,8 @@ int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event)
         if (dso->inactivity_due == 0) {
             if (dso->inactivity_timeout != 0) {
                 dso->inactivity_due = NonZeroTime(now + (event_time_t)MIN(dso->inactivity_timeout, INT32_MAX));
-                if (next_timer_event - dso->keepalive_due > 0) {
-                    next_timer_event = dso->keepalive_due;
+                if (next_timer_event - dso->inactivity_due > 0) {
+                    next_timer_event = dso->inactivity_due;
                 }
             }
         } else if (now - dso->inactivity_due > 0 && dso->cb != NULL) {
@@ -175,7 +175,7 @@ int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event)
             // its status will not work as expected.
             continue;
         }
-        if (dso->keepalive_due != 0 && dso->keepalive_due < now && dso->cb != NULL) {
+        if (dso->keepalive_due != 0 && dso->keepalive_due - now < 0 && dso->cb != NULL) {
             dso_keepalive_context_t kc;
             memset(&kc, 0, sizeof kc);
             dso->cb(dso->context, &kc, dso, kDSOEventType_Keepalive);

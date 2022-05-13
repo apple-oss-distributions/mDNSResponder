@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@
 #include <mdns/resource_record.h>
 #include <mdns/system.h>
 #include <mdns/ticks.h>
+#include <mdns/xpc.h>
 #include <net/necp.h>
 #include <os/lock.h>
 #include <stdatomic.h>
@@ -335,7 +336,7 @@ struct dx_gai_result_s {
 	struct dx_object_s		base;				// Object base.
 	dx_gai_result_t			next;				// Next result in list.
 	mdns_resource_record_t	record;				// Result's resource record.
-	mdns_dns_service_t		service;			// The DNS service that was the source of the record.
+	mdns_xpc_string_t		provider_name;		// The DNS service's provider name, if any.
 	xpc_object_t			cname_update;		// If non-NULL, XPC array to use for a CNAME chain update.
 	xpc_object_t			tracker_hostname;	// If non-NULL, tracker hostname as an XPC string.
 	xpc_object_t			tracker_owner;		// If non-NULL, owner of the tracker hostname as an XPC string.
@@ -1834,9 +1835,8 @@ _dx_gai_request_enqueue_result(const dx_gai_request_t me, const QC_result qc_res
 	result->ifindex     = mDNSPlatformInterfaceIndexfromInterfaceID(&mDNSStorage, answer->InterfaceID, mDNStrue);
 	result->protocol    = answer->protocol;
 	result->question_id = mDNSVal16(q->TargetQID);
-	result->service     = answer->dnsservice;
-	if (result->service) {
-		mdns_retain(result->service);
+	if (answer->dnsservice) {
+		result->provider_name = mdns_dns_service_copy_provider_name(answer->dnsservice);
 	}
 	const int record_type = mdns_resource_record_get_type(result->record);
 	if ((me->options & mdns_gai_option_auth_tags) && is_add && !result_error) {
@@ -2113,7 +2113,7 @@ static void
 _dx_gai_result_finalize(const dx_gai_result_t me)
 {
 	mdns_forget(&me->record);
-	mdns_forget(&me->service);
+	mdns_xpc_string_forget(&me->provider_name);
 	xpc_forget(&me->cname_update);
 	xpc_forget(&me->tracker_hostname);
 	xpc_forget(&me->tracker_owner);
@@ -2157,11 +2157,8 @@ _dx_gai_result_to_dictionary(const dx_gai_result_t me)
 	if (me->negative_reason != dnssd_negative_reason_none) {
 		dnssd_xpc_result_set_negative_reason(result, me->negative_reason);
 	}
-	if (me->service) {
-		const char * const provider_name = mdns_dns_service_get_provider_name(me->service);
-		if (provider_name) {
-			dnssd_xpc_result_set_provider_name(result, provider_name);
-		}
+	if (me->provider_name) {
+		dnssd_xpc_result_set_provider_name(result, me->provider_name);
 	}
 	if (me->auth_tag) {
 		dnssd_xpc_result_set_authentication_tag(result, me->auth_tag, sizeof(*me->auth_tag));

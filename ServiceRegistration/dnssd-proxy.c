@@ -316,6 +316,9 @@ dnssd_query_finalize(void *context)
          query->name, (query->served_domain
                        ? (query->served_domain->interface ? DOT_LOCAL : query->served_domain->domain_ld)
                        : ""));
+    if (query->tracker != NULL) {
+        RELEASE_HERE(query->tracker, dp_tracker_finalize);
+    }
     if (query->txn != NULL) {
         ioloop_dnssd_txn_cancel(query->txn);
         ioloop_dnssd_txn_release(query->txn);
@@ -492,7 +495,6 @@ dp_tracker_disconnected(comm_t *UNUSED connection, void *context, int UNUSED err
     // in turn finalize the tracker.
     if (tracker_connection != NULL) {
         ioloop_comm_release(tracker_connection);
-        tracker->connection = NULL;
     }
 
     // If dns_queries is non-null, tracker still exists, but it might go away when we cancel the last
@@ -2398,8 +2400,6 @@ static void dso_message(dp_tracker_t *tracker, message_t *message, dso_state_t *
             return;
         }
         srpl_dso_server_message(tracker->connection, message, dso);
-        // The SRP replication server is now responsible for the DSO state and the tracker.
-        RELEASE_HERE(tracker, dp_tracker_finalize);
         break;
 #endif
 

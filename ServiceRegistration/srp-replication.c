@@ -1,6 +1,6 @@
 /* srp-replication.c
  *
- * Copyright (c) 2020-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,6 +70,7 @@ static void srpl_connection_next_state(srpl_connection_t *srpl_connection, srpl_
 static void srpl_event_initialize(srpl_event_t *event, srpl_event_type_t event_type);
 static void srpl_event_deliver(srpl_connection_t *srpl_connection, srpl_event_t *event);
 static void srpl_domain_advertise(void);
+static void srpl_connection_finalize(srpl_connection_t *srpl_connection);
 
 #ifdef DEBUG
 #define STATE_DEBUGGING_ABORT() abort();
@@ -319,6 +320,13 @@ address_query_txn_fail(void *context, int err)
     address_query_cancel(address);
 }
 
+static void
+address_query_context_release(void *context)
+{
+    address_query_t *address = context;
+    RELEASE_HERE(address, address_query_finalize);
+}
+
 static address_query_t *
 address_query_create(const char *hostname, void *context, address_change_callback_t change_callback,
                      address_query_cancel_callback_t cancel_callback)
@@ -326,8 +334,10 @@ address_query_create(const char *hostname, void *context, address_change_callbac
     address_query_t *address = calloc(1, sizeof(*address));
     DNSServiceRef sdref;
     dnssd_txn_t **txn;
+    int num_retained = 0;
 
     require_action_quiet(address != NULL, exit_no_free, ERROR("No memory for address query."));
+    RETAIN_HERE(address); // We return a retained object
     address->hostname = strdup(hostname);
     require_action_quiet(address->hostname != NULL, exit, ERROR("No memory for address query hostname."));
 
@@ -342,22 +352,27 @@ address_query_create(const char *hostname, void *context, address_change_callbac
                                    hostname, ret));
 
         txn = i ? &address->a_query : &address->aaaa_query;
-        *txn = ioloop_dnssd_txn_add(sdref, address, NULL, address_query_txn_fail);
+        *txn = ioloop_dnssd_txn_add(sdref, address, address_query_context_release, address_query_txn_fail);
         require_action_quiet(*txn != NULL, exit,
                              ERROR("Unable to set up ioloop transaction for " PRI_S_SRP " query on " THREAD_BROWSING_DOMAIN,
                                    hostname);
                              DNSServiceRefDeallocate(sdref));
+        RETAIN_HERE(address); // Retain for the QueryRecord callback
+        num_retained++;
     }
     address->change_callback = change_callback;
     address->cancel_callback = cancel_callback;
     address->context = context;
     address->cur_address = -1;
-    RETAIN_HERE(address);
-    if (false) {
-    exit:
-        RELEASE_HERE(address, address_query_finalize);
-        address = NULL;
+    return address;
+
+exit:
+    for (int i = 0; i < num_retained; i++) {
+        RELEASE_HERE(address, address_query_finalize); // Release any retains from address queries.
     }
+    RELEASE_HERE(address, address_query_finalize);     // Release the retain for the return value
+    address = NULL;
+
 exit_no_free:
     return address;
 }
@@ -376,8 +391,35 @@ srpl_domain_finalize(srpl_domain_t *domain)
 static void
 srpl_instance_finalize(srpl_instance_t *instance)
 {
+    if (instance->resolve_txn != NULL) {
+        ioloop_dnssd_txn_cancel(instance->resolve_txn);
+        ioloop_dnssd_txn_release(instance->resolve_txn);
+        instance->resolve_txn = NULL;
+    }
     if (instance->domain != NULL) {
         RELEASE_HERE(instance->domain, srpl_domain_finalize);
+    }
+    if (instance->incoming != NULL) {
+        srpl_connection_discontinue(instance->incoming);
+        RELEASE_HERE(instance->incoming, srpl_connection_finalize);
+    }
+    if (instance->outgoing != NULL) {
+        srpl_connection_discontinue(instance->outgoing);
+        RELEASE_HERE(instance->outgoing, srpl_connection_finalize);
+    }
+    if (instance->address_query != NULL) {
+        address_query_cancel(instance->address_query);
+        RELEASE_HERE(instance->address_query, address_query_finalize);
+    }
+    if (instance->discontinue_timeout != NULL) {
+        ioloop_cancel_wake_event(instance->discontinue_timeout);
+        ioloop_wakeup_release(instance->discontinue_timeout);
+        instance->discontinue_timeout = NULL;
+    }
+    if (instance->reconnect_timeout != NULL) {
+        ioloop_cancel_wake_event(instance->reconnect_timeout);
+        ioloop_wakeup_release(instance->reconnect_timeout);
+        instance->reconnect_timeout = NULL;
     }
     free(instance->instance_name);
     free(instance->name);
@@ -564,6 +606,7 @@ srpl_instance_discontinue_timeout(void *context)
     if (instance->discontinue_timeout != NULL) {
         ioloop_cancel_wake_event(instance->discontinue_timeout);
         ioloop_wakeup_release(instance->discontinue_timeout);
+        instance->discontinue_timeout = NULL;
     }
     if (instance->address_query != NULL) {
         address_query_cancel(instance->address_query);
@@ -571,10 +614,12 @@ srpl_instance_discontinue_timeout(void *context)
         instance->address_query = NULL;
     }
     for (int i = 0; i < 2; i++) {
-        srpl_connection_t *srpl_connection = i ? instance->incoming : instance->outgoing;
+        srpl_connection_t **cp = i ? &instance->incoming : &instance->outgoing;
+        srpl_connection_t *srpl_connection = *cp;
         if (srpl_connection == NULL) {
             continue;
         }
+        *cp = NULL;
         RELEASE_HERE(srpl_connection->instance, srpl_instance_finalize);
         srpl_connection->instance = NULL;
         if (srpl_connection->connection != NULL) {
@@ -1805,7 +1850,10 @@ srpl_instance_address_callback(void *context, addr_t *address, bool added, int e
                 srpl_associate_incoming_with_instance(unclaimed->connection,
                                                       unclaimed->message, unclaimed->dso, instance);
                 unclaimed->dso = NULL;
-                *up = unclaimed->next;
+                // srpl_associate_incoming_with_instance retains unclaimed->connection. srpl_unclaimed_cancel would
+                // release it, but it also cancels it, which we don't want, so release it and NULL it out now.
+                ioloop_comm_release(unclaimed->connection);
+                unclaimed->connection = NULL;
                 srpl_unclaimed_cancel(unclaimed);
                 break;
             } else {
@@ -1927,7 +1975,6 @@ srpl_instance_add(const char *hostname, const char *instance_name,
         if (instance->address_query == NULL) {
             INFO("unable to create address query");
         } else {
-            RETAIN_HERE(instance->address_query);
             RETAIN_HERE(instance); // retain for the address query.
         }
     }
@@ -2068,8 +2115,9 @@ srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t
                 ERROR("no memory for instance" PRI_S_SRP, instance_name);
                 return;
             }
-            // Retain the instance object in case it gets removed while the resolve is still active. We do this here in case the
-            // resolve_txn allocation fails. When the transaction is canceled, the reference to the instance object will be dropped.
+
+            // This reference is for the DNSServiceResolve callback. If the DNSServiceResolve call returns an error, we release this below; otherwise
+            // it is released by the instance_context_release call when the dnssd_txn_t is finalized.
             RETAIN_HERE(instance);
             instance->domain = domain;
             RETAIN_HERE(instance->domain);
@@ -2097,7 +2145,7 @@ srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t
             }
             INFO("resolving " PRI_S_SRP, instance_name);
             *sp = instance;
-            RETAIN_HERE(instance);
+            RETAIN_HERE(instance); // Retained for the instance list.
         }
     } else {
         INFO("_srpl-tls._tcp service instance " PRI_S_SRP " went away.", instance_name);
@@ -2325,7 +2373,8 @@ srpl_connection_drop_state_delay(srpl_instance_t *instance, srpl_connection_t *s
     if (instance->reconnect_timeout == NULL) {
         FAULT(PRI_S_SRP "disconnecting, but can't reconnect!", srpl_connection->name);
     } else {
-        ioloop_add_wake_event(instance->reconnect_timeout, instance, srpl_instance_reconnect, NULL, delay * MSEC_PER_SEC);
+        RETAIN_HERE(instance);
+        ioloop_add_wake_event(instance->reconnect_timeout, instance, srpl_instance_reconnect, srpl_instance_context_release, delay * MSEC_PER_SEC);
     }
 
     if (srpl_connection == instance->incoming) {
@@ -2339,7 +2388,11 @@ srpl_connection_drop_state_delay(srpl_instance_t *instance, srpl_connection_t *s
 static srpl_state_t
 srpl_connection_drop_state(srpl_instance_t *instance, srpl_connection_t *srpl_connection)
 {
-    return srpl_connection_drop_state_delay(instance, srpl_connection, 300);
+    if (instance == NULL) {
+        return srpl_state_disconnect;
+    } else {
+        return srpl_connection_drop_state_delay(instance, srpl_connection, 300);
+    }
 }
 
 // Call when there's a protocol error, so that we don't start reconnecting over and over.
