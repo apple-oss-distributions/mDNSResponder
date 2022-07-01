@@ -85,7 +85,7 @@ mDNSexport mdns_dns_service_manager_t Querier_GetDNSServiceManager(void)
         return NULL;
     }
     mdns_dns_service_manager_set_report_symptoms(manager, true);
-    mdns_dns_service_manager_ignore_odoh_connection_problems(manager, true);
+    mdns_dns_service_manager_enable_fail_fast_mode_for_odoh(manager, true);
     mdns_dns_service_manager_enable_problematic_qtype_workaround(manager, PQWorkaroundThreshold);
     mdns_dns_service_manager_set_event_handler(manager,
     ^(mdns_event_t event, __unused OSStatus error)
@@ -208,6 +208,16 @@ mDNSlocal mdns_dns_service_t _Querier_GetNonNativeDNSService(const mdns_dns_serv
             {
                 service = mdns_dns_service_manager_get_custom_service(manager, q->CustomID);
             }
+        }
+    }
+    // Check if the final service is a fail-fast service.
+    if (service && mdns_dns_service_fail_fast_mode_enabled(service))
+    {
+        // If it's having connection problems and the DNSQuestion has already been used to probe if the service is back
+        // up and running. This way the client requests can fail quicker.
+        if (mdns_dns_service_has_connection_problems(service) && q->UsedAsFailFastProbe)
+        {
+            service = NULL;
         }
     }
     return service;
@@ -570,9 +580,9 @@ mDNSlocal void _Querier_HandleQuerierResponse(const mdns_querier_t querier)
 #endif
     mDNS *const m = &mDNSStorage;
     const mdns_querier_result_type_t resultType = mdns_querier_get_result_type(querier);
+    const mdns_dns_service_t dnsservice = (mdns_dns_service_t)mdns_querier_get_context(querier);
     if (resultType == mdns_querier_result_type_response)
     {
-        const mdns_dns_service_t dnsservice = (mdns_dns_service_t)mdns_querier_get_context(querier);
         if (!mdns_dns_service_is_defunct(dnsservice))
         {
             size_t copyLen = mdns_querier_get_response_length(querier);
@@ -594,7 +604,7 @@ mDNSlocal void _Querier_HandleQuerierResponse(const mdns_querier_t querier)
         mdns_set_remove(set, querier);
     }
     mDNSBool qIsNew = mDNSfalse;
-    DNSQuestion *const q = Querier_GetDNSQuestion(querier, &qIsNew);
+    DNSQuestion *q = Querier_GetDNSQuestion(querier, &qIsNew);
     if (q)
     {
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_ANALYTICS)
@@ -630,6 +640,44 @@ mDNSlocal void _Querier_HandleQuerierResponse(const mdns_querier_t querier)
                     q->ThisQInterval = 5 * mDNSPlatformOneSecond;
                     q->LastQTime = m->timenow;
                     SetNextQueryTime(m, q);
+                    mDNS_Unlock(m);
+                    break;
+
+                case mdns_querier_result_type_connection_problem:
+                    // If we haven't yet received the connection problem update from the DNS service manager, try to apply
+                    // it now, so that the DNSQuestion restart can notice that the DNS service is indeed having connection
+                    // problems. It could be that the overall connection problems status has cleared by the time we got
+                    // this connection problem result. Either way, restart the DNSQuestion and all of its duplicates so
+                    // that they can make progress.
+                    if (!mdns_dns_service_has_connection_problems(dnsservice))
+                    {
+                        const mdns_dns_service_manager_t manager = Querier_GetDNSServiceManager();
+                        if (manager)
+                        {
+                            mdns_dns_service_manager_apply_pending_connection_problem_updates(manager);
+                        }
+                    }
+                    mDNS_Lock(m);
+                    // Re-assign the querier, so that if the DNSQuestion is the leader of a set of duplicates, we can
+                    // iteratively identify each subsequent duplicate as each member of the set gets restarted. This is
+                    // because when a DNSQuestion is stopped, its querier gets passed to the next duplicate if one exists.
+                    // If a duplicate doesn't exist, then the querier gets released.
+                    mdns_replace(&q->querier, querier);
+                    while (q)
+                    {
+                        mDNS_StopQuery_internal(m, q);
+                        q->UsedAsFailFastProbe = mDNStrue;
+                        mDNS_StartQuery_internal(m, q);
+                        q = Querier_GetDNSQuestion(querier, &qIsNew);
+                        if (q && qIsNew)
+                        {
+                            // If we reach the NewQuestions sub-list, we're done. Just forget the querier because it has
+                            // already concluded and is no longer useful. AnswerNewQuestion() will handle the new
+                            // DNSQuestion as normal.
+                            mdns_forget(&q->querier);
+                            q = mDNSNULL;
+                        }
+                    }
                     mDNS_Unlock(m);
                     break;
 

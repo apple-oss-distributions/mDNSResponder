@@ -2074,6 +2074,7 @@ dp_query_create(dp_tracker_t *tracker, dns_rr_t *question, message_t *message, d
     dnssd_query_t *query = calloc(1,sizeof *query);
     require_action_quiet(query != NULL, exit, *rcode = dns_rcode_servfail;
         ERROR("Unable to allocate memory for query on " PRI_S_SRP, name));
+    RETAIN_HERE(query);
 
     query->response = malloc(sizeof *query->response);
     require_action_quiet(query->response != NULL, exit, *rcode = dns_rcode_servfail;
@@ -2245,12 +2246,13 @@ dns_push_subscribe(dp_tracker_t *tracker, const dns_wire_t *header, dso_state_t 
     if (!dp_query_start(query, &rcode, dns64, dns_push_query_callback)) {
         dso_simple_response(tracker->connection, NULL, header, rcode);
         dnssd_query_cancel(query);
-        // That the only thing holding a reference to the query is the activity, and when we call dnssd_query_cancel,
-        // we drop the activity, which in turn dereferences the query. So when we get to here, the query should have
-        // already been finalized.
-        return;
+    } else {
+        dso_simple_response(tracker->connection, NULL, header, dns_rcode_noerror);
     }
-    dso_simple_response(tracker->connection, NULL, header, dns_rcode_noerror);
+    // dp_query_create() returned the query retained; when we added the query to the activity, we retained it again;
+    // if something went wrong, the second retain was released, but whether or not something went wrong, we can now
+    // safely release the initial retain.
+    RELEASE_HERE(query, dnssd_query_finalize);
 }
 
 static void
@@ -2526,9 +2528,9 @@ dp_dns_query(dp_tracker_t *tracker, message_t *message, dns_rr_t *question)
     } else {
     fail:
         dso_simple_response(tracker->connection, message, &message->wire, rcode);
-        RELEASE_HERE(query, dnssd_query_finalize);
-        return;
     }
+    // Query is returned retained, and dp_query_track retains it, so we always need to release the reference here.
+    RELEASE_HERE(query, dnssd_query_finalize);
 }
 
 static void

@@ -1,6 +1,6 @@
 /* srp-ioloop.c
  *
- * Copyright (c) 2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,8 @@ static int bogusify_signatures = false;
 static int bogus_remove = false;
 static int push_query = false;
 static int push_unsubscribe = false;
+static bool test_subtypes = false;
+static bool test_diff_subtypes = false;
 
 const uint64_t thread_enterprise_number = 52627;
 
@@ -739,7 +741,8 @@ usage(void)
             "           [--push-query] [--push-unsubscribe]\n"
             "           [--random-leases] [--delete-registrations] [--use-thread-services] [--log-stderr]\n"
             "           [--interface <interface name>] [--bogusify-signatures] [--remove-added-service]\n"
-            "           [--expire-added-service] [--random-txt-record] [--bogus-remove]\n");
+            "           [--expire-added-service] [--random-txt-record] [--bogus-remove]\n"
+            "           [--test-subtypes] [--test-diff-subtypes]\n");
     exit(1);
 }
 
@@ -873,6 +876,10 @@ main(int argc, char **argv)
             push_query = true;
         } else if (!strcmp(argv[i], "--push-unsubscribe")) {
             push_unsubscribe = true;
+        } else if (!strcmp(argv[i], "--test-subtypes")) {
+            test_subtypes = true;
+        } else if (!strcmp(argv[i], "--test-diff-subtypes")) {
+            test_diff_subtypes = true;
         } else if (!strcmp(argv[i], "--service-type")) {
             if (i + 1 == argc) {
                 usage();
@@ -965,11 +972,13 @@ main(int argc, char **argv)
         }
         iport = (((uint16_t)port[0]) << 8) + port[1];
 
-        err = DNSServiceRegister(&sdref, 0, 0, hnbuf, service_type,
-                                 0, 0, iport, txt_len, txt_data, register_callback, client);
-        if (err != kDNSServiceErr_NoError) {
-            ERROR("DNSServiceRegister failed: %d", err);
-            exit(1);
+        if (!test_subtypes && !test_diff_subtypes) {
+            err = DNSServiceRegister(&sdref, 0, 0, hnbuf, service_type,
+                                     0, 0, iport, txt_len, txt_data, register_callback, client);
+            if (err != kDNSServiceErr_NoError) {
+                ERROR("DNSServiceRegister failed: %d", err);
+                exit(1);
+            }
         }
         if (remove_added_service || let_added_service_expire) {
             expecting_second_add = true;
@@ -978,6 +987,36 @@ main(int argc, char **argv)
             if (err != kDNSServiceErr_NoError) {
                 ERROR("second DNSServiceRegister failed: %d", err);
                 exit(1);
+            }
+        }
+        // Here we register two services with subtypes. The idea is to see that the srp parsing code does not
+        // associate the second subtype with the first service instance and report an error. In order to
+        // attempt to trigger the error, we need the service instance name of the second service instance
+        // to be different.
+        if (test_subtypes || test_diff_subtypes) {
+            expecting_second_add = true;
+            err = DNSServiceRegister(&sdref, 0, 0, hnbuf, "_ipps._tcp,subtype",
+                                     0, 0, iport, txt_len, txt_data, register_callback, client);
+            if (err != kDNSServiceErr_NoError) {
+                ERROR("DNSServiceRegister failed: %d", err);
+                exit(1);
+            }
+            if (test_diff_subtypes) {
+                err = DNSServiceRegister(&sdref, 0, 0, hnbuf, "_second._tcp,othersub",
+                                         0, 0, iport, txt_len, txt_data, second_register_callback, client);
+                if (err != kDNSServiceErr_NoError) {
+                    ERROR("DNSServiceRegister failed: %d", err);
+                    exit(1);
+                }
+            } else {
+                char shnbuf[132];
+                snprintf(shnbuf, sizeof(shnbuf), "foo-%s", hnbuf);
+                err = DNSServiceRegister(&sdref, 0, 0, shnbuf, "_ipps._tcp,othersub",
+                                         0, 0, iport, txt_len, txt_data, second_register_callback, client);
+                if (err != kDNSServiceErr_NoError) {
+                    ERROR("DNSServiceRegister failed: %d", err);
+                    exit(1);
+                }
             }
         }
     }

@@ -1,6 +1,6 @@
 /* srp-parse.c
  *
- * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -398,6 +398,9 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
             {
                 dns_name_t *base_type_name = rr->name->next->next;
                 for (base_type = services; base_type != NULL; base_type = base_type->next) {
+                    if (!dns_names_equal(base_type->rr->data.ptr.name, rr->data.ptr.name)) {
+                        continue;
+                    }
                     if (dns_names_equal(base_type->rr->name, base_type_name)) {
                         break;
                     }
@@ -408,18 +411,6 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
                     ERROR("service subtype " PRI_DNS_NAME_SRP " for " PRI_DNS_NAME_SRP
                           " has no preceding base type ", DNS_NAME_PARAM_SRP(rr->name, name_buf),
                           DNS_NAME_PARAM_SRP(rr->data.ptr.name, target_name_buf));
-                    rcode = dns_rcode_formerr;
-                    goto out;
-                }
-                if (!dns_names_equal(base_type->rr->data.ptr.name, rr->data.ptr.name)) {
-                    DNS_NAME_GEN_SRP(rr->name, name_buf);
-                    DNS_NAME_GEN_SRP(rr->data.ptr.name, target_name_buf);
-                    DNS_NAME_GEN_SRP(base_type->rr->data.ptr.name, base_target_name_buf);
-                    ERROR("service subtype " PRI_DNS_NAME_SRP " for " PRI_DNS_NAME_SRP
-                          " doesn't match base type service " PRI_DNS_NAME_SRP,
-                          DNS_NAME_PARAM_SRP(rr->name, name_buf),
-                          DNS_NAME_PARAM_SRP(rr->data.ptr.name, target_name_buf),
-                          DNS_NAME_PARAM_SRP(base_type->rr->data.ptr.name, base_target_name_buf));
                     rcode = dns_rcode_formerr;
                     goto out;
                 }
