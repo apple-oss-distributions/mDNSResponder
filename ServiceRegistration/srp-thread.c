@@ -287,7 +287,7 @@ srp_set_wakeup(void *host_context, void *context, int milliseconds, srp_wakeup_c
         now = HAPPlatformClockGetCurrent();
         io_context->wakeup_time = now + milliseconds * (HAPTIME_FREQUENCY / 1000);
         io_context->wakeup_callback = callback;
-        INFO("srp_set_wakeup: %llu (%llu + %dms)", io_context->wakeup_time, now, milliseconds);
+        INFO("%llu (%llu + %dms)", io_context->wakeup_time, now, milliseconds);
         compute_wakeup_time(now);
     }
     return err;

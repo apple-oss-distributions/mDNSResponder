@@ -1,12 +1,12 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -167,6 +167,7 @@ struct NetworkInterfaceInfoOSX_struct
     int BPF_fd;                                 // -1 uninitialized; -2 requested BPF; -3 failed
     int BPF_mcfd;                               // Socket for our IPv6 ND group membership
     u_int BPF_len;
+    uint32_t ift_subfamily;                     // The interface's subfamily type from the SIOCGIFTYPE ioctl().
     mDNSBool isAWDL;                            // True if this interface has the IFEF_AWDL flag set.
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
     dispatch_source_t BPF_source;
@@ -296,6 +297,7 @@ struct CompileTimeAssertionChecks_mDNSMacOSX
 };
 
 extern mDNSInterfaceID AWDLInterfaceID;
+extern mDNSInterfaceID WiFiAwareInterfaceID;
 void initializeD2DPlugins(mDNS *const m);
 void terminateD2DPlugins(void);
 

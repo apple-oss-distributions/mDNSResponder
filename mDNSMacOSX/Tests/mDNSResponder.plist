@@ -23,7 +23,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -36,7 +36,7 @@
 			<key>TestName</key>
 			<string>GAIPerf Advanced</string>
 			<key>Description</key>
-			<string>Tests correctness of resolving hostnames via DNS using the GAIPerf Advanced test suite.</string>
+			<string>Tests correctness of resolving hostnames with ordinary DNS using the GAIPerf Advanced test suite.</string>
 			<key>AsRoot</key>
 			<true/>
 			<key>RequiresWiFi</key>
@@ -69,7 +69,101 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>GAIPerf Advanced (DoT)</string>
+			<key>Description</key>
+			<string>Tests correctness of resolving hostnames with DNS over TLS (DoT) using the GAIPerf Advanced test suite.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>900</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>gaiperf</string>
+				<string>--suite</string>
+				<string>advanced</string>
+				<string>--timeLimit</string>
+				<string>3000</string>
+				<string>--format</string>
+				<string>json</string>
+				<string>--protocol</string>
+				<string>DoT</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>GAIPerf Advanced (DoH)</string>
+			<key>Description</key>
+			<string>Tests correctness of resolving hostnames with DNS over HTTPS (DoH) using the GAIPerf Advanced test suite.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>900</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>gaiperf</string>
+				<string>--suite</string>
+				<string>advanced</string>
+				<string>--timeLimit</string>
+				<string>3000</string>
+				<string>--format</string>
+				<string>json</string>
+				<string>--protocol</string>
+				<string>DoH</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -110,7 +204,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -151,7 +245,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -192,7 +286,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -239,7 +333,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -295,7 +389,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -352,7 +446,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -408,7 +502,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -465,7 +559,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -521,7 +615,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -578,7 +672,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -633,7 +727,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -689,7 +783,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -744,7 +838,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -800,7 +894,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -855,7 +949,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -911,7 +1005,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -972,7 +1066,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1033,7 +1127,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1094,7 +1188,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1155,7 +1249,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1212,7 +1306,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1270,7 +1364,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1327,7 +1421,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1385,7 +1479,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1442,7 +1536,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1500,7 +1594,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1556,7 +1650,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1613,7 +1707,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1669,7 +1763,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1726,7 +1820,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1782,7 +1876,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1839,7 +1933,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1901,7 +1995,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -1963,7 +2057,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2025,7 +2119,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2087,7 +2181,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2130,7 +2224,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2172,7 +2266,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2213,7 +2307,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2226,13 +2320,13 @@
 			<key>TestName</key>
 			<string>Probe Conflicts (IPv4)</string>
 			<key>Description</key>
-			<string>Tests various probe conflict scenarios, some of which are expected to result in service instance and record renames. The probe conflicts occur via IPv4.</string>
+			<string>Tests various probe conflict scenarios, some of which are expected to result in service instance and record renames. The test service is registered on the loopback interface. The probe conflicts occur over IPv4 via the loopback interface.</string>
 			<key>AsRoot</key>
 			<false/>
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>300</integer>
+			<integer>400</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2242,6 +2336,7 @@
 				<string>probeconflicts</string>
 				<string>--interface</string>
 				<string>lo0</string>
+				<string>--extraWait 2000</string>
 				<string>--ipv4</string>
 				<string>--format</string>
 				<string>json</string>
@@ -2257,7 +2352,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2270,13 +2365,13 @@
 			<key>TestName</key>
 			<string>Probe Conflicts (IPv6)</string>
 			<key>Description</key>
-			<string>Tests various probe conflict scenarios, some of which are expected to result in service instance and record renames. The probe conflicts occur via IPv6.</string>
+			<string>Tests various probe conflict scenarios, some of which are expected to result in service instance and record renames. The test service is registered on the loopback interface. The probe conflicts occur over IPv6 via the loopback interface.</string>
 			<key>AsRoot</key>
 			<false/>
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>300</integer>
+			<integer>400</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2286,6 +2381,7 @@
 				<string>probeconflicts</string>
 				<string>--interface</string>
 				<string>lo0</string>
+				<string>--extraWait 2000</string>
 				<string>--ipv6</string>
 				<string>--format</string>
 				<string>json</string>
@@ -2301,7 +2397,99 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Probe Conflicts (Registration On Any Interface, IPv4)</string>
+			<key>Description</key>
+			<string>Tests various probe conflict scenarios, some of which are expected to result in service instance and record renames. The test service is registered using the kDNSServiceInterfaceIndexAny interface index. The probe conflicts occur over IPv4 via the loopback interface.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>400</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>probeconflicts</string>
+				<string>--interface</string>
+				<string>lo0</string>
+				<string>--extraWait 2000</string>
+				<string>--ipv4</string>
+				<string>--registerOnAny</string>
+				<string>--format</string>
+				<string>json</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Probe Conflicts (Registration On Any Interface, IPv6)</string>
+			<key>Description</key>
+			<string>Tests various probe conflict scenarios, some of which are expected to result in service instance and record renames. The test service is registered using the kDNSServiceInterfaceIndexAny interface index. The probe conflicts occur over IPv6 via the loopback interface.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>400</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>probeconflicts</string>
+				<string>--interface</string>
+				<string>lo0</string>
+				<string>--extraWait 2000</string>
+				<string>--ipv6</string>
+				<string>--registerOnAny</string>
+				<string>--format</string>
+				<string>json</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2345,7 +2533,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2358,7 +2546,7 @@
 			<key>TestName</key>
 			<string>DNS Proxy</string>
 			<key>Description</key>
-			<string>Tests mDNSResponder&apos;s DNS proxy by sending it a variety of queries and verifying the responses. The queries are sent via UDP and TCP to the DNS proxy&apos;s IPV4 and IPv6 addresses. The DNS proxy is tested while it runs in different modes. Aside from the mode without a DNS64 prefix, the DNS proxy is tested while it runs with all of the valid DNS64 prefix lengths: 32-bit, 40-bit, 48-bit, 56-bit, 64-bit, and 96-bit.</string>
+			<string>Tests mDNSResponder&apos;s DNS proxy by sending it a variety of queries and verifying the responses. The queries are sent via UDP and TCP to the DNS proxy&apos;s IPV4 and IPv6 addresses. The DNS proxy is tested while it runs in different modes. Aside from the mode without a DNS64 prefix, the DNS proxy is tested while it runs with all of the valid DNS64 prefix lengths: 32-bit, 40-bit, 48-bit, 56-bit, 64-bit, and 96-bit. Uses mrc_dns_proxy to start the DNS proxies.</string>
 			<key>AsRoot</key>
 			<true/>
 			<key>RequiresWiFi</key>
@@ -2386,7 +2574,49 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNS Proxy (Legacy SPI)</string>
+			<key>Description</key>
+			<string>Tests mDNSResponder&apos;s DNS proxy by sending it a variety of queries and verifying the responses. The queries are sent via UDP and TCP to the DNS proxy&apos;s IPV4 and IPv6 addresses. The DNS proxy is tested while it runs in different modes. Aside from the mode without a DNS64 prefix, the DNS proxy is tested while it runs with all of the valid DNS64 prefix lengths: 32-bit, 40-bit, 48-bit, 56-bit, 64-bit, and 96-bit. Uses the legacy client SPI to start the DNS proxies, i.e., DNSXEnableProxy() and DNSXEnableProxy64().</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>600</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>dnsproxy</string>
+				<string>--legacy</string>
+				<string>--format</string>
+				<string>json</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2427,7 +2657,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2468,7 +2698,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2509,7 +2739,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2550,7 +2780,7 @@
 			<key>RequiresWiFi</key>
 			<false/>
 			<key>Timeout</key>
-			<integer>10</integer>
+			<integer>60</integer>
 			<key>IgnoreOutput</key>
 			<true/>
 			<key>Command</key>
@@ -2792,138 +3022,6 @@
 		</dict>
 		<dict>
 			<key>TestName</key>
-			<string>ListTMethodsTest</string>
-			<key>Description</key>
-			<string>ListTMethodsTest from Tests.xctest</string>
-			<key>AsRoot</key>
-			<false/>
-			<key>RequiresWiFi</key>
-			<false/>
-			<key>Timeout</key>
-			<integer>5</integer>
-			<key>IgnoreOutput</key>
-			<false/>
-			<key>Command</key>
-			<array>
-				<string>/usr/local/bin/dnssdutil</string>
-				<string>test</string>
-				<string>xctest</string>
-				<string>-c</string>
-				<string>ListTMethodsTest</string>
-			</array>
-		</dict>
-		<dict>
-			<key>TestName</key>
-			<string>BaseNEncodingDecodingTest</string>
-			<key>Description</key>
-			<string>BaseNEncodingDecodingTest from Tests.xctest</string>
-			<key>AsRoot</key>
-			<false/>
-			<key>RequiresWiFi</key>
-			<false/>
-			<key>Timeout</key>
-			<integer>5</integer>
-			<key>IgnoreOutput</key>
-			<false/>
-			<key>Command</key>
-			<array>
-				<string>/usr/local/bin/dnssdutil</string>
-				<string>test</string>
-				<string>xctest</string>
-				<string>-c</string>
-				<string>BaseNEncodingDecodingTest</string>
-			</array>
-		</dict>
-		<dict>
-			<key>TestName</key>
-			<string>CanonicalMethodsTest</string>
-			<key>Description</key>
-			<string>CanonicalMethodsTest from Tests.xctest</string>
-			<key>AsRoot</key>
-			<false/>
-			<key>RequiresWiFi</key>
-			<false/>
-			<key>Timeout</key>
-			<integer>5</integer>
-			<key>IgnoreOutput</key>
-			<false/>
-			<key>Command</key>
-			<array>
-				<string>/usr/local/bin/dnssdutil</string>
-				<string>test</string>
-				<string>xctest</string>
-				<string>-c</string>
-				<string>CanonicalMethodsTest</string>
-			</array>
-		</dict>
-		<dict>
-			<key>TestName</key>
-			<string>DigestCalculationTest</string>
-			<key>Description</key>
-			<string>DigestCalculationTest from Tests.xctest</string>
-			<key>AsRoot</key>
-			<false/>
-			<key>RequiresWiFi</key>
-			<false/>
-			<key>Timeout</key>
-			<integer>5</integer>
-			<key>IgnoreOutput</key>
-			<false/>
-			<key>Command</key>
-			<array>
-				<string>/usr/local/bin/dnssdutil</string>
-				<string>test</string>
-				<string>xctest</string>
-				<string>-c</string>
-				<string>DigestCalculationTest</string>
-			</array>
-		</dict>
-		<dict>
-			<key>TestName</key>
-			<string>NSEC3HashTest</string>
-			<key>Description</key>
-			<string>NSEC3HashTest from Tests.xctest</string>
-			<key>AsRoot</key>
-			<false/>
-			<key>RequiresWiFi</key>
-			<false/>
-			<key>Timeout</key>
-			<integer>5</integer>
-			<key>IgnoreOutput</key>
-			<false/>
-			<key>Command</key>
-			<array>
-				<string>/usr/local/bin/dnssdutil</string>
-				<string>test</string>
-				<string>xctest</string>
-				<string>-c</string>
-				<string>NSEC3HashTest</string>
-			</array>
-		</dict>
-		<dict>
-			<key>TestName</key>
-			<string>SignatureValidationTest</string>
-			<key>Description</key>
-			<string>Test if the DNSSEC signature validation works with multiple DNSKEY algorithm.</string>
-			<key>AsRoot</key>
-			<false/>
-			<key>RequiresWiFi</key>
-			<false/>
-			<key>Timeout</key>
-			<integer>5</integer>
-			<key>IgnoreOutput</key>
-			<false/>
-			<key>Command</key>
-			<array>
-				<string>/usr/local/bin/dnssdutil</string>
-				<string>test</string>
-				<string>xctest</string>
-				<string>-c</string>
-				<string>SignatureValidationTest</string>
-			</array>
-		</dict>
-		<dict>
-			<key>TestName</key>
 			<string>DNSDigestTest</string>
 			<key>Description</key>
 			<string>Test if the HMAC MD5 utilities in DNSDigest.c can generate the correct digest.</string>
@@ -2942,6 +3040,352 @@
 				<string>xctest</string>
 				<string>-c</string>
 				<string>DNSDigestTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjTrustAnchorTest</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_trust_anchor_t.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjTrustAnchorTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjTrustAnchorManagerTest</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_trust_anchor_manager_t.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjTrustAnchorManagerTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjDomainNameTest</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_domain_name_t.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjDomainNameTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjRRValidator</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_rr_validator_t.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjRRValidator</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjDenialOfExistenceTest</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_denial_of_existence_t.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjDenialOfExistenceTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjRRTest</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_rr_t.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjRRTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjRRSOATest</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_rr_soa_t.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjRRSOATest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjRRDSTest</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_rr_ds_t.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjRRDSTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjRRNSECTest</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_rr_nsec_t.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjRRNSECTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjRRRRSigTest</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_rr_rrsig_t</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjRRRRSigTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjRRDNSKeyTest</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_rr_dnskey_t</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjRRDNSKeyTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - DNSSECObjRRNSEC3Test</string>
+			<key>Description</key>
+			<string>Test the methods of dnssec_obj_rr_nsec3_t</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSSECObjRRNSEC3Test</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Unit - BaseEncodingTest</string>
+			<key>Description</key>
+			<string>Test base 64 and base 32 HEX encoding.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>BaseEncodingTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNSSEC Integration - Basic Validation</string>
+			<key>Description</key>
+			<string>Test the DNSSEC validation capability of mDNSResponder when the validation result is Secure, with different number of address records and different DNSKEY algorithms.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>dnssec</string>
+				<string>--testCaseName</string>
+				<string>&quot;basic validation&quot;</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
 			</array>
 		</dict>
 	</array>

@@ -10,6 +10,9 @@
 #include "dns-msg.h"
 
 #include "ioloop.h"
+#include "srp-gw.h"
+#include "srp-proxy.h"
+#include "srp-mdns-proxy.h"
 #include "route.h"
 
 #ifdef FUZZING_ICMP_CALLBACK

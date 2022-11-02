@@ -50,7 +50,7 @@ static void
 cti_internal_reply_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
     cti_reply_t callback;
-    INFO("cti_internal_reply_callback: conn_ref = %p", conn_ref);
+    INFO("conn_ref = %p", conn_ref);
     callback = conn_ref->callback.reply;
     if (callback != NULL) {
         callback(conn_ref->context, status);
@@ -97,7 +97,7 @@ cti_response_parse(cti_connection_t connection)
         cti_connection_i32_parse(connection, &status) &&
         cti_connection_parse_done(connection))
     {
-        INFO("cti_response_parse: %d %d", responding_to, status);
+        INFO("%d %d", responding_to, status);
         connection->internal_callback(connection, NULL, status);
     }
 }
@@ -111,7 +111,7 @@ cti_tunnel_response_parse(cti_connection_t connection)
     if (cti_connection_string_parse(connection, &tunnel_name) &&
         cti_connection_parse_done(connection))
     {
-        INFO("cti_tunnel_response_parse: %s", tunnel_name);
+        INFO("%s", tunnel_name);
         connection->internal_callback(connection, tunnel_name, kCTIStatus_NoError);
     }
     if (tunnel_name != NULL) {
@@ -299,7 +299,7 @@ static void
 cti_internal_tunnel_reply_callback(cti_connection_t conn_ref, void *tunnel_name, cti_status_t status)
 {
     cti_tunnel_reply_t callback;
-    INFO("cti_tunnel_internal_reply_callback: conn_ref = %p name = %s", conn_ref,
+    INFO("conn_ref = %p name = %s", conn_ref,
          tunnel_name == NULL ? "<NULL>" : (char *)tunnel_name);
     callback = conn_ref->callback.tunnel_reply;
     if (callback != NULL) {
@@ -339,7 +339,7 @@ static void
 cti_internal_state_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
     cti_state_reply_t callback;
-    INFO("cti_internal_state_event_callback: conn_ref = %p", conn_ref);
+    INFO("conn_ref = %p", conn_ref);
     if (status != kCTIStatus_NoError) {
         callback = conn_ref->callback.state_reply;
         if (callback != NULL) {
@@ -438,7 +438,7 @@ static void
 cti_internal_node_type_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
     cti_network_node_type_reply_t callback;
-    INFO("cti_internal_node_type_event_callback: conn_ref = %p", conn_ref);
+    INFO("conn_ref = %p", conn_ref);
     if (status != kCTIStatus_NoError) {
         callback = conn_ref->callback.network_node_type_reply;
         if (callback != NULL) {
@@ -551,7 +551,7 @@ static void
 cti_internal_service_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
     cti_service_reply_t callback;
-    INFO("cti_internal_service_event_callback: conn_ref = %p", conn_ref);
+    INFO("conn_ref = %p", conn_ref);
     if (status != kCTIStatus_NoError) {
         callback = conn_ref->callback.service_reply;
         if (callback != NULL) {
@@ -658,7 +658,7 @@ static void
 cti_internal_prefix_event_callback(cti_connection_t conn_ref, void *UNUSED object, cti_status_t status)
 {
     cti_prefix_reply_t callback;
-    INFO("cti_internal_prefix_event_callback: conn_ref = %p", conn_ref);
+    INFO("conn_ref = %p", conn_ref);
     if (status != kCTIStatus_NoError) {
         callback = conn_ref->callback.prefix_reply;
         if (callback != NULL && conn_ref->context != NULL) {
@@ -712,7 +712,7 @@ cti_role_event_parse(cti_connection_t connection)
     if (cti_connection_u8_parse(connection, &role) &&
         cti_connection_parse_done(connection))
     {
-        INFO("cti_role_event_parse: %d", role);
+        INFO("%d", role);
         connection->callback.network_node_type_reply(connection, role, kCTIStatus_NoError);
     }
 }
@@ -726,7 +726,7 @@ cti_state_event_parse(cti_connection_t connection)
     if (cti_connection_u8_parse(connection, &state) &&
         cti_connection_parse_done(connection))
     {
-        INFO("cti_state_event_parse: %d", state);
+        INFO("%d", state);
         connection->callback.state_reply(connection, state, kCTIStatus_NoError);
     }
 }
@@ -778,7 +778,7 @@ cti_service_event_parse(cti_connection_t connection)
             cti_service_t *service = NULL;
             dump_to_hex(service_data, service_data_length, service_data_buf, sizeof(service_data_buf));
             dump_to_hex(server_data, server_data_length, server_data_buf, sizeof(server_data_buf));
-            INFO("cti_service_event_parse: %" PRIu32 " %" PRIu16 "[ %s ] %" PRIu16 "[ %s ]",
+            INFO("%" PRIu32 " %" PRIu16 "[ %s ] %" PRIu16 "[ %s ]",
                  enterprise_number, service_data_length, service_data_buf, server_data_length, server_data_buf);
             if (enterprise_number == THREAD_ENTERPRISE_NUMBER) {
                 if (service_data_length == 1) {
@@ -799,7 +799,7 @@ cti_service_event_parse(cti_connection_t connection)
             return;
         }
 
-        INFO("cti_service_event_parse: %zd", vec->num);
+        INFO("%zd", vec->num);
         connection->callback.service_reply(connection, vec, kCTIStatus_NoError);
     }
 }
@@ -862,7 +862,7 @@ cti_prefix_event_parse(cti_connection_t connection)
             return;
         }
 
-        INFO("cti_prefix_event_parse: %zd", vec->num);
+        INFO("%zd", vec->num);
         connection->callback.prefix_reply(connection, vec, kCTIStatus_NoError);
     }
 }

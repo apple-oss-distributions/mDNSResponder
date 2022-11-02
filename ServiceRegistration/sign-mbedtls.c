@@ -372,7 +372,7 @@ srp_get_key(const char *key_name, void *os_context)
             return NULL;
         }
     } else {
-        INFO("srp_get_key: weird error %d", err);
+        INFO("weird error %d", err);
         return NULL;
     }
     return key;

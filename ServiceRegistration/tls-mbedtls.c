@@ -361,6 +361,13 @@ configure_tls(void *const NULLABLE UNUSED context)
 {
 }
 
+void
+schedule_tls_certificate_rotation(wakeup_t **const UNUSED tls_listener_wakeup,
+	comm_t *const UNUSED tls_listener_to_rotate)
+{
+    ;
+}
+
 // Local Variables:
 // mode: C
 // tab-width: 4

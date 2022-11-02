@@ -1,6 +1,6 @@
 /* advertising_proxy_services.h
  *
- * Copyright (c) 2020-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -255,7 +255,7 @@ adv_ula_callback(cti_connection_t connection, void *UNUSED object, cti_status_t 
 	if (!cti_connection_u64_parse(connection, &ula_prefix)) {
 		ERROR("error parsing ula prefix");
         goto fail;
-    }
+	}
 
     if (!cti_connection_parse_done(connection)) {
     fail:
@@ -369,12 +369,104 @@ advertising_proxy_advertise_prefix(advertising_proxy_conn_ref *conn_ref,
 }
 
 advertising_proxy_error_type
+advertising_proxy_add_prefix(advertising_proxy_conn_ref *conn_ref, run_context_t client_queue,
+                             advertising_proxy_reply callback, const uint8_t *prefix_buf, size_t buf_len)
+{
+    advertising_proxy_error_type errx;
+    errx = adv_send_command_with_data(conn_ref, client_queue, "advertising_proxy_add_prefix",
+                                      kDNSSDAdvertisingProxyAddPrefix, callback, NULL, 0,
+                                      prefix_buf, buf_len);
+    return errx;
+}
+
+advertising_proxy_error_type
+advertising_proxy_remove_prefix(advertising_proxy_conn_ref *conn_ref, run_context_t client_queue,
+                                advertising_proxy_reply callback, const uint8_t *prefix_buf, size_t buf_len)
+{
+    advertising_proxy_error_type errx;
+    errx = adv_send_command_with_data(conn_ref, client_queue, "advertising_proxy_remove_prefix",
+                                      kDNSSDAdvertisingProxyRemovePrefix, callback, NULL, 0,
+                                      prefix_buf, buf_len);
+    return errx;
+}
+
+advertising_proxy_error_type
+advertising_proxy_stop(advertising_proxy_conn_ref *conn_ref,
+                       run_context_t client_queue, advertising_proxy_reply callback)
+{
+    advertising_proxy_error_type errx;
+    errx = adv_send_command(conn_ref, client_queue, "advertising_proxy_stop",
+                            kDNSSDAdvertisingProxyStop, callback, NULL, 0);
+    return errx;
+}
+
+advertising_proxy_error_type
 advertising_proxy_get_ula(advertising_proxy_conn_ref *conn_ref,
                           run_context_t client_queue, advertising_proxy_reply callback)
 {
     advertising_proxy_error_type errx;
     errx = adv_send_command(conn_ref, client_queue, "advertising_proxy_get_ula",
                             kDNSSDAdvertisingProxyGetULA, callback, adv_ula_callback, 128);
+    return errx;
+}
+
+advertising_proxy_error_type
+advertising_proxy_disable_srp_replication(advertising_proxy_conn_ref *conn_ref,
+                                          run_context_t client_queue, advertising_proxy_reply callback)
+{
+    advertising_proxy_error_type errx;
+    errx = adv_send_command(conn_ref, client_queue, "advertising_proxy_disable_srp_replication",
+                            kDNSSDAdvertisingProxyDisableReplication, callback, NULL, 0);
+    return errx;
+}
+
+advertising_proxy_error_type
+advertising_proxy_drop_srpl_connection(advertising_proxy_conn_ref *conn_ref,
+                                       run_context_t client_queue, advertising_proxy_reply callback)
+{
+    advertising_proxy_error_type errx;
+    errx = adv_send_command(conn_ref, client_queue, "advertising_proxy_drop_srpl_connection",
+                            kDNSSDAdvertisingProxyDropSrplConnection, callback, NULL, 0);
+    return errx;
+}
+
+advertising_proxy_error_type
+advertising_proxy_undrop_srpl_connection(advertising_proxy_conn_ref *conn_ref,
+                                         run_context_t client_queue, advertising_proxy_reply callback)
+{
+    advertising_proxy_error_type errx;
+    errx = adv_send_command(conn_ref, client_queue, "advertising_proxy_undrop_srpl_connection",
+                            kDNSSDAdvertisingProxyUndropSrplConnection, callback, NULL, 0);
+    return errx;
+}
+
+advertising_proxy_error_type
+advertising_proxy_drop_srpl_advertisement(advertising_proxy_conn_ref *conn_ref,
+                                          run_context_t client_queue, advertising_proxy_reply callback)
+{
+    advertising_proxy_error_type errx;
+    errx = adv_send_command(conn_ref, client_queue, "advertising_proxy_drop_srpl_advertisement",
+                            kDNSSDAdvertisingProxyDropSrplAdvertisement, callback, NULL, 0);
+    return errx;
+}
+
+advertising_proxy_error_type
+advertising_proxy_undrop_srpl_advertisement(advertising_proxy_conn_ref *conn_ref,
+                                            run_context_t client_queue, advertising_proxy_reply callback)
+{
+    advertising_proxy_error_type errx;
+    errx = adv_send_command(conn_ref, client_queue, "advertising_proxy_disable_undrop_srpl_advertisement",
+                            kDNSSDAdvertisingProxyUndropSrplAdvertisement, callback, NULL, 0);
+    return errx;
+}
+
+advertising_proxy_error_type
+advertising_proxy_start_dropping_push_connections(advertising_proxy_conn_ref *conn_ref,
+                                                  run_context_t client_queue, advertising_proxy_reply callback)
+{
+    advertising_proxy_error_type errx;
+    errx = adv_send_command(conn_ref, client_queue, "advertising_proxy_disable_start_dropping_push_connections",
+                            kDNSSDAdvertisingProxyStartDroppingPushConnections, callback, NULL, 0);
     return errx;
 }
 

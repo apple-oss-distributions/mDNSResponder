@@ -1,12 +1,12 @@
 /*
  *
- * Copyright (c) 2016 Apple Inc. All rights reserved.
+ * Copyright (c) 2016, 2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,6 +20,7 @@
 #import "CNDomainBrowserPathUtils.h"
 
 #define BROWSER_CELL_SPACING                4
+#define BROWSER_ARROW_WIDTH                 8
 #define INITIAL_LEGACYBROWSE                1
 
 @implementation NSBrowser(PathArray)
@@ -317,10 +318,10 @@
         cell.font = font;
         cell.leaf = ([self.bonjour subDomainsAtDomainPath: itemArray].count == 0);
 		newSize = MAX(newSize, cell.cellSize.width + BROWSER_CELL_SPACING);
+		if (!cell.leaf) newSize += BROWSER_ARROW_WIDTH;
 	}
 	
 	if (!newSize) newSize = suggestedWidth;
-	newSize = (NSInteger)(newSize + 0.5);
 	
 	return(newSize);
 }

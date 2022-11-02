@@ -1,6 +1,6 @@
 /* ioloop.c
  *
- * Copyright (c) 2018-2021 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2022 Apple, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -272,7 +272,7 @@ ioloop_add_wake_event(wakeup_t *wakeup, void *context, wakeup_callback_t callbac
         ERROR("ioloop_add_wake_event called with negative timeout");
         return false;
     }
-    INFO("ioloop_add_wake_event: %p %p %d", wakeup, context, milliseconds);
+    INFO("%p %p %d", wakeup, context, milliseconds);
     add_remove_wakeup(wakeup, false);
     wakeup->wakeup_time = ioloop_timenow() + milliseconds;
     wakeup->finalize = finalize;
@@ -284,6 +284,11 @@ ioloop_add_wake_event(wakeup_t *wakeup, void *context, wakeup_callback_t callbac
 void
 ioloop_cancel_wake_event(wakeup_t *wakeup)
 {
+    if (wakeup->finalize) {
+        wakeup->finalize(wakeup->context);
+        wakeup->finalize = NULL;
+        wakeup->context = NULL;
+    }
     add_remove_wakeup(wakeup, true);
     wakeup->wakeup_time = 0;
 }
@@ -533,7 +538,7 @@ ioloop(void)
     int nev;
     do {
         nev = ioloop_events(0);
-        INFO("ioloop_events: %d", nev);
+        INFO("%d", nev);
     } while (nev >= 0);
     ERROR("ioloop returned %d.", nev);
     return -1;
@@ -702,7 +707,7 @@ tcp_read_callback(io_t *io, void *context)
 
 
 static bool
-tcp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int iov_len)
+tcp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int iov_len, bool send_length)
 {
     struct msghdr mh;
     struct iovec iovec[4];
@@ -719,15 +724,23 @@ tcp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int
         return false;
     }
 
-    iovec[0].iov_base = &lenbuf[0];
-    iovec[0].iov_len = 2;
+    i = 0;
+    if (send_length) {
+        i++;
+    }
     for (i = 0; i < iov_len; i++) {
         iovec[i + 1] = iov[i];
         payload_length += iov[i].iov_len;
     }
-    lenbuf[0] = payload_length / 256;
-    lenbuf[1] = payload_length & 0xff;
-    payload_length += 2;
+    if (send_length) {
+        iovec[0].iov_base = &lenbuf[0];
+        iovec[0].iov_len = 2;
+
+        lenbuf[0] = payload_length / 256;
+        lenbuf[1] = payload_length & 0xff;
+
+        payload_length += 2;
+    }
 
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
@@ -849,7 +862,7 @@ bool
 ioloop_send_message(comm_t *connection, message_t *responding_to, struct iovec *iov, int iov_len)
 {
     if (connection->tcp_stream) {
-        return tcp_send_response(connection, responding_to, iov, iov_len);
+        return tcp_send_response(connection, responding_to, iov, iov_len, true);
     } else {
         if (connection->is_connected) {
             return udp_send_connected_response(connection, responding_to, iov, iov_len);
@@ -863,6 +876,38 @@ ioloop_send_message(comm_t *connection, message_t *responding_to, struct iovec *
             return udp_send_response(connection, responding_to, iov, iov_len);
         }
     }
+}
+
+bool
+ioloop_send_final_message(comm_t *connection, message_t *responding_to, struct iovec *iov, int iov_len)
+{
+    bool ret = ioloop_send_message(connection, responding_to, iov, iov_len);
+    if (ret) {
+        shutdown(connection->io.fd, SHUT_WR);
+    }
+    return ret;
+}
+
+bool
+ioloop_send_data(comm_t *connection, message_t *responding_to, struct iovec *iov, int iov_len)
+{
+    if (connection->tcp_stream) {
+        return tcp_send_response(connection, responding_to, iov, iov_len, false);
+    }
+    return ioloop_send_message(connection, responding_to, iov, iov_len);
+}
+
+bool
+ioloop_send_final_data(comm_t *connection, message_t *responding_to, struct iovec *iov, int iov_len)
+{
+    if (connection->tcp_stream) {
+        bool ret = tcp_send_response(connection, responding_to, iov, iov_len, false);
+        if (ret) {
+            shutdown(connection->io.fd, SHUT_WR);
+        }
+        return ret;
+    }
+    return ioloop_send_message(connection, responding_to, iov, iov_len);
 }
 
 static void
@@ -920,6 +965,9 @@ ioloop_comm_cancel(comm_t *comm)
 void
 ioloop_comm_context_set(comm_t *comm, void *context, finalize_callback_t callback)
 {
+    if (comm->context != NULL && comm->finalize != NULL) {
+        comm->finalize(comm->context);
+    }
     comm->finalize = callback;
     comm->context = context;
 }
@@ -988,6 +1036,7 @@ listen_callback(io_t *io, void *context)
     comm->address = addr;
     comm->datagram_callback = listener->datagram_callback;
     comm->tcp_stream = true;
+    comm->context = listener->context;
 
     if (listener->tls_context == (tls_context_t *)-1) {
 #ifndef EXCLUDE_TLS
@@ -1470,7 +1519,7 @@ ioloop_subproc(const char *exepath, char **argv, int argc, subproc_callback_t ca
     posix_spawnattr_t attrs;
 
     if (callback == NULL) {
-        ERROR("ioloop_add_wake_event called with null callback");
+        ERROR("ioloop_subproc called with null callback");
         return NULL;
     }
 
@@ -1582,7 +1631,7 @@ dnssd_txn_callback(io_t *io, void *context)
             if (txn->failure_callback != NULL) {
                 txn->failure_callback(txn->context, status);
             } else {
-                INFO("dnssd_txn_callback: status %d", status);
+                INFO("status %d", status);
             }
             ioloop_dnssd_txn_cancel(txn);
         }
@@ -1615,7 +1664,7 @@ ioloop_dnssd_txn_cancel(dnssd_txn_t *txn)
         DNSServiceRefDeallocate(txn->sdref);
         txn->sdref = NULL;
     } else {
-        INFO("ioloop_dnssd_txn_cancel: dead transaction.");
+        INFO("dead transaction.");
     }
     if (txn->io != NULL) {
         txn->io->fd = -1;

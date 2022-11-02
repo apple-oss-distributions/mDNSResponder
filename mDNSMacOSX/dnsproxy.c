@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,11 @@
  */
 
 #include "dnsproxy.h"
+#include "mrcs_dns_proxy.h"
+#include "mrcs_server.h"
 #include "mdns_strict.h"
+#include "mDNSMacOSX.h"
+#include <AssertMacros.h>
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
 #include <nw/private.h>
@@ -25,11 +29,6 @@
 #ifndef UNICAST_DISABLED
 
 extern mDNS mDNSStorage;
-#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
-static mDNSBool gDNS64Enabled = mDNSfalse;
-static mDNSBool gDNS64ForceAAAASynthesis = mDNSfalse;
-static nw_nat64_prefix_t gDNS64Prefix;
-#endif
 
 // Implementation Notes
 //
@@ -106,7 +105,8 @@ struct DNSProxyClient_struct
 #endif
     mDNSu8 *omsg_ptr;               // Where we are in the omsg->data
     mDNSu16 omsg_size;              // The current size of omsg->data
-    _DNSMessage *omsg;                // Outgoing message we're building
+    _DNSMessage *omsg;              // Outgoing message we're building
+    mrcs_dns_proxy_t proxy;         // A reference to the DNS proxy that this client request belongs to.
 };
 
 typedef struct
@@ -141,6 +141,7 @@ mDNSlocal void FreeDNSProxyClient(DNSProxyClient *pc)
         mDNSPlatformMemFree(pc->optRR);
     if (pc->omsg)
         mDNSPlatformMemFree(pc->omsg);
+    mrcs_forget(&pc->proxy);
     mDNSPlatformMemFree(pc);
 }
 
@@ -382,7 +383,8 @@ mDNSlocal mDNSu8 *AddResourceRecord(DNSProxyClient *pc, mDNSu8 **prevptr, mStatu
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
                 RData rdata;
                 ResourceRecord newRR;
-                if ((pc->dns64state == kDNSProxyDNS64State_AAAASynthesis) && (cr->resrec.rrtype == kDNSType_A))
+                const nw_nat64_prefix_t *const nat64_prefix = mrcs_dns_proxy_get_nat64_prefix(pc->proxy);
+                if (nat64_prefix && (pc->dns64state == kDNSProxyDNS64State_AAAASynthesis) && (cr->resrec.rrtype == kDNSType_A))
                 {
                     struct in_addr  addrV4;
                     struct in6_addr addrV6;
@@ -394,7 +396,7 @@ mDNSlocal mDNSu8 *AddResourceRecord(DNSProxyClient *pc, mDNSu8 **prevptr, mStatu
                     newRR.rdata         = &rdata;
 
                     memcpy(&addrV4.s_addr, cr->resrec.rdata->u.ipv4.b, 4);
-                    if (nw_nat64_synthesize_v6(&gDNS64Prefix, &addrV4, &addrV6))
+                    if (nw_nat64_synthesize_v6(nat64_prefix, &addrV4, &addrV6))
                     {
                         memcpy(rdata.u.ipv6.b, addrV6.s6_addr, 16);
                         rr = &newRR;
@@ -495,7 +497,7 @@ mDNSlocal void ProxyClientCallback(mDNS *const m, DNSQuestion *question, const R
     LogInfo("ProxyClientCallback: %##s (%s)", &pc->qname.c, DNSTypeName(pc->qtype));
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
-    if (gDNS64Enabled)
+    if (mrcs_dns_proxy_get_nat64_prefix(pc->proxy))
     {
         if (pc->dns64state == kDNSProxyDNS64State_Initial)
         {
@@ -686,29 +688,12 @@ mDNSlocal DNSQuestion *IsDuplicateClient(const mDNSAddr *const addr, const mDNSI
     return(mDNSNULL);
 }
 
-mDNSlocal mDNSBool CheckDNSProxyIpIntf(mDNSInterfaceID InterfaceID)
+static mrcs_dns_proxy_manager_t gProxyManager = mDNSNULL;
+
+mDNSlocal mrcs_dns_proxy_t DNSProxyGetDNSProxyInstance(mDNSInterfaceID InterfaceID)
 {
-    mDNS *const m = &mDNSStorage;
-    int i;
-    mDNSu32 ip_ifindex = (mDNSu32)(unsigned long)InterfaceID;
-
-    LogInfo("CheckDNSProxyIpIntf: Check for ifindex[%d] in stored input interface list: [%d] [%d] [%d] [%d] [%d]",
-            ip_ifindex, m->dp_ipintf[0], m->dp_ipintf[1], m->dp_ipintf[2], m->dp_ipintf[3], m->dp_ipintf[4]);
-
-    if (ip_ifindex > 0)
-    {
-        for (i = 0; i < MaxIp; i++)
-        {
-            if (ip_ifindex == m->dp_ipintf[i])
-                return mDNStrue;
-        }
-    }
-    
-    LogMsg("CheckDNSProxyIpIntf: ifindex[%d] not in stored input interface list: [%d] [%d] [%d] [%d] [%d]",
-            ip_ifindex, m->dp_ipintf[0], m->dp_ipintf[1], m->dp_ipintf[2], m->dp_ipintf[3], m->dp_ipintf[4]);
-    
-    return mDNSfalse;
-
+    const mDNSu32 index = (mDNSu32)(uintptr_t)InterfaceID;
+    return (gProxyManager ? mrcs_dns_proxy_manager_get_proxy_by_input_interface(gProxyManager, index) : mDNSNULL);
 }
 
 mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mDNSu8 *const end, const mDNSAddr *const srcaddr,
@@ -728,7 +713,8 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
 
     debugf("ProxyCallbackCommon: DNS Query coming from InterfaceID %p", InterfaceID);
     // Ignore if the DNS Query is not from a Valid Input InterfaceID
-    if (!CheckDNSProxyIpIntf(InterfaceID))
+    const mrcs_dns_proxy_t proxy = DNSProxyGetDNSProxyInstance(InterfaceID);
+    if (!proxy)
     {
         LogMsg("ProxyCallbackCommon: Rejecting DNS Query coming from InterfaceID %p", InterfaceID);
         return;
@@ -813,6 +799,8 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
         FreeDNSProxyClient(pc);
         return;
     }
+    pc->proxy = proxy;
+    mrcs_retain(pc->proxy);
     pc->addr = *srcaddr;
     pc->port = srcport;
     pc->msgid = msg->h.id;
@@ -844,8 +832,9 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
         }
     }
 
-    debugf("ProxyCallbackCommon: DNS Query forwarding to interface index %d", m->dp_opintf);
-    mDNS_SetupQuestion(&pc->q, (mDNSInterfaceID)(unsigned long)m->dp_opintf, &q.qname, q.qtype, ProxyClientCallback, pc);
+    const mDNSu32 outputIndex = mrcs_dns_proxy_get_output_interface(pc->proxy);
+    debugf("ProxyCallbackCommon: DNS Query forwarding to interface index %u", outputIndex);
+    mDNS_SetupQuestion(&pc->q, (mDNSInterfaceID)(unsigned long)outputIndex, &q.qname, q.qtype, ProxyClientCallback, pc);
     pc->q.TimeoutQuestion = 1;
     // Set ReturnIntermed so that we get the negative responses
     pc->q.ReturnIntermed  = mDNStrue;
@@ -853,13 +842,14 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
     pc->q.responseFlags   = zeroID;
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
     pc->qtype = pc->q.qtype;
-    if (gDNS64Enabled)
+    const nw_nat64_prefix_t * const nat64_prefix = mrcs_dns_proxy_get_nat64_prefix(pc->proxy);
+    if (nat64_prefix)
     {
         if (pc->qtype == kDNSType_PTR)
         {
             struct in6_addr v6Addr;
             struct in_addr v4Addr;
-            if (GetReverseIPv6Addr(&pc->qname, v6Addr.s6_addr) && nw_nat64_extract_v4(&gDNS64Prefix, &v6Addr, &v4Addr))
+            if (GetReverseIPv6Addr(&pc->qname, v6Addr.s6_addr) && nw_nat64_extract_v4(nat64_prefix, &v6Addr, &v4Addr))
             {
                 const mDNSu8 *const a = (const mDNSu8 *)&v4Addr.s_addr;
                 char qnameStr[MAX_REVERSE_MAPPING_NAME_V4];
@@ -869,7 +859,7 @@ mDNSlocal void ProxyCallbackCommon(void *socket, DNSMessage *const msg, const mD
                 pc->dns64state = kDNSProxyDNS64State_PTRSynthesisTrying;
             }
         }
-        else if ((pc->qtype == kDNSType_AAAA) && gDNS64ForceAAAASynthesis)
+        else if ((pc->qtype == kDNSType_AAAA) && mrcs_dns_proxy_forces_aaaa_synthesis(pc->proxy))
         {
             pc->dns64state = kDNSProxyDNS64State_AAAASynthesis;
             pc->q.qtype    = kDNSType_A;
@@ -898,7 +888,7 @@ mDNSexport void ProxyTCPCallback(void *socket, DNSMessage *const msg, const mDNS
     
     // If the connection was closed from the other side or incoming packet does not match stored input interface list, locate the client
     // state and free it.
-    if (((end - (mDNSu8 *)msg) == 0) || (!CheckDNSProxyIpIntf(InterfaceID)))
+    if (((end - (mDNSu8 *)msg) == 0) || (!DNSProxyGetDNSProxyInstance(InterfaceID)))
     {
         DNSProxyClient **ppc = &DNSProxyClients;
         DNSProxyClient **prevpc;
@@ -924,6 +914,51 @@ mDNSexport void ProxyTCPCallback(void *socket, DNSMessage *const msg, const mDNS
     ProxyCallbackCommon(socket, msg, end, srcaddr, srcport, dstaddr, dstport, InterfaceID, mDNStrue, context);
 }
 
+mDNSlocal OSStatus DNSProxyStart(const mrcs_dns_proxy_t proxy)
+{
+    OSStatus err;
+    if (!gProxyManager)
+    {
+        gProxyManager = mrcs_dns_proxy_manager_create(&err);
+        require_noerr_quiet(err, exit);
+    }
+    const size_t previousCount = mrcs_dns_proxy_manager_get_count(gProxyManager);
+    err = mrcs_dns_proxy_manager_add_proxy(gProxyManager, proxy);
+    if (previousCount == 0)
+    {
+        if (mrcs_dns_proxy_manager_get_count(gProxyManager) > 0)
+        {
+            mDNSPlatformInitDNSProxySkts(ProxyUDPCallback, ProxyTCPCallback);
+        }
+    }
+
+exit:
+    return err;
+}
+
+mDNSlocal OSStatus DNSProxyStop(const mrcs_dns_proxy_t proxy)
+{
+    OSStatus err;
+    require_action_quiet(gProxyManager, exit, err = mStatus_BadStateErr);
+
+    const size_t previousCount = mrcs_dns_proxy_manager_get_count(gProxyManager);
+    err = mrcs_dns_proxy_manager_remove_proxy(gProxyManager, proxy);
+    require_noerr_quiet(err, exit);
+
+    if (previousCount > 0)
+    {
+        if (mrcs_dns_proxy_manager_get_count(gProxyManager) == 0)
+        {
+            mDNSPlatformCloseDNSProxySkts(&mDNSStorage);
+        }
+    }
+
+exit:
+    return err;
+}
+
+static mrcs_dns_proxy_t gLegacyProxy = mDNSNULL;
+
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
 mDNSexport void DNSProxyInit(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf, const mDNSu8 IPv6Prefix[16], int IPv6PrefixBitLen,
                              mDNSBool forceAAAASynthesis)
@@ -931,93 +966,96 @@ mDNSexport void DNSProxyInit(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf, const mDNSu8 
 mDNSexport void DNSProxyInit(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf)
 #endif
 {
-    mDNS *const m = &mDNSStorage;
-    int i;
+    if (gLegacyProxy)
+    {
+        return;
+    }
+    gLegacyProxy = mrcs_dns_proxy_create(NULL);
+    if (!gLegacyProxy)
+    {
+        return;
+    }
+    for (int i = 0; i < MaxIp; ++i)
+    {
+        mrcs_dns_proxy_add_input_interface(gLegacyProxy, IpIfArr[i]);
+    }
+    mrcs_dns_proxy_set_output_interface(gLegacyProxy, OpIf);
 
-    // Store DNSProxy Interface fields in mDNS struct
-    for (i = 0; i < MaxIp; i++)
-        m->dp_ipintf[i]  = IpIfArr[i];
-    m->dp_opintf         = OpIf;
-
-    LogInfo("DNSProxyInit Storing interface list: Input [%d, %d, %d, %d, %d] Output [%d]", m->dp_ipintf[0],
-            m->dp_ipintf[1], m->dp_ipintf[2], m->dp_ipintf[3], m->dp_ipintf[4], m->dp_opintf);
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
     if (IPv6Prefix)
     {
-        mDNSu32 copyLen;
-        mDNSPlatformMemZero(&gDNS64Prefix, (mDNSu32)sizeof(gDNS64Prefix));
-        switch (IPv6PrefixBitLen)
+        const OSStatus err = mrcs_dns_proxy_set_nat64_prefix(gLegacyProxy, IPv6Prefix, IPv6PrefixBitLen);
+        if (!err)
         {
-            case 32:
-                gDNS64Prefix.length = nw_nat64_prefix_length_32;
-                copyLen = 4;
-                break;
-
-            case 40:
-                gDNS64Prefix.length = nw_nat64_prefix_length_40;
-                copyLen = 5;
-                break;
-
-            case 48:
-                gDNS64Prefix.length = nw_nat64_prefix_length_48;
-                copyLen = 6;
-                break;
-
-            case 56:
-                gDNS64Prefix.length = nw_nat64_prefix_length_56;
-                copyLen = 7;
-                break;
-
-            case 64:
-                gDNS64Prefix.length = nw_nat64_prefix_length_64;
-                copyLen = 8;
-                break;
-
-            case 96:
-                gDNS64Prefix.length = nw_nat64_prefix_length_96;
-                copyLen = 12;
-                break;
-
-            default:
-                copyLen = 0;
-                break;
-        }
-        if (copyLen > 0)
-        {
-            mDNSPlatformMemCopy(gDNS64Prefix.data, IPv6Prefix, copyLen);
-            gDNS64ForceAAAASynthesis = forceAAAASynthesis;
-            gDNS64Enabled = mDNStrue;
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+            mrcs_dns_proxy_enable_force_aaaa_synthesis(gLegacyProxy, forceAAAASynthesis ? true : false);
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                 "DNSProxy using DNS64 IPv6 prefix: " PRI_IPv6_ADDR "/%d" PUB_S,
-                IPv6Prefix, IPv6PrefixBitLen, gDNS64ForceAAAASynthesis ? "" : " (force AAAA synthesis)");
+                IPv6Prefix, IPv6PrefixBitLen, forceAAAASynthesis ? "" : " (force AAAA synthesis)");
         }
         else
         {
-            gDNS64Enabled = mDNSfalse;
-            gDNS64ForceAAAASynthesis = mDNSfalse;
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
                 "DNSProxy not using invalid DNS64 IPv6 prefix: " PRI_IPv6_ADDR "/%d", IPv6Prefix, IPv6PrefixBitLen);
         }
     }
 #endif
+    DNSProxyStart(gLegacyProxy);
 }
 
 mDNSexport void DNSProxyTerminate(void)
 {
-    mDNS *const m = &mDNSStorage;
-    int i;
-    
-    // Clear DNSProxy Interface fields from mDNS struct
-    for (i = 0; i < MaxIp; i++)
-        m->dp_ipintf[i]  = 0;
-    m->dp_opintf         = 0; 
-    
-    LogInfo("DNSProxyTerminate Cleared interface list: Input [%d, %d, %d, %d, %d] Output [%d]", m->dp_ipintf[0],
-            m->dp_ipintf[1], m->dp_ipintf[2], m->dp_ipintf[3], m->dp_ipintf[4], m->dp_opintf);
-#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
-    gDNS64Enabled = mDNSfalse;
-#endif
+    if (gLegacyProxy)
+    {
+        DNSProxyStop(gLegacyProxy);
+        mrcs_forget(&gLegacyProxy);
+    }
 }
+
+mDNSlocal OSStatus DNSProxyStartHandler(const mrcs_dns_proxy_t proxy)
+{
+    KQueueLock();
+    const OSStatus err = DNSProxyStart(proxy);
+    KQueueUnlock("DNSProxyStartHandler");
+    return err;
+}
+
+mDNSlocal OSStatus DNSProxyStopHandler(const mrcs_dns_proxy_t proxy)
+{
+    KQueueLock();
+    const OSStatus err = DNSProxyStop(proxy);
+    KQueueUnlock("DNSProxyStopHandler");
+    return err;
+}
+
+mDNSlocal char *DNSProxyGetState(void)
+{
+    char *state;
+    if (gProxyManager && (mrcs_dns_proxy_manager_get_count(gProxyManager) > 0))
+    {
+        state = mrcs_copy_description(gProxyManager);
+    }
+    else
+    {
+        state = mdns_strdup("‹No DNS Proxies›");
+    }
+    return state;
+}
+
+mDNSlocal char *DNSProxyGetStateHandler(void)
+{
+    KQueueLock();
+    char *state = DNSProxyGetState();
+    KQueueUnlock("DNSProxyGetStateHandler");
+    return state;
+}
+
+const struct mrcs_server_handlers_s kMRCSServerHandlers =
+{
+    .dns_proxy_start = DNSProxyStartHandler,
+    .dns_proxy_stop = DNSProxyStopHandler,
+    .dns_proxy_get_state = DNSProxyGetStateHandler
+};
+
 #else // UNICAST_DISABLED
 
 mDNSexport void ProxyUDPCallback(void *socket, DNSMessage *const msg, const mDNSu8 *const end, const mDNSAddr *const srcaddr, const mDNSIPPort srcport, const mDNSAddr *dstaddr, const mDNSIPPort dstport, const mDNSInterfaceID InterfaceID, void *context)

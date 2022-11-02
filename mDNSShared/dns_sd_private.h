@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2015-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,9 @@
     #define DNS_SD_ENUM_SPI_AVAILABLE(...)
 
 #define DNS_SD_ENUM_SPI_AVAILABLE_FALL_2021 DNS_SD_ENUM_SPI_AVAILABLE(macos(12.0), ios(15.0), tvos(15.0), watchos(8.0))
+#define DNS_SD_ENUM_SPI_AVAILABLE_FALL_2022 DNS_SD_ENUM_SPI_AVAILABLE(macos(13.0), ios(16.0), tvos(16.0), watchos(9.0))
+
+__BEGIN_DECLS
 
 // Private flags (kDNSServiceFlagsPrivateOne, kDNSServiceFlagsPrivateTwo, kDNSServiceFlagsPrivateThree, kDNSServiceFlagsPrivateFour, kDNSServiceFlagsPrivateFive) from dns_sd.h
 enum
@@ -60,18 +63,20 @@ enum
 
 typedef enum
 {
-    kDNSServiceAAAAPolicyNone     DNS_SD_ENUM_SPI_AVAILABLE_FALL_2021 = 0,
-    kDNSServiceAAAAPolicyFallback DNS_SD_ENUM_SPI_AVAILABLE_FALL_2021 = 1  // If AAAA record doesn't exist, query for A.
-} DNSServiceAAAAPolicy;
-
-typedef enum
-{
     kDNSServiceFailoverPolicyNone  DNS_SD_ENUM_SPI_AVAILABLE_FALL_2021 = 0,
     kDNSServiceFailoverPolicyAllow DNS_SD_ENUM_SPI_AVAILABLE_FALL_2021 = 1
 } DNSServiceFailoverPolicy;
 
+typedef enum
+{
+    kDNSServiceValidationPolicyNone     DNS_SD_ENUM_SPI_AVAILABLE_FALL_2022 = 0,
+    kDNSServiceValidationPolicyRequired DNS_SD_ENUM_SPI_AVAILABLE_FALL_2022 = 1
+} DNSServiceValidationPolicy;
+
 
 #define kDNSServiceCompPrivateDNS   "PrivateDNS"
 #define kDNSServiceCompMulticastDNS "MulticastDNS"
+
+__END_DECLS
 
 #endif  // _DNS_SD_PRIVATE_H

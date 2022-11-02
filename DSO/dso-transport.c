@@ -1,6 +1,6 @@
 /* dso-transport.c
  *
- * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -67,6 +67,10 @@ static void dso_read_callback(TCPSocket *sock, void *context, mDNSBool connectio
                        mStatus err);
 #endif
 
+static void dso_connect_state_process_address_port_change(const mDNSAddr *addr_changed, mDNSIPPort port,
+                                                          bool add, dso_connect_state_t *const cs);
+static void dso_connect_internal(dso_connect_state_t *cs, mDNSBool reconnecting);
+
 void
 dso_transport_init(void)
 {
@@ -95,11 +99,11 @@ dso_connect_state_find(uint32_t serial)
 #endif
 
 static void
-dso_transport_finalize(dso_transport_t *transport)
+dso_transport_finalize(dso_transport_t *transport, const char *whence)
 {
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSO%u->DSOT%u] dso_transport_t finalizing - "
-        "transport: %p.", transport->dso != NULL ? transport->dso->serial : DSO_STATE_INVALID_SERIAL, transport->serial,
-        transport);
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSO%u->DSOT%u] dso_transport_t finalizing for " PUB_S " - "
+              "transport: %p.", transport->dso != NULL ? transport->dso->serial : DSO_STATE_INVALID_SERIAL,
+              transport->serial, whence, transport);
 
     dso_transport_t **tp = &dso_transport_states;
     for (; *tp != NULL && *tp != transport; tp = &((*tp)->next))
@@ -113,7 +117,6 @@ dso_transport_finalize(dso_transport_t *transport)
 
     if (transport->connection != NULL) {
 #ifdef DSO_USES_NETWORK_FRAMEWORK
-        nw_connection_cancel(transport->connection);
         nw_release(transport->connection);
 #else
         mDNSPlatformTCPCloseConnection(transport->connection);
@@ -161,6 +164,14 @@ int32_t dso_transport_idle(void *context, int32_t now_in, int32_t next_timer_eve
             MDNS_DISPOSE_DNS_SERVICE_REF(ref);
             mDNS_ReclaimLockAfterCallback();
         }
+
+        // Remove any remaining unused addresses.
+        for (dso_transport_address_t **addrs = &cs->addrs; *addrs != NULL; ) {
+            dso_transport_address_t *addr = *addrs;
+            *addrs = addr->next;
+            mdns_free(addr);
+        }
+
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSOC%u] dso_connect_state_t finalizing - "
             "dso_connect: %p, hostname: " PRI_S ", dso_connect->context: %p.", cs->serial, cs, cs->hostname,
             cs->context);
@@ -178,6 +189,9 @@ int32_t dso_transport_idle(void *context, int32_t now_in, int32_t next_timer_eve
             mDNSs32 expiry = cs->last_event + 90 * mDNSPlatformOneSecond;
             if (now - expiry > 0) {
                 cs->last_event = 0;
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSOC%u] dso_transport_idle: expiry has happened "
+                          ": %p, hostname: " PRI_S ", dso_connect->context: %p; now %d expiry %d last_event %d",
+                          cs->serial, cs, cs->hostname, cs->context, now, expiry, cs->last_event);
                 cs->callback(cs->context, NULL, cs->dso, kDSOEventType_ConnectFailed);
                 // Should not touch the current dso_connect_state_t after we deliver kDSOEventType_ConnectFailed event,
                 // because it is possible that the current dso_connect_state_t has been canceled in the callback.
@@ -188,16 +202,21 @@ int32_t dso_transport_idle(void *context, int32_t now_in, int32_t next_timer_eve
                     next_timer_event = expiry;
                 }
             }
-        } else if (!cs->connecting && cs->reconnect_time && now - cs->reconnect_time > 0) {
-            cs->reconnect_time = 0; // Don't try to immediately reconnect if it fails.
-            // If cs->dso->transport is non-null, we're already connected.
-            if (cs->dso && cs->dso->transport == NULL) {
-                cs->callback(cs->context, NULL, NULL, kDSOEventType_ShouldReconnect);
+        } else if (!cs->connecting && cs->reconnect_time != 0) {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSOC%u] reconnect time %d "
+                      "hostname: " PRI_S ", dso_connect->context: %p.",
+                      cs->serial, now - cs->reconnect_time, cs->hostname, cs->context);
+            if (now - cs->reconnect_time > 0) {
+                cs->reconnect_time = 0; // Don't try to immediately reconnect if it fails.
+                // If cs->dso->transport is non-null, we're already connected.
+                if (cs->dso && cs->dso->transport == NULL) {
+                    cs->callback(cs->context, NULL, cs->dso, kDSOEventType_ShouldReconnect);
+                }
+                // Should not touch the current dso_connect_state_t after we deliver kDSOEventType_ShouldReconnect event,
+                // because it is possible that the current dso_connect_state_t has been canceled in the callback.
+                // Any status update for the canceled dso_connect_state_t will not work as expected.
+                continue;
             }
-            // Should not touch the current dso_connect_state_t after we deliver kDSOEventType_ShouldReconnect event,
-            // because it is possible that the current dso_connect_state_t has been canceled in the callback.
-            // Any status update for the canceled dso_connect_state_t will not work as expected.
-            continue;
         }
         if (cs->reconnect_time != 0 && next_event - cs->reconnect_time > 0) {
             next_event = cs->reconnect_time;
@@ -207,10 +226,19 @@ int32_t dso_transport_idle(void *context, int32_t now_in, int32_t next_timer_eve
     return next_event;
 }
 
+void dso_reconnect(dso_connect_state_t *cs, dso_state_t *dso)
+{
+    cs->dso = dso;
+    dso_connect_internal(cs, mDNStrue);
+}
+
 // Call to schedule a reconnect at a later time.
 void dso_schedule_reconnect(mDNS *m, dso_connect_state_t *cs, mDNSs32 when)
 {
     cs->reconnect_time = when * mDNSPlatformOneSecond + m->timenow;
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSOC%u] scheduling reconnect in %d (%d %d) seconds, "
+              "hostname: " PRI_S ", dso_connect->context: %p.", cs->serial, when,
+              m->timenow, cs->reconnect_time, cs->hostname, cs->context);
 }
 
 // If a DSO was created by an incoming connection, the creator of the listener can use this function
@@ -315,7 +343,7 @@ bool dso_write_finish(dso_transport_t *transport)
                 dso_state_cancel(dso);
             }
         } else {
-            if (dso != NULL) {
+            if (dso != NULL && dso->transport != NULL) {
                 dso->transport->unsent_bytes -= bytes_to_write;
                 LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSO%u] dso_write_finish: completed - "
                     "bytes written: %zu, bytes outstanding: %zu.", serial, bytes_to_write,
@@ -410,6 +438,9 @@ void dso_write(dso_transport_t *transport, const uint8_t *buf, size_t length)
 int dso_message_write(dso_state_t *dso, dso_message_t *msg, bool disregard_low_water)
 {
     dso_transport_t *transport = dso->transport;
+    if (transport == NULL || transport->dso == NULL) {
+        return mStatus_BadStateErr;
+    }
     if (transport->connection != NULL) {
         if (dso_write_start(transport, dso_message_length(msg)) || disregard_low_water) {
             dso_write(transport, msg->buf, msg->no_copy_bytes_offset);
@@ -499,6 +530,12 @@ static void dso_read_message_length(dso_transport_t *transport)
         return;
     }
 
+    if (transport->dso == NULL) {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
+            "dso_read_message_length: transport->dso is NULL while reading message");
+        return;
+    }
+
     const uint32_t serial = transport->dso->serial;
     if (transport->connection == NULL) {
         LogMsg("dso_read_message_length called with null connection.");
@@ -521,8 +558,26 @@ static void dso_read_message_length(dso_transport_t *transport)
                                       mDNS_Unlock(&mDNSStorage);
                                   }
                               } else if (content == NULL) {
-                                  LogMsg("dso_read_message_length: remote end closed connection.");
-                                  goto fail;
+                                  dso_disconnect_context_t disconnect_context;
+                                  if (dso != NULL && transport->dso == dso && transport->dso->cb != NULL) {
+                                      LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                                                "dso_read_message_length: remote end closed connection: "
+                                                "passing disconnect event to callback.");
+                                      memset(&disconnect_context, 0, sizeof disconnect_context);
+                                      disconnect_context.reconnect_delay = 1; // reconnect in 1s
+                                      mDNS_Lock(&mDNSStorage);
+                                      dso->transport = NULL;
+                                      nw_connection_cancel(transport->connection);
+                                      transport->dso->cb(transport->dso->context, &disconnect_context, transport->dso,
+                                                         kDSOEventType_Disconnected);
+                                      mDNS_Unlock(&mDNSStorage);
+                                  } else if (dso != NULL) {
+                                      LogMsg("dso_read_message_length: remote end closed connection: "
+                                             "no callback to notify.");
+                                      mDNS_Lock(&mDNSStorage);
+                                      dso_state_cancel(dso);
+                                      mDNS_Unlock(&mDNSStorage);
+                                  }
                               } else if (dso != NULL) {
                                   uint32_t length;
                                   size_t length_length;
@@ -556,6 +611,11 @@ void dso_read_message(dso_transport_t *transport, uint32_t length)
             "dso_read_message: dso_transport_t is NULL while reading message");
         return;
     }
+    if (transport->dso == NULL) {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
+            "dso_read_message: transport->dso is NULL while reading message");
+        return;
+    }
 
     const uint32_t serial = transport->dso->serial;
     if (transport->connection == NULL) {
@@ -578,8 +638,25 @@ void dso_read_message(dso_transport_t *transport, uint32_t length)
                                       mDNS_Unlock(&mDNSStorage);
                                   }
                               } else if (content == NULL) {
-                                  LogMsg("dso_read_message: remote end closed connection");
-                                  goto fail;
+                                  dso_disconnect_context_t disconnect_context;
+                                  if (dso != NULL && transport->dso == dso && transport->dso->cb != NULL) {
+                                      LogMsg("dso_read_message: remote end closed connection: "
+                                             "passing disconnect event to callback.");
+                                      memset(&disconnect_context, 0, sizeof disconnect_context);
+                                      disconnect_context.reconnect_delay = 1; // reconnect in 1s
+                                      mDNS_Lock(&mDNSStorage);
+                                      dso->transport = NULL;
+                                      nw_connection_cancel(transport->connection);
+                                      transport->dso->cb(transport->dso->context, &disconnect_context, transport->dso,
+                                                         kDSOEventType_Disconnected);
+                                      mDNS_Unlock(&mDNSStorage);
+                                  } else if (dso != NULL) {
+                                      LogMsg("dso_read_message: remote end closed connection: "
+                                             "no callback to notify.");
+                                      mDNS_Lock(&mDNSStorage);
+                                      dso_state_cancel(dso);
+                                      mDNS_Unlock(&mDNSStorage);
+                                  }
                               } else if (dso != NULL) {
                                   dso_message_payload_t message;
                                   dispatch_data_t map = dispatch_data_create_map(content,
@@ -849,7 +926,6 @@ dso_connect_state_t *dso_connect_state_create(
     char *csp;
     char nbuf[INET6_ADDRSTRLEN + 1];
     dso_connect_state_t **states;
-    mdns_addr_tailq_t *addrs = NULL;
 
     // Enforce Some Minimums (Xxx these are a bit arbitrary, maybe not worth doing?)
     if (inbuf_size < MaximumRDSize || outbuf_size < 128 || max_outstanding_queries < 1) {
@@ -915,21 +991,12 @@ dso_connect_state_t *dso_connect_state_create(
     cs->inbuf_size = inbuf_size;
 #endif
 
-    // Initialize mDNSAddr list.
-    addrs = mdns_addr_tailq_create();
-    if (addrs == NULL) {
-        goto exit;
-    }
-
     if (addr != NULL) {
-        const mdns_addr_with_port_t *const addr_with_port = mdns_addr_tailq_add_back(addrs, addr, port);
-        if (addr_with_port == NULL) {
+        dso_connect_state_process_address_port_change(addr, port, mDNStrue, cs);
+        if (cs->addrs == NULL) {
             goto exit;
         }
     }
-
-    cs->addrs = addrs;
-    addrs = NULL;
 
     // cs->canceled must be set to false here, because we use it to determine if the current dso_connect_state_t is
     // still valid. We do not need to set it explicitly because the memset(cs, 0, sizeof *cs); above will initialize it
@@ -947,7 +1014,9 @@ dso_connect_state_t *dso_connect_state_create(
     cs = NULL;
 
 exit:
-    mdns_free(addrs);
+    if (cs != NULL) {
+        mdns_free(cs->addrs);
+    }
     mdns_free(cs);
     return cs_to_return;
 }
@@ -977,12 +1046,12 @@ dso_connect_state_cancel(dso_connect_state_t *const cs)
     }
 
 #ifdef DSO_USES_NETWORK_FRAMEWORK
-    // Cancel and release the underlying nw_connection_t.
+    // Cancel the underlying nw_connection_t.
     if (cs->connection != NULL) {
         nw_connection_cancel(cs->connection);
-        // Note that this may not finalize the nw_connection_t, because there might be pending callbacks that holds
-        // the reference to it.
-        MDNS_DISPOSE_NW(cs->connection);
+    }
+    if (cs->transport != NULL && cs->transport->connection != NULL) {
+        nw_connection_cancel(cs->transport->connection);
     }
 #endif
 
@@ -997,9 +1066,6 @@ dso_connect_state_cancel(dso_connect_state_t *const cs)
     // Invalidate this dso_connect_state_t object, so that when we get a callback for dso_inaddr_callback(), we can skip
     // the callback for the canceled dso_connect_state_t object.
     cs->canceled = mDNStrue;
-
-    // Remove any remaining unused addresses.
-    MDNS_DISPOSE_MDNS_ADDR_TAILQ(cs->addrs);
 
     // We leave cs and cs->lookup to be freed by dso_transport_idle.
     cs->next = dso_connect_state_needing_clean_up;
@@ -1027,16 +1093,8 @@ dso_connection_succeeded(dso_connect_state_t *cs)
     }
 
     cs->last_event = 0;
-
-    // When the connection has succeeded, stop asking questions.
-    if (cs->lookup != NULL) {
-        mDNS *m = &mDNSStorage;
-        DNSServiceRef ref = cs->lookup;
-        cs->lookup = NULL;
-        mDNS_DropLockBeforeCallback();
-        DNSServiceRefDeallocate(ref);
-        mDNS_ReclaimLockAfterCallback();
-    }
+    // Remember the transport on the connect state so that we can cancel it when needed.
+    cs->transport = transport;
     return;
 }
 
@@ -1082,10 +1140,9 @@ static bool tls_cert_verify(const sec_protocol_metadata_t metadata, const sec_tr
     return valid;
 }
 
-static void dso_connect_internal(dso_connect_state_t *cs)
+static void dso_connect_internal(dso_connect_state_t *cs, mDNSBool reconnecting)
 {
     uint32_t serial = cs->serial;
-    mdns_addr_tailq_t *const addrs = cs->addrs;
     nw_endpoint_t endpoint = NULL;
     nw_parameters_t parameters = NULL;
     nw_connection_t connection = NULL;
@@ -1093,31 +1150,39 @@ static void dso_connect_internal(dso_connect_state_t *cs)
     cs->last_event = mDNSStorage.timenow;
 
     // If we do not have more address to connect.
-    if (mdns_addr_tailq_empty(addrs)) {
-        if (cs->lookup == NULL) {
+    if (cs->next_addr == NULL) {
+        if (reconnecting) {
+            if (cs->addrs != NULL) {
+                dso_disconnect_context_t context;
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "[DSOC%u] At end of address list, delaying retry - "
+                          "server name: " PRI_S ".", cs->serial, cs->hostname);
+                cs->last_event = 0;
+                context.reconnect_delay = 60; // Wait one minute before attempting to reconnect.
+                cs->callback(cs->context, &context, cs->dso, kDSOEventType_Disconnected);
+                cs->next_addr = cs->addrs;
+            } else {
+                // Otherwise, we will get more callbacks when outstanding queries either fail or succeed.
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                          "[DSOC%u] Waiting for newly resolved address to connect - server name: " PRI_S ".",
+                          cs->serial, cs->hostname);
+            }
+        } else {
+            // The expectation is that if we are connecting to a DSO server, we really should succeed. If we
+            // don't succeed in connecting to any of the advertised servers, it's a good assumption that it's
+            // not working, so we should give up, rather than continuing forever to try.
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "[DSOC%u] No more addresses to try - "
-                "server name: " PRI_S ".", cs->serial, cs->hostname);
+                      "server name: " PRI_S ".", cs->serial, cs->hostname);
             cs->last_event = 0;
             cs->callback(cs->context, NULL, cs->dso, kDSOEventType_ConnectFailed);
-        } else {
-            // Otherwise, we will get more callbacks when outstanding queries either fail or succeed.
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
-                "[DSOC%u] Waiting for newly resolved address to connect - server name: " PRI_S ".",
-                cs->serial, cs->hostname);
         }
         goto exit;
     }
 
     // Always use the first address in the list to set up the connection.
-    const mdns_addr_with_port_t *addr_to_connect = mdns_addr_tailq_get_front(addrs);
-    if (addr_to_connect == NULL) {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
-            "[DSOC%u] No more address to connect to, but the addrs_p queue is not empty.", cs->serial);
-        goto exit;
-    }
+    const dso_transport_address_t *dest_addr = cs->next_addr;
 
-    const mDNSAddr addr = addr_to_connect->address;
-    const mDNSIPPort port = addr_to_connect->port;
+    const mDNSAddr addr = dest_addr->address;
+    const mDNSIPPort port = dest_addr->port;
 
     char addrbuf[INET6_ADDRSTRLEN + 1];
     char portbuf[6];
@@ -1153,12 +1218,7 @@ static void dso_connect_internal(dso_connect_state_t *cs)
         goto exit;
     }
 
-    uint64_t nw_connection_id;
-    if (__builtin_available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *)) {
-        nw_connection_id = nw_connection_get_id(connection);
-    } else {
-        nw_connection_id = 0;
-    }
+    const uint64_t nw_connection_id = nw_connection_get_id(connection);
 
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSOC%u->C%" PRIu64 "] Connecting to the server - "
         "server: " PRI_IP_ADDR ":%u.", cs->serial, nw_connection_id, &addr, mDNSVal16(port));
@@ -1173,14 +1233,14 @@ static void dso_connect_internal(dso_connect_state_t *cs)
                 // If we cannot find dso_connect_state_t in the system's list, it means that we have already canceled it
                 // in dso_connect_state_cancel() including the corresponding nw_connection_t. Therefore, there is no
                 // need to cancel the nw_connection_t again.
-                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_WARNING,
-                    "[DSOC%u->C%" PRIu64 "] The dso connection has been canceled - nw_connection_state_t: " PUB_S ".",
-                    serial, nw_connection_id, nw_connection_state_to_string(state));
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT, "[DSOC%u->C%" PRIu64
+                          "] No connect state found - nw_connection_state_t: " PUB_S ".",
+                          serial, nw_connection_id, nw_connection_state_to_string(state));
             } else {
                 if (state == nw_connection_state_waiting) {
                     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-                        "[DSOC%u->C%" PRIu64 "] Waiting to connect to the server - server: " PRI_IP_ADDR ":%u.", serial,
-                        nw_connection_id, &addr, mDNSVal16(port));
+                              "[DSOC%u->C%" PRIu64 "] Connection to server: " PRI_IP_ADDR ":%u waiting.",
+                              serial, nw_connection_id, &addr, mDNSVal16(port));
 
                     // XXX the right way to do this is to just let NW Framework wait until we get a connection,
                     // but there are a bunch of problems with that right now.   First, will we get "waiting" on
@@ -1192,25 +1252,17 @@ static void dso_connect_internal(dso_connect_state_t *cs)
                     // to think this through.   So right now we're just using the semantics of regular sockets,
                     // which we /have/ thought through.   So in the future we should do this think-through and
                     // try to use NW Framework as it's intended to work rather than as if it were just sockets.
-                    ncs->connecting = mDNSfalse;
                     nw_connection_cancel(connection);
                 } else if (state == nw_connection_state_failed) {
                     // We tried to connect, but didn't succeed.
                     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-                        "[DSOC%u->C%" PRIu64 "] Failed to connect to the server - "
-                        "server: " PRI_IP_ADDR ":%u, error:" PUB_S ", detail: " PUB_S ".", serial, nw_connection_id,
-                        &addr, mDNSVal16(port), strerror(nw_error_get_error_code(error)), ncs->detail);
-
-                    nw_release(ncs->connection);
-                    ncs->connection = NULL;
-                    ncs->connecting = mDNSfalse;
-                    // This will do the work of figuring out if there are more addresses to try.
-                    mDNS_Lock(&mDNSStorage);
-                    dso_connect_internal(ncs);
-                    mDNS_Unlock(&mDNSStorage);
+                              "[DSOC%u->C%" PRIu64 "] Connection to server: " PRI_IP_ADDR ":%u failed, error:"
+                              PUB_S ", detail: " PUB_S ".", serial, nw_connection_id,
+                              &addr, mDNSVal16(port), strerror(nw_error_get_error_code(error)), ncs->detail);
+                    nw_connection_cancel(connection);
                 } else if (state == nw_connection_state_ready) {
                     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-                        "[DSOC%u->C%" PRIu64 "] Connection to the server succeeds - server: " PRI_IP_ADDR ":%u.",
+                        "[DSOC%u->C%" PRIu64 "] Connection to server: " PRI_IP_ADDR ":%u ready.",
                         serial, nw_connection_id, &addr, mDNSVal16(port));
                     ncs->connecting = mDNSfalse;
                     mDNS_Lock(&mDNSStorage);
@@ -1218,17 +1270,45 @@ static void dso_connect_internal(dso_connect_state_t *cs)
                     mDNS_Unlock(&mDNSStorage);
                 } else if (state == nw_connection_state_cancelled) {
                     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-                        "[DSOC%u->C%" PRIu64 "] Canceling connection to the server - server: " PRI_IP_ADDR ":%u.",
+                        "[DSOC%u->C%" PRIu64 "] Connection to server: " PRI_IP_ADDR ":%u canceled.",
                         serial, nw_connection_id, &addr, mDNSVal16(port));
+                    if (ncs->transport) {
+                        if (ncs->transport->connection) {
+                            nw_release(ncs->transport->connection);
+                            ncs->transport->connection = NULL;
+                        }
+                        // If there is a dso state on the connect state and it is referencing this transport,
+                        // remove the reference.
+                        if (ncs->dso != NULL && ncs->dso->transport == ncs->transport) {
+                            ncs->dso->transport = NULL;
+                        }
+                        // If the dso_state_t is still referencing this transport, remove the reference.
+                        if (ncs->transport->dso != NULL && ncs->transport->dso->transport == ncs->transport) {
+                            ncs->transport->dso->transport = NULL;
+                        }
+                        dso_transport_finalize(ncs->transport, "dso_connect_internal");
+                        ncs->transport = NULL;
+                    }
                     if (ncs->connection) {
                         nw_release(ncs->connection);
                     }
                     ncs->connection = NULL;
-                    ncs->connecting = mDNSfalse;
-                    // If we get here and cs exists, we are still trying to connect.   So do the next step.
-                    mDNS_Lock(&mDNSStorage);
-                    dso_connect_internal(ncs);
-                    mDNS_Unlock(&mDNSStorage);
+                    if (ncs->connecting) {
+                        ncs->connecting = mDNSfalse;
+                        // If we get here and cs exists, we are still trying to connect.   So do the next step.
+                        mDNS_Lock(&mDNSStorage);
+                        dso_connect_internal(ncs, reconnecting);
+                        mDNS_Unlock(&mDNSStorage);
+                    }
+                }
+
+                // Except for the state nw_connection_state_ready, all the other states mean that the nw_connection is
+                // not ready for use. Therefore, it is no longer correct to say that we have an established session.
+                // In which case, set has_session to false.
+                if (state != nw_connection_state_ready) {
+                    if (ncs->dso != NULL) {
+                        ncs->dso->has_session = false;
+                    }
                 }
             }
             KQueueUnlock("dso_connect_internal state change handler");
@@ -1239,8 +1319,8 @@ static void dso_connect_internal(dso_connect_state_t *cs)
     connection = NULL;
 
     // We finished setting up the connection with the first address in the list, so remove it from the list.
-    addr_to_connect = NULL; // Discard the reference before removing it.
-    mdns_addr_tailq_remove_front(addrs);
+    cs->next_addr = dest_addr->next;
+    dest_addr = NULL;
 exit:
     MDNS_DISPOSE_NW(endpoint);
     MDNS_DISPOSE_NW(parameters);
@@ -1302,29 +1382,15 @@ static void dso_connect_callback(TCPSocket *sock, void *context, mDNSBool connec
 
     // If there are no addresses to connect to, and there are no queries running, then we can give
     // up.  Otherwise, we wait for one of the queries to deliver an answer.
-    mdns_addr_tailq_t *const addrs = cs->addrs;
-    if (mdns_addr_tailq_empty(addrs)) {
-        if (cs->lookup == NULL) {
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "[DSOC%u] No more addresses to try - "
-                "server name: " PRI_S ".", cs->serial, cs->hostname);
-            cs->last_event = 0;
-            cs->callback(cs->context, NULL, cs->dso, kDSOEventType_ConnectFailed);
-        }
-        // Otherwise, we will get more callbacks when outstanding queries either fail or succeed.
+    if (cs->next_addr == NULL) {
+        // We may get more callbacks when outstanding queries either fail or succeed, at which point we can try to
+        // connect to those addresses, or give up.
         mDNS_Unlock(m);
         return;
     }
 
-    // Always use the first address in the list to set up the connection.
-    const mdns_addr_with_port_t *addr_to_connect = mdns_addr_tailq_get_front(addrs);
-    if (addr_to_connect == NULL) {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
-            "[DSOC%u] No more address to connect to, but the addrs_p queue is not empty.", cs->serial);
-        goto fail;
-    }
-
-    const mDNSAddr addr = addr_to_connect->address;
-    const mDNSIPPort port = addr_to_connect->port;
+    const mDNSAddr addr = cs->next_addr->address;
+    const mDNSIPPort port = cs->next_addr->port;
 
     sock = mDNSPlatformTCPSocket(kTCPSocketFlags_Zero, addr.type, NULL, NULL, mDNSfalse);
     if (sock == NULL) {
@@ -1337,8 +1403,7 @@ static void dso_connect_callback(TCPSocket *sock, void *context, mDNSBool connec
 
     status = mDNSPlatformTCPConnect(sock, &addr, port, NULL, dso_connect_callback, cs);
     // We finished setting up the connection with the first address in the list, so remove it from the list.
-    addr_to_connect = NULL; // Discard the reference before removing it.
-    mdns_addr_tailq_remove_front(addrs);
+    cs->next_addr = cs->next_addr->next;
 
     if (status == mStatus_NoError || status == mStatus_ConnEstablished) {
         // This can't happen in practice on MacOS; we don't know about all other operating systems,
@@ -1357,38 +1422,59 @@ static void dso_connect_callback(TCPSocket *sock, void *context, mDNSBool connec
     mDNS_Unlock(m);
 }
 
-static void dso_connect_internal(dso_connect_state_t *cs)
+static void dso_connect_internal(dso_connect_state_t *cs, mDNSBool reconnecting)
 {
+    (void)reconnecting;
     dso_connect_callback(NULL, cs, false, mStatus_NoError);
 }
 #endif // DSO_USES_NETWORK_FRAMEWORK
 
-static void dso_connect_state_process_address_change(const mDNSAddr addr_changed, const bool add,
-                                                     dso_connect_state_t *const cs)
+static void dso_connect_state_process_address_port_change(const mDNSAddr *addr_changed, mDNSIPPort port,
+                                                          bool add, dso_connect_state_t *const cs)
 {
     bool succeeded;
-    mdns_addr_tailq_t *const addrs = cs->addrs;
-
-    if (addrs == NULL) {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT, "[DSOC%u] dso_connect_state_t has NULL mdns_addr_tailq_t -"
-            " canceled: %d.", cs->serial, cs->canceled);
-        succeeded = false;
-        goto exit;
-    }
+    dso_transport_address_t **addrs = &cs->addrs;
 
     if (add) {
         // Always add the new address to the tail, so the order of using the address to connect is the same as the order
         // of the address being added.
-        const mdns_addr_with_port_t *const addr_with_port = mdns_addr_tailq_add_back(addrs, &addr_changed,
-                                                                                     cs->config_port);
-        if (addr_with_port == NULL) {
+        while (*addrs != NULL) {
+            addrs = &(*addrs)->next;
+        }
+        dso_transport_address_t *new_addr = mdns_calloc(1, sizeof(*new_addr));
+        if (new_addr == NULL) {
             succeeded = false;
             goto exit;
+        }
+        memcpy(&new_addr->address, addr_changed, sizeof (*addr_changed));
+        new_addr->port = port;
+        *addrs = new_addr;
+        if (cs->next_addr == NULL) {
+            cs->next_addr = new_addr;
         }
     } else {
         // Remove address that has been previously added, so that mDNSResponder will not even try the removed address in
         // the future when reconnecting.
-        const bool removed = mdns_addr_tailq_remove(addrs, &addr_changed, cs->config_port);
+        bool removed = mDNSfalse;
+        while (*addrs != NULL) {
+            dso_transport_address_t *addr = *addrs;
+            if (((addr->address.type == mDNSAddrType_IPv4 && !memcmp(&addr->address.ip.v4, &addr_changed->ip.v4,
+                                                                     sizeof(addr->address.ip.v4))) ||
+                 (addr->address.type == mDNSAddrType_IPv6 && !memcmp(&addr->address.ip.v6, &addr_changed->ip.v6,
+                                                                     sizeof(addr->address.ip.v4)))) &&
+                addr->port.NotAnInteger == port.NotAnInteger)
+            {
+                if (cs->next_addr == addr) {
+                    cs->next_addr = addr->next;
+                }
+                *addrs = addr->next;
+                mdns_free(addr);
+                removed = mDNStrue;
+                break;
+            }
+            addrs = &addr->next;
+        }
+
         if (!removed) {
             // If the address being removed is not in the list, it indicates the following two scenarios:
             // 1. The address has been traversed when dso_connect_state_t tries to connect to the server address.
@@ -1401,12 +1487,17 @@ static void dso_connect_state_process_address_change(const mDNSAddr addr_changed
         }
     }
 
-    if (!cs->connecting) {
+    if (!cs->connecting && !cs->transport) {
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSOC%u] Starting a new connection.", cs->serial);
-        dso_connect_internal(cs);
+        dso_connect_internal(cs, mDNSfalse);
     } else {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-            "[DSOC%u] Connection in progress, deferring new connection until it fails.", cs->serial);
+        if (cs->connecting) {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                      "[DSOC%u] Connection in progress, deferring new connection until it fails.", cs->serial);
+        } else {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                      "[DSOC%u] Already connected, retained new address for later need.", cs->serial);
+        }
     }
 
     succeeded = true;
@@ -1415,6 +1506,12 @@ exit:
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
                   "[DSOC%u] Failed to process address changes for dso_connect_state_t.", cs->serial);
     }
+}
+
+static void dso_connect_state_process_address_change(const mDNSAddr *addr_changed, const bool add,
+                                                     dso_connect_state_t *const cs)
+{
+    dso_connect_state_process_address_port_change(addr_changed, cs->config_port, add, cs);
 }
 
 static void dso_inaddr_callback(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex,
@@ -1438,7 +1535,7 @@ static void dso_inaddr_callback(DNSServiceRef sdRef, DNSServiceFlags flags, uint
     // It is possible that the network does not support IPv4 or IPv6, in which case we will get the
     // kDNSServiceErr_NoSuchRecord error for the corresponding unsupported address type. This is a valid case.
     if (errorCode == kDNSServiceErr_NoSuchRecord) {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "[DSOC%u] No usable IP address for the DNS push server - "
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSOC%u] No usable IP address for the DNS push server - "
             "host name: " PRI_S ", address type: " PUB_S ".", cs->serial, fullname,
             sa->sa_family == AF_INET ? "A" : "AAAA");
         goto exit;
@@ -1455,26 +1552,28 @@ static void dso_inaddr_callback(DNSServiceRef sdRef, DNSServiceFlags flags, uint
     const mDNSAddr addr_changed = mDNSAddr_from_sockaddr(sa);
     const mDNSBool addr_add = (flags & kDNSServiceFlagsAdd) != 0;
 
-    mDNS_Lock(m);
+    // mDNSPlatformInterfaceIDfromInterfaceIndex() should be called without holding mDNS lock, because the function itself
+    // may need to grab mDNS lock.
     const mDNSInterfaceID if_id = mDNSPlatformInterfaceIDfromInterfaceIndex(m, interfaceIndex);
+    mDNS_Lock(m);
     const char *const if_name = InterfaceNameForID(m, if_id);
     const mDNSBool on_the_local_subnet = mDNS_AddressIsLocalSubnet(m, if_id, &addr_changed);
     mDNS_Unlock(m);
 
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSOC%u] dso_inaddr_callback - address " PUB_S
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSOC%u] dso_inaddr_callback - address " PUB_ADD_RMV
         ", resolved name: " PRI_S ", flags: %x, interface name: " PUB_S "(%u), erorr: %d, full name: " PRI_S
-        ", addr: " PRI_IP_ADDR ":%u, ttl: %u" PUB_S ".", cs->serial, addr_add ? "added" : "removed", fullname, flags,
-        if_name, interfaceIndex, errorCode, fullname, &addr_changed, mDNSVal16(cs->config_port), ttl,
-        on_the_local_subnet ? ", on the local subnet" : "");
+        ", addr: " PRI_IP_ADDR ":%u, ttl: %u, on the local subnet: " PUB_BOOL ".", cs->serial, ADD_RMV_PARAM(addr_add),
+        fullname, flags, if_name, interfaceIndex, errorCode, fullname, &addr_changed, mDNSVal16(cs->config_port), ttl,
+        BOOL_PARAM(on_the_local_subnet));
 
     // Currently, mDNSResponder only trusts DNS push server on the local subnet.
     if (!on_the_local_subnet) {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
             "[DSOC%u] Ignoring the DNS push server address that is not on the local subnet.", cs->serial);
          goto exit;
     }
 
-    dso_connect_state_process_address_change(addr_changed, addr_add, cs);
+    dso_connect_state_process_address_change(&addr_changed, addr_add, cs);
 
 exit:
     return;
@@ -1485,9 +1584,9 @@ bool dso_connect(dso_connect_state_t *cs)
     struct in_addr in;
     struct in6_addr in6;
 
-    if (!mdns_addr_tailq_empty(cs->addrs)) {
+    if (cs->next_addr != NULL) {
         // If the connection state was created with an address, use that rather than hostname,
-        dso_connect_internal(cs);
+        dso_connect_internal(cs, mDNSfalse);
 
     } else if (inet_pton(AF_INET, cs->hostname, &in)) {
         // else allow an IPv4 address literal string,
@@ -1496,7 +1595,7 @@ bool dso_connect(dso_connect_state_t *cs)
             "[DSOC%u] Add and connecting to an IPv4 address literal string directly - address: " PRI_IP_ADDR ":%u.",
             cs->serial, &v4, mDNSVal16(cs->config_port));
 
-        dso_connect_state_process_address_change(v4, true, cs);
+        dso_connect_state_process_address_change(&v4, true, cs);
 
     } else if (inet_pton(AF_INET6, cs->hostname, &in6)) {
         // or an IPv6 address literal string,
@@ -1505,11 +1604,11 @@ bool dso_connect(dso_connect_state_t *cs)
             "[DSOC%u] Add and connecting to an IPv6 address literal string directly - address: " PRI_IP_ADDR ":%u.",
             cs->serial, &v6, mDNSVal16(cs->config_port));
 
-        dso_connect_state_process_address_change(v6, true, cs);
+        dso_connect_state_process_address_change(&v6, true, cs);
 
     } else {
         // else look it up.
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "[DSOC%u] Resolving server name to start a new connection - "
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSOC%u] Resolving server name to start a new connection - "
             "server: " PRI_S ".", cs->serial, cs->hostname);
         mDNS *m = &mDNSStorage;
         mDNS_DropLockBeforeCallback();
@@ -1567,7 +1666,6 @@ out:
 
 int dso_listen(dso_connect_state_t *listen_context)
 {
-    char addrbuf[INET6_ADDRSTRLEN + 1];
     mDNSIPPort port;
     mDNSBool reuseAddr = mDNSfalse;
 
@@ -1582,14 +1680,7 @@ int dso_listen(dso_connect_state_t *listen_context)
     }
     listen_context->connect_port = port;
 
-    const mdns_addr_tailq_t *const addrs = listen_context->addrs;
-    if (mdns_addr_tailq_empty(addrs)) {
-        return mStatus_Invalid;
-    }
-    const mdns_addr_with_port_t *const addr_to_listen = mdns_addr_tailq_get_front(addrs);
-    get_address_string_from_mDNSAddr(&addr_to_listen->address, addrbuf);
-
-    LogMsg("DSOListen: Listening on %s%%%d", addrbuf, mDNSVal16(addr_to_listen->port));
+    LogMsg("DSOListen: Listening on <any>%%%d", mDNSVal16(port));
     return mStatus_NoError;
 }
 #endif // DSO_USES_NETWORK_FRAMEWORK

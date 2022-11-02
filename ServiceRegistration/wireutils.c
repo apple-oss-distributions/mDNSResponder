@@ -476,7 +476,7 @@ dns_rcode_name(int rcode)
     case dns_rcode_refused:
         return "Query Refused";
     case dns_rcode_yxdomain:
-        return "RFC6672] Name Exists when it should not";
+        return "Name Exists when it should not";
     case dns_rcode_yxrrset:
         return "RR Set Exists when it should not";
     case dns_rcode_nxrrset:

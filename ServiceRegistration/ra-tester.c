@@ -60,34 +60,42 @@ int
 main(int argc, char **argv)
 {
     int i;
-	extern char *thread_interface_name;
-    extern char *home_interface_name;
-	extern bool advertise_default_route_on_thread;
     bool log_stderr = true;
+
+    srp_server_t *server_state = calloc(1, sizeof(*server_state));
+    if (server_state == NULL) {
+        ERROR("no memory for server_state");
+        return 1;
+    }
+    server_state->name = strdup("ra-tester");
+    server_state->route_state = route_state_create(server_state, "ra-tester");
+    if (server_state->route_state == NULL) {
+        return 1;
+    }
 
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-t")) {
             if (i + 1 == argc) {
                 usage();
             }
-            thread_interface_name = argv[i + 1];
+            server_state->route_state->thread_interface_name = argv[i + 1];
             i++;
         } else if (!strcmp(argv[i], "-h")) {
             if (i + 1 == argc) {
                 usage();
             }
-            home_interface_name = argv[i + 1];
+            server_state->route_state->home_interface_name = argv[i + 1];
             i++;
         } else {
             usage();
         }
     }
 
-    if (thread_interface_name == NULL) {
+    if (server_state->route_state->thread_interface_name == NULL) {
         INFO("thread interface name required.");
         usage();
     }
-    if (home_interface_name == NULL) {
+    if (server_state->route_state->home_interface_name == NULL) {
         INFO("home interface name required.");
         usage();
     }
@@ -101,7 +109,7 @@ main(int argc, char **argv)
         return 1;
     }
 
-    infrastructure_network_startup();
+    infrastructure_network_startup(server_state->route_state);
 
     do {
         int something = 0;

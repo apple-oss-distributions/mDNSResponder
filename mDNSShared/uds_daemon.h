@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,9 @@
 #include "ClientRequests.h"
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
 #include "mdns_trust.h"
+#endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+#include "signed_result.h"
 #endif
 
 /* Client request: */
@@ -79,9 +82,14 @@ typedef struct browser_t
 } browser_t;
 
 #ifdef _WIN32
+# ifdef __MINGW32__
+typedef int pid_t;
+typedef int socklen_t;
+# else
 typedef unsigned int pid_t;
 typedef int socklen_t;
-#endif
+# endif // __MINGW32__
+#endif //_WIN32
 
 #if (!defined(MAXCOMLEN))
 #define MAXCOMLEN 16
@@ -109,6 +117,10 @@ struct request_state
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
     mdns_trust_t trust;
 #endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+    mDNSBool sign_result;
+    mdns_signed_result_t signed_obj;
+#endif
 	// Note: On a shared connection these fields in the primary structure, including hdr, are re-used
 	// for each new request. This is because, until we've read the ipc_msg_hdr to find out what the
 	// operation is, we don't know if we're going to need to allocate a new request_state or not.
@@ -131,7 +143,6 @@ struct request_state
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     mdns_dns_service_id_t custom_service_id;
 #endif
-
 	union
 	{
 		registered_record_entry *reg_recs;  // list of registrations for a connection-oriented request

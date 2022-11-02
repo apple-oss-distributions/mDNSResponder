@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,16 @@
 #define MDNSASWithFormat(format, ...) MDNSAS(([[NSString alloc] initWithFormat:format, ##__VA_ARGS__]))
 
 // os_log(OS_LOG_DEFAULT, "IP Address(IPv4/IPv6): %{mdnsresponder:ip_addr}.20P", <the address of mDNSAddr structure>);
-#define MDNSADDR_LENGTH 20
+typedef struct
+{
+    int32_t type;
+    union
+    {
+        uint8_t v4[4];
+        uint8_t v6[16];
+    } ip;
+} mDNSAddrCompat;
+
 static NS_RETURNS_RETAINED NSAttributedString *
 MDNSOLCopyFormattedStringmDNSIPAddr(id value)
 {
@@ -48,10 +57,16 @@ MDNSOLCopyFormattedStringmDNSIPAddr(id value)
         goto exit;
     }
 
-    require_quiet(data.length == MDNSADDR_LENGTH, exit);
-    AlignedBuffer(MDNSADDR_LENGTH) addr;
-    memcpy(addr.buf, data.bytes, MDNSADDR_LENGTH);
-    str = NSPrintF("%#a", addr.buf);
+    mDNSAddrCompat addr;
+    require_quiet(data.length == sizeof(addr), exit);
+    memcpy(&addr, data.bytes, sizeof(addr));
+
+    if (addr.type == 0) {
+        nsa_str = MDNSAS(@"<UNSPECIFIED IP ADDRESS>");
+        goto exit;
+    }
+
+    str = NSPrintF("%#a", &addr);
     require_action_quiet(str != nil, exit, nsa_str = MDNSAS(@"<Could not create NSString>"));
 
     nsa_str = MDNSAS(str);

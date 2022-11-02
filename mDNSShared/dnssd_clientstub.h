@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -26,10 +26,43 @@
  */
 
 #include "dns_sd.h"
+#include "dnssd_ipc.h"
 
-typedef struct DNSServiceQueryAttr_s DNSServiceQueryAttr;
+DNSServiceErrorType
+DNSServiceBrowseInternal(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, const char *regtype,
+    const char *domain, const DNSServiceAttribute *attr, DNSServiceBrowseReply callBack, void *context);
+
+DNSServiceErrorType
+DNSServiceResolveInternal(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, const char *name,
+    const char *regtype, const char *domain, const DNSServiceAttribute *attr, DNSServiceResolveReply callBack,
+    void *context);
+
+DNSServiceErrorType
+DNSServiceGetAddrInfoInternal(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex,
+    DNSServiceProtocol protocol, const char *hostname, const DNSServiceAttribute *attr, DNSServiceGetAddrInfoReply callBack,
+    void *context);
 
 DNSServiceErrorType
 DNSServiceQueryRecordInternal(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, const char *name,
-	uint16_t rrtype, uint16_t rrclass, const DNSServiceQueryAttr *attr, const DNSServiceQueryRecordReply callback,
-	void *context);
+    uint16_t rrtype, uint16_t rrclass, const DNSServiceAttribute *attr, const DNSServiceQueryRecordReply callback,
+    void *context);
+
+DNSServiceErrorType
+DNSServiceRegisterInternal(DNSServiceRef *sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, const char *name,
+    const char *regtype, const char *domain, const char *host, uint16_t portInNetworkByteOrder, uint16_t txtLen,
+    const void *txtRecord, const DNSServiceAttribute *attr, DNSServiceRegisterReply callBack, void *context);
+
+DNSServiceErrorType
+DNSServiceRegisterRecordInternal(DNSServiceRef sdRef, DNSRecordRef *recordRef, DNSServiceFlags flags,
+    uint32_t interfaceIndex, const char *fullname, uint16_t rrtype, uint16_t rrclass, uint16_t rdlen,
+    const void *rdata, uint32_t ttl, const DNSServiceAttribute *attr, DNSServiceRegisterRecordReply callBack,
+    void *context);
+
+DNSServiceErrorType
+DNSServiceSendQueuedRequestsInternal(DNSServiceRef sdr);
+
+size_t
+get_required_tlv_length_for_service_attr(const DNSServiceAttribute *attr);
+
+void
+put_tlvs_for_service_attr(const DNSServiceAttribute *attr, ipc_msg_hdr *hdr, uint8_t **ptr, const uint8_t *limit);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,9 @@ int WCFNameResolvesToAddr(WCFConnection *conn, char* domainName, struct sockaddr
 int WCFNameResolvesToName(WCFConnection *conn, char* fromName, char* toName, uid_t userid) __attribute__((weak_import));
 #endif
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+#include "dnssec.h"
+#endif
 
 #define RecordTypeIsAddress(TYPE)   (((TYPE) == kDNSType_A) || ((TYPE) == kDNSType_AAAA))
 
@@ -86,6 +89,7 @@ typedef struct
     mDNSBool                needEncryption;
     mDNSBool                useFailover;
     mDNSBool                failoverMode;
+    mDNSBool                prohibitEncryptedDNS;
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
     const audit_token_t *   peerAuditToken;
@@ -210,6 +214,7 @@ mDNSexport mStatus GetAddrInfoClientRequestStart(GetAddrInfoClientRequest *inReq
     opParams.needEncryption         = inParams->needEncryption;
     opParams.useFailover            = inParams->useFailover;
     opParams.failoverMode           = inParams->failoverMode;
+    opParams.prohibitEncryptedDNS   = inParams->prohibitEncryptedDNS;
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
     opParams.peerAuditToken         = inParams->peerAuditToken;
@@ -367,6 +372,7 @@ mDNSexport mStatus QueryRecordClientRequestStart(QueryRecordClientRequest *inReq
     opParams.needEncryption         = inParams->needEncryption;
     opParams.useFailover            = inParams->useFailover;
     opParams.failoverMode           = inParams->failoverMode;
+    opParams.prohibitEncryptedDNS   = inParams->prohibitEncryptedDNS;
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
     opParams.peerAuditToken         = inParams->peerAuditToken;
@@ -378,11 +384,7 @@ mDNSexport mStatus QueryRecordClientRequestStart(QueryRecordClientRequest *inReq
     opParams.logPrivacyLevel        = inParams->logPrivacyLevel;
 #endif
 
-    {
-        // Clear DNSSEC flag since the current query cannot be validated with DNSSEC or the user does not enable it.
-        opParams.flags &= (~kDNSServiceFlagsEnableDNSSEC);
-        err = QueryRecordOpStart(&inRequest->op, &opParams, inResultHandler, inResultContext);
-    }
+    err = QueryRecordOpStart(&inRequest->op, &opParams, inResultHandler, inResultContext);
 
 exit:
     if (err) QueryRecordClientRequestStop(inRequest);
@@ -392,7 +394,6 @@ exit:
 mDNSexport void QueryRecordClientRequestStop(QueryRecordClientRequest *inRequest)
 {
     QueryRecordOpStop(&inRequest->op);
-
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, REACHABILITY_TRIGGER)
     if (inRequest->op.answered)
@@ -466,15 +467,16 @@ mDNSlocal mStatus QueryRecordOpStart(QueryRecordOp *inOp, const QueryRecordOpPar
     }
     mDNSPlatformMemCopy(inOp->qname, inParams->qname, len);
 
-    inOp->interfaceID     = inParams->interfaceID;
-    inOp->reqID           = inParams->requestID;
-    inOp->resultHandler   = inResultHandler;
-    inOp->resultContext   = inResultContext;
-    inOp->useAAAAFallback = inParams->useAAAAFallback;
+    inOp->interfaceID          = inParams->interfaceID;
+    inOp->reqID                = inParams->requestID;
+    inOp->resultHandler        = inResultHandler;
+    inOp->resultContext        = inResultContext;
+    inOp->useAAAAFallback      = inParams->useAAAAFallback;
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
-    inOp->useFailover     = inParams->useFailover;
-    inOp->failoverMode    = inParams->failoverMode;
-    inOp->qtype           = inParams->qtype;
+    inOp->useFailover          = inParams->useFailover;
+    inOp->failoverMode         = inParams->failoverMode;
+    inOp->prohibitEncryptedDNS = inParams->prohibitEncryptedDNS;
+    inOp->qtype                = inParams->qtype;
 #endif
 
     // Set up DNSQuestion.
@@ -510,6 +512,9 @@ mDNSlocal mStatus QueryRecordOpStart(QueryRecordOp *inOp, const QueryRecordOpPar
     q->SuppressUnusable     = (inParams->flags & kDNSServiceFlagsSuppressUnusable)          ? mDNStrue : mDNSfalse;
     q->TimeoutQuestion      = (inParams->flags & kDNSServiceFlagsTimeout)                   ? mDNStrue : mDNSfalse;
     q->UseBackgroundTraffic = (inParams->flags & kDNSServiceFlagsBackgroundTrafficClass)    ? mDNStrue : mDNSfalse;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    q->enableDNSSEC         = dns_service_flags_enables_dnssec(inParams->flags);
+#endif
     q->AppendSearchDomains  = inParams->appendSearchDomains;
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     q->RequireEncryption    = inParams->needEncryption;
@@ -523,7 +528,11 @@ mDNSlocal mStatus QueryRecordOpStart(QueryRecordOp *inOp, const QueryRecordOpPar
             q->ForcePathEval = mDNStrue;
         }
     }
-    else if (inParams->resolverUUID)
+    if (inOp->prohibitEncryptedDNS)
+    {
+        q->ProhibitEncryptedDNS = mDNStrue;
+    }
+    else if (inParams->resolverUUID && !q->ProhibitEncryptedDNS)
     {
         mDNSPlatformMemCopy(q->ResolverUUID, inParams->resolverUUID, UUID_SIZE);
     }
@@ -533,7 +542,6 @@ mDNSlocal mStatus QueryRecordOpStart(QueryRecordOp *inOp, const QueryRecordOpPar
 #if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
     q->logPrivacyLevel      = inParams->logPrivacyLevel;
 #endif
-
 
     q->pid              = inParams->effectivePID;
     if (inParams->effectiveUUID)
@@ -593,7 +601,7 @@ mDNSlocal mStatus QueryRecordOpStart(QueryRecordOp *inOp, const QueryRecordOpPar
             q2->AppendSearchDomains     = mDNSfalse;
         }
 
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                "[R%u] QueryRecordOpStart: starting parallel unicast query for " PRI_DM_NAME " " PUB_S,
                inOp->reqID, DM_NAME_PARAM(&q2->qname), DNSTypeName(q2->qtype));
 
@@ -697,7 +705,7 @@ mDNSlocal void QueryRecordOpCallback(mDNS *m, DNSQuestion *inQuestion, const Res
     {
         if (inQuestion->TimeoutQuestion && ((GetTimeNow(m) - inQuestion->StopTime) >= 0))
         {
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                    "[R%u] QueryRecordOpCallback: Question " PRI_DM_NAME " (" PUB_S ") timing out, InterfaceID %p",
                    op->reqID, DM_NAME_PARAM(&inQuestion->qname), DNSTypeName(inQuestion->qtype),
                    inQuestion->InterfaceID);
@@ -756,7 +764,7 @@ mDNSlocal void QueryRecordOpCallback(mDNS *m, DNSQuestion *inQuestion, const Res
                 if ((RecordTypeIsAddress(inQuestion->qtype) && (inAnswer->rcode == kDNSFlag1_RC_NoErr)) ||
                     DomainNameIsInSearchList(&inQuestion->qname, mDNStrue))
                 {
-                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                            "[R%u] QueryRecordOpCallback: Question " PRI_DM_NAME " (" PUB_S ") answering local with negative unicast response",
                            op->reqID, DM_NAME_PARAM(&inQuestion->qname), DNSTypeName(inQuestion->qtype));
                 }

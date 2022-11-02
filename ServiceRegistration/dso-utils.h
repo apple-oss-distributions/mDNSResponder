@@ -19,6 +19,8 @@
 #define DNSMessageHeader dns_wire_t
 
 void dso_simple_response(comm_t *NONNULL comm, message_t *NULLABLE message, const dns_wire_t *NONNULL wire, int rcode);
+void dso_retry_delay_response(comm_t *NONNULL comm, message_t *NONNULL message, const dns_wire_t *NONNULL wire,
+                              int rcode, uint32_t milliseconds);
 
 // Local Variables:
 // mode: C

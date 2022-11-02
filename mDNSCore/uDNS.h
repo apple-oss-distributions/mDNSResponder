@@ -188,14 +188,6 @@ extern domainname      *uDNS_GetNextSearchDomain(mDNSInterfaceID InterfaceID, in
     
 extern void uDNS_RestartQuestionAsTCP(mDNS *m, DNSQuestion *const q, const mDNSAddr *const srcaddr, const mDNSIPPort srcport);
 
-typedef enum
-{
-    uDNS_LLQ_Not = 0,   // Normal uDNS answer: Flush any stale records from cache, and respect record TTL
-    uDNS_LLQ_Ignore,    // LLQ initial challenge packet: ignore -- has no useful records for us
-    uDNS_LLQ_Entire,    // LLQ initial set of answers: Flush any stale records from cache, but assume TTL is 2 x LLQ refresh interval
-    uDNS_LLQ_Events     // LLQ event packet: don't flush cache; assume TTL is 2 x LLQ refresh interval
-} uDNS_LLQType;
-
 extern uDNS_LLQType    uDNS_recvLLQResponse(mDNS *const m, const DNSMessage *const msg, const mDNSu8 *const end, const mDNSAddr *const srcaddr, const mDNSIPPort srcport, DNSQuestion **matchQuestion);
 extern DomainAuthInfo *GetAuthInfoForName_internal(mDNS *m, const domainname *const name);
 extern DomainAuthInfo *GetAuthInfoForQuestion(mDNS *m, const DNSQuestion *const q);

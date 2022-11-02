@@ -1,9 +1,18 @@
-//
-//  HelperFunctionTest.m
-//  Tests
-//
-//  Copyright (c) 2019 Apple Inc. All rights reserved.
-//
+/*
+ * Copyright (c) 2019, 2021 Apple Inc. All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #import <XCTest/XCTest.h>
 #include "unittest_common.h"
@@ -14,15 +23,8 @@
 
 @implementation HelperFunctionTest
 
-- (void)setUp {
-    // It is empty for now.
-}
-
-- (void)tearDown {
-    // It is empty for now.
-}
-
-- (void)testCFStringToDomainLabel {
+- (void)testCFStringToDomainLabel
+{
     // test_cstring[i][0] is the input
     // test_cstring[i][1] is the expected correct output
     static const char * const test_cstring[][2] = {
@@ -36,7 +38,7 @@
         {"🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝", "🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝"} // "🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝" is 60 bytes, and "🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝🃝" is more than 63 bytes so the result is expected to be truncated to 60 bytes instead of 64 bytes
     };
 
-    for (int i = 0, n = sizeof(test_cstring) / sizeof(test_cstring[0]); i < n; i++) {
+    for (size_t i = 0; i < sizeof(test_cstring) / sizeof(test_cstring[0]); i++) {
         // construct CFString from input
         CFStringRef name_ref = CFStringCreateWithCString(kCFAllocatorDefault, test_cstring[i][0], kCFStringEncodingUTF8);
         XCTAssertTrue(name_ref != NULL, @"unit test internal error. {descrption=\"name_ref should be non-NULL.\"}");
@@ -47,7 +49,7 @@
 
         // Check if the result is correct
         XCTAssertEqual(label.c[0], strlen(test_cstring[i][1]),
-                       @"name length is not equal. {expect=%d,actual=%d}", strlen(test_cstring[i][1]), label.c[0]);
+                       @"name length is not equal. {expect=%lu,actual=%d}", strlen(test_cstring[i][1]), label.c[0]);
         XCTAssertTrue(memcmp(label.c + 1, test_cstring[i][1], label.c[0]) == 0,
                       @"name is not correctly decoded. {expect='%s',actual='%s'}", test_cstring[i][1], label.c + 1);
 

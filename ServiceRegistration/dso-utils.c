@@ -56,6 +56,46 @@ dso_send_formerr(dso_state_t *dso, const dns_wire_t *header)
     return true;
 }
 
+void
+dso_retry_delay_response(comm_t *comm, message_t *message, const dns_wire_t *wire, int rcode, uint32_t milliseconds)
+{
+    dns_wire_t response;
+    dns_towire_state_t towire;
+    struct iovec iov;
+    memset(&response, 0, DNS_HEADER_SIZE);
+    memset(&towire, 0, sizeof(towire));
+
+    towire.p = &response.data[0];  // We start storing RR data here.
+    towire.lim = ((uint8_t *)&response) + sizeof(response);
+    towire.message = &response;
+    towire.p_rdlength = NULL;
+    towire.p_opt = NULL;
+
+    response.id = wire->id;
+    dns_qr_set(&response, dns_qr_response);
+    dns_opcode_set(&response, dns_opcode_get(wire));
+    dns_rcode_set(&response, rcode);
+
+    dns_u16_to_wire(&towire, kDSOType_RetryDelay);
+    // This shouldn't be possible.
+    if (towire.p + 2 > towire.lim) {
+        FAULT("No room for dso length in Retry Delay message.");
+        return;
+    }
+    uint8_t *p_dso_length = towire.p;
+    towire.p += 2;
+
+    dns_u32_to_wire(&towire, milliseconds);
+
+    int16_t dso_length = towire.p - p_dso_length - 2;
+    iov.iov_len = (towire.p - (uint8_t *)&response);
+    iov.iov_base = &response;
+
+    towire.p = p_dso_length;
+    dns_u16_to_wire(&towire, dso_length);
+    ioloop_send_message(comm, message, &iov, 1);
+}
+
 int32_t
 dso_transport_idle(void * UNUSED context, int32_t UNUSED now, int32_t next_event)
 {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ typedef os_log_type_t mDNSLogLevel_t;
 #define MDNS_LOG_ERROR      OS_LOG_TYPE_ERROR
 #define MDNS_LOG_WARNING    OS_LOG_TYPE_DEFAULT
 #define MDNS_LOG_DEFAULT    OS_LOG_TYPE_DEFAULT
-#define MDNS_LOG_INFO       OS_LOG_TYPE_DEFAULT
+#define MDNS_LOG_INFO       OS_LOG_TYPE_INFO
 #define MDNS_LOG_DEBUG      OS_LOG_TYPE_DEBUG
 #else
 typedef const char * mDNSLogCategory_t;
@@ -66,15 +66,20 @@ typedef enum
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
-    extern os_log_t mDNSLogCategory_Default;
-    extern os_log_t mDNSLogCategory_mDNS;
-    extern os_log_t mDNSLogCategory_uDNS;
-    extern os_log_t mDNSLogCategory_SPS;
-    extern os_log_t mDNSLogCategory_NAT;
-    extern os_log_t mDNSLogCategory_D2D;
-    extern os_log_t mDNSLogCategory_XPC;
-    extern os_log_t mDNSLogCategory_Analytics;
-    extern os_log_t mDNSLogCategory_DNSSEC;
+
+    #define MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(NAME)                       \
+        extern os_log_t mDNSLogCategory_ ## NAME;                           \
+        extern os_log_t mDNSLogCategory_ ## NAME ## _redacted
+
+    MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(Default);
+    MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(mDNS);
+    MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(uDNS);
+    MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(SPS);
+    MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(NAT);
+    MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(D2D);
+    MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(XPC);
+    MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(Analytics);
+    MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(DNSSEC);
 
     #define MDNS_LOG_CATEGORY_DEFINITION(NAME)  mDNSLogCategory_ ## NAME
 #else
@@ -90,6 +95,13 @@ typedef enum
 #define MDNS_LOG_CATEGORY_XPC       MDNS_LOG_CATEGORY_DEFINITION(XPC)
 #define MDNS_LOG_CATEGORY_ANALYTICS MDNS_LOG_CATEGORY_DEFINITION(Analytics)
 #define MDNS_LOG_CATEGORY_DNSSEC    MDNS_LOG_CATEGORY_DEFINITION(DNSSEC)
+
+// Use MDNS_LOG_CATEGORY_DISABLED to disable a log temporarily.
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define MDNS_LOG_CATEGORY_DISABLED OS_LOG_DISABLED
+#else
+    #define MDNS_LOG_CATEGORY_DISABLED "Log Disabled"
+#endif
 
 // Set this symbol to 1 to answer remote queries for our Address, and reverse mapping PTR
 #define ANSWER_REMOTE_HOSTNAME_QUERIES 0
@@ -151,9 +163,9 @@ extern "C" {
 
         #define debug_noop(...)   do {} while(0)
         #define LogMsg(...)       LogMsgWithLevel(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, __VA_ARGS__)
-        #define LogOperation(...) MDNS_LOG_DEFINITION(MDNS_LOG_INFO,  __VA_ARGS__)
-        #define LogSPS(...)       MDNS_LOG_DEFINITION(MDNS_LOG_INFO,  __VA_ARGS__)
-        #define LogInfo(...)      MDNS_LOG_DEFINITION(MDNS_LOG_INFO,  __VA_ARGS__)
+        #define LogOperation(...) MDNS_LOG_DEFINITION(MDNS_LOG_DEFAULT,  __VA_ARGS__)
+        #define LogSPS(...)       MDNS_LOG_DEFINITION(MDNS_LOG_DEFAULT,  __VA_ARGS__)
+        #define LogInfo(...)      MDNS_LOG_DEFINITION(MDNS_LOG_DEFAULT,  __VA_ARGS__)
         #define LogDebug(...)     MDNS_LOG_DEFINITION(MDNS_LOG_DEBUG, __VA_ARGS__)
     #elif (MDNS_GNU_VA_ARGS)
         #define MDNS_LOG_DEFINITION(LEVEL, ARGS...) \
@@ -161,9 +173,9 @@ extern "C" {
 
         #define debug_noop(ARGS...)   do {} while (0)
         #define LogMsg(ARGS... )      LogMsgWithLevel(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, ARGS)
-        #define LogOperation(ARGS...) MDNS_LOG_DEFINITION(MDNS_LOG_INFO,  ARGS)
-        #define LogSPS(ARGS...)       MDNS_LOG_DEFINITION(MDNS_LOG_INFO,  ARGS)
-        #define LogInfo(ARGS...)      MDNS_LOG_DEFINITION(MDNS_LOG_INFO,  ARGS)
+        #define LogOperation(ARGS...) MDNS_LOG_DEFINITION(MDNS_LOG_DEFAULT,  ARGS)
+        #define LogSPS(ARGS...)       MDNS_LOG_DEFINITION(MDNS_LOG_DEFAULT,  ARGS)
+        #define LogInfo(ARGS...)      MDNS_LOG_DEFINITION(MDNS_LOG_DEFAULT,  ARGS)
         #define LogDebug(ARGS...)     MDNS_LOG_DEFINITION(MDNS_LOG_DEBUG, ARGS)
     #else
         #error "Unknown variadic macros"
@@ -236,6 +248,7 @@ extern void freeL(const char *msg, void *x);
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+
 /** @brief Write a log message to system's log storage(memory or disk).
  *
  *  On Apple platform, os_log() will be called to log a message.
@@ -285,7 +298,21 @@ extern void freeL(const char *msg, void *x);
  *                              "%{mdnsresponder:domain_name}.*P", (name ? (int)DomainNameLength((const domainname *)name) : 0), <the pointer to a DNS label sequence>
  *
  */
-    #define LogRedact(CATEGORY, LEVEL, FORMAT, ...) os_log_with_type(CATEGORY, LEVEL, FORMAT, ## __VA_ARGS__)
+    #define JOIN(X, Y) JOIN_AGAIN(X, Y)
+    #define JOIN_AGAIN(X, Y) X ## Y
+
+    #define LogRedact(CATEGORY, LEVEL, FORMAT, ...)                                         \
+        do                                                                                  \
+        {                                                                                   \
+            if (!gPrivateLogRedactionEnabled)                                               \
+            {                                                                               \
+                os_log_with_type(CATEGORY, LEVEL, FORMAT, ## __VA_ARGS__);                  \
+            }                                                                               \
+            else                                                                            \
+            {                                                                               \
+                os_log_with_type(JOIN(CATEGORY, _redacted), LEVEL, FORMAT, ## __VA_ARGS__); \
+            }                                                                               \
+        } while(0)
 #else
     #if (MDNS_HAS_VA_ARG_MACROS)
         #if (MDNS_C99_VA_ARGS)
@@ -313,15 +340,55 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_S "%{public}s"
-    #define PRI_S "%{private, mask.hash}s"
+    #define PRI_S "%{sensitive, mask.hash}s"
 #else
     #define PUB_S "%s"
     #define PRI_S PUB_S
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_BOOL                    "%{BOOL}d"
+    #define BOOL_PARAM(boolean_value)   (boolean_value)
+#else
+    #define PUB_BOOL                    PUB_S
+    #define BOOL_PARAM(boolean_value)   ((boolean_value) ? "YES" : "NO")
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_DNS_TYPE                "%{mdns:rrtype}d"
+    #define DNS_TYPE_PARAM(type_value)  (type_value)
+#else
+    #define PUB_DNS_TYPE                PUB_S
+    #define DNS_TYPE_PARAM(type_value)  (DNSTypeName(type_value))
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_ADD_RMV                     "%{mdns:addrmv}d"
+    #define ADD_RMV_PARAM(add_rmv_value)    (add_rmv_value)
+#else
+    #define PUB_ADD_RMV                     PUB_S
+    #define ADD_RMV_PARAM(add_rmv_value)    ((add_rmv_value) ? "add" : "rmv")
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_PN                      "%{mdns:pos/neg}d"
+    #define PN_PARAM(pn_boolean_value)  (pn_boolean_value)
+#else
+    #define PUB_PN                      PUB_S
+    #define PN_PARAM(pn_boolean_value)  ((pn_boolean_value) ? "positive" : "negative")
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_MORTALITY                       "%{mdns:mortality}d"
+    #define MORTALITY_PARAM(mortality_value)    (mortality_value)
+#else
+    #define PUB_MORTALITY                       PUB_S
+    #define MORTALITY_PARAM(mortality_value)    (MortalityDisplayString(mortality_value))
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_DM_NAME "%{public, mdnsresponder:domain_name}.*P"
-    #define PRI_DM_NAME "%{private, mask.hash, mdnsresponder:domain_name}.*P"
+    #define PRI_DM_NAME "%{sensitive, mask.hash, mdnsresponder:domain_name}.*P"
     // When DM_NAME_PARAM is used, the file where the function is defined must include DNSEmbeddedAPI.h
     #define DM_NAME_PARAM(name) ((name) ? ((int)DomainNameLength((name))) : 0), (name)
 #else
@@ -332,7 +399,7 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_DM_LABEL "%{public, mdnsresponder:domain_label}.*P"
-    #define PRI_DM_LABEL "%{private, mask.hash, mdnsresponder:domain_label}.*P"
+    #define PRI_DM_LABEL "%{sensitive, mask.hash, mdnsresponder:domain_label}.*P"
     #define DM_LABEL_PARAM(label) 1 + ((label)->c[0]), ((label)->c)
 #else
     #define PUB_DM_LABEL "%#s"
@@ -342,13 +409,13 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_IP_ADDR "%{public, mdnsresponder:ip_addr}.20P"
-    #define PRI_IP_ADDR "%{private, mask.hash, mdnsresponder:ip_addr}.20P"
+    #define PRI_IP_ADDR "%{sensitive, mask.hash, mdnsresponder:ip_addr}.20P"
 
     #define PUB_IPv4_ADDR "%{public, network:in_addr}.4P"
-    #define PRI_IPv4_ADDR "%{private, mask.hash, network:in_addr}.4P"
+    #define PRI_IPv4_ADDR "%{sensitive, mask.hash, network:in_addr}.4P"
 
     #define PUB_IPv6_ADDR "%{public, network:in6_addr}.16P"
-    #define PRI_IPv6_ADDR "%{private, mask.hash, network:in6_addr}.16P"
+    #define PRI_IPv6_ADDR "%{sensitive, mask.hash, network:in6_addr}.16P"
 #else
     #define PUB_IP_ADDR "%#a"
     #define PRI_IP_ADDR PUB_IP_ADDR
@@ -362,7 +429,7 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_MAC_ADDR "%{public, mdnsresponder:mac_addr}.6P"
-    #define PRI_MAC_ADDR "%{private, mask.hash, mdnsresponder:mac_addr}.6P"
+    #define PRI_MAC_ADDR "%{sensitive, mask.hash, mdnsresponder:mac_addr}.6P"
 #else
     #define PUB_MAC_ADDR "%.6a"
     #define PRI_MAC_ADDR PUB_MAC_ADDR
@@ -370,7 +437,7 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_HEX "%{public, mdnsresponder:hex_sequence}.*P"
-    #define PRI_HEX "%{private, mask.hash, mdnsresponder:hex_sequence}.*P"
+    #define PRI_HEX "%{sensitive, mask.hash, mdnsresponder:hex_sequence}.*P"
     #define HEX_PARAM(hex, hex_length) (int)(hex_length), (hex)
 #else
     #define PUB_HEX "%p"
@@ -380,7 +447,7 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_DNSKEY "%{public, mdns:rd.dnskey}.*P"
-    #define PRI_DNSKEY "%{private, mask.hash, mdns:rd.dnskey}.*P"
+    #define PRI_DNSKEY "%{sensitive, mask.hash, mdns:rd.dnskey}.*P"
     #define DNSKEY_PARAM(rdata, rdata_length) (rdata_length), (rdata)
 #else
     #define PUB_DNSKEY "%p"
@@ -390,7 +457,7 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_DS "%{public, mdns:rd.ds}.*P"
-    #define PRI_DS "%{private, mask.hash, mdns:rd.ds}.*P"
+    #define PRI_DS "%{sensitive, mask.hash, mdns:rd.ds}.*P"
     #define DS_PARAM(rdata, rdata_length) (rdata_length), (rdata)
 #else
     #define PUB_DS "%p"
@@ -400,7 +467,7 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_NSEC "%{public, mdns:rd.nsec}.*P"
-    #define PRI_NSEC "%{private, mask.hash, mdns:rd.nsec}.*P"
+    #define PRI_NSEC "%{sensitive, mask.hash, mdns:rd.nsec}.*P"
     #define NSEC_PARAM(rdata, rdata_length) (rdata_length), (rdata)
 #else
     #define PUB_NSEC "%p"
@@ -410,7 +477,7 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_NSEC3 "%{public, mdns:rd.nsec3}.*P"
-    #define PRI_NSEC3 "%{private, mask.hash, mdns:rd.nsec3}.*P"
+    #define PRI_NSEC3 "%{sensitive, mask.hash, mdns:rd.nsec3}.*P"
     #define NSEC3_PARAM(rdata, rdata_length) (rdata_length), (rdata)
 #else
     #define PUB_NSEC3 "%p"
@@ -420,7 +487,7 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_RRSIG "%{public, mdns:rd.rrsig}.*P"
-    #define PRI_RRSIG "%{private, mask.hash, mdns:rd.rrsig}.*P"
+    #define PRI_RRSIG "%{sensitive, mask.hash, mdns:rd.rrsig}.*P"
     #define RRSIG_PARAM(rdata, rdata_length) (rdata_length), (rdata)
 #else
     #define PUB_RRSIG "%p"
@@ -430,12 +497,38 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_SVCB "%{public, mdns:rd.svcb}.*P"
-    #define PRI_SVCB "%{private, mask.hash, mdns:rd.svcb}.*P"
+    #define PRI_SVCB "%{sensitive, mask.hash, mdns:rd.svcb}.*P"
     #define SVCB_PARAM(rdata, rdata_length) (rdata_length), (rdata)
 #else
     #define PUB_SVCB "%p"
     #define PRI_SVCB PUB_SVCB
     #define SVCB_PARAM(rdata, rdata_length) (rdata)
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+        #define PUB_DNSSEC_RESULT                           "%{public, mdns:dnssec_result}d"
+        #define DNSSEC_RESULT_PARAM(dnssec_result_value)    (dnssec_result_value)
+    #else
+        #define PUB_DNSSEC_RESULT                           "%s"
+        #define DNSSEC_RESULT_PARAM(dnssec_result_value)    (dnssec_result_to_description(dnssec_result_value))
+    #endif
+#else
+        #define PUB_DNSSEC_RESULT                           "%s"
+        #define DNSSEC_RESULT_PARAM(dnssec_result_value)    ("<DNSSEC Unsupported>")
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+        #define PUB_DNSSEC_INVAL_STATE                  "%{public, mdns:dnssec_inval_state}d"
+        #define DNSSEC_INVAL_STATE_PARAM(state_value)   (state_value)
+    #else
+        #define PUB_DNSSEC_INVAL_STATE                  "%s"
+        #define DNSSEC_INVAL_STATE_PARAM(state_value)   (dnssec_insecure_validation_state_to_description(state_value))
+    #endif
+#else
+        #define PUB_DNSSEC_INVAL_STATE                  "%s"
+        #define DNSSEC_INVAL_STATE_PARAM(state_value)   ("<DNSSEC Unsupported>")
 #endif
 
 extern void LogToFD(int fd, const char *format, ...);

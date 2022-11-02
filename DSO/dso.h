@@ -158,7 +158,7 @@ typedef int32_t event_time_t;
 
 typedef void (*dso_event_callback_t)(void *context, void *header,
                                      dso_state_t *dso, dso_event_type_t eventType);
-typedef void (*dso_transport_finalize_t)(dso_transport_t *transport);
+typedef void (*dso_transport_finalize_t)(dso_transport_t *transport, const char *whence);
 
 typedef enum {
     // When the object is created and holds a reference to the context, the callback(see below) is called with
@@ -172,7 +172,7 @@ typedef enum {
     dso_life_cycle_free
 } dso_life_cycle_t;
 
-typedef void (*dso_life_cycle_context_callback_t)(const dso_life_cycle_t life_cycle, void *const context,
+typedef bool (*dso_life_cycle_context_callback_t)(const dso_life_cycle_t life_cycle, void *const context,
                                                   dso_state_t *const dso);
 
 // DNS Stateless Operations state
@@ -229,7 +229,7 @@ dso_activity_t *dso_find_activity(dso_state_t *dso, const char *name, const char
 dso_activity_t *dso_add_activity(dso_state_t *dso, const char *name, const char *activity_type,
                                             void *context, void (*finalize)(dso_activity_t *));
 void dso_drop_activity(dso_state_t *dso, dso_activity_t *activity);
-void dso_ignore_response(dso_state_t *dso, void *context);
+uint32_t dso_ignore_further_responses(dso_state_t *dso, void *context);
 bool dso_make_message(dso_message_t *state, uint8_t *outbuf, size_t outbuf_size, dso_state_t *dso,
                       bool unidirectional, bool response, uint16_t xid, int rcode, void *callback_state);
 size_t dso_message_length(dso_message_t *state);

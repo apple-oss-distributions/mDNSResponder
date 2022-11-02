@@ -278,7 +278,7 @@ mDNSlocal mDNSBool HasReplyWithInterfaceIndex(reply_state * reply, mDNSu32 inter
 {
     request_state* req = client_request_message;
 
-    fprintf(stdout, "testLocalOnlyWithInterfacesTestSeries: primary_interfaceID %d\n", primary_interfaceID);
+    fprintf(stdout, "testLocalOnlyWithInterfacesTestSeries: primary_interfaceID %p\n", (void *)primary_interfaceID);
 
     // Verify Any index returns 2 results.
  #if !TARGET_OS_WATCH

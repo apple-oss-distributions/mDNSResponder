@@ -1,6 +1,6 @@
 /* srp-replication.h
  *
- * Copyright (c) 2020-2021 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2020-2022 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -174,6 +174,7 @@ struct srpl_candidate {
 
 struct srpl_advertise_finished_result {
     char *NULLABLE hostname;
+    srp_server_t *NULLABLE server_state;
     int rcode;
 };
 
@@ -278,6 +279,7 @@ struct srpl_domain {
     char *NONNULL name;
     srpl_instance_t *NULLABLE instances;
     dnssd_txn_t *NULLABLE query;
+    srp_server_t *NULLABLE server_state;
 };
 
 struct unclaimed_connection {
@@ -286,8 +288,9 @@ struct unclaimed_connection {
     wakeup_t *NULLABLE wakeup_timeout;
     dso_state_t *NULLABLE dso;
     message_t *NULLABLE message;
-    addr_t address;
     comm_t *NULLABLE connection;
+    srp_server_t *NULLABLE server_state;
+    addr_t address;
 };
 
 #define SRP_THREAD_DOMAIN "thread.home.arpa."
@@ -313,9 +316,16 @@ struct unclaimed_connection {
 #define SRPL_UPDATE_JITTER_WINDOW 10
 
 // Exported functions...
-void srpl_startup(void);
-void srpl_dso_server_message(comm_t *NONNULL connection, message_t *NULLABLE message, dso_state_t *NONNULL dso);
-void srpl_advertise_finished_event_send(char *NONNULL host, int rcode);
+time_t srpl_time(void);
+void srpl_startup(srp_server_t *NONNULL srp_server);
+void srpl_disable(srp_server_t *NONNULL srp_server);
+void srpl_drop_srpl_connection(srp_server_t *NONNULL srp_server);
+void srpl_undrop_srpl_connection(srp_server_t *NONNULL srp_server);
+void srpl_drop_srpl_advertisement(srp_server_t *NONNULL srp_server);
+void srpl_undrop_srpl_advertisement(srp_server_t *NONNULL srp_server);
+void srpl_dso_server_message(comm_t *NONNULL connection, message_t *NULLABLE message, dso_state_t *NONNULL dso,
+                             srp_server_t *NONNULL server_state);
+void srpl_advertise_finished_event_send(char *NONNULL host, int rcode, srp_server_t *NONNULL server_state);
 void srpl_srp_client_update_finished_event_send(adv_host_t *NONNULL host, int rcode);
 #define srpl_connection_release(connection) srpl_connection_release_(connection, __FILE__, __LINE__)
 void srpl_connection_release_(srpl_connection_t *NONNULL srpl_connection, const char *NONNULL file, int line);

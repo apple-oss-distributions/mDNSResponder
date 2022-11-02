@@ -63,6 +63,7 @@
 #endif
 
 #include <mdns/power.h>
+#include "mrcs_server.h"
 #include "mdns_strict.h"
 
 #ifndef USE_SELECT_WITH_KQUEUEFD
@@ -338,8 +339,6 @@ mDNSexport void dump_state_to_fd(int fd)
     LogTimerToFD(fd, "m->p->NotifyUser        ", mDNSStorage.p->NotifyUser);
     LogTimerToFD(fd, "m->p->HostNameConflict  ", mDNSStorage.p->HostNameConflict);
     LogTimerToFD(fd, "m->p->KeyChainTimer     ", mDNSStorage.p->KeyChainTimer);
-
-    log_dnsproxy_info_to_fd(fd, &mDNSStorage);
 
     LogToFD(fd, "----- KQSocketEventSources -----");
     if (!gEventSources) LogToFD(fd, "<None>");
@@ -1217,8 +1216,9 @@ mDNSlocal void * KQueueLoop(void *m_param)
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSD_XPC_SERVICE)
     dnssd_server_init();
 #endif
+    mrcs_server_init(&kMRCSServerHandlers);
     pthread_mutex_lock(&PlatformStorage.BigMutex);
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "Starting time value 0x%08X (%d)", (mDNSu32)mDNSStorage.timenow_last, mDNSStorage.timenow_last);
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Starting time value 0x%08X (%d)", (mDNSu32)mDNSStorage.timenow_last, mDNSStorage.timenow_last);
 
     // This is the main work loop:
     // (1) First we give mDNSCore a chance to finish off any of its deferred work and calculate the next sleep time
@@ -1264,7 +1264,7 @@ mDNSlocal void * KQueueLoop(void *m_param)
                 AuthRecord *rr;
                 for (rr = mDNSStorage.ResourceRecords; rr; rr=rr->next)
                 {
-                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "Cannot exit yet; Resource Record still exists: " PRI_S, ARDisplayString(m, rr));
+                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Cannot exit yet; Resource Record still exists: " PRI_S, ARDisplayString(m, rr));
                     if (mDNS_LoggingEnabled) usleep(10000);     // Sleep 10ms so that we don't flood syslog with too many messages
                 }
             }
@@ -1436,7 +1436,8 @@ mDNSlocal void SandboxProcess(void)
     do\
     { \
         mDNSLogCategory_ ## NAME = os_log_create(kMDNSResponderIDStr, # NAME ); \
-        if (!mDNSLogCategory_ ## NAME ) \
+        mDNSLogCategory_ ## NAME ## _redacted = os_log_create(kMDNSResponderIDStr, # NAME "_redacted" ); \
+        if (!mDNSLogCategory_ ## NAME || !mDNSLogCategory_ ## NAME ## _redacted) \
         { \
             os_log_error(OS_LOG_DEFAULT, "Could NOT create the " # NAME " log handle in mDNSResponder"); \
             mDNSLogCategory_ ## NAME = OS_LOG_DEFAULT; \
@@ -1444,15 +1445,19 @@ mDNSlocal void SandboxProcess(void)
     } \
     while (0)
 
-os_log_t mDNSLogCategory_Default    = NULL;
-os_log_t mDNSLogCategory_mDNS       = NULL;
-os_log_t mDNSLogCategory_uDNS       = NULL;
-os_log_t mDNSLogCategory_SPS        = NULL;
-os_log_t mDNSLogCategory_NAT        = NULL;
-os_log_t mDNSLogCategory_D2D        = NULL;
-os_log_t mDNSLogCategory_XPC        = NULL;
-os_log_t mDNSLogCategory_Analytics  = NULL;
-os_log_t mDNSLogCategory_DNSSEC     = NULL;
+#define MDNS_OS_LOG_CATEGORY_DECLARE(NAME)                  \
+    os_log_t mDNSLogCategory_ ## NAME               = NULL; \
+    os_log_t mDNSLogCategory_ ## NAME ## _redacted  = NULL
+
+MDNS_OS_LOG_CATEGORY_DECLARE(Default);
+MDNS_OS_LOG_CATEGORY_DECLARE(mDNS);
+MDNS_OS_LOG_CATEGORY_DECLARE(uDNS);
+MDNS_OS_LOG_CATEGORY_DECLARE(SPS);
+MDNS_OS_LOG_CATEGORY_DECLARE(NAT);
+MDNS_OS_LOG_CATEGORY_DECLARE(D2D);
+MDNS_OS_LOG_CATEGORY_DECLARE(XPC);
+MDNS_OS_LOG_CATEGORY_DECLARE(Analytics);
+MDNS_OS_LOG_CATEGORY_DECLARE(DNSSEC);
 
 mDNSlocal void init_logging(void)
 {

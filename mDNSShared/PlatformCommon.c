@@ -382,12 +382,14 @@ mDNSexport mDNSBool mDNSPosixTCPSocketSetup(int *fd, mDNSAddr_Type addrType, mDN
     if (port)
         port->NotAnInteger = outTcpPort->NotAnInteger;
 
+#ifdef TCP_NOTSENT_LOWAT
     err = setsockopt(sock, IPPROTO_TCP, TCP_NOTSENT_LOWAT, &lowWater, sizeof lowWater);
     if (err < 0)
     {
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "mDNSPosixTCPSocketSetup: TCP_NOTSENT_LOWAT failed: " PUB_S, strerror(errno));
         return mDNSfalse;
     }
+#endif // TCP_NOTSENT_LOWAT
 
     return mDNStrue;
 }
@@ -432,6 +434,7 @@ mDNSexport TCPSocket *mDNSPosixDoTCPListenCallback(int fd, mDNSAddr_Type address
         goto out;
     }
 
+#ifdef TCP_NOTSENT_LOWAT
     failed = setsockopt(remoteSock, IPPROTO_TCP, TCP_NOTSENT_LOWAT,
                         &lowWater, sizeof lowWater);
     if (failed < 0)
@@ -440,6 +443,7 @@ mDNSexport TCPSocket *mDNSPosixDoTCPListenCallback(int fd, mDNSAddr_Type address
         LogMsg("mDNSPosixDoTCPListenCallback: TCP_NOTSENT_LOWAT returned %d", errno);
         goto out;
     }
+#endif // TCP_NOTSENT_LOWAT
 
     if (address.sa.sa_family == AF_INET6)
     {

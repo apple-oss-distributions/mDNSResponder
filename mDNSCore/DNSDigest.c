@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,9 @@ extern "C" {
 
 #include "mDNSEmbeddedAPI.h"
 #include "DNSCommon.h"
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+#include <CommonCrypto/CommonHMAC.h>
+#endif
 #include "mdns_strict.h"
 
 // Disable certain benign warnings with Microsoft compilers
@@ -1309,12 +1312,150 @@ mDNSlocal mDNSs32 DNSDigest_Base64ToBin(const char *src, mDNSu8 *target, mDNSu32
 // ***************************************************************************
 // MARK: - API exported to mDNS Core
 
+// TSIG HMAC names from <https://datatracker.ietf.org/doc/html/rfc8945#section-6>
+// Currently, we do not support the truncated algorithms listed by the link above.
+
+#define kHMAC_MD5_AlgName    ((const domainname *)"\x8" "hmac-md5" "\x7" "sig-alg" "\x3" "reg" "\x3" "int")
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+
+#define kHMAC_None_AlgName      ((const domainname *)"\xC" "hmac-invalid")
+#define kHMAC_SHA1_AlgName      ((const domainname *)"\x9" "hmac-sha1")
+#define kHMAC_SHA224_AlgName    ((const domainname *)"\xB" "hmac-sha224")
+#define kHMAC_SHA256_AlgName    ((const domainname *)"\xB" "hmac-sha256")
+#define kHMAC_SHA384_AlgName    ((const domainname *)"\xB" "hmac-sha384")
+#define kHMAC_SHA512_AlgName    ((const domainname *)"\xB" "hmac-sha512")
+
+// Since each HMAC algorithm has the most secure key length, we use the key length to determine which HMAC algorithm
+// should be used.
+mDNSlocal DNSDigest_HMACAlgorithm DNSDigest_GetHMACAlgorithmFromKeyLengthInBytes(const mDNSu32 length)
+{
+    switch (length) {
+        case kDNSDigest_HMACMD5_KeyLengthInBytes:
+            return kDNSDigest_HMACAlg_MD5;
+        case kDNSDigest_HMACSHA1_KeyLengthInBytes:
+            return kDNSDigest_HMACAlg_SHA1;
+        case kDNSDigest_HMACSHA224_KeyLengthInBytes:
+            return kDNSDigest_HMACAlg_SHA224;
+        case kDNSDigest_HMACSHA256_KeyLengthInBytes:
+            return kDNSDigest_HMACAlg_SHA256;
+        case kDNSDigest_HMACSHA384_KeyLengthInBytes:
+            return kDNSDigest_HMACAlg_SHA384;
+        case kDNSDigest_HMACSHA512_KeyLengthInBytes:
+            return kDNSDigest_HMACAlg_SHA512;
+        default:
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "Invalid HMAC key length, unable to get algorithm type"
+                " - key length: %u", length);
+            return kDNSDigest_HMACAlg_None;
+    }
+}
+
+// Convert DNSDigest_HMACAlgorithm to CCHmacAlgorithm that is used by CoreCrypto.
+mDNSlocal CCHmacAlgorithm DNSDigest_GetCCHmacAlgorithm(const DNSDigest_HMACAlgorithm algorithm)
+{
+    switch (algorithm) {
+        case kDNSDigest_HMACAlg_None:
+            return kCCHmacAlgSHA512;
+        case kDNSDigest_HMACAlg_MD5:
+            return kCCHmacAlgMD5;
+        case kDNSDigest_HMACAlg_SHA1:
+            return kCCHmacAlgSHA1;
+        case kDNSDigest_HMACAlg_SHA224:
+            return kCCHmacAlgSHA224;
+        case kDNSDigest_HMACAlg_SHA256:
+            return kCCHmacAlgSHA256;
+        case kDNSDigest_HMACAlg_SHA384:
+            return kCCHmacAlgSHA384;
+        case kDNSDigest_HMACAlg_SHA512:
+            return kCCHmacAlgSHA512;
+    }
+}
+
+// Get the signature output length of each algorithm.
+mDNSlocal mDNSu16 DNSDigest_GetHMACOutputLength(const DNSDigest_HMACAlgorithm algorithm)
+{
+    switch (algorithm) {
+        case kDNSDigest_HMACAlg_None:
+            return 0;
+        case kDNSDigest_HMACAlg_MD5:
+            return kDNSDigest_HMACMD5_OutputLengthInBytes;
+        case kDNSDigest_HMACAlg_SHA1:
+            return kDNSDigest_HMACSHA1_OutputLengthInBytes;
+        case kDNSDigest_HMACAlg_SHA224:
+            return kDNSDigest_HMACSHA224_OutputLengthInBytes;
+        case kDNSDigest_HMACAlg_SHA256:
+            return kDNSDigest_HMACSHA256_OutputLengthInBytes;
+        case kDNSDigest_HMACAlg_SHA384:
+            return kDNSDigest_HMACSHA384_OutputLengthInBytes;
+        case kDNSDigest_HMACAlg_SHA512:
+            return kDNSDigest_HMACSHA512_OutputLengthInBytes;
+    }
+}
+
+// Get the domain name format algorithm identifier for the given algorithm.
+mDNSlocal const domainname *DNSDigest_GetHMACName(const DNSDigest_HMACAlgorithm algorithm)
+{
+    switch (algorithm) {
+        case kDNSDigest_HMACAlg_None:
+            return kHMAC_None_AlgName;
+        case kDNSDigest_HMACAlg_MD5:
+            return kHMAC_MD5_AlgName;
+        case kDNSDigest_HMACAlg_SHA1:
+            return kHMAC_SHA1_AlgName;
+        case kDNSDigest_HMACAlg_SHA224:
+            return kHMAC_SHA224_AlgName;
+        case kDNSDigest_HMACAlg_SHA256:
+            return kHMAC_SHA256_AlgName;
+        case kDNSDigest_HMACAlg_SHA384:
+            return kHMAC_SHA384_AlgName;
+        case kDNSDigest_HMACAlg_SHA512:
+            return kHMAC_SHA512_AlgName;
+    }
+}
+
+// Get the algorithm enum given the domain name format algorithm identifier.
+mDNSlocal DNSDigest_HMACAlgorithm DNSDigest_GetHMACAlgorithmFromName(const domainname *const algorithmName)
+{
+    if (algorithmName == mDNSNULL)
+    {
+        return kDNSDigest_HMACAlg_None;
+    }
+    else if (SameDomainName(algorithmName, kHMAC_MD5_AlgName))
+    {
+        return kDNSDigest_HMACAlg_MD5;
+    }
+    else if (SameDomainName(algorithmName, kHMAC_SHA1_AlgName))
+    {
+        return kDNSDigest_HMACAlg_SHA1;
+    }
+    else if (SameDomainName(algorithmName, kHMAC_SHA224_AlgName))
+    {
+        return kDNSDigest_HMACAlg_SHA224;
+    }
+    else if (SameDomainName(algorithmName, kHMAC_SHA256_AlgName))
+    {
+        return kDNSDigest_HMACAlg_SHA256;
+    }
+    else if (SameDomainName(algorithmName, kHMAC_SHA384_AlgName))
+    {
+        return kDNSDigest_HMACAlg_SHA384;
+    }
+    else if (SameDomainName(algorithmName, kHMAC_SHA512_AlgName))
+    {
+        return kDNSDigest_HMACAlg_SHA512;
+    }
+    else
+    {
+        return kDNSDigest_HMACAlg_None;
+    }
+}
+
+#else // MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+
 // Constants
 #define HMAC_IPAD   0x36
 #define HMAC_OPAD   0x5c
 #define MD5_LEN     16
-
-#define HMAC_MD5_AlgName "\010" "hmac-md5" "\007" "sig-alg" "\003" "reg" "\003" "int"
 
 // Adapted from Appendix, RFC 2104
 mDNSlocal void DNSDigest_ConstructHMACKey(DomainAuthInfo *info, const mDNSu8 *key, mDNSu32 len)
@@ -1348,12 +1489,36 @@ mDNSlocal void DNSDigest_ConstructHMACKey(DomainAuthInfo *info, const mDNSu8 *ke
 
 }
 
+#endif // MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+
 mDNSexport mDNSs32 DNSDigest_ConstructHMACKeyfromBase64(DomainAuthInfo *info, const char *b64key)
 {
     mDNSu8 keybuf[1024];
     mDNSs32 keylen = DNSDigest_Base64ToBin(b64key, keybuf, sizeof(keybuf));
     if (keylen < 0) return(keylen);
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    info->key_len = (mDNSu32)keylen;
+    info->algorithm = DNSDigest_GetHMACAlgorithmFromKeyLengthInBytes(info->key_len);
+    if (info->algorithm == kDNSDigest_HMACAlg_None)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
+            "Invalid HMAC secret key length, should be 16(HMAC MD5), 20(HMAC SHA1), 28(HMAC SHA224), 32(HMAC SHA256), 48(HMAC SHA384) or 64(HMAC SHA512)"
+            " - actual length: %u", info->key_len);
+        return -1;
+    }
+
+    if (sizeof(info->key) < (size_t)keylen)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT, "Key is too long, unable to save it in the buffer - "
+            "buffer length: %zu, actual key length: %d", sizeof(info->key), keylen);
+        return -1;
+    }
+    memcpy(info->key, keybuf, keylen);
+#else
     DNSDigest_ConstructHMACKey(info, keybuf, (mDNSu32)keylen);
+#endif
+
     return(keylen);
 }
 
@@ -1363,39 +1528,83 @@ mDNSexport void DNSDigest_SignMessage(DNSMessage *msg, mDNSu8 **end, DomainAuthI
     mDNSu8  *rdata, *const countPtr = (mDNSu8 *)&msg->h.numAdditionals; // Get existing numAdditionals value
     mDNSu32 utc32;
     mDNSu8 utc48[6];
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    mDNSu8 digest[kDNSDigest_HMACOutputLengthInBytesMAX];
+#else
     mDNSu8 digest[MD5_LEN];
+#endif
     mDNSu8 *ptr = *end;
     mDNSu32 len;
     mDNSOpaque16 buf;
-    MD5_CTX c;
     mDNSu16 numAdditionals = (mDNSu16)((mDNSu16)countPtr[0] << 8 | countPtr[1]);
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    const DNSDigest_HMACAlgorithm algorithm = info->algorithm;
+    CCHmacContext hmacContext;
+#else
+    MD5_CTX c;
+#endif
+
+    // Initialize HMAC context.
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacInit(&hmacContext, DNSDigest_GetCCHmacAlgorithm(algorithm), info->key, info->key_len);
+#else
     // Init MD5 context, digest inner key pad and message
     MD5_Init(&c);
     MD5_Update(&c, info->keydata_ipad, HMAC_LEN);
+#endif
+
+    // Digest the entire DNS message.
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, (mDNSu8 *)msg, (size_t)(*end - (mDNSu8 *)msg));
+#else
     MD5_Update(&c, (mDNSu8 *)msg, (unsigned long)(*end - (mDNSu8 *)msg));
+#endif
 
     // Construct TSIG RR, digesting variables as apporpriate
     mDNS_SetupResourceRecord(&tsig, mDNSNULL, 0, kDNSType_TSIG, 0, kDNSRecordTypeKnownUnique, AuthRecordAny, mDNSNULL, mDNSNULL);
 
     // key name
     AssignDomainName(&tsig.namestorage, &info->keyname);
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, info->keyname.c, DomainNameLength(&info->keyname));
+#else
     MD5_Update(&c, info->keyname.c, DomainNameLength(&info->keyname));
+#endif
 
     // class
     tsig.resrec.rrclass = kDNSQClass_ANY;
     buf = mDNSOpaque16fromIntVal(kDNSQClass_ANY);
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, buf.b, sizeof(mDNSOpaque16));
+#else
     MD5_Update(&c, buf.b, sizeof(mDNSOpaque16));
+#endif
 
     // ttl
     tsig.resrec.rroriginalttl = 0;
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, (mDNSu8 *)&tsig.resrec.rroriginalttl, sizeof(tsig.resrec.rroriginalttl));
+#else
     MD5_Update(&c, (mDNSu8 *)&tsig.resrec.rroriginalttl, sizeof(tsig.resrec.rroriginalttl));
+#endif
 
     // alg name
-    AssignConstStringDomainName(&tsig.resrec.rdata->u.name, HMAC_MD5_AlgName);
-    len = DomainNameLengthLimit((domainname *)HMAC_MD5_AlgName, (mDNSu8 *)HMAC_MD5_AlgName + sizeof HMAC_MD5_AlgName);
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    const domainname *const algorithmName = DNSDigest_GetHMACName(algorithm);
+#else
+    const domainname *const algorithmName = kHMAC_MD5_AlgName;
+#endif
+
+    AssignDomainName(&tsig.resrec.rdata->u.name, algorithmName);
+    len = DomainNameLength(algorithmName);
     rdata = tsig.resrec.rdata->u.data + len;
-    MD5_Update(&c, (mDNSu8 *)HMAC_MD5_AlgName, len);
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, (mDNSu8 *)algorithmName, len);
+#else
+    MD5_Update(&c, (mDNSu8 *)algorithmName, len);
+#endif
 
     // time
     // get UTC (universal time), convert to 48-bit unsigned in network byte order
@@ -1410,21 +1619,46 @@ mDNSexport void DNSDigest_SignMessage(DNSMessage *msg, mDNSu8 **end, DomainAuthI
 
     mDNSPlatformMemCopy(rdata, utc48, 6);
     rdata += 6;
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, utc48, 6);
+#else
     MD5_Update(&c, utc48, 6);
+#endif
 
     // 300 sec is fudge recommended in RFC 2485
     rdata[0] = (mDNSu8)((300 >> 8)  & 0xff);
     rdata[1] = (mDNSu8)( 300        & 0xff);
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, rdata, sizeof(mDNSOpaque16));
+#else
     MD5_Update(&c, rdata, sizeof(mDNSOpaque16));
+#endif
     rdata += sizeof(mDNSOpaque16);
 
     // digest error (tcode) and other data len (zero) - we'll add them to the rdata later
     buf.b[0] = (mDNSu8)((tcode >> 8) & 0xff);
     buf.b[1] = (mDNSu8)( tcode       & 0xff);
-    MD5_Update(&c, buf.b, sizeof(mDNSOpaque16));  // error
-    buf.NotAnInteger = 0;
-    MD5_Update(&c, buf.b, sizeof(mDNSOpaque16));  // other data len
 
+    // error code
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, buf.b, sizeof(mDNSOpaque16));
+#else
+    MD5_Update(&c, buf.b, sizeof(mDNSOpaque16));
+#endif
+
+    // other data len
+    buf.NotAnInteger = 0;
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, buf.b, sizeof(mDNSOpaque16));
+#else
+    MD5_Update(&c, buf.b, sizeof(mDNSOpaque16));
+#endif
+
+    mDNSu16 digestLen = 0;
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacFinal(&hmacContext, digest);
+    digestLen = DNSDigest_GetHMACOutputLength(algorithm);
+#else
     // finish the message & tsig var hash
     MD5_Final(digest, &c);
 
@@ -1433,13 +1667,15 @@ mDNSexport void DNSDigest_SignMessage(DNSMessage *msg, mDNSu8 **end, DomainAuthI
     MD5_Update(&c, info->keydata_opad, HMAC_LEN);
     MD5_Update(&c, digest, MD5_LEN);
     MD5_Final(digest, &c);
+    digestLen = MD5_LEN;
+#endif
 
     // set remaining rdata fields
-    rdata[0] = (mDNSu8)((MD5_LEN >> 8)  & 0xff);
-    rdata[1] = (mDNSu8)( MD5_LEN        & 0xff);
+    rdata[0] = (mDNSu8)((digestLen >> 8)  & 0xff);
+    rdata[1] = (mDNSu8)( digestLen        & 0xff);
     rdata += sizeof(mDNSOpaque16);
-    mDNSPlatformMemCopy(rdata, digest, MD5_LEN);                          // MAC
-    rdata += MD5_LEN;
+    mDNSPlatformMemCopy(rdata, digest, digestLen);                        // MAC
+    rdata += digestLen;
     rdata[0] = msg->h.id.b[0];                                            // original ID
     rdata[1] = msg->h.id.b[1];
     rdata[2] = (mDNSu8)((tcode >> 8) & 0xff);
@@ -1457,28 +1693,41 @@ mDNSexport void DNSDigest_SignMessage(DNSMessage *msg, mDNSu8 **end, DomainAuthI
     countPtr[1] = (mDNSu8)(numAdditionals &  0xFF);
 }
 
-mDNSexport mDNSBool DNSDigest_VerifyMessage(DNSMessage *msg, mDNSu8 *end, LargeCacheRecord * lcr, DomainAuthInfo *info, mDNSu16 * rcode, mDNSu16 * tcode)
+mDNSexport mDNSBool DNSDigest_VerifyMessage(const DNSMessage *const msg, const mDNSu8 *const end,
+    const LargeCacheRecord *const lcr, const DomainAuthInfo *const info, mDNSu16 *const rcode, mDNSu16 *const tcode)
 {
     mDNSu8          *   ptr = (mDNSu8*) &lcr->r.resrec.rdata->u.data;
     mDNSs32 now;
     mDNSs32 then;
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    mDNSu8 thisDigest[kDNSDigest_HMACOutputLengthInBytesMAX];
+    mDNSu8 thatDigest[kDNSDigest_HMACOutputLengthInBytesMAX];
+#else
     mDNSu8 thisDigest[MD5_LEN];
     mDNSu8 thatDigest[MD5_LEN];
+#endif
     mDNSOpaque16 buf;
     mDNSu8 utc48[6];
     mDNSs32 delta;
     mDNSu16 fudge;
     domainname      *   algo;
-    MD5_CTX c;
     mDNSBool ok = mDNSfalse;
 
     // We only support HMAC-MD5 for now
 
     algo = (domainname*) ptr;
 
-    if (!SameDomainName(algo, (domainname *)HMAC_MD5_AlgName))
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    const DNSDigest_HMACAlgorithm algorithm = DNSDigest_GetHMACAlgorithmFromName(algo);
+    CCHmacContext hmacContext;
+    if (algorithm == kDNSDigest_HMACAlg_None || algorithm != info->algorithm)
+#else
+    MD5_CTX c;
+    if (!SameDomainName(algo, kHMAC_MD5_AlgName))
+#endif
     {
-        LogMsg("ERROR: DNSDigest_VerifyMessage - TSIG algorithm not supported: %##s", algo->c);
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "TSIG algorithm not supported - "
+            "algorithm name: " PUB_DM_NAME, DM_NAME_PARAM(algo));
         *rcode = kDNSFlag1_RC_NotAuth;
         *tcode = TSIG_ErrBadKey;
         ok = mDNSfalse;
@@ -1527,50 +1776,98 @@ mDNSexport mDNSBool DNSDigest_VerifyMessage(DNSMessage *msg, mDNSu8 *end, LargeC
 
     // MAC size
 
+    const mDNSu16 hmacLength = NToH16(ptr);
     ptr += sizeof(mDNSu16);
 
     // MAC
 
-    mDNSPlatformMemCopy(thatDigest, ptr, MD5_LEN);
+    mDNSPlatformMemCopy(thatDigest, ptr, hmacLength);
 
+    // Initialize HMAC context.
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacInit(&hmacContext, DNSDigest_GetCCHmacAlgorithm(algorithm), info->key, info->key_len);
+#else
     // Init MD5 context, digest inner key pad and message
-
     MD5_Init(&c);
     MD5_Update(&c, info->keydata_ipad, HMAC_LEN);
+#endif
+
+    // Digest the entire DNS message.
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, (mDNSu8 *)msg, (size_t)(end - (mDNSu8 *)msg));
+#else
     MD5_Update(&c, (mDNSu8*) msg, (unsigned long)(end - (mDNSu8*) msg));
+#endif
 
     // Key name
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, lcr->r.resrec.name->c, DomainNameLength(lcr->r.resrec.name));
+#else
     MD5_Update(&c, lcr->r.resrec.name->c, DomainNameLength(lcr->r.resrec.name));
+#endif
 
     // Class name
 
     buf = mDNSOpaque16fromIntVal(lcr->r.resrec.rrclass);
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, buf.b, sizeof(mDNSOpaque16));
+#else
     MD5_Update(&c, buf.b, sizeof(mDNSOpaque16));
+#endif
 
     // TTL
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, (mDNSu8 *) &lcr->r.resrec.rroriginalttl, sizeof(lcr->r.resrec.rroriginalttl));
+#else
     MD5_Update(&c, (mDNSu8*) &lcr->r.resrec.rroriginalttl, sizeof(lcr->r.resrec.rroriginalttl));
+#endif
 
     // Algorithm
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, algo->c, DomainNameLength(algo));
+#else
     MD5_Update(&c, algo->c, DomainNameLength(algo));
+#endif
 
     // Time
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, utc48, 6);
+#else
     MD5_Update(&c, utc48, 6);
+#endif
 
     // Fudge
 
     buf = mDNSOpaque16fromIntVal(fudge);
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, buf.b, sizeof(mDNSOpaque16));
+#else
     MD5_Update(&c, buf.b, sizeof(mDNSOpaque16));
+#endif
 
     // Digest error and other data len (both zero) - we'll add them to the rdata later
 
     buf.NotAnInteger = 0;
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    CCHmacUpdate(&hmacContext, buf.b, sizeof(mDNSOpaque16)); // error
+    CCHmacUpdate(&hmacContext, buf.b, sizeof(mDNSOpaque16)); // other data len
+#else
     MD5_Update(&c, buf.b, sizeof(mDNSOpaque16));  // error
     MD5_Update(&c, buf.b, sizeof(mDNSOpaque16));  // other data len
+#endif
 
+    // Get the HMAC output.
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    mDNSu16 digestLen = 0;
+    CCHmacFinal(&hmacContext, thisDigest);
+    digestLen = DNSDigest_GetHMACOutputLength(algorithm);
+#else
     // Finish the message & tsig var hash
 
     MD5_Final(thisDigest, &c);
@@ -1581,10 +1878,18 @@ mDNSexport mDNSBool DNSDigest_VerifyMessage(DNSMessage *msg, mDNSu8 *end, LargeC
     MD5_Update(&c, info->keydata_opad, HMAC_LEN);
     MD5_Update(&c, thisDigest, MD5_LEN);
     MD5_Final(thisDigest, &c);
+#endif
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
+    // The MAC must be verified by comparing the computed and expected values using timingsafe_bcmp. Other comparison
+    // functions (e.g. memcmp) must not be used as they may be vulnerable to practical timing attacks, leading to MAC
+    // forgery.
+    if (timingsafe_bcmp(thisDigest, thatDigest, digestLen))
+#else
     if (!mDNSPlatformMemSame(thisDigest, thatDigest, MD5_LEN))
+#endif
     {
-        LogMsg("ERROR: DNSDigest_VerifyMessage - bad signature");
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "DNSDigest_VerifyMessage - bad signature");
         *rcode = kDNSFlag1_RC_NotAuth;
         *tcode = TSIG_ErrBadSig;
         ok = mDNSfalse;
@@ -1599,6 +1904,79 @@ exit:
     return ok;
 }
 
+#if defined(DEBUG) && DEBUG
+
+// This function is used for debug purpose to ensure that the signature generated by DNSDigest_SignMessage can be
+// authenticated by DNSDigest_VerifyMessage.
+mDNSexport void DNSDigest_VerifyMessage_Verify(DNSMessage *const msg, const mDNSu8 *const end,
+    const DomainAuthInfo *const authInfo)
+{
+    // Convert from network byte order to host byte order.
+    SwapDNSHeaderBytes(msg);
+
+    // Locate the TSIG record in the additional section.
+    mDNSBool verified;
+    if (!msg->h.numAdditionals)
+    {
+        verified = mDNSfalse;
+        goto exit;
+    }
+
+    const mDNSu8 *ptr = LocateAdditionals(msg, end);
+    if (!ptr)
+    {
+        verified = mDNSfalse;
+        goto exit;
+    }
+
+    const mDNSu8 *lastPtr = mDNSNULL;
+    LargeCacheRecord lcr = {0};
+    mDNSBool hasTSIGAtLast = mDNSfalse;
+    for (mDNSu32 i = 0; i < msg->h.numAdditionals; i++)
+    {
+        lastPtr = ptr;
+        ptr = GetLargeResourceRecord(mDNSNULL, msg, ptr, end, 0, kDNSRecordTypePacketAdd, &lcr);
+        if (!ptr)
+        {
+            verified = mDNSfalse;
+            goto exit;
+        }
+
+        if (lcr.r.resrec.RecordType != kDNSRecordTypePacketNegative && lcr.r.resrec.rrtype == kDNSType_TSIG &&
+            i == msg->h.numAdditionals - 1)
+        {
+            hasTSIGAtLast = mDNStrue;
+        }
+    }
+
+    if (!hasTSIGAtLast)
+    {
+        verified = mDNSfalse;
+        goto exit;
+    }
+
+    // Before doing verification, decrement the additional count by 1 (added by the TSIG record)
+    // Also go back to network byte order.
+    msg->h.numAdditionals--;
+    SwapDNSHeaderBytes(msg);
+
+    mDNSu16 rcode;
+    mDNSu16 tcode;
+    verified = DNSDigest_VerifyMessage(msg, lastPtr, &lcr, authInfo, &rcode, &tcode);
+
+    // Undo the operation above.
+    SwapDNSHeaderBytes(msg);
+    msg->h.numAdditionals++;
+
+exit:
+    if (!verified)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT, "Failed to verify that DNSDigest_VerifyMessage works.");
+    }
+    SwapDNSHeaderBytes(msg);
+}
+
+#endif // defined(DEBUG) && DEBUG
 
 #ifdef __cplusplus
 }

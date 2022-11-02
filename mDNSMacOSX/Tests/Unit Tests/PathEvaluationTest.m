@@ -46,7 +46,7 @@
     q.TargetQID.NotAnInteger = 1;
     q.pid = getpid();
     q.InterfaceID = (mDNSInterfaceID)((uintptr_t)if_nametoindex("pdp_ip0"));
-    fprintf(stdout, "%s %s with cellular index %d named pdp_ip0\n", q.InterfaceID ? "Starting" : "Exiting (no cellular interface)", __FUNCTION__, q.InterfaceID);
+    fprintf(stdout, "%s %s with cellular index %p named pdp_ip0\n", q.InterfaceID ? "Starting" : "Exiting (no cellular interface)", __FUNCTION__, (void *)q.InterfaceID);
     if (!q.InterfaceID) return;
 
     routableIndex = (mDNSInterfaceID)((uintptr_t)IndexForInterfaceByName_ut("pdp_ip0"));

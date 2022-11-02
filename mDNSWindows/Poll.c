@@ -113,7 +113,7 @@ ShiftDown( void * arr, size_t arraySize, size_t itemSize, int index )
 
 #define	DEBUG_NAME	"[mDNSWin32] "
 #define gMDNSRecord mDNSStorage
-mDNSlocal Poll gPoll = { mDNSfalse, NULL };
+mDNSlocal Poll gPoll;
 
 #define LogErr( err, FUNC ) LogMsg( "%s:%d - %s failed: %d\n", __FUNCTION__, __LINE__, FUNC, err );
 

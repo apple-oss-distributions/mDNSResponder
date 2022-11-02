@@ -1504,7 +1504,6 @@ HandleRequest
     PktMsg buf;
     char addrbuf[32];
     TCPSocket * sock = NULL;
-    mStatus err;
     mDNSu32 lease = 0;
     mDNSBool gotlease;
     if ((request->msg.h.flags.b[0] & kDNSFlag0_QROP_Mask) == kDNSFlag0_OP_Update)
@@ -1562,10 +1561,10 @@ HandleRequest
         int res;
 
         sock = ConnectToServer( self );
-        require_action_quiet( sock, exit, err = mStatus_UnknownErr ; Log( "Discarding request from %s due to connection errors", inet_ntop( AF_INET, &request->src.sin_addr, addrbuf, 32 ) ) );
+        require_action_quiet( sock, exit, Log( "Discarding request from %s due to connection errors", inet_ntop( AF_INET, &request->src.sin_addr, addrbuf, 32 ) ) );
 
         res = SendPacket( sock, request );
-        require_action_quiet( res >= 0, exit, err = mStatus_UnknownErr ; Log( "Couldn't relay message from %s to server.  Discarding.", inet_ntop(AF_INET, &request->src.sin_addr, addrbuf, 32 ) ) );
+        require_action_quiet( res >= 0, exit, Log( "Couldn't relay message from %s to server.  Discarding.", inet_ntop(AF_INET, &request->src.sin_addr, addrbuf, 32 ) ) );
 
         reply = RecvPacket( sock, &buf, &closed );
     }
@@ -1579,7 +1578,7 @@ HandleRequest
     {
         char pingmsg[4];
         mDNSBool ok = SuccessfulUpdateTransaction( request, reply );
-        require_action( ok, exit, err = mStatus_UnknownErr; VLog( "Message from %s not a successful update.", inet_ntop(AF_INET, &request->src.sin_addr, addrbuf, 32 ) ) );
+        require_action( ok, exit, VLog( "Message from %s not a successful update.", inet_ntop(AF_INET, &request->src.sin_addr, addrbuf, 32 ) ) );
 
         UpdateLeaseTable( request, self, lease );
 
@@ -2526,13 +2525,12 @@ UDPMessageHandler
     UDPContext  *   context = ( UDPContext* ) vptr;
     PktMsg      *   reply   = NULL;
     int res;
-    mStatus err;
 
     // !!!KRS strictly speaking, we shouldn't use TCP for a UDP request because the server
     // may give us a long answer that would require truncation for UDP delivery to client
 
     reply = HandleRequest( context->d, &context->pkt );
-    require_action( reply, exit, err = mStatus_UnknownErr );
+    require_action( reply, exit, );
 
     res = sendto( context->sd, &reply->msg, reply->len, 0, ( struct sockaddr* ) &context->pkt.src, sizeof( context->pkt.src ) );
     require_action_quiet( res == ( int ) reply->len, exit, LogErr( "UDPMessageHandler", "sendto" ) );

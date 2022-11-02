@@ -77,7 +77,12 @@ extern uint16_t srp_random16(void);
 //*************************************************************************************************************
 // Globals
 
-static dso_state_t *dso_connections;
+// List of dso connection states that are active. Added when dso_connect_state_create() is called, removed
+// when dso_state_cancel() is called. Removals are moved to dso_connections_needing_cleanup for cleanup during
+// the idle loop.
+// The list of connection states is not declared static so that the discovery proxy can access it as part of
+// the "start-dropping-push" test.
+dso_state_t *dso_connections;
 static dso_state_t *dso_connections_needing_cleanup; // DSO connections that have been shut down but aren't yet freed.
 
 dso_state_t *dso_find_by_serial(uint32_t serial)
@@ -98,30 +103,35 @@ dso_state_t *dso_find_by_serial(uint32_t serial)
 
 void dso_state_cancel(dso_state_t *dso)
 {
-    dso_state_t *dsop;
+    dso_state_t **dsop = &dso_connections;
+    bool status = true;
 
-    if (dso_connections == dso) {
-        dso_connections = dso->next;
-    } else {
-        for (dsop = dso_connections; dsop != NULL && dsop->next != dso; dsop = dsop->next)
-            ;
-        if (dsop) {
-            dsop->next = dso->next;
-        // If we get to the end of the list without finding dso, it means that it's already
-        // been dropped.
-        } else {
-            return;
-        }
+    // Find dso on the list of connections.
+    while (*dsop != NULL && *dsop != dso) {
+        dsop = &(*dsop)->next;
+    }
+
+    // If we get to the end of the list without finding dso, it means that it's already
+    // been dropped.
+    if (*dsop == NULL) {
+        return;
     }
 
     // When the dso_state_t is canceled, its context may also need to be canceled/released/freed, so we give context a
     // callback to do the cleaning work with dso_life_cycle_cancel state.
     if (dso->context_callback != NULL) {
-        dso->context_callback(dso_life_cycle_cancel, dso->context, dso);
+        status = dso->context_callback(dso_life_cycle_cancel, dso->context, dso);
     }
 
-    dso->next = dso_connections_needing_cleanup;
-    dso_connections_needing_cleanup = dso;
+    // If the callback returns a status of true, then we want to free the dso object in the idle loop.
+    if (status) {
+        // Remove dso from the list of active dso objects.
+        *dsop = dso->next;
+
+        // Add it to the list of dso objects needing cleanup.
+        dso->next = dso_connections_needing_cleanup;
+        dso_connections_needing_cleanup = dso;
+    }
 }
 
 int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event)
@@ -140,7 +150,7 @@ int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event)
             mdns_free(ap);
         }
         if (dso->transport != NULL && dso->transport_finalize != NULL) {
-            dso->transport_finalize(dso->transport);
+            dso->transport_finalize(dso->transport, "dso_idle");
             dso->transport = NULL;
         }
         LogMsg("[DSO%u] dso_state_t finalizing - "
@@ -164,8 +174,8 @@ int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event)
         if (dso->inactivity_due == 0) {
             if (dso->inactivity_timeout != 0) {
                 dso->inactivity_due = NonZeroTime(now + (event_time_t)MIN(dso->inactivity_timeout, INT32_MAX));
-                if (next_timer_event - dso->keepalive_due > 0) {
-                    next_timer_event = dso->keepalive_due;
+                if (next_timer_event - dso->inactivity_due > 0) {
+                    next_timer_event = dso->inactivity_due;
                 }
             }
         } else if (now - dso->inactivity_due > 0 && dso->cb != NULL) {
@@ -175,7 +185,7 @@ int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event)
             // its status will not work as expected.
             continue;
         }
-        if (dso->keepalive_due != 0 && dso->keepalive_due < now && dso->cb != NULL) {
+        if (dso->keepalive_due != 0 && dso->keepalive_due - now < 0 && dso->cb != NULL) {
             dso_keepalive_context_t kc;
             memset(&kc, 0, sizeof kc);
             dso->cb(dso->context, &kc, dso, kDSOEventType_Keepalive);
@@ -518,10 +528,11 @@ void dso_drop_activity(dso_state_t *dso, dso_activity_t *activity)
     mdns_free(activity);
 }
 
-void dso_ignore_response(dso_state_t *dso, void *context)
+uint32_t dso_ignore_further_responses(dso_state_t *dso, void *context)
 {
     dso_outstanding_query_state_t *midState = dso->outstanding_queries;
     int i;
+    uint32_t disassociated_count = 0;
     for (i = 0; i < midState->max_outstanding_queries; i++) {
         // The query is still be outstanding, and we want to know it when it comes back, but we forget the context,
         // which presumably is a reference to something that's going away.
@@ -529,8 +540,11 @@ void dso_ignore_response(dso_state_t *dso, void *context)
             midState->queries[i].context = NULL;
             INFO("[DSO%u] Disassociate the outstanding dso query with the context - query id: 0x%x, context: %p.",
                  dso->serial, midState->queries[i].id, context);
+            disassociated_count++;
         }
     }
+
+    return disassociated_count;
 }
 
 bool dso_make_message(dso_message_t *state, uint8_t *outbuf, size_t outbuf_size, dso_state_t *dso,

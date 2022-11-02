@@ -1,12 +1,12 @@
-/* srp-gw.c
+/* srp-dns-proxy.c
  *
- * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -554,7 +554,7 @@ update_send(update_t *update)
     }
 
 #ifdef DEBUG_DECODE_UPDATE
-    if (!dns_wire_parse(&decoded, msg, update->update_length)) {
+    if (!dns_wire_parse(&decoded, msg, update->update_length, false)) {
         ERROR("Constructed message does not successfully parse.");
         update_finished(update, dns_rcode_servfail);
         return;

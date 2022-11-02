@@ -95,8 +95,15 @@ typedef enum {
     dso_connect_life_cycle_free
 } dso_connect_life_cycle_t;
 
-typedef void (*dso_connect_life_cycle_context_callback_t)(const dso_connect_life_cycle_t life_cycle,
+typedef bool (*dso_connect_life_cycle_context_callback_t)(const dso_connect_life_cycle_t life_cycle,
      void *const context, dso_connect_state_t *const dso_connect);
+
+typedef struct dso_transport_address dso_transport_address_t;
+struct dso_transport_address {
+    dso_transport_address_t *next;
+    mDNSAddr address;
+    mDNSIPPort port;
+};
 
 struct dso_connect_state {
     dso_connect_state_t *next;
@@ -117,12 +124,14 @@ struct dso_connect_state {
     uint32_t serial; // Serial number that identifies a specific dso_connect_state_t.
     char *hostname;
 
-    mdns_addr_tailq_t *addrs; // A list that contains all the resolved/added addresses and ports of the DSO server.
+    // A list of addresses that we've discovered, and the next address to try.
+    dso_transport_address_t *addrs, *next_addr;
     DNSServiceRef lookup;
     mDNSBool canceled; // Indicates if the dso_connect_state_t has been canceled and should be ignored for processing.
 
     mDNSBool connecting;
     mDNSIPPort config_port, connect_port;
+    dso_transport_t *transport;
 #ifdef DSO_USES_NETWORK_FRAMEWORK
     nw_connection_t connection;
     bool tls_enabled;
@@ -164,6 +173,7 @@ void dso_connect_state_use_tls(dso_connect_state_t *cs);
 #endif
 void dso_connect_state_cancel(dso_connect_state_t *const cs);
 bool dso_connect(dso_connect_state_t *connect_state);
+void dso_reconnect(dso_connect_state_t *cs, dso_state_t *dso);
 mStatus dso_listen(dso_connect_state_t *listen_context);
 bool dso_write_start(dso_transport_t *transport, size_t length);
 bool dso_write_finish(dso_transport_t *transport);

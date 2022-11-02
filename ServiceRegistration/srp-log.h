@@ -331,8 +331,13 @@
     #define PUB_S_SRP "%s"
     #define PRI_S_SRP PUB_S_SRP
     // DNS name, when the pointer to DNS name is NULL, <NULL> will be logged.
+    #if defined(MDNS_NO_STRICT) && (!MDNS_NO_STRICT)
+        #define SRP_LOG_STRNCPY_STRICT mdns_strlcpy
+    #else
+        #define SRP_LOG_STRNCPY_STRICT strlcpy
+    #endif
     #ifdef IOLOOP_MACOS
-        #define SRP_LOG_STRNCPY strlcpy
+        #define SRP_LOG_STRNCPY SRP_LOG_STRNCPY_STRICT
     #else
         #define SRP_LOG_STRNCPY strncpy
     #endif // IOLOOP_MACOS

@@ -33,9 +33,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/signal.h>
-#ifndef LINUX
-#include <sys/ucred.h>
-#endif
 
 #ifdef OPENTHREAD_PLATFORM_POSIX
 #include "cti-server.h"
@@ -584,7 +581,7 @@ cti_accept(int listen_fd, uid_t *p_uid, gid_t *p_gid, pid_t *p_pid)
         goto out;
     }
 
-#ifdef LINUX
+#if defined(LINUX) || OPENTHREAD_PLATFORM_POSIX
     if (p_uid != NULL) {
         *p_uid = ucred.uid;
     }

@@ -38,10 +38,13 @@
 #include "dns-msg.h"
 #include "ioloop.h"
 #include "srp-gw.h"
-#include "route.h"
 #include "srp-proxy.h"
 #include "srp-mdns-proxy.h"
+#include "cti-services.h"
+#include "route.h"
 #include "adv-ctl-server.h"
+#include "srp-replication.h"
+#include "dnssd-proxy.h"
 
 #include "cti-proto.h"
 #include "adv-ctl-common.h"
@@ -49,57 +52,166 @@
 
 
 static int
-adv_ctl_block_service(bool enable)
+adv_ctl_block_service(bool enable, void *context)
 {
     int status = kDNSSDAdvertisingProxyStatus_NoError;
 #if THREAD_BORDER_ROUTER
-    extern srp_proxy_listener_state_t *srp_listener;
-
+    srp_server_t *server_state = context;
     if (enable) {
-        if (srp_listener != NULL) {
-            srp_proxy_listener_cancel(srp_listener);
-            srp_listener = NULL;
+        if (server_state->route_state->srp_listener != NULL) {
+            srp_proxy_listener_cancel(server_state->route_state->srp_listener);
+            server_state->route_state->srp_listener = NULL;
         } else {
             status = kDNSSDAdvertisingProxyStatus_UnknownErr;
         }
     } else {
-        if (srp_listener == NULL) {
-            partition_start_srp_listener();
+        if (server_state->route_state->srp_listener == NULL) {
+            partition_start_srp_listener(server_state->route_state);
         } else {
             status = kDNSSDAdvertisingProxyStatus_UnknownErr;
         }
     }
 #else
     (void)enable;
+    (void)context;
 #endif // THREAD_BORDER_ROUTER
     return status;
 }
 
 static bool
-adv_ctl_regenerate_ula(void)
+adv_ctl_regenerate_ula(void *context)
 {
     int status = kDNSSDAdvertisingProxyStatus_NoError;
+    srp_server_t *server_state = context;
 
 #if THREAD_BORDER_ROUTER
-    partition_stop_advertising_pref_id();
-    infrastructure_network_shutdown();
-    route_ula_generate();
-    infrastructure_network_startup();
+    partition_stop_advertising_pref_id(server_state->route_state);
+    infrastructure_network_shutdown(server_state->route_state);
+    route_ula_generate(server_state->route_state);
+    infrastructure_network_startup(server_state->route_state);
 #endif
     return status;
 }
 
 static int
-adv_ctl_advertise_prefix(void)
+adv_ctl_advertise_prefix(void *context)
 {
     int status = kDNSSDAdvertisingProxyStatus_NoError;
+    srp_server_t *server_state = context;
 
 #if THREAD_BORDER_ROUTER
-    partition_publish_my_prefix();
+    partition_publish_my_prefix(server_state->route_state);
 #endif
     return status;
 }
 
+static int
+adv_ctl_prefix_add_remove(void *context, xpc_object_t request, bool add)
+{
+    int status = kDNSSDAdvertisingProxyStatus_NoError;
+    srp_server_t *server_state = context;
+    const uint8_t *data;
+    size_t data_len;
+
+    data = xpc_dictionary_get_data(request, "data", &data_len);
+    if (data != NULL && data_len == 16) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(data, prefix_buf);
+        INFO("got prefix " PRI_SEGMENTED_IPv6_ADDR_SRP, SEGMENTED_IPv6_ADDR_PARAM_SRP(data, prefix_buf));
+#if THREAD_BORDER_ROUTER
+        if (add) {
+            adv_ctl_add_prefix(server_state->route_state, data);
+        } else {
+            adv_ctl_remove_prefix(server_state->route_state, data);
+        }
+#endif
+    } else {
+        ERROR("invalid request, data[%p], data_len[%ld]", data, data_len);
+        status = kDNSSDAdvertisingProxyStatus_BadParam;
+    }
+    return status;
+}
+
+static int
+adv_ctl_stop_advertising_service(void *context)
+{
+    int status = kDNSSDAdvertisingProxyStatus_NoError;
+    srp_server_t *server_state = context;
+
+#if THREAD_BORDER_ROUTER
+    partition_discontinue_srp_service(server_state->route_state);
+#endif
+    return status;
+}
+
+static int
+adv_ctl_disable_replication(void *context)
+{
+    int status = kDNSSDAdvertisingProxyStatus_NoError;
+
+#if SRP_FEATURE_REPLICATION
+    srp_server_t *server_state = context;
+    srpl_disable(server_state);
+#else
+    (void)context;
+#endif
+    return status;
+}
+
+static int
+adv_ctl_drop_srpl_connection(void *context)
+{
+    int status = kDNSSDAdvertisingProxyStatus_NoError;
+
+#if SRP_FEATURE_REPLICATION
+    srp_server_t *server_state = context;
+    srpl_drop_srpl_connection(server_state);
+#else
+    (void)context;
+#endif
+    return status;
+}
+
+static int
+adv_ctl_undrop_srpl_connection(void *context)
+{
+    int status = kDNSSDAdvertisingProxyStatus_NoError;
+
+#if SRP_FEATURE_REPLICATION
+    srp_server_t *server_state = context;
+    srpl_undrop_srpl_connection(server_state);
+#else
+    (void)context;
+#endif
+    return status;
+}
+
+static int
+adv_ctl_drop_srpl_advertisement(void *context)
+{
+    int status = kDNSSDAdvertisingProxyStatus_NoError;
+
+#if SRP_FEATURE_REPLICATION
+    srp_server_t *server_state = context;
+    srpl_drop_srpl_advertisement(server_state);
+#else
+    (void)context;
+#endif
+    return status;
+}
+
+static int
+adv_ctl_undrop_srpl_advertisement(void *context)
+{
+    int status = kDNSSDAdvertisingProxyStatus_NoError;
+
+#if SRP_FEATURE_REPLICATION
+    srp_server_t *server_state = context;
+    srpl_undrop_srpl_advertisement(server_state);
+#else
+    (void)context;
+#endif
+    return status;
+}
 
 
 static void
@@ -111,8 +223,9 @@ adv_ctl_fd_finalize(void *context)
 }
 
 static bool
-adv_ctl_list_services(advertising_proxy_conn_ref connection)
+adv_ctl_list_services(advertising_proxy_conn_ref connection, void *context)
 {
+    srp_server_t *server_state = context;
     adv_host_t *host;
     int i;
     int64_t now = ioloop_timenow();
@@ -129,7 +242,7 @@ adv_ctl_list_services(advertising_proxy_conn_ref connection)
 		cti_connection_close(connection);
 		return false;
 	}
-	for (host = hosts; host != NULL; host = host->next) {
+	for (host = server_state->hosts; host != NULL; host = host->next) {
 		int num_addresses = 0;
 		int num_instances = 0;
 		if (!cti_connection_string_put(connection, host->name) ||
@@ -145,41 +258,49 @@ adv_ctl_list_services(advertising_proxy_conn_ref connection)
 
         cti_connection_u64_put(connection, host->server_stable_id);
 
-		for (i = 0; i < host->num_addresses; i++) {
-			if (host->addresses[i] != NULL) {
-				num_addresses++;
-			}
-		}
+        if (host->addresses != NULL) {
+            for (i = 0; i < host->addresses->num; i++) {
+                if (host->addresses->vec[i] != NULL) {
+                    num_addresses++;
+                }
+            }
+        }
 		cti_connection_u16_put(connection, num_addresses);
-		for (i = 0; i < host->num_addresses; i++) {
-			if (host->addresses[i] != NULL) {
-				if (!cti_connection_u16_put(connection, host->addresses[i]->rrtype) ||
-					!cti_connection_data_put(connection, host->addresses[i]->rdata, host->addresses[i]->rdlen))
-				{
-					ERROR("adv_ctl_list_services: unable to write address %d for host %s", i, host->name);
-					cti_connection_close(connection);
-					return false;
-				}
-			}
-		}
-		for (i = 0; i < host->instances->num; i++) {
-			if (host->instances->vec[i] != NULL) {
-				num_instances++;
-			}
-		}
+        if (host->addresses != NULL) {
+            for (i = 0; i < host->addresses->num; i++) {
+                if (host->addresses->vec[i] != NULL) {
+                    if (!cti_connection_u16_put(connection, host->addresses->vec[i]->rrtype) ||
+                        !cti_connection_data_put(connection, host->addresses->vec[i]->rdata, host->addresses->vec[i]->rdlen))
+                    {
+                        ERROR("adv_ctl_list_services: unable to write address %d for host %s", i, host->name);
+                        cti_connection_close(connection);
+                        return false;
+                    }
+                }
+            }
+        }
+        if (host->instances != NULL) {
+            for (i = 0; i < host->instances->num; i++) {
+                if (host->instances->vec[i] != NULL) {
+                    num_instances++;
+                }
+            }
+        }
 		cti_connection_u16_put(connection, num_instances);
-		for (i = 0; i < host->instances->num; i++) {
-			adv_instance_t *instance = host->instances->vec[i];
-			if (instance != NULL) {
-				if (!cti_connection_string_put(connection, instance->instance_name) ||
-					!cti_connection_string_put(connection, instance->service_type) ||
-					!cti_connection_u16_put(connection, instance->port) ||
-					!cti_connection_data_put(connection, instance->txt_data, instance->txt_length))
-				{
-					ERROR("adv_ctl_list_services: unable to write address %d for host %s", i, host->name);
-					cti_connection_close(connection);
-					return false;
-				}
+        if (host->instances != NULL) {
+            for (i = 0; i < host->instances->num; i++) {
+                adv_instance_t *instance = host->instances->vec[i];
+                if (instance != NULL) {
+                    if (!cti_connection_string_put(connection, instance->instance_name) ||
+                        !cti_connection_string_put(connection, instance->service_type) ||
+                        !cti_connection_u16_put(connection, instance->port) ||
+                        !cti_connection_data_put(connection, instance->txt_data, instance->txt_length))
+                    {
+                        ERROR("adv_ctl_list_services: unable to write address %d for host %s", i, host->name);
+                        cti_connection_close(connection);
+                        return false;
+                    }
+                }
 			}
 		}
     }
@@ -187,8 +308,10 @@ adv_ctl_list_services(advertising_proxy_conn_ref connection)
 }
 
 static bool
-adv_ctl_get_ula(advertising_proxy_conn_ref connection)
+adv_ctl_get_ula(advertising_proxy_conn_ref connection, void *context)
 {
+    srp_server_t *server_state = context;
+
     if (!cti_connection_message_create(connection, kDNSSDAdvertisingProxyResponse, 200) ||
         !cti_connection_u32_put(connection, (uint32_t)kDNSSDAdvertisingProxyStatus_NoError))
     {
@@ -199,7 +322,7 @@ adv_ctl_get_ula(advertising_proxy_conn_ref connection)
     // Copy out just the global ID part of the ULA prefix.
     uint64_t ula = 0;
     for (int j = 1; j < 6; j++) {
-        ula = ula << 8 | (((uint8_t *)&ula_prefix)[j]);
+        ula = ula << 8 | (((uint8_t *)&server_state->ula_prefix)[j]);
     }
     if (!cti_connection_u64_put(connection, ula)) {
         ERROR("error sending ula");
@@ -210,7 +333,7 @@ adv_ctl_get_ula(advertising_proxy_conn_ref connection)
 }
 
 static void
-adv_ctl_message_parse(advertising_proxy_conn_ref connection)
+adv_ctl_message_parse(advertising_proxy_conn_ref connection, void *context)
 {
 	int status = kDNSSDAdvertisingProxyStatus_NoError;
 	cti_connection_parse_start(connection);
@@ -229,7 +352,7 @@ adv_ctl_message_parse(advertising_proxy_conn_ref connection)
 	case kDNSSDAdvertisingProxyListServices:
         INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyListServices request.",
 			 connection->uid, connection->gid);
-        adv_ctl_list_services(connection);
+        adv_ctl_list_services(connection, context);
 		return;
 	case kDNSSDAdvertisingProxyListHosts:
         INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyListHosts request.",
@@ -242,33 +365,107 @@ adv_ctl_message_parse(advertising_proxy_conn_ref connection)
 	case kDNSSDAdvertisingProxyFlushEntries:
         INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyFlushEntries request.",
 			 connection->uid, connection->gid);
-        srp_mdns_flush();
+        srp_mdns_flush(context);
 		break;
 	case kDNSSDAdvertisingProxyBlockService:
         INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyBlockService request.",
 			 connection->uid, connection->gid);
-        adv_ctl_block_service(true);
+        adv_ctl_block_service(true, context);
 		break;
 	case kDNSSDAdvertisingProxyUnblockService:
         INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyUnblockService request.",
 			 connection->uid, connection->gid);
-        adv_ctl_block_service(false);
+        adv_ctl_block_service(false, context);
 		break;
 	case kDNSSDAdvertisingProxyRegenerateULA:
         INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyRegenerateULA request.",
 			 connection->uid, connection->gid);
-        adv_ctl_regenerate_ula();
+        adv_ctl_regenerate_ula(context);
 		break;
-	case kDNSSDAdvertisingProxyAdvertisePrefix:
+    case kDNSSDAdvertisingProxyAdvertisePrefix:
         INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyAdvertisePrefix request.",
-			 connection->uid, connection->gid);
-        adv_ctl_advertise_prefix();
-		break;
+             connection->uid, connection->gid);
+        adv_ctl_advertise_prefix(context);
+        break;
+    case kDNSSDAdvertisingProxyAddPrefix:
+        void *data = NULL;
+        uint16_t data_len;
+        INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyAddPrefix request.",
+             connection->uid, connection->gid);
+        if (!cti_connection_data_parse(connection, &data, &data_len)) {
+            ERROR("faile to parse data for kDNSSDAdvertisingProxyAddPrefix request.");
+            status = kDNSSDAdvertisingProxyStatus_BadParam;
+        } else {
+            if (data != NULL && data_len == 16) {
+                SEGMENTED_IPv6_ADDR_GEN_SRP(data, prefix_buf);
+                INFO("got prefix " PRI_SEGMENTED_IPv6_ADDR_SRP, SEGMENTED_IPv6_ADDR_PARAM_SRP(data, prefix_buf));
+                status = adv_ctl_add_prefix(context, data);
+            } else {
+                ERROR("invalid add prefix request, data[%p], data_len[%ld]", data, data_len);
+                status = kDNSSDAdvertisingProxyStatus_BadParam;
+            }
+        }
+        break;
+    case kDNSSDAdvertisingProxyRemovePrefix:
+        void *data = NULL;
+        uint16_t data_len;
+        INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyRemovePrefix request.",
+             connection->uid, connection->gid);
+        if (!cti_connection_data_parse(connection, &data, &data_len)) {
+            ERROR("faile to parse data for kDNSSDAdvertisingProxyRemovePrefix request.");
+            status = kDNSSDAdvertisingProxyStatus_BadParam;
+        } else {
+            if (data != NULL && data_len == 16) {
+                SEGMENTED_IPv6_ADDR_GEN_SRP(data, prefix_buf);
+                INFO("got prefix " PRI_SEGMENTED_IPv6_ADDR_SRP, SEGMENTED_IPv6_ADDR_PARAM_SRP(data, prefix_buf));
+                status = adv_ctl_add_prefix(context, data);
+            } else {
+                ERROR("invalid add prefix request, data[%p], data_len[%ld]", data, data_len);
+                status = kDNSSDAdvertisingProxyStatus_BadParam;
+            }
+        }
+        break;
+    case kDNSSDAdvertisingProxyStop:
+        INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyStop request.",
+             connection->uid, connection->gid);
+        adv_ctl_stop_advertising_service(context);
+        break;
     case kDNSSDAdvertisingProxyGetULA:
         INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyULA request.",
              connection->uid, connection->gid);
-        adv_ctl_get_ula(connection);
-        return;
+        adv_ctl_get_ula(connection, context);
+        break;
+    case kDNSSDAdvertisingProxyDisableReplication:
+        INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyDisableReplication request.",
+             connection->uid, connection->gid);
+        adv_ctl_disable_replication(context);
+        break;
+    case kDNSSDAdvertisingProxyDropSrplConnection:
+        INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyDropSrplConnection request.",
+             connection->uid, connection->gid);
+        adv_ctl_drop_srpl_connection(context);
+        break;
+    case kDNSSDAdvertisingProxyUndropSrplConnection:
+        INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyUndropSrplConnection request.",
+             connection->uid, connection->gid);
+        adv_ctl_undrop_srpl_connection(context);
+        break;
+    case kDNSSDAdvertisingProxyDropSrplAdvertisement:
+        INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyDropSrplAdvertisement request.",
+             connection->uid, connection->gid);
+        adv_ctl_drop_srpl_advertisement(context);
+        break;
+    case kDNSSDAdvertisingProxyUndropSrplAdvertisement:
+        INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyUndropSrplAdvertisement request.",
+             connection->uid, connection->gid);
+        adv_ctl_undrop_srpl_advertisement(context);
+        break;
+
+    case kDNSSDAdvertisingProxyStartDroppingPushConnections:
+        INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyStartDroppingPushConnections request.",
+             connection->uid, connection->gid);
+        dp_start_smashing();
+        break;
 
 	default:
         ERROR("Client uid %d pid %d sent a request with unknown message type %d.",
@@ -288,14 +485,15 @@ adv_ctl_read_callback(io_t *UNUSED io, void *context)
     cti_read(connection, adv_ctl_message_parse);
 }
 
-static io_t *listener;
 static void
-adv_ctl_listen_callback(io_t *UNUSED io, void *UNUSED context)
+adv_ctl_listen_callback(io_t *UNUSED io, void *context)
 {
+    srp_server_t *server_state = context;
 	uid_t uid;
 	gid_t gid;
 	pid_t pid;
-	int fd = cti_accept(listener->fd, &uid, &gid, &pid);
+
+	int fd = cti_accept(server_state->adv_ctl_listener->fd, &uid, &gid, &pid);
 	if (fd < 0) {
 		return;
 	}
@@ -327,7 +525,7 @@ adv_ctl_listen_callback(io_t *UNUSED io, void *UNUSED context)
 }
 
 static int
-adv_ctl_listen(void)
+adv_ctl_listen(srp_server_t *server_state)
 {
     int fd = cti_make_unix_socket(ADV_CTL_SERVER_SOCKET_NAME, sizeof(ADV_CTL_SERVER_SOCKET_NAME), true);
     if (fd < 0) {
@@ -338,22 +536,23 @@ adv_ctl_listen(void)
         return ret;
     }
 
-    listener = ioloop_file_descriptor_create(fd, NULL, NULL);
-    if (listener == NULL) {
+    server_state->adv_ctl_listener = ioloop_file_descriptor_create(fd, server_state, NULL);
+    if (server_state->listener == NULL) {
         ERROR("adv_ctl_listener: no memory for io_t object.");
 		close(fd);
         return kDNSSDAdvertisingProxyStatus_NoMemory;
     }
-    RETAIN_HERE(listener);
+    RETAIN_HERE(server_state->adv_ctl_listener);
 
-    ioloop_add_reader(listener, adv_ctl_listen_callback);
+    ioloop_add_reader(server_state->adv_ctl_listener, adv_ctl_listen_callback);
     return kDNSSDAdvertisingProxyStatus_NoError;
 }
 
 bool
-adv_ctl_init(void)
+adv_ctl_init(void *context)
 {
-	return adv_ctl_listen();
+    srp_server_t *server_state = context;
+	return adv_ctl_listen(server_state);
 }
 
 // Local Variables:

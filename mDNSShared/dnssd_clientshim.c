@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include "DNSCommon.h"          // For mDNSPlatformInterfaceIndexfromInterfaceID().
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+#include "dnssec.h"
+#include "dnssec_obj_context.h"
+#endif
+
 extern mDNS mDNSStorage;        // We need to pass the address of this storage to the lower-layer functions
 
 // If a target complies this file, then it should be using the shim layer.
@@ -639,8 +645,17 @@ mDNSlocal void DNSServiceQueryRecordResponse(mDNS *const m, DNSQuestion *questio
     char fullname[MAX_ESCAPED_DOMAIN_NAME];
     (void)m;    // Unused
     ConvertDomainNameToCString(answer->name, fullname);
-    x->callback((DNSServiceRef)x, AddRecord ? kDNSServiceFlagsAdd : (DNSServiceFlags)0, 0, kDNSServiceErr_NoError,
-                fullname, answer->rrtype, answer->rrclass, answer->rdlength, answer->rdata->u.data, answer->rroriginalttl, x->context);
+
+    DNSServiceFlags flags = AddRecord ? kDNSServiceFlagsAdd : (DNSServiceFlags)0;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    if (dns_question_is_dnssec_requestor(question))
+    {
+        flags |= dns_service_flags_init_with_dnssec_result(question, answer);
+    }
+#endif
+
+    x->callback((DNSServiceRef)x, flags, 0, kDNSServiceErr_NoError, fullname, answer->rrtype, answer->rrclass,
+                answer->rdlength, answer->rdata->u.data, answer->rroriginalttl, x->context);
 }
 
 DNSServiceErrorType DNSServiceQueryRecord
@@ -679,6 +694,9 @@ DNSServiceErrorType DNSServiceQueryRecord
     x->q.ForceMCast           = (flags & kDNSServiceFlagsForceMulticast) != 0;
     x->q.ReturnIntermed       = (flags & kDNSServiceFlagsReturnIntermediates) != 0;
     x->q.SuppressUnusable     = (flags & kDNSServiceFlagsSuppressUnusable) != 0;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    x->q.enableDNSSEC         = dns_service_flags_enables_dnssec(flags);
+#endif
     x->q.AppendSearchDomains  = 0;
     x->q.TimeoutQuestion      = 0;
     x->q.WakeOnResolve        = 0;
@@ -858,6 +876,9 @@ DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo(
     x->a.ForceMCast           = (inFlags & kDNSServiceFlagsForceMulticast) != 0;
     x->a.ReturnIntermed       = (inFlags & kDNSServiceFlagsReturnIntermediates) != 0;
     x->a.SuppressUnusable     = (inFlags & kDNSServiceFlagsSuppressUnusable) != 0;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    x->a.enableDNSSEC         = dns_service_flags_enables_dnssec(inFlags);
+#endif
     x->a.AppendSearchDomains  = 0;
     x->a.TimeoutQuestion      = 0;
     x->a.WakeOnResolve        = 0;

@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
  *
  * Disclaimer: IMPORTANT:  This Apple software is supplied to you by Apple Inc.
  * ("Apple") in consideration of your agreement to the following terms, and your
@@ -66,6 +66,10 @@
 #include <time.h>
 #include <sys/types.h>      // For u_char
 
+
+#ifndef __printflike
+    #define __printflike(A, B)
+#endif
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -507,6 +511,28 @@ static DNSServiceProtocol GetProtocol(const char *s)
     else return(atoi(s));
 }
 
+static char
+DNSSECResultToCharRepresentation(const DNSServiceFlags flags)
+{
+    char dnssec_result;
+    if ((flags & kDNSServiceFlagsValidate) == 0)
+    {
+        dnssec_result = ' ';
+    }
+    else if ((flags & kDNSServiceFlagsSecure) == kDNSServiceFlagsSecure)
+    {
+        dnssec_result = 'S';
+    }
+    else if ((flags & kDNSServiceFlagsInsecure) == kDNSServiceFlagsInsecure)
+    {
+        dnssec_result = 'I';
+    }
+    else
+    {
+        dnssec_result = 'E';
+    }
+    return dnssec_result;
+}
 
 //*************************************************************************************************************
 // Sample callback functions for each of the operation types
@@ -578,6 +604,7 @@ static void print_usage(const char *arg0, int print_all)
         fprintf(stderr, "\n");
         fprintf(stderr, "%s -A                              (Test Adding/Updating/Deleting a record)\n", arg0);
         fprintf(stderr, "%s -C <name> <rrtype> <rrclass>           (Query; reconfirming each result)\n", arg0);
+        fprintf(stderr, "%s -D                               (Set kDNSServiceFlagsEnableDNSSEC flag)\n", arg0);
         fprintf(stderr, "%s -I           (Test registering and then immediately updating TXT record)\n", arg0);
         fprintf(stderr, "%s -N                                     (Test adding a large NULL record)\n", arg0);
         fprintf(stderr, "%s -M              (Test creating a registration with multiple TXT records)\n", arg0);
@@ -603,7 +630,6 @@ static void print_usage(const char *arg0, int print_all)
         fprintf(stderr, "%s -timeout                              (Set kDNSServiceFlagsTimeout flag)\n", arg0);
         fprintf(stderr, "%s -unicastResponse              (Set kDNSServiceFlagsUnicastResponse flag)\n", arg0);
         fprintf(stderr, "%s -autoTrigger                      (Set kDNSServiceFlagsAutoTrigger flag)\n", arg0);
-        fprintf(stderr, "%s -enableDNSSEC              (Enable DNSSEC validation for the '-Q' query)\n", arg0);
     }
 }
 
@@ -968,6 +994,7 @@ static void DNSSD_API reg_reply(DNSServiceRef sdref, const DNSServiceFlags flags
     }
 }
 
+__printflike(3, 4)
 static int snprintf_safe(char *str, size_t size, const char *format, ...)
 {
     int length = 0;
@@ -1122,16 +1149,8 @@ static void DNSSD_API qr_reply(DNSServiceRef sdref, const DNSServiceFlags flags,
     const unsigned char *end = (const unsigned char *) rdata + rdlen;
     char rdb[1000] = "0.0.0.0", *p = rdb;
     int unknowntype = 0;
-    char dnssec_status[20] = "Unknown";
     char rr_type[RR_TYPE_SIZE];
     char rr_class[6];
-    DNSServiceFlags check_flags = flags;//local flags for dnssec status checking
-    int8_t enable_dnssec = ((check_flags & kDNSServiceFlagsEnableDNSSEC) != 0);
-    static int8_t enabled_dnssec_before = -1;
-
-    if (enabled_dnssec_before == -1) {
-        enabled_dnssec_before = enable_dnssec;
-    }
 
     (void)sdref;    // Unused
     (void)ifIndex;  // Unused
@@ -1141,7 +1160,7 @@ static void DNSSD_API qr_reply(DNSServiceRef sdref, const DNSServiceFlags flags,
 
     if (num_printed++ == 0)
     {
-        printf("Timestamp     A/R    Flags if %-30s%-6s%-7s%s Rdata\n", "Name", "Type", "Class", enable_dnssec ? " DNSSECResult  " : "");
+        printf("Timestamp     %3s  %-11s  %3s  %-29s %-6s %-6s Rdata\n", "A/R", "Flags", "IF", "Name", "Type", "Class");
     }
     printtimestamp();
 
@@ -1206,20 +1225,10 @@ static void DNSSD_API qr_reply(DNSServiceRef sdref, const DNSServiceFlags flags,
         }
     }
 
-    if (check_flags & kDNSServiceFlagsSecure)
-        strncpy(dnssec_status, "Secure            ", sizeof(dnssec_status));
-    else if (check_flags & kDNSServiceFlagsInsecure)
-        strncpy(dnssec_status, "Insecure          ", sizeof(dnssec_status));
-    else if (check_flags & kDNSServiceFlagsIndeterminate)
-        strncpy(dnssec_status, "Indeterminate     ", sizeof(dnssec_status));
-    else if (check_flags & kDNSServiceFlagsBogus)
-        strncpy(dnssec_status, "Bogus             ", sizeof(dnssec_status));
-    else
-        strncpy(dnssec_status, "                  ", sizeof(dnssec_status));
+    const char dnssec_result = DNSSECResultToCharRepresentation(flags);
 
-    printf("%s%9X%3d %-30s%-7s%-6s %s%s",
-        op, flags, ifIndex, fullname, rr_type, rr_class, enabled_dnssec_before ? dnssec_status : "", rdb);
-
+    printf("%-3s  %-9X %c  %3d  %-29s %-6s %-6s %s",
+        op, flags, dnssec_result, ifIndex, fullname, rr_type, rr_class, rdb);
 
     if (unknowntype)
     {
@@ -1282,17 +1291,14 @@ static void DNSSD_API addrinfo_reply(DNSServiceRef sdref, const DNSServiceFlags 
 {
     char *op = (flags & kDNSServiceFlagsAdd) ? "Add" : "Rmv";
     char addr[256] = "";
-    char dnssec_status[15] = "Unknown";
-    DNSServiceFlags check_flags = flags;
     (void) sdref;
     (void) context;
-    unsigned char enable_dnssec = ((check_flags & kDNSServiceFlagsEnableDNSSEC) != 0);
 
     EXIT_IF_LIBDISPATCH_FATAL_ERROR(errorCode);
 
     if (num_printed++ == 0)
     {
-        printf("Timestamp     A/R    Flags if %-38s %-44s %s%s\n", "Hostname", "Address", "TTL", enable_dnssec ? "DNSSECResult" : "");
+        printf("Timestamp     %3s  %-11s  %3s  %-38s %-44s %s\n", "A/R", "Flags", "IF", "Hostname", "Address", "TTL");
     }
     printtimestamp();
 
@@ -1313,19 +1319,9 @@ static void DNSSD_API addrinfo_reply(DNSServiceRef sdref, const DNSServiceFlags 
             b[0x8], b[0x9], b[0xA], b[0xB], b[0xC], b[0xD], b[0xE], b[0xF], if_name);
     }
 
-    if (enable_dnssec)
-    {
-        if (check_flags & kDNSServiceFlagsSecure)
-            strncpy(dnssec_status, " Secure", sizeof(dnssec_status));
-        else if (check_flags & kDNSServiceFlagsInsecure)
-            strncpy(dnssec_status, " Insecure", sizeof(dnssec_status));
-        else if (check_flags & kDNSServiceFlagsIndeterminate)
-            strncpy(dnssec_status, " Indeterminate", sizeof(dnssec_status));
-        else if (check_flags & kDNSServiceFlagsBogus)
-            strncpy(dnssec_status, " Bogus", sizeof(dnssec_status));
-    }
+    const char dnssec_result = DNSSECResultToCharRepresentation(flags);
 
-    printf("%s%9X%3d %-38s %-44s %d%s", op, flags, interfaceIndex, hostname, addr, ttl, enable_dnssec ? dnssec_status : "");
+    printf("%-3s  %-9X %c  %3d  %-38s %-44s %d", op, flags, dnssec_result, interfaceIndex, hostname, addr, ttl);
 
     if (errorCode)
     {
@@ -2141,12 +2137,12 @@ int main(int argc, char **argv)
             printf("Setting kDNSServiceFlagsAutoTrigger\n");
         }
 
-        if (argc > 1 && !strcasecmp(argv[1], "-enableDNSSEC"))
+        if (argc > 1 && !strcasecmp(argv[1], "-D"))
         {
             argc--;
             argv++;
             enable_dnssec = 1;
-            printf("Enable DNSSEC validation for the '-Q' query\n");
+            printf("Setting kDNSServiceFlagsEnableDNSSEC\n");
         }
 
         if (argc > 2 && !strcmp(argv[1], "-i"))
@@ -2352,6 +2348,8 @@ int main(int argc, char **argv)
 
     case 'G':   {
         flags |= kDNSServiceFlagsReturnIntermediates;
+        if (enable_dnssec)
+            flags |= kDNSServiceFlagsEnableDNSSEC;
 
         if (argc != opi+2)
             goto Fail;
@@ -2401,8 +2399,30 @@ int main(int argc, char **argv)
         uint32_t v;
         uint32_t size = sizeof(v);
         err = DNSServiceGetProperty(kDNSServiceProperty_DaemonVersion, &v, &size);
-        if (err) fprintf(stderr, "DNSServiceGetProperty failed %ld\n", (long int)err);
-        else printf("Currently running daemon (system service) is version %d.%d.%d\n",  v / 10000, v / 100 % 100, v % 100);
+        if (err)
+        {
+            fprintf(stderr, "DNSServiceGetProperty failed %ld\n", (long int)err);
+        }
+        else
+        {
+            // Version strings are of the form x[.y[.z]].
+            // Newer version strings are encoded as (x * 1000000) + (y * 1000) + z, where 0 ≤ y,z ≤ 999.
+            // Older version strings were encoded as (x * 10000) + (y * 100) + z, where 0 ≤ y,z ≤ 99.
+            uint32_t x, y, z;
+            if (v > DNS_SD_ORIGINAL_ENCODING_VERSION_NUMBER_MAX)
+            {
+                x = v / 1000000;
+                y = (v / 1000) % 1000;
+                z = v % 1000;
+            }
+            else
+            {
+                x = v / 10000;
+                y = (v / 100) % 100;
+                z = v % 100;
+            }
+            printf("Currently running daemon (system service) is version %u.%u.%u\n", x, y, z);
+        }
         exit(0);
     }
 
@@ -2441,7 +2461,10 @@ Fail:
 
 // NOT static -- otherwise the compiler may optimize it out
 // The "@(#) " pattern is a special prefix the "what" command looks for
-const char VersionString_SCCS[] = "@(#) dns-sd " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdate-time"
+    const char VersionString_SCCS[] = "@(#) dns-sd " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
+#pragma GCC diagnostic pop
 
 #if _BUILDING_XCODE_PROJECT_
 // If the process crashes, then this string will be magically included in the automatically-generated crash log

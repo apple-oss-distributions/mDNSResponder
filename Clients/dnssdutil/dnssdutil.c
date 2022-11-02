@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2016-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,16 @@
 #include <dns_sd.h>
 #include <dns_sd_private.h>
 #include <mdns/DNSMessage.h>
+#include <mdns/dns_relay.h>
 #include <mdns/pf.h>
+#include <mdns/security.h>
+#include <mdns/signed_result.h>
 #include <mdns/system.h>
+#include <mrc/private.h>
+#include <os/feature_private.h>
 #include <pcap.h>
+#include <Security/SecCertificateRequest.h>
+#include <Security/SecTrustSettings.h>
 
 #include CF_RUNTIME_HEADER
 
@@ -63,7 +70,7 @@
 	#include <mdns/tcpinfo.h>
 	#include "TestUtils.h"
 	// Set ENABLE_DNSSDUTIL_DNSSEC_TEST to 1 to enable DNSSEC test functionality.
-	#define ENABLE_DNSSDUTIL_DNSSEC_TEST 0
+	#define ENABLE_DNSSDUTIL_DNSSEC_TEST 1
 #endif
 
 //===========================================================================================================================
@@ -134,10 +141,12 @@
 //	DNS
 //===========================================================================================================================
 
-#define kDNSPort					53
+#define kDNSPort_Do53		 53 // See <https://tools.ietf.org/html/rfc1035#section-4.2>.
+#define kDNSPort_DoT		853 // See <https://tools.ietf.org/html/rfc7858#section-3.1>.
+#define kDNSPort_DoH		443 // See <https://tools.ietf.org/html/rfc8484#section-8.1>.
+
 #define kDNSMaxUDPMessageSize		512
 #define kDNSMaxTCPMessageSize		UINT16_MAX
-
 #define kDNSRecordDataLengthMax		UINT16_MAX
 
 //===========================================================================================================================
@@ -345,6 +354,7 @@ static int		gDNSSDFlag_EnableDNSSEC			= false;
 #define DNSSDFlagsOption_DenyCellular()				DNSSDFlagOption( 'C', DenyCellular )
 #define DNSSDFlagsOption_DenyConstrained()			DNSSDFlagOption( 'R', DenyConstrained)
 #define DNSSDFlagsOption_DenyExpensive()			DNSSDFlagOption( 'E', DenyExpensive )
+#define DNSSDFlagsOption_EnableDNSSEC()				DNSSDFlagOption( 'D', EnableDNSSEC )
 #define DNSSDFlagsOption_ForceMulticast()			DNSSDFlagOption( 'M', ForceMulticast )
 #define DNSSDFlagsOption_IncludeAWDL()				DNSSDFlagOption( 'A', IncludeAWDL )
 #define DNSSDFlagsOption_KnownUnique()				DNSSDFlagOption( 'K', KnownUnique )
@@ -357,7 +367,6 @@ static int		gDNSSDFlag_EnableDNSSEC			= false;
 #define DNSSDFlagsOption_UnicastResponse()			DNSSDFlagOption( 'U', UnicastResponse )
 #define DNSSDFlagsOption_Unique()					DNSSDFlagOption( 'U', Unique )
 #define DNSSDFlagsOption_WakeOnResolve()			DNSSDFlagOption( 'W', WakeOnResolve )
-#define DNSSDFlagsOption_EnableDNSSEC()				DNSSDFlagOption( 'D', EnableDNSSEC )
 
 // Interface option
 
@@ -499,6 +508,8 @@ static const char *		gBrowse_Domain				= NULL;
 static int				gBrowse_DoResolve			= false;
 static int				gBrowse_QueryTXT			= false;
 static int				gBrowse_TimeLimitSecs		= 0;
+static int 				gBrowse_ValidateResults		= false;
+static int 				gBrowse_ResolveDelayMs		= 0;
 
 static CLIOption		kBrowseOpts[] =
 {
@@ -512,9 +523,11 @@ static CLIOption		kBrowseOpts[] =
 	
 	CLI_OPTION_GROUP( "Operation" ),
 	ConnectionOptions(),
-	BooleanOption(  0 , "resolve",		&gBrowse_DoResolve,		"Resolve service instances." ),
-	BooleanOption(  0 , "queryTXT",		&gBrowse_QueryTXT,		"Query TXT records of service instances." ),
-	IntegerOption( 'l', "timeLimit",	&gBrowse_TimeLimitSecs,	"seconds", "Specifies the max duration of the browse operation. Use '0' for no time limit.", false ),
+	BooleanOption(  0 , "resolve",      &gBrowse_DoResolve,       "Resolve service instances." ),
+	BooleanOption(  0 , "queryTXT",     &gBrowse_QueryTXT,        "Query TXT records of service instances." ),
+	IntegerOption( 'l', "timeLimit",    &gBrowse_TimeLimitSecs,   "seconds", "Specifies the max duration of the browse operation. Use '0' for no time limit.", false ),
+	BooleanOption( 'v', "validate",     &gBrowse_ValidateResults, "Validate results." ),
+	IntegerOption(  0 , "resolveDelay", &gBrowse_ResolveDelayMs,  "ms", "The amount of time to wait before a resolve or TXT query in milliseconds. (default: 0)", false ),
 	
 	ConnectionSection(),
 	CLI_OPTION_END()
@@ -543,6 +556,7 @@ static CLIOption		kGetAddrInfoOpts[] =
 	DNSSDFlagsOption_DenyCellular(),
 	DNSSDFlagsOption_DenyConstrained(),
 	DNSSDFlagsOption_DenyExpensive(),
+	DNSSDFlagsOption_EnableDNSSEC(),
 	DNSSDFlagsOption_IncludeAWDL(),
 	DNSSDFlagsOption_PathEvalDone(),
 	DNSSDFlagsOption_ReturnIntermediates(),
@@ -586,6 +600,7 @@ static CLIOption		kQueryRecordOpts[] =
 	DNSSDFlagsOption_DenyCellular(),
 	DNSSDFlagsOption_DenyConstrained(),
 	DNSSDFlagsOption_DenyExpensive(),
+	DNSSDFlagsOption_EnableDNSSEC(),
 	DNSSDFlagsOption_ForceMulticast(),
 	DNSSDFlagsOption_IncludeAWDL(),
 	DNSSDFlagsOption_PathEvalDone(),
@@ -593,7 +608,6 @@ static CLIOption		kQueryRecordOpts[] =
 	DNSSDFlagsOption_SuppressUnusable(),
 	DNSSDFlagsOption_Timeout(),
 	DNSSDFlagsOption_UnicastResponse(),
-	DNSSDFlagsOption_EnableDNSSEC(),
 	
 	CLI_OPTION_GROUP( "Attributes" ),
 	BooleanOption( 0, "aaaaFallback",	&gQueryRecord_AAAAFallback,		"If a AAAA record doesn't exist, try querying for an A record of the same name and type." ),
@@ -623,6 +637,7 @@ static const char *			gRegister_Domain		= NULL;
 static int					gRegister_Port			= 0;
 static const char *			gRegister_TXT			= NULL;
 static int					gRegister_LifetimeMs	= -1;
+static const char *			gRegister_TimeOfReceipt	= NULL;
 
 static const char **		gAddRecord_Types		= NULL;
 static size_t				gAddRecord_TypesCount	= 0;
@@ -646,6 +661,9 @@ static CLIOption		kRegisterOpts[] =
 	StringOption(  'd', "domain",	&gRegister_Domain,	"domain",		"Domain in which to advertise the service.", false ),
 	IntegerOption( 'p', "port",		&gRegister_Port,	"port number",	"Service's port number.", true ),
 	StringOption(   0 , "txt",		&gRegister_TXT,		"record data",	"The TXT record data. See " kRecordDataSection_Name " below.", false ),
+	
+	CLI_OPTION_GROUP( "Attributes" ),
+	StringOption( 0, "timestamp", &gRegister_TimeOfReceipt, "Unix time", "Time since epoch in seconds to indicate when the service registration request is received, should be used with flag kDNSServiceFlagsNoAutoRename", false ),
 	
 	CLI_OPTION_GROUP( "Flags" ),
 	DNSSDFlagsOption(),
@@ -697,6 +715,7 @@ static int				gRegisterRecord_LifetimeMs		= -1;
 static const char *		gRegisterRecord_UpdateData		= NULL;
 static int				gRegisterRecord_UpdateDelayMs	= 0;
 static int				gRegisterRecord_UpdateTTL		= 0;
+static const char *		gRegisterRecord_TimeOfReceipt	= NULL;
 
 static CLIOption		kRegisterRecordOpts[] =
 {
@@ -705,6 +724,9 @@ static CLIOption		kRegisterRecordOpts[] =
 	StringOption( 't', "type",	&gRegisterRecord_Type,	"record type",	"Record type by name (e.g., TXT, PTR, A) or number.", true ),
 	StringOption( 'd', "data",	&gRegisterRecord_Data,	"record data",	"The record data. See " kRecordDataSection_Name " below.", false ),
 	IntegerOption( 0 , "ttl",	&gRegisterRecord_TTL,	"seconds",		"Time-to-live in seconds. Use '0' for default.", false ),
+	
+	CLI_OPTION_GROUP( "Attributes" ),
+	StringOption( 0, "timestamp", &gRegisterRecord_TimeOfReceipt, "Unix time", "Time since epoch in seconds to indicate when the record registration request is received.", false ),
 	
 	CLI_OPTION_GROUP( "Flags" ),
 	DNSSDFlagsOption(),
@@ -928,12 +950,16 @@ static const char **	gBrowseAll_ServiceTypes			= NULL;
 static size_t			gBrowseAll_ServiceTypesCount	= 0;
 static int				gBrowseAll_BrowseTimeSecs		= 5;
 static int				gBrowseAll_ConnectTimeout		= 0;
+static int 				gBrowseAll_UseNewGAI		 	= false;
+static int 				gBrowseAll_ValidateResults		= false;
 
 static CLIOption		kBrowseAllOpts[] =
 {
 	InterfaceOption(),
-	StringOption(	   'd', "domain", &gBrowseAll_Domain, "domain", "Domain in which to browse for the service.", false ),
-	MultiStringOption( 't', "type",   &gBrowseAll_ServiceTypes, &gBrowseAll_ServiceTypesCount, "service type", "Service type(s), e.g., \"_ssh._tcp\". All services are browsed for if none is specified.", false ),
+	StringOption(      'd', "domain",    &gBrowseAll_Domain,          "domain", "Domain in which to browse for the service.", false ),
+	MultiStringOption( 't', "type",      &gBrowseAll_ServiceTypes, &gBrowseAll_ServiceTypesCount, "service type", "Service type(s), e.g., \"_ssh._tcp\". All services are browsed for if none is specified.", false ),
+	BooleanOption(      0 , "useNewGAI", &gBrowseAll_UseNewGAI,       "Use dnssd_getaddrinfo_* instead of DNSServiceGetAddrInfo()." ),
+	BooleanOption(     'v', "validate",  &gBrowseAll_ValidateResults, "Validate results." ),
 	
 	CLI_OPTION_GROUP( "Flags" ),
 	DNSSDFlagsOption_IncludeAWDL(),
@@ -1423,21 +1449,32 @@ static const char		kDNSServerInfoText_BadUDPMode[] =
 	"base address, and AAAA records in responses sent via UDP have IPv6 addresses in the ::ffff:0:0/120 block\n"
 	"instead of the 2001:db8:1::/120 block, i.e., ::ffff:0:0 is used as the IPv6 base address.\n";
 
+typedef enum
+{
+	kDNSProtocol_Do53	= 0,
+	kDNSProtocol_DoT	= 1,
+	kDNSProtocol_DoH	= 2
+	
+}	DNSProtocol;
+
+#define kDNSProtocolStr_Do53		"Do53"
+#define kDNSProtocolStr_DoT			"DoT"
+#define kDNSProtocolStr_DoH			"DoH"
+
 static int				gDNSServer_LoopbackOnly			= false;
 static int				gDNSServer_Foreground			= false;
 static int				gDNSServer_ResponseDelayMs		= 0;
 static int				gDNSServer_DefaultTTL			= 60;
-static int				gDNSServer_Port					= kDNSPort;
+static int				gDNSServer_Port					= -1;
 static const char *		gDNSServer_DomainOverride		= NULL;
 static char **			gDNSServer_IgnoredQTypes		= NULL;
 static size_t			gDNSServer_IgnoredQTypesCount	= 0;
 static int				gDNSServer_ListenOnV4			= false;
 static int				gDNSServer_ListenOnV6			= false;
 static int				gDNSServer_BadUDPMode			= false;
-#if( TARGET_OS_DARWIN )
 static const char *		gDNSServer_FollowPID			= NULL;
 static int				gDNSServer_ExtraV6Count			= 0;
-#endif
+static const char *		gDNSServer_Protocol				= kDNSProtocolStr_Do53;
 
 static CLIOption		kDNSServerOpts[] =
 {
@@ -1454,7 +1491,12 @@ static CLIOption		kDNSServerOpts[] =
 	StringOption(       0 , "follow",        &gDNSServer_FollowPID,       "pid", "Exit when the process, usually the parent process, specified by PID exits.", false ),
 #endif
 	BooleanOption(      0 , "badUDPMode",    &gDNSServer_BadUDPMode,      "Run in Bad UDP mode to trigger mDNSResponder's TCP fallback mechanism." ),
-	
+	StringOptionEx(    'P', "protocol",      &gDNSServer_Protocol,        "protocol", "The DNS protocol to use. (default: Do53)", false,
+		"\n"
+		"Use '" kDNSProtocolStr_Do53 "' for DNS over UDP and TCP (Do53).\n"
+		"Use '" kDNSProtocolStr_DoT  "' for DNS over TLS (DoT).\n"
+		"Use '" kDNSProtocolStr_DoH  "' for DNS over HTTPS (DoH).\n"
+ 	),
 #if( TARGET_OS_DARWIN )
 	CLI_OPTION_GROUP( "Loopback-Only Mode Options" ),
 	IntegerOptionEx( 0 , "extraIPv6",     &gDNSServer_ExtraV6Count,    "count", "The number of extra IPv6 addresses to listen on. (default: 0)", false,
@@ -1487,7 +1529,7 @@ static CLIOption		kDNSServerOpts[] =
 	CLI_OPTION_END()
 };
 
-static void	DNSServerCmd( void );
+static void	DNSServerCommand( void );
 
 //===========================================================================================================================
 //	MDNSReplier Command Options
@@ -1715,6 +1757,7 @@ static int				gGAIPerf_IterationTimeLimitMs	= 100;
 static const char *		gGAIPerf_OutputFilePath			= NULL;
 static const char *		gGAIPerf_OutputFormat			= kOutputFormatStr_JSON;
 static int				gGAIPerf_OutputAppendNewline	= false;
+static const char *		gGAIPerf_Protocol				= kDNSProtocolStr_Do53;
 
 static void	GAIPerfCmd( void );
 
@@ -1798,7 +1841,12 @@ static CLIOption		kGAIPerfOpts[] =
 	CLI_OPTION_GROUP( "DNS Server Options" ),
 	IntegerOption(   0 , "responseDelay", &gGAIPerf_ServerDelayMs,        "ms", "Additional delay in milliseconds to have the server apply to responses. (default: 10)", false ),
 	BooleanOption(   0 , "badUDPMode",    &gGAIPerf_BadUDPMode,           "Run server in Bad UDP mode to trigger mDNSResponder's TCP fallback mechanism." ),
-	
+	StringOptionEx( 'P', "protocol",      &gGAIPerf_Protocol,             "protocol", "The DNS protocol to use. (default: Do53)", false,
+		"\n"
+		"Use '" kDNSProtocolStr_Do53 "' for DNS over UDP and TCP (Do53).\n"
+		"Use '" kDNSProtocolStr_DoT  "' for DNS over TLS (DoT).\n"
+		"Use '" kDNSProtocolStr_DoH  "' for DNS over HTTPS (DoH).\n"
+ 	),
 	CLI_SECTION( "Test Suite \"Basic\"",	kGAIPerfSectionText_TestSuiteBasic ),
 	CLI_SECTION( "Test Suite \"Advanced\"",	kGAIPerfSectionText_TestSuiteAdvanced ),
 	TestExitStatusSection(),
@@ -1820,9 +1868,7 @@ static double			gMDNSDiscoveryTest_MulticastDropRate	= 0.0;
 static int				gMDNSDiscoveryTest_MaxDropCount			= 0;
 static int				gMDNSDiscoveryTest_UseIPv4				= false;
 static int				gMDNSDiscoveryTest_UseIPv6				= false;
-#if( MDNSRESPONDER_PROJECT )
 static int				gMDNSDiscoveryTest_UseNewGAI			= false;
-#endif
 static const char *		gMDNSDiscoveryTest_OutputFormat			= kOutputFormatStr_JSON;
 static int				gMDNSDiscoveryTest_OutputAppendNewline	= false;
 static const char *		gMDNSDiscoveryTest_OutputFilePath		= NULL;
@@ -1844,9 +1890,7 @@ static CLIOption		kMDNSDiscoveryTestOpts[] =
 	IntegerOption(  0 , "maxDropCount",   &gMDNSDiscoveryTest_MaxDropCount,        "count", "If > 0, drop probabilities are limted to first <count> responses from each instance. (default: 0)", false ),
 	BooleanOption(  0 , "ipv4",           &gMDNSDiscoveryTest_UseIPv4,             "Use IPv4." ),
 	BooleanOption(  0 , "ipv6",           &gMDNSDiscoveryTest_UseIPv6,             "Use IPv6." ),
-#if( MDNSRESPONDER_PROJECT )
 	BooleanOption(  0 , "useNewGAI",      &gMDNSDiscoveryTest_UseNewGAI,           "Use dnssd_getaddrinfo_* instead of DNSServiceGetAddrInfo()." ),
-#endif
 	
 	CLI_OPTION_GROUP( "Results" ),
 	FormatOption(   'f', "format",        &gMDNSDiscoveryTest_OutputFormat,        "Specifies the test results output format. (default: " kOutputFormatStr_JSON ")", false ),
@@ -1909,19 +1953,31 @@ static const char *		gProbeConflictTest_Interface		= NULL;
 static int				gProbeConflictTest_UseComputerName	= false;
 static int				gProbeConflictTest_UseIPv4			= false;
 static int				gProbeConflictTest_UseIPv6			= false;
+static int				gProbeConflictTest_RegisterOnAny	= false;
+static int				gProbeConflictTest_ExtraWaitMs		= 0;
 static const char *		gProbeConflictTest_OutputFormat		= kOutputFormatStr_JSON;
 static const char *		gProbeConflictTest_OutputFilePath	= NULL;
 
 static CLIOption		kProbeConflictTestOpts[] =
 {
-	StringOption(  'i', "interface",       &gProbeConflictTest_Interface,       "name or index", "mdnsreplier's network interface. If not set, any mDNS-capable interface will be used.", false ),
-	BooleanOption( 'c', "useComputerName", &gProbeConflictTest_UseComputerName, "Use the device's \"computer name\" for the test service's name." ),
-	BooleanOption(  0 , "ipv4",            &gProbeConflictTest_UseIPv4,         "Use IPv4 instead of IPv6. (Default behavior.)" ),
-	BooleanOption(  0 , "ipv6",            &gProbeConflictTest_UseIPv6,         "Use IPv6 instead of IPv4." ),
+	StringOption(    'i', "interface",       &gProbeConflictTest_Interface,       "name or index", "mdnsreplier's network interface. If not set, any mDNS-capable interface will be used.", false ),
+	BooleanOption(   'c', "useComputerName", &gProbeConflictTest_UseComputerName, "Use the device's \"computer name\" for the test service's name." ),
+	BooleanOption(    0 , "ipv4",            &gProbeConflictTest_UseIPv4,         "Use IPv4 instead of IPv6. (Default behavior.)" ),
+	BooleanOption(    0 , "ipv6",            &gProbeConflictTest_UseIPv6,         "Use IPv6 instead of IPv4." ),
+	BooleanOption(   'r', "registerOnAny",   &gProbeConflictTest_RegisterOnAny,   "Register test service on kDNSServiceInterfaceIndexAny instead of specific interface." ),
+	IntegerOptionEx(  0 , "extraWait",       &gProbeConflictTest_ExtraWaitMs,     "ms", "Extra time in milliseconds to wait after a probe conflict. (default: 0)", false,
+		"\n"
+		"After each probe conflict, there is a minimum amount of time that the test will wait to allow for probing and\n"
+		"renames to take place. The minimum wait time was chosen for relatively tranquil environments.\n"
+		"\n"
+		"If the test environment is such that mDNSResponder is expected to be busier than usual, then use this option to\n"
+		"allow extra time for renames, which may be delayed by events outside of mDNSResponder's control, such as network\n"
+		"changes.\n"
+	),
 	
 	CLI_OPTION_GROUP( "Results" ),
-	FormatOption(  'f', "format",          &gProbeConflictTest_OutputFormat,    "Specifies the test report output format. (default: " kOutputFormatStr_JSON ")", false ),
-	StringOption(  'o', "output",          &gProbeConflictTest_OutputFilePath,  "path", "Path of the file to write test report to instead of standard output (stdout).", false ),
+	FormatOption( 'f', "format", &gProbeConflictTest_OutputFormat,   "Specifies the test report output format. (default: " kOutputFormatStr_JSON ")", false ),
+	StringOption( 'o', "output", &gProbeConflictTest_OutputFilePath, "path", "Path of the file to write test report to instead of standard output (stdout).", false ),
 	
 	TestExitStatusSection(),
 	CLI_OPTION_END()
@@ -1996,12 +2052,14 @@ static void	DNSProxyTestCmd( void );
 
 static const char *		gDNSProxyTest_OutputFormat		= kOutputFormatStr_JSON;
 static const char *		gDNSProxyTest_OutputFilePath	= NULL;
+static int				gDNSProxyTest_UseLegacyDNSProxy	= false;
 
 static CLIOption		kDNSProxyTestOpts[] =
 {
 	CLI_OPTION_GROUP( "Results" ),
-	FormatOption( 'f', "format", &gDNSProxyTest_OutputFormat,   "Specifies the test results output format. (default: " kOutputFormatStr_JSON ")", false ),
-	StringOption( 'o', "output", &gDNSProxyTest_OutputFilePath, "path", "Path of the file to write test results to instead of standard output (stdout).", false ),
+	FormatOption(  'f', "format", &gDNSProxyTest_OutputFormat,      "Specifies the test results output format. (default: " kOutputFormatStr_JSON ")", false ),
+	StringOption(  'o', "output", &gDNSProxyTest_OutputFilePath,    "path", "Path of the file to write test results to instead of standard output (stdout).", false ),
+	BooleanOption( 'l', "legacy", &gDNSProxyTest_UseLegacyDNSProxy, "Use the legacy DNS proxy client SPI, i.e., DNSXEnableProxy() and DNSXEnableProxy64()." ),
 	
 	TestExitStatusSection(),
 	CLI_OPTION_END()
@@ -2283,11 +2341,12 @@ static CLIOption		kDNSConfigOpts[] =
 //	XPCSend
 //===========================================================================================================================
 
-static void	XPCSendCmd( void );
+static void	XPCSendCommand( void );
 
-static const char *		gXPCSend_ServiceName	= NULL;
-static const char *		gXPCSend_MessageStr		= NULL;
-static int				gXPCSend_NoReply		= false;
+static const char *		gXPCSend_ServiceName		= NULL;
+static const char *		gXPCSend_MessageStr			= NULL;
+static int				gXPCSend_NoReply			= false;
+static int				gXPCSend_CancelDelaySecs	= 0;
 
 static const char		kXPCSendMessageSection_Name[] = "Message Argument";
 static const char		kXPCSendMessageSection_Text[] =
@@ -2324,9 +2383,10 @@ static const char		kXPCSendMessageSection_Text[] =
 
 static CLIOption		kXPCSendOpts[] =
 {
-	StringOption(  's', "service", &gXPCSend_ServiceName, "service name", "XPC service name.", true ),
-	StringOption(  'm', "message", &gXPCSend_MessageStr,  "message",      "XPC message as a string.", true ),
-	BooleanOption( 'n', "noReply", &gXPCSend_NoReply,     "No reply is expected." ),
+	StringOption(  's', "service", &gXPCSend_ServiceName,     "service name", "XPC service name.", true ),
+	StringOption(  'm', "message", &gXPCSend_MessageStr,      "message",      "XPC message as a string.", false ),
+	BooleanOption( 'n', "noReply", &gXPCSend_NoReply,         "No reply is expected." ),
+	IntegerOption( 'd', "delay",   &gXPCSend_CancelDelaySecs, "seconds",      "Time to delay the XPC connection's cancellation in seconds. (default: 0)", false ),
 	
 	CLI_SECTION( kXPCSendMessageSection_Name, kXPCSendMessageSection_Text ),
 	CLI_OPTION_END()
@@ -2368,10 +2428,12 @@ static const char *		gQuerier_ProviderName		= NULL;
 static const char *		gQuerier_ConnectionHostname	= NULL;
 static const char *		gQuerier_URLPath			= NULL;
 static const char *		gQuerier_ODoHConfig			= NULL;
+static const char *		gQuerier_IdentityReference	= NULL;
 static int				gQuerier_NoConnectionReuse	= false;
 static int				gQuerier_SquashCNAMEs		= false;
 static char **			gQuerier_Domains			= NULL;
 static size_t			gQuerier_DomainCount		= 0;
+static const char *		gQuerier_StartLeewayMs		= NULL;
 
 static CLIOption		kQuerierOpts[] =
 {
@@ -2382,6 +2444,7 @@ static CLIOption		kQuerierOpts[] =
 	StringOption(  0 , "delegator",        &gQuerier_Delegator,        "PID|UUID", "Delegator's PID or UUID.", false ),
 	BooleanOption( 0 , "dnssec",           &gQuerier_DNSSECOK,         "Have queries include an OPT record with the DNSSEC OK (DO) bit set." ),
 	BooleanOption( 0 , "checkingDisabled", &gQuerier_CheckingDisabled, "Set the Checking Disabled (CD) bit in queries." ),
+	StringOption(  0 , "startLeeway",      &gQuerier_StartLeewayMs,    "ms", "Start time leeway in milliseconds. Negative values mean infinite leeway.", false ),
 	
 	CLI_OPTION_GROUP( "DNS Service Options" ),
 	StringOptionEx( 'r', "resolverType", &gQuerier_ResolverType, "resolver type", "Specifies the type of resolver to use.", false,
@@ -2418,6 +2481,7 @@ static CLIOption		kQuerierOpts[] =
 	StringOption(  0 , "connectionHostname", &gQuerier_ConnectionHostname, "hostname",    "Overrides hostname used for transport layer connection for DNS over TLS/HTTPS.", false ),
 	StringOption( 'q', "urlPath",            &gQuerier_URLPath,            "path", "URL path for DNS over HTTPS.", false ),
 	StringOption( 'o', "odohConfig",         &gQuerier_ODoHConfig,         "odoh config", "Config for Oblivious DNS over HTTPS.", false ),
+	StringOption(  0 , "identityReference",  &gQuerier_IdentityReference,  "hex string", "Persistent keychain reference for a client certificate.", false ),
 	BooleanOption( 0 , "noConnectionReuse",  &gQuerier_NoConnectionReuse,  "Disable connection reuse." ),
 	BooleanOption( 0 , "squashCNAMEs",       &gQuerier_SquashCNAMEs,       "Squash CNAME chains in responses." ),
 	CLI_OPTION_END()
@@ -2435,12 +2499,14 @@ static char **			gDNSProxy_InputInterfaces		= NULL;
 static size_t			gDNSProxy_InputInterfaceCount	= 0;
 static const char *		gDNSProxy_OutputInterface		= NULL;
 static const char *		gDNSProxy_DNS64IPv6Prefix		= NULL;
+static int				gDNSProxy_ForceAAAASynthesis	= false;
 
 static CLIOption		kDNSProxyOpts[] =
 {
 	MultiStringOption( 'i', "inputInterface",  &gDNSProxy_InputInterfaces, &gDNSProxy_InputInterfaceCount, "name or index", "Interface to accept queries on. Can be specified more than once.", true ),
-	StringOption(      'o', "outputInterface", &gDNSProxy_OutputInterface, "name or index", "Interface to forward queries over. Use '0' for primary interface. (default: 0)", false ),
-	StringOption(      'p', "dns64Prefix",     &gDNSProxy_DNS64IPv6Prefix, "IPv6 prefix", "IPv6 prefix to use for DNS64 AAAA record synthesis.", false ),
+	StringOption(      'o', "outputInterface", &gDNSProxy_OutputInterface,    "name or index", "Interface to forward queries over. Use '0' for primary interface. (default: 0)", false ),
+	StringOption(      'p', "dns64Prefix",     &gDNSProxy_DNS64IPv6Prefix,    "IPv6 prefix", "IPv6 prefix to use for DNS64 AAAA record synthesis.", false ),
+	BooleanOption(     'f', "forceAAAASynth",  &gDNSProxy_ForceAAAASynthesis, "Force AAAA synthesis for DNS64." ),
 	CLI_OPTION_END()
 };
 
@@ -2448,19 +2514,20 @@ static CLIOption		kDNSProxyOpts[] =
 //	GetAddrInfoNew Command Options
 //===========================================================================================================================
 
-static const char *		gGAINew_Hostname		= NULL;
-static const char *		gGAINew_DelegatorID		= NULL;
-static const char *		gGAINew_ServiceScheme	= NULL;
-static const char *		gGAINew_AccountID		= NULL;
-static int				gGAINew_ProtocolIPv4	= false;
-static int				gGAINew_ProtocolIPv6	= false;
-static int				gGAINew_WantAuthTags	= false;
-static int				gGAINew_ShowTracker		= false;
-static int				gGAINew_UseFailover		= false;
-static int				gGAINew_OneShot			= false;
-static int				gGAINew_TimeLimitSecs	= 0;
-static const char *		gGAINew_QoS				= NULL;
-static const char *		gGAINew_ResolverUUID	= NULL;
+static const char *		gGAINew_Hostname				= NULL;
+static const char *		gGAINew_DelegatorID				= NULL;
+static const char *		gGAINew_ServiceScheme			= NULL;
+static const char *		gGAINew_AccountID				= NULL;
+static int				gGAINew_ProtocolIPv4			= false;
+static int				gGAINew_ProtocolIPv6			= false;
+static int				gGAINew_WantAuthTags			= false;
+static int				gGAINew_ShowTracker				= false;
+static int				gGAINew_UseFailover				= false;
+static int				gGAINew_ProhibitEncryptedDNS	= false;
+static int				gGAINew_OneShot					= false;
+static int				gGAINew_TimeLimitSecs			= 0;
+static const char *		gGAINew_QoS						= NULL;
+static const char *		gGAINew_ResolverUUID			= NULL;
 
 #define kQoSTypeStr_Unspecified			"unspecified"
 #define kQoSTypeStr_Background			"background"
@@ -2474,16 +2541,17 @@ static const char *		gGAINew_ResolverUUID	= NULL;
 static CLIOption		kGetAddrInfoNewOpts[] =
 {
 	InterfaceOption(),
-	StringOption(  'n', "name",          &gGAINew_Hostname,      "domain name", "Hostname to resolve.", true ),
-	StringOption(  'd', "delegate",      &gGAINew_DelegatorID,   "PID|UUID", "Delegator's PID or UUID. If PID p < 0, the audit token of PID |p| will be used.", false ),
-	StringOption(   0,  "accountID",     &gGAINew_AccountID,     "account ID", "Account ID string.", false ),
-	StringOption(   0,  "serviceScheme", &gGAINew_ServiceScheme, "scheme", "Service scheme such as '_443._https'.", false ),
-	BooleanOption(  0 , "ipv4",          &gGAINew_ProtocolIPv4,  "Use kDNSServiceProtocol_IPv4." ),
-	BooleanOption(  0 , "ipv6",          &gGAINew_ProtocolIPv6,  "Use kDNSServiceProtocol_IPv6." ),
-	BooleanOption( 'a', "wantAuthTags",  &gGAINew_WantAuthTags,  "Want authentication tags." ),
-	BooleanOption( 't', "showTracker",   &gGAINew_ShowTracker,   "Display tracker hostnames." ),
-	BooleanOption(  0,  "useFailover",   &gGAINew_UseFailover,   "Use DNS service failover if necessary and applicable." ),
-	StringOption(   0,  "resolverUUID",  &gGAINew_ResolverUUID,  "UUID", "UUID of libnetwork DNS resolver configuration to use.", false ),
+	StringOption(  'n', "name",                 &gGAINew_Hostname,             "domain name", "Hostname to resolve.", true ),
+	StringOption(  'd', "delegate",             &gGAINew_DelegatorID,          "PID|UUID", "Delegator's PID or UUID. If PID p < 0, the audit token of PID |p| will be used.", false ),
+	StringOption(   0,  "accountID",            &gGAINew_AccountID,            "account ID", "Account ID string.", false ),
+	StringOption(   0,  "serviceScheme",        &gGAINew_ServiceScheme,        "scheme", "Service scheme such as '_443._https'.", false ),
+	BooleanOption(  0 , "ipv4",                 &gGAINew_ProtocolIPv4,         "Use kDNSServiceProtocol_IPv4." ),
+	BooleanOption(  0 , "ipv6",                 &gGAINew_ProtocolIPv6,         "Use kDNSServiceProtocol_IPv6." ),
+	BooleanOption( 'a', "wantAuthTags",         &gGAINew_WantAuthTags,         "Want authentication tags." ),
+	BooleanOption( 't', "showTracker",          &gGAINew_ShowTracker,          "Display tracker hostnames." ),
+	BooleanOption(  0,  "useFailover",          &gGAINew_UseFailover,          "Use DNS service failover if necessary and applicable." ),
+	BooleanOption(  0,  "prohibitEncryptedDNS", &gGAINew_ProhibitEncryptedDNS, "Prohibit use of encrypted DNS protocols such as DoT, DoH, ODoH, etc." ),
+	StringOption(   0,  "resolverUUID",         &gGAINew_ResolverUUID,         "UUID", "UUID of libnetwork DNS resolver configuration to use.", false ),
 	
 	CLI_OPTION_GROUP( "Flags" ),
 	DNSSDFlagsOption(),
@@ -2587,6 +2655,22 @@ static CLIOption		kIPv6FwdOpts[] =
 };
 
 //===========================================================================================================================
+//	Print
+//===========================================================================================================================
+
+static void	PrintCommand( void );
+
+static CLIOption		kPrintOpts[] =
+{
+	CLI_OPTIONAL_ARGUMENT( "file", "Path to the file containing the DNS message.",
+		"\n"
+		"If this argument isn't specified or the argument is '-' (a single hyphen), then the DNS message is read from\n"
+		"standard input.\n"
+	),
+	CLI_OPTION_END()
+};
+
+//===========================================================================================================================
 //	Command Table
 //===========================================================================================================================
 
@@ -2612,6 +2696,7 @@ static void	MDNSQueryCmd( void );
 #if( TARGET_OS_DARWIN )
 static void	PIDToUUIDCmd( void );
 #endif
+static void	DNSProxyStateCmd( void );
 static void	DaemonVersionCmd( void );
 
 static CLIOption		kGlobalOpts[] =
@@ -2650,25 +2735,27 @@ static CLIOption		kGlobalOpts[] =
 #if( TARGET_OS_DARWIN )
 	Command( "pid2uuid",			PIDToUUIDCmd,			kPIDToUUIDOpts,			"Prints the UUID of a process.", true ),
 #endif
-	Command( "server",				DNSServerCmd,			kDNSServerOpts,			"DNS server for testing.", true ),
+	Command( "server",				DNSServerCommand,		kDNSServerOpts,			"DNS server for testing.", true ),
 	Command( "mdnsreplier",			MDNSReplierCmd,			kMDNSReplierOpts,		"Responds to mDNS queries for a set of authoritative resource records.", true ),
 	Command( "test",				NULL,					kTestOpts,				"Commands for testing DNS-SD.", true ),
 	Command( "ssdp",				NULL,					kSSDPOpts,				"Simple Service Discovery Protocol (SSDP).", true ),
 #if( TARGET_OS_DARWIN )
 	Command( "legacy",				NULL,					kLegacyOpts,			"Legacy DNS API.", true ),
 	Command( "dnsconfig",			NULL,					kDNSConfigOpts,			"Add/remove a supplemental resolver entry to/from the system's DNS configuration.", true ),
-	Command( "xpcsend",				XPCSendCmd,				kXPCSendOpts,			"Sends a message to an XPC service.", true ),
+	Command( "xpcsend",				XPCSendCommand,			kXPCSendOpts,			"Sends a message to an XPC service.", true ),
 #endif
 #if( MDNSRESPONDER_PROJECT )
 	Command( "interfaceMonitor",	InterfaceMonitorCmd,	kInterfaceMonitorOpts,	"Instantiates an mdns_interface_monitor.", true ),
 	Command( "querier",				QuerierCommand,			kQuerierOpts,			"Sends a DNS query using mdns_querier.", true ),
 	Command( "dnsproxy",			DNSProxyCmd,			kDNSProxyOpts,			"Enables mDNSResponder's DNS proxy.", true ),
+	Command( "dnsproxy-state",		DNSProxyStateCmd,		NULL,					"Gets mDNSResponder's DNS proxy state dump.", true ),
 	Command( "getaddrinfo-new",		GetAddrInfoNewCommand,	kGetAddrInfoNewOpts,	"Uses dnssd_getaddrinfo to resolve a hostname to IP addresses.", false ),
 	Command( "tcpinfo",				TCPInfoCommand,			kTCPInfoOpts,			"Uses mdns_tcpinfo_* to get TCP info.", true ),
 #endif
 	Command( "pf",					NULL,					kPFOpts,				"Packet filter commands.", true ),
 	Command( "ipv4fwd",				NULL,					kIPv4FwdOpts,			"IPv4 forwarding commands.", true ),
 	Command( "ipv6fwd",				NULL,					kIPv6FwdOpts,			"IPv6 forwarding commands.", true ),
+	Command( "print",				PrintCommand,			kPrintOpts,				"Reads a DNS message in wire format and writes it to stdout in a human-readable form.", true ),
 	Command( "daemonVersion",		DaemonVersionCmd,		NULL,					"Prints the version of the DNS-SD daemon.", true ),
 	
 	CLI_COMMAND_HELP(),
@@ -3010,7 +3097,6 @@ static void
 static OSStatus	_SetDefaultFallbackDNSService( const char *inFallbackDNSServiceStr );
 #endif
 
-static OSStatus	_SocketWriteAll( SocketRef inSock, const void *inData, size_t inSize, int32_t inTimeoutSecs );
 static OSStatus
 	_StringToIPv4Address(
 		const char *			inStr,
@@ -3020,7 +3106,6 @@ static OSStatus
 		uint32_t *				outSubnet,
 		uint32_t *				outRouter,
 		const char **			outStr );
-static void	_StringArray_Free( char **inArray, size_t inCount );
 static OSStatus
 	_StringToIPv6Address(
 		const char *			inStr,
@@ -3043,6 +3128,17 @@ static Boolean
 static void *	_memdup( const void *inPtr, size_t inLen );
 static int		_memicmp( const void *inP1, const void *inP2, size_t inLen );
 static uint32_t	_FNV1( const void *inData, size_t inSize );
+static OSStatus	_UInt32FromArgString( const char *inArgStr, const char *inArgName, uint32_t *outValue );
+static char *	_UnixTimeToDateAndTimeString( int64_t inTimeSecs, char *inBufPtr, size_t inBufLen );
+static char *	_DNSSDSourceVersionToCString( uint32_t inVersion, char *inBufPtr, size_t inBufLen );
+static Boolean	_StdOutIsTTY( void );
+#if( TARGET_OS_IOS )
+static Boolean	_StdErrIsTTY( void );
+#endif
+static void		_PrintValidatedToStdOut( const char *inPrefix, Boolean inValidated, const char *inSuffix );
+
+static Boolean		_DNSProtocolIsSecure( DNSProtocol inProtocol );
+static const char *	_DNSProtocolToString( DNSProtocol inProtocol );
 
 #define Unused( X )		(void)(X)
 
@@ -3130,6 +3226,7 @@ struct SBRIPAddress
 	SBRIPAddress *		next;			// Next IP address in list.
 	sockaddr_ip			sip;			// IPv4 or IPv6 address.
 	uint64_t			resolveTimeUs;	// Time it took to resolve this IP address in microseconds.
+	Boolean				validated;		// True if IP address is validated.
 };
 
 static CFTypeID	ServiceBrowserGetTypeID( void );
@@ -3141,9 +3238,8 @@ static OSStatus
 		unsigned int		inBrowseTimeSecs,
 		Boolean				inIncludeAWDL,
 		ServiceBrowserRef *	outBrowser );
-#if( MDNSRESPONDER_PROJECT )
 static void		ServiceBrowserSetUseNewGAI( ServiceBrowserRef inBrowser, Boolean inUseNewGAI );
-#endif
+static void		ServiceBrowserSetValidateResults( ServiceBrowserRef inBrowser, Boolean inValidateResults );
 static void		ServiceBrowserStart( ServiceBrowserRef inBrowser );
 static OSStatus	ServiceBrowserAddServiceType( ServiceBrowserRef inBrowser, const char *inServiceType );
 static void
@@ -3162,7 +3258,7 @@ static void		ServiceBrowserResultsRelease( ServiceBrowserResults *inResults );
 
 typedef struct DNSServerPrivate *		DNSServerRef;
 
-typedef void ( *DNSServerStartHandler_f )( const sockaddr_ip *inServerArray, size_t inServerCount, void *inCtx );
+typedef void ( *DNSServerStartHandler_f )( uint16_t inActualPort, void *inCtx );
 typedef void ( *DNSServerStopHandler_f )( OSStatus inError, void *inCtx );
 
 static CFTypeID	DNSServerGetTypeID( void );
@@ -3180,10 +3276,9 @@ static OSStatus
 		Boolean					inBadUDPMode,
 		DNSServerRef *			outServer );
 static OSStatus	_DNSServerSetIgnoredQType( DNSServerRef inServer, int inQType );
+static void		_DNSServerSetPort( DNSServerRef inServer, uint16_t inPort );
 static void		_DNSServerStart( DNSServerRef inServer );
 static void		_DNSServerStop( DNSServerRef inServer );
-
-#define DNSServerForget( X )		ForgetCustomEx( X, _DNSServerStop, CFRelease )
 
 //===========================================================================================================================
 //	main
@@ -3245,7 +3340,7 @@ static OSStatus	VersionOptionCallback( CLIOption *inOption, const char *inArg, i
 	Unused( inUnset );
 	
 #if( MDNSRESPONDER_PROJECT )
-	srcVers = SourceVersionToCString( _DNS_SD_H, srcStr );
+	srcVers = _DNSSDSourceVersionToCString( _DNS_SD_H, srcStr, sizeof( srcStr ) );
 #else
 	srcVers = DNSSDUTIL_SOURCE_VERSION;
 #endif
@@ -3280,11 +3375,15 @@ typedef struct
 	int						timeLimitSecs;		// Time limit of DNSServiceBrowse operation in seconds.
 	BrowseResolveOp *		resolveList;		// List of resolve and/or TXT record query operations.
 	uint32_t				ifIndex;			// Interface index of DNSServiceBrowse operation(s).
+	useconds_t				resolveDelayUs;		// Amount of time to wait before a resolve or TXT query in microseconds.
 	Boolean					printedHeader;		// True if results header has been printed.
 	Boolean					doResolve;			// True if service instances are to be resolved.
 	Boolean					doResolveTXTOnly;	// True if TXT records of service instances are to be queried.
+	Boolean					validateResults;	// True if signed results are requested and validated.
 	
 }	BrowseContext;
+
+#define _DNSServiceAttrForget( X )		ForgetCustom( X, DNSServiceAttributeDeallocate )
 
 static void		BrowsePrintPrologue( const BrowseContext *inContext );
 static void		BrowseContextFree( BrowseContext *inContext );
@@ -3325,6 +3424,9 @@ static void DNSSD_API
 		const void *			inRDataPtr,
 		uint32_t				inTTL,
 		void *					inContext );
+
+ulog_define_ex( kDNSSDUtilIdentifier, Browse, kLogLevelTrace, kLogFlags_None, "Browse", NULL );
+#define bc_ulog( LEVEL, ... )		ulog( &log_category_from_name( Browse ), (LEVEL), __VA_ARGS__ )
 
 static void	BrowseCmd( void )
 {
@@ -3387,10 +3489,33 @@ static void	BrowseCmd( void )
 	context->serviceTypes		= gBrowse_ServiceTypes;
 	context->serviceTypesCount	= gBrowse_ServiceTypesCount;
 	context->domain				= gBrowse_Domain;
-	context->doResolve			= gBrowse_DoResolve	? true : false;
+	context->doResolve			= gBrowse_DoResolve			? true : false;
 	context->timeLimitSecs		= gBrowse_TimeLimitSecs;
-	context->doResolveTXTOnly	= gBrowse_QueryTXT	? true : false;
+	context->doResolveTXTOnly	= gBrowse_QueryTXT			? true : false;
+	context->validateResults	= gBrowse_ValidateResults	? true : false;
 	
+	if( gBrowse_ResolveDelayMs > 0 )
+	{
+		const int		maxDelayMs = ( (useconds_t) -1 ) / kMicrosecondsPerMillisecond;
+		
+		err = CheckIntegerArgument( gBrowse_ResolveDelayMs, "resolveDelay", INT_MIN, maxDelayMs );
+		require_noerr_quiet( err, exit );
+		
+		context->resolveDelayUs = (useconds_t)( gBrowse_ResolveDelayMs * kMicrosecondsPerMillisecond );
+	}
+#if( TARGET_OS_IOS )
+	// Check for potential issues.
+	
+	if( context->validateResults && context->doResolve && os_feature_enabled( mDNSResponder, revoke_media_sessions ) )
+	{
+		FPrintF( stderr,
+			"%s"
+			"Warning: --validate and --resolve are not compatible when media revocation is enabled.\n"
+			"         Use 'ffctl mDNSResponder/revoke_media_sessions=off' to disable.\n"
+			"%s",
+			_StdErrIsTTY() ? kANSIRed : "", _StdErrIsTTY() ? kANSINormal : "" );
+	}
+#endif
 	// Print prologue.
 	
 	BrowsePrintPrologue( context );
@@ -3402,10 +3527,27 @@ static void	BrowseCmd( void )
 		DNSServiceRef		sdRef;
 		
 		sdRef = useMainConnection ? context->mainRef : kBadDNSServiceRef;
-		err = DNSServiceBrowse( &sdRef, context->flags, context->ifIndex, context->serviceTypes[ i ], context->domain,
-			BrowseCallback, context );
-		require_noerr( err, exit );
-		
+		if( context->validateResults )
+		{
+			if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+			{
+				err = DNSServiceBrowseEx( &sdRef, context->flags, context->ifIndex, context->serviceTypes[ i ],
+					context->domain, &kDNSServiceAttrValidationRequired, BrowseCallback, context );
+				require_noerr( err, exit );
+			}
+			else
+			{
+				FPrintF( stderr, "DNSServiceBrowseEx is not available on this OS." );
+				err = kUnsupportedErr;
+				goto exit;
+			}
+		}
+		else
+		{
+			err = DNSServiceBrowse( &sdRef, context->flags, context->ifIndex, context->serviceTypes[ i ],
+				context->domain, BrowseCallback, context );
+			require_noerr( err, exit );
+		}
 		context->opRefs[ i ] = sdRef;
 		if( !useMainConnection )
 		{
@@ -3469,7 +3611,7 @@ static void	BrowseContextFree( BrowseContext *inContext )
 	}
 	if( inContext->serviceTypes )
 	{
-		_StringArray_Free( inContext->serviceTypes, inContext->serviceTypesCount );
+		StringArray_Free( inContext->serviceTypes, inContext->serviceTypesCount );
 		inContext->serviceTypes			= NULL;
 		inContext->serviceTypesCount	= 0;
 	}
@@ -3529,14 +3671,15 @@ static void DNSSD_API
 		const char *		inDomain,
 		void *				inContext )
 {
-	BrowseContext * const		context = (BrowseContext *) inContext;
-	OSStatus					err;
-	BrowseResolveOp *			newOp = NULL;
-	BrowseResolveOp **			p;
-	char						fullName[ kDNSServiceMaxDomainName ];
-	struct timeval				now;
-	
-	Unused( inSDRef );
+	BrowseContext * const			context = (BrowseContext *) inContext;
+	OSStatus						err;
+	BrowseResolveOp *				newOp			= NULL;
+	BrowseResolveOp **				p;
+	mdns_signed_browse_result_t		signedResult	= NULL;
+	DNSServiceAttributeRef			attr			= NULL;
+	struct timeval					now;
+	Boolean 						browseOnly, resultValidated;
+	char							fullName[ kDNSServiceMaxDomainName ];
 	
 	gettimeofday( &now, NULL );
 	
@@ -3545,13 +3688,71 @@ static void DNSSD_API
 	
 	if( !context->printedHeader )
 	{
-		FPrintF( stdout, "%-26s  %-16s IF %-20s %-20s Instance Name\n", "Timestamp", "Flags", "Domain", "Service Type" );
+		FPrintF( stdout, "%-26s  %-17s IF %-20s %-20s Instance Name\n", "Timestamp", "Flags", "Domain", "Service Type" );
 		context->printedHeader = true;
 	}
-	FPrintF( stdout, "%{du:time}  %{du:cbflags} %2d %-20s %-20s %s\n",
+	browseOnly		= !context->doResolve && !context->doResolveTXTOnly;
+	resultValidated	= false;
+	if( context->validateResults )
+	{
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+		{
+			const uint8_t *		dataPtr;
+			size_t				dataLen;
+			
+			dataPtr = DNSServiceGetValidationData( inSDRef, &dataLen );
+			bc_ulog( kLogLevelTrace, "Got %zu bytes of validation data for TXT query result\n", dataLen );
+			if( dataPtr )
+			{
+				if( browseOnly )
+				{
+					signedResult = mdns_signed_browse_result_create_from_data( dataPtr, dataLen, &err );
+					if( signedResult )
+					{
+						uint8_t		instanceName[ kDomainNameLengthMax ];
+						
+						err = DNSServiceConstructFullName( fullName, inName, inRegType, inDomain );
+						require_noerr( err, exit );
+						
+						err = DomainNameFromString( instanceName, fullName, NULL );
+						require_noerr( err, exit );
+						
+						if( mdns_signed_browse_result_contains( signedResult, instanceName, inInterfaceIndex ) )
+						{
+							resultValidated = true;
+						}
+						else
+						{
+							bc_ulog( kLogLevelError, "Signed browse result doesn't contain instance %s interface %d\n",
+								fullName, inInterfaceIndex );
+						}
+						mdns_forget( &signedResult );
+					}
+					else
+					{
+						bc_ulog( kLogLevelError, "mdns_signed_browse_result_create_from_data() failed: %#m\n", err );
+					}
+				}
+				else
+				{
+					attr = DNSServiceAttributeCreate();
+					require( attr, exit );
+					
+					err = DNSServiceAttrSetValidationData( attr, dataPtr, dataLen );
+					require_noerr( err, exit );
+				}
+			}
+		}
+		else
+		{
+			bc_ulog( kLogLevelError, "DNSServiceGetValidationData is not available on this OS\n" );
+		}
+	}
+	FPrintF( stdout, "%{du:time}  %{du:cbflags} %2d %-20s %-20s %s",
 		&now, inFlags, (int32_t) inInterfaceIndex, inDomain, inRegType, inName );
-	
-	if( !context->doResolve && !context->doResolveTXTOnly ) goto exit;
+	if( browseOnly && context->validateResults ) _PrintValidatedToStdOut( " (", resultValidated, ")" );
+	FPrintF( stdout, "\n" );
+	if( browseOnly ) goto exit;
 	
 	err = DNSServiceConstructFullName( fullName, inName, inRegType, inDomain );
 	require_noerr( err, exit );
@@ -3573,17 +3774,54 @@ static void DNSSD_API
 		{
 			flags = 0;
 		}
+		if( context->resolveDelayUs > 0 ) usleep( context->resolveDelayUs );
 		if( context->doResolve )
 		{
-			err = DNSServiceResolve( &sdRef, flags, inInterfaceIndex, inName, inRegType, inDomain, BrowseResolveCallback,
-				NULL );
-			require_noerr( err, exit );
+			if( attr )
+			{
+				if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+				{
+					err = DNSServiceResolveEx( &sdRef, flags, inInterfaceIndex, inName, inRegType, inDomain, attr,
+						BrowseResolveCallback, context );
+					require_noerr( err, exit );
+				}
+				else
+				{
+					bc_ulog( kLogLevelError, "DNSServiceResolveEx is not available on this OS\n" );
+					err = kUnsupportedErr;
+					goto exit;
+				}
+			}
+			else
+			{
+				err = DNSServiceResolve( &sdRef, flags, inInterfaceIndex, inName, inRegType, inDomain,
+					BrowseResolveCallback, context );
+				require_noerr( err, exit );
+			}
 		}
 		else
 		{
-			err = DNSServiceQueryRecord( &sdRef, flags, inInterfaceIndex, fullName, kDNSServiceType_TXT, kDNSServiceClass_IN,
-				BrowseQueryRecordCallback, NULL );
-			require_noerr( err, exit );
+			if( attr )
+			{
+				if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+				{
+					err = DNSServiceQueryRecordWithAttribute( &sdRef, flags, inInterfaceIndex, fullName,
+						kDNSServiceType_TXT, kDNSServiceClass_IN, attr, BrowseQueryRecordCallback, context );
+					require_noerr( err, exit );
+				}
+				else
+				{
+					bc_ulog( kLogLevelError, "DNSServiceQueryRecordWithAttribute is not available on this OS\n" );
+					err = kUnsupportedErr;
+					goto exit;
+				}
+			}
+			else
+			{
+				err = DNSServiceQueryRecord( &sdRef, flags, inInterfaceIndex, fullName, kDNSServiceType_TXT,
+					kDNSServiceClass_IN, BrowseQueryRecordCallback, context );
+				require_noerr( err, exit );
+			}
 		}
 		
 		newOp->sdRef = sdRef;
@@ -3615,6 +3853,11 @@ static void DNSSD_API
 	}
 	
 exit:
+	mdns_forget( &signedResult );
+	if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+	{
+		_DNSServiceAttrForget( &attr );
+	}
 	if( newOp ) BrowseResolveOpFree( newOp );
 	if( err ) exit( 1 );
 }
@@ -3637,13 +3880,13 @@ static void DNSSD_API
 		uint32_t				inTTL,
 		void *					inContext )
 {
-	OSStatus			err;
-	struct timeval		now;
+	OSStatus				err;
+	BrowseContext * const	context = (BrowseContext *) inContext;
+	struct timeval			now;
+	Boolean					txtValidated = false;
 	
-	Unused( inSDRef );
 	Unused( inClass );
 	Unused( inTTL );
-	Unused( inContext );
 	
 	gettimeofday( &now, NULL );
 	
@@ -3651,9 +3894,48 @@ static void DNSSD_API
 	require_noerr( err, exit );
 	require_action( inType == kDNSServiceType_TXT, exit, err = kTypeErr );
 	
-	FPrintF( stdout, "%{du:time}  %s %s TXT on interface %d\n    TXT: %#{txt}\n",
+	if( context->validateResults )
+	{
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+		{
+			const uint8_t *		dataPtr;
+			size_t				dataLen;
+			
+			dataPtr = DNSServiceGetValidationData( inSDRef, &dataLen );
+			bc_ulog( kLogLevelTrace, "Got %zu bytes of validation data for TXT query result\n", dataLen );
+			if( dataPtr )
+			{
+				mdns_signed_browse_result_t		signedResult;
+				
+				signedResult = mdns_signed_browse_result_create_from_data( dataPtr, dataLen, &err );
+				if( signedResult )
+				{
+					if( mdns_signed_browse_result_covers_txt_rdata( signedResult, inRDataPtr, inRDataLen ) )
+					{
+						txtValidated = true;
+					}
+					else
+					{
+						bc_ulog( kLogLevelError, "Signed resolve result doesn't cover TXT record data\n" );
+					}
+					mdns_forget( &signedResult );
+				}
+				else
+				{
+					bc_ulog( kLogLevelError, "mdns_signed_resolve_result_create_from_data() failed: %#m\n", err );
+				}
+			}
+		}
+		else
+		{
+			bc_ulog( kLogLevelError, "DNSServiceGetValidationData is not available on this OS\n" );
+		}
+	}
+	FPrintF( stdout, "%{du:time}  %s %s TXT on interface %d\n    TXT: %#{txt}",
 		&now, DNSServiceFlagsToAddRmvStr( inFlags ), inFullName, (int32_t) inInterfaceIndex, inRDataPtr,
 		(size_t) inRDataLen );
+	if( context->validateResults ) _PrintValidatedToStdOut( " (", txtValidated, ")" );
+	FPrintF( stdout, "\n" );
 	
 exit:
 	if( err ) exit( 1 );
@@ -3676,27 +3958,68 @@ static void DNSSD_API
 		const unsigned char *	inTXTPtr,
 		void *					inContext )
 {
-	struct timeval		now;
-	char				errorStr[ 64 ];
+	BrowseContext * const	context = (BrowseContext *) inContext;
+	struct timeval			now;
+	char					errorStr[ 64 ];
+	Boolean					txtValidated = false;
 	
-	Unused( inSDRef );
 	Unused( inFlags );
-	Unused( inContext );
 	
 	gettimeofday( &now, NULL );
 	
 	if( inError ) SNPrintF( errorStr, sizeof( errorStr ), " error %#m", inError );
 	
+	if( context->validateResults )
+	{
+		OSStatus	err;
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+		{
+			const uint8_t *		dataPtr;
+			size_t				dataLen;
+			
+			dataPtr = DNSServiceGetValidationData( inSDRef, &dataLen );
+			bc_ulog( kLogLevelTrace, "Got %zu bytes of validation data for resolve result\n", dataLen );
+			if( dataPtr )
+			{
+				mdns_signed_resolve_result_t		signedResult;
+				
+				signedResult = mdns_signed_resolve_result_create_from_data( dataPtr, dataLen, &err );
+				if( signedResult )
+				{
+					if( mdns_signed_resolve_result_covers_txt_rdata( signedResult, inTXTPtr, inTXTLen ) )
+					{
+						txtValidated = true;
+					}
+					else
+					{
+						bc_ulog( kLogLevelError, "Signed resolve result doesn't cover TXT record data\n" );
+					}
+					mdns_forget( &signedResult );
+				}
+				else
+				{
+					bc_ulog( kLogLevelError, "mdns_signed_resolve_result_create_from_data() failed: %#m\n", err );
+				}
+			}
+		}
+		else
+		{
+			bc_ulog( kLogLevelError, "DNSServiceGetValidationData is not available on this OS\n" );
+		}
+	}
+	
 	FPrintF( stdout, "%{du:time}  %s can be reached at %s:%u (interface %d)%?s\n",
 		&now, inFullName, inHostname, ntohs( inPort ), (int32_t) inInterfaceIndex, inError, errorStr );
 	if( inTXTLen == 1 )
 	{
-		FPrintF( stdout, " TXT record: %#H\n", inTXTPtr, (int) inTXTLen, INT_MAX );
+		FPrintF( stdout, " TXT record: %#H", inTXTPtr, (int) inTXTLen, INT_MAX );
 	}
 	else
 	{
-		FPrintF( stdout, " TXT record: %#{txt}\n", inTXTPtr, (size_t) inTXTLen );
+		FPrintF( stdout, " TXT record: %#{txt}", inTXTPtr, (size_t) inTXTLen );
 	}
+	if( context->validateResults ) _PrintValidatedToStdOut( " (", txtValidated, ")" );
+	FPrintF( stdout, "\n" );
 }
 
 //===========================================================================================================================
@@ -3931,7 +4254,7 @@ static void DNSSD_API
 	
 	if( !context->printedHeader )
 	{
-		FPrintF( stdout, "%-26s  %-16s IF %-30s %-34s %6s\n", "Timestamp", "Flags", "Hostname", "Address", "TTL" );
+		FPrintF( stdout, "%-26s  %-17s IF %-30s %-34s %6s\n", "Timestamp", "Flags", "Hostname", "Address", "TTL" );
 		context->printedHeader = true;
 	}
 	FPrintF( stdout, "%{du:time}  %{du:cbflags} %2d %-30s %-34s %6u\n",
@@ -3992,13 +4315,11 @@ static void DNSSD_API
 		uint32_t				inTTL,
 		void *					inContext );
 
-#define _DNSServiceQueryAttrForget( X )		ForgetCustom( X, DNSServiceQueryAttrFree )
-
 static void	QueryRecordCmd( void )
 {
 	OSStatus					err;
 	DNSServiceRef				sdRef;
-	DNSServiceQueryAttrRef		attr			= NULL;
+	DNSServiceAttributeRef		attr			= NULL;
 	QueryRecordContext *		context			= NULL;
 	dispatch_source_t			signalSource	= NULL;
 	int							useMainConnection;
@@ -4074,30 +4395,26 @@ static void	QueryRecordCmd( void )
 	
 	// Start operation.
 	
-	if( __builtin_available( macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, * ) )
+	if( context->useAAAAFallback || context->useFailover )
 	{
-		if( context->useAAAAFallback || context->useFailover )
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
 		{
-			attr = DNSServiceQueryAttrCreate();
+			attr = DNSServiceAttributeCreate();
 			require_action( attr, exit, err = kNoResourcesErr );
-			
 			if( context->useAAAAFallback )
 			{
-				err = DNSServiceQueryAttrSetAAAAPolicy( attr, kDNSServiceAAAAPolicyFallback );
+				err = DNSServiceAttributeSetAAAAPolicy( attr, kDNSServiceAAAAPolicyFallback );
 				require_noerr( err, exit );
 			}
 			if( context->useFailover )
 			{
-				err = DNSServiceQueryAttrSetFailoverPolicy( attr, kDNSServiceFailoverPolicyAllow );
+				err = DNSServiceAttrSetFailoverPolicy( attr, kDNSServiceFailoverPolicyAllow );
 				require_noerr( err, exit );
 			}
 		}
-	}
-	else
-	{
-		if( context->useAAAAFallback || context->useFailover )
+		else
 		{
-			FPrintF( stderr, "error: DNSServiceQueryAttrCreate() is not available on this OS.\n" );
+			FPrintF( stderr, "error: DNSServiceAttributeCreate is not available on this OS.\n" );
 			err = kUnsupportedErr;
 			goto exit;
 		}
@@ -4105,16 +4422,17 @@ static void	QueryRecordCmd( void )
 	sdRef = useMainConnection ? context->mainRef : kBadDNSServiceRef;
 	if( attr )
 	{
-		if( __builtin_available( macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, * ) )
+
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
 		{
-			err = DNSServiceQueryRecordEx( &sdRef, context->flags, context->ifIndex, context->recordName,
+			err = DNSServiceQueryRecordWithAttribute( &sdRef, context->flags, context->ifIndex, context->recordName,
 				context->recordType, kDNSServiceClass_IN, attr, QueryRecordCallback, context );
 			require_noerr( err, exit );
-			_DNSServiceQueryAttrForget( &attr );
+			_DNSServiceAttrForget( &attr );
 		}
 		else
 		{
-			FPrintF( stderr, "error: DNSServiceQueryRecordEx() is not available on this OS.\n" );
+			FPrintF( stderr, "error: DNSServiceQueryRecordWithAttribute is not available on this OS.\n" );
 			err = kUnsupportedErr;
 			goto exit;
 		}
@@ -4143,9 +4461,9 @@ static void	QueryRecordCmd( void )
 	dispatch_main();
 	
 exit:
-	if( __builtin_available( macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, * ) )
+	if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
 	{
-		_DNSServiceQueryAttrForget( &attr );
+		_DNSServiceAttrForget( &attr );
 	}
 	dispatch_source_forget( &signalSource );
 	if( context ) QueryRecordContextFree( context );
@@ -4245,7 +4563,7 @@ static void DNSSD_API
 	}
 	if( !context->printedHeader )
 	{
-		FPrintF( stdout, "%-26s  %-16s IF %-32s %-5s %-5s %6s RData\n",
+		FPrintF( stdout, "%-26s  %-17s IF %-32s %-5s %-5s %6s RData\n",
 			"Timestamp", "Flags", "Name", "Type", "Class", "TTL" );
 		context->printedHeader = true;
 	}
@@ -4309,10 +4627,11 @@ typedef struct
 	DNSServiceFlags			flags;				// Flags argument for DNSServiceRegister().
 	uint32_t				ifIndex;			// Interface index argument for DNSServiceRegister().
 	int						lifetimeMs;			// Lifetime of the record registration in milliseconds.
+	uint32_t				timestamp;			// Timestamp in seconds since epoch time to indicate when the service is registered.
 	uint16_t				port;				// Service instance's port number.
+	Boolean					setTimestamp;		// True if the timestamp attribute needs to be set.
 	Boolean					printedHeader;		// True if results header was printed.
 	Boolean					didRegister;		// True if service was registered.
-	
 }	RegisterContext;
 
 static void	RegisterPrintPrologue( const RegisterContext *inContext );
@@ -4333,9 +4652,10 @@ static void		_RecordUpdateFree( RecordUpdate *inUpdate );
 
 static void	RegisterCmd( void )
 {
-	OSStatus				err;
-	RegisterContext *		context			= NULL;
-	dispatch_source_t		signalSource	= NULL;
+	OSStatus					err;
+	RegisterContext *			context			= NULL;
+	dispatch_source_t			signalSource	= NULL;
+	DNSServiceAttributeRef		attr			= NULL;
 	
 	// Set up SIGINT handler.
 	
@@ -4359,7 +4679,7 @@ static void	RegisterCmd( void )
 	require_action_quiet( ( gUpdateRecord_DataCount == gUpdateRecord_DelayCount ) &&
 		( ( gUpdateRecord_TTLCount == 0 ) || ( gUpdateRecord_TTLCount == gUpdateRecord_DataCount ) ), exit,
 		FPrintF( stderr, "There are missing update record parameters.\n" ); err = kParamErr );
-	
+
 	// Get flags.
 	
 	context->flags = GetDNSSDFlagsFromOpts();
@@ -4384,6 +4704,13 @@ static void	RegisterCmd( void )
 	context->domain		= gRegister_Domain;
 	context->port		= (uint16_t) gRegister_Port;
 	context->lifetimeMs	= gRegister_LifetimeMs;
+	if ( gRegister_TimeOfReceipt )
+	{
+		err = _UInt32FromArgString( gRegister_TimeOfReceipt, "timestamp", &context->timestamp );
+		require_noerr_quiet( err, exit );
+
+		context->setTimestamp = true;
+	}
 	
 	if( gAddRecord_TypesCount > 0 )
 	{
@@ -4456,18 +4783,58 @@ static void	RegisterCmd( void )
 	
 	// Start operation.
 	
-	err = DNSServiceRegister( &context->opRef, context->flags, context->ifIndex, context->name, context->type,
-		context->domain, NULL, htons( context->port ), (uint16_t) context->txtLen, context->txtPtr,
-		RegisterCallback, context );
-	ForgetMem( &context->txtPtr );
-	require_noerr( err, exit );
-	
+	if( context->setTimestamp )
+	{
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+		{
+			attr = DNSServiceAttributeCreate();
+			require_action( attr, exit, err = kNoResourcesErr );
+			
+			err = DNSServiceAttributeSetTimestamp( attr, context->timestamp );
+			require_noerr( err, exit );
+		}
+		else
+		{
+			FPrintF( stderr, "error: DNSServiceAttributeCreate is not available on this OS.\n" );
+			err = kUnsupportedErr;
+			goto exit;
+		}
+	}
+	if( attr )
+	{
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+		{
+			err = DNSServiceRegisterWithAttribute( &context->opRef, context->flags, context->ifIndex, context->name,
+				context->type, context->domain, NULL, htons( context->port ), (uint16_t) context->txtLen, context->txtPtr,
+				attr, RegisterCallback, context );
+			require_noerr( err, exit );
+			_DNSServiceAttrForget( &attr );
+		}
+		else
+		{
+			FPrintF( stderr, "error: DNSServiceRegisterWithAttribute is not available on this OS.\n" );
+			err = kUnsupportedErr;
+			goto exit;
+		}
+	}
+	else
+	{
+		err = DNSServiceRegister( &context->opRef, context->flags, context->ifIndex, context->name, context->type,
+			context->domain, NULL, htons( context->port ), (uint16_t) context->txtLen, context->txtPtr,
+			RegisterCallback, context );
+		ForgetMem( &context->txtPtr );
+		require_noerr( err, exit );
+	}
 	err = DNSServiceSetDispatchQueue( context->opRef, dispatch_get_main_queue() );
 	require_noerr( err, exit );
 	
 	dispatch_main();
 	
 exit:
+	if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+	{
+		_DNSServiceAttrForget( &attr );
+	}
 	dispatch_source_forget( &signalSource );
 	if( context ) RegisterContextFree( context );
 	if( err ) exit( 1 );
@@ -4492,6 +4859,16 @@ static void	RegisterPrintPrologue( const RegisterContext *inContext )
 	FPrintF( stdout, "Domain:     %s\n",		inContext->domain ? inContext->domain : "<NULL> (default domains)" );
 	FPrintF( stdout, "Port:       %u\n",		inContext->port );
 	FPrintF( stdout, "TXT data:   %#{txt}\n",	inContext->txtPtr, inContext->txtLen );
+	if( inContext->setTimestamp )
+	{
+		const char *		dateTimeStr;
+		char				dateTimeBuf[ 32 ];
+		
+		FPrintF( stdout, "Timestamp:  %u", inContext->timestamp );
+		dateTimeStr = _UnixTimeToDateAndTimeString( inContext->timestamp, dateTimeBuf, sizeof( dateTimeBuf ) );
+		if( dateTimeStr ) FPrintF( stdout, " (%s)", dateTimeStr );
+		FPrintF( stdout, "\n" );
+	}
 	if( inContext->lifetimeMs < 0 )	FPrintF( stdout, "Lifetime:   ∞ ms\n" );
 	else							FPrintF( stdout, "Lifetime:   %d ms\n", inContext->lifetimeMs );
 	
@@ -4583,7 +4960,7 @@ static void DNSSD_API
 	
 	if( !context->printedHeader )
 	{
-		FPrintF( stdout, "%-26s  %-16s Service\n", "Timestamp", "Flags" );
+		FPrintF( stdout, "%-26s  %-17s Service\n", "Timestamp", "Flags" );
 		context->printedHeader = true;
 	}
 	FPrintF( stdout, "%{du:time}  %{du:cbflags} %s.%s%s %?#m\n", &now, inFlags, inName, inType, inDomain, inError, inError );
@@ -4708,7 +5085,10 @@ typedef struct
 	size_t				updateDataLen;	// Length of data for record update.
 	uint32_t			updateTTL;		// TTL for updated record.
 	int					updateDelayMs;	// Post-registration record update delay in milliseconds.
+	uint32_t			timestamp;		// Timestamp in seconds since epoch time to indicate when the record is registered.
+	Boolean				setTimestamp;	// True if the timestamp attribute needs to be set.
 	Boolean				didRegister;	// True if the record was registered.
+
 	
 }	RegisterRecordContext;
 
@@ -4728,6 +5108,7 @@ static void	RegisterRecordCmd( void )
 	OSStatus					err;
 	RegisterRecordContext *		context			= NULL;
 	dispatch_source_t			signalSource	= NULL;
+	DNSServiceAttributeRef		attr			= NULL;
 	
 	// Set up SIGINT handler.
 	
@@ -4735,7 +5116,7 @@ static void	RegisterRecordCmd( void )
 	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), Exit, kExitReason_SIGINT, &signalSource );
 	require_noerr( err, exit );
 	dispatch_resume( signalSource );
-	
+
 	// Create context.
 	
 	context = (RegisterRecordContext *) calloc( 1, sizeof( *context ) );
@@ -4773,7 +5154,14 @@ static void	RegisterRecordCmd( void )
 	context->recordName	= gRegisterRecord_Name;
 	context->ttl		= (uint32_t) gRegisterRecord_TTL;
 	context->lifetimeMs	= gRegisterRecord_LifetimeMs;
-	
+	if( gRegisterRecord_TimeOfReceipt )
+	{
+		err = _UInt32FromArgString( gRegisterRecord_TimeOfReceipt, "timestamp", &context->timestamp );
+		require_noerr_quiet( err, exit );
+
+		context->setTimestamp = true;
+	}
+
 	// Get update data.
 	
 	if( gRegisterRecord_UpdateData )
@@ -4791,18 +5179,60 @@ static void	RegisterRecordCmd( void )
 	
 	// Start operation.
 	
-	err = DNSServiceRegisterRecord( context->conRef, &context->recordRef, context->flags, context->ifIndex,
-		context->recordName, context->recordType, kDNSServiceClass_IN, (uint16_t) context->dataLen, context->dataPtr,
-		context->ttl, RegisterRecordCallback, context );
-	if( err )
+	// Only call DNSServiceAttributeSetTimestamp when the option is set.
+	if( context->setTimestamp )
 	{
-		FPrintF( stderr, "DNSServiceRegisterRecord() returned %#m\n", err );
-		goto exit;
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+		{
+			attr = DNSServiceAttributeCreate();
+			require_action( attr, exit, err = kNoResourcesErr );
+			
+			err = DNSServiceAttributeSetTimestamp( attr, context->timestamp );
+			require_noerr( err, exit );
+		}
+		else
+		{
+			FPrintF( stderr, "error: DNSServiceAttributeCreate is not available on this OS.\n" );
+			err = kUnsupportedErr;
+			goto exit;
+		}
 	}
-	
+	if( attr )
+	{
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+		{
+			err = DNSServiceRegisterRecordWithAttribute( context->conRef, &context->recordRef, context->flags,
+				context->ifIndex, context->recordName, context->recordType, kDNSServiceClass_IN,
+				(uint16_t) context->dataLen, context->dataPtr, context->ttl, attr, RegisterRecordCallback, context );
+			require_noerr( err, exit );
+			_DNSServiceAttrForget( &attr );
+		}
+		else
+		{
+			FPrintF( stderr, "error: DNSServiceRegisterRecordWithAttribute is not available on this OS.\n" );
+			err = kUnsupportedErr;
+			goto exit;
+		}
+	}
+	else
+	{
+		err = DNSServiceRegisterRecord( context->conRef, &context->recordRef, context->flags, context->ifIndex,
+			context->recordName, context->recordType, kDNSServiceClass_IN, (uint16_t) context->dataLen, context->dataPtr,
+			context->ttl, RegisterRecordCallback, context );
+		if( err )
+		{
+			FPrintF( stderr, "DNSServiceRegisterRecord() returned %#m\n", err );
+			goto exit;
+		}
+	}
+
 	dispatch_main();
 	
 exit:
+	if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+	{
+		_DNSServiceAttrForget( &attr );
+	}
 	dispatch_source_forget( &signalSource );
 	if( context ) RegisterRecordContextFree( context );
 	if( err ) exit( 1 );
@@ -4825,6 +5255,16 @@ static void	RegisterRecordPrintPrologue( const RegisterRecordContext *inContext 
 	FPrintF( stdout, "Type:        %s (%u)\n",		RecordTypeToString( inContext->recordType ), inContext->recordType );
 	FPrintF( stdout, "TTL:         %u\n",			inContext->ttl );
 	FPrintF( stdout, "Data:        %#H\n",			inContext->dataPtr, (int) inContext->dataLen, INT_MAX );
+	if( inContext->setTimestamp )
+	{
+		const char *		dateTimeStr;
+		char				dateTimeBuf[ 32 ];
+		
+		FPrintF( stdout, "Timestamp:   %u", inContext->timestamp );
+		dateTimeStr = _UnixTimeToDateAndTimeString( inContext->timestamp, dateTimeBuf, sizeof( dateTimeBuf ) );
+		if( dateTimeStr ) FPrintF( stdout, " (%s)", dateTimeStr );
+		FPrintF( stdout, "\n" );
+	}
 	infinite = ( inContext->lifetimeMs < 0 ) ? true : false;
 	FPrintF( stdout, "Lifetime:    %?s%?d ms\n",	infinite, "∞", !infinite, inContext->lifetimeMs );
 	if( inContext->updateDataPtr )
@@ -5733,18 +6173,10 @@ static void	_RegisterKACmdStart( void *inContext )
 	FPrintF( stdout, "Start time: %{du:time}\n",	NULL );
 	FPrintF( stdout, "---\n" );
 	
-	if( __builtin_available( macOS 10.15.4, iOS 13.2.2, watchOS 6.2, tvOS 13.2, * ) )
-	{
-		err = DNSServiceSleepKeepalive_sockaddr( &cmd->keepalive, cmd->flags, &cmd->local.sa, &cmd->remote.sa, cmd->timeout,
-			_RegisterKACmdKeepaliveCallback, cmd );
-		require_noerr( err, exit );
-	}
-	else
-	{
-		FPrintF( stderr, "error: DNSServiceSleepKeepalive_sockaddr() is not available on this OS.\n" );
-		err = kUnsupportedErr;
-		goto exit;
-	}
+	err = DNSServiceSleepKeepalive_sockaddr( &cmd->keepalive, cmd->flags, &cmd->local.sa, &cmd->remote.sa, cmd->timeout,
+		_RegisterKACmdKeepaliveCallback, cmd );
+	require_noerr( err, exit );
+	
 	err = DNSServiceSetDispatchQueue( cmd->keepalive, cmd->queue );
 	require_noerr( err, exit );
 	
@@ -5799,6 +6231,7 @@ typedef struct
 	dispatch_source_t			connectionTimer;		// Timer for connection timeout.
 	int							connectionPendingCount;	// Number of pending connections.
 	int							connectionTimeoutSecs;	// Timeout value for connections in seconds.
+	Boolean						validateResults;		// Validate results.
 	
 }	BrowseAllContext;
 
@@ -5851,6 +6284,7 @@ static void	BrowseAllCmd( void )
 	require_action( context, exit, err = kNoMemoryErr );
 	
 	context->connectionTimeoutSecs	= gBrowseAll_ConnectTimeout;
+	context->validateResults		= gBrowseAll_ValidateResults ? true : false;
 #if( TARGET_OS_POSIX )
 	// Increase the open file descriptor limit for connection sockets.
 	
@@ -5877,10 +6311,23 @@ static void	BrowseAllCmd( void )
 	err = InterfaceIndexFromArgString( gInterface, &ifIndex );
 	require_noerr_quiet( err, exit );
 	
+#if( TARGET_OS_IOS )
+	// Check for potential issues.
+	
+	if( context->validateResults && os_feature_enabled( mDNSResponder, revoke_media_sessions ) )
+	{
+		FPrintF( stderr,
+			"%s"
+			"Warning: --validate may not work as expected when media revocation is enabled.\n"
+			"         Use 'ffctl mDNSResponder/revoke_media_sessions=off' to disable.\n"
+			"%s",
+			_StdErrIsTTY() ? kANSIRed : "", _StdErrIsTTY() ? kANSINormal : "" );
+	}
+#endif
 	// Print prologue.
 	
-	FPrintF( stdout, "Interface:       %d (%s)\n",	(int32_t) ifIndex, InterfaceIndexToName( ifIndex, ifName ) );
-	FPrintF( stdout, "Service types:   ");
+	FPrintF( stdout, "Interface:        %d (%s)\n", (int32_t) ifIndex, InterfaceIndexToName( ifIndex, ifName ) );
+	FPrintF( stdout, "Service types:    ");
 	if( gBrowseAll_ServiceTypesCount > 0 )
 	{
 		FPrintF( stdout, "%s", gBrowseAll_ServiceTypes[ 0 ] );
@@ -5894,17 +6341,22 @@ static void	BrowseAllCmd( void )
 	{
 		FPrintF( stdout, "all services\n" );
 	}
-	FPrintF( stdout, "Domain:          %s\n", gBrowseAll_Domain ? gBrowseAll_Domain : "default domains" );
-	FPrintF( stdout, "Browse time:     %d second%?c\n", gBrowseAll_BrowseTimeSecs, gBrowseAll_BrowseTimeSecs != 1, 's' );
-	FPrintF( stdout, "Connect timeout: %d second%?c\n",
+	FPrintF( stdout, "Domain:           %s\n", gBrowseAll_Domain ? gBrowseAll_Domain : "default domains" );
+	FPrintF( stdout, "Browse time:      %d second%?c\n", gBrowseAll_BrowseTimeSecs, gBrowseAll_BrowseTimeSecs != 1, 's' );
+	FPrintF( stdout, "Connect timeout:  %d second%?c\n",
 		context->connectionTimeoutSecs, context->connectionTimeoutSecs != 1, 's' );
-	FPrintF( stdout, "IncludeAWDL:     %s\n", gDNSSDFlag_IncludeAWDL ? "yes" : "no" );
-	FPrintF( stdout, "Start time:      %{du:time}\n", NULL );
+	FPrintF( stdout, "IncludeAWDL:      %s\n", YesNoStr( gDNSSDFlag_IncludeAWDL ) );
+	FPrintF( stdout, "New GAI:          %s\n", YesNoStr( gBrowseAll_UseNewGAI ) );
+	FPrintF( stdout, "Validate results: %s\n", YesNoStr( context->validateResults ) );
+	FPrintF( stdout, "Start time:       %{du:time}\n", NULL );
 	FPrintF( stdout, "---\n" );
-	
 	err = ServiceBrowserCreate( dispatch_get_main_queue(), ifIndex, gBrowseAll_Domain,
-		(unsigned int) gBrowseAll_BrowseTimeSecs, gDNSSDFlag_IncludeAWDL ? true : false, &context->browser );
+		(unsigned int) gBrowseAll_BrowseTimeSecs, gDNSSDFlag_IncludeAWDL ? true : false,
+		&context->browser );
 	require_noerr( err, exit );
+	
+	ServiceBrowserSetUseNewGAI( context->browser, gBrowseAll_UseNewGAI ? true : false );
+	ServiceBrowserSetValidateResults( context->browser, context->validateResults );
 	
 	for( i = 0; i < gBrowseAll_ServiceTypesCount; ++i )
 	{
@@ -6125,9 +6577,6 @@ static void	_BrowseAllExit( void *inContext )
 	SBRServiceInstance *			instance;
 	SBRIPAddress *					ipaddr;
 	char							textBuf[ 512 ];
-#if( TARGET_OS_POSIX )
-	const Boolean					useColor	= isatty( STDOUT_FILENO ) ? true : false;
-#endif
 	
 	dispatch_source_forget( &context->connectionTimer );
 	
@@ -6186,6 +6635,7 @@ static void	_BrowseAllExit( void *inContext )
 				{
 					BrowseAllConnection *		conn;
 					BrowseAllConnection **		connPtr;
+					const char * const			colorEnd = _StdOutIsTTY() ? kANSINormal : "";
 					
 					FPrintF( stdout, "%*s" "%-##47a %4llu.%03llu ms",
 						Indent( 4 ), &ipaddr->sip.sa, ipaddr->resolveTimeUs / 1000, ipaddr->resolveTimeUs % 1000 );
@@ -6206,25 +6656,27 @@ static void	_BrowseAllExit( void *inContext )
 							AsyncConnection_Forget( &conn->asyncCnx );
 						}
 					}
-					
+					FPrintF( stdout, " (");
+					if( context->validateResults ) _PrintValidatedToStdOut( "", ipaddr->validated , ", " );
 					if( conn )
 					{
 						if( conn->status == kNoErr )
 						{
-							FPrintF( stdout, " (%sconnected%s in %.3f ms)\n",
-								useColor ? kANSIGreen : "", useColor ? kANSINormal : "", conn->connectTimeSecs * 1000 );
+							FPrintF( stdout, "%sconnected%s in %.3f ms",
+								_StdOutIsTTY() ? kANSIGreen : "", colorEnd, conn->connectTimeSecs * 1000 );
 						}
 						else
 						{
-							FPrintF( stdout, " (%scould not connect%s: %m)\n",
-								useColor ? kANSIRed : "", useColor ? kANSINormal : "", conn->status );
+							FPrintF( stdout, "%scould not connect%s: %m",
+								_StdOutIsTTY() ? kANSIRed : "", colorEnd, conn->status );
 						}
 						_BrowseAllConnectionRelease( conn );
 					}
 					else
 					{
-						FPrintF( stdout, " (no connection attempted)\n" );
+						FPrintF( stdout, "no connection attempted" );
 					}
+					FPrintF( stdout, ")\n" );
 				}
 				
 				FPrintF( stdout, "\n" );
@@ -6641,7 +7093,7 @@ static void	DNSQueryCmd( void )
 		require_noerr( err, exit );
 	}
 #endif
-	if( SockAddrGetPort( &context->serverAddr ) == 0 ) SockAddrSetPort( &context->serverAddr, kDNSPort );
+	if( SockAddrGetPort( &context->serverAddr ) == 0 ) SockAddrSetPort( &context->serverAddr, kDNSPort_Do53 );
 	
 	err = RecordTypeFromArgString( gDNSQuery_Type, &context->type );
 	require_noerr( err, exit );
@@ -6682,7 +7134,7 @@ static void	DNSQueryCmd( void )
 	}
 	if( context->useTCP )
 	{
-		WriteBig16( context->msgBuf, msgLen );
+		WriteBig16Typed( context->msgBuf, (uint16_t) msgLen );
 		sendLen = 2 + msgLen;
 	}
 	else
@@ -6718,7 +7170,7 @@ static void	DNSQueryCmd( void )
 	}
 	
 	context->sendTicks = UpTicks();
-	err = _SocketWriteAll( context->sock, context->msgBuf, sendLen, 5 );
+	err = SocketWriteAll( context->sock, context->msgBuf, sendLen, 5 );
 	require_noerr( err, exit );
 	
 	if( context->timeLimitSecs == 0 ) goto exit;
@@ -7020,7 +7472,7 @@ static void	DNSCryptCmd( void )
 	// Send DNS query.
 	
 	context->sendTicks = UpTicks();
-	err = _SocketWriteAll( sock, context->msgBuf, context->msgLen, 5 );
+	err = SocketWriteAll( sock, context->msgBuf, context->msgLen, 5 );
 	require_noerr( err, exit );
 	
 	sockCtx = SocketContextCreate( sock, context, &err );
@@ -7391,7 +7843,7 @@ static OSStatus	DNSCryptSendQuery( DNSCryptContext *inContext )
 	require_noerr( err, exit );
 	
 	inContext->sendTicks = UpTicks();
-	err = _SocketWriteAll( sock, inContext->msgBuf, inContext->msgLen, 5 );
+	err = SocketWriteAll( sock, inContext->msgBuf, inContext->msgLen, 5 );
 	require_noerr( err, exit );
 	
 	sockCtx = SocketContextCreate( sock, inContext, &err );
@@ -7849,59 +8301,72 @@ exit:
 #endif
 
 //===========================================================================================================================
-//	DNSServerCmd
+//	DNSServerCommand
 //===========================================================================================================================
 
 typedef struct
 {
-	DNSServerRef			server;			// Reference to the DNS server.
-	dispatch_queue_t		queue;			// Serial queue for server.
-	sockaddr_ip *			addrArray;		// Server's addresses.
-	size_t					addrCount;		// Count of server's addresses.
-	dispatch_source_t		sourceSigInt;	// Dispatch source for SIGINT.
-	dispatch_source_t		sourceSigTerm;	// Dispatch source for SIGTERM.
-	const char *			domainOverride;	// If non-NULL, server is to use this domain instead of "d.test.".
-	dispatch_semaphore_t	doneSem;		// Semaphore to signal when the server is done.
-	OSStatus				error;			// Error encounted while running server.
-	Boolean					loopbackOnly;	// True if the server should be bound to the loopback interface.
-#if( TARGET_OS_DARWIN )
-	dispatch_source_t		processMonitor;	// Process monitor source for process being followed, if any.
-	pid_t					followPID;		// PID of process being followed, if any. If it exits, we exit.
-	Boolean					addedResolver;	// True if a resolver entry was added to the system DNS settings.
-#endif
+	DNSServerRef				server;				// Reference to the DNS server.
+	dispatch_queue_t			queue;				// Serial queue for server.
+	sockaddr_ip *				addrArray;			// Server's addresses.
+	size_t						addrCount;			// Count of server's addresses.
+	dispatch_source_t			sourceSigInt;		// Dispatch source for SIGINT.
+	dispatch_source_t			sourceSigTerm;		// Dispatch source for SIGTERM.
+	const char *				domainOverride;		// If non-NULL, server is to use this domain instead of "d.test.".
+	dispatch_group_t			group;				// Dispatch group to signal when command is done.
+	dispatch_source_t			processMonitor;		// Process monitor source for process being followed, if any.
+	nw_resolver_config_t		secureDNSConfig;	// Resolver configuration for DNS over TLS (DoT).
+	mdns_network_policy_t		domainPolicy;		// Networking policy for matching domains to DoT service.
+	SecIdentityRef				secIdentity;		// Security identity associated with a self-signed certificate for DoT.
+	nw_listener_t				tlsListener;		// TLS listener.
+	DNSProtocol					protocol;			// DNS protocol to use, e.g., Do53, DoT, or DoH.
+	pid_t						followPID;			// PID of process being followed, if any. If it exits, we exit.
+	int32_t						refCount;			// Object's reference count.
+	OSStatus					error;				// Error encounted while running server.
+	uint16_t					portRequested;		// The port that was requested by the user.
+	uint16_t					portActual;			// DNS server's actual port number.
+	Boolean						loopbackOnly;		// True if the server should be bound to the loopback interface.
+	Boolean						addedResolver;		// True if a resolver entry was added to the system DNS settings.
+	Boolean						stopped;			// True if the command has stopped.
 	
-}	DNSServerCmdContext;
+}	DNSServerCmd;
 
-static void		_DNSServerCmdStart( void *inCtx );
-static void		_DNSServerCmdStop( DNSServerCmdContext *inCmd, OSStatus inError );
-#if( TARGET_OS_DARWIN )
-static OSStatus	_DNSServerCmdAddExtraLoopbackAddrs( sockaddr_ip *inAddrArray, size_t inAddrCount, uint16_t inPort );
-#endif
-static void		_DNSServerCmdContextFree( DNSServerCmdContext *inCmd );
-static void		_DNSServerCmdServerStartHandler( const sockaddr_ip *inAddrArray, size_t inAddrCount, void *inCtx );
-static void		_DNSServerCmdServerStopHandler( OSStatus inError, void *inCtx );
-static void		_DNSServerCmdSIGINTHandler( void *inCtx );
-static void		_DNSServerCmdSIGTERMHandler( void *inCtx );
-static void		_DNSServerCmdShutdown( DNSServerCmdContext *inCtx, int inSignal );
-#if( TARGET_OS_DARWIN )
-static void		_DNSServerCmdFollowedProcessHandler( void *inCtx );
-static OSStatus	_DNSServerCmdLoopbackResolverAdd( const char *inDomain, const sockaddr_ip *inAddrArray, size_t inAddrCount );
-static OSStatus	_DNSServerCmdLoopbackResolverRemove( void );
-#endif
+static DNSServerCmd *	_DNSServerCmdCreate( OSStatus *outError );
+static void				_DNSServerCmdRetain( DNSServerCmd *inCmd );
+static void				_DNSServerCmdRelease( DNSServerCmd *inCmd );
+static void				_DNSServerCmdStart( void *inCtx );
+static void				_DNSServerCmdStop( DNSServerCmd *inCmd, OSStatus inError );
+static OSStatus			_DNSServerCmdAddExtraLoopbackAddrs( sockaddr_ip *inAddrArray, size_t inAddrCount );
+static void				_DNSServerCmdServerStartHandler( uint16_t inActualPort, void *inCtx );
+static void				_DNSServerCmdServerStopHandler( OSStatus inError, void *inCtx );
+static void				_DNSServerCmdSIGINTHandler( void *inCtx );
+static void				_DNSServerCmdSIGTERMHandler( void *inCtx );
+static void				_DNSServerCmdShutdown( DNSServerCmd *inCtx, int inSignal );
+static void				_DNSServerCmdFollowedProcessHandler( void *inCtx );
+static OSStatus			_DNSServerCmdModifySystemSettings( DNSServerCmd *inCmd );
+static OSStatus			_DNSServerCmdUndoSystemSettings( DNSServerCmd *inCmd );
+static SecIdentityRef	_DNSServerCmdCreateSecIdentity( OSStatus *outError );
+static OSStatus			_DNSServerCmdSetUpCertificate( SecIdentityRef inIdentity );
+static OSStatus			_DNSServerCmdCleanUpCertificates( void );
+static nw_listener_t
+	_DNSServerCmdCreateTLSListener(
+		sec_identity_t	inIdentity,
+		uint16_t		inPort,
+		Boolean			inUseHTTPS,
+		OSStatus *		outError );
+static OSStatus			_DNSServerCmdHandleNewTLSConnection( DNSServerCmd *inCmd, nw_connection_t inConnection );
 
 ulog_define_ex( kDNSSDUtilIdentifier, DNSServer, kLogLevelInfo, kLogFlags_None, "DNSServer", NULL );
 #define ds_ulog( LEVEL, ... )		ulog( &log_category_from_name( DNSServer ), (LEVEL), __VA_ARGS__ )
 
-static void	DNSServerCmd( void )
+static void	DNSServerCommand( void )
 {
-	OSStatus					err;
-	DNSServerCmdContext *		cmd = NULL;
-	sockaddr_ip *				sip;
-	size_t						addrCount;
-	Boolean						listenOnV4, listenOnV6;
-#if( TARGET_OS_DARWIN )
-	size_t                      extraLoopbackV6Count;
-#endif
+	OSStatus			err;
+	DNSServerCmd *		cmd = NULL;
+	sockaddr_ip *		sip;
+	size_t				addrCount, extraLoopbackV6Count;
+	uint16_t			port;
+	Boolean				listenOnV4, listenOnV6;
 	
 	// Check command arguments.
 	
@@ -7912,13 +8377,42 @@ static void	DNSServerCmd( void )
 	err = CheckIntegerArgument( gDNSServer_DefaultTTL, "default TTL", 0, INT32_MAX );
 	require_noerr_quiet( err, exit );
 	
-	err = CheckIntegerArgument( gDNSServer_Port, "port number", 0, UINT16_MAX );
+	cmd = _DNSServerCmdCreate( &err );
+	require_noerr( err, exit );
+	
+	cmd->followPID		= -1;
+	cmd->domainOverride	= gDNSServer_DomainOverride;
+	cmd->protocol = (DNSProtocol) CLIArgToValue( "protocol", gDNSServer_Protocol, &err,
+		kDNSProtocolStr_Do53,	(int) kDNSProtocol_Do53,
+		kDNSProtocolStr_DoT,	(int) kDNSProtocol_DoT,
+		kDNSProtocolStr_DoH,	(int) kDNSProtocol_DoH,
+		NULL );
 	require_noerr_quiet( err, exit );
 	
-	listenOnV4 = ( gDNSServer_ListenOnV4 || !gDNSServer_ListenOnV6 ) ? true : false;
-	listenOnV6 = ( gDNSServer_ListenOnV6 || !gDNSServer_ListenOnV4 ) ? true : false;
-#if( TARGET_OS_DARWIN )
-	if( gDNSServer_LoopbackOnly && listenOnV6 )
+	if( gDNSServer_Port == -1 )
+	{
+		switch( cmd->protocol )
+		{
+			case kDNSProtocol_Do53:	port = kDNSPort_Do53;	break;
+			case kDNSProtocol_DoT:	port = kDNSPort_DoT;	break;
+			case kDNSProtocol_DoH:	port = kDNSPort_DoH;	break;
+		}
+	}
+	else
+	{
+		err = CheckIntegerArgument( gDNSServer_Port, "port number", 0, UINT16_MAX );
+		require_noerr_quiet( err, exit );
+		
+		port = (uint16_t) gDNSServer_Port;
+	}
+	cmd->portRequested = port;
+	listenOnV4 = gDNSServer_ListenOnV4 || !gDNSServer_ListenOnV6;
+	listenOnV6 = gDNSServer_ListenOnV6 || !gDNSServer_ListenOnV4;
+	if( gDNSServer_LoopbackOnly || ( cmd->protocol == kDNSProtocol_DoT ) || ( cmd->protocol == kDNSProtocol_DoH ) )
+	{
+		cmd->loopbackOnly = true;
+	}
+	if( cmd->loopbackOnly && listenOnV6 )
 	{
 		err = CheckIntegerArgument( gDNSServer_ExtraV6Count, "extra IPv6", 0, 100 );
 		require_noerr_quiet( err, exit );
@@ -7933,14 +8427,6 @@ static void	DNSServerCmd( void )
 	{
 		extraLoopbackV6Count = 0;
 	}
-#endif
-	cmd = (DNSServerCmdContext *) calloc( 1, sizeof( *cmd ) );
-	require_action( cmd, exit, err = kNoMemoryErr );
-	
-	cmd->domainOverride	= gDNSServer_DomainOverride;
-	cmd->loopbackOnly	= gDNSServer_LoopbackOnly ? true : false;
-#if( TARGET_OS_DARWIN )
-	cmd->followPID		= -1;
 	if( gDNSServer_FollowPID )
 	{
 		cmd->followPID = _StringToPID( gDNSServer_FollowPID, &err );
@@ -7951,15 +8437,11 @@ static void	DNSServerCmd( void )
 			goto exit;
 		}
 	}
-#endif
-	
 	// Set up IP addresses.
 	
 	if( listenOnV4 ) ++cmd->addrCount;
 	if( listenOnV6 ) ++cmd->addrCount;
-#if( TARGET_OS_DARWIN )
 	cmd->addrCount += extraLoopbackV6Count;
-#endif
 	check( cmd->addrCount > 0 );
 	cmd->addrArray = (sockaddr_ip *) calloc( cmd->addrCount, sizeof( *cmd->addrArray ) );
 	require_action( cmd->addrArray, exit, err = kNoMemoryErr );
@@ -7968,24 +8450,21 @@ static void	DNSServerCmd( void )
 	if( listenOnV4 )
 	{
 		sip = &cmd->addrArray[ addrCount++ ];
-		_SockAddrInitIPv4( &sip->v4, cmd->loopbackOnly ? INADDR_LOOPBACK : INADDR_ANY, (uint16_t) gDNSServer_Port );
+		_SockAddrInitIPv4( &sip->v4, cmd->loopbackOnly ? INADDR_LOOPBACK : INADDR_ANY, 0 );
 	}
 	if( listenOnV6 )
 	{
 		const struct in6_addr * const		addr = cmd->loopbackOnly ? &in6addr_loopback : &in6addr_any;
 		
 		sip = &cmd->addrArray[ addrCount++ ];
-		_SockAddrInitIPv6( &sip->v6, addr->s6_addr, 0, (uint16_t) gDNSServer_Port );
+		_SockAddrInitIPv6( &sip->v6, addr->s6_addr, 0, 0 );
 	}
-#if( TARGET_OS_DARWIN )
 	if( extraLoopbackV6Count > 0 )
 	{
-		err = _DNSServerCmdAddExtraLoopbackAddrs( &cmd->addrArray[ addrCount ], extraLoopbackV6Count,
-			(uint16_t) gDNSServer_Port );
+		err = _DNSServerCmdAddExtraLoopbackAddrs( &cmd->addrArray[ addrCount ], extraLoopbackV6Count );
 		require_noerr( err, exit );
 		addrCount += extraLoopbackV6Count;
 	}
-#endif
 	check( addrCount == cmd->addrCount );
 	
 	// Start command.
@@ -7993,25 +8472,90 @@ static void	DNSServerCmd( void )
 	cmd->queue = dispatch_queue_create( "com.apple.dnssdutil.server-command", DISPATCH_QUEUE_SERIAL );
 	require_action( cmd->queue, exit, err = kNoResourcesErr );
 	
-	cmd->doneSem = dispatch_semaphore_create( 0 );
-	require_action( cmd->doneSem, exit, err = kNoResourcesErr );
-	
+	dispatch_group_enter( cmd->group ); // Enter for the duration of _DNSServerCmdStart().
 	dispatch_async_f( cmd->queue, cmd, _DNSServerCmdStart );
-    dispatch_semaphore_wait( cmd->doneSem, DISPATCH_TIME_FOREVER );
+    dispatch_group_wait( cmd->group, DISPATCH_TIME_FOREVER );
 	
 exit:
 	if( err ) FPrintF( stderr, "Failed to start DNS server: %#m\n", err );
-	if( cmd ) _DNSServerCmdContextFree( cmd );
+	if( cmd ) _DNSServerCmdRelease( cmd );
 	gExitCode = err ? 1 : 0;
+}
+
+//===========================================================================================================================
+
+static DNSServerCmd *	_DNSServerCmdCreate( OSStatus * const outError )
+{
+	OSStatus			err;
+	DNSServerCmd *		obj;
+	DNSServerCmd *		cmd = NULL;
+	
+	obj = (DNSServerCmd *) calloc( 1, sizeof( *obj ) );
+	require_action( obj, exit, err = kNoMemoryErr );
+	
+	obj->refCount	= 1;
+	obj->group		= dispatch_group_create();
+	require_action( obj->group, exit, err = kNoResourcesErr );
+	
+	cmd = obj;
+	obj = NULL;
+	err = kNoErr;
+	
+exit:
+	if( obj ) _DNSServerCmdRelease( obj );
+	if( outError ) *outError = err;
+	return( cmd );
+}
+
+//===========================================================================================================================
+
+static void	_DNSServerCmdRetain( DNSServerCmd * const inCmd )
+{
+	atomic_add_32( &inCmd->refCount, 1 );
+}
+
+//===========================================================================================================================
+
+static void	_DNSServerCmdRelease( DNSServerCmd * const inCmd )
+{
+	if( atomic_add_and_fetch_32( &inCmd->refCount, -1 ) == 0 )
+	{
+		size_t		i;
+		
+		check( !inCmd->server );
+		check( !inCmd->sourceSigInt );
+		check( !inCmd->sourceSigTerm );
+		check( !inCmd->processMonitor );
+		check( !inCmd->secureDNSConfig );
+		check( !inCmd->domainPolicy );
+		check( !inCmd->tlsListener );
+		for( i = 0; i < inCmd->addrCount; ++i )
+		{
+			OSStatus								err;
+			const struct sockaddr_in6 * const		sin6 = &inCmd->addrArray[ i ].v6;
+			int										cmp;
+			
+			if( sin6->sin6_family != AF_INET6 ) continue;
+			cmp = memcmp( sin6->sin6_addr.s6_addr, kExtraLoopbackIPv6Prefix, sizeof( kExtraLoopbackIPv6Prefix ) );
+			if( cmp != 0 ) continue;
+			err = _InterfaceIPv6AddressRemove( "lo0", sin6->sin6_addr.s6_addr );
+			check_noerr( err );
+		}
+		dispatch_forget( &inCmd->queue );
+		dispatch_forget( &inCmd->group );
+		ForgetMem( &inCmd->addrArray );
+		CFForget( &inCmd->secIdentity );
+		free( inCmd );
+	}
 }
 
 //===========================================================================================================================
 
 static void	_DNSServerCmdStart( void *inCtx )
 {
-	OSStatus						err;
-	DNSServerCmdContext * const		cmd = (DNSServerCmdContext *) inCtx;
-	size_t							i;
+	OSStatus					err;
+	DNSServerCmd * const		cmd = (DNSServerCmd *) inCtx;
+	size_t						i;
 	
 	signal( SIGINT, SIG_IGN );
 	err = DispatchSignalSourceCreate( SIGINT, cmd->queue, _DNSServerCmdSIGINTHandler, cmd, &cmd->sourceSigInt );
@@ -8023,7 +8567,6 @@ static void	_DNSServerCmdStart( void *inCtx )
 	require_noerr( err, exit );
 	dispatch_resume( cmd->sourceSigTerm );
 	
-#if( TARGET_OS_DARWIN )
 	if( cmd->followPID >= 0 )
 	{
 		err = DispatchProcessMonitorCreate( cmd->followPID, DISPATCH_PROC_EXIT, cmd->queue,
@@ -8031,12 +8574,15 @@ static void	_DNSServerCmdStart( void *inCtx )
 		require_noerr( err, exit );
 		dispatch_resume( cmd->processMonitor );
 	}
-#endif
+	
 	err = _DNSServerCreate( cmd->queue, _DNSServerCmdServerStartHandler, _DNSServerCmdServerStopHandler, cmd,
 		(unsigned int) gDNSServer_ResponseDelayMs, (uint32_t) gDNSServer_DefaultTTL, cmd->addrArray, cmd->addrCount,
 		cmd->domainOverride, gDNSServer_BadUDPMode ? true : false, &cmd->server );
 	require_noerr( err, exit );
 	
+	_DNSServerCmdRetain( cmd );
+	dispatch_group_enter( cmd->group ); // Enter for the DNS server's lifetime.
+	_DNSServerSetPort( cmd->server, _DNSProtocolIsSecure( cmd->protocol ) ? 0 : cmd->portRequested );
 	for( i = 0; i < gDNSServer_IgnoredQTypesCount; ++i )
 	{
 		uint16_t		qtype;
@@ -8051,26 +8597,31 @@ static void	_DNSServerCmdStart( void *inCtx )
 	
 exit:
 	if( err ) _DNSServerCmdStop( cmd, err );
+	dispatch_group_leave( cmd->group ); // Leave for _DNSServerCmdStart().
 }
 
 //===========================================================================================================================
 
-static void	_DNSServerCmdStop( DNSServerCmdContext *inCmd, OSStatus inError )
+static void	_DNSServerCmdStop( DNSServerCmd *inCmd, OSStatus inError )
 {
-	if( !inCmd->error ) inCmd->error = inError;
-	check( !inCmd->server );
-	dispatch_source_forget( &inCmd->sourceSigInt );
-	dispatch_source_forget( &inCmd->sourceSigTerm );
-#if( TARGET_OS_DARWIN )
-	dispatch_source_forget( &inCmd->processMonitor );
-#endif
-	dispatch_semaphore_signal( inCmd->doneSem );
+	if( !inCmd->stopped )
+	{
+		inCmd->stopped = true;
+		if( !inCmd->error ) inCmd->error = inError;
+		if( inCmd->server )
+		{
+			_DNSServerStop( inCmd->server );
+			CFForget( &inCmd->server );
+		}
+		dispatch_source_forget( &inCmd->sourceSigInt );
+		dispatch_source_forget( &inCmd->sourceSigTerm );
+		dispatch_source_forget( &inCmd->processMonitor );
+	}
 }
 
-#if( TARGET_OS_DARWIN )
 //===========================================================================================================================
 
-static OSStatus	_DNSServerCmdAddExtraLoopbackAddrs( sockaddr_ip *inAddrArray, size_t inAddrCount, uint16_t inPort )
+static OSStatus	_DNSServerCmdAddExtraLoopbackAddrs( sockaddr_ip *inAddrArray, size_t inAddrCount )
 {
 	OSStatus		err;
 	uint8_t			addrV6[ 16 ];
@@ -8079,7 +8630,7 @@ static OSStatus	_DNSServerCmdAddExtraLoopbackAddrs( sockaddr_ip *inAddrArray, si
 	check_compile_time_code( sizeof( kExtraLoopbackIPv6Prefix ) == 8 );
 	memcpy( addrV6, kExtraLoopbackIPv6Prefix, 8 );	// 64-bit prefix
 	RandomBytes( &addrV6[ 8 ], 4 );					// 32-bit random
-	WriteBig32( &addrV6[ 12 ], 2 );					// 16-bit base offset starting at 2
+	WriteBig32Typed( &addrV6[ 12 ], 2 );			// 16-bit base offset starting at 2
 	for( i = 0; i < inAddrCount; ++i )
 	{
 		struct sockaddr_in6 * const		sin6 = &inAddrArray[ i ].v6;
@@ -8087,7 +8638,7 @@ static OSStatus	_DNSServerCmdAddExtraLoopbackAddrs( sockaddr_ip *inAddrArray, si
 		err = _InterfaceIPv6AddressAdd( "lo0", addrV6, kExtraLoopbackIPv6PrefixBitLen );
 		require_noerr( err, exit );
 		
-		_SockAddrInitIPv6( sin6, addrV6, 0, inPort );
+		_SockAddrInitIPv6( sin6, addrV6, 0, 0 );
 		BigEndianIntegerIncrement( addrV6, sizeof( addrV6 ) );
 	}
 	err = kNoErr;
@@ -8095,118 +8646,158 @@ static OSStatus	_DNSServerCmdAddExtraLoopbackAddrs( sockaddr_ip *inAddrArray, si
 exit:
 	return( err );
 }
-#endif
 
 //===========================================================================================================================
 
-static void	_DNSServerCmdContextFree( DNSServerCmdContext *inCmd )
+static void
+_DNSServerCmdServerStartHandler( const uint16_t inActualPort, void * const inCtx )
 {
-#if( TARGET_OS_DARWIN )
-	size_t		i;
-#endif
+	OSStatus					err;
+	DNSServerCmd * const		cmd			= (DNSServerCmd *) inCtx;
+	sec_identity_t				secIdentity	= NULL;
 	
-	check( !inCmd->server );
-	check( !inCmd->sourceSigInt );
-	check( !inCmd->sourceSigTerm );
-#if( TARGET_OS_DARWIN )
-	check( !inCmd->processMonitor );
-	for( i = 0; i < inCmd->addrCount; ++i )
-	{
-		OSStatus								err;
-		const struct sockaddr_in6 * const		sin6 = &inCmd->addrArray[ i ].v6;
-		int										cmp;
-		
-		if( sin6->sin6_family != AF_INET6 ) continue;
-		cmp = memcmp( sin6->sin6_addr.s6_addr, kExtraLoopbackIPv6Prefix, sizeof( kExtraLoopbackIPv6Prefix ) );
-		if( cmp != 0 ) continue;
-		err = _InterfaceIPv6AddressRemove( "lo0", sin6->sin6_addr.s6_addr );
-		check_noerr( err );
-	}
-#endif
-	dispatch_forget( &inCmd->queue );
-	dispatch_forget( &inCmd->doneSem );
-	ForgetMem( &inCmd->addrArray );
-	free( inCmd );
-}
-
-//===========================================================================================================================
-
-static void	_DNSServerCmdServerStartHandler( const sockaddr_ip *inServerArray, size_t inServerCount, void *inCtx )
-{
-#if( TARGET_OS_DARWIN )
-	OSStatus						err;
-	DNSServerCmdContext * const		cmd		= (DNSServerCmdContext *) inCtx;
-	const char * const				domain	= cmd->domainOverride ? cmd->domainOverride : "d.test.";
-	
+	cmd->portActual = inActualPort;
 	if( cmd->loopbackOnly )
 	{
-		err = _DNSServerCmdLoopbackResolverAdd( domain, inServerArray, inServerCount );
-		if( err )
+		err = _DNSServerCmdModifySystemSettings( cmd );
+		require_noerr_action( err, exit, ds_ulog( kLogLevelError,
+			"Failed to modify system settings: %#m\n", err ) );
+		
+		if( _DNSProtocolIsSecure( cmd->protocol ) )
 		{
-			ds_ulog( kLogLevelError, "Failed to add loopback resolver to DNS configuration for \"%s\" domain: %#m\n",
-				domain, err );
-			cmd->error = err;
-			DNSServerForget( &cmd->server );
-		}
-		else
-		{
-			cmd->addedResolver = true;
+			Boolean		useHTTPS;
+			
+			err = _DNSServerCmdCleanUpCertificates();
+			require_noerr( err, exit );
+			
+			check( !cmd->secIdentity );
+			cmd->secIdentity = _DNSServerCmdCreateSecIdentity( &err );
+			require_noerr( err, exit );
+			
+			err = _DNSServerCmdSetUpCertificate( cmd->secIdentity );
+			require_noerr( err, exit );
+			
+			secIdentity = sec_identity_create( cmd->secIdentity );
+			require_action( secIdentity, exit, err = kNoResourcesErr );
+			
+			useHTTPS = ( cmd->protocol == kDNSProtocol_DoH );
+			cmd->tlsListener = _DNSServerCmdCreateTLSListener( secIdentity, cmd->portRequested, useHTTPS, &err );
+			require_noerr( err, exit );
+			
+			_DNSServerCmdRetain( cmd );
+			dispatch_group_enter( cmd->group ); // Enter for the TLS listener's lifetime.
+			nw_listener_set_state_changed_handler( cmd->tlsListener,
+			^( const nw_listener_state_t inState, const nw_error_t inError )
+			{
+				if( cmd->tlsListener )
+				{
+					switch( inState )
+					{
+						case nw_listener_state_ready:
+							ds_ulog( kLogLevelInfo, "Listening for TLS connections on port %d\n",
+								nw_listener_get_port( cmd->tlsListener ) );
+							break;
+						
+						case nw_listener_state_failed:
+						{
+							OSStatus		listenerErr;
+							
+							ds_ulog( kLogLevelError, "TLS listener failed: %@\n", inError );
+							listenerErr = nw_error_get_error_code( inError );
+							if( !listenerErr ) listenerErr = kUnknownErr;
+							_DNSServerCmdStop( cmd, listenerErr );
+							break;
+						}
+						case nw_listener_state_invalid:
+						case nw_listener_state_waiting:
+						case nw_listener_state_cancelled:
+							break;
+					}
+				}
+				if( inState == nw_listener_state_cancelled )
+				{
+					dispatch_group_leave( cmd->group ); // Leave for the TLS listener.
+					_DNSServerCmdRelease( cmd );
+				}
+			} );
+			nw_listener_set_new_connection_handler( cmd->tlsListener,
+			^( const nw_connection_t inConnection )
+			{
+				OSStatus		connectionErr;
+				
+				connectionErr = _DNSServerCmdHandleNewTLSConnection( cmd, inConnection );
+				if( connectionErr ) _DNSServerCmdStop( cmd, connectionErr );
+			} );
+			nw_listener_set_queue( cmd->tlsListener, cmd->queue );
+			nw_listener_start( cmd->tlsListener );
 		}
 	}
-#else
-	Unused( inServerArray );
-	Unused( inServerCount );
-	Unused( inCtx );
-#endif
+	err = kNoErr;
+	
+exit:
+	if( secIdentity ) sec_release( secIdentity );
+	if( err ) _DNSServerCmdStop( cmd, err );
 }
 
 //===========================================================================================================================
 
 static void	_DNSServerCmdServerStopHandler( OSStatus inError, void *inCtx )
 {
-	DNSServerCmdContext * const		cmd = (DNSServerCmdContext *) inCtx;
+	OSStatus					err;
+	DNSServerCmd * const		cmd = (DNSServerCmd *) inCtx;
 	
-	if( inError ) ds_ulog( kLogLevelError, "The server stopped unexpectedly with error: %#m.\n", inError );
-#if( TARGET_OS_DARWIN )
-	if( cmd->addedResolver )
+	if( inError )
 	{
-		OSStatus		err;
-		err = _DNSServerCmdLoopbackResolverRemove();
-		if( err ) ds_ulog( kLogLevelError, "Failed to remove loopback resolver from DNS configuration: %#m\n", err );
-		if( !err ) cmd->addedResolver = false;
+		ds_ulog( kLogLevelError, "The server stopped unexpectedly with error: %#m.\n", inError );
+		if( !cmd->error ) cmd->error = inError;
 	}
-#endif
-	_DNSServerCmdStop( cmd, cmd->error ? cmd->error : inError );
+	err = _DNSServerCmdUndoSystemSettings( cmd );
+	if( err )
+	{
+		ds_ulog( kLogLevelError, "Failed to undo system settings: %#m\n", err );
+		if( !cmd->error ) cmd->error = err;
+	}
+	if( _DNSProtocolIsSecure( cmd->protocol ) )
+	{
+		err = _DNSServerCmdCleanUpCertificates();
+		if( !cmd->error ) cmd->error = err;
+	}
+	if( cmd->tlsListener )
+	{
+		nw_listener_cancel( cmd->tlsListener );
+		nw_forget( &cmd->tlsListener );
+	}
+	_DNSServerCmdStop( cmd, cmd->error );
+	dispatch_group_leave( cmd->group ); // Leave for the DNS server.
+	_DNSServerCmdRelease( cmd );
 }
 
 //===========================================================================================================================
 
 static void	_DNSServerCmdSIGINTHandler( void *inCtx )
 {
-	_DNSServerCmdShutdown( (DNSServerCmdContext *) inCtx, SIGINT );
+	_DNSServerCmdShutdown( (DNSServerCmd *) inCtx, SIGINT );
 }
 
 //===========================================================================================================================
 
 static void	_DNSServerCmdSIGTERMHandler( void *inCtx )
 {
-	_DNSServerCmdShutdown( (DNSServerCmdContext *) inCtx, SIGTERM );
+	_DNSServerCmdShutdown( (DNSServerCmd *) inCtx, SIGTERM );
 }
 
 //===========================================================================================================================
 
-static void	_DNSServerCmdShutdown( DNSServerCmdContext *inCmd, int inSignal )
+static void	_DNSServerCmdShutdown( DNSServerCmd *inCmd, int inSignal )
 {
 	dispatch_source_forget( &inCmd->sourceSigInt );
 	dispatch_source_forget( &inCmd->sourceSigTerm );
-#if( TARGET_OS_DARWIN )
 	dispatch_source_forget( &inCmd->processMonitor );
 	if( inSignal == 0 )
 	{
 		ds_ulog( kLogLevelNotice, "Exiting: followed process (%lld) exited\n", (int64_t) inCmd->followPID );
 	}
 	else
-#endif
 	{
 		const char *		sigName;
 		
@@ -8218,80 +8809,515 @@ static void	_DNSServerCmdShutdown( DNSServerCmdContext *inCmd, int inSignal )
 		}
 		ds_ulog( kLogLevelNotice, "Exiting: received signal %d (%s)\n", inSignal, sigName );
 	}
-	DNSServerForget( &inCmd->server );
+	_DNSServerCmdStop( inCmd, kNoErr );
 }
 
-#if( TARGET_OS_DARWIN )
 //===========================================================================================================================
 
 static void	_DNSServerCmdFollowedProcessHandler( void *inCtx )
 {
-	DNSServerCmdContext * const		cmd = (DNSServerCmdContext *) inCtx;
+	DNSServerCmd * const		cmd = (DNSServerCmd *) inCtx;
 	
 	if( dispatch_source_get_data( cmd->processMonitor ) & DISPATCH_PROC_EXIT ) _DNSServerCmdShutdown( cmd, 0 );
 }
 //===========================================================================================================================
 
-#define kDNSServerServiceID		CFSTR( "com.apple.dnssdutil.server" )
+#define kDNSServerHostname				"dns.apple.test"
+#define kDNSServerDoHURLPath			"/dns-query"
+#define kDNSServerDoHURLTemplate		"https://" kDNSServerHostname kDNSServerDoHURLPath
+#define kDNSServerServiceID				CFSTR( "com.apple.dnssdutil.server" )
 
-static OSStatus	_DNSServerCmdLoopbackResolverAdd( const char *inDomain, const sockaddr_ip *inAddrArray, size_t inAddrCount )
+static OSStatus	_DNSServerCmdModifySystemSettings( DNSServerCmd * const inCmd )
 {
 	OSStatus					err;
-	mdns_dns_configurator_t		configurator = NULL;
+	mdns_dns_configurator_t		configurator	= NULL;
+	nw_resolver_config_t		secureDNSConfig	= NULL;
+	nw_endpoint_t				endpoint		= NULL;
+	const char *				primaryDomainStr;
+	CFArrayRef					domains			= NULL;
 	size_t						i;
 	char						dnssecDomainStr[ kDNSServiceMaxDomainName ];
 	
-	require_action_quiet( inAddrCount > 0, exit, err = kCountErr );
-	
-	configurator = mdns_dns_configurator_create_with_cfstring_id( kDNSServerServiceID, &err );
-	require_noerr( err, exit );
-	
-	err = mdns_dns_configurator_add_domain( configurator, inDomain, 0 );
-	require_noerr( err, exit );
+	require_action_quiet( inCmd->addrCount > 0, exit, err = kCountErr );
 	
 	err = DomainNameToString( kDNSServerDomain_DNSSEC, NULL, dnssecDomainStr, NULL );
 	require_noerr( err, exit );
 	
-	err = mdns_dns_configurator_add_domain( configurator, dnssecDomainStr, 0 );
-	require_noerr( err, exit );
-	
-	err = mdns_dns_configurator_add_domain( configurator, kDNSServerReverseIPv4DomainStr, 0 );
-	require_noerr( err, exit );
-	
-	err = mdns_dns_configurator_add_domain( configurator, kDNSServerReverseIPv6DomainStr, 0 );
-	require_noerr( err, exit );
-	
-	for( i = 0; i < inAddrCount; ++i )
+	primaryDomainStr = inCmd->domainOverride ? inCmd->domainOverride : "d.test.";
+	switch( inCmd->protocol )
 	{
-		char		addrStr[ kSockAddrStringMaxSize ];
-		
-        err = SockAddrToString( &inAddrArray[ i ], kSockAddrStringFlagsNoPort, addrStr );
-        require_noerr( err, exit );
-		
-		err = mdns_dns_configurator_add_server_address_string( configurator, addrStr );
-		require_noerr( err, exit );
+		case kDNSProtocol_DoT:
+		case kDNSProtocol_DoH:
+		{
+			bool					ok;
+			const char * const		domainStrings[] =
+			{
+				primaryDomainStr,
+				dnssecDomainStr,
+				kDNSServerReverseIPv4DomainStr,
+				kDNSServerReverseIPv6DomainStr
+			};
+			
+			// Try to clean up a stale Do53 resolver entry for a previous server from the system's DNS configuration in case
+			// one happens to still be present. Such an entry may interfere with the system settings for the DoT server if
+			// they're for the same domain, i.e., queries may be incorrectly sent to the Do53 server which no longer exists.
+			
+			mdns_dns_configurator_deregister_configuration( kDNSServerServiceID, CFSTR( kDNSSDUtilIdentifier ) );
+			if( inCmd->protocol == kDNSProtocol_DoT )
+			{
+				endpoint = nw_endpoint_create_host_with_numeric_port( kDNSServerHostname, 0 );
+				require_action( endpoint, exit, err = kUnknownErr );
+				
+				secureDNSConfig = nw_resolver_config_create_tls( endpoint );
+				nw_forget( &endpoint );
+				require_action( secureDNSConfig, exit, err = kUnknownErr );
+			}
+			else
+			{
+				endpoint = nw_endpoint_create_url( kDNSServerDoHURLTemplate );
+				require_action( endpoint, exit, err = kUnknownErr );
+				
+				secureDNSConfig = nw_resolver_config_create_https( endpoint );
+				nw_forget( &endpoint );
+				require_action( secureDNSConfig, exit, err = kUnknownErr );
+			}
+			domains = CFArrayCreateMutable( NULL, 0, &kCFTypeArrayCallBacks );
+			require_action( domains, exit, err = kNoResourcesErr );
+			
+			for( i = 0; i < countof( domainStrings ); ++i )
+			{
+				const char * const		domainStr = domainStrings[ i ];
+				size_t					len;
+				char *					domainStrDup;
+				
+				len = strlen( domainStr );
+				if( len <= 0 ) continue;
+				
+				// NECP doesn't properly handle trailing root dots at the end of FQDNs, so remove them if present.
+				
+				if( domainStr[ len - 1 ] == '.' ) --len;
+				domainStrDup = NULL;
+				ASPrintF( &domainStrDup, "%.*s", (int) len, domainStr );
+				require_action( domainStrDup, exit, err = kNoMemoryErr );
+				
+				nw_resolver_config_add_match_domain( secureDNSConfig, domainStrDup );
+				err = CFPropertyListAppendFormatted( NULL, domains, "%s", domainStrDup );
+				ForgetMem( &domainStrDup );
+				require_noerr( err, exit );
+			}
+			for( i = 0; i < inCmd->addrCount; ++i )
+			{
+				const sockaddr_ip * const		sip = &inCmd->addrArray[ i ];
+				
+				endpoint = nw_endpoint_create_address( &sip->sa );
+				require( endpoint, exit );
+				
+				nw_resolver_config_add_server_address( secureDNSConfig, endpoint );
+				nw_forget( &endpoint );
+			}
+			nw_resolver_config_set_interface_name( secureDNSConfig, "lo0" );
+			ok = nw_resolver_config_publish( secureDNSConfig );
+			require_action( ok, exit, err = kUnknownErr );
+			
+			if( domains )
+			{
+				uuid_t		resolverConfigID;
+				
+				uuid_clear( resolverConfigID );
+				nw_resolver_config_get_identifier( secureDNSConfig, resolverConfigID );
+				check( !inCmd->domainPolicy );
+				inCmd->domainPolicy = mdns_system_add_net_agent_match_domains( resolverConfigID, domains );
+			}
+			inCmd->secureDNSConfig = secureDNSConfig;
+			secureDNSConfig = NULL;
+			break;
+		}
+		case kDNSProtocol_Do53:
+		{
+			configurator = mdns_dns_configurator_create_with_cfstring_id( kDNSServerServiceID, &err );
+			require_noerr( err, exit );
+			
+			err = mdns_dns_configurator_add_domain( configurator, primaryDomainStr, 0 );
+			require_noerr( err, exit );
+			
+			err = mdns_dns_configurator_add_domain( configurator, dnssecDomainStr, 0 );
+			require_noerr( err, exit );
+			
+			err = mdns_dns_configurator_add_domain( configurator, kDNSServerReverseIPv4DomainStr, 0 );
+			require_noerr( err, exit );
+			
+			err = mdns_dns_configurator_add_domain( configurator, kDNSServerReverseIPv6DomainStr, 0 );
+			require_noerr( err, exit );
+			
+			for( i = 0; i < inCmd->addrCount; ++i )
+			{
+				const sockaddr_ip * const		sip = &inCmd->addrArray[ i ];
+				char							addrStr[ kSockAddrStringMaxSize ];
+				
+				err = SockAddrToString( &sip->sa, kSockAddrStringFlagsNoPort, addrStr );
+				require_noerr( err, exit );
+				
+				err = mdns_dns_configurator_add_server_address_string( configurator, addrStr );
+				require_noerr( err, exit );
+			}
+			err = mdns_dns_configurator_set_port( configurator, inCmd->portActual );
+			require_noerr( err, exit );
+			
+			err = mdns_dns_configurator_set_interface( configurator, "lo0" );
+			require_noerr( err, exit );
+			
+			err = mdns_dns_configurator_register( configurator, CFSTR( kDNSSDUtilIdentifier ) );
+			require_noerr( err, exit );
+			
+			inCmd->addedResolver = true;
+			break;
+		}
+		default:
+			err = kInternalErr;
+			goto exit;
 	}
-	err = mdns_dns_configurator_set_port( configurator, (uint16_t) SockAddrGetPort( inAddrArray ) );
-	require_noerr( err, exit );
-	
-	err = mdns_dns_configurator_set_interface( configurator, "lo0" );
-	require_noerr( err, exit );
-	
-	err = mdns_dns_configurator_register( configurator, CFSTR( kDNSSDUtilIdentifier ) );
-	require_noerr( err, exit );
 	
 exit:
 	mdns_forget( &configurator );
+	nw_forget( &secureDNSConfig );
+	nw_forget( &endpoint );
+	CFForget( &domains );
 	return( err );
 }
 
 //===========================================================================================================================
 
-static OSStatus	_DNSServerCmdLoopbackResolverRemove( void )
+static OSStatus	_DNSServerCmdUndoSystemSettings( DNSServerCmd * const inCmd )
 {
-	return( mdns_dns_configurator_deregister_configuration( kDNSServerServiceID, CFSTR( kDNSSDUtilIdentifier ) ) );
+	OSStatus		err;
+	
+	if( inCmd->secureDNSConfig )
+	{
+		nw_resolver_config_unpublish( inCmd->secureDNSConfig );
+		nw_forget( &inCmd->secureDNSConfig );
+	}
+	if( inCmd->domainPolicy )
+	{
+		mdns_system_remove_network_policy( inCmd->domainPolicy );
+		inCmd->domainPolicy = NULL;
+	}
+	if( inCmd->addedResolver )
+	{
+		err = mdns_dns_configurator_deregister_configuration( kDNSServerServiceID, CFSTR( kDNSSDUtilIdentifier ) );
+		require_noerr( err, exit );
+		
+		inCmd->addedResolver = false;
+	}
+	err = kNoErr;
+	
+exit:
+	return( err );
 }
-#endif	// TARGET_OS_DARWIN
+
+//===========================================================================================================================
+
+static SecIdentityRef	_DNSServerCmdCreateSecIdentity( OSStatus * const outError )
+{
+	SecIdentityRef		identity	= NULL;
+	CFArrayRef			certSubject	= NULL;
+	CFDictionaryRef		csrParams	= NULL;
+	
+	OSStatus err = CFPropertyListCreateFormatted( kCFAllocatorDefault, &certSubject,
+		"["
+			"[[%O%O]]"	// kSecOidCommonName
+			"[[%O%O]]"	// kSecOidOrganizationalUnit
+			"[[%O%O]]"	// kSecOidOrganization
+		"]",
+		kSecOidCommonName,			CFSTR( kDNSServerHostname ),
+		kSecOidOrganizationalUnit,	CFSTR( "Networking" ),
+		kSecOidOrganization,		CFSTR( "Apple Inc." ) );
+	require_noerr( err, exit );
+	
+	err = CFPropertyListCreateFormatted( kCFAllocatorDefault, &csrParams,
+		"{"
+			"%kO="			// kSecSubjectAltName
+			"{"
+				"%kO=%O"	// kSecSubjectAltNameDNSName
+			"}"
+			"%kO=%lli"		// kSecCertificateLifetime
+		"}",
+		kSecSubjectAltName,
+		kSecSubjectAltNameDNSName,	CFSTR( kDNSServerHostname ),
+		kSecCertificateLifetime,	(int64_t)( 24 * kSecondsPerHour ) );
+	require_noerr( err, exit );
+	
+	identity = mdns_security_create_self_signed_certificate( certSubject, csrParams, kSecAttrKeyTypeECSECPrimeRandom, 256,
+		&err );
+	require_noerr( err, exit );
+	
+exit:
+	CFForget( &certSubject );
+	CFForget( &csrParams );
+	if( outError ) *outError = err;
+	return( identity );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_DNSServerCmdSetUpCertificate( const SecIdentityRef inIdentity )
+{
+	SecCertificateRef		cert			= NULL;
+	SecPolicyRef			policySSL		= NULL;
+	CFDictionaryRef			trustSettings	= NULL;
+	
+	OSStatus err = SecIdentityCopyCertificate( inIdentity, &cert );
+	require_noerr( err, exit );
+	
+	err = KeychainAddFormatted( NULL,
+		"{"
+			"%kO=%O"	// kSecClass
+			"%kO=%O"	// kSecValueRef
+		"}",
+		kSecClass,		kSecClassCertificate,
+		kSecValueRef,	cert );
+	require_noerr( err, exit );
+	
+	policySSL = SecPolicyCreateSSL( true, NULL );
+	require_action( policySSL, exit, err = kNoResourcesErr );
+	
+	err = CFPropertyListCreateFormatted( kCFAllocatorDefault, &trustSettings,
+		"{"
+			"%kO=%O"	// kSecTrustSettingsPolicy
+			"%kO=%lli"	// kSecTrustSettingsResult
+		"}",
+		kSecTrustSettingsPolicy, policySSL,
+		kSecTrustSettingsResult, (int64_t) kSecTrustSettingsResultTrustRoot );
+	require_noerr( err, exit );
+	
+	err = mdns_security_set_per_user_certificate_trust_settings( cert, trustSettings );
+	require_noerr( err, exit );
+	
+exit:
+	CFForget( &cert );
+	CFForget( &policySSL );
+	CFForget( &trustSettings );
+	return( err );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_DNSServerCmdCleanUpCertificates( void )
+{
+	OSStatus					err;
+	CFMutableDictionaryRef		certQuery = NULL;
+	CFTypeRef					certResults = NULL;
+	
+	err = CFPropertyListCreateFormatted( kCFAllocatorDefault, &certQuery,
+		"{"
+			"%kO=%O"	// kSecClass
+			"%kO=%O"	// kSecAttrLabel
+			"%kO=%O"	// kSecMatchLimit
+			"%kO=%O"	// kSecReturnAttributes
+			"%kO=%O"	// kSecReturnRef
+		"}",
+		kSecClass,				kSecClassCertificate,
+		kSecAttrLabel,			CFSTR( kDNSServerHostname ),
+		kSecMatchLimit,			kSecMatchLimitAll,
+		kSecReturnAttributes,	kCFBooleanTrue,
+		kSecReturnRef,			kCFBooleanTrue );
+	require_noerr( err, exit );
+	
+	err = SecItemCopyMatching( certQuery, &certResults );
+	if( err == errSecItemNotFound )
+	{
+		err = kNoErr;
+		goto exit;
+	}
+	require_noerr( err, exit );
+	
+	if( certResults )
+	{
+		const CFArrayApplierBlock applierBlock =
+		^( const void * const inValue )
+		{
+			const CFDictionaryRef item = CFGetCFDictionary( inValue, NULL );
+			require_return( item );
+			
+			const SecCertificateRef itemCert = (SecCertificateRef) CFDictionaryGetValue( item, kSecValueRef );
+			require_return( itemCert );
+			
+			OSStatus localErr = mdns_security_remove_per_user_certificate_trust_settings( itemCert );
+			require_noerr_fatal( localErr,
+				"mdns_security_remove_per_user_certificate_trust_settings() failed: %#m", localErr );
+		};
+		const CFArrayRef certResultsArray = CFGetCFArray( certResults, NULL );
+		if( certResultsArray )
+		{
+			CFArrayApplyBlock( certResultsArray, CFRangeMake( 0, CFArrayGetCount( certResultsArray ) ), applierBlock );
+		}
+		else
+		{
+			applierBlock( certResults );
+		}
+		err = KeychainDeleteFormatted(
+			"{"
+				"%kO=%O"	// kSecClass
+				"%kO=%O"	// kSecAttrLabel
+			"}",
+			kSecClass,		kSecClassCertificate,
+			kSecAttrLabel,	CFSTR( kDNSServerHostname ) );
+		require_noerr( err, exit );
+	}
+	
+exit:
+	CFForget( &certQuery );
+	CFForget( &certResults );
+	return( err );
+}
+
+//===========================================================================================================================
+
+static nw_listener_t
+	_DNSServerCmdCreateTLSListener(
+		const sec_identity_t	inIdentity,
+		const uint16_t			inPort,
+		const Boolean			inUseHTTPS,
+		OSStatus * const		outError )
+{
+	OSStatus					err;
+	nw_parameters_t				params		= NULL;
+	nw_protocol_options_t		options		= NULL;
+	nw_protocol_stack_t			stack		= NULL;
+	nw_interface_t				interface	= NULL;
+	nw_listener_t				listener	= NULL;
+	__block bool				tlsWasConfigured;
+	char						portStr[ 16 ];
+	
+	tlsWasConfigured = false;
+	const nw_parameters_configure_protocol_block_t configureTLS =
+	^( const nw_protocol_options_t inOptions )
+	{
+		sec_protocol_options_t		tlsOptions;
+		
+		tlsOptions = nw_tls_copy_sec_protocol_options( inOptions );
+		require_return( tlsOptions );
+		
+		sec_protocol_options_set_local_identity( tlsOptions, inIdentity );
+		sec_protocol_options_append_tls_ciphersuite_group( tlsOptions, tls_ciphersuite_group_default );
+		sec_release( tlsOptions );
+		tlsWasConfigured = true;
+	};
+	params = nw_parameters_create_secure_tcp( configureTLS, NW_PARAMETERS_DEFAULT_CONFIGURATION );
+	require_action( params, exit, err = kNoResourcesErr );
+	require_action( tlsWasConfigured, exit, err = kSecurityErr );
+	
+	if( inUseHTTPS )
+	{
+		nw_parameters_set_attach_protocol_listener( params, true );
+		options = nw_http_create_options();
+		require_action( options, exit, err = kNoResourcesErr );
+		
+		nw_http_options_add_version( options, nw_http_version_2 );
+		stack = nw_parameters_copy_default_protocol_stack( params );
+		require_action( stack, exit, err = kNoResourcesErr );
+		
+		nw_protocol_stack_prepend_application_protocol( stack, options );
+	}
+	interface = nw_interface_create_with_name( "lo0" );
+	require_action( interface, exit, err = kNoResourcesErr );
+	
+	nw_parameters_require_interface( params, interface );
+	nw_parameters_set_server_mode( params, true );
+	nw_parameters_set_reuse_local_address( params, true );
+	SNPrintF( portStr, sizeof( portStr ), "%u", inPort );
+	listener = nw_listener_create_with_port( portStr, params );
+	require_action( listener, exit, err = kNoResourcesErr );
+	
+	err = kNoErr;
+	
+exit:
+	nw_forget( &params );
+	nw_forget( &options );
+	nw_forget( &stack );
+	nw_forget( &interface );
+	if( outError ) *outError = err;
+	return( listener );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_DNSServerCmdHandleNewTLSConnection( DNSServerCmd * const inCmd, const nw_connection_t inConnection )
+{
+	OSStatus					err;
+	nw_connection_t				clientConnection;
+	nw_parameters_t				params;
+	nw_endpoint_t				localEndpoint	= NULL;
+	const struct sockaddr *		localAddr;
+	sockaddr_ip					serverAddr;
+	mdns_dns_relay_t			relay			= NULL;
+	
+	clientConnection = inConnection;
+	params = nw_connection_copy_parameters( clientConnection );
+	require_action( params, exit, err = kNoResourcesErr );
+	
+	localEndpoint = nw_parameters_copy_local_endpoint( params );
+	require_action( localEndpoint, exit, err = kNoResourcesErr );
+	
+	localAddr = nw_endpoint_get_address( localEndpoint );
+	require_action( localAddr, exit, err = kUnexpectedErr );
+	
+	memset( &serverAddr, 0, sizeof( serverAddr ) );
+	switch( localAddr->sa_family )
+	{
+		case AF_INET:
+		{
+			const struct sockaddr_in * const		sin = (const struct sockaddr_in *) localAddr;
+			
+			_SockAddrInitIPv4( &serverAddr.v4, ntohl( sin->sin_addr.s_addr ), inCmd->portActual );
+			break;
+		}
+		case AF_INET6:
+		{
+			const struct sockaddr_in6 * const		sin6 = (const struct sockaddr_in6 *) localAddr;
+			
+			_SockAddrInitIPv6( &serverAddr.v6, sin6->sin6_addr.s6_addr, sin6->sin6_scope_id, inCmd->portActual );
+			break;
+		}
+		default:
+			err = kAddressErr;
+			goto exit;
+	}
+	if( inCmd->protocol == kDNSProtocol_DoH )
+	{
+		mdns_doh_relay_t		relayDoH;
+		
+		relayDoH = mdns_doh_relay_create( NULL );
+		require_action( relayDoH, exit, err = kNoResourcesErr );
+		
+		relay = mdns_dns_relay_upcast( relayDoH );
+		err = mdns_doh_relay_set_request_uri_path( relayDoH, kDNSServerDoHURLPath );
+		require_noerr( err, exit );
+		
+		err = mdns_doh_relay_set_host_and_port( relayDoH, kDNSServerHostname, inCmd->portRequested );
+		require_noerr( err, exit );
+	}
+	else
+	{
+		mdns_dot_relay_t		relayDoT;
+		
+		relayDoT = mdns_dot_relay_create( NULL );
+		require_action( relayDoT, exit, err = kNoResourcesErr );
+		
+		relay = mdns_dns_relay_upcast( relayDoT );
+	}
+	mdns_dns_relay_set_client_connection( relay, clientConnection );
+	clientConnection = NULL;
+	mdns_dns_relay_set_server_address( relay, &serverAddr );
+	mdns_dns_relay_activate( relay );
+	err = kNoErr;
+	
+exit:
+	nw_forget( &params );
+	nw_forget( &localEndpoint );
+	mdns_forget( &relay );
+	if( clientConnection ) nw_connection_cancel( clientConnection );
+	return( err );
+}
 
 //===========================================================================================================================
 
@@ -8331,6 +9357,7 @@ struct DNSServerPrivate
 	uint32_t						defaultTTL;			// Default TTL for resource records.
 	uint32_t						serial;				// Serial number for SOA record.
 	OSStatus						stopErr;			// The error, if any, that caused the server to stop.
+	uint16_t						portRequested;		// The port that was requested by the user.
 	Boolean							started;			// True if the server was started.
 	Boolean							stopped;			// True if the server was stopped.
 	Boolean							badUDPMode;			// True if the server runs in Bad UDP mode.
@@ -8512,9 +9539,16 @@ static OSStatus	_DNSServerSetIgnoredQType( DNSServerRef me, int inQType )
 
 //===========================================================================================================================
 
+static void	_DNSServerSetPort( const DNSServerRef me, const uint16_t inPort )
+{
+	me->portRequested = inPort;
+}
+
+//===========================================================================================================================
+
 static void		_DNSServerStartOnQueue( void *inContext );
 static void		_DNSServerStartInternal( DNSServerRef inServer );
-static OSStatus	_DNSServerSetUpSockets( DNSServerRef inServer );
+static OSStatus	_DNSServerSetUpSockets( DNSServerRef inServer, uint16_t *outActualPort );
 static void		_DNSServerStopInternal( void *inContext, OSStatus inError );
 static SocketContext *
 	_DNSServerSocketContextCreate(
@@ -8544,15 +9578,16 @@ static void _DNSServerStartInternal( DNSServerRef me )
 	SocketRef				sock	= kInvalidSocketRef;
 	SocketContext *			sockCtx	= NULL;
 	int						year, month, day;
+	uint16_t				actualPort;
 	
 	require_action_quiet( !me->started && !me->stopped, exit, err = kNoErr );
 	me->started = true;
 	CFRetain( me );
 	
-	err = _DNSServerSetUpSockets( me );
+	err = _DNSServerSetUpSockets( me, &actualPort );
 	require_noerr( err, exit );
 	
-	if( me->startHandler ) me->startHandler( me->addrArray, me->addrCount, me->userContext );
+	if( me->startHandler ) me->startHandler( actualPort, me->userContext );
 	
 	// Create the serial number for the server's SOA record in the YYYMMDDnn convention recommended by
 	// <https://tools.ietf.org/html/rfc1912#section-2.2> using the current time.
@@ -8578,7 +9613,7 @@ typedef struct
 
 #define kDNSServerMaxBindTryCount	10
 
-static OSStatus	_DNSServerSetUpSockets( DNSServerRef me )
+static OSStatus	_DNSServerSetUpSockets( const DNSServerRef me,  uint16_t * const outActualPort )
 {
 	OSStatus					err;
 	SocketContext *				sockCtx			= NULL;
@@ -8587,7 +9622,8 @@ static OSStatus	_DNSServerSetUpSockets( DNSServerRef me )
 	_DNSServerSocketPair		sockPairsStack[ 16 ];
 	size_t						i;
 	const size_t				addrCount		= me->addrCount; // Don't use me->addrCount to avoid false analyzer warning.
-	int							portWanted, tryCount, tryCountMax;
+	int							portActual		= 0;
+	int							tryCount, tryCountMax;
 	
 	require_action_quiet( addrCount > 0, exit, err = kNoErr );
 	
@@ -8609,19 +9645,19 @@ static OSStatus	_DNSServerSetUpSockets( DNSServerRef me )
 	// Create server sockets.
 	
 	err = kNoErr;
-	portWanted = SockAddrGetPort( &me->addrArray[ 0 ] );
-	tryCountMax = ( portWanted == 0 ) ? kDNSServerMaxBindTryCount : 1;
+	tryCountMax = ( me->portRequested == 0 ) ? kDNSServerMaxBindTryCount : 1;
 	for( tryCount = 0; tryCount < tryCountMax; ++tryCount )
 	{
 		int		portDefault = 0;
 		
+		portActual = 0;
 		for( i = 0; i < addrCount; ++i )
 		{
 			sockaddr_ip * const					sip		= &me->addrArray[ i ];
 			_DNSServerSocketPair * const		pair	= &sockPairs[ i ];
 			const void *						address;
 			SocketRef							sock;
-			int									port, portActual;
+			int									port;
 			sockaddr_ip							tmpSA;
 			
 			switch( sip->sa.sa_family )
@@ -8634,12 +9670,11 @@ static OSStatus	_DNSServerSetUpSockets( DNSServerRef me )
 					goto exit;
 			}
 			// Create UDP socket.
-			// Initially, portWanted is the port requested by the user. If it's 0, then the user wants any available
-			// ephemeral port. If it's negative, then the user would like a port number equal to its absolute value, but
-			// will settle for any available ephemeral port, if it's not available. The actual port number that was used
-			// will be stored in portActual and used for the remaining addresses that don't specify a non-zero port.
+			// If the user's requested port 0, then the user wants any available ephemeral port. The actual port number
+			// that was used will be stored in portActual and used for the remaining addresses that don't specify a
+			// non-zero port.
 			
-			port = ( portWanted == 0 ) ? portDefault : portWanted;
+			port = ( me->portRequested == 0 ) ? portDefault : me->portRequested;
 			err = _ServerSocketOpenEx2( sip->sa.sa_family, SOCK_DGRAM, IPPROTO_UDP, address, port, &portActual,
 				kSocketBufferSize_DontSet, true, &sock );
 			if( err == EADDRINUSE )
@@ -8650,7 +9685,7 @@ static OSStatus	_DNSServerSetUpSockets( DNSServerRef me )
 				break;
 			}
 			require_noerr( err, exit );
-			check( ( portWanted == 0 ) || ( portActual == portWanted ) );
+			check( ( me->portRequested == 0 ) || ( portActual == me->portRequested ) );
 			
 			ForgetSocket( &pair->sockUDP );
 			pair->sockUDP = sock;
@@ -8729,6 +9764,7 @@ exit:
 	}
 	FreeNullSafe( sockPairsHeap );
 	if( sockCtx ) SocketContextRelease( sockCtx );
+	if( outActualPort ) *outActualPort = (uint16_t) portActual;
 	return( err );
 }
 
@@ -9143,8 +10179,9 @@ static OSStatus
 		int				inQType,
 		int				inQClass,
 		size_t          inIndex,
-		Boolean			inForTCP,
+		size_t			inTruncateLen,
 		Boolean			inDNSSEC,
+		Boolean			inUseBadAddrs,
 		DataBuffer *	inDB );
 
 static OSStatus
@@ -9159,15 +10196,15 @@ static OSStatus
 {
 	OSStatus				err;
 	DataBuffer				db;
-	const uint8_t *			ptr;
+	const uint8_t *			qptr;
 	const DNSHeader *		hdr;
-	const uint8_t *			optPtr;
-	size_t					optLen;
+	const uint8_t *			qOptPtr;
+	size_t					qOptLen, truncateLen;
 	unsigned int			qflags, rcode;
 	uint16_t				msgID, qtype, qclass, rflags;
 	uint8_t					qname[ kDomainNameLengthMax ];
 	uint8_t					dbBuf[ 512 ];
-	Boolean					dnssecOK;
+	Boolean					dnssecOK, usePadding, useBadAddrs;
 	
 	DataBuffer_Init( &db, dbBuf, sizeof( dbBuf ), kDNSMaxTCPMessageSize );
 	
@@ -9182,8 +10219,8 @@ static OSStatus
 	require_action_quiet( DNSFlagsGetOpCode( qflags ) == kDNSOpCode_Query, exit, err = kRequestErr );
 	require_action_quiet( DNSHeaderGetQuestionCount( hdr ) == 1, exit, err = kRequestErr );
 	
-	ptr = (const uint8_t *) &hdr[ 1 ];
-	err = DNSMessageExtractQuestion( inMsgPtr, inMsgLen, ptr, qname, &qtype, &qclass, &ptr );
+	qptr = (const uint8_t *) &hdr[ 1 ];
+	err = DNSMessageExtractQuestion( inMsgPtr, inMsgLen, qptr, qname, &qtype, &qclass, NULL );
 	require_noerr( err, exit );
 	
 	// Check if this query should be ignored because of its QTYPE.
@@ -9209,7 +10246,9 @@ static OSStatus
 	
 	// Get OPT record, if any.
 	
-	err = DNSMessageGetOptRecord( inMsgPtr, inMsgLen, &optPtr, &optLen );
+	dnssecOK	= false;
+	usePadding	= false;
+	err = DNSMessageGetOptRecord( inMsgPtr, inMsgLen, &qOptPtr, &qOptLen );
 	require_noerr_action_quiet( err, done, rcode = kDNSRCode_FormErr );
 	
 	// Create a tentative response message.
@@ -9221,25 +10260,145 @@ static OSStatus
 	
 	// Complete the response message.
 	
-	dnssecOK = false;
-	if( optPtr )
+	if( qOptPtr )
 	{
-		const dns_fixed_fields_opt *		opt = (const dns_fixed_fields_opt *) optPtr;
+		const dns_fixed_fields_opt * const		opt = (const dns_fixed_fields_opt *) qOptPtr;
+		unsigned int							version;
+		
+		version = dns_fixed_fields_opt_get_version( opt );
+		require_action_quiet( version == 0, done, rcode = kDNSRCode_BADVERS );
 		
 		if( dns_fixed_fields_opt_get_extended_flags( opt ) & kDNSExtendedFlag_DNSSECOK ) dnssecOK = true;
+		
+		// If the query includes EDNS(0) padding, then so must the response according to
+		// <https://datatracker.ietf.org/doc/html/rfc8467#section-4.1>.
+		
+		if( inForTCP )
+		{
+			const uint8_t *				ptr;
+			const uint8_t * const		optEnd = &qOptPtr[ qOptLen ];
+			
+			ptr = (const uint8_t *) &opt[ 1 ];
+			while( ptr < optEnd )
+			{
+				const dns_fixed_fields_option *		optionFields;
+				unsigned int						optionCode, optionLen;
+				
+				require_action_quiet( (size_t)( optEnd - ptr ) >= sizeof( *optionFields ), done, rcode = kDNSRCode_FormErr );
+				
+				optionFields	= (const dns_fixed_fields_option *) ptr;
+				optionCode		= dns_fixed_fields_option_get_code( optionFields );
+				optionLen		= dns_fixed_fields_option_get_length( optionFields );
+				
+				ptr = (const uint8_t *) &optionFields[ 1 ];
+				require_action_quiet( (size_t)( optEnd - ptr ) >= optionLen, done, rcode = kDNSRCode_FormErr );
+				
+				ptr += optionLen;
+				if( optionCode == kDNSEDNS0OptionCode_Padding )
+				{
+					usePadding = true;
+					break;
+				}
+			}
+			truncateLen = 0;
+		}
+		else
+		{
+			// For UDP, the response's length limit for truncation should account for the inclusion of an OPT record.
+			
+			check_compile_time_code( sizeof( *opt ) < kDNSMaxUDPMessageSize );
+			truncateLen	= kDNSMaxUDPMessageSize - sizeof( *opt );
+		}
 	}
-	err = _DNSServerAnswerQueryDynamically( me, qname, qtype, qclass, inIndex, inForTCP, dnssecOK, &db );
+	else
+	{
+		truncateLen = inForTCP ? 0 : kDNSMaxUDPMessageSize;
+	}
+	useBadAddrs = me->badUDPMode && !inForTCP;
+	err = _DNSServerAnswerQueryDynamically( me, qname, qtype, qclass, inIndex, truncateLen, dnssecOK, useBadAddrs, &db );
 	if( err == kSkipErr ) goto exit;
-	rcode = err ? kDNSRCode_ServFail : 0;
+	require_noerr_action( err, done, rcode = kDNSRCode_ServFail );
 	
-	// Create an error response if there was a format error or a server failure.
+	rcode = kDNSRCode_NoError;
 	
 done:
-	if( rcode != 0 )
+	// Create an error response if necessary.
+	
+	if( rcode != kDNSRCode_NoError )
 	{
-		DNSFlagsSetRCode( rflags, rcode );
+		const unsigned int		rcode4BitMax  =   15; // 2^4  - 1
+		const unsigned int		rcode12BitMax = 4095; // 2^12 - 1
+		
+		// One of the following must be true.
+		// 1. The RCODE value must completely fit in the response header's 4-bit RCODE field.
+		// 2. The response will include an OPT record and the RCODE value can be represented as an unsigned 12-bit
+		//    integer (upper eight bits go in the OPT record's EXTENDED-RCODE field).
+		
+		require_fatal( ( rcode <= rcode4BitMax ) || ( ( rcode <= rcode12BitMax ) && qOptPtr ),
+			"Invalid RCODE value %u for response with%s OPT record", rcode, qOptPtr ? "" : "out" );
+		
+		DNSFlagsSetRCode( rflags, rcode & 0x0FU );
 		err = _DNSServerInitializeResponseMessage( &db, DNSHeaderGetID( hdr ), rflags, qname, qtype, qclass );
 		require_noerr( err, exit );
+	}
+	
+	// Include an OPT record in the response if the query included one.
+	// See <https://datatracker.ietf.org/doc/html/rfc6891#section-6.1.1>.
+	
+	if( qOptPtr )
+	{
+		DNSHeader *					rhdr;
+		uint16_t					additionalCount;
+		dns_fixed_fields_opt		optFields;
+		size_t						rOptOffset;
+		
+		memset( &optFields, 0, sizeof( optFields ) );
+		dns_fixed_fields_opt_set_type( &optFields, kDNSRecordType_OPT );
+		dns_fixed_fields_opt_set_udp_payload_size( &optFields, kDNSMaxUDPMessageSize );
+		dns_fixed_fields_opt_set_extended_rcode( &optFields, ( rcode >> 4 ) & 0xFFU );
+		if( dnssecOK ) dns_fixed_fields_opt_set_extended_flags( &optFields, kDNSExtendedFlag_DNSSECOK );
+		
+		rOptOffset = DataBuffer_GetLen( &db );
+		err = DataBuffer_Append( &db, &optFields, sizeof( optFields ) );
+		require_noerr( err, exit );
+		
+		// Pad responses using the block-length padding strategy using a 468-octet block length as recommended by
+		// <https://datatracker.ietf.org/doc/html/rfc8467#section-4.1>.
+		
+		if( usePadding )
+		{
+			dns_fixed_fields_opt *		rOptPtr;
+			dns_fixed_fields_option		padOption;
+			size_t						curLen, newLen, rdLen;
+			uint16_t					padLen;
+			
+			curLen = DataBuffer_GetLen( &db );
+			newLen = RoundUp( curLen + sizeof( padOption ), 468 );
+			require_action( newLen > curLen, exit, err = kSizeErr );
+			
+			rdLen = newLen - curLen;
+			require_action( rdLen <= UINT16_MAX, exit, err = kSizeErr );
+			
+			memset( &padOption, 0, sizeof( padOption ) );
+			dns_fixed_fields_option_set_code( &padOption, kDNSEDNS0OptionCode_Padding );
+			padLen = (uint16_t)( rdLen - sizeof( padOption ) );
+			dns_fixed_fields_option_set_length( &padOption, padLen );
+			err = DataBuffer_Append( &db, &padOption, sizeof( padOption ) );
+			require_noerr( err, exit );
+			
+			if( padLen > 0 )
+			{
+				err = DataBuffer_AppendF( &db, "%{fill}", 0, padLen );
+				require_noerr( err, exit );
+			}
+			check( DataBuffer_GetLen( &db ) == newLen );
+			rOptPtr = (dns_fixed_fields_opt *)( DataBuffer_GetPtr( &db ) + rOptOffset );
+			dns_fixed_fields_opt_set_rdlen( rOptPtr, (uint16_t) rdLen );
+		}
+		check( DataBuffer_GetLen( &db ) >= sizeof( *rhdr ) );
+		rhdr = (DNSHeader *) DataBuffer_GetPtr( &db );
+		additionalCount = DNSHeaderGetAdditionalCount( rhdr ) + 1;
+		DNSHeaderSetAdditionalCount( rhdr, additionalCount );
 	}
 	err = DataBuffer_Detach( &db, outResponsePtr, outResponseLen );
 	require_noerr( err, exit );
@@ -9329,11 +10488,11 @@ typedef uint32_t		DNSNameFlags;
 
 typedef enum
 {
-	kDNSServerCommand_None		= 0,
-	kDNSServerCommand_Suspend	= 1,
-	kDNSServerCommand_Resume	= 2
+	kDNSServerAction_None		= 0,
+	kDNSServerAction_Suspend	= 1,
+	kDNSServerAction_Resume		= 2
 	
-}	DNSServerCommand;
+}	DNSServerAction;
 
 static Boolean
 	_DNSServerParseHostName(
@@ -9355,7 +10514,7 @@ static Boolean
 		DNSKeyInfoRef *		outZSK,
 		DNSKeyInfoRef *		outKSK,
 		DNSKeyInfoRef *		outParentZSK,
-		DNSServerCommand *	outCommand );
+		DNSServerAction *	outAction );
 static Boolean
 	_DNSServerParseSRVName(
 		DNSServerRef		inServer,
@@ -9395,8 +10554,9 @@ static OSStatus
 		const int				inQType,
 		const int				inQClass,
 		const size_t			inIndex,
-		const Boolean			inForTCP,
+		const size_t			inTruncateLen,
 		const Boolean			inDNSSEC,
+		const Boolean			inUseBadAddrs,
 		DataBuffer * const		inDB )
 {
 	OSStatus			err;
@@ -9416,7 +10576,7 @@ static OSStatus
 	DNSKeyInfoRef		zsk				= NULL;
 	DNSKeyInfoRef		ksk				= NULL;
 	DNSKeyInfoRef		zskParent		= NULL;
-	DNSServerCommand	serverCommand	= kDNSServerCommand_None;
+	DNSServerAction		action			= kDNSServerAction_None;
 	const uint8_t *		srvDomainPtr	= NULL;
 	size_t				srvDomainLen	= 0;
 	ParsedSRV			srvArray[ kParsedSRVCountMax ];
@@ -9447,7 +10607,7 @@ static OSStatus
 	wasSuspended = me->suspended;
 	nameExists = _DNSServerParseHostName( me, inQName, &aliasCount, aliasTTLs, &aliasTTLCount, &addrCount, &randCount,
 		&index, &rcodeOverride, &ttl, &offset, &procDelayMs, &nameFlags, &zone, &zoneParent, &zsk, &ksk, &zskParent,
-		&serverCommand );
+		&action );
 	if( nameExists )
 	{
 		check( !( ( aliasCount > 0 ) && ( aliasTTLCount > 0 ) ) );
@@ -9455,17 +10615,17 @@ static OSStatus
 		check( rcodeOverride <= 15 );
 		check( !( nameFlags & kDNSNameFlag_HasRRSIG ) || ( zsk && ksk && zskParent ) );
 		
-		switch( serverCommand )
+		switch( action )
 		{
-			case kDNSServerCommand_Suspend:
+			case kDNSServerAction_Suspend:
 				me->suspended = true;
 				break;
 			
-			case kDNSServerCommand_Resume:
+			case kDNSServerAction_Resume:
 				me->suspended = false;
 				break;
 			
-			case kDNSServerCommand_None:
+			case kDNSServerAction_None:
 				break;
 		}
 		if( aliasTTLCount > 0 ) aliasCount = (uint32_t) aliasTTLCount;
@@ -9620,12 +10780,10 @@ static OSStatus
 				rdataLen = sizeof( parentCPtr );
 			}
 			
-			// If the transport is UDP, make sure the message is within the UDP size limit.
-			
-			if( !inForTCP )
+			if( inTruncateLen > 0 )
 			{
 				recordLen = nameLen + sizeof( recFields ) + rdataLen;
-				if( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize )
+				if( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen )
 				{
 					status = kQueryStatus_Truncated;
 					goto done;
@@ -9768,11 +10926,9 @@ static OSStatus
 						DataBuffer_GetLen( sigMsg ), signature, signatureLen, zsk );
 				}
 				#endif
-				// If the transport is UDP, make sure the message is within the UDP size limit.
-				
 				rdataLen	= sizeof( sigFields ) + signerLen + signatureLen;
 				recordLen	= nameLen + sizeof( recFields ) + rdataLen;
-				if( !inForTCP && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize ) )
+				if( ( inTruncateLen > 0 ) && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen ) )
 				{
 					status = kQueryStatus_Truncated;
 					goto done;
@@ -9853,8 +11009,8 @@ static OSStatus
 			require_action_quiet( nameFlags & kDNSNameFlag_HasA, done, status = kQueryStatus_OK );
 			
 			rdataLen = 4;
-			baseAddr = ( me->badUDPMode && !inForTCP ) ? kDNSServerBadBaseAddrV4 : kDNSServerBaseAddrV4;
-			WriteBig32( rdata, baseAddr );
+			baseAddr = inUseBadAddrs ? kDNSServerBadBaseAddrV4 : kDNSServerBaseAddrV4;
+			WriteBig32Typed( rdata, baseAddr );
 			idPtr = &rdata[ 3 ]; // The last octet is the host identifier since the IPv4 address block is /24.
 		}
 		else
@@ -9864,7 +11020,7 @@ static OSStatus
 			require_action_quiet( nameFlags & kDNSNameFlag_HasAAAA, done, status = kQueryStatus_OK );
 			
 			rdataLen = 16;
-			baseAddr = ( me->badUDPMode && !inForTCP ) ? &kDNSServerBadBaseAddrV6 : &kDNSServerBaseAddrV6;
+			baseAddr = inUseBadAddrs ? &kDNSServerBadBaseAddrV6 : &kDNSServerBaseAddrV6;
 			memcpy( rdata, baseAddr, rdataLen );
 			idPtr = &rdata[ 14 ]; // The last two octets are the host identifier since we allow up to 511 IPv6 addresses.
 		}
@@ -9946,9 +11102,7 @@ static OSStatus
 			uint32_t				addrHostID;
 			const unsigned int		modulus = nameIsV6Only ? 512 : 256; // IPv6-only names can have up to 511 addresses.
 			
-			// If the transport is UDP, make sure the message is within the UDP size limit.
-			
-			if( !inForTCP && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize ) )
+			if( ( inTruncateLen > 0 ) && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen ) )
 			{
 				status = kQueryStatus_Truncated;
 				goto done;
@@ -10010,11 +11164,9 @@ static OSStatus
 			_DNSServerSigCheck( ownerLower, inQType, DataBuffer_GetPtr( sigMsg ), DataBuffer_GetLen( sigMsg ), signature,
 				signatureLen, zsk );
 		#endif
-			// If the transport is UDP, make sure the message is within the UDP size limit.
-			
 			rdataLen	= sizeof( sigFields ) + signerLen + signatureLen;
 			recordLen	= sizeof( nameCPtr ) + sizeof( recFields ) + rdataLen;
-			if( !inForTCP && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize ) )
+			if( ( inTruncateLen > 0 ) && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen ) )
 			{
 				status = kQueryStatus_Truncated;
 				goto done;
@@ -10063,11 +11215,9 @@ static OSStatus
 			size_t						recordLen;
 			const ParsedSRV * const		srv = &srvArray[ i ];
 			
-			// If the transport is UDP, make sure the message is within the UDP size limit.
-			
 			rdataLen  = sizeof( srvFields ) + srvDomainLen + srv->targetLen + 1;
 			recordLen = sizeof( nameCPtr ) + sizeof( recFields ) + rdataLen;
-			if( !inForTCP && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize ) )
+			if( ( inTruncateLen > 0 ) && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen ) )
 			{
 				status = kQueryStatus_Truncated;
 				goto done;
@@ -10118,20 +11268,17 @@ static OSStatus
 		require_action_quiet( nameFlags & kDNSNameFlag_HasSOA, done, status = kQueryStatus_OK );
 		
 		nameLen	= DomainNameLength( me->domain );
-		if( !inForTCP )
+		if( inTruncateLen > 0 )
 		{
 			err = AppendSOARecord( NULL, me->domain, nameLen, 0, 0, 0, kRootLabel, kRootLabel, 0, 0, 0, 0, 0, &recordLen );
 			require_noerr( err, exit );
 			
-			// If the transport is UDP, make sure the message is within the UDP size limit.
-			
-			if( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize )
+			if( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen )
 			{
 				status = kQueryStatus_Truncated;
 				goto done;
 			}
 		}
-		
 		err = AppendSOARecord( inDB, me->domain, nameLen, kDNSServiceType_SOA, kDNSServiceClass_IN, me->defaultTTL,
 			kRootLabel, kRootLabel, me->serial, 1 * kSecondsPerDay, 2 * kSecondsPerHour, 1000 * kSecondsPerHour,
 			me->defaultTTL, NULL );
@@ -10190,12 +11337,10 @@ static OSStatus
 		}
 		label[ 0 ] = (uint8_t)( dst - &label[ 1 ] );
 		
-		// If the transport is UDP, make sure the message is within the UDP size limit.
-		
 		domainLen	= DomainNameLength( me->domain );
 		rdataLen	= 1 + label[ 0 ] + domainLen;
 		recordLen	= sizeof( nameCPtr ) + sizeof( recFields ) + rdataLen;
-		if( !inForTCP && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize ) )
+		if( ( inTruncateLen > 0 ) && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen ) )
 		{
 			status = kQueryStatus_Truncated;
 			goto done;
@@ -10233,10 +11378,8 @@ static OSStatus
 		
 		require_action_quiet( nameFlags & kDNSNameFlag_HasDNSKEY, done, status = kQueryStatus_OK );
 		
-		// If the transport is UDP, make sure the message is within the UDP size limit.
-		
 		recordLen = sizeof( nameCPtr ) + sizeof( recFields ) + DNSKeyInfoGetRDataLen( zsk );
-		if( !inForTCP && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize ) )
+		if( ( inTruncateLen > 0 ) && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen ) )
 		{
 			status = kQueryStatus_Truncated;
 			goto done;
@@ -10306,10 +11449,8 @@ static OSStatus
 			err = DataBuffer_Append( sigMsg, DNSKeyInfoGetRDataPtr( zsk ), DNSKeyInfoGetRDataLen( zsk ) );
 			require_noerr( err, exit );
 		}
-		// If the transport is UDP, make sure the message is within the UDP size limit.
-		
 		recordLen = sizeof( nameCPtr ) + sizeof( recFields ) + DNSKeyInfoGetRDataLen( ksk );
-		if( !inForTCP && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize ) )
+		if( ( inTruncateLen > 0 ) && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen ) )
 		{
 			status = kQueryStatus_Truncated;
 			goto done;
@@ -10359,11 +11500,9 @@ static OSStatus
 			_DNSServerSigCheck( ownerLower, inQType, DataBuffer_GetPtr( sigMsg ), DataBuffer_GetLen( sigMsg ), signature,
 				signatureLen, ksk );
 		#endif
-			// If the transport is UDP, make sure the message is within the UDP size limit.
-			
 			rdataLen	= sizeof( sigFields ) + signerLen + signatureLen;
 			recordLen	= sizeof( nameCPtr ) + sizeof( recFields ) + rdataLen;
-			if( !inForTCP && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize ) )
+			if( ( inTruncateLen > 0 ) && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen ) )
 			{
 				status = kQueryStatus_Truncated;
 				goto done;
@@ -10495,10 +11634,8 @@ static OSStatus
 			dsPtr = dsPtrs[ i ];
 			if( !dsPtr ) continue;
 			
-			// If the transport is UDP, make sure the message is within the UDP size limit.
-			
 			recordLen = sizeof( nameCPtr ) + sizeof( recFields ) + rdataLen;
-			if( !inForTCP && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize ) )
+			if( ( inTruncateLen > 0 ) && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen ) )
 			{
 				status = kQueryStatus_Truncated;
 				goto done;
@@ -10549,11 +11686,9 @@ static OSStatus
 			_DNSServerSigCheck( ownerLower, inQType, DataBuffer_GetPtr( sigMsg ), DataBuffer_GetLen( sigMsg ), signature,
 				signatureLen, zskParent );
 		#endif
-			// If the transport is UDP, make sure the message is within the UDP size limit.
-			
 			rdataLen	= sizeof( sigFields ) + signerLen + signatureLen;
 			recordLen	= sizeof( nameCPtr ) + sizeof( recFields ) + rdataLen;
-			if( !inForTCP && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > kDNSMaxUDPMessageSize ) )
+			if( ( inTruncateLen > 0 ) && ( ( DataBuffer_GetLen( inDB ) + recordLen ) > inTruncateLen ) )
 			{
 				status = kQueryStatus_Truncated;
 				goto done;
@@ -10637,7 +11772,7 @@ done:
 		// The TXT record isn't strictly necessary, so only include it if it fits.
 		
 		recordLen = sizeof( nameCPtr ) + sizeof( recFields ) + rdataLen;
-		maxLen = inForTCP ? kDNSMaxTCPMessageSize : kDNSMaxUDPMessageSize;
+		maxLen = ( inTruncateLen > 0 ) ? inTruncateLen : kDNSMaxTCPMessageSize;
 		if( ( DataBuffer_GetLen( inDB ) < maxLen ) && ( ( maxLen - DataBuffer_GetLen( inDB ) ) >= recordLen ) )
 		{
 			// Append TXT record NAME to response.
@@ -10707,7 +11842,7 @@ static Boolean
 		DNSKeyInfoRef *		outZSK,
 		DNSKeyInfoRef *		outKSK,
 		DNSKeyInfoRef *		outParentZSK,
-		DNSServerCommand *	outCommand )
+		DNSServerAction *	outAction )
 {
 	OSStatus			err;
 	const uint8_t *		label;
@@ -10729,7 +11864,7 @@ static Boolean
 	DNSKeyInfoRef		zsk				= NULL;
 	DNSKeyInfoRef		ksk				= NULL;
 	DNSKeyInfoRef		parentZSK		= NULL;
-	DNSServerCommand	command			= kDNSServerCommand_None;
+	DNSServerAction		action			= kDNSServerAction_None;
 	Boolean				isAlias			= false;
 	
 	for( label = inQName; ( labelLen = *label ) != 0; label = labelNext )
@@ -10950,8 +12085,8 @@ static Boolean
 		
 		if( strnicmpx( labelData, labelLen, kLabel_CommandSuspend ) == 0 )
 		{
-			if( command != kDNSServerCommand_None ) break; // A command cannot be specified more than once.
-			command = kDNSServerCommand_Suspend;
+			if( action != kDNSServerAction_None ) break; // A command cannot be specified more than once.
+			action = kDNSServerAction_Suspend;
 			continue;
 		}
 		
@@ -10959,8 +12094,8 @@ static Boolean
 		
 		if( strnicmpx( labelData, labelLen, kLabel_CommandResume ) == 0 )
 		{
-			if( command != kDNSServerCommand_None ) break; // A command cannot be specified more than once.
-			command = kDNSServerCommand_Resume;
+			if( action != kDNSServerAction_None ) break; // A command cannot be specified more than once.
+			action = kDNSServerAction_Resume;
 			continue;
 		}
 		
@@ -11022,7 +12157,7 @@ static Boolean
 	if( outZSK )			*outZSK				= zsk;
 	if( outKSK )			*outKSK				= ksk;
 	if( outParentZSK )		*outParentZSK		= parentZSK;
-	if( outCommand )		*outCommand			= command;
+	if( outAction )			*outAction			= action;
 	
 exit:
 	return( zone ? true : false );
@@ -11495,7 +12630,7 @@ static void	_DNSServerConnectionReadHandler( void *inContext )
 		me->msgLen, &me->local, &me->remote, me->msgPtr, me->msgLen );
 	
 	check( me->msgLen <= UINT16_MAX );
-	WriteBig16( me->lenBuf, me->msgLen );
+	WriteBig16Typed( me->lenBuf, (uint16_t) me->msgLen );
 	me->iov[ 0 ].iov_base	= me->lenBuf;
 	me->iov[ 0 ].iov_len	= sizeof( me->lenBuf );
 	me->iov[ 1 ].iov_base	= me->msgPtr;
@@ -12243,7 +13378,7 @@ static OSStatus
 				require_action( rdataPtr, exit, err = kNoMemoryErr );
 				
 				rdataPtr[ 0 ] = 0;
-				WriteBig16( &rdataPtr[ 1 ], inIndex );
+				WriteBig16Typed( &rdataPtr[ 1 ], (uint16_t) inIndex );
 				rdataPtr[ 3 ] = (uint8_t) i;
 				
 				err = _MRResourceRecordCreate( recordName, kDNSServiceType_A, kDNSServiceClass_IN, kMDNSRecordTTL_Host,
@@ -12271,7 +13406,7 @@ static OSStatus
 				rdataPtr = (uint8_t *) _memdup( baseAddr, rdataLen );
 				require_action( rdataPtr, exit, err = kNoMemoryErr );
 				
-				WriteBig16( &rdataPtr[ 12 ], inIndex );
+				WriteBig16Typed( &rdataPtr[ 12 ], (uint16_t) inIndex );
 				rdataPtr[ 15 ] = (uint8_t) i;
 				
 				err = _MRResourceRecordCreate( recordName, kDNSServiceType_AAAA, kDNSServiceClass_IN, kMDNSRecordTTL_Host,
@@ -12749,7 +13884,7 @@ static OSStatus
 			check( rdlength <= UINT16_MAX );
 			
 			rdLengthPtr = DataBuffer_GetPtr( &responseDB ) + rdLengthOffset;
-			WriteBig16( rdLengthPtr, rdlength );
+			WriteBig16Typed( rdLengthPtr, (uint16_t) rdlength );
 		}
 		else
 		{
@@ -13256,6 +14391,7 @@ typedef struct
 	dispatch_source_t		sigTermSource;		// Dispatch source for SIGTERM.
 	char *					outputFilePath;		// File to write test results to. If NULL, then write to stdout.
 	OutputFormatType		outputFormat;		// Format of test results output.
+	DNSProtocol				protocol;			// DNS protocol to use, e.g., Do53, DoT, or DoH.
 	Boolean					skipPathEval;		// True if DNSServiceGetAddrInfo() path evaluation is to be skipped.
 	Boolean					badUDPMode;			// True if the test DNS server is to run in Bad UDP mode.
 	Boolean					testFailed;			// True if at least one test case iteration failed.
@@ -13280,6 +14416,7 @@ static CFTypeID	GAITesterGetTypeID( void );
 static OSStatus
 	GAITesterCreate(
 		dispatch_queue_t	inQueue,
+		DNSProtocol			inProtocol,
 		unsigned int		inCallDelayMs,
 		int					inServerDelayMs,
 		int					inServerDefaultTTL,
@@ -13352,6 +14489,13 @@ static void	GAIPerfCmd( void )
 	context->skipPathEval		= gGAIPerf_SkipPathEvalulation	? true : false;
 	context->badUDPMode			= gGAIPerf_BadUDPMode			? true : false;
 	
+	context->protocol = (DNSProtocol) CLIArgToValue( "protocol", gGAIPerf_Protocol, &err,
+		kDNSProtocolStr_Do53,	(int) kDNSProtocol_Do53,
+		kDNSProtocolStr_DoT,	(int) kDNSProtocol_DoT,
+		kDNSProtocolStr_DoH,	(int) kDNSProtocol_DoH,
+		NULL );
+	require_noerr_quiet( err, exit );
+	
 	if( gGAIPerf_OutputFilePath )
 	{
 		context->outputFilePath = strdup( gGAIPerf_OutputFilePath );
@@ -13361,7 +14505,7 @@ static void	GAIPerfCmd( void )
 	err = OutputFormatFromArgString( gGAIPerf_OutputFormat, &context->outputFormat );
 	require_noerr_quiet( err, exit );
 	
-	err = GAITesterCreate( dispatch_get_main_queue(), context->callDelayMs, (int) context->serverDelayMs,
+	err = GAITesterCreate( dispatch_get_main_queue(), context->protocol, context->callDelayMs, (int) context->serverDelayMs,
 		kGAIPerfStandardTTL, context->skipPathEval, context->badUDPMode, &context->tester );
 	require_noerr( err, exit );
 	
@@ -13659,6 +14803,7 @@ exit:
 #define kGAIPerfResultsKey_Success			CFSTR( "success" )
 
 #define kGAIPerfInfoKey_CallDelay			CFSTR( "callDelayMs" )
+#define kGAIPerfInfoKey_Protocol			CFSTR( "protocol" )
 #define kGAIPerfInfoKey_ServerDelay			CFSTR( "serverDelayMs" )
 #define kGAIPerfInfoKey_SkippedPathEval		CFSTR( "skippedPathEval" )
 #define kGAIPerfInfoKey_UsedBadUDPMode		CFSTR( "usedBadUPDMode" )
@@ -13678,6 +14823,7 @@ static void	GAIPerfTesterStopHandler( void *inContext, OSStatus inError )
 			"%kO="			// info
 			"{"
 				"%kO=%lli"	// callDelayMs
+				"%kO=%s"	// protocol
 				"%kO=%lli"	// serverDelayMs
 				"%kO=%b"	// skippedPathEval
 				"%kO=%b"	// usedBadUPDMode
@@ -13687,6 +14833,7 @@ static void	GAIPerfTesterStopHandler( void *inContext, OSStatus inError )
 		"}",
 		kGAIPerfResultsKey_Info,
 		kGAIPerfInfoKey_CallDelay,			(int64_t) context->callDelayMs,
+		kGAIPerfInfoKey_Protocol,			_DNSProtocolToString( context->protocol ),
 		kGAIPerfInfoKey_ServerDelay,		(int64_t) context->serverDelayMs,
 		kGAIPerfInfoKey_SkippedPathEval,	context->skipPathEval,
 		kGAIPerfInfoKey_UsedBadUDPMode,		context->badUDPMode,
@@ -13992,6 +15139,7 @@ struct GAITesterPrivate
 	GAITestCase *					caseList;			// List of test cases.
 	GAITestCase *					currentCase;		// Pointer to the current test case.
 	GAITestItem *					currentItem;		// Pointer to the current test item.
+	const char *					protocolStr;		// DNS protocol to use, e.g., Do53, DoT, or DoH.
 	NanoTime64						caseStartTime;		// Start time of current test case in Unix time as nanoseconds.
 	NanoTime64						caseEndTime;		// End time of current test case in Unix time as nanoseconds.
 	unsigned int					callDelayMs;		// Amount of time to wait before calling DNSServiceGetAddrInfo().
@@ -14007,6 +15155,7 @@ struct GAITesterPrivate
 	void *							stopContext;		// User's event handler context.
 	GAITesterResultsHandler_f		resultsHandler;		// User's results handler.
 	void *							resultsContext;		// User's results handler context.
+	int								probeTryCount;		// Number of remaining probe queries.
 	
 	// Variables for current test item.
 	
@@ -14023,10 +15172,10 @@ CF_CLASS_DEFINE( GAITester );
 
 static void		_GAITesterStartNextTest( GAITesterRef inTester );
 static OSStatus	_GAITesterCreatePacketCapture( pcap_t **outPCap );
-static void		_GAITesterFirstGAITimeout( void *inContext );
+static void		_GAITesterProbeTimerEventHandler( void *inContext );
 static void		_GAITesterTimeout( void *inContext );
 static void DNSSD_API
-	_GAITesterFirstGAICallback(
+	_GAITesterProbeCallback(
 		DNSServiceRef			inSDRef,
 		DNSServiceFlags			inFlags,
 		uint32_t				inInterfaceIndex,
@@ -14063,6 +15212,7 @@ static void		GAITestItemFree( GAITestItem *inItem );
 static OSStatus
 	GAITesterCreate(
 		dispatch_queue_t	inQueue,
+		DNSProtocol			inProtocol,
 		unsigned int		inCallDelayMs,
 		int					inServerDelayMs,
 		int					inServerDefaultTTL,
@@ -14074,6 +15224,9 @@ static OSStatus
 	GAITesterRef		obj = NULL;
 	
 	CF_OBJECT_CREATE( GAITester, obj, err, exit );
+	
+	obj->protocolStr = _DNSProtocolToString( inProtocol );
+	require_action_quiet( obj->protocolStr, exit, err = kValueErr );
 	
 	ReplaceDispatchQueue( &obj->queue, inQueue );
 	obj->callDelayMs		= inCallDelayMs;
@@ -14125,18 +15278,15 @@ static void	GAITesterStart( GAITesterRef me )
 	dispatch_async_f( me->queue, me, _GAITesterStart );
 }
 
-#define kGAITesterFirstGAITimeoutSecs		4
-
 static void	_GAITesterStart( void *inContext )
 {
 	OSStatus				err;
 	GAITesterRef const		me = (GAITesterRef) inContext;
-	DNSServiceFlags			flags;
-	char					name[ 64 ];
-	char					tag[ kGAITesterTagStringLen + 1 ];
 	
-	err = _SpawnCommand( &me->serverPID, NULL, NULL, "dnssdutil server --loopback --follow %lld%?s%?d%?s%?d%?s",
+	err = _SpawnCommand( &me->serverPID, NULL, NULL,
+		"dnssdutil server --loopback --follow %lld --protocol %s%?s%?d%?s%?d%?s",
 		(int64_t) getpid(),
+		me->protocolStr,
 		me->serverDefaultTTL >= 0,	" --defaultTTL ",
 		me->serverDefaultTTL >= 0,	me->serverDefaultTTL,
 		me->serverDelayMs    >= 0,	" --responseDelay ",
@@ -14144,23 +15294,11 @@ static void	_GAITesterStart( void *inContext )
 		me->badUDPMode,				" --badUDPMode" );
 	require_noerr_quiet( err, exit );
 	
-	SNPrintF( name, sizeof( name ), "tag-gaitester-probe-%s.ipv4.d.test.",
-		_RandomStringExact( kLowerAlphaNumericCharSet, kLowerAlphaNumericCharSetSize, sizeof( tag ) - 1, tag ) );
-	
-	flags = 0;
-	if( me->skipPathEval ) flags |= kDNSServiceFlagsPathEvaluationDone;
-	
-	err = DNSServiceGetAddrInfo( &me->getAddrInfo, flags, kDNSServiceInterfaceIndexAny, kDNSServiceProtocol_IPv4, name,
-		_GAITesterFirstGAICallback, me );
+	me->probeTryCount = 4;
+	err = DispatchTimerCreate( DISPATCH_TIME_NOW, 1 * kNanosecondsPerSecond, 0, me->queue, _GAITesterProbeTimerEventHandler,
+		NULL, me, &me->timer );
 	require_noerr( err, exit );
 	
-	err = DNSServiceSetDispatchQueue( me->getAddrInfo, me->queue );
-	require_noerr( err, exit );
-	
-	err = DispatchTimerOneShotCreate( dispatch_time_seconds( kGAITesterFirstGAITimeoutSecs ),
-		UINT64_C_safe( kGAITesterFirstGAITimeoutSecs ) * kNanosecondsPerSecond / 10, me->queue,
-		_GAITesterFirstGAITimeout, me, &me->timer );
-	require_noerr( err, exit );
 	dispatch_resume( me->timer );
 	
 exit:
@@ -14344,11 +15482,14 @@ static void	_GAITesterStartNextTest( GAITesterRef me )
 		me->caseEndTime		= kNanoTime_Invalid;
 	}
 	
-	// Start a packet capture.
+	// Start a packet capture for Do53 traffic.
 	
-	check( !me->pcap );
-	err = _GAITesterCreatePacketCapture( &me->pcap );
-	require_noerr( err, exit );
+	if( strcasecmp( me->protocolStr, kDNSProtocolStr_Do53 ) == 0 )
+	{
+		check( !me->pcap );
+		err = _GAITesterCreatePacketCapture( &me->pcap );
+		require_noerr( err, exit );
+	}
 	
 	// Start timer for test item's time limit.
 	
@@ -14448,14 +15589,43 @@ exit:
 }
 
 //===========================================================================================================================
-//	_GAITesterFirstGAITimeout
+//	_GAITesterProbeTimerEventHandler
 //===========================================================================================================================
 
-static void	_GAITesterFirstGAITimeout( void *inContext )
+static void	_GAITesterProbeTimerEventHandler( void *inContext )
 {
+	OSStatus				err;
 	GAITesterRef const		me = (GAITesterRef) inContext;
 	
-	_GAITesterStop( me, kNoResourcesErr );
+	if( me->probeTryCount > 0 )
+	{
+		DNSServiceFlags		flags;
+		char				name[ 64 ];
+		char				tag[ kGAITesterTagStringLen + 1 ];
+		
+		flags = 0;
+		if( me->skipPathEval ) flags |= kDNSServiceFlagsPathEvaluationDone;
+		
+		SNPrintF( name, sizeof( name ), "tag-gaitester-probe-%s.ipv4.d.test.",
+			_RandomStringExact( kLowerAlphaNumericCharSet, kLowerAlphaNumericCharSetSize, sizeof( tag ) - 1, tag ) );
+		
+		DNSServiceForget( &me->getAddrInfo );
+		err = DNSServiceGetAddrInfo( &me->getAddrInfo, flags, kDNSServiceInterfaceIndexAny, kDNSServiceProtocol_IPv4, name,
+			_GAITesterProbeCallback, me );
+		require_noerr( err, exit );
+		
+		err = DNSServiceSetDispatchQueue( me->getAddrInfo, me->queue );
+		require_noerr( err, exit );
+		
+		--me->probeTryCount;
+	}
+	else
+	{
+		err = kNotPreparedErr;
+	}
+	
+exit:
+	if( err ) _GAITesterStop( me, err );
 }
 
 //===========================================================================================================================
@@ -14470,11 +15640,11 @@ static void	_GAITesterTimeout( void *inContext )
 }
 
 //===========================================================================================================================
-//	_GAITesterFirstGAICallback
+//	_GAITesterProbeCallback
 //===========================================================================================================================
 
 static void DNSSD_API
-	_GAITesterFirstGAICallback(
+	_GAITesterProbeCallback(
 		DNSServiceRef			inSDRef,
 		DNSServiceFlags			inFlags,
 		uint32_t				inInterfaceIndex,
@@ -14659,68 +15829,70 @@ static void	_GAITesterCompleteCurrentTest( GAITesterRef me, OSStatus inError )
 	require_noerr( err, exit );
 	
 	tsPtr = &timeStamps[ 0 ];
-	for( ;; )
+	if( me->pcap )
 	{
-		int							status;
-		struct pcap_pkthdr *		pktHdr;
-		const uint8_t *				packet;
-		const uint8_t *				msgPtr;
-		size_t						msgLen;
-		const DNSHeader *			hdr;
-		unsigned int				flags;
-		const uint8_t *				ptr;
-		uint16_t					qtype, qclass;
-		uint8_t						qname[ kDomainNameLengthMax ];
-		
-		status = pcap_next_ex( me->pcap, &pktHdr, &packet );
-		if( status != 1 ) break;
-		if( _GAITesterGetDNSMessageFromPacket( packet, pktHdr->caplen, &msgPtr, &msgLen ) != kNoErr ) continue;
-		if( msgLen < kDNSHeaderLength ) continue;
-		
-		hdr = (const DNSHeader *) msgPtr;
-		flags = DNSHeaderGetFlags( hdr );
-		if( DNSFlagsGetOpCode( flags ) != kDNSOpCode_Query ) continue;
-		if( DNSHeaderGetQuestionCount( hdr ) < 1 ) continue;
-		
-		ptr = (const uint8_t *) &hdr[ 1 ];
-		if( DNSMessageExtractQuestion( msgPtr, msgLen, ptr, qname, &qtype, &qclass, NULL ) != kNoErr ) continue;
-		if( qclass != kDNSServiceClass_IN ) continue;
-		if( !DomainNameEqual( qname, name ) ) continue;
-		
-		if( item->wantV4 && ( qtype == kDNSServiceType_A ) )
+		for( ;; )
 		{
-			if( flags & kDNSHeaderFlag_Response )
+			int							status;
+			struct pcap_pkthdr *		pktHdr;
+			const uint8_t *				packet;
+			const uint8_t *				msgPtr;
+			size_t						msgLen;
+			const DNSHeader *			hdr;
+			unsigned int				flags;
+			const uint8_t *				ptr;
+			uint16_t					qtype, qclass;
+			uint8_t						qname[ kDomainNameLengthMax ];
+			
+			status = pcap_next_ex( me->pcap, &pktHdr, &packet );
+			if( status != 1 ) break;
+			if( _GAITesterGetDNSMessageFromPacket( packet, pktHdr->caplen, &msgPtr, &msgLen ) != kNoErr ) continue;
+			if( msgLen < kDNSHeaderLength ) continue;
+			
+			hdr = (const DNSHeader *) msgPtr;
+			flags = DNSHeaderGetFlags( hdr );
+			if( DNSFlagsGetOpCode( flags ) != kDNSOpCode_Query ) continue;
+			if( DNSHeaderGetQuestionCount( hdr ) < 1 ) continue;
+			
+			ptr = (const uint8_t *) &hdr[ 1 ];
+			if( DNSMessageExtractQuestion( msgPtr, msgLen, ptr, qname, &qtype, &qclass, NULL ) != kNoErr ) continue;
+			if( qclass != kDNSServiceClass_IN ) continue;
+			if( !DomainNameEqual( qname, name ) ) continue;
+			
+			if( item->wantV4 && ( qtype == kDNSServiceType_A ) )
 			{
-				if( tsQA && !tsRA )
+				if( flags & kDNSHeaderFlag_Response )
 				{
-					tsRA  = tsPtr++;
-					*tsRA = pktHdr->ts;
+					if( tsQA && !tsRA )
+					{
+						tsRA  = tsPtr++;
+						*tsRA = pktHdr->ts;
+					}
+				}
+				else if( !tsQA )
+				{
+					tsQA  = tsPtr++;
+					*tsQA = pktHdr->ts;
 				}
 			}
-			else if( !tsQA )
+			else if( item->wantV6 && ( qtype == kDNSServiceType_AAAA ) )
 			{
-				tsQA  = tsPtr++;
-				*tsQA = pktHdr->ts;
-			}
-		}
-		else if( item->wantV6 && ( qtype == kDNSServiceType_AAAA ) )
-		{
-			if( flags & kDNSHeaderFlag_Response )
-			{
-				if( tsQAAAA && !tsRAAAA )
+				if( flags & kDNSHeaderFlag_Response )
 				{
-					tsRAAAA  = tsPtr++;
-					*tsRAAAA = pktHdr->ts;
+					if( tsQAAAA && !tsRAAAA )
+					{
+						tsRAAAA  = tsPtr++;
+						*tsRAAAA = pktHdr->ts;
+					}
 				}
-			}
-			else if( !tsQAAAA )
-			{
-				tsQAAAA  = tsPtr++;
-				*tsQAAAA = pktHdr->ts;
+				else if( !tsQAAAA )
+				{
+					tsQAAAA  = tsPtr++;
+					*tsQAAAA = pktHdr->ts;
+				}
 			}
 		}
 	}
-	
 	// t1 is the time when the last query was sent.
 	
 	if( tsQA && tsQAAAA )	t1 = TIMEVAL_GT( *tsQA, *tsQAAAA ) ? tsQA : tsQAAAA;
@@ -15108,9 +16280,7 @@ typedef struct
 	Boolean					noAdditionals;			// True if the replier is to not include additional records in responses.
 	Boolean					useIPv4;				// True if the replier is to use IPv4.
 	Boolean					useIPv6;				// True if the replier is to use IPv6.
-#if( MDNSRESPONDER_PROJECT )
 	Boolean					useNewGAI;				// True if the browser is to use dnssd_getaddrinfo to resolve hostnames.
-#endif
 	Boolean					flushedCache;			// True if mDNSResponder's record cache was flushed before testing.
 	char *					replierCommand;			// Command used to run the replier.
 	char *					serviceType;			// Type of services to browse for.
@@ -15192,9 +16362,7 @@ static void	MDNSDiscoveryTestCmd( void )
 	context->noAdditionals			= gMDNSDiscoveryTest_NoAdditionals			? true : false;
 	context->useIPv4				= ( gMDNSDiscoveryTest_UseIPv4 || !gMDNSDiscoveryTest_UseIPv6 ) ? true : false;
 	context->useIPv6				= ( gMDNSDiscoveryTest_UseIPv6 || !gMDNSDiscoveryTest_UseIPv4 ) ? true : false;
-#if( MDNSRESPONDER_PROJECT )
 	context->useNewGAI				= gMDNSDiscoveryTest_UseNewGAI				? true : false;
-#endif
 	
 	if( gMDNSDiscoveryTest_Interface )
 	{
@@ -15329,9 +16497,7 @@ static void DNSSD_API
 	err = ServiceBrowserAddServiceType( context->browser, context->serviceType );
 	require_noerr( err, exit );
 	
-#if( MDNSRESPONDER_PROJECT )
 	ServiceBrowserSetUseNewGAI( context->browser, context->useNewGAI );
-#endif
 	ServiceBrowserSetCallback( context->browser, _MDNSDiscoveryTestServiceBrowserCallback, context );
 	ServiceBrowserStart( context->browser );
 	
@@ -15632,14 +16798,14 @@ static void	_MDNSDiscoveryTestServiceBrowserCallback( ServiceBrowserResults *inR
 			else								addrV6Bitmap =  ~UINT64_C( 0 );
 			
 			addrV4[ 0 ] = 0;
-			WriteBig16( &addrV4[ 1 ], i );
+			WriteBig16Typed( &addrV4[ 1 ], (uint16_t) i );
 			addrV4[ 3 ] = 0;
 			
 			memcpy( addrV6, kMDNSReplierBaseAddrV6, 16 );
-			WriteBig16( &addrV6[ 12 ], i );
+			WriteBig16Typed( &addrV6[ 12 ], (uint16_t) i );
 			
 			memcpy( addrV6LL, kMDNSReplierLinkLocalBaseAddrV6, 16 );
-			WriteBig16( &addrV6LL[ 12 ], i );
+			WriteBig16Typed( &addrV6LL[ 12 ], (uint16_t) i );
 			
 			unexpectedAddrs = CFArrayCreateMutable( NULL, 0, &kCFTypeArrayCallBacks );
 			require_action( unexpectedAddrs, exit, err = kNoMemoryErr );
@@ -16858,78 +18024,84 @@ typedef struct
 	
 }	ProbeConflictTestCase;
 
-#define kPCTProgPreWait			"wait 1000;"	// Wait 1 second before sending gratuitous response.
-#define kPCTProgPostWait		"wait 10000;"	// Wait 10 seconds after sending gratuitous response.
-												// This allows ~2.75 seconds for probing, ~5 seconds for a rename, and
-												// a 2 second fudge factor for unexpected system delays.
+// Wait 1 second before sending gratuitous response.
+
+#define kPCTProgPreWait		"wait 1000;"
+
+// Wait at least 10 seconds after sending gratuitous response. This allows ~2.75 seconds for probing, ~5 seconds for a
+// rename, and a 2 second fudge factor for unexpected system delays.
+
+#define kProbeConflictTestPostWaitMs		( 10 * kMillisecondsPerSecond )
 
 static const ProbeConflictTestCase		kProbeConflictTestCases[] =
 {
 	// No conflicts
 	
-	{ "No probe conflicts.",                       kPCTProgPreWait "probes n-n-n;"       "send;" kPCTProgPostWait, false },
+	{ "No probe conflicts.",                       kPCTProgPreWait "probes n-n-n;"       "send;", false },
 	
 	// One multicast probe conflict
 	
-	{ "One multicast probe conflict (1).",         kPCTProgPreWait "probes m;"           "send;" kPCTProgPostWait, false },
-	{ "One multicast probe conflict (2).",         kPCTProgPreWait "probes n-m;"         "send;" kPCTProgPostWait, false },
-	{ "One multicast probe conflict (3).",         kPCTProgPreWait "probes n-n-m;"       "send;" kPCTProgPostWait, false },
+	{ "One multicast probe conflict (1).",         kPCTProgPreWait "probes m;"           "send;", false },
+	{ "One multicast probe conflict (2).",         kPCTProgPreWait "probes n-m;"         "send;", false },
+	{ "One multicast probe conflict (3).",         kPCTProgPreWait "probes n-n-m;"       "send;", false },
 	
 	// One unicast probe conflict
 	
-	{ "One unicast probe conflict (1).",           kPCTProgPreWait "probes u;"           "send;" kPCTProgPostWait, true },
-	{ "One unicast probe conflict (2).",           kPCTProgPreWait "probes n-u;"         "send;" kPCTProgPostWait, true },
-	{ "One unicast probe conflict (3).",           kPCTProgPreWait "probes n-n-u;"       "send;" kPCTProgPostWait, true },
+	{ "One unicast probe conflict (1).",           kPCTProgPreWait "probes u;"           "send;", true },
+	{ "One unicast probe conflict (2).",           kPCTProgPreWait "probes n-u;"         "send;", true },
+	{ "One unicast probe conflict (3).",           kPCTProgPreWait "probes n-n-u;"       "send;", true },
 	
 	// One multicast and one unicast probe conflict
 	
-	{ "Multicast and unicast probe conflict (1).", kPCTProgPreWait "probes m-u;"         "send;" kPCTProgPostWait, true },
-	{ "Multicast and unicast probe conflict (2).", kPCTProgPreWait "probes m-n-u;"       "send;" kPCTProgPostWait, true },
-	{ "Multicast and unicast probe conflict (3).", kPCTProgPreWait "probes m-n-n-u;"     "send;" kPCTProgPostWait, true },
-	{ "Multicast and unicast probe conflict (4).", kPCTProgPreWait "probes n-m-u;"       "send;" kPCTProgPostWait, true },
-	{ "Multicast and unicast probe conflict (5).", kPCTProgPreWait "probes n-m-n-u;"     "send;" kPCTProgPostWait, true },
-	{ "Multicast and unicast probe conflict (6).", kPCTProgPreWait "probes n-m-n-n-u;"   "send;" kPCTProgPostWait, true },
-	{ "Multicast and unicast probe conflict (7).", kPCTProgPreWait "probes n-n-m-u;"     "send;" kPCTProgPostWait, true },
-	{ "Multicast and unicast probe conflict (8).", kPCTProgPreWait "probes n-n-m-n-u;"   "send;" kPCTProgPostWait, true },
-	{ "Multicast and unicast probe conflict (9).", kPCTProgPreWait "probes n-n-m-n-n-u;" "send;" kPCTProgPostWait, true },
+	{ "Multicast and unicast probe conflict (1).", kPCTProgPreWait "probes m-u;"         "send;", true },
+	{ "Multicast and unicast probe conflict (2).", kPCTProgPreWait "probes m-n-u;"       "send;", true },
+	{ "Multicast and unicast probe conflict (3).", kPCTProgPreWait "probes m-n-n-u;"     "send;", true },
+	{ "Multicast and unicast probe conflict (4).", kPCTProgPreWait "probes n-m-u;"       "send;", true },
+	{ "Multicast and unicast probe conflict (5).", kPCTProgPreWait "probes n-m-n-u;"     "send;", true },
+	{ "Multicast and unicast probe conflict (6).", kPCTProgPreWait "probes n-m-n-n-u;"   "send;", true },
+	{ "Multicast and unicast probe conflict (7).", kPCTProgPreWait "probes n-n-m-u;"     "send;", true },
+	{ "Multicast and unicast probe conflict (8).", kPCTProgPreWait "probes n-n-m-n-u;"   "send;", true },
+	{ "Multicast and unicast probe conflict (9).", kPCTProgPreWait "probes n-n-m-n-n-u;" "send;", true },
 	
 	// Two multicast probe conflicts
 	
-	{ "Two multicast probe conflicts (1).",        kPCTProgPreWait "probes m-m;"         "send;" kPCTProgPostWait, true },
-	{ "Two multicast probe conflicts (2).",        kPCTProgPreWait "probes m-n-m;"       "send;" kPCTProgPostWait, true },
-	{ "Two multicast probe conflicts (3).",        kPCTProgPreWait "probes m-n-n-m;"     "send;" kPCTProgPostWait, true },
-	{ "Two multicast probe conflicts (4).",        kPCTProgPreWait "probes n-m-m;"       "send;" kPCTProgPostWait, true },
-	{ "Two multicast probe conflicts (5).",        kPCTProgPreWait "probes n-m-n-m-n;"   "send;" kPCTProgPostWait, true },
-	{ "Two multicast probe conflicts (6).",        kPCTProgPreWait "probes n-m-n-n-m;"   "send;" kPCTProgPostWait, true },
-	{ "Two multicast probe conflicts (7).",        kPCTProgPreWait "probes n-n-m-m;"     "send;" kPCTProgPostWait, true },
-	{ "Two multicast probe conflicts (8).",        kPCTProgPreWait "probes n-n-m-n-m;"   "send;" kPCTProgPostWait, true },
-	{ "Two multicast probe conflicts (9).",        kPCTProgPreWait "probes n-n-m-n-n-m;" "send;" kPCTProgPostWait, true },
+	{ "Two multicast probe conflicts (1).",        kPCTProgPreWait "probes m-m;"         "send;", true },
+	{ "Two multicast probe conflicts (2).",        kPCTProgPreWait "probes m-n-m;"       "send;", true },
+	{ "Two multicast probe conflicts (3).",        kPCTProgPreWait "probes m-n-n-m;"     "send;", true },
+	{ "Two multicast probe conflicts (4).",        kPCTProgPreWait "probes n-m-m;"       "send;", true },
+	{ "Two multicast probe conflicts (5).",        kPCTProgPreWait "probes n-m-n-m-n;"   "send;", true },
+	{ "Two multicast probe conflicts (6).",        kPCTProgPreWait "probes n-m-n-n-m;"   "send;", true },
+	{ "Two multicast probe conflicts (7).",        kPCTProgPreWait "probes n-n-m-m;"     "send;", true },
+	{ "Two multicast probe conflicts (8).",        kPCTProgPreWait "probes n-n-m-n-m;"   "send;", true },
+	{ "Two multicast probe conflicts (9).",        kPCTProgPreWait "probes n-n-m-n-n-m;" "send;", true },
 };
 
 #define kProbeConflictTestCaseCount		countof( kProbeConflictTestCases )
 
 typedef struct
 {
-	DNSServiceRef				registration;	// Test service registration.
-	NanoTime64					testStartTime;	// Test's start time.
-	NanoTime64					startTime;		// Current test case's start time.
-	MDNSColliderRef				collider;		// mDNS collider object.
-	CFMutableArrayRef			results;		// Array of test case results.
-	char *						serviceName;	// Test service's instance name as a string. (malloced)
-	char *						serviceType;	// Test service's service type as a string. (malloced)
-	uint8_t *					recordName;		// FQDN of collider's record (same as test service's records). (malloced)
-	dispatch_source_t			sigSourceINT;	// SIGINT signal handler.
-	dispatch_source_t			sigSourceTERM;	// SIGTERM signal handler.
-	CFStringRef					exComputerName;	// Previous ComputerName.
-	CFStringRef					exLocalHostName;// Previous LocalHostName.
-	CFStringEncoding			exCompNameEnc;	// Previous ComputerName's encoding.
-	unsigned int				testCaseIndex;	// Index of the current test case.
-	uint32_t					ifIndex;		// Index of the interface that the collider is to operate on.
-	MDNSColliderProtocols		protocol;		// mDNS collider's IP protocol.
-	char *						outputFilePath;	// File to write test results to. If NULL, then write to stdout. (malloced)
-	OutputFormatType			outputFormat;	// Format of test report output.
-	Boolean						registered;		// True if the test service instance is currently registered.
-	Boolean						testFailed;		// True if at least one test case failed.
+	DNSServiceRef				registration;		// Test service registration.
+	NanoTime64					testStartTime;		// Test's start time.
+	NanoTime64					startTime;			// Current test case's start time.
+	MDNSColliderRef				collider;			// mDNS collider object.
+	CFMutableArrayRef			results;			// Array of test case results.
+	char *						serviceName;		// Test service's instance name as a string. (malloced)
+	char *						serviceType;		// Test service's service type as a string. (malloced)
+	uint8_t *					recordName;			// FQDN of collider's record (same as test service's records). (malloced)
+	dispatch_source_t			sigSourceINT;		// SIGINT signal handler.
+	dispatch_source_t			sigSourceTERM;		// SIGTERM signal handler.
+	CFStringRef					exComputerName;		// Previous ComputerName.
+	CFStringRef					exLocalHostName;	// Previous LocalHostName.
+	CFStringEncoding			exCompNameEnc;		// Previous ComputerName's encoding.
+	unsigned int				testCaseIndex;		// Index of the current test case.
+	uint32_t					conflictIfIndex;	// Index of the interface that the collider is to operate on.
+	uint32_t					registerIfIndex;	// Index of the interface to register the test service on.
+	uint32_t					extraWaitMs;		// Extra amount of time to wait for renames in milliseconds.
+	MDNSColliderProtocols		protocol;			// mDNS collider's IP protocol.
+	char *						outputFilePath;		// File to write test results to. If NULL, write to stdout. (malloced)
+	OutputFormatType			outputFormat;		// Format of test report output.
+	Boolean						registered;			// True if the test service instance is currently registered.
+	Boolean						testFailed;			// True if at least one test case failed.
 	
 }	ProbeConflictTestContext;
 
@@ -16964,12 +18136,12 @@ static void	ProbeConflictTestCmd( void )
 	
 	if( gProbeConflictTest_Interface )
 	{
-		err = InterfaceIndexFromArgString( gProbeConflictTest_Interface, &context->ifIndex );
+		err = InterfaceIndexFromArgString( gProbeConflictTest_Interface, &context->conflictIfIndex );
 		require_noerr_quiet( err, exit );
 	}
 	else
 	{
-		err = _MDNSInterfaceGetAny( kMDNSInterfaceSubset_All, NULL, &context->ifIndex );
+		err = _MDNSInterfaceGetAny( kMDNSInterfaceSubset_All, NULL, &context->conflictIfIndex );
 		require_noerr_quiet( err, exit );
 	}
 	
@@ -16986,7 +18158,15 @@ static void	ProbeConflictTestCmd( void )
 	{
 		context->protocol = kMDNSColliderProtocol_IPv4;
 	}
+	context->registerIfIndex = gProbeConflictTest_RegisterOnAny ? kDNSServiceInterfaceIndexAny : context->conflictIfIndex;
 	
+	// Make sure that the sum of kProbeConflictTestPostWaitMs and extraWaitMs doesn't wrap under uint32_t arithmetic.
+	
+	check_compile_time_code( INT_MAX <= ( UINT32_MAX - kProbeConflictTestPostWaitMs ) );
+	err = CheckIntegerArgument( gProbeConflictTest_ExtraWaitMs, "extraWait", 0, INT_MAX );
+	require_noerr_quiet( err, exit );
+	
+	context->extraWaitMs = (uint32_t) gProbeConflictTest_ExtraWaitMs;
 	if( gProbeConflictTest_OutputFilePath )
 	{
 		context->outputFilePath = strdup( gProbeConflictTest_OutputFilePath );
@@ -17055,8 +18235,8 @@ static void	ProbeConflictTestCmd( void )
 	ASPrintF( &context->serviceType, "_pctest-%s._udp", tag );
 	require_action( context->serviceType, exit, err = kNoMemoryErr );
 	
-	err = DNSServiceRegister( &context->registration, 0, context->ifIndex, serviceName, context->serviceType, "local.",
-		NULL, htons( kProbeConflictTestService_Port ), 0, NULL, _ProbeConflictTestRegisterCallback, context );
+	err = DNSServiceRegister( &context->registration, 0, context->registerIfIndex, serviceName, context->serviceType,
+		"local.", NULL, htons( kProbeConflictTestService_Port ), 0, NULL, _ProbeConflictTestRegisterCallback, context );
 	require_noerr( err, exit );
 	
 	err = DNSServiceSetDispatchQueue( context->registration, dispatch_get_main_queue() );
@@ -17176,10 +18356,12 @@ exit:
 //	_ProbeConflictTestStartNextTest
 //===========================================================================================================================
 
-static OSStatus	_ProbeConflictTestStartNextTest( ProbeConflictTestContext *inContext )
+static OSStatus	_ProbeConflictTestStartNextTest( ProbeConflictTestContext * const inContext )
 {
 	OSStatus							err;
 	const ProbeConflictTestCase *		testCase;
+	char *								program = NULL;
+	uint32_t							totalWaitMs;
 	
 	check( !inContext->collider );
 	
@@ -17195,7 +18377,11 @@ static OSStatus	_ProbeConflictTestStartNextTest( ProbeConflictTestContext *inCon
 	err = MDNSColliderCreate( dispatch_get_main_queue(), &inContext->collider );
 	require_noerr( err, exit );
 	
-	err = MDNSColliderSetProgram( inContext->collider, testCase->program );
+	totalWaitMs = kProbeConflictTestPostWaitMs + inContext->extraWaitMs;
+	ASPrintF( &program, "%s wait %u;", testCase->program, totalWaitMs );
+	require_action( program, exit, err = kNoMemoryErr );
+	
+	err = MDNSColliderSetProgram( inContext->collider, program );
 	require_noerr( err, exit );
 	
 	err = MDNSColliderSetRecord( inContext->collider, inContext->recordName, kDNSServiceType_TXT,
@@ -17203,7 +18389,7 @@ static OSStatus	_ProbeConflictTestStartNextTest( ProbeConflictTestContext *inCon
 	require_noerr( err, exit );
 	
 	MDNSColliderSetProtocols( inContext->collider, inContext->protocol );
-	MDNSColliderSetInterfaceIndex( inContext->collider, inContext->ifIndex );
+	MDNSColliderSetInterfaceIndex( inContext->collider, inContext->conflictIfIndex );
 	MDNSColliderSetStopHandler( inContext->collider, _ProbeConflictTestColliderStopHandler, inContext );
 	
 	inContext->startTime = NanoTimeGetCurrent();
@@ -17211,6 +18397,7 @@ static OSStatus	_ProbeConflictTestStartNextTest( ProbeConflictTestContext *inCon
 	require_noerr( err, exit );
 	
 exit:
+	ForgetMem( &program );
 	return( err );
 }
 
@@ -17278,11 +18465,16 @@ exit:
 //	_ProbeConflictTestFinalizeAndExit
 //===========================================================================================================================
 
-#define kProbeConflictTestReportKey_StartTime		CFSTR( "startTime" )
-#define kProbeConflictTestReportKey_EndTime			CFSTR( "endTime" )
-#define kProbeConflictTestReportKey_ServiceType		CFSTR( "serviceType" )
-#define kProbeConflictTestReportKey_Results			CFSTR( "results" )
-#define kProbeConflictTestReportKey_Passed			CFSTR( "passed" )
+#define kProbeConflictTestReportKey_StartTime				CFSTR( "startTime" )
+#define kProbeConflictTestReportKey_EndTime					CFSTR( "endTime" )
+#define kProbeConflictTestReportKey_ServiceType				CFSTR( "serviceType" )
+#define kProbeConflictTestReportKey_RegistrationInterface	CFSTR( "registrationInterface" )
+#define kProbeConflictTestReportKey_ConflictInterface		CFSTR( "conflictInterface" )
+#define kProbeConflictTestReportKey_Index					CFSTR( "index" )
+#define kProbeConflictTestReportKey_Name					CFSTR( "name" )
+#define kProbeConflictTestReportKey_ExtraWaitMs				CFSTR( "extraWaitMs" )
+#define kProbeConflictTestReportKey_Results					CFSTR( "results" )
+#define kProbeConflictTestReportKey_Passed					CFSTR( "passed" )
 
 static void	_ProbeConflictTestFinalizeAndExit( ProbeConflictTestContext *inContext )
 {
@@ -17292,6 +18484,8 @@ static void	_ProbeConflictTestFinalizeAndExit( ProbeConflictTestContext *inConte
 	int						exitCode;
 	char					startTime[ 32 ];
 	char					endTime[ 32 ];
+	char					registerIfName[ kInterfaceNameBufLen ];
+	char					conflictIfName[ kInterfaceNameBufLen ];
 	
 	now = NanoTimeGetCurrent();
 	
@@ -17299,20 +18493,39 @@ static void	_ProbeConflictTestFinalizeAndExit( ProbeConflictTestContext *inConte
 	
 	_NanoTime64ToTimestamp( inContext->testStartTime, startTime, sizeof( startTime ) );
 	_NanoTime64ToTimestamp( now, endTime, sizeof( endTime ) );
-	
+	InterfaceIndexToName( inContext->registerIfIndex, registerIfName );
+	InterfaceIndexToName( inContext->conflictIfIndex, conflictIfName );
 	err = CFPropertyListCreateFormatted( kCFAllocatorDefault, &plist,
 		"{"
 			"%kO=%s"	// startTime
 			"%kO=%s"	// endTime
 			"%kO=%s"	// serviceType
+			"%kO="		// registrationInterface
+			"{"
+				"%kO=%lli"	// index
+				"%kO=%s"	// name
+			"}"
+			"%kO="		// conflictInterface
+			"{"
+				"%kO=%lli"	// index
+				"%kO=%s"	// name
+			"}"
+			"%kO=%lli"	// extraWaitMs
 			"%kO=%O"	// results
 			"%kO=%b"	// passed
 		"}",
-		kProbeConflictTestReportKey_StartTime,		startTime,
-		kProbeConflictTestReportKey_EndTime,		endTime,
-		kProbeConflictTestReportKey_ServiceType,	inContext->serviceType,
-		kProbeConflictTestReportKey_Results,		inContext->results,
-		kProbeConflictTestReportKey_Passed,			inContext->testFailed ? false : true );
+		kProbeConflictTestReportKey_StartTime,				startTime,
+		kProbeConflictTestReportKey_EndTime,				endTime,
+		kProbeConflictTestReportKey_ServiceType,			inContext->serviceType,
+		kProbeConflictTestReportKey_RegistrationInterface,
+		kProbeConflictTestReportKey_Index,					(int64_t) inContext->registerIfIndex,
+		kProbeConflictTestReportKey_Name,					registerIfName,
+		kProbeConflictTestReportKey_ConflictInterface,
+		kProbeConflictTestReportKey_Index,					(int64_t) inContext->conflictIfIndex,
+		kProbeConflictTestReportKey_Name,					conflictIfName,
+		kProbeConflictTestReportKey_ExtraWaitMs,			(int64_t) inContext->extraWaitMs,
+		kProbeConflictTestReportKey_Results,				inContext->results,
+		kProbeConflictTestReportKey_Passed,					inContext->testFailed ? false : true );
 	require_noerr( err, exit );
 	ForgetCF( &inContext->results );
 	
@@ -18938,7 +20151,8 @@ struct DNSProxyTest
 	dispatch_semaphore_t		doneSem;			// Semaphore to signal when the test is done.
 	DNSServiceRef				probeGAI;			// Probe GAI for DNS server.
 	char *						probeHostname;		// Probe hostname.
-	DNSXConnRef					dnsProxy;			// DNS proxy connection reference.
+	mrc_dns_proxy_t				dnsProxy;			// DNS proxy reference.
+	DNSXConnRef					dnsProxyLegacy;		// Legacy DNS proxy connection reference.
 	dispatch_source_t			timer;				// Timer to put time limit on queries.
 	mdns_resolver_t				resolver;			// Resolver to represent the DNS proxy as a DNS service.
 	CFMutableDictionaryRef		report;				// Test's report.
@@ -18971,6 +20185,7 @@ struct DNSProxyTest
 	int							dns64PrefixBitLen;	// Current DNS64 prefix length (valid if > 0).
 	uint8_t						dns64Prefix[ 16 ];	// Current DNS64 prefix (valid if dns64PrefixBitLen > 0).
 	char						tag[ 6 + 1 ];		// Current subtest's random tag to uniquify QNAMEs.
+	Boolean						useLegacyDNSProxy;	// True if the legacy DNS proxy should be used.
 	Boolean						synthesizedAAAA;	// True if the current subtest expects DNS64 synthesized AAAA records.
 	Boolean						startedSubtests;	// True if the test has started running subtests.
 };
@@ -18996,6 +20211,7 @@ static void	DNSProxyTestCmd( void )
 	err = _DNSProxyTestCreate( &test );
 	require_noerr( err, exit );
 	
+	test->useLegacyDNSProxy = gDNSProxyTest_UseLegacyDNSProxy ? true : false;
 	err = _DNSProxyTestRun( test, &passed );
 	require_noerr( err, exit );
 	
@@ -19115,6 +20331,7 @@ static void	_DNSProxyTestRelease( DNSProxyTestRef me )
 		check( !me->probeGAI );
 		check( !me->probeHostname );
 		check( !me->dnsProxy );
+		check( !me->dnsProxyLegacy );
 		check( !me->timer );
 		check( !me->resolver );
 		check( !me->modeResults );
@@ -19207,7 +20424,8 @@ exit:
 
 static void		_DNSProxyTestSubtestCleanup( DNSProxyTestRef inTest );
 
-#define _DNSXForget( X )		ForgetCustom( X, DNSXRefDeAlloc )
+#define _DNSXForget( X )			ForgetCustom( X, DNSXRefDeAlloc )
+#define _mrc_dns_proxy_forget( X )	ForgetCustomEx( X, mrc_dns_proxy_invalidate, mrc_release )
 
 static void	_DNSProxyTestStop( DNSProxyTestRef me, OSStatus inError )
 {
@@ -19221,7 +20439,8 @@ static void	_DNSProxyTestStop( DNSProxyTestRef me, OSStatus inError )
 	
 	DNSServiceForget( &me->probeGAI );
 	ForgetMem( &me->probeHostname );
-	_DNSXForget( &me->dnsProxy );
+	_mrc_dns_proxy_forget( &me->dnsProxy );
+	_DNSXForget( &me->dnsProxyLegacy );
 	dispatch_source_forget( &me->timer );
 	mdns_resolver_forget( &me->resolver );
 	me->prefixResults		= NULL;
@@ -19306,7 +20525,8 @@ static OSStatus	_DNSProxyTestContinue( DNSProxyTestRef me, OSStatus inSubtestErr
 						me->transportParam		= 0;
 						me->transportResults	= NULL;
 						dpt_ulog( kLogLevelInfo, "Disabling DNS proxy\n" );
-						_DNSXForget( &me->dnsProxy );
+						_mrc_dns_proxy_forget( &me->dnsProxy );
+						_DNSXForget( &me->dnsProxyLegacy );
 						if( ++me->prefixParamIdx == countof( kDNSProxyTestParams_DNS64Prefixes ) )
 						{
 							me->prefixParamIdx	= 0;
@@ -19517,11 +20737,10 @@ static OSStatus	_DNSProxyTestPrepareDNSProxy( DNSProxyTestRef me )
 {
 	OSStatus			err;
 	const char *		dns64PrefixStr;
-	IfIndex				interfaces[ MaxInputIf ];
+	Boolean				forceAAAASynthesis;
 	
 	me->dns64PrefixBitLen = 0;
 	memset( me->dns64Prefix, 0, sizeof( me->dns64Prefix ) );
-	
 	dns64PrefixStr = _DNSProxyTestGetCurrentDNS64PrefixParam( me );
 	if( dns64PrefixStr )
 	{
@@ -19532,47 +20751,96 @@ static OSStatus	_DNSProxyTestPrepareDNSProxy( DNSProxyTestRef me )
 		if( !err && ( *end != '\0' ) ) err = kMalformedErr;
 		require_noerr_quiet( err, exit );
 	}
-	memset( interfaces, 0, sizeof( interfaces ) );
-	interfaces[ 0 ] = me->loopbackIndex;
-	
-	check( !me->dnsProxy );
-	if( dns64PrefixStr )
+	switch( me->modeParam )
 	{
-		if( __builtin_available( macOS 10.16, iOS 14.0, watchOS 7.0, tvOS 14.0, * ) )
+		case kDNSProxyTestMode_Normal:
+			forceAAAASynthesis = false;
+			break;
+		
+		case kDNSProxyTestMode_ForceAAAASynthesis:
+			forceAAAASynthesis = true;
+			break;
+		
+		default:
+			FatalErrorF( "Unhandled DNSProxyTestMode value %ld", (long) me->modeParam );
+	}
+	if( me->useLegacyDNSProxy )
+	{
+		IfIndex		interfaces[ MaxInputIf ];
+		
+		memset( interfaces, 0, sizeof( interfaces ) );
+		interfaces[ 0 ] = me->loopbackIndex;
+		
+		check( !me->dnsProxyLegacy );
+		if( dns64PrefixStr )
 		{
 			DNSXProxyFlags		flags;
 			
-			switch( me->modeParam )
-			{
-				case kDNSProxyTestMode_Normal:
-					flags = kDNSXProxyFlagNull;
-					break;
-				
-				case kDNSProxyTestMode_ForceAAAASynthesis:
-					flags = kDNSXProxyFlagForceAAAASynthesis;
-					break;
-				
-				default:
-					FatalErrorF( "Unhandled DNSProxyTestMode value %ld", (long) me->modeParam );
-			}
-			dpt_ulog( kLogLevelInfo, "Enabling DNS proxy with DNS64 prefix %.16a/%d\n",
+			dpt_ulog( kLogLevelInfo, "Enabling legacy DNS proxy with DNS64 prefix %.16a/%d\n",
 				me->dns64Prefix, me->dns64PrefixBitLen );
-			err = DNSXEnableProxy64( &me->dnsProxy, kDNSProxyEnable, interfaces, 0, me->dns64Prefix, me->dns64PrefixBitLen,
-				flags, me->queue, _DNSProxyTestDNSProxyCallback );
+			flags = forceAAAASynthesis ? kDNSXProxyFlagForceAAAASynthesis : kDNSXProxyFlagNull;
+			err = DNSXEnableProxy64( &me->dnsProxyLegacy, kDNSProxyEnable, interfaces, 0, me->dns64Prefix,
+				me->dns64PrefixBitLen, flags, me->queue, _DNSProxyTestDNSProxyCallback );
 			require_noerr_quiet( err, exit );
 		}
 		else
 		{
-			dpt_ulog( kLogLevelError, "DNSXEnableProxy64() is not available on this OS.\n" );
-			err = kUnsupportedErr;
-			goto exit;
+			dpt_ulog( kLogLevelInfo, "Enabling legacy DNS proxy (without a DNS64 prefix)\n" );
+			err = DNSXEnableProxy( &me->dnsProxyLegacy, kDNSProxyEnable, interfaces, 0, me->queue,
+				_DNSProxyTestDNSProxyCallback );
+			require_noerr_quiet( err, exit );
 		}
 	}
 	else
 	{
-		dpt_ulog( kLogLevelInfo, "Enabling DNS proxy (without a DNS64 prefix)\n" );
-		err = DNSXEnableProxy( &me->dnsProxy, kDNSProxyEnable, interfaces, 0, me->queue, _DNSProxyTestDNSProxyCallback );
+		mrc_dns_proxy_parameters_t		params;
+		
+		params = mrc_dns_proxy_parameters_create( &err );
+		require_noerr( err, exit );
+		
+		mrc_dns_proxy_parameters_add_input_interface( params, me->loopbackIndex );
+		mrc_dns_proxy_parameters_set_output_interface( params, 0 );
+		if( dns64PrefixStr )
+		{
+			mrc_dns_proxy_parameters_set_nat64_prefix( params, me->dns64Prefix, (size_t) me->dns64PrefixBitLen );
+			if( forceAAAASynthesis ) mrc_dns_proxy_parameters_set_force_aaaa_synthesis( params, true );
+			dpt_ulog( kLogLevelInfo, "Starting DNS proxy with DNS64 prefix %.16a/%d\n",
+				me->dns64Prefix, me->dns64PrefixBitLen );
+		}
+		else
+		{
+			dpt_ulog( kLogLevelInfo, "Starting DNS proxy (without a DNS64 prefix)\n" );
+		}
+		check( !me->dnsProxy );
+		me->dnsProxy = mrc_dns_proxy_create( params, &err );
+		mrc_forget( &params );
 		require_noerr_quiet( err, exit );
+		
+		mrc_dns_proxy_set_queue( me->dnsProxy, me->queue );
+		mrc_dns_proxy_set_event_handler( me->dnsProxy,
+		^( const mrc_dns_proxy_event_t inEvent, const OSStatus inError )
+		{
+			switch( inEvent )
+			{
+				case mrc_dns_proxy_event_started:
+					dpt_ulog( kLogLevelInfo, "DNS proxy was started\n" );
+					break;
+				
+				case mrc_dns_proxy_event_interruption:
+					dpt_ulog( kLogLevelInfo, "DNS proxy was interrupted\n" );
+					break;
+				
+				case mrc_dns_proxy_event_invalidation:
+					if( inError )	dpt_ulog( kLogLevelError, "DNS proxy invalidated with error: %#m\n", inError );
+					else			dpt_ulog( kLogLevelInfo, "DNS proxy invalidated\n" );
+					break;
+				
+				default:
+				case mrc_dns_proxy_event_none:
+					FatalErrorF( "Unhandled DNS proxy event value: %d", inEvent );
+			}
+		} );
+		mrc_dns_proxy_activate( me->dnsProxy );
 	}
 	err = CFPropertyListAppendFormatted( kCFAllocatorDefault, me->prefixResults,
 		"{"
@@ -20070,7 +21338,7 @@ static OSStatus
 			uint8_t			v4Addr[ 4 ];
 			
 			memcpy( outIPv6Addr, inIPv6Prefix, (size_t) prefixLen );
-			WriteBig32( v4Addr, inIPv4Addr );
+			WriteBig32Typed( v4Addr, inIPv4Addr );
 			
 			// 1. Bits 64 - 71, i.e., reserved octet "u", MUST be zero.
 			// 2. Except for bits 64 - 71, the 32 bits following the prefix are the bits of the embedded IPv4 address.
@@ -20289,7 +21557,7 @@ static OSStatus
 			{
 				const uint32_t		ipv4Addr = kDNSServerBaseAddrV4 + ( i + 1 );
 				
-				WriteBig32( expectedData, ipv4Addr );
+				WriteBig32Typed( expectedData, ipv4Addr );
 				expectedLen = 4;
 			}
 			else
@@ -22172,7 +23440,7 @@ struct FastRecoveryTest
 	size_t						gaiCount;		// Number of regular GAI operations that are in progress.
 	dispatch_source_t			timer;			// Timer for enforcing time limit on current dnssd_getaddrinfo.
 	CFMutableDictionaryRef		report;			// Test's report, as a plist.
-	CFMutableArrayRef			subtestResults;	// Pointer to report's subtest results.
+	CFMutableArrayRef			gaiResults;		// Pointer to report's GAI results.
 	char *						domain;			// High-level domain for test's hostnames.
 	char *						probeQNAME;		// QNAME used in probe query for test DNS server.
 	char *						resumeQNAME;	// QNAME used in query to resume the test DNS server.
@@ -22283,7 +23551,7 @@ static void	_FastRecoveryTestRelease( const FastRecoveryTestRef me )
 	{
 		check( !me->gai );
 		check( !me->timer );
-		check( !me->subtestResults );
+		check( !me->gaiResults );
 		check( !me->domain );
 		check( !me->probeQNAME );
 		check( !me->resumeQNAME );
@@ -22305,7 +23573,7 @@ static void
 		dnssd_getaddrinfo_result_t *	inResults,
 		size_t							inCount );
 static void		_FastRecoveryTestProbeQueryTimerHandler( void *inCtx );
-static OSStatus	_FastRecoveryTestStartSubtest( FastRecoveryTestRef inTest );
+static OSStatus	_FastRecoveryTestStartGAIRequests( FastRecoveryTestRef inTest );
 
 static void	_FastRecoveryTestStart( void * const inCtx )
 {
@@ -22387,7 +23655,7 @@ static void	_FastRecoveryTestStart( void * const inCtx )
 		CFSTR( "startTime" ),	startTimeStr,
 		CFSTR( "serverCmd" ),	serverCmd,
 		CFSTR( "probeQNAME" ),	me->probeQNAME,
-		CFSTR( "results" ),		&me->subtestResults );
+		CFSTR( "results" ),		&me->gaiResults );
 	require_noerr( err, exit );
 	
 exit:
@@ -22402,7 +23670,7 @@ static void
 		const size_t						inCount )
 {
 	size_t		i;
-	Boolean		startSubtests = false;
+	Boolean		startGAIRequests = false;
 	
 	for( i = 0; i < inCount; ++i )
 	{
@@ -22412,18 +23680,18 @@ static void
 		{
 			frt_ulog( kLogLevelInfo,
 				"Probe GAI got %##a for %s\n", dnssd_getaddrinfo_result_get_address( result ), me->probeQNAME );
-			startSubtests = true;
+			startGAIRequests = true;
 			break;
 		}
 	}
-	if( startSubtests )
+	if( startGAIRequests )
 	{
 		OSStatus		err;
 		
 		me->suspended = true;
 		dispatch_source_forget( &me->timer );
 		dnssd_getaddrinfo_forget( &me->gai );
-		err = _FastRecoveryTestStartSubtest( me );
+		err = _FastRecoveryTestStartGAIRequests( me );
 		if( err ) _FastRecoveryTestStop( me, err );
 	}
 }
@@ -22461,7 +23729,7 @@ static void	_FastRecoveryTestStop( const FastRecoveryTestRef me, const OSStatus 
 	ForgetMem( &me->domain );
 	ForgetMem( &me->probeQNAME );
 	ForgetMem( &me->resumeQNAME );
-	me->subtestResults = NULL;
+	me->gaiResults = NULL;
 	if( me->serverPID >= 0 )
 	{
 		OSStatus		killErr;
@@ -22484,7 +23752,7 @@ static OSStatus	_FastRecoveryTestStartQuerier( FastRecoveryTestRef inTest );
 
 #define kFastRecoveryTestQuerierStartIntervalSecs		5
 
-static OSStatus	_FastRecoveryTestStartSubtest( const FastRecoveryTestRef me )
+static OSStatus	_FastRecoveryTestStartGAIRequests( const FastRecoveryTestRef me )
 {
 	OSStatus		err;
 	
@@ -22518,11 +23786,6 @@ static void
 	_FastRecoveryTestHandleGAIResuts(
 		FastRecoveryTestRef				inTest,
 		FastRecoveryGAI *				inGAI,
-		dnssd_getaddrinfo_result_t *	inResults,
-		size_t							inCount );
-static void
-	_FastRecoveryTestHandleGAIResumeResults(
-		FastRecoveryTestRef				inTest,
 		dnssd_getaddrinfo_result_t *	inResults,
 		size_t							inCount );
 static void	_FastRecoveryTestComplete( FastRecoveryTestRef inTest );
@@ -22621,8 +23884,14 @@ static OSStatus	_FastRecoveryTestStartQuerier( const FastRecoveryTestRef me )
 		dnssd_getaddrinfo_set_result_handler( gai,
 		^( dnssd_getaddrinfo_result_t * const inResults, const size_t inCount )
 		{
+			size_t		i;
+			
 			require_return( me->gai == gai );
-			_FastRecoveryTestHandleGAIResumeResults( me, inResults, inCount );
+			
+			for( i = 0; i < inCount; ++i )
+			{
+				frt_ulog( kLogLevelInfo, "GAI result -- %@\n", inResults[ i ] );
+			}
 		} );
 		dnssd_getaddrinfo_set_event_handler( gai,
 		^( const dnssd_event_t inEvent, const DNSServiceErrorType inGAIError )
@@ -22647,6 +23916,7 @@ static OSStatus	_FastRecoveryTestStartQuerier( const FastRecoveryTestRef me )
 		me->gai = gai;
 		gai = NULL;
 		dnssd_getaddrinfo_activate( me->gai );
+		me->suspended = false; // The resume command query will resume the DNS server.
 	}
 	err = kNoErr;
 	
@@ -22705,29 +23975,6 @@ exit:
 
 //===========================================================================================================================
 
-static void
-	_FastRecoveryTestHandleGAIResumeResults(
-		const FastRecoveryTestRef			me,
-		dnssd_getaddrinfo_result_t * const	inResults,
-		const size_t						inCount )
-{
-	size_t		i;
-	
-	for( i = 0; i < inCount; ++i )
-	{
-		const dnssd_getaddrinfo_result_t		result = inResults[ i ];
-		
-		frt_ulog( kLogLevelInfo, "GAI result -- %@\n", result );
-		if( dnssd_getaddrinfo_result_get_type( result ) == dnssd_getaddrinfo_result_type_add )
-		{
-			me->suspended = false;
-			break;
-		}
-	}
-}
-
-//===========================================================================================================================
-
 static void	_FastRecoveryTestComplete( const FastRecoveryTestRef me )
 {
 	OSStatus		err;
@@ -22738,7 +23985,7 @@ static void	_FastRecoveryTestComplete( const FastRecoveryTestRef me )
 	{
 		FastRecoveryGAI * const		frGAI = &me->gaiArray[ i ];
 		
-		err = CFPropertyListAppendFormatted( NULL, me->subtestResults,
+		err = CFPropertyListAppendFormatted( NULL, me->gaiResults,
 			"{"
 				"%kO=%s"	// hostname
 				"%kO=%b"	// gotResultIPv4
@@ -24753,19 +26000,10 @@ static void	_KeepAliveTestHandleConnection( KeepAliveTestRef inTest, SocketRef i
 			kat_ulog( kLogLevelInfo,
 				"%s: Will call DNSServiceSleepKeepalive_sockaddr() for local and remote sockaddrs\n", prefix );
 			check( !inTest->keepalive );
-			if( __builtin_available( macOS 10.15.4, iOS 13.2.2, watchOS 6.2, tvOS 13.2, * ) )
-			{
-				err = DNSServiceSleepKeepalive_sockaddr( &inTest->keepalive, 0, &subtest->local.sa, &subtest->remote.sa,
-					subtest->timeoutKA, _KeepAliveTestKeepaliveCallback, inTest );
-				require_noerr( err, exit );
-			}
-			else
-			{
-				kat_ulog( kLogLevelError, "DNSServiceSleepKeepalive_sockaddr() is not available on this OS.\n" );
-				subtestFailed = true;
-				err = kUnsupportedErr;
-				goto exit;
-			}
+			err = DNSServiceSleepKeepalive_sockaddr( &inTest->keepalive, 0, &subtest->local.sa, &subtest->remote.sa,
+				subtest->timeoutKA, _KeepAliveTestKeepaliveCallback, inTest );
+			require_noerr( err, exit );
+			
 			err = DNSServiceSetDispatchQueue( inTest->keepalive, inTest->queue );
 			require_noerr( err, exit );
 			break;
@@ -26304,48 +27542,280 @@ static void	DNSConfigRemoveCmd( void )
 }
 
 //===========================================================================================================================
-//	XPCSendCmd
+//	XPCSendCommand
 //===========================================================================================================================
 
 static OSStatus	_XPCDictionaryCreateFromString( const char *inString, xpc_object_t *outDict );
 
-static void	XPCSendCmd( void )
+typedef struct
+{
+	dispatch_queue_t			queue;				// Dispatch queue.
+	dispatch_semaphore_t		doneSem;			// Semaphore to signal when done.
+	char *						serviceName;		// Mach service name.
+	char *						msgStr;				// Message to send as a string.
+	xpc_connection_t			connection;			// XPC connection.
+	dispatch_source_t			cancelTimer;		// Timer cancelling the XPC connection.
+	dispatch_source_t			sourceSigInt;		// Dispatch source for SIGINT.
+	dispatch_source_t			sourceSigTerm;		// Dispatch source for SIGTERM.
+	int32_t						refCount;			// Reference count.
+	int							cancelDelaySecs;	// Number of seconds to wait before cancelling the connection.
+	OSStatus					error;				// Command's final error.
+	Boolean						noReply;			// True if there was a message to send and a reply is expected.
+	Boolean						done;				// True if the command is done.
+	
+}	XPCSendCmd;
+
+static OSStatus	_XPCSendCmdCreate( XPCSendCmd **outCmd );
+static void		_XPCSendCmdRetain( XPCSendCmd *inCmd );
+static void		_XPCSendCmdRelease( XPCSendCmd *inCmd );
+static OSStatus	_XPCSendCmdRun( XPCSendCmd *inCmd );
+static void		_XPCSendCmdStart( void *inCtx );
+static void		_XPCSendCmdStop( XPCSendCmd *inCmd, OSStatus inError );
+static OSStatus	_XPCSendCmdScheduleConnectionCancellation( XPCSendCmd *inCmd );
+
+static void	XPCSendCommand( void )
 {
 	OSStatus			err;
-	xpc_object_t		msg, reply;
-	xpc_object_t *		replyPtr;
+	XPCSendCmd *		cmd = NULL;
 	
-	err = _XPCDictionaryCreateFromString( gXPCSend_MessageStr, &msg );
+	err = _XPCSendCmdCreate( &cmd );
+	require_noerr( err, exit );
+	
+	cmd->serviceName = strdup( gXPCSend_ServiceName );
+	require_action( cmd->serviceName, exit, err = kNoMemoryErr );
+	
+	if( gXPCSend_MessageStr )
+	{
+		cmd->msgStr = strdup( gXPCSend_MessageStr );
+		require_action( cmd->msgStr, exit, err = kNoMemoryErr );
+	}
+	cmd->cancelDelaySecs	= gXPCSend_CancelDelaySecs;
+	cmd->noReply			= gXPCSend_NoReply ? true : false;
+	
+	err = _XPCSendCmdRun( cmd );
 	require_noerr_quiet( err, exit );
 	
-	FPrintF( stdout, "Service:    %s\n", gXPCSend_ServiceName );
-	FPrintF( stdout, "Message:    %s\n", gXPCSend_MessageStr );
-	FPrintF( stdout, "Start time: %{du:time}\n", NULL );
-	FPrintF( stdout, "---\n" );
-	FPrintF( stdout, "XPC Message:\n%{xpc}\n", msg );
+exit:
+	if( err ) FPrintF( stderr, "error: %#m\n", err );
+	if( cmd ) _XPCSendCmdRelease( cmd );
+	gExitCode = err ? 1 : 0;
+}
+
+//===========================================================================================================================
+
+static OSStatus	_XPCSendCmdCreate( XPCSendCmd ** const outCmd )
+{
+	OSStatus			err;
+	XPCSendCmd *		cmd;
 	
-	if( gXPCSend_NoReply )
+	cmd = (XPCSendCmd *) calloc( 1, sizeof( *cmd ) );
+	require_action( cmd, exit, err = kNoResourcesErr );
+	
+	cmd->refCount	= 1;
+	cmd->error		= kInProgressErr;
+	
+	cmd->queue = dispatch_queue_create( "com.apple.dnssdutil.xpc-send-command", DISPATCH_QUEUE_SERIAL );
+	require_action( cmd->queue, exit, err = kNoResourcesErr );
+	
+	cmd->doneSem = dispatch_semaphore_create( 0 );
+	require_action( cmd->doneSem, exit, err = kNoResourcesErr );
+	
+	*outCmd = cmd;
+	cmd = NULL;
+	err = kNoErr;
+	
+exit:
+	if( cmd ) _XPCSendCmdRelease( cmd );
+	return( err );
+}
+
+//===========================================================================================================================
+
+static void	_XPCSendCmdRetain( XPCSendCmd * const me )
+{
+	atomic_add_32( &me->refCount, 1 );
+}
+
+//===========================================================================================================================
+
+static void	_XPCSendCmdRelease( XPCSendCmd * const me )
+{
+	if( atomic_add_and_fetch_32( &me->refCount, -1 ) == 0 )
 	{
-		replyPtr = NULL;
+		check( !me->connection );
+		check( !me->cancelTimer );
+		check( !me->sourceSigInt );
+		check( !me->sourceSigTerm );
+		dispatch_forget( &me->queue );
+		dispatch_forget( &me->doneSem );
+		ForgetMem( &me->serviceName );
+		ForgetMem( &me->msgStr );
+		free( me );
+	}
+}
+
+//===========================================================================================================================
+
+static OSStatus	_XPCSendCmdRun( XPCSendCmd * const me )
+{
+	dispatch_async_f( me->queue, me, _XPCSendCmdStart );
+    dispatch_semaphore_wait( me->doneSem, DISPATCH_TIME_FOREVER );
+	return( me->error );
+}
+
+//===========================================================================================================================
+
+static void	_XPCSendCmdStart( void * const inCtx )
+{
+	OSStatus				err;
+	XPCSendCmd * const		me				= (XPCSendCmd *) inCtx;
+	xpc_object_t			msg				= NULL;
+	dispatch_source_t		sourceSigInt	= NULL;
+	dispatch_source_t		sourceSigTerm	= NULL;
+	
+	sourceSigInt = dispatch_source_create( DISPATCH_SOURCE_TYPE_SIGNAL, SIGINT, 0, me->queue );
+	require_action( sourceSigInt, exit, err = kNoResourcesErr );
+	
+	sourceSigTerm = dispatch_source_create( DISPATCH_SOURCE_TYPE_SIGNAL, SIGTERM, 0, me->queue );
+	require_action( sourceSigInt, exit, err = kNoResourcesErr );
+	
+	me->sourceSigInt	= sourceSigInt;
+	sourceSigInt		= NULL;
+	me->sourceSigTerm	= sourceSigTerm;
+	sourceSigTerm		= NULL;
+	
+	signal( SIGINT, SIG_IGN );
+	signal( SIGTERM, SIG_IGN );
+	dispatch_source_set_event_handler( me->sourceSigInt,
+	^{
+		FPrintF( stdout, "*** Got SIGINT signal ***\n" );
+		_XPCSendCmdStop( me, kNoErr );
+	} );
+	dispatch_activate( me->sourceSigInt );
+	dispatch_source_set_event_handler( me->sourceSigTerm,
+	^{
+		FPrintF( stdout, "*** Got SIGTERM signal ***\n" );
+		_XPCSendCmdStop( me, kNoErr );
+	} );
+	dispatch_activate( me->sourceSigTerm );
+	
+	if( me->msgStr )
+	{
+		err = _XPCDictionaryCreateFromString( me->msgStr, &msg );
+		require_noerr_quiet( err, exit );
+	}
+	FPrintF( stdout, "Service:    %s\n",			me->serviceName );
+	FPrintF( stdout, "Message:    '%s'\n",			me->msgStr );
+	FPrintF( stdout, "Wait:       %d second%s\n",	me->cancelDelaySecs, ( me->cancelDelaySecs != 1 ) ? "s" : "" );
+	FPrintF( stdout, "Start time: %{du:time}\n",	NULL );
+	FPrintF( stdout, "---\n" );
+	if( msg ) FPrintF( stdout, "XPC Message:\n%{xpc}\n", msg );
+	
+	me->connection = xpc_connection_create_mach_service( me->serviceName, me->queue, 0 );
+	require_action( me->connection, exit, err = kNoResourcesErr );
+	
+	_XPCSendCmdRetain( me );
+	xpc_connection_set_event_handler( me->connection,
+	^( const xpc_object_t inEvent )
+	{
+		if( !me->done ) FPrintF( stdout, "[%{du:time}] Connection Event:\n%{xpc}\n", NULL, inEvent );
+		if( inEvent == XPC_ERROR_CONNECTION_INVALID )
+		{
+			_XPCSendCmdRelease( me );
+		}
+	} );
+	xpc_connection_activate( me->connection );
+	
+	if( msg )
+	{
+		if( me->noReply )
+		{
+			xpc_connection_send_message( me->connection, msg );
+			_XPCSendCmdRetain( me );
+			xpc_connection_send_barrier( me->connection,
+			^{
+				if( !me->done )
+				{
+					OSStatus		localErr;
+					
+					localErr = _XPCSendCmdScheduleConnectionCancellation( me );
+					if( localErr ) _XPCSendCmdStop( me, localErr );
+				}
+				_XPCSendCmdRelease( me );
+			} );
+		}
+		else
+		{
+			_XPCSendCmdRetain( me );
+			xpc_connection_send_message_with_reply( me->connection, msg, me->queue,
+			^( const xpc_object_t inReply )
+			{
+				if( !me->done )
+				{
+					OSStatus		localErr;
+					
+					FPrintF( stdout, "[%{du:time}] Reply:\n%{xpc}\n", NULL, inReply );
+					localErr = _XPCSendCmdScheduleConnectionCancellation( me );
+					if( localErr ) _XPCSendCmdStop( me, localErr );
+				}
+				_XPCSendCmdRelease( me );
+			} );
+		}
 	}
 	else
 	{
-		replyPtr = &reply;
+		err = _XPCSendCmdScheduleConnectionCancellation( me );
+		require_noerr( err, exit );
 	}
-	err = xpc_send_message_sync( gXPCSend_ServiceName, 0, 0, msg, replyPtr );
-	xpc_forget( &msg );
-	require_noerr_quiet( err, exit );
-	
-	if( replyPtr )
-	{
-		FPrintF( stdout, "XPC Reply:\n%{xpc}\n", *replyPtr );
-		xpc_forget( replyPtr );
-	}
-	FPrintF( stdout, "---\n" );
-	FPrintF( stdout, "End time:   %{du:time}\n", NULL );
+	err = kNoErr;
 	
 exit:
-	if( err ) ErrQuit( 1, "error: %#m\n", err );
+	xpc_forget( &msg );
+	dispatch_forget( &sourceSigInt );
+	dispatch_forget( &sourceSigTerm );
+	if( err ) _XPCSendCmdStop( me, err );
+}
+
+//===========================================================================================================================
+
+static void	_XPCSendCmdStop( XPCSendCmd * const me, const OSStatus inError )
+{
+	if( !me->done )
+	{
+		me->done	= true;
+		me->error	= inError;
+		xpc_connection_forget( &me->connection );
+		dispatch_source_forget( &me->cancelTimer );
+		dispatch_source_forget( &me->sourceSigInt );
+		dispatch_source_forget( &me->sourceSigTerm );
+		FPrintF( stdout, "---\n" );
+		FPrintF( stdout, "End time:   %{du:time}\n", NULL );
+		dispatch_semaphore_signal( me->doneSem );
+	}
+}
+
+//===========================================================================================================================
+
+static OSStatus	_XPCSendCmdScheduleConnectionCancellation( XPCSendCmd * const me )
+{
+	OSStatus		err;
+	
+	if( me->cancelDelaySecs >= 0 )
+	{
+		me->cancelTimer = dispatch_source_create( DISPATCH_SOURCE_TYPE_TIMER, 0, 0, me->queue );
+		require_action( me->cancelTimer, exit, err = kNoResourcesErr );
+		
+		dispatch_source_set_timer( me->cancelTimer, dispatch_time_seconds( me->cancelDelaySecs ), DISPATCH_TIME_FOREVER, 0 );
+		dispatch_source_set_event_handler( me->cancelTimer,
+		^{
+			_XPCSendCmdStop( me, kNoErr );
+		} );
+		dispatch_activate( me->cancelTimer );
+	}
+	err = kNoErr;
+	
+exit:
+	return( err );
 }
 
 //===========================================================================================================================
@@ -26859,6 +28329,7 @@ typedef struct
 	int32_t							refCount;				// Reference count.
 	OSStatus						error;					// Command's error.
 	uint32_t						ifIndex;				// Interface index for scoping.
+	int32_t							startTimeLeewayMs;		// Start time leeway in milliseconds.
 	uint16_t						qtype;					// Type of record to query for.
 	uint16_t						qclass;					// Class of record to query for.
 	pid_t							delegatorPID;			// Delegator PID.
@@ -26867,6 +28338,7 @@ typedef struct
 	Boolean							haveDelegatorUUID;		// True if delegatorUUID is set.
 	Boolean							dnssecOK;				// True if queries need an OPT record with the DO bit set.
 	Boolean							checkingDisabled;		// True if queries need the CD bit set.
+	Boolean							haveStartTimeLeeway;	// True if the start time leeway was set.
 	Boolean							done;					// True if the command is done.
 	
 	// Variables for resolver.
@@ -26877,6 +28349,8 @@ typedef struct
 	char *							providerName;			// Provider name for resolver.
 	char *							connectionHostname;		// Overrides hostname used for transport layer connection.
 	char *							urlPath;				// URL path for resolver.
+	void *							identityRefPtr;			// Keychain identity reference.
+	size_t							identityRefLen;			// Keychain identity reference length.
 	void *							odohCfgPtr;				// Oblivious DoH configuration.
 	size_t							odohCfgLen;				// Oblivious DoH configuration length.
 	Boolean							noConnectionReuse;		// True if connection reuse is to be disabled.
@@ -26989,6 +28463,13 @@ static void	QuerierCommand( void )
 			cmd->urlPath = strdup( gQuerier_URLPath );
 			require_action( cmd->urlPath, exit, err = kNoMemoryErr );
 		}
+		if( gQuerier_IdentityReference )
+		{
+			err = HexToDataCopy( gQuerier_IdentityReference, kSizeCString, kHexToData_DefaultFlags, &cmd->identityRefPtr,
+				&cmd->identityRefLen, NULL );
+			require_noerr_action( err, exit, FPrintF( stderr,
+				"error: Failed to parse identity reference hex string: '%s'\n", gQuerier_IdentityReference ) );
+		}
 		if( gQuerier_ODoHConfig )
 		{
 			err = HexToDataCopy( gQuerier_ODoHConfig, kSizeCString, kHexToData_DefaultFlags, &cmd->odohCfgPtr,
@@ -27038,6 +28519,14 @@ static void	QuerierCommand( void )
 	}
 	cmd->dnssecOK			= gQuerier_DNSSECOK			? true : false;
 	cmd->checkingDisabled	= gQuerier_CheckingDisabled	? true : false;
+	if( gQuerier_StartLeewayMs )
+	{
+		err = StringToInt32( gQuerier_StartLeewayMs, &cmd->startTimeLeewayMs );
+		require_noerr_action_quiet( err, exit, FPrintF( stderr,
+			"Invalid startLeeway value: '%s'\n", gQuerier_StartLeewayMs ) );
+
+		cmd->haveStartTimeLeeway = true;
+	}
 	err = _QuerierCmdRun( cmd );
 	require_noerr( err, exit );
 	
@@ -27103,6 +28592,7 @@ static void	_QuerierCmdRelease( QuerierCmd *inCmd )
 		ForgetMem( &inCmd->providerName );
 		ForgetMem( &inCmd->connectionHostname );
 		ForgetMem( &inCmd->urlPath );
+		ForgetPtrLen( &inCmd->identityRefPtr, &inCmd->identityRefLen );
 		ForgetPtrLen( &inCmd->odohCfgPtr, &inCmd->odohCfgLen );
 		mdns_forget( &inCmd->definition );
 		free( inCmd );
@@ -27128,7 +28618,6 @@ static void	_QuerierCmdStart( void *inCtx )
 	OSStatus				err;
 	QuerierCmd * const		cmd		= (QuerierCmd *) inCtx;
 	dns_config_t *			config	= NULL;
-	mdns_querier_t			querier	= NULL;
 	const char *			ifNamePtr;
 	char					ifNameBuf[ IF_NAMESIZE + 1 ];
 	
@@ -27147,10 +28636,15 @@ static void	_QuerierCmdStart( void *inCtx )
 	FPrintF( stdout, "Name:                 %{du:dname}\n",	cmd->qname );
 	FPrintF( stdout, "Type:                 %s (%u)\n",		RecordTypeToString( cmd->qtype ), cmd->qtype );
 	FPrintF( stdout, "Class:                %s (%u)\n",		RecordClassToString( cmd->qclass ), cmd->qclass );
-	
+	if( cmd->haveStartTimeLeeway )
+	{
+		FPrintF( stdout, "Start leeway:         " );
+		if( cmd->startTimeLeewayMs >= 0 )	FPrintF( stdout, "%d ms\n", cmd->startTimeLeewayMs );
+		else								FPrintF( stdout, "∞ ms\n" );
+	}
 	if( cmd->definition || ( cmd->resolverType == mdns_resolver_type_null ) )
 	{
-		FPrintF( stdout, "Start time:     %{du:time}\n", NULL );
+		FPrintF( stdout, "Start time:           %{du:time}\n", NULL );
 		FPrintF( stdout, "---\n" );
 		
 		cmd->manager = mdns_dns_service_manager_create( cmd->queue, &err );
@@ -27225,7 +28719,7 @@ static void	_QuerierCmdStart( void *inCtx )
 		mdns_retain( cmd->service );
 		FPrintF( stdout, "Using DNS service -- %@\n\n", cmd->service );
 		
-		querier = mdns_dns_service_create_querier( cmd->service, &err );
+		cmd->querier = mdns_dns_service_create_querier( cmd->service, &err );
 		require_noerr( err, exit );
 	}
 	else
@@ -27236,6 +28730,10 @@ static void	_QuerierCmdStart( void *inCtx )
 		if( cmd->providerName )			FPrintF( stdout, "Provider Name:        %s\n", cmd->providerName );
 		if( cmd->connectionHostname )	FPrintF( stdout, "Connection Hostname:  %s\n", cmd->connectionHostname );
 		if( cmd->urlPath )				FPrintF( stdout, "URL path:             %s\n", cmd->urlPath );
+		if( cmd->identityRefPtr )
+		{
+			FPrintF( stdout, "Identity Reference:   %H\n", cmd->identityRefPtr, (int) cmd->identityRefLen, INT_MAX );
+		}
 		if( cmd->odohCfgPtr )
 		{
 			FPrintF( stdout, "ODoH Config:          %H\n", cmd->odohCfgPtr, (int) cmd->odohCfgLen, INT_MAX );
@@ -27268,6 +28766,11 @@ static void	_QuerierCmdStart( void *inCtx )
 			err = mdns_resolver_set_url_path( cmd->resolver, cmd->urlPath );
 			require_noerr( err, exit );
 		}
+		if( cmd->identityRefPtr )
+		{
+			err = mdns_resolver_set_identity_reference( cmd->resolver, cmd->identityRefPtr, cmd->identityRefLen );
+			require_noerr( err, exit );
+		}
 		if( cmd->odohCfgPtr )
 		{
 			err = mdns_resolver_update_odoh_config( cmd->resolver, cmd->providerName, cmd->urlPath, cmd->odohCfgPtr,
@@ -27285,19 +28788,17 @@ static void	_QuerierCmdStart( void *inCtx )
 		}
 		mdns_resolver_activate( cmd->resolver );
 		
-		querier = mdns_resolver_create_querier( cmd->resolver, &err );
+		cmd->querier = mdns_resolver_create_querier( cmd->resolver, &err );
 		require_noerr( err, exit );
 	}
-	err = mdns_querier_set_query( querier, cmd->qname, cmd->qtype, cmd->qclass );
+	err = mdns_querier_set_query( cmd->querier, cmd->qname, cmd->qtype, cmd->qclass );
 	require_noerr( err, exit );
 	
-	if( cmd->dnssecOK )			mdns_querier_set_dnssec_ok( querier, true );
-	if( cmd->checkingDisabled )	mdns_querier_set_checking_disabled( querier, true );
-	cmd->querier = querier;
-	querier = NULL;
-	
-	if( cmd->haveDelegatorPID ) mdns_querier_set_delegator_pid( cmd->querier, cmd->delegatorPID );
-	else if( cmd->haveDelegatorUUID ) mdns_querier_set_delegator_uuid( cmd->querier, cmd->delegatorUUID );
+	if( cmd->haveDelegatorPID )			mdns_querier_set_delegator_pid( cmd->querier, cmd->delegatorPID );
+	else if( cmd->haveDelegatorUUID )	mdns_querier_set_delegator_uuid( cmd->querier, cmd->delegatorUUID );
+	if( cmd->dnssecOK )					mdns_querier_set_dnssec_ok( cmd->querier, true );
+	if( cmd->checkingDisabled )			mdns_querier_set_checking_disabled( cmd->querier, true );
+	if( cmd->haveStartTimeLeeway )		mdns_querier_set_start_time_leeway( cmd->querier, cmd->startTimeLeewayMs );
 	
 	_QuerierCmdRetain( cmd );
 	mdns_querier_set_queue( cmd->querier, cmd->queue );
@@ -27340,7 +28841,6 @@ static void	_QuerierCmdStart( void *inCtx )
 	
 exit:
 	if( config ) dns_configuration_free( config );
-	mdns_release_null_safe( querier );
 	if( err ) _QuerierCmdStop( cmd, err );
 }
 
@@ -27391,29 +28891,24 @@ static void	_QuerierCmdSigTermHandler( void *inCtx )
 //	DNSProxyCmd
 //===========================================================================================================================
 
-static void	_DNSProxyCallback( DNSXConnRef inConnection, DNSXErrorType inError );
 static void	_DNSProxyCmdSignalHandler( void *inContext );
 
 static void	DNSProxyCmd( void )
 {
-	OSStatus				err;
-	size_t					i;
-	DNSXConnRef				connection;
-	IfIndex					inputIfIndexes[ MaxInputIf ];
-	dispatch_source_t		sigIntSource	= NULL;
-	dispatch_source_t		sigTermSource	= NULL;
-	uint32_t				outputIfIndex;
-	char					ifName[ kInterfaceNameBufLen ];
-	uint8_t					dns64Prefix[ 16 ];
-	int						dns64PrefixBitLen;
+	OSStatus						err;
+	size_t							i;
+	mrc_dns_proxy_parameters_t		params			= NULL;
+	mrc_dns_proxy_t					dnsProxy		= NULL;
+	dispatch_source_t				sigIntSource	= NULL;
+	dispatch_source_t				sigTermSource	= NULL;
+	__block const char *			separator;
+	uint32_t						outputIfIndex;
+	char							ifName[ kInterfaceNameBufLen ];
+	uint8_t							dns64Prefix[ 16 ];
+	int								dns64PrefixBitLen;
 	
-	if( gDNSProxy_InputInterfaceCount > MaxInputIf )
-	{
-		FPrintF( stderr, "error: Invalid input interface count: %zu > %d (max).\n",
-			gDNSProxy_InputInterfaceCount, MaxInputIf );
-		err = kRangeErr;
-		goto exit;
-	}
+	params = mrc_dns_proxy_parameters_create( &err );
+	require_noerr( err, exit );
 	
 	for( i = 0; i < gDNSProxy_InputInterfaceCount; ++i )
 	{
@@ -27422,9 +28917,8 @@ static void	DNSProxyCmd( void )
 		err = InterfaceIndexFromArgString( gDNSProxy_InputInterfaces[ i ], &ifIndex );
 		require_noerr_quiet( err, exit );
 		
-		inputIfIndexes[ i ] = ifIndex;
+		mrc_dns_proxy_parameters_add_input_interface( params, ifIndex );
 	}
-	while( i < MaxInputIf ) inputIfIndexes[ i++ ] = 0;	// Remaining interface indexes are required to be 0.
 	
 	if( gDNSProxy_OutputInterface )
 	{
@@ -27433,8 +28927,9 @@ static void	DNSProxyCmd( void )
 	}
 	else
 	{
-		outputIfIndex = kDNSIfindexAny;
+		outputIfIndex = 0;
 	}
+	mrc_dns_proxy_parameters_set_output_interface( params, outputIfIndex );
 	
 	dns64PrefixBitLen = 0;
 	if( gDNSProxy_DNS64IPv6Prefix )
@@ -27446,79 +28941,134 @@ static void	DNSProxyCmd( void )
 			&end );
 		if( !err && ( *end != '\0' ) ) err = kMalformedErr;
 		require_noerr_quiet( err, exit );
-	}
-	FPrintF( stdout, "Input Interfaces:" );
-	for( i = 0; i < gDNSProxy_InputInterfaceCount; ++i )
-	{
-		const uint32_t		ifIndex = (uint32_t) inputIfIndexes[ i ];
 		
-		FPrintF( stdout, "%s %u (%s)", ( i == 0 ) ? "" : ",", ifIndex, InterfaceIndexToName( ifIndex, ifName ) );
+		mrc_dns_proxy_parameters_set_nat64_prefix( params, dns64Prefix, (size_t) dns64PrefixBitLen );
 	}
+	if( gDNSProxy_ForceAAAASynthesis ) mrc_dns_proxy_parameters_set_force_aaaa_synthesis( params, true );
+	FPrintF( stdout, "Input Interfaces:    " );
+	separator = "";
+	mrc_dns_proxy_parameters_enumerate_input_interfaces( params,
+	^ bool ( const uint32_t inIfIndex )
+	{
+		char		inputIfName[ kInterfaceNameBufLen ];
+		
+		FPrintF( stdout, "%s %u (%s)", separator, inIfIndex, InterfaceIndexToName( inIfIndex, inputIfName ) );
+		separator = ",";
+		return( true );
+	} );
 	FPrintF( stdout, "\n" );
-	FPrintF( stdout, "Output Interface: %u (%s)\n",		outputIfIndex, InterfaceIndexToName( outputIfIndex, ifName ) );
-	if( gDNSProxy_DNS64IPv6Prefix ) FPrintF( stdout, "DNS64 prefix:     %.16a/%d\n", dns64Prefix, dns64PrefixBitLen );
-	FPrintF( stdout, "Start time:       %{du:time}\n",	NULL );
+	FPrintF( stdout, "Output Interface:     %u (%s)\n",		outputIfIndex, InterfaceIndexToName( outputIfIndex, ifName ) );
+	if( gDNSProxy_DNS64IPv6Prefix ) FPrintF( stdout, "DNS64 prefix:         %.16a/%d\n", dns64Prefix, dns64PrefixBitLen );
+	FPrintF( stdout, "Force AAAA synthesis: %s\n", YesNoStr( mrc_dns_proxy_parameters_get_force_aaaa_synthesis( params ) ) );
+	FPrintF( stdout, "Start time:           %{du:time}\n",	NULL );
 	FPrintF( stdout, "---\n" );
 	
-	connection = NULL;
-	if( gDNSProxy_DNS64IPv6Prefix )
+	dnsProxy = mrc_dns_proxy_create( params, &err );
+	mrc_forget( &params );
+	require_noerr_quiet( err, exit );
+	
+	mrc_dns_proxy_set_queue( dnsProxy, dispatch_get_main_queue() );
+	mrc_dns_proxy_set_event_handler( dnsProxy,
+	^( const mrc_dns_proxy_event_t inEvent, const OSStatus inError )
 	{
-		if( __builtin_available( macOS 10.16, iOS 14.0, watchOS 7.0, tvOS 14.0, * ) )
+		switch( inEvent )
 		{
-			err = DNSXEnableProxy64( &connection, kDNSProxyEnable, inputIfIndexes, outputIfIndex,
-                dns64Prefix, dns64PrefixBitLen, kDNSXProxyFlagNull, dispatch_get_main_queue(), _DNSProxyCallback );
-			require_noerr_quiet( err, exit );
+			case mrc_dns_proxy_event_started:
+			{
+				FPrintF( stdout, "%{du:time}  DNS proxy was started\n", NULL );
+				break;
+			}
+			case mrc_dns_proxy_event_interruption:
+			{
+				FPrintF( stdout, "%{du:time}  DNS proxy was interrupted\n", NULL );
+				break;
+			}
+			case mrc_dns_proxy_event_invalidation:
+			{
+				struct timeval		now;
+				
+				gettimeofday( &now, NULL );
+				
+				mrc_release( dnsProxy );
+				
+				FPrintF( stdout, "---\n" );
+				FPrintF( stdout, "Error:    %#m\n", inError );
+				FPrintF( stdout, "End time: %{du:time}\n", &now );
+				exit( 0 );
+			}
+			case mrc_dns_proxy_event_none:
+				break;
 		}
-		else
-		{
-			FPrintF( stderr, "error: DNSXEnableProxy64() is not available on this OS.\n" );
-			err = kUnsupportedErr;
-			goto exit;
-		}
-	}
-	else
-	{
-		err = DNSXEnableProxy( &connection, kDNSProxyEnable, inputIfIndexes, outputIfIndex,
-			dispatch_get_main_queue(), _DNSProxyCallback );
-		require_noerr_quiet( err, exit );
-	}
+	} );
 	signal( SIGINT, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), _DNSProxyCmdSignalHandler, connection,
+	err = DispatchSignalSourceCreate( SIGINT, dispatch_get_main_queue(), _DNSProxyCmdSignalHandler, dnsProxy,
 		&sigIntSource );
 	require_noerr( err, exit );
 	dispatch_activate( sigIntSource );
 	
 	signal( SIGTERM, SIG_IGN );
-	err = DispatchSignalSourceCreate( SIGTERM, dispatch_get_main_queue(), _DNSProxyCmdSignalHandler, connection,
+	err = DispatchSignalSourceCreate( SIGTERM, dispatch_get_main_queue(), _DNSProxyCmdSignalHandler, dnsProxy,
 		&sigTermSource );
 	require_noerr( err, exit );
 	dispatch_activate( sigTermSource );
 	
+	mrc_dns_proxy_activate( dnsProxy );
 	dispatch_main();
 	
 exit:
 	if( err ) ErrQuit( 1, "error: %#m\n", err );
 }
 
-static void	_DNSProxyCallback( DNSXConnRef inConnection, DNSXErrorType inError )
-{
-	Unused( inConnection );
-	
-	if( inError ) ErrQuit( 1, "error: DNS proxy failed: %#m\n", inError );
-}
-
 static void	_DNSProxyCmdSignalHandler( void *inContext )
 {
-	DNSXConnRef const		connection = (DNSXConnRef) inContext;
-	struct timeval			now;
+	mrc_dns_proxy_invalidate( (mrc_dns_proxy_t) inContext );
+}
+
+//===========================================================================================================================
+//	DNSProxyStateCmd
+//===========================================================================================================================
+
+static void	DNSProxyStateCmd( void )
+{
+	OSStatus							err;
+	dispatch_queue_t					queue;
+	dispatch_semaphore_t				doneSem	= NULL;
+	mrc_dns_proxy_state_inquiry_t		inquiry	= NULL;
 	
-	gettimeofday( &now, NULL );
+	queue = dispatch_queue_create( "com.apple.dnssdutil.dns-proxy-state-command", DISPATCH_QUEUE_SERIAL );
+	require_action( queue, exit, err = kNoResourcesErr );
 	
-	DNSXRefDeAlloc( connection );
+	doneSem = dispatch_semaphore_create( 0 );
+	require_action( doneSem, exit, err = kNoResourcesErr );
 	
-	FPrintF( stdout, "---\n" );
-	FPrintF( stdout, "End time:         %{du:time}\n", &now );
-	exit( 0 );
+	inquiry = mrc_dns_proxy_state_inquiry_create();
+	require_action( inquiry, exit, err = kNoResourcesErr );
+	
+	mrc_dns_proxy_state_inquiry_set_queue( inquiry, queue );
+	mrc_dns_proxy_state_inquiry_set_handler( inquiry,
+	^( const char * const inState, const OSStatus inError )
+	{
+		if( inError ) FPrintF( stderr, "error: %#m\n", inError );
+		if( inState ) FPrintF( stdout, "%s\n", inState );
+		dispatch_semaphore_signal( doneSem );
+	} );
+	mrc_dns_proxy_state_inquiry_activate( inquiry );
+	
+	// Wait for the DNS proxy state inquiry to complete.
+	// Note: We intentionally use a semaphore that will be signalled by the asynchronous handler. The analyzer considers
+	// this an antipattern, which is OK for the purposes of this internal test tool. Actual well-written production code
+	// would usually not have to emulate this type of synchronous behavior.
+	
+#if( !COMPILER_CLANG_ANALYZER )
+    dispatch_semaphore_wait( doneSem, DISPATCH_TIME_FOREVER );
+#endif
+	err = kNoErr;
+	
+exit:
+	dispatch_forget( &queue );
+	dispatch_forget( &doneSem );
+	mrc_forget( &inquiry );
+	gExitCode = err ? 1 : 0;
 }
 
 //===========================================================================================================================
@@ -27550,30 +29100,31 @@ typedef struct
 
 typedef struct
 {
-	dispatch_queue_t		queue;			// Serial queue for command's events.
-	dispatch_group_t		group;			// GCD group to know when command is done.
-	dnssd_getaddrinfo_t		gai;			// dnssd_getaddrinfo object.
-	dispatch_source_t		timer;			// Timer to impose time limit on dnssd_getaddrinfo activity.
-	dispatch_source_t		sigint;			// Dispatch source for SIGINT.
-	dispatch_source_t		sigterm;		// Dispatch source for SIGTERM.
-	const char *			hostname;		// dnssd_getaddrinfo's hostname argument.
-	const char *			serviceScheme;	// dnssd_getaddrinfo's service scheme argument.
-	const char *			accountID;		// dnssd_getaddrinfo's account ID argument.
-	char *					stopReason;		// Reason for stopping the command.
-	uuid_t *				resolverUUID;	// UUID of libnetwork DNS resolver configuration to use.
-	Delegation				delegation;		// Specifies the type of delegation to use for dnssd_getaddrinfo, if any.
-	int32_t					refCount;		// Reference count.
-	DNSServiceFlags			flags;			// dnssd_getaddrinfo's flags argument.
-	DNSServiceProtocol		protocols;		// dnssd_getaddrinfo's protocols argument.
-	uint32_t				ifIndex;		// dnssd_getaddrinfo's interface index argument.
-	unsigned int			timeLimitSecs;	// Time limit in seconds for dnssd_getaddrinfo activity.
-	OSStatus				error;			// Command's error.
-	Boolean					needAuthTags;	// True if dnssd_getaddrinfo 
-	Boolean					showTracker;	// True if tracker hostname, if any, should be displayed.
-	Boolean					useFailover;	// True if DNS service failover should be used if necessary and applicable.
-	Boolean					stopped;		// True if the command has been stopped.
-	Boolean					oneshot;		// True if the command should stop after first set of results.
-	Boolean					printedHeader;	// True if the results header has been printed.
+	dispatch_queue_t		queue;					// Serial queue for command's events.
+	dispatch_group_t		group;					// GCD group to know when command is done.
+	dnssd_getaddrinfo_t		gai;					// dnssd_getaddrinfo object.
+	dispatch_source_t		timer;					// Timer to impose time limit on dnssd_getaddrinfo activity.
+	dispatch_source_t		sigint;					// Dispatch source for SIGINT.
+	dispatch_source_t		sigterm;				// Dispatch source for SIGTERM.
+	const char *			hostname;				// dnssd_getaddrinfo's hostname argument.
+	const char *			serviceScheme;			// dnssd_getaddrinfo's service scheme argument.
+	const char *			accountID;				// dnssd_getaddrinfo's account ID argument.
+	char *					stopReason;				// Reason for stopping the command.
+	uuid_t *				resolverUUID;			// UUID of libnetwork DNS resolver configuration to use.
+	Delegation				delegation;				// Specifies the type of delegation to use for dnssd_getaddrinfo, if any.
+	int32_t					refCount;				// Reference count.
+	DNSServiceFlags			flags;					// dnssd_getaddrinfo's flags argument.
+	DNSServiceProtocol		protocols;				// dnssd_getaddrinfo's protocols argument.
+	uint32_t				ifIndex;				// dnssd_getaddrinfo's interface index argument.
+	unsigned int			timeLimitSecs;			// Time limit in seconds for dnssd_getaddrinfo activity.
+	OSStatus				error;					// Command's error.
+	Boolean					needAuthTags;			// True if authentication tags are needed.
+	Boolean					showTracker;			// True if tracker hostname, if any, should be displayed.
+	Boolean					useFailover;			// True if DNS service failover should be used if necessary.
+	Boolean					prohibitEncryptedDNS;	// True if use of encrypted DNS protocols is prohibited.
+	Boolean					stopped;				// True if the command has been stopped.
+	Boolean					oneshot;				// True if the command should stop after first set of results.
+	Boolean					printedHeader;			// True if the results header has been printed.
 	
 }	GetAddrInfoNewCmd;
 
@@ -27619,14 +29170,15 @@ static void	GetAddrInfoNewCommand( void )
 	
 	cmd->timeLimitSecs = (unsigned int) gGAINew_TimeLimitSecs;
 	
-	cmd->hostname		= gGAINew_Hostname;
-	cmd->flags			= GetDNSSDFlagsFromOpts();
-	cmd->serviceScheme	= gGAINew_ServiceScheme;
-	cmd->accountID		= gGAINew_AccountID;
-	cmd->needAuthTags	= gGAINew_WantAuthTags	? true : false;
-	cmd->showTracker	= gGAINew_ShowTracker	? true : false;
-	cmd->useFailover	= gGAINew_UseFailover	? true : false;
-	cmd->oneshot		= gGAINew_OneShot		? true : false;
+	cmd->hostname				= gGAINew_Hostname;
+	cmd->flags					= GetDNSSDFlagsFromOpts();
+	cmd->serviceScheme			= gGAINew_ServiceScheme;
+	cmd->accountID				= gGAINew_AccountID;
+	cmd->needAuthTags			= gGAINew_WantAuthTags			? true : false;
+	cmd->showTracker			= gGAINew_ShowTracker			? true : false;
+	cmd->useFailover			= gGAINew_UseFailover			? true : false;
+	cmd->prohibitEncryptedDNS	= gGAINew_ProhibitEncryptedDNS	? true : false;
+	cmd->oneshot				= gGAINew_OneShot				? true : false;
 	
 	err = InterfaceIndexFromArgString( gInterface, &cmd->ifIndex );
 	require_noerr_quiet( err, exit );
@@ -27768,9 +29320,16 @@ static void	_GetAddrInfoNewCmdStart( void *inCtx )
 	dnssd_getaddrinfo_set_interface_index( me->gai, me->ifIndex );
 	dnssd_getaddrinfo_set_protocols( me->gai, me->protocols );
 	dnssd_getaddrinfo_set_need_authenticated_results( me->gai, me->needAuthTags ? true : false );
-	if( __builtin_available( macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, * ) )
+	dnssd_getaddrinfo_set_use_failover( me->gai, me->useFailover );
+	if( __builtin_available( macOS 13.0, iOS 16.1, watchOS 9.1, tvOS 16.1, * ) )
 	{
-		dnssd_getaddrinfo_set_use_failover( me->gai, me->useFailover );
+		dnssd_getaddrinfo_prohibit_encrypted_dns( me->gai, me->prohibitEncryptedDNS );
+	}
+	else
+	{
+		FPrintF( stderr, "dnssd_getaddrinfo_prohibit_encrypted_dns is not available on this OS." );
+		err = kUnsupportedErr;
+		goto exit;
 	}
 	switch( me->delegation.type )
 	{
@@ -27783,16 +29342,7 @@ static void	_GetAddrInfoNewCmdStart( void *inCtx )
 			break;
 		
 		case kDelegationType_AuditToken:
-			if( __builtin_available( macOS 10.16, iOS 14.0, watchOS 7.0, tvOS 14.0, * ) )
-			{
-				dnssd_getaddrinfo_set_delegate_audit_token( me->gai, me->delegation.ident.auditToken );
-			}
-			else
-			{
-				FPrintF( stderr, "error: dnssd_getaddrinfo_set_delegate_audit_token() is not available on this OS.\n" );
-				err = kUnsupportedErr;
-				goto exit;
-			}
+			dnssd_getaddrinfo_set_delegate_audit_token( me->gai, me->delegation.ident.auditToken );
 			break;
 		
 		case kDelegationType_None:
@@ -27801,29 +29351,11 @@ static void	_GetAddrInfoNewCmdStart( void *inCtx )
 	}
 	if( me->serviceScheme )
 	{
-		if( __builtin_available( macOS 10.16, iOS 14.0, watchOS 7.0, tvOS 14.0, * ) )
-		{
-			dnssd_getaddrinfo_set_service_scheme( me->gai, me->serviceScheme );
-		}
-		else
-		{
-			FPrintF( stderr, "error: dnssd_getaddrinfo_set_service_scheme() is not available on this OS.\n" );
-			err = kUnsupportedErr;
-			goto exit;
-		}
+		dnssd_getaddrinfo_set_service_scheme( me->gai, me->serviceScheme );
 	}
 	if( me->accountID )
 	{
-		if( __builtin_available( macOS 10.16, iOS 14.0, watchOS 7.0, tvOS 14.0, * ) )
-		{
-			dnssd_getaddrinfo_set_account_id( me->gai, me->accountID );
-		}
-		else
-		{
-			FPrintF( stderr, "error: dnssd_getaddrinfo_set_account_id() is not available on this OS.\n" );
-			err = kUnsupportedErr;
-			goto exit;
-		}
+		dnssd_getaddrinfo_set_account_id( me->gai, me->accountID );
 	}
 	if( me->resolverUUID )
 	{
@@ -27859,60 +29391,51 @@ static void	_GetAddrInfoNewCmdStart( void *inCtx )
 				case dnssd_getaddrinfo_result_type_service_binding:	typeStr = "SvB"; break;
 				default:											typeStr = "???"; break;
 			}
-			cacheStr = "-";
-			if( __builtin_available( macOS 10.16, iOS 14.0, watchOS 7.0, tvOS 14.0, * ) )
+			if( type == dnssd_getaddrinfo_result_type_remove )
 			{
-				if( type != dnssd_getaddrinfo_result_type_remove )
-				{
-					cacheStr = dnssd_getaddrinfo_result_is_from_cache( result ) ? "Y" : "N";
-				}
+				cacheStr = "-";
+			}
+			else
+			{
+				cacheStr = dnssd_getaddrinfo_result_is_from_cache( result ) ? "Y" : "N";
 			}
 			FPrintF( stdout, "%{du:time}  %-4s %-2s %2d %-30s %##a",
 				NULL, typeStr, cacheStr, dnssd_getaddrinfo_result_get_interface_index( result ),
 				dnssd_getaddrinfo_result_get_hostname( result ), dnssd_getaddrinfo_result_get_address( result ) );
-			if( __builtin_available( macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, * ) )
+			if( type == dnssd_getaddrinfo_result_type_no_address )
 			{
-				if( type == dnssd_getaddrinfo_result_type_no_address )
-				{
-					FPrintF( stdout, " (%s)",
-						dnssd_negative_reason_to_string( dnssd_getaddrinfo_result_get_negative_reason( result ) ) );
-				}
+				FPrintF( stdout, " (%s)",
+					dnssd_negative_reason_to_string( dnssd_getaddrinfo_result_get_negative_reason( result ) ) );
 			}
 			FPrintF( stdout, "\n" );
-			if( __builtin_available( macOS 10.16, iOS 14.0, watchOS 7.0, tvOS 14.0, * ) )
+			if( me->flags & kDNSServiceFlagsReturnIntermediates )
 			{
-				if( me->flags & kDNSServiceFlagsReturnIntermediates )
+				const dnssd_cname_array_t		cnames = dnssd_getaddrinfo_result_get_cnames( result );
+				size_t							j, n;
+				
+				FPrintF( stdout, "    Canonical Names: [" );
+				n = dnssd_cname_array_get_count( cnames );
+				for( j = 0; j < n; ++j )
 				{
-					const dnssd_cname_array_t		cnames = dnssd_getaddrinfo_result_get_cnames( result );
-					size_t							j, n;
-					
-					FPrintF( stdout, "    Canonical Names: [" );
-					n = dnssd_cname_array_get_count( cnames );
-					for( j = 0; j < n; ++j )
-					{
-						FPrintF( stdout, "%s%s", ( j == 0 ) ? "" : ", ", dnssd_cname_array_get_cname( cnames, j ) );
-					}
-					FPrintF( stdout, "]\n" );
+					FPrintF( stdout, "%s%s", ( j == 0 ) ? "" : ", ", dnssd_cname_array_get_cname( cnames, j ) );
 				}
+				FPrintF( stdout, "]\n" );
 			}
-			if( __builtin_available( macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, * ) )
+			if( me->showTracker && ( type != dnssd_getaddrinfo_result_type_remove ) )
 			{
-				if( me->showTracker && ( type != dnssd_getaddrinfo_result_type_remove ) )
+				const char * const		tracker = dnssd_getaddrinfo_result_get_tracker_hostname( result );
+				
+				if( tracker )
 				{
-					const char * const		tracker = dnssd_getaddrinfo_result_get_tracker_hostname( result );
+					const char * const		owner = dnssd_getaddrinfo_result_get_tracker_owner( result );
 					
-					if( tracker )
-					{
-						const char * const		owner = dnssd_getaddrinfo_result_get_tracker_owner( result );
-						
-						FPrintF( stdout, "    Tracker: %s", tracker );
-						if( owner ) FPrintF( stdout, ", Owner: %s", owner );
-						FPrintF( stdout, "\n" );
-					}
-					else
-					{
-						FPrintF( stdout, "    (Not a known tracker)\n" );
-					}
+					FPrintF( stdout, "    Tracker: %s", tracker );
+					if( owner ) FPrintF( stdout, ", Owner: %s", owner );
+					FPrintF( stdout, "\n" );
+				}
+				else
+				{
+					FPrintF( stdout, "    (Not a known tracker)\n" );
 				}
 			}
 			if( me->needAuthTags )
@@ -28336,6 +29859,52 @@ static void	IPv6FwdDisableCommand( void )
 }
 
 //===========================================================================================================================
+//	PrintCommand
+//===========================================================================================================================
+
+static void	PrintCommand( void )
+{
+	OSStatus			err;
+	const char *		inputPath;
+	uint8_t *			msgPtr = NULL;
+	size_t				msgLen;
+	char *				msgStr = NULL;
+	
+	inputPath = CLINextArgOrNULL();
+	if( !inputPath || ( strcmp( inputPath, "-" ) == 0 ) )
+	{
+		err = CopyFileDataByFile( stdin, (char **) &msgPtr, &msgLen );
+		require_noerr_action_quiet( err, exit, FPrintF( stderr,
+			"error: Failed to copy DNS message from stdin: %#m\n", err ) );
+	}
+	else
+	{
+		err = CopyFileDataByPath( inputPath, (char **) &msgPtr, &msgLen );
+		require_noerr_action_quiet( err, exit, FPrintF( stderr,
+			"error: Failed to copy DNS message from '%s': %#m\n", inputPath, err ) );
+	}
+	require_action_quiet( msgLen <= UINT16_MAX, exit, err = kSizeErr; FPrintF( stderr,
+		"error: DNS message size is greater than the supported maximum (%zu > %d bytes)\n", msgLen, UINT16_MAX ) );
+	
+	err = DNSMessageToString( msgPtr, msgLen, kDNSMessageToStringFlag_Null, &msgStr );
+	if( !err )
+	{
+		FPrintF( stdout, "%s\n", msgStr );
+	}
+	else
+	{
+		FPrintF( stderr, "error: Failed to pretty print DNS message: %#m\n", err );
+		FPrintF( stdout, "%.1H\n", msgPtr, (int) msgLen, (int) msgLen );
+		err = kNoErr;
+	}
+	
+exit:
+	ForgetMem( &msgPtr );
+	ForgetMem( &msgStr );
+	gExitCode = err ? 1 : 0;
+}
+
+//===========================================================================================================================
 //	DaemonVersionCmd
 //===========================================================================================================================
 
@@ -28349,7 +29918,7 @@ static void	DaemonVersionCmd( void )
 	err = DNSServiceGetProperty( kDNSServiceProperty_DaemonVersion, &version, &size );
 	require_noerr( err, exit );
 	
-	FPrintF( stdout, "Daemon version: %s\n", SourceVersionToCString( version, strBuf ) );
+	FPrintF( stdout, "Daemon version: %s\n", _DNSSDSourceVersionToCString( version, strBuf, sizeof( strBuf ) ) );
 	
 exit:
 	if( err ) exit( 1 );
@@ -28496,17 +30065,23 @@ static int
 {
 	DNSServiceFlags		flags;
 	int					n;
+	char				dnssecResult;
 	
 	Unused( inUserContext );
 	
 	flags = va_arg( inArgs->args, DNSServiceFlags );
 	require_action_quiet( !inFormat->suppress, exit, n = 0 );
 	
-	n = PrintFCore( inContext, "%08X %s%c %c%c",
+	if(      ( flags & kDNSServiceFlagsValidate ) == 0 )						dnssecResult = ' ';
+	else if( ( flags & kDNSServiceFlagsSecure )   == kDNSServiceFlagsSecure )	dnssecResult = 'S';
+	else if( ( flags & kDNSServiceFlagsInsecure ) == kDNSServiceFlagsInsecure )	dnssecResult = 'I';
+	else																		dnssecResult = 'E';
+	n = PrintFCore( inContext, "%08X %s%c %c%c%c",
 		flags, DNSServiceFlagsToAddRmvStr( flags ),
 		( flags & kDNSServiceFlagsMoreComing )       ? '+' : ' ',
 		( flags & kDNSServiceFlagAnsweredFromCache ) ? 'C' : ' ',
-		( flags & kDNSServiceFlagsExpiredAnswer )    ? '*' : ' ' );
+		( flags & kDNSServiceFlagsExpiredAnswer )    ? '*' : ' ',
+		dnssecResult );
 	
 exit:
 	return( n );
@@ -28634,7 +30209,7 @@ static DNSServiceFlags	GetDNSSDFlagsFromOpts( void )
 	if( gDNSSDFlag_UnicastResponse )		flags |= kDNSServiceFlagsUnicastResponse;
 	if( gDNSSDFlag_Unique )					flags |= kDNSServiceFlagsUnique;
 	if( gDNSSDFlag_WakeOnResolve )			flags |= kDNSServiceFlagsWakeOnResolve;
-	if( gDNSSDFlag_EnableDNSSEC )			flags |= kDNSServiceFlagsValidate;
+	if( gDNSSDFlag_EnableDNSSEC )			flags |= kDNSServiceFlagsEnableDNSSEC;
 	
 	return( flags );
 }
@@ -30105,7 +31680,7 @@ static OSStatus	CreateSRVRecordDataFromString( const char *inString, uint8_t **o
 		require_action_quiet( ( value >= 0 ) && ( value <= UINT16_MAX ), exit, err = kRangeErr );
 		ptr = next + 1;
 		
-		WriteBig16( buf, value );
+		WriteBig16Typed( buf, (uint16_t) value );
 		
 		err = DataBuffer_Append( &dataBuf, buf, sizeof( buf ) );
 		require_noerr( err, exit );
@@ -30320,7 +31895,7 @@ static OSStatus
 	if( inDB )
 	{
 		rdlengthPtr = DataBuffer_GetPtr( inDB ) + rdlengthOffset;
-		WriteBig16( rdlengthPtr, rdataLen );
+		WriteBig16Typed( rdlengthPtr, (uint16_t) rdataLen );
 	}
 	
 	if( outLen ) *outLen = inNameLen + sizeof( dns_fixed_fields_record ) + rdataLen;
@@ -30928,55 +32503,46 @@ static void
 
 static OSStatus	_SetDefaultFallbackDNSService( const char *inFallbackDNSServiceStr )
 {
-	OSStatus		err;
+	OSStatus					err;
+	nw_resolver_config_t		resolverConfig;
+	CFDataRef					plistData;
 	
-	if( __builtin_available( macOS 10.16, iOS 14.0, watchOS 7.0, tvOS 14.0, * ) )
+	if( stricmp_prefix( inFallbackDNSServiceStr, kFallbackDNSServiceArgPrefix_DoH ) == 0 )
 	{
-		nw_resolver_config_t		resolverConfig;
-		CFDataRef					plistData;
+		nw_endpoint_t			endpoint;
+		const char * const		url = inFallbackDNSServiceStr + sizeof_string( kFallbackDNSServiceArgPrefix_DoH );
 		
-		if( stricmp_prefix( inFallbackDNSServiceStr, kFallbackDNSServiceArgPrefix_DoH ) == 0 )
-		{
-			nw_endpoint_t			endpoint;
-			const char * const		url = inFallbackDNSServiceStr + sizeof_string( kFallbackDNSServiceArgPrefix_DoH );
-			
-			endpoint = nw_endpoint_create_url( url );
-			require_action( endpoint, exit, err = kUnknownErr );
-			
-			resolverConfig = nw_resolver_config_create_https( endpoint );
-			nw_forget( &endpoint );
-			require_action( resolverConfig, exit, err = kUnknownErr );
-		}
-		else if( stricmp_prefix( inFallbackDNSServiceStr, kFallbackDNSServiceArgPrefix_DoT ) == 0 )
-		{
-			nw_endpoint_t			endpoint;
-			const char * const		hostname = inFallbackDNSServiceStr + sizeof_string( kFallbackDNSServiceArgPrefix_DoT );
-			
-			endpoint = nw_endpoint_create_host( hostname, "0" );
-			require_action( endpoint, exit, err = kUnknownErr );
-			
-			resolverConfig = nw_resolver_config_create_tls( endpoint );
-			nw_forget( &endpoint );
-			require_action( resolverConfig, exit, err = kUnknownErr );
-		}
-		else
-		{
-			FPrintF( stderr, "error: Unrecognized fallback DNS service string: \"%s\"\n", inFallbackDNSServiceStr );
-			err = kParamErr;
-			goto exit;
-		}
-		plistData = nw_resolver_config_copy_plist_data_ref( resolverConfig );
-		require_action( plistData, exit, err = kUnknownErr );
+		endpoint = nw_endpoint_create_url( url );
+		require_action( endpoint, exit, err = kUnknownErr );
 		
-		err = DNSServiceSetResolverDefaults( CFDataGetBytePtr( plistData ), (size_t) CFDataGetLength( plistData ), true );
-		ForgetCF( &plistData );
-		require_noerr( err, exit );
+		resolverConfig = nw_resolver_config_create_https( endpoint );
+		nw_forget( &endpoint );
+		require_action( resolverConfig, exit, err = kUnknownErr );
+	}
+	else if( stricmp_prefix( inFallbackDNSServiceStr, kFallbackDNSServiceArgPrefix_DoT ) == 0 )
+	{
+		nw_endpoint_t			endpoint;
+		const char * const		hostname = inFallbackDNSServiceStr + sizeof_string( kFallbackDNSServiceArgPrefix_DoT );
+		
+		endpoint = nw_endpoint_create_host( hostname, "0" );
+		require_action( endpoint, exit, err = kUnknownErr );
+		
+		resolverConfig = nw_resolver_config_create_tls( endpoint );
+		nw_forget( &endpoint );
+		require_action( resolverConfig, exit, err = kUnknownErr );
 	}
 	else
 	{
-		FPrintF( stderr, "error: Setting a default fallback DNS service is unsupported on this OS.\n" );
-		err = kUnsupportedErr;
+		FPrintF( stderr, "error: Unrecognized fallback DNS service string: \"%s\"\n", inFallbackDNSServiceStr );
+		err = kParamErr;
+		goto exit;
 	}
+	plistData = nw_resolver_config_copy_plist_data_ref( resolverConfig );
+	require_action( plistData, exit, err = kUnknownErr );
+	
+	err = DNSServiceSetResolverDefaults( CFDataGetBytePtr( plistData ), (size_t) CFDataGetLength( plistData ), true );
+	ForgetCF( &plistData );
+	require_noerr( err, exit );
 	
 exit:
 	return( err );
@@ -31825,6 +33391,7 @@ struct ServiceBrowserPrivate
 #endif
 	Boolean							includeAWDL;		// True if the IncludeAWDL flag should be used for DNS-SD ops that
 														// use the "any" interface.
+	Boolean							validateResults;	// Validate results.
 };
 
 struct SBDomain
@@ -31882,6 +33449,7 @@ struct SBIPAddress
 	SBIPAddress *		next;			// Next IP address object in list.
 	sockaddr_ip			sip;			// IPv4 or IPv6 address.
 	uint64_t			resolveTimeUs;	// Time it took to resolve this IP address in microseconds.
+	Boolean				validated;		// True if IP address is validated.
 };
 
 typedef struct
@@ -31975,13 +33543,14 @@ static OSStatus
 		uint32_t			inIfIndex );
 static OSStatus
 	_ServiceBrowserAddServiceInstance(
-		ServiceBrowserRef	inBrowser,
-		SBServiceBrowse *	inBrowse,
-		uint32_t			inIfIndex,
-		const char *		inName,
-		const char *		inRegType,
-		const char *		inDomain,
-		uint64_t			inDiscoverTimeUs );
+		ServiceBrowserRef			inBrowser,
+		SBServiceBrowse *			inBrowse,
+		uint32_t					inIfIndex,
+		const char *				inName,
+		const char *				inRegType,
+		const char *				inDomain,
+		uint64_t					inDiscoverTimeUs,
+		const DNSServiceAttribute *	inAttr );
 static OSStatus
 	_ServiceBrowserRemoveServiceInstance(
 		ServiceBrowserRef	inBrowser,
@@ -31993,7 +33562,8 @@ static OSStatus
 		ServiceBrowserRef		inBrowser,
 		SBServiceInstance *		inInstance,
 		const struct sockaddr *	inSockAddr,
-		uint64_t				inResolveTimeUs );
+		uint64_t				inResolveTimeUs,
+		Boolean					inValidated );
 static OSStatus
 	_ServiceBrowserRemoveIPAddress(
 		ServiceBrowserRef		inBrowser,
@@ -32025,6 +33595,7 @@ static OSStatus
 	_SBIPAddressCreate(
 		const struct sockaddr *	inSockAddr,
 		uint64_t				inResolveTimeUs,
+		Boolean 				inValidated,
 		SBIPAddress **			outIPAddress );
 static void		_SBIPAddressFree( SBIPAddress *inIPAddress );
 static void		_SBIPAddressFreeList( SBIPAddress *inList );
@@ -32048,6 +33619,7 @@ static OSStatus
 	_SBRIPAddressCreate(
 		const struct sockaddr *	inSockAddr,
 		uint64_t				inResolveTimeUs,
+		Boolean					inValidated,
 		SBRIPAddress **			outIPAddress );
 static void		_SBRIPAddressFree( SBRIPAddress *inIPAddress );
 
@@ -32114,7 +33686,6 @@ static void	_ServiceBrowserFinalize( CFTypeRef inObj )
 	check( !me->stopTimer );
 }
 
-#if( MDNSRESPONDER_PROJECT )
 //===========================================================================================================================
 //	ServiceBrowserSetUseNewGAI
 //===========================================================================================================================
@@ -32123,7 +33694,15 @@ static void	ServiceBrowserSetUseNewGAI( ServiceBrowserRef me, Boolean inUseNewGA
 {
 	me->useNewGAI = inUseNewGAI;
 }
-#endif
+
+//===========================================================================================================================
+//	ServiceBrowserSetValidateResults
+//===========================================================================================================================
+
+static void	ServiceBrowserSetValidateResults( const ServiceBrowserRef me, const Boolean inValidateResults )
+{
+	me->validateResults = inValidateResults;
+}
 
 //===========================================================================================================================
 //	ServiceBrowserStart
@@ -32570,6 +34149,7 @@ static void DNSSD_API
 	const uint64_t				nowTicks	= UpTicks();
 	SBServiceBrowse * const		browse		= (SBServiceBrowse *) inContext;
 	ServiceBrowserRef const		me			= (ServiceBrowserRef) browse->browser;
+	DNSServiceAttributeRef		attr		= NULL;
 	
 	Unused( inSDRef );
 	
@@ -32580,8 +34160,31 @@ static void DNSSD_API
 	
 	if( inFlags & kDNSServiceFlagsAdd )
 	{
+		if( me->validateResults )
+		{
+			if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+			{
+				const uint8_t *		dataPtr;
+				size_t				dataLen;
+				
+				dataPtr = DNSServiceGetValidationData( inSDRef, &dataLen );
+				sb_ulog( kLogLevelTrace, "Got %zu bytes of validation data for browse result", dataLen );
+				if( dataPtr )
+				{
+					attr = DNSServiceAttributeCreate();
+					require( attr, exit );
+					
+					err = DNSServiceAttrSetValidationData( attr, dataPtr, dataLen );
+					require_noerr( err, exit );
+				}
+			}
+			else
+			{
+				sb_ulog( kLogLevelError, "DNSServiceGetValidationData is not available on this OS\n" );
+			}
+		}
 		err = _ServiceBrowserAddServiceInstance( me, browse, inInterfaceIndex, inName, inRegType, inDomain,
-			UpTicksToMicroseconds( nowTicks - browse->startTicks ) );
+			UpTicksToMicroseconds( nowTicks - browse->startTicks ), attr );
 		if( err == kDuplicateErr ) err = kNoErr;
 		require_noerr( err, exit );
 	}
@@ -32593,7 +34196,10 @@ static void DNSSD_API
 	}
 	
 exit:
-	return;
+	if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+	{
+		_DNSServiceAttrForget( &attr );
+	}
 }
 
 //===========================================================================================================================
@@ -32614,9 +34220,12 @@ static void DNSSD_API
 		void *					inContext )
 {
 	OSStatus						err;
-	const uint64_t					nowTicks	= UpTicks();
-	SBServiceInstance * const		instance	= (SBServiceInstance *) inContext;
-	ServiceBrowserRef const			me			= (ServiceBrowserRef) instance->browser;
+	const uint64_t					nowTicks			= UpTicks();
+	SBServiceInstance * const		instance			= (SBServiceInstance *) inContext;
+	ServiceBrowserRef const			me					= (ServiceBrowserRef) instance->browser;
+	DNSServiceAttributeRef			attr				= NULL;
+	const uint8_t *					validationDataPtr	= NULL;
+	size_t							validationDataLen	= 0;
 	
 	Unused( inSDRef );
 	Unused( inFlags );
@@ -32634,7 +34243,45 @@ static void DNSSD_API
 		
 		instance->txtLen = inTXTLen;
 	}
-	
+	if( me->validateResults )
+	{
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+		{
+			const uint8_t *		dataPtr;
+			size_t				dataLen;
+			
+			dataPtr = DNSServiceGetValidationData( inSDRef, &dataLen );
+			sb_ulog( kLogLevelTrace, "Got %zu bytes of validation data for resolve result\n", dataLen );
+			if( dataPtr )
+			{
+				mdns_signed_resolve_result_t		signedResult;
+				
+				signedResult = mdns_signed_resolve_result_create_from_data( dataPtr, dataLen, &err );
+				if( signedResult )
+				{
+					if( mdns_signed_resolve_result_covers_txt_rdata( signedResult, instance->txtPtr, instance->txtLen ) )
+					{
+						sb_ulog( kLogLevelTrace, "Signed resolve result covers TXT record data\n" );
+						validationDataPtr = dataPtr;
+						validationDataLen = dataLen;
+					}
+					else
+					{
+						sb_ulog( kLogLevelError, "Signed resolve result doesn't cover TXT record data\n" );
+					}
+					mdns_forget( &signedResult );
+				}
+				else
+				{
+					sb_ulog( kLogLevelError, "mdns_signed_resolve_result_create_from_data() failed: %#m\n", err );
+				}
+			}
+		}
+		else
+		{
+			sb_ulog( kLogLevelError, "DNSServiceGetValidationData is not available on this OS\n" );
+		}
+	}
 	instance->port = ntohs( inPort );
 	
 	if( !instance->hostname || ( strcasecmp( instance->hostname, inHostname ) != 0 ) )
@@ -32651,7 +34298,6 @@ static void DNSSD_API
 		
 		ForgetSBIPAddressList( &instance->ipaddrList );
 		
-	#if( MDNSRESPONDER_PROJECT )
 		if( me->useNewGAI )
 		{
 			dnssd_getaddrinfo_t		gai;
@@ -32665,6 +34311,17 @@ static void DNSSD_API
 			dnssd_getaddrinfo_set_flags( gai, 0 );
 			dnssd_getaddrinfo_set_interface_index( gai, instance->ifIndex );
 			dnssd_getaddrinfo_set_protocols( gai, kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6 );
+			if( validationDataPtr )
+			{
+				if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+				{
+					dnssd_getaddrinfo_set_validation_data( gai, validationDataPtr, validationDataLen );
+				}
+				else
+				{
+					sb_ulog( kLogLevelError, "dnssd_getaddrinfo_set_validation_data is not available on this OS\n" );
+				}
+			}
 			dnssd_getaddrinfo_set_queue( gai, me->queue );
 			_SBServiceInstanceRetain( instance );
 			CFRetain( me );
@@ -32704,23 +34361,47 @@ static void DNSSD_API
 			dnssd_getaddrinfo_activate( instance->newGAI );
 		}
 		else
-	#endif
 		{
 			DNSServiceForget( &instance->gai );
 			
 			sdRef = me->connection;
 			instance->gaiStartTicks = UpTicks();
-			err = DNSServiceGetAddrInfo( &sdRef, kDNSServiceFlagsShareConnection, instance->ifIndex,
-				kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6, instance->hostname, _ServiceBrowserGAICallback,
-				instance );
-			require_noerr( err, exit );
-			
+			if( validationDataPtr )
+			{
+				if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+				{
+					attr = DNSServiceAttributeCreate();
+					require( attr, exit );
+					
+					err = DNSServiceAttrSetValidationData( attr, validationDataPtr, validationDataLen );
+					require_noerr( err, exit );
+					
+					err = DNSServiceGetAddrInfoEx( &sdRef, kDNSServiceFlagsShareConnection, instance->ifIndex,
+						kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6, instance->hostname, attr,
+						_ServiceBrowserGAICallback, instance );
+					require_noerr( err, exit );
+				}
+				else
+				{
+					sb_ulog( kLogLevelError, "DNSServiceAttributeCreate is not available on this OS\n" );
+				}
+			}
+			else
+			{
+				err = DNSServiceGetAddrInfo( &sdRef, kDNSServiceFlagsShareConnection, instance->ifIndex,
+					kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6, instance->hostname, _ServiceBrowserGAICallback,
+					instance );
+				require_noerr( err, exit );
+			}
 			instance->gai = sdRef;
 		}
 	}
 	
 exit:
-	return;
+	if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+	{
+		_DNSServiceAttrForget( &attr );
+	}
 }
 
 #if( MDNSRESPONDER_PROJECT )
@@ -32748,8 +34429,38 @@ static void
 		
 		if( type == dnssd_getaddrinfo_result_type_add )
 		{
+			Boolean		validated = false;
+			
+			if( me->validateResults )
+			{
+				if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+				{
+					const uint8_t *		dataPtr;
+					size_t				dataLen;
+					
+					dataPtr = dnssd_getaddrinfo_result_get_validation_data( result, &dataLen );
+					sb_ulog( kLogLevelTrace, "Got %zu bytes of validation data for dnssd_getaddrinfo result", dataLen );
+					if( dataPtr )
+					{
+						OSStatus							createErr;
+						mdns_signed_hostname_result_t		signedResult;
+						
+						signedResult = mdns_signed_hostname_result_create_from_data( dataPtr, dataLen, &createErr );
+						sb_ulog( kLogLevelTrace, "Signed hostname result: %@", signedResult );
+						if( signedResult )
+						{
+							validated = true;
+							mdns_forget( &signedResult );
+						}
+					}
+				}
+				else
+				{
+					sb_ulog( kLogLevelError, "dnssd_getaddrinfo_result_get_validation_data is not available on this OS." );
+				}
+			}
 			err = _ServiceBrowserAddIPAddress( me, inInstance, dnssd_getaddrinfo_result_get_address( result ),
-				UpTicksToMicroseconds( nowTicks - inInstance->gaiStartTicks ) );
+				UpTicksToMicroseconds( nowTicks - inInstance->gaiStartTicks ), validated );
 			if( err == kDuplicateErr ) err = kNoErr;
 			require_noerr( err, exit );
 		}
@@ -32803,8 +34514,38 @@ static void DNSSD_API
 	
 	if( inFlags & kDNSServiceFlagsAdd )
 	{
+		Boolean		validated = false;
+		
+		if( me->validateResults )
+		{
+			if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+			{
+				const uint8_t *		dataPtr;
+				size_t				dataLen;
+				
+				dataPtr = DNSServiceGetValidationData( inSDRef, &dataLen );
+				sb_ulog( kLogLevelTrace, "Got %zu bytes of validation data for GetAddrInfo result", dataLen );
+				if( dataPtr )
+				{
+					OSStatus							createErr;
+					mdns_signed_hostname_result_t		signedResult;
+					
+					signedResult = mdns_signed_hostname_result_create_from_data( dataPtr, dataLen, &createErr );
+					sb_ulog( kLogLevelTrace, "Signed hostname result: %@", signedResult );
+					if( signedResult )
+					{
+						validated = true;
+						mdns_forget( &signedResult );
+					}
+				}
+			}
+			else
+			{
+				sb_ulog( kLogLevelError, "DNSServiceGetValidationData is not available on this OS" );
+			}
+		}
 		err = _ServiceBrowserAddIPAddress( me, instance, inSockAddr,
-			UpTicksToMicroseconds( nowTicks - instance->gaiStartTicks ) );
+			UpTicksToMicroseconds( nowTicks - instance->gaiStartTicks ), validated );
 		if( err == kDuplicateErr ) err = kNoErr;
 		require_noerr( err, exit );
 	}
@@ -32869,10 +34610,27 @@ static OSStatus
 	
 	sdRef = me->connection;
 	newBrowse->startTicks = UpTicks();
-	err = DNSServiceBrowse( &sdRef, flags, newBrowse->ifIndex, type->name, inDomain->name, _ServiceBrowserBrowseCallback,
-		newBrowse );
-	require_noerr( err, exit );
-	
+	if( me->validateResults )
+	{
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+		{
+			err = DNSServiceBrowseEx( &sdRef, flags, newBrowse->ifIndex, type->name, inDomain->name,
+				&kDNSServiceAttrValidationRequired, _ServiceBrowserBrowseCallback, newBrowse );
+			require_noerr( err, exit );
+		}
+		else
+		{
+			sb_ulog( kLogLevelError, "DNSServiceBrowseEx is not available on this OS." );
+			err = kUnsupportedErr;
+			goto exit;
+		}
+	}
+	else
+	{
+		err = DNSServiceBrowse( &sdRef, flags, newBrowse->ifIndex, type->name, inDomain->name, _ServiceBrowserBrowseCallback,
+			newBrowse );
+		require_noerr( err, exit );
+	}
 	newBrowse->browse = sdRef;
 	*browsePtr	= newBrowse;
 	newBrowse	= NULL;
@@ -32939,13 +34697,14 @@ exit:
 
 static OSStatus
 	_ServiceBrowserAddServiceInstance(
-		ServiceBrowserRef	me,
-		SBServiceBrowse *	inBrowse,
-		uint32_t			inIfIndex,
-		const char *		inName,
-		const char *		inRegType,
-		const char *		inDomain,
-		uint64_t			inDiscoverTimeUs )
+		ServiceBrowserRef			me,
+		SBServiceBrowse *			inBrowse,
+		uint32_t					inIfIndex,
+		const char *				inName,
+		const char *				inRegType,
+		const char *				inDomain,
+		uint64_t					inDiscoverTimeUs,
+		const DNSServiceAttribute *	inAttr )
 {
 	OSStatus					err;
 	DNSServiceRef				sdRef;
@@ -32967,10 +34726,27 @@ static OSStatus
 	
 	sdRef = me->connection;
 	newInstance->resolveStartTicks = UpTicks();
-	err = DNSServiceResolve( &sdRef, kDNSServiceFlagsShareConnection, newInstance->ifIndex, inName, inRegType, inDomain,
-		_ServiceBrowserResolveCallback, newInstance );
-	require_noerr( err, exit );
-	
+	if( inAttr )
+	{
+		if( __builtin_available( macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, * ) )
+		{
+			err = DNSServiceResolveEx( &sdRef, kDNSServiceFlagsShareConnection, newInstance->ifIndex, inName, inRegType,
+				inDomain, inAttr, _ServiceBrowserResolveCallback, newInstance );
+			require_noerr( err, exit );
+		}
+		else
+		{
+			sb_ulog( kLogLevelError, "DNSServiceResolveEx is not available on this OS." );
+			err = kUnsupportedErr;
+			goto exit;
+		}
+	}
+	else
+	{
+		err = DNSServiceResolve( &sdRef, kDNSServiceFlagsShareConnection, newInstance->ifIndex, inName, inRegType,
+			inDomain, _ServiceBrowserResolveCallback, newInstance );
+		require_noerr( err, exit );
+	}
 	newInstance->resolve = sdRef;
 	*instancePtr	= newInstance;
 	newInstance		= NULL;
@@ -33020,7 +34796,8 @@ static OSStatus
 		ServiceBrowserRef		me,
 		SBServiceInstance *		inInstance,
 		const struct sockaddr *	inSockAddr,
-		uint64_t				inResolveTimeUs )
+		uint64_t				inResolveTimeUs,
+		Boolean					inValidated )
 {
 	OSStatus			err;
 	SBIPAddress *		ipaddr;
@@ -33042,7 +34819,7 @@ static OSStatus
 	}
 	require_action_quiet( !ipaddr, exit, err = kDuplicateErr );
 	
-	err = _SBIPAddressCreate( inSockAddr, inResolveTimeUs, &newIPAddr );
+	err = _SBIPAddressCreate( inSockAddr, inResolveTimeUs, inValidated, &newIPAddr );
 	require_noerr_quiet( err, exit );
 	
 	*ipaddrPtr = newIPAddr;
@@ -33145,7 +34922,7 @@ static OSStatus	_ServiceBrowserCreateResults( ServiceBrowserRef me, ServiceBrows
 					{
 						SBRIPAddress *		ipaddr;
 						
-						err = _SBRIPAddressCreate( &a->sip.sa, a->resolveTimeUs, &ipaddr );
+						err = _SBRIPAddressCreate( &a->sip.sa, a->resolveTimeUs, a->validated, &ipaddr );
 						require_noerr_quiet( err, exit );
 						
 						*ipaddrPtr = ipaddr;
@@ -33379,7 +35156,8 @@ static void	_SBServiceInstanceRelease( SBServiceInstance *inInstance )
 //	_SBIPAddressCreate
 //===========================================================================================================================
 
-static OSStatus	_SBIPAddressCreate( const struct sockaddr *inSockAddr, uint64_t inResolveTimeUs, SBIPAddress **outIPAddress )
+static OSStatus	_SBIPAddressCreate( const struct sockaddr *inSockAddr, uint64_t inResolveTimeUs, Boolean inValidated,
+	SBIPAddress **outIPAddress )
 {
 	OSStatus			err;
 	SBIPAddress *		obj;
@@ -33388,7 +35166,8 @@ static OSStatus	_SBIPAddressCreate( const struct sockaddr *inSockAddr, uint64_t 
 	require_action( obj, exit, err = kNoMemoryErr );
 	
 	SockAddrCopy( inSockAddr, &obj->sip );
-	obj->resolveTimeUs = inResolveTimeUs;
+	obj->resolveTimeUs	= inResolveTimeUs;
+	obj->validated		= inValidated;
 	
 	*outIPAddress = obj;
 	err = kNoErr;
@@ -33580,6 +35359,7 @@ static OSStatus
 	_SBRIPAddressCreate(
 		const struct sockaddr *	inSockAddr,
 		uint64_t				inResolveTimeUs,
+		Boolean 				inValidated,
 		SBRIPAddress **			outIPAddress )
 {
 	OSStatus			err;
@@ -33589,7 +35369,8 @@ static OSStatus
 	require_action( obj, exit, err = kNoMemoryErr );
 	
 	SockAddrCopy( inSockAddr, &obj->sip );
-	obj->resolveTimeUs = inResolveTimeUs;
+	obj->resolveTimeUs 	= inResolveTimeUs;
+	obj->validated 		= inValidated;
 	
 	*outIPAddress = obj;
 	err = kNoErr;
@@ -33605,47 +35386,6 @@ exit:
 static void	_SBRIPAddressFree( SBRIPAddress *inIPAddress )
 {
 	free( inIPAddress );
-}
-
-//===========================================================================================================================
-//	_SocketWriteAll
-//
-//	Note: This was copied from CoreUtils because the SocketWriteAll function is currently not exported in the framework.
-//===========================================================================================================================
-
-static OSStatus	_SocketWriteAll( SocketRef inSock, const void *inData, size_t inSize, int32_t inTimeoutSecs )
-{
-	OSStatus			err;
-	const uint8_t *		src;
-	const uint8_t *		end;
-	fd_set				writeSet;
-	struct timeval		timeout;
-	ssize_t				n;
-	
-	FD_ZERO( &writeSet );
-	src = (const uint8_t *) inData;
-	end = src + inSize;
-	while( src < end )
-	{
-		FD_SET( inSock, &writeSet );
-		timeout.tv_sec 	= inTimeoutSecs;
-		timeout.tv_usec = 0;
-		n = select( (int)( inSock + 1 ), NULL, &writeSet, NULL, &timeout );
-		if( n == 0 ) { err = kTimeoutErr; goto exit; }
-		err = map_socket_value_errno( inSock, n > 0, n );
-		require_noerr( err, exit );
-		
-		n = send( inSock, (char *) src, (size_t)( end - src ), 0 );
-		err = map_socket_value_errno( inSock, n >= 0, n );
-		if( err == EINTR ) continue;
-		require_noerr( err, exit );
-		
-		src += n;
-	}
-	err = kNoErr;
-	
-exit:
-	return( err );
 }
 
 //===========================================================================================================================
@@ -34068,23 +35808,6 @@ exit:
 }
 
 //===========================================================================================================================
-//	_StringArray_Free
-//
-//	Note: This was copied from CoreUtils because the StringArray_Free function is currently not exported in the framework.
-//===========================================================================================================================
-
-static void	_StringArray_Free( char **inArray, size_t inCount )
-{
-	size_t		i;
-	
-	for( i = 0; i < inCount; ++i )
-	{
-		free( inArray[ i ] );
-	}
-	if( inCount > 0 ) free( inArray );
-}
-
-//===========================================================================================================================
 //	_ParseQuotedEscapedString
 //
 //	Note: This was copied from CoreUtils because it's currently not exported in the framework.
@@ -34466,4 +36189,182 @@ static uint32_t	_FNV1( const void *inData, size_t inSize )
 		hash ^= *src++;
 	}
 	return( hash );
+}
+
+//===========================================================================================================================
+//	_UIint32FromArgString
+//===========================================================================================================================
+
+static OSStatus	_UInt32FromArgString( const char * const inArgStr, const char * const inArgName, uint32_t * const outValue )
+{
+	OSStatus		err;
+	int64_t			i64;
+	
+	i64 = _StringToInt64( inArgStr, &err );
+	require_noerr_quiet( err, exit );
+	require_action_quiet( ( i64 >= 0 ) && ( i64 <= UINT32_MAX ), exit, err = kRangeErr );
+	
+	*outValue = (uint32_t) i64;
+	
+exit:
+	if( err ) FPrintF( stderr, "error: Invalid %s '%s'. Valid range is [0, %u].\n", inArgName, inArgStr, UINT32_MAX );
+	return( err );
+}
+
+//===========================================================================================================================
+//	_UnixTimeToDateAndTimeString
+//===========================================================================================================================
+
+static char *	_UnixTimeToDateAndTimeString( const int64_t inTimeSecs, char * const inBufPtr, const size_t inBufLen )
+{
+	OSStatus		err;
+	
+	// If the number of seconds is representable as a time_t value, then use the standard library functions to create a
+	// local date and time string. If not (e.g., time_t may be a 32-bit signed integer type), then try to create a UTC
+	// date and time string with CoreUtils as a fallback.
+	
+	if( ( (time_t) inTimeSecs ) == inTimeSecs )
+	{
+		struct tm			tm;
+		struct tm *			tmPtr;
+		size_t				len;
+		const time_t		timeSecs = (time_t) inTimeSecs;
+		
+		tmPtr = localtime_r( &timeSecs, &tm );
+		require_action( tmPtr, exit, err = kUnknownErr );
+		
+		// Local date and time in ISO 8601 date, hours, minutes, seconds, and time zone format.
+		
+		len = strftime( inBufPtr, inBufLen, "%Y-%m-%dT%H:%M:%S%z", tmPtr );
+		require_action_quiet( len > 0, exit, err = kUnknownErr );
+	}
+	else
+	{
+		const int64_t		epochSecs	= INT64_C_safe( kDaysToUnixEpoch ) * kSecondsPerDay;
+		const int64_t		year10KSecs	= ( YearToDays( 10000 ) - INT64_C_safe( kDaysToUnixEpoch ) ) * kSecondsPerDay;
+		int					year, month, day, hour, minute, second;
+		
+		// Ensure that the time's year is representable by four digits, i.e., before 10,000 A.D.
+		
+		require_action_quiet( inTimeSecs >= -epochSecs, exit, err = kNotHandledErr );
+		require_action_quiet( inTimeSecs < year10KSecs, exit, err = kNotHandledErr );
+		
+		// UTC date and time in ISO 8601 date, hours, minutes, and seconds format.
+		
+		SecondsToYMD_HMS( epochSecs + inTimeSecs, &year, &month, &day, &hour, &minute, &second );
+		SNPrintF( inBufPtr, inBufLen, "%04d-%02d-%02dT%02d:%02d:%02dZ", year, month, day, hour, minute, second );
+	}
+	err = kNoErr;
+	
+exit:
+	if( err && ( inBufLen > 0 ) ) inBufPtr[ 0 ] = '\0';
+	return( err ? NULL : inBufPtr );
+}
+
+//===========================================================================================================================
+//	_DNSSDSourceVersionToCString
+//===========================================================================================================================
+
+static char *	_DNSSDSourceVersionToCString( const uint32_t inVersion, char * const inBufPtr, const size_t inBufLen )
+{
+	uint32_t		x, y, z;
+	
+	// Version strings are of the form x[.y[.z]].
+	// Newer version strings are encoded as (x * 1000000) + (y * 1000) + z, where 0 ≤ y,z ≤ 999.
+	// Older version strings were encoded as (x * 10000) + (y * 100) + z, where 0 ≤ y,z ≤ 99.
+	
+	if( inVersion > DNS_SD_ORIGINAL_ENCODING_VERSION_NUMBER_MAX )
+	{
+		x =   inVersion / 1000000;
+		y = ( inVersion /    1000 ) % 1000;
+		z =   inVersion             % 1000;
+	}
+	else
+	{
+		x =   inVersion / 10000;
+		y = ( inVersion /   100 ) % 100;
+		z =   inVersion           % 100;
+	}
+	if( z > 0 )			SNPrintF( inBufPtr, inBufLen, "%u.%u.%u", x, y, z );
+	else if( y > 0 )	SNPrintF( inBufPtr, inBufLen, "%u.%u", x, y );
+	else				SNPrintF( inBufPtr, inBufLen, "%u", x );
+	return( inBufPtr );
+}
+
+//===========================================================================================================================
+//	_StdOutIsTTY
+//===========================================================================================================================
+
+static Boolean	_StdOutIsTTY( void )
+{
+	static dispatch_once_t		sOnce	= 0;
+	static Boolean				sIsTTY	= false;
+	
+	dispatch_once( &sOnce,
+	^{
+		sIsTTY = isatty( STDOUT_FILENO ) ? true : false;
+	});
+	return( sIsTTY );
+}
+
+#if( TARGET_OS_IOS )
+//===========================================================================================================================
+//	_StdErrIsTTY
+//===========================================================================================================================
+
+static Boolean	_StdErrIsTTY( void )
+{
+	static dispatch_once_t		sOnce	= 0;
+	static Boolean				sIsTTY	= false;
+	
+	dispatch_once( &sOnce,
+	^{
+		sIsTTY = isatty( STDERR_FILENO ) ? true : false;
+	});
+	return( sIsTTY );
+}
+#endif
+
+//===========================================================================================================================
+//	_PrintValidatedToStdOut
+//===========================================================================================================================
+
+static void	_PrintValidatedToStdOut( const char * const inPrefix, const Boolean inValidated, const char * const inSuffix )
+{
+	FPrintF_safe( stdout, "%s%s%svalidated%s%s",
+		inPrefix,
+		_StdOutIsTTY() ? ( inValidated ? kANSIGreen : kANSIRed ) : "",
+		inValidated ? "" : "not ",
+		_StdOutIsTTY() ? kANSINormal : "",
+		inSuffix );
+}
+
+//===========================================================================================================================
+//	_DNSProtocolIsSecure
+//===========================================================================================================================
+
+static Boolean	_DNSProtocolIsSecure( const DNSProtocol inProtocol )
+{
+	switch( inProtocol )
+	{
+		case kDNSProtocol_Do53:	return( false );
+		case kDNSProtocol_DoT:	return( true );
+		case kDNSProtocol_DoH:	return( true );
+	}
+	return( false );
+}
+
+//===========================================================================================================================
+//	_DNSProtocolToString
+//===========================================================================================================================
+
+static const char *	_DNSProtocolToString( const DNSProtocol inProtocol )
+{
+	switch( inProtocol )
+	{
+		case kDNSProtocol_Do53:	return( kDNSProtocolStr_Do53 );
+		case kDNSProtocol_DoT:	return( kDNSProtocolStr_DoT );
+		case kDNSProtocol_DoH:	return( kDNSProtocolStr_DoH );
+	}
+	return( NULL );
 }

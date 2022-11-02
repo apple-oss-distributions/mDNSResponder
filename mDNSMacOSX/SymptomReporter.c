@@ -86,7 +86,7 @@ mDNSlocal mStatus SymptomReporterReportDNSReachability(const mDNSAddr *addr, mDN
     struct sockaddr_storage sockAddr;
     size_t sockAddrSize;
 
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
         "SymptomReporterReportDNSReachability: DNS server " PRI_IP_ADDR " is " PUB_S "reachable", addr, isReachable ? "" : "un");
 
     if (addr->type == mDNSAddrType_IPv4)

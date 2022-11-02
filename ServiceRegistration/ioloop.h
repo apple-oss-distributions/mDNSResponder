@@ -104,9 +104,6 @@ typedef void (*interface_callback_t)(void *NULLABLE context, const char *NONNULL
                                      const addr_t *NONNULL address, const addr_t *NONNULL netmask,
                                      uint32_t flags, enum interface_address_change event_type);
 typedef void (*subproc_callback_t)(void *NULLABLE context, int status, const char *NULLABLE error);
-#ifdef IOLOOP_MACOS
-typedef bool (*ioloop_xpc_callback_t)(xpc_connection_t NULLABLE conn, xpc_object_t NULLABLE request);
-#endif
 typedef void (*tls_config_callback_t)(void *NONNULL context);
 typedef void (*async_callback_t)(void *NULLABLE context);
 
@@ -196,10 +193,11 @@ struct dso_transport {
     bool read_pending: 1; // Only ever one.
     bool server: 1;       // Indicates that this connection was created by a listener
     bool connection_ready: 1;
-    bool tls_rotation_ready: 1; // Indicates if the listener should rotate its TLS certificate.
+    bool final_data : 1; // Indicates that the next message written will be the final message, so send a FIN.
 #else
     bool tls_handshake_incomplete: 1;
 #endif // IOLOOP_MACOS
+    bool tls_rotation_ready: 1; // Indicates if the listener should rotate its TLS certificate.
     bool tcp_stream: 1;
     bool is_multicast: 1;
     bool is_connected: 1;
@@ -294,6 +292,12 @@ void ioloop_message_release_(message_t *NONNULL message, const char *NONNULL fil
 bool ioloop_send_multicast(comm_t *NONNULL comm, int ifindex, struct iovec *NONNULL iov, int iov_len);
 bool ioloop_send_message(comm_t *NONNULL connection, message_t *NULLABLE responding_to,
                          struct iovec *NONNULL iov, int iov_len);
+bool ioloop_send_final_message(comm_t *NONNULL connection, message_t *NULLABLE responding_to,
+                               struct iovec *NONNULL iov, int iov_len);
+bool ioloop_send_data(comm_t *NONNULL connection, message_t *NULLABLE responding_to,
+                      struct iovec *NONNULL iov, int iov_len);
+bool ioloop_send_final_data(comm_t *NONNULL connection, message_t *NULLABLE responding_to,
+                            struct iovec *NONNULL iov, int iov_len);
 bool ioloop_map_interface_addresses(const char *NULLABLE ifname, void *NULLABLE context, interface_callback_t NULLABLE callback);
 #define ioloop_map_interface_addresses_here(here, ifname, context, callback) \
     ioloop_map_interface_addresses_here_(here, ifname, context, callback, __FILE__, __LINE__)

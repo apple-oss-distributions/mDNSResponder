@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 
 #include "unittest_common.h"
+#include "ApplePlatformFeatures.h"		// For MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
 #include "mDNSEmbeddedAPI.h"			// For DNSDigest-related functions.
 #include <CommonCrypto/CommonHMAC.h>	// For CCHmac* APIs.
 #include <CoreUtils/Base64Utils.h>		// For base64 Base64Decode().
@@ -35,6 +36,7 @@
 }
 
 - (void)testHMACMD5 {
+#if !MDNSRESPONDER_SUPPORTS(APPLE, SECURE_HMAC_ALGORITHM_2022)
 	static const char * const message_to_sign[] = {"", "This is the message to be signed"};
 	static const char hmac_md5_key_base64[] = "okaVQ4ACBE0IwKt+TJrR+w==";
 
@@ -87,6 +89,7 @@
 		// The actual test.
 		XCTAssertTrue(memcmp(cc_hmac, dnsdigest_hmac, CC_MD5_DIGEST_LENGTH) == 0);
 	}
+#endif
 }
 
 @end

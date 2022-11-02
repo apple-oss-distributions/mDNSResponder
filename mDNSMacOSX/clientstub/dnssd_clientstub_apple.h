@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -34,13 +34,20 @@ xpc_object_t
 DNSServiceGetRetainedResolverDefaults(void);
 
 size_t
+get_required_tlv_length_for_validation_attr(const DNSServiceAttribute *attr);
+
+size_t
 get_required_tlv_length_for_defaults(xpc_object_t defaults);
 
 size_t
-get_required_tlv_length_for_query_attr(const DNSServiceQueryAttr *attr);
+get_required_tlv_length_for_service_attr(const DNSServiceAttribute *attr);
+
+const uint8_t *
+get_validation_data_from_tlvs(const uint8_t * const ptr, const uint8_t * const limit, size_t * const length);
+
+void
+put_tlvs_for_validation_attr(const DNSServiceAttribute * const attr, ipc_msg_hdr * const hdr, uint8_t ** const ptr,
+	const uint8_t * const limit);
 
 void
 put_tlvs_for_defaults(xpc_object_t defaults, ipc_msg_hdr *hdr, uint8_t **ptr, const uint8_t *limit);
-
-void
-put_tlvs_for_query_attr(const DNSServiceQueryAttr *attr, ipc_msg_hdr *hdr, uint8_t **ptr, const uint8_t *limit);

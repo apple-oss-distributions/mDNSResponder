@@ -53,6 +53,8 @@
 // comes online.
 #define BR_PREFIX_LIFETIME 30 * 60
 
+#define BR_PREFIX_SLASH_64_BYTES 8
+
 
 #ifndef RTR_SOLICITATION_INTERVAL
 #define RTR_SOLICITATION_INTERVAL       4       /* 4sec */
@@ -98,6 +100,9 @@ struct interface {
 
     // Wakeup event to periodically probe routers for reachability
     wakeup_t *NULLABLE router_probe_wakeup;
+
+    // The route state object to which this interface belongs.
+    route_state_t *NULLABLE route_state;
 
     // List of Router Advertisement messages from different routers.
     icmp_message_t *NULLABLE routers;
@@ -262,6 +267,7 @@ struct icmp_message {
     interface_t *NULLABLE interface;
     icmp_option_t *NULLABLE options;
     wakeup_t *NULLABLE wakeup;
+    route_state_t *NULLABLE route_state;
 
     bool usable;                         // True if this router was usable at the last policy evaluation
     bool reachable;                      // True if this router was reachable when last probed
@@ -291,28 +297,103 @@ struct icmp_message {
     int hop_limit;                  // Hop limit provided by the kernel, must be 255.
 };
 
-extern struct in6_addr ula_prefix;
+typedef struct icmp_listener icmp_listener_t;
+typedef struct thread_prefix thread_prefix_t;
+typedef struct thread_pref_id thread_pref_id_t;
+typedef struct thread_service thread_service_t;
+typedef struct route_state route_state_t;
+typedef struct srp_server_state srp_server_t;
 
-void route_ula_setup(void);
-void route_ula_generate(void);
-bool start_route_listener(void);
+struct route_state {
+    route_state_t *NULLABLE next;
+    const char *NULLABLE name;
+    srp_server_t *NULLABLE srp_server;
+    interface_address_state_t *NULLABLE interface_addresses;
+    struct thread_prefix *NULLABLE thread_prefixes, *NULLABLE published_thread_prefix, *NULLABLE adopted_thread_prefix;
+    struct thread_pref_id *NULLABLE thread_pref_ids;
+    struct thread_service *NULLABLE thread_services;
+
+    // If true, a prefix with L=1, A=0 in an RA with M=1 is treated as usable. The reason it's not treated as
+    // usable by default is that this will break Thread for Android phones on networks where IPv6 is present
+    // but only DHCPv6 is supported.
+    bool config_enable_dhcpv6_prefixes;
+
+    interface_t *NULLABLE interfaces;
+    bool have_thread_prefix;
+    struct in6_addr my_thread_prefix;
+    struct in6_addr srp_listener_ip_address;
+    uint16_t srp_service_listen_port;
+    uint8_t thread_partition_id[4];
+    srp_proxy_listener_state_t *NULLABLE srp_listener;
+    struct in6_addr xpanid_prefix;
+    bool have_xpanid_prefix;
+    int num_thread_interfaces; // Should be zero or one.
+    int ula_serial;
+    subproc_t *NULLABLE thread_interface_enumerator_process;
+    subproc_t *NULLABLE thread_prefix_adder_process;
+    subproc_t *NULLABLE thread_rti_setter_process;
+    subproc_t *NULLABLE thread_forwarding_setter_process;
+    subproc_t *NULLABLE tcpdump_logger_process;
+    char *NULLABLE thread_interface_name;
+    char *NULLABLE home_interface_name;
+    bool have_non_thread_interface;
+    uint64_t xpanid;
+
+#ifndef RA_TESTER
+    cti_network_state_t current_thread_state;
+    cti_connection_t NULLABLE thread_role_context;
+    cti_connection_t NULLABLE thread_state_context;
+    cti_connection_t NULLABLE thread_service_context;
+    cti_connection_t NULLABLE thread_prefix_context;
+    cti_connection_t NULLABLE thread_partition_id_context;
+    cti_connection_t NULLABLE thread_xpanid_context;
+    bool thread_network_running;
+#endif
+
+#if !defined(RA_TESTER)
+    wakeup_t *NULLABLE wpan_reconnect_wakeup;
+#endif !defined(RA_TESTER)
+#if !defined(RA_TESTER)
+    uint64_t partition_last_prefix_set_change;
+    uint64_t partition_last_pref_id_set_change;
+    uint64_t partition_last_partition_id_change;
+    uint64_t partition_last_role_change;
+    uint64_t partition_last_state_change;
+    uint64_t partition_settle_start;
+    uint64_t partition_service_last_add_time;
+    bool partition_id_is_known;
+    bool partition_have_prefix_list;
+    bool partition_have_pref_id_list;
+    bool partition_tunnel_name_is_known;
+    bool partition_can_advertise_service;
+    bool partition_service_blocked;
+    bool partition_can_provide_routing;
+    bool partition_has_xpanid;
+    bool partition_may_offer_service;
+    bool partition_settle_satisfied;
+    wakeup_t *NULLABLE partition_settle_wakeup;
+    wakeup_t *NULLABLE partition_post_partition_wakeup;
+    wakeup_t *NULLABLE partition_pref_id_wait_wakeup;
+    wakeup_t *NULLABLE partition_service_add_pending_wakeup;
+#endif // RA_TESTER
+};
+
+extern srp_server_t *NONNULL srp_server; // temporary static srp server pointer
+
+route_state_t *NULLABLE route_state_create(srp_server_t *NONNULL server_state, const char *NONNULL name);
+void route_ula_setup(route_state_t *NULLABLE route_state);
+void route_ula_generate(route_state_t *NULLABLE route_state);
+bool start_route_listener(route_state_t *NULLABLE route_state);
 bool start_icmp_listener(void);
 void icmp_leave_join(int sock, int ifindex, bool join);
-void route_evaluate_registration(int rrtype, const uint8_t *NONNULL rdata, size_t rdlen);
-
-#define interface_create(name, iface) interface_create_(name, iface, __FILE__, __LINE__)
-interface_t *NULLABLE interface_create_(const char *NONNULL name, int ifindex,
-                                                      const char *NONNULL file, int line);
-#define interface_retain(interface) interface_retain_(interface, __FILE__, __LINE__)
-void interface_retain_(interface_t *NONNULL interface, const char *NONNULL file, int line);
-#define interface_release(interface) interface_release_(interface, __FILE__, __LINE__)
-void interface_release_(interface_t *NONNULL interface, const char *NONNULL file, int line);
-bool interface_monitor_start(void);
-void infrastructure_network_startup(void);
-void infrastructure_network_shutdown(void);
-void partition_stop_advertising_pref_id(void);
-void partition_start_srp_listener(void);
-void partition_publish_my_prefix(void);
+void infrastructure_network_startup(route_state_t *NULLABLE route_state);
+void infrastructure_network_shutdown(route_state_t *NULLABLE route_state);
+void partition_stop_advertising_pref_id(route_state_t *NULLABLE route_state);
+void partition_start_srp_listener(route_state_t *NULLABLE route_state);
+void partition_publish_my_prefix(route_state_t *NULLABLE route_state);
+void partition_discontinue_srp_service(route_state_t *NULLABLE route_state);
+void adv_ctl_add_prefix(route_state_t *NONNULL route_state, const uint8_t *NONNULL data);
+void adv_ctl_remove_prefix(route_state_t *NONNULL route_state, const uint8_t *NONNULL data);
 #endif // __SERVICE_REGISTRATION_ROUTE_H
 
 // Local Variables:

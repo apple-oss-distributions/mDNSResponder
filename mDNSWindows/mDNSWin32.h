@@ -26,13 +26,12 @@
 
 #include	"mDNSEmbeddedAPI.h"
 #include	"uDNS.h"
+#include	"uds_daemon.h"
 
 #ifdef	__cplusplus
 	extern "C" {
 #endif
 
-
-typedef void ( *TCPUserCallback )();
 
 struct TCPSocket_struct
 {
@@ -40,7 +39,8 @@ struct TCPSocket_struct
     TCPSocketFlags              flags;          // MUST BE SECOND FIELD -- mDNSCore expects every TCPSocket_struct have TCPSocketFlags flags after mDNSIPPort
 	SOCKET						fd;
 	BOOL						connected;
-	TCPUserCallback				userCallback;
+	TCPConnectionCallback		tcpConnectionCallback;
+	udsEventCallback			udsEventCallback;
 	void					*	userContext;
 	BOOL						closed;
 	mDNS					*	m;

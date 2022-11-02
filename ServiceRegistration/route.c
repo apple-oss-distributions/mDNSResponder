@@ -74,7 +74,6 @@
 #include "srp.h"
 #include "dns-msg.h"
 #include "ioloop.h"
-#include "route.h"
 #include "adv-ctl-server.h"
 #include "srp-crypto.h"
 
@@ -92,18 +91,19 @@
 #if SRP_FEATURE_NAT64
 #include "nat64-macos.h"
 #endif
+#include "srp-proxy.h"
+#include "route.h"
 
 #ifdef LINUX
 #define CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IFCONFIG 1
 #endif
 
-typedef struct icmp_listener {
+struct icmp_listener {
     io_t *io_state;
     int sock;
     uint32_t unsolicited_interval;
-} icmp_listener_t;
+};
 
-typedef struct thread_prefix thread_prefix_t;
 struct thread_prefix {
     int ref_count;
     thread_prefix_t *next;
@@ -112,9 +112,7 @@ struct thread_prefix {
     bool user, ncp, stable;
     bool previous_user, previous_ncp, previous_stable;
 };
-struct thread_prefix *thread_prefixes, *published_thread_prefix, *adopted_thread_prefix;
 
-typedef struct thread_pref_id thread_pref_id_t;
 struct thread_pref_id {
     int ref_count;
     thread_pref_id_t *next;
@@ -123,9 +121,7 @@ struct thread_pref_id {
     bool user, ncp, stable;
     bool previous_user, previous_ncp, previous_stable;
 };
-struct thread_pref_id *thread_pref_ids;
 
-typedef struct thread_service thread_service_t;
 struct thread_service {
     int ref_count;
     thread_service_t *next;
@@ -134,8 +130,6 @@ struct thread_service {
     bool user, ncp, stable;
     bool previous_user, previous_ncp, previous_stable;
 };
-struct thread_service *thread_services;
-
 
 #ifdef LINUX
 struct in6_addr in6addr_linklocal_allnodes = {{{ 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -144,60 +138,16 @@ struct in6_addr in6addr_linklocal_allrouters = {{{ 0xff, 0x02, 0x00, 0x00, 0x00,
                                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02 }}};
 #endif
 
-// If true, a prefix with L=1, A=0 in an RA with M=1 is treated as usable. The reason it's not treated as
-// usable by default is that this will break Thread for Android phones on networks where IPv6 is present
-// but only DHCPv6 is supported.
-bool config_enable_dhcpv6_prefixes = false;
-
-// If true, we actually want stub router functionality. If false, we don't (yet) have a need for it.
-bool stub_router_needed = false;
-
-interface_t *interfaces;
 icmp_listener_t icmp_listener;
-bool have_thread_prefix = false;
-struct in6_addr my_thread_prefix;
-struct in6_addr srp_listener_ip_address;
-char thread_address_string[INET6_ADDRSTRLEN];
-uint16_t srp_service_listen_port;
-uint8_t thread_partition_id[4];
-srp_proxy_listener_state_t *srp_listener;
-struct in6_addr ula_prefix;
-struct in6_addr xpanid_prefix;
-bool have_xpanid_prefix = false;
-int num_thread_interfaces; // Should be zero or one.
-int ula_serial = 1;
-bool advertise_default_route_on_thread;
-subproc_t *thread_interface_enumerator_process;
-subproc_t *thread_prefix_adder_process;
-subproc_t *thread_rti_setter_process;
-subproc_t *thread_forwarding_setter_process;
-subproc_t *thread_proxy_service_adder_process;
-subproc_t *tcpdump_logger_process;
-char *thread_interface_name;
-char *home_interface_name;
-bool thread_proxy_service_setup_done;
-bool interface_state_stable = false;
-bool have_non_thread_interface = false;
-uint64_t xpanid;
-
-#ifndef RA_TESTER
-cti_network_state_t current_thread_state = kCTI_NCPState_Uninitialized;
-cti_connection_t thread_role_context;
-cti_connection_t thread_state_context;
-cti_connection_t thread_service_context;
-cti_connection_t thread_prefix_context;
-cti_connection_t thread_partition_id_context;
-cti_connection_t thread_xpanid_context;
-static bool thread_network_running = false;
-#endif
-
-#if !defined(RA_TESTER)
-static wakeup_t *wpan_reconnect_wakeup;
-#endif
+route_state_t *route_states;
 
 #define CONFIGURE_STATIC_INTERFACE_ADDRESSES 1
 
-static void refresh_interface_list(void);
+#define interface_create(route_state, name, iface) interface_create_(route_state, name, iface, __FILE__, __LINE__)
+interface_t *NULLABLE interface_create_(route_state_t *NONNULL route_state, const char *NONNULL name, int ifindex,
+                                        const char *NONNULL file, int line);
+
+static void refresh_interface_list(route_state_t *route_state);
 static void router_advertisement_send(interface_t *NONNULL interface, const struct in6_addr *destination);
 static void neighbor_solicit_send(interface_t *interface, struct in6_addr *destination);
 static void icmp_send(uint8_t *NONNULL message, size_t length,
@@ -207,7 +157,7 @@ static void interface_prefix_configure(struct in6_addr prefix, interface_t *NONN
 static void interface_prefix_evaluate(interface_t *interface);
 static void start_router_solicit(interface_t *interface);
 #ifndef RA_TESTER
-static void routing_policy_evaluate_all_interfaces(bool assume_changed);
+static void routing_policy_evaluate_all_interfaces(route_state_t *route_state, bool assume_changed);
 #endif
 static void routing_policy_evaluate(interface_t *interface, bool assume_changed);
 static void post_solicit_policy_evaluate(void *context);
@@ -215,57 +165,60 @@ static void interface_active_state_evaluate(interface_t *interface, bool active_
 static void schedule_next_router_probe(interface_t *interface);
 
 #ifndef RA_TESTER
-static void thread_network_startup(void);
-static void thread_network_shutdown(void);
-static void partition_state_reset(void);
-static void partition_unpublish_prefix(thread_prefix_t *NONNULL prefix);
-static void partition_unpublish_adopted_prefix(bool wait);
-static void partition_adopt_prefix(thread_prefix_t *NONNULL prefix);
-static bool partition_prefix_is_present(struct in6_addr *prefix_addr, int length);
-static bool partition_pref_id_is_present(struct in6_addr *NONNULL prefix_addr);
-static thread_prefix_t *NULLABLE partition_find_lowest_valid_prefix(void);
-static thread_pref_id_t *NULLABLE partition_find_lowest_valid_pref_id(void);
+static void thread_network_startup(route_state_t *route_state);
+static void thread_network_shutdown(route_state_t *route_state);
+static void partition_state_reset(route_state_t *route_state);
+static void partition_unpublish_prefix(route_state_t *route_state, thread_prefix_t *NONNULL prefix);
+static void partition_unpublish_adopted_prefix(route_state_t *route_state, bool wait);
+static void partition_adopt_prefix(route_state_t *route_state, thread_prefix_t *NONNULL prefix);
+static bool partition_prefix_is_present(route_state_t *route_state, struct in6_addr *prefix_addr, int length);
+static bool partition_pref_id_is_present(route_state_t *route_state, struct in6_addr *NONNULL prefix_addr);
+static thread_prefix_t *NULLABLE partition_find_lowest_valid_prefix(route_state_t *route_state);
+static thread_pref_id_t *NULLABLE partition_find_lowest_valid_pref_id(route_state_t *route_state);
 static void partition_pref_id_timeout(void *UNUSED NULLABLE context);
 static void partition_post_election_wakeup(void *UNUSED NULLABLE context);
 static void partition_post_partition_timeout(void *UNUSED NULLABLE context);
-static void partition_discontinue_srp_service(void);
-static void partition_utun0_address_changed(const struct in6_addr *NONNULL addr, enum interface_address_change change);
-static bool partition_wait_for_prefix_settling(wakeup_callback_t NONNULL callback, uint64_t now);
-static void partition_got_tunnel_name(void);
-static void partition_prefix_set_changed(void);
-static void partition_pref_id_set_changed(void);
-static void partition_id_changed(void);
+static void partition_utun0_address_changed(route_state_t *route_state, const struct in6_addr *NONNULL addr, enum interface_address_change change);
+static bool partition_wait_for_prefix_settling(route_state_t *route_state, wakeup_callback_t NONNULL callback, uint64_t now);
+static void partition_got_tunnel_name(route_state_t *route_state);
+static void partition_prefix_set_changed(route_state_t *route_state);
+static void partition_pref_id_set_changed(route_state_t *route_state);
+static void partition_id_changed(route_state_t *route_state);
 static void partition_remove_service_done(void *UNUSED NULLABLE context, cti_status_t status);
-static void partition_stop_advertising_service(void);
+static void partition_stop_advertising_service(route_state_t *route_state);
 static void partition_proxy_listener_ready(void *UNUSED NULLABLE context, uint16_t port);
-static void partition_maybe_advertise_service(void);
-static void partition_service_set_changed(void);
-static void partition_maybe_enable_services(void);
-static void partition_disable_service(void);
-static void partition_schedule_service_add_wakeup(void);
-
-static uint64_t partition_last_prefix_set_change;
-static uint64_t partition_last_pref_id_set_change;
-static uint64_t partition_last_partition_id_change;
-static uint64_t partition_last_role_change;
-static uint64_t partition_last_state_change;
-static uint64_t partition_settle_start;
-static uint64_t partition_service_last_add_time;
-static bool partition_id_is_known;
-static bool partition_have_prefix_list;
-static bool partition_have_pref_id_list;
-static bool partition_tunnel_name_is_known;
-static bool partition_can_advertise_service;
-static bool partition_service_blocked;
-static bool partition_can_provide_routing;
-static bool partition_has_xpanid;
-static bool partition_may_offer_service = false;
-static bool partition_settle_satisfied = true;
-static wakeup_t *partition_settle_wakeup;
-static wakeup_t *partition_post_partition_wakeup;
-static wakeup_t *partition_pref_id_wait_wakeup;
-static wakeup_t *partition_service_add_pending_wakeup;
+static void partition_maybe_advertise_service(route_state_t *route_state);
+static void partition_service_set_changed(route_state_t *route_state);
+static void partition_maybe_enable_services(route_state_t *route_state);
+static void partition_disable_service(route_state_t *route_state);
+static void partition_schedule_service_add_wakeup(route_state_t *route_state);
 #endif
+
+route_state_t *
+route_state_create(srp_server_t *server_state, const char *name)
+{
+    route_state_t *new_route_state = calloc(1, sizeof(*new_route_state));
+    if (new_route_state == NULL || (new_route_state->name = strdup(name)) == NULL) {
+        free(new_route_state);
+        ERROR("no memory for route state.");
+        return NULL;
+    }
+#if !defined(RA_TESTER)
+    new_route_state->thread_network_running = false;
+    new_route_state->partition_may_offer_service = false;
+    new_route_state->partition_settle_satisfied = true;
+    new_route_state->current_thread_state = kCTI_NCPState_Uninitialized;
+#endif
+    new_route_state->have_non_thread_interface = false;
+    new_route_state->ula_serial = 1;
+    new_route_state->have_xpanid_prefix = false;
+    new_route_state->have_thread_prefix = false;
+    new_route_state->config_enable_dhcpv6_prefixes = false;
+    new_route_state->srp_server = server_state; // temporarily communicate the server_state object to route.c with a static assignment.
+    new_route_state->next = route_states;
+    route_states = new_route_state;
+    return new_route_state;
+}
 
 static void
 interface_finalize(void *context)
@@ -298,22 +251,8 @@ interface_finalize(void *context)
     free(interface);
 }
 
-void
-interface_retain_(interface_t *interface, const char *file, int line)
-{
-    (void)file; (void)line;
-    RETAIN(interface);
-}
-
-void
-interface_release_(interface_t *interface, const char *file, int line)
-{
-    (void)file; (void)line;
-    RELEASE(interface, interface_finalize);
-}
-
 interface_t *
-interface_create_(const char *name, int ifindex, const char *file, int line)
+interface_create_(route_state_t *route_state, const char *name, int ifindex, const char *file, int line)
 {
     interface_t *ret;
 
@@ -338,6 +277,7 @@ interface_create_(const char *name, int ifindex, const char *file, int line)
             return NULL;
         }
 
+        ret->route_state = route_state;
         ret->index = ifindex;
         ret->inactive = true;
         if (!strcmp(name, "lo") || !strcmp(name, "wpan0")) {
@@ -670,22 +610,24 @@ static void
 interface_prefix_deconfigure(void *context)
 {
     interface_t *interface = context;
-    INFO("interface_prefix_deconfigure: post solicit wakeup.");
+    INFO("post solicit wakeup.");
 
     if (interface->preferred_lifetime != 0) {
-        INFO("interface_prefix_deconfigure: PUT PREFIX DECONFIGURE CODE HERE!!");
+        INFO("PUT PREFIX DECONFIGURE CODE HERE!!");
         interface->valid_lifetime = 0;
     }
     interface->deprecate_deadline = 0;
 }
 
 static bool
-want_routing(void)
+want_routing(route_state_t *route_state)
 {
 #ifdef RA_TESTER
+    (void)route_state;
     return true;
 #else
-    return partition_can_provide_routing && partition_has_xpanid && stub_router_needed;
+    return (route_state->partition_can_provide_routing &&
+            route_state->partition_has_xpanid);
 #endif
 }
 
@@ -693,15 +635,17 @@ static void
 interface_beacon_send(interface_t *interface, const struct in6_addr *destination)
 {
     uint64_t now = ioloop_timenow();
+#ifndef RA_TESTER
+    route_state_t *route_state = interface->route_state;
+#endif
 
-    INFO(PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
+    INFO(PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
          interface->deprecate_deadline > now ? " ddl>now" : "",
-         stub_router_needed ? " stubn" : " !stubn",
 #ifdef RA_TESTER
          "", "", "",
 #else
-         partition_can_provide_routing ? " canpr" : " !canpr",
-         partition_has_xpanid ? " havexp" : " !havexp",
+         route_state->partition_can_provide_routing ? " canpr" : " !canpr",
+         route_state->partition_has_xpanid ? " havexp" : " !havexp",
          interface->suppress_ipv6_prefix ? " suppress" : " !suppress",
 #endif
          interface->our_prefix_advertised ? " advert" : " !advert",
@@ -734,7 +678,7 @@ interface_beacon_send(interface_t *interface, const struct in6_addr *destination
 #ifndef RA_TESTER
     // If we have been beaconing, and router mode has been disabled, and we don't have
     // an on-link prefix to advertise, discontinue beaconing.
-    if (want_routing() || interface->our_prefix_advertised) {
+    if (want_routing(route_state) || interface->our_prefix_advertised) {
 #endif
 
     // Send an RA.
@@ -753,10 +697,9 @@ interface_beacon_send(interface_t *interface, const struct in6_addr *destination
 
 #ifndef RA_TESTER
     } else {
-        INFO("didn't send: " PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
-             partition_can_provide_routing ? "canpr" : "!canpr",
-             stub_router_needed ? " stubn" : " !stubn",
-             partition_has_xpanid ? " xpanid" : " !xpanid",
+        INFO("didn't send: " PUB_S_SRP PUB_S_SRP PUB_S_SRP,
+             route_state->partition_can_provide_routing ? "canpr" : "!canpr",
+             route_state->partition_has_xpanid ? " route_state->xpanid" : " !route_state->xpanid",
              interface->our_prefix_advertised ? " advert" : " !advert");
     }
 #endif
@@ -852,7 +795,7 @@ flush_stale_routers(interface_t *interface, uint64_t now)
         if (now - router->received_time > MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE)  {
             *p_router = router->next;
             SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, __router_src_addr_buf);
-            INFO("flush_stale_routers: flushing stale router - ifname: " PUB_S_SRP
+            INFO("flushing stale router - ifname: " PUB_S_SRP
                  ", router src: " PRI_SEGMENTED_IPv6_ADDR_SRP, interface->name,
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, __router_src_addr_buf));
             icmp_message_free(router);
@@ -871,7 +814,7 @@ router_discovery_stop(interface_t *interface, uint64_t now)
         return;
     }
     if (!interface->router_discovery_complete) {
-        INFO("router_discovery_stop: stopping router discovery on " PUB_S_SRP, interface->name);
+        INFO("stopping router discovery on " PUB_S_SRP, interface->name);
     }
     if (interface->router_solicit_wakeup != NULL) {
         ioloop_cancel_wake_event(interface->router_solicit_wakeup);
@@ -882,7 +825,7 @@ router_discovery_stop(interface_t *interface, uint64_t now)
 #if SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
     if (interface->vicarious_discovery_complete != NULL) {
         ioloop_cancel_wake_event(interface->vicarious_discovery_complete);
-        INFO("router_discovery_stop: stopping vicarious router discovery on " PUB_S_SRP, interface->name);
+        INFO("stopping vicarious router discovery on " PUB_S_SRP, interface->name);
     }
     interface->vicarious_router_discovery_in_progress = false;
 #endif // SRP_FEATURE_VICARIOUS_ROUTER_DISCOVERY
@@ -909,11 +852,11 @@ adjust_router_received_time(interface_t *const interface, const uint64_t now, co
     if (interface->routers == NULL) {
         if (interface->our_prefix_advertised) {
             SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __ipv6_prefix);
-            INFO("adjust_router_received_time: No router information available for the interface - "
+            INFO("No router information available for the interface - "
                  "ifname: " PUB_S_SRP ", prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
                  interface->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __ipv6_prefix));
         } else {
-            INFO("adjust_router_received_time: No router information available for the interface - "
+            INFO("No router information available for the interface - "
                  "ifname: " PUB_S_SRP, interface->name);
         }
 
@@ -924,7 +867,7 @@ adjust_router_received_time(interface_t *const interface, const uint64_t now, co
         SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, __router_src_addr_buf);
         // Only adjust the received time once.
         if (router->received_time_already_adjusted) {
-            INFO("adjust_router_received_time: received time already adjusted - remaining time: %llu, "
+            INFO("received time already adjusted - remaining time: %llu, "
                   "router src: " PRI_SEGMENTED_IPv6_ADDR_SRP, (now - router->received_time) / MSEC_PER_SEC,
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, __router_src_addr_buf));
             continue;
@@ -936,7 +879,7 @@ adjust_router_received_time(interface_t *const interface, const uint64_t now, co
                   "now: %" PRIu64 ", time_adjusted: %" PRId64, now, time_adjusted));
         router->received_time = now + time_adjusted;
         router->received_time_already_adjusted = true; // Only adjust the icmp message received time once.
-        INFO("adjust_router_received_time: router received time is adjusted - router src: " PRI_SEGMENTED_IPv6_ADDR_SRP
+        INFO("router received time is adjusted - router src: " PRI_SEGMENTED_IPv6_ADDR_SRP
               ", adjusted value: %" PRId64,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, __router_src_addr_buf), time_adjusted);
     }
@@ -969,11 +912,11 @@ vicarious_discovery_callback(void *context)
 
 #ifndef RA_TESTER
 static void
-routing_policy_evaluate_all_interfaces(bool assume_changed)
+routing_policy_evaluate_all_interfaces(route_state_t *route_state, bool assume_changed)
 {
     interface_t *interface;
 
-    for (interface = interfaces; interface; interface = interface->next) {
+    for (interface = route_state->interfaces; interface; interface = interface->next) {
         routing_policy_evaluate(interface, assume_changed);
     }
 }
@@ -998,9 +941,13 @@ stale_router_policy_evaluate(void *context)
 static bool
 prefix_usable(icmp_message_t *router, prefix_information_t *prefix)
 {
+    if (router->interface == NULL) {
+        FAULT("no interface");
+        return false;
+    }
     return ((prefix->flags & ND_OPT_PI_FLAG_ONLINK) &&
             ((prefix->flags & ND_OPT_PI_FLAG_AUTO) ||
-             (config_enable_dhcpv6_prefixes && (router->flags & ND_RA_FLAG_MANAGED))) &&
+             (router->interface->route_state->config_enable_dhcpv6_prefixes && (router->flags & ND_RA_FLAG_MANAGED))) &&
             prefix->preferred_lifetime > 0);
 }
 
@@ -1015,6 +962,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
     uint64_t now = ioloop_timenow();
     bool stale_routers_exist = false;
     uint64_t stale_refresh_time = 0;
+    route_state_t *route_state = interface->route_state;
 
     // No action on interfaces that aren't eligible for routing or that isn't currently active.
     if (interface->ineligible || interface->inactive) {
@@ -1024,7 +972,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
     }
 
     // We can't tell whether any particular prefix is usable until we've gotten the xpanid.
-    if (have_xpanid_prefix) {
+    if (route_state->have_xpanid_prefix) {
         // Look at all the router advertisements we've seen to see if any contain a usable prefix which is not the
         // prefix we'd advertise. Routers advertising that prefix are all Thread BRs, and it's fine for more than
         // one router to advertise a prefix, so we will also advertise it for redundancy.
@@ -1039,7 +987,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
                         // We don't consider the prefix we would advertise to be infrastructure-provided if we see it
                         // advertised by another router, because that router is also a Thread BR, and we don't want
                         // to get into dueling prefixes with it.
-                        if (memcmp(&option->option.prefix_information.prefix, &xpanid_prefix, 8))
+                        if (memcmp(&option->option.prefix_information.prefix, &route_state->xpanid_prefix, 8))
                         {
                             uint32_t preferred_lifetime_offset = MAX_ROUTER_RECEIVED_TIME_GAP_BEFORE_STALE / MSEC_PER_SEC;
                             uint32_t preferred_lifetime = prefix->preferred_lifetime;
@@ -1149,7 +1097,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
         }
     }
 
-    INFO("routing_policy_evaluate: policy on " PUB_S_SRP ": " PUB_S_SRP "stale " /* stale_routers_exist ? */
+    INFO("policy on " PUB_S_SRP ": " PUB_S_SRP "stale " /* stale_routers_exist ? */
          PUB_S_SRP "started " /* interface->router_discovery_started ? */
          PUB_S_SRP "disco " /* interface->router_discovery_complete ? */
          PUB_S_SRP "present " /* on_link_prefix_present ? */
@@ -1177,7 +1125,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
             INFO("starting router discovery");
             router_discovery_start(interface);
         } else {
-            INFO("routing_policy_evaluate: router discovery in progress");
+            INFO("router discovery in progress");
         }
     }
     // If we are advertising a prefix and there's another on-link prefix, deprecate the one we are
@@ -1192,7 +1140,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
             something_changed = true;
             interface->preferred_lifetime = FIVE_MINUTES;
         } else {
-            INFO("routing_policy_evaluate: prefix deprecating in progress - prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+            INFO("prefix deprecating in progress - prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
         }
     }
@@ -1203,7 +1151,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
               interface->preferred_lifetime == 0)) {
 
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
-        INFO("routing_policy_evaluate: advertising prefix again - ifname: " PUB_S_SRP
+        INFO("advertising prefix again - ifname: " PUB_S_SRP
              ", prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP, interface->name,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
 
@@ -1238,7 +1186,7 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
     else if (interface->need_reconfigure_prefix && !on_link_prefix_present && interface->our_prefix_advertised &&
              interface->on_link_prefix_configured && !interface->is_thread) {
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf);
-        INFO("routing_policy_evaluate: reconfigure ipv6 prefix due to possible network changes -"
+        INFO("reconfigure ipv6 prefix due to possible network changes -"
              " prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, __prefix_buf));
         interface_prefix_configure(interface->ipv6_prefix, interface);
@@ -1336,7 +1284,7 @@ start_vicarious_router_discovery_if_appropriate(interface_t *const interface)
         // on vicarious discovery.  If we got any router advertisements, these will not be
         // stale, and that means vicarious discovery succeeded.
         make_all_routers_nearly_stale(interface, ioloop_timenow());
-        INFO("start_vicarious_router_discovery_if_appropriate: Starting vicarious router discovery on " PUB_S_SRP,
+        INFO("Starting vicarious router discovery on " PUB_S_SRP,
              interface->name);
     }
 }
@@ -1459,7 +1407,7 @@ router_solicit(icmp_message_t *message)
         }
     } else {
         // Make sure it's not from this host
-        for (iface = interfaces; iface; iface = iface->next) {
+        for (iface = message->route_state->interfaces; iface; iface = iface->next) {
             if (iface->have_link_layer_address && !memcmp(&message->source,
                                                           &iface->link_local, sizeof(message->source))) {
                 INFO("dropping router solicitation sent from this host.");
@@ -1542,7 +1490,7 @@ router_advertisement(icmp_message_t *message)
         icmp_message_free(message);
         return;
     }
-    for (iface = interfaces; iface != NULL; iface = iface->next) {
+    for (iface = message->route_state->interfaces; iface != NULL; iface = iface->next) {
         if (iface->have_link_layer_address && !memcmp(&message->source,
                                                       &iface->link_local, sizeof(message->source))) {
             INFO("dropping router advertisement sent from this host.");
@@ -1700,41 +1648,22 @@ neighbor_advertisement(icmp_message_t *message)
     return;
 }
 
-#ifndef FUZZING
-static
-#endif
-void
-icmp_callback(io_t *NONNULL io, void *UNUSED context)
+static void
+icmp_message(route_state_t *route_state, uint8_t *icmp_buf, unsigned length, int ifindex, int hop_limit, addr_t *src, addr_t *dest)
 {
-    ssize_t rv;
-    uint8_t icmp_buf[1500];
-    unsigned offset = 0, length = 0;
+    unsigned offset = 0;
     uint32_t reserved32;
-    int ifindex = 0;
-    addr_t src, dest;
     interface_t *interface;
-    int hop_limit = 0;
-
-#ifndef FUZZING
-    rv = ioloop_recvmsg(io->fd, &icmp_buf[0], sizeof(icmp_buf), &ifindex, &hop_limit, &src, &dest);
-#else
-    rv = read(io->fd, &icmp_buf, sizeof(icmp_buf));
-#endif
-    if (rv < 0) {
-        ERROR("icmp_callback: can't read ICMP message: " PUB_S_SRP, strerror(errno));
-        return;
-    }
-
     icmp_message_t *message = calloc(1, sizeof(*message));
     if (message == NULL) {
         ERROR("Unable to allocate icmp_message_t for parsing");
         return;
     }
 
-    message->source = src.sin6.sin6_addr;
-    message->destination = dest.sin6.sin6_addr;
+    message->source = src->sin6.sin6_addr;
+    message->destination = dest->sin6.sin6_addr;
     message->hop_limit = hop_limit;
-    for (interface = interfaces; interface; interface = interface->next) {
+    for (interface = route_state->interfaces; interface; interface = interface->next) {
         if (interface->index == ifindex) {
             message->interface = interface;
             break;
@@ -1743,6 +1672,7 @@ icmp_callback(io_t *NONNULL io, void *UNUSED context)
     message->received_time = ioloop_timenow();
     message->received_time_already_adjusted = false;
     message->new_router = true;
+    message->route_state = route_state;
 
     if (message->interface == NULL) {
         SEGMENTED_IPv6_ADDR_GEN_SRP(message->source.s6_addr, src_buf);
@@ -1755,13 +1685,12 @@ icmp_callback(io_t *NONNULL io, void *UNUSED context)
         return;
     }
 
-    length = (unsigned)rv;
     if (length < sizeof (struct icmp6_hdr)) {
-        ERROR("Short ICMP message: length %zd is shorter than ICMP header length %zd", rv, sizeof(struct icmp6_hdr));
+        ERROR("Short ICMP message: length %d is shorter than ICMP header length %zd", length, sizeof(struct icmp6_hdr));
         icmp_message_free(message);
         return;
     }
-    INFO("length %zd", rv);
+    INFO("length %d", length);
 
     // The increasingly innaccurately named dns parse functions will work fine for this.
     if (!dns_u8_parse(icmp_buf, length, &offset, &message->type)) {
@@ -1829,6 +1758,32 @@ out:
     return;
 }
 
+#ifndef FUZZING
+static
+#endif
+void
+icmp_callback(io_t *NONNULL io, void *UNUSED context)
+{
+    ssize_t rv;
+    uint8_t icmp_buf[1500];
+    int ifindex = 0;
+    addr_t src, dest;
+    int hop_limit = 0;
+
+#ifndef FUZZING
+    rv = ioloop_recvmsg(io->fd, &icmp_buf[0], sizeof(icmp_buf), &ifindex, &hop_limit, &src, &dest);
+#else
+    rv = read(io->fd, &icmp_buf, sizeof(icmp_buf));
+#endif
+    if (rv < 0) {
+        ERROR("icmp_callback: can't read ICMP message: " PUB_S_SRP, strerror(errno));
+        return;
+    }
+    for (route_state_t *route_state = route_states; route_state != NULL; route_state = route_state->next) {
+        icmp_message(route_state, icmp_buf, (unsigned)rv, ifindex, hop_limit, &src, &dest); // rv will never be > sizeof(icmp_buf)
+    }
+}
+
 #if   defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG) || \
       defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IFCONFIG)
 static void
@@ -1853,6 +1808,7 @@ static void
 interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
 {
     int sock;
+    route_state_t *route_state = interface->route_state;
 
     sock = socket(PF_INET6, SOCK_DGRAM, 0);
     if (sock < 0) {
@@ -1864,7 +1820,7 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
     struct in6_addr interface_address = prefix;
     char addrbuf[INET6_ADDRSTRLEN + 4];
     // Use our ULA prefix as the host identifier.
-    memcpy(&interface_address.s6_addr[10], &ula_prefix.s6_addr[0], 6);
+    memcpy(&interface_address.s6_addr[10], &route_state->srp_server->ula_prefix.s6_addr[0], 6);
     inet_ntop(AF_INET6, &interface_address, addrbuf, INET6_ADDRSTRLEN);
 #if   defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG)
     char *args[] = { "set", interface->name, "MANUAL-V6", addrbuf, "64" };
@@ -1873,7 +1829,7 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
         ERROR("interface_prefix_configure: " PUB_S_SRP " already configuring the route.", interface->name);
         return;
     }
-    INFO("interface_prefix_configure: /sbin/ipconfig " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " "
+    INFO("/sbin/ipconfig " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " "
          PUB_S_SRP, args[0], args[1], args[2], args[3], args[4]);
     interface->link_route_adder_process = ioloop_subproc("/usr/sbin/ipconfig", args, 5, link_route_done, interface, NULL);
     if (interface->link_route_adder_process == NULL) {
@@ -1892,7 +1848,7 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
         ERROR("interface_prefix_configure: " PUB_S_SRP " already configuring the route.", interface->name);
         return;
     }
-    INFO("interface_prefix_configure: /sbin/ifconfig %s %s %s", args[0], args[1], args[2]);
+    INFO("/sbin/ifconfig %s %s %s", args[0], args[1], args[2]);
     interface->link_route_adder_process = ioloop_subproc("/sbin/ifconfig", args, 3, link_route_done, NULL, interface);
     if (interface->link_route_adder_process == NULL) {
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface_address.s6_addr, if_addr_buf);
@@ -1923,7 +1879,7 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
               strerror(errno));
     } else {
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface_address.s6_addr, if_addr_buf);
-        INFO("interface_prefix_configure: added address " PRI_SEGMENTED_IPv6_ADDR_SRP " to " PUB_S_SRP,
+        INFO("added address " PRI_SEGMENTED_IPv6_ADDR_SRP " to " PUB_S_SRP,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(interface_address.s6_addr, if_addr_buf), interface->name);
     }
 #endif // CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG
@@ -1933,34 +1889,6 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
     close(sock);
 }
 
-#ifdef USE_SYSCTL_COMMAND_TO_ENABLE_FORWARDING
-static void
-thread_forwarding_done(void *UNUSED context, int status, const char *error)
-{
-    if (error != NULL) {
-        ERROR("thread_forwarding_done: " PUB_S_SRP, error);
-    } else {
-        INFO("thread_forwarding_done: %d.", status);
-    }
-    ioloop_subproc_release(thread_forwarding_setter_process);
-    thread_forwarding_setter_process = NULL;
-}
-
-static void
-set_thread_forwarding(void)
-{
-    char *args[] = { "-w", "net.inet6.ip6.forwarding=1" };
-
-    INFO("/usr/sbin/sysctl " PUB_S_SRP " " PUB_S_SRP, args[0], args[1]);
-    thread_forwarding_setter_process = ioloop_subproc("/usr/sbin/sysctl", args, 2, thread_forwarding_done,
-                                                      NULL, NULL);
-    if (thread_forwarding_setter_process == NULL) {
-        ERROR("Unable to set thread forwarding enabled.");
-    }
-}
-
-#else
-
 static void
 set_thread_forwarding(void)
 {
@@ -1968,13 +1896,13 @@ set_thread_forwarding(void)
     const char *procfile = "/proc/sys/net/ipv6/conf/all/forwarding";
     int fd = open(procfile, O_WRONLY);
     if (fd < 0) {
-        ERROR("set_thread_forwarding: %s: %s", procfile, strerror(errno));
+        ERROR("%s: %s", procfile, strerror(errno));
     } else {
         ssize_t ret = write(fd, "1", 1);
         if (ret < 0) {
-            ERROR("set_thread_forwarding: write: %s", strerror(errno));
+            ERROR("write: %s", strerror(errno));
         } else if (ret != 1) {
-            ERROR("set_thread_forwarding: invalid write: %zd", ret);
+            ERROR("invalid write: %zd", ret);
         }
         close(fd);
     }
@@ -1982,34 +1910,35 @@ set_thread_forwarding(void)
     int wun = 1;
     int ret = sysctlbyname("net.inet6.ip6.forwarding", NULL, 0, &wun, sizeof(wun));
     if (ret < 0) {
-        ERROR("set_thread_forwarding: " PUB_S_SRP, strerror(errno));
+        ERROR(PUB_S_SRP, strerror(errno));
     } else {
         INFO("Enabled IPv6 forwarding.");
     }
 #endif
 }
-#endif // USE_SYSCTL_COMMAND_TO_ENABLE_FORWARDING
 
 #ifdef NEED_THREAD_RTI_SETTER
 static void
 thread_rti_done(void *UNUSED context, int status, const char *error)
 {
+    route_state_t *route_state = context;
+
     if (error != NULL) {
         ERROR("thread_rti_done: " PUB_S_SRP, error);
     } else {
-        INFO("thread_rti_done: %d.", status);
+        INFO("%d.", status);
     }
-    ioloop_subproc_release(thread_rti_setter_process);
-    thread_rti_setter_process = NULL;
+    ioloop_subproc_release(route_state->thread_rti_setter_process);
+    route_state->thread_rti_setter_process = NULL;
 }
 
 static void
-set_thread_rti(void)
+set_thread_rti(route_state_t *route_state)
 {
     char *args[] = { "-w", "net.inet6.icmp6.nd6_process_rti=1" };
-    thread_rti_setter_process = ioloop_subproc("/usr/sbin/sysctl", args, 2, thread_rti_done,
-                                               NULL, NULL);
-    if (thread_rti_setter_process == NULL) {
+    route_state->thread_rti_setter_process = ioloop_subproc("/usr/sbin/sysctl", args, 2, thread_rti_done,
+                                               NULL, route_state);
+    if (route_state->thread_rti_setter_process == NULL) {
         ERROR("Unable to set thread rti enabled.");
     }
 }
@@ -2018,31 +1947,34 @@ set_thread_rti(void)
 #if defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
 #ifdef ADD_PREFIX_WITH_WPANCTL
 static void
-thread_prefix_done(void *UNUSED context, int status, const char *error)
+thread_prefix_done(void *context, int status, const char *error)
 {
+    route_state_t *route_state = context;
+
     if (error != NULL) {
         ERROR("thread_prefix_done: " PUB_S_SRP, error);
     } else {
         interface_t *interface;
 
-        INFO("thread_prefix_done: %d.", status);
-        for (interface = interfaces; interface; interface = interface->next) {
+        INFO("%d.", status);
+        for (interface = route_state->interfaces; interface; interface = interface->next) {
             if (!interface->inactive) {
                 interface_beacon_schedule(interface, 0);
             }
         }
     }
-    ioloop_subproc_release(thread_prefix_adder_process);
-    thread_prefix_adder_process = NULL;
+    ioloop_subproc_release(route_state->thread_prefix_adder_process);
+    route_state->thread_prefix_adder_process = NULL;
 }
 #endif
 
 static void
-cti_add_prefix_callback(void *UNUSED context, cti_status_t status)
+cti_add_prefix_callback(void *context, cti_status_t status)
 {
+    route_state_t *route_state = context;
     interface_t *interface;
-    INFO("cti_add_prefix_callback: %d", status);
-    for (interface = interfaces; interface; interface = interface->next) {
+    INFO("%d", status);
+    for (interface = route_state->interfaces; interface; interface = interface->next) {
         if (!interface->inactive) {
             interface_beacon_schedule(interface, 0);
         }
@@ -2050,21 +1982,21 @@ cti_add_prefix_callback(void *UNUSED context, cti_status_t status)
 }
 
 static thread_prefix_t *
-get_advertised_thread_prefix(void)
+get_advertised_thread_prefix(route_state_t *route_state)
 {
-    if (published_thread_prefix != NULL) {
-        return published_thread_prefix;
+    if (route_state->published_thread_prefix != NULL) {
+        return route_state->published_thread_prefix;
     } else {
-        return adopted_thread_prefix;
+        return route_state->adopted_thread_prefix;
     }
     return NULL;
 }
 
 static void
-set_thread_prefix(void)
+set_thread_prefix(route_state_t *route_state)
 {
     char addrbuf[INET6_ADDRSTRLEN];
-    thread_prefix_t *advertised_thread_prefix = get_advertised_thread_prefix();
+    thread_prefix_t *advertised_thread_prefix = get_advertised_thread_prefix(route_state);
     if (advertised_thread_prefix == NULL) {
         ERROR("set_thread_prefix: no advertised thread prefix.");
         return;
@@ -2076,15 +2008,15 @@ set_thread_prefix(void)
     INFO("/usr/local/bin/wpanctl " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " " PUB_S_SRP " "
          PRI_SEGMENTED_IPv6_ADDR_SRP, args[0], args[1], args[2], args[3], args[4], args[5],
          SEGMENTED_IPv6_ADDR_PARAM_SRP(advertised_thread_prefix->prefix.s6_addr, thread_prefix_buf));
-    thread_prefix_adder_process = ioloop_subproc("/usr/local/bin/wpanctl", args, 7, thread_prefix_done,
+    route_state->thread_prefix_adder_process = ioloop_subproc("/usr/local/bin/wpanctl", args, 7, thread_prefix_done,
                                                  NULL, NULL);
-    if (thread_prefix_adder_process == NULL) {
+    if (route_state->thread_prefix_adder_process == NULL) {
         ERROR("Unable to add thread interface prefix.");
     }
 #else
     INFO("add_prefix(true, true, true, true, " PRI_SEGMENTED_IPv6_ADDR_SRP ")",
          SEGMENTED_IPv6_ADDR_PARAM_SRP(advertised_thread_prefix->prefix.s6_addr, thread_prefix_buf));
-    int status = cti_add_prefix(NULL, cti_add_prefix_callback, NULL,
+    int status = cti_add_prefix(route_state, cti_add_prefix_callback, NULL,
                                 &advertised_thread_prefix->prefix, advertised_thread_prefix->prefix_len,
                                 true, true, true, true);
     if (status != kCTIStatus_NoError) {
@@ -2099,6 +2031,7 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
 {
     uint8_t *message;
     dns_towire_state_t towire;
+    route_state_t *route_state = interface->route_state;
 
     // Thread blocks RAs so no point sending them.
     if (interface->inactive
@@ -2135,7 +2068,7 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
 #else
 #ifdef RA_TESTER
     // Advertise a default route on the simulated thread network
-    if (!strcmp(interface->name, thread_interface_name)) {
+    if (!strcmp(interface->name, route_state->thread_interface_name)) {
         dns_u16_to_wire(&towire, BR_PREFIX_LIFETIME); // Router lifetime for default route
     } else {
 #endif
@@ -2152,7 +2085,7 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
         dns_u8_to_wire(&towire, ND_OPT_SOURCE_LINKADDR);
         dns_u8_to_wire(&towire, 1); // length / 8
         dns_rdata_raw_data_to_wire(&towire, &interface->link_layer, sizeof(interface->link_layer));
-        INFO("router_advertisement_send: advertising source lladdr " PRI_MAC_ADDR_SRP
+        INFO("advertising source lladdr " PRI_MAC_ADDR_SRP
              " on " PUB_S_SRP, MAC_ADDR_PARAM_SRP(interface->link_layer), interface->name);
     }
 
@@ -2162,7 +2095,7 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
         dns_u8_to_wire(&towire, ND_OPT_MTU);
         dns_u8_to_wire(&towire, 1); // length / 8
         dns_u32_to_wire(&towire, 1280);
-        INFO("router_advertisement_send: advertising MTU of 1280 on " PUB_S_SRP, interface->name);
+        INFO("advertising MTU of 1280 on " PUB_S_SRP, interface->name);
     }
 #endif
 
@@ -2177,7 +2110,7 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
         dns_u32_to_wire(&towire, 0); // Reserved
         dns_rdata_raw_data_to_wire(&towire, &interface->ipv6_prefix, sizeof interface->ipv6_prefix);
         SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, ipv6_prefix_buf);
-        INFO("router_advertisement_send: advertising on-link prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " on " PUB_S_SRP,
+        INFO("advertising on-link prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " on " PUB_S_SRP,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, ipv6_prefix_buf), interface->name);
 
     }
@@ -2199,11 +2132,11 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
 #if defined (ROUTE_BETWEEN_NON_THREAD_LINKS) || defined(RA_TESTER)
     interface_t *ifroute;
     // Send Route Information option for other interfaces.
-    for (ifroute = interfaces; ifroute; ifroute = ifroute->next) {
+    for (ifroute = route_state->interfaces; ifroute; ifroute = ifroute->next) {
         if (ifroute->inactive) {
             continue;
         }
-        if (want_routing() &&
+        if (want_routing(route_state) &&
             ifroute->our_prefix_advertised &&
 #ifdef SEND_ON_LINK_ROUTE
             // In theory we don't want to send RIO for the on-link prefix, but there's this bug, see.
@@ -2214,7 +2147,7 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
 #ifdef RA_TESTER
             // For the RA tester, we don't need to send an RIO to the thread network because we're the
             // default router for that network.
-            strcmp(interface->name, thread_interface_name)
+            strcmp(interface->name, route_state->thread_interface_name)
 #else
             true
 #endif
@@ -2236,7 +2169,7 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
 
 #ifndef RA_TESTER
     // Send route information option for thread prefix
-    thread_prefix_t *advertised_thread_prefix = get_advertised_thread_prefix();
+    thread_prefix_t *advertised_thread_prefix = get_advertised_thread_prefix(route_state);
     if (advertised_thread_prefix != NULL) {
         dns_u8_to_wire(&towire, ND_OPT_ROUTE_INFORMATION);
         dns_u8_to_wire(&towire, 2); // length / 8
@@ -2247,7 +2180,7 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
         SEGMENTED_IPv6_ADDR_GEN_SRP(advertised_thread_prefix->prefix.s6_addr, thread_prefix_buf);
         INFO("Sending route to " PRI_SEGMENTED_IPv6_ADDR_SRP "%%" PUB_S_SRP " on " PUB_S_SRP,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(advertised_thread_prefix->prefix.s6_addr, thread_prefix_buf),
-             thread_interface_name, interface->name);
+             route_state->thread_interface_name, interface->name);
     }
 #endif
 #else
@@ -2257,7 +2190,7 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
     dns_u8_to_wire(&towire, 48); // ULA prefixes are always 48 bits
     dns_u8_to_wire(&towire, 0); // There's no reason at present to prefer one Thread BR over another
     dns_u32_to_wire(&towire, BR_PREFIX_LIFETIME); // Route lifetime 1800 seconds (30 minutes)
-    dns_rdata_raw_data_to_wire(&towire, &ula_prefix, 16); // /48 requires 16 bytes
+    dns_rdata_raw_data_to_wire(&towire, &route_state->srp_server->ula_prefix, 16); // /48 requires 16 bytes
 #endif // SKIP_SLASH_48
 #endif // SEND_INTERFACE_SPECIFIC_RIOS
 
@@ -2462,7 +2395,6 @@ post_solicit_policy_evaluate(void *context)
     interface->need_reconfigure_prefix = false;
 }
 
-
 static void
 ula_record(const char *ula_printable)
 {
@@ -2477,15 +2409,15 @@ ula_record(const char *ula_printable)
 }
 
 void
-route_ula_generate(void)
+route_ula_generate(route_state_t *route_state)
 {
     char ula_prefix_buffer[INET6_ADDRSTRLEN];
-    struct in6_addr old_ula_prefix;
+    struct in6_addr ula_prefix, old_ula_prefix;
     bool prefix_changed;
 
     // Already have a prefix?
-    if (ula_prefix.s6_addr[0] == 0xfd) {
-        old_ula_prefix = ula_prefix;
+    if (route_state->srp_server->ula_prefix.s6_addr[0] == 0xfd) {
+        old_ula_prefix = route_state->srp_server->ula_prefix;
         prefix_changed = true;
     } else {
         prefix_changed = false;
@@ -2511,17 +2443,18 @@ route_ula_generate(void)
     }
 
     // Set up the thread prefix.
-    my_thread_prefix = ula_prefix;
-    have_thread_prefix = true;
+    route_state->my_thread_prefix = ula_prefix;
+    route_state->srp_server->ula_prefix = ula_prefix;
+    route_state->have_thread_prefix = true;
 #if SRP_FEATURE_NAT64
-    if (srp_nat64_enabled) {
+    if (route_state->srp_server->srp_nat64_enabled) {
         nat64_set_ula_prefix(&ula_prefix);
     }
 #endif
 }
 
 void
-route_ula_setup(void)
+route_ula_setup(route_state_t *route_state)
 {
     bool have_stored_ula_prefix = false;
 
@@ -2529,7 +2462,7 @@ route_ula_setup(void)
     uint16_t length;
     if (srp_load_file_data(NULL, THREAD_ULA_FILE, (uint8_t *)ula_buf, &length, sizeof(ula_buf) - 1)) {
         ula_buf[length] = 0;
-        if (inet_pton(AF_INET6, ula_buf, &ula_prefix)) {
+        if (inet_pton(AF_INET6, ula_buf, &route_state->srp_server->ula_prefix)) {
             have_stored_ula_prefix = true;
         } else {
             INFO("ula prefix %.*s is not valid", length, ula_buf);
@@ -2540,19 +2473,18 @@ route_ula_setup(void)
 
     // If we didn't already successfully fetch a stored prefix, try to store one.
     if (!have_stored_ula_prefix) {
-        route_ula_generate();
+        route_ula_generate(route_state);
     } else {
         // Set up the thread prefix.
-        my_thread_prefix = ula_prefix;
-        have_thread_prefix = true;
+        route_state->my_thread_prefix = route_state->srp_server->ula_prefix;
+        route_state->have_thread_prefix = true;
 #if SRP_FEATURE_NAT64
-        if (srp_nat64_enabled) {
-            nat64_set_ula_prefix(&ula_prefix);
+        if (route_state->srp_server->srp_nat64_enabled) {
+            nat64_set_ula_prefix(&route_state->srp_server->ula_prefix);
         }
 #endif
     }
 }
-
 
 bool
 start_icmp_listener(void)
@@ -2714,11 +2646,11 @@ icmp_interface_subscribe(interface_t *interface, bool added)
 }
 
 static interface_t *
-find_interface(const char *name, int ifindex)
+find_interface(route_state_t *route_state, const char *name, int ifindex)
 {
     interface_t **p_interface, *interface = NULL;
 
-    for (p_interface = &interfaces; *p_interface; p_interface = &(*p_interface)->next) {
+    for (p_interface = &route_state->interfaces; *p_interface; p_interface = &(*p_interface)->next) {
         interface = *p_interface;
         if (!strcmp(name, interface->name)) {
             if (ifindex != -1 && interface->index != ifindex) {
@@ -2732,9 +2664,9 @@ find_interface(const char *name, int ifindex)
     // If it's a new interface, make a structure.
     // We could do a callback, but don't have a use case
     if (*p_interface == NULL) {
-        interface = interface_create(name, ifindex);
+        interface = interface_create(route_state, name, ifindex);
         if (interface != NULL) {
-            if (thread_interface_name != NULL && !strcmp(name, thread_interface_name)) {
+            if (route_state->thread_interface_name != NULL && !strcmp(name, route_state->thread_interface_name)) {
                 interface->is_thread = true;
             }
             *p_interface = interface;
@@ -2796,13 +2728,15 @@ interface_shutdown(interface_t *interface)
 static void
 interface_prefix_evaluate(interface_t *interface)
 {
+    route_state_t *route_state = interface->route_state;
     // Set up the interface prefix using the prefix number for the link.
-    interface->ipv6_prefix = xpanid_prefix;
+    interface->ipv6_prefix = route_state->xpanid_prefix;
 }
 
 static void
 interface_active_state_evaluate(interface_t *interface, bool active_known, bool active)
 {
+    route_state_t *route_state = interface->route_state;
     INFO("evaluating interface active status - ifname: " PUB_S_SRP
          ", active_known: " PUB_S_SRP ", active: " PUB_S_SRP ", inactive: " PUB_S_SRP,
          interface->name, active_known ? "true" : "false", active ? "true" : "false",
@@ -2812,22 +2746,22 @@ interface_active_state_evaluate(interface_t *interface, bool active_known, bool 
         if (!interface->inactive) {
 #ifndef RA_TESTER
             bool active_infrastructure = false;
-            for (interface_t *scan = interfaces; scan != NULL; scan = scan->next) {
+            for (interface_t *scan = route_state->interfaces; scan != NULL; scan = scan->next) {
                 if (scan != interface && !scan->inactive && !scan->ineligible) {
                     active_infrastructure = true;
                 }
             }
             // Don't be a border router if there is no infrastructure interface left.
-            if (thread_network_running && !active_infrastructure && !interface->inactive && !interface->ineligible) {
+            if (route_state->thread_network_running && !active_infrastructure && !interface->inactive && !interface->ineligible) {
                 INFO("interface " PUB_S_SRP " went away, and there is no other infrastructure interface: shutting down thread network",
                      interface->name);
 
-                thread_network_shutdown();
+                thread_network_shutdown(route_state);
             } else {
                 INFO("interface " PUB_S_SRP " went away, "
                      PUB_S_SRP "thread " PUB_S_SRP "infra " PUB_S_SRP "inactive " PUB_S_SRP "ineligible.",
                      interface->name,
-                     thread_network_running ? "" : "!", active_infrastructure ? "" : "!",
+                     route_state->thread_network_running ? "" : "!", active_infrastructure ? "" : "!",
                      interface->inactive ? "" : "!", interface->ineligible ? "" : "!");
             }
 #else // RA_TESTER
@@ -2858,28 +2792,32 @@ interface_active_state_evaluate(interface_t *interface, bool active_known, bool 
         if (interface->inactive) {
 #ifndef RA_TESTER
             bool active_infrastructure = false;
-            for (interface_t *scan = interfaces; scan != NULL; scan = scan->next) {
+            for (interface_t *scan = route_state->interfaces; scan != NULL; scan = scan->next) {
                 if (scan != interface && !scan->inactive && !scan->ineligible) {
                     active_infrastructure = true;
                 }
             }
             // If this is the first infrastructure interface to show up, start the thread network
-            if (!thread_network_running && !active_infrastructure && interface->inactive && !interface->ineligible) {
+            if (!route_state->thread_network_running &&
+                !active_infrastructure && interface->inactive && !interface->ineligible)
+            {
                 INFO("interface " PUB_S_SRP " showed up, and there is no other infrastructure interface: starting thread network",
                      interface->name);
-                thread_network_startup();
+                thread_network_startup(route_state);
             } else {
                 INFO("interface " PUB_S_SRP " showed up, "
                      PUB_S_SRP "thread " PUB_S_SRP "infra " PUB_S_SRP "inactive " PUB_S_SRP "ineligible.",
                      interface->name,
-                     thread_network_running ? "" : "!", active_infrastructure ? "" : "!",
+                     route_state->thread_network_running ? "" : "!", active_infrastructure ? "" : "!",
                      interface->inactive ? "" : "!", interface->ineligible ? "" : "!");
             }
 #else // !RA_TESTER
             INFO("interface " PUB_S_SRP " showed up.", interface->name);
 #endif
 #ifdef RA_TESTER
-            if (!strcmp(interface->name, thread_interface_name) || !strcmp(interface->name, home_interface_name)) {
+            if (!strcmp(interface->name, route_state->thread_interface_name) ||
+                !strcmp(interface->name, route_state->home_interface_name))
+            {
 #endif
                 // Zero IPv4 addresses.
                 interface->num_ipv4_addresses = 0;
@@ -2888,12 +2826,12 @@ interface_active_state_evaluate(interface_t *interface, bool active_known, bool 
                 interface->inactive = false;
 
                 interface_prefix_evaluate(interface);
-                if (want_routing()) {
+                if (want_routing(route_state)) {
                     INFO("starting router discovery");
                     router_discovery_start(interface);
 
                     // If we already have a thread prefix, trigger beaconing now.
-                    if (published_thread_prefix != NULL || adopted_thread_prefix != NULL) {
+                    if (route_state->published_thread_prefix != NULL || route_state->adopted_thread_prefix != NULL) {
                         interface_beacon_schedule(interface, 0);
                     } else {
                         INFO("No prefix on thread network, so not scheduling beacon.");
@@ -2912,21 +2850,22 @@ interface_active_state_evaluate(interface_t *interface, bool active_known, bool 
 
 
 static void
-ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, const addr_t *mask,
+ifaddr_callback(void *context, const char *name, const addr_t *address, const addr_t *mask,
                 unsigned flags, enum interface_address_change change)
 {
     char addrbuf[INET6_ADDRSTRLEN];
     const uint8_t *addrbytes, *maskbytes, *prefp;
     int preflen, i;
     interface_t *interface;
+    route_state_t *route_state = context;
 
 #ifndef POSIX_BUILD
-    interface = find_interface(name, -1);
+    interface = find_interface(route_state, name, -1);
 #else
-    interface = find_interface(name, if_nametoindex(name));
+    interface = find_interface(route_state, name, if_nametoindex(name));
 #endif
     if (interface == NULL) {
-        ERROR("ifaddr_callback: find_interface returned NULL for " PUB_S_SRP, name);
+        ERROR("find_interface returned NULL for " PUB_S_SRP, name);
         return;
     }
 
@@ -2970,7 +2909,7 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
         addrbytes = NULL;
 #endif
     } else {
-        INFO("ifaddr_callback: Unknown address type %d", address->sa.sa_family);
+        INFO("Unknown address type %d", address->sa.sa_family);
         return;
     }
 
@@ -2978,7 +2917,7 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
 #ifndef LINUX
         if (address->sa.sa_family == AF_LINK) {
             if (!interface->ineligible) {
-                INFO("ifaddr_callback: interface " PUB_S_SRP PUB_S_SRP " " PUB_S_SRP " " PRI_MAC_ADDR_SRP " flags %x",
+                INFO("interface " PUB_S_SRP PUB_S_SRP " " PUB_S_SRP " " PRI_MAC_ADDR_SRP " flags %x",
                      name, is_thread_interface ? " (thread)" : "",
                      change == interface_address_added ? "added" : "removed",
                      MAC_ADDR_PARAM_SRP(address->ether_addr.addr), flags);
@@ -3001,18 +2940,18 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
             if (!interface->ineligible) {
                 if (address->sa.sa_family == AF_INET) {
                     IPv4_ADDR_GEN_SRP(addrbytes, addr_buf);
-                    INFO("ifaddr_callback: interface " PUB_S_SRP PUB_S_SRP " " PUB_S_SRP " " PRI_IPv4_ADDR_SRP
+                    INFO("interface " PUB_S_SRP PUB_S_SRP " " PUB_S_SRP " " PRI_IPv4_ADDR_SRP
                          "/%d flags %x", name, is_thread_interface ? " (thread)" : "",
                          change == interface_address_added ? "added" : "removed",
                          IPv4_ADDR_PARAM_SRP(addrbytes, addr_buf), preflen, flags);
                 } else if (address->sa.sa_family == AF_INET6) {
                     SEGMENTED_IPv6_ADDR_GEN_SRP(addrbytes, addr_buf);
-                    INFO("ifaddr_callback: interface " PUB_S_SRP PUB_S_SRP " " PUB_S_SRP " " PRI_SEGMENTED_IPv6_ADDR_SRP
+                    INFO("interface " PUB_S_SRP PUB_S_SRP " " PUB_S_SRP " " PRI_SEGMENTED_IPv6_ADDR_SRP
                          "/%d flags %x", name, is_thread_interface ? " (thread)" : "",
                          change == interface_address_added ? "added" : "removed",
                          SEGMENTED_IPv6_ADDR_PARAM_SRP(addrbytes, addr_buf), preflen, flags);
                 } else {
-                    INFO("ifaddr_callback - invalid sa_family: %d", address->sa.sa_family);
+                    INFO("invalid sa_family: %d", address->sa.sa_family);
                 }
 
                 // Only notify dnssd-proxy when srp-mdns-proxy and dnssd-proxy is combined together.
@@ -3080,7 +3019,7 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
 
 #if defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
     if (is_thread_interface && address->sa.sa_family == AF_INET6) {
-        partition_utun0_address_changed(&address->sin6.sin6_addr, change);
+        partition_utun0_address_changed(route_state, &address->sin6.sin6_addr, change);
     }
 #endif
 
@@ -3103,12 +3042,12 @@ ifaddr_callback(void *UNUSED context, const char *name, const addr_t *address, c
 }
 
 static void
-refresh_interface_list(void)
+refresh_interface_list(route_state_t *route_state)
 {
     interface_t *interface;
     bool UNUSED have_active = false;
-    ioloop_map_interface_addresses(NULL, NULL, ifaddr_callback);
-    for (interface = interfaces; interface; interface = interface->next) {
+    ioloop_map_interface_addresses_here(&route_state->interface_addresses, NULL, route_state, ifaddr_callback);
+    for (interface = route_state->interfaces; interface; interface = interface->next) {
         if (!interface->ineligible && !interface->inactive) {
             have_active = true;
         }
@@ -3116,162 +3055,95 @@ refresh_interface_list(void)
 
 #ifndef RA_TESTER
     // Notice if we have lost or gained infrastructure.
-    if (have_active && !have_non_thread_interface) {
+    if (have_active && !route_state->have_non_thread_interface) {
         INFO("we have an active interface");
-        have_non_thread_interface = true;
-        partition_can_advertise_service = true;
-    } else if (!have_active && have_non_thread_interface) {
+        route_state->have_non_thread_interface = true;
+        route_state->partition_can_advertise_service = true;
+    } else if (!have_active && route_state->have_non_thread_interface) {
         INFO("we no longer have an active interface");
-        have_non_thread_interface = false;
+        route_state->have_non_thread_interface = false;
         // Stop advertising the service, if we are doing so.
-        partition_discontinue_srp_service();
+        partition_discontinue_srp_service(route_state);
     }
 #endif // RA_TESTER
 }
 
 
 #if defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
-#ifdef GET_TUNNEL_NAME_WITH_WPANCTL
-static void
-thread_interface_output(io_t *io, void *UNUSED context)
-{
-    char inbuf[512];
-    ssize_t rv;
-    char *s, *t;
-
-    // We are assuming that wpanctl will never do partial-line writes.
-    rv = read(io->fd, inbuf, sizeof(inbuf) - 1);
-    if (rv < 0) {
-        ERROR("thread_interface_output: " PUB_S_SRP, strerror(errno));
-    }
-    INFO("read %" PRIs64 " bytes from wpanctl output", rv);
-    if (rv <= 0) {
-        INFO("Done with thread interface output.");
-        ioloop_close(io);
-    } else {
-        if (inbuf[rv - 1] == '\n') {
-            inbuf[rv - 1] = 0;
-            s = strchr(inbuf, '>');
-            if (s == NULL) {
-            bad:
-                ERROR("Bad wpanctl output: " PUB_S_SRP, inbuf);
-                return;
-            }
-            s = strchr(s, '(');
-            if (s == NULL) {
-                goto bad;
-            }
-            // We don't expect the end of string here.
-            if (*++s == '\0') {
-                goto bad;
-            }
-            t = strchr(s, ')');
-            if (s == t || t == NULL) {
-                goto bad;
-            }
-            *t = '\0';
-            if (num_thread_interfaces != 0) {
-                INFO("Already have a thread interface.");
-            } else {
-                num_thread_interfaces = 1;
-                thread_interface_name = strdup(s);
-                if (thread_interface_name == NULL) {
-                    ERROR("No memory to save thread interface name " PUB_S_SRP, s);
-                    return;
-                }
-                INFO("Thread interface at " PUB_S_SRP, thread_interface_name);
-                partition_got_tunnel_name();
-            }
-        } else {
-            goto bad;
-        }
-    }
-}
-
-static void
-thread_interface_done(void *UNUSED context, int status, const char *error)
-{
-    if (error != NULL) {
-        ERROR("thread_interface_done: " PUB_S_SRP, error);
-    } else {
-        INFO("thread_interface_done: %d.", status);
-    }
-    ioloop_subproc_release(thread_interface_enumerator_process);
-    thread_interface_enumerator_process = NULL;
-}
-#endif // GET_TUNNEL_NAME_WITH_WPANCTL
-
 #if !defined(RA_TESTER)
 #if defined(POSIX_BUILD)
 static void
-wpan_reconnect_wakeup_callback(void *UNUSED context)
+wpan_reconnect_wakeup_callback(void *context)
 {
-    if (wpan_reconnect_wakeup != NULL) {
-        ioloop_wakeup_release(wpan_reconnect_wakeup);
-        wpan_reconnect_wakeup = NULL;
+    if (route_state->wpan_reconnect_wakeup != NULL) {
+        ioloop_wakeup_release(route_state->wpan_reconnect_wakeup);
+        route_state->wpan_reconnect_wakeup = NULL;
     }
     // Attempt to restart the thread network...
-    infrastructure_network_startup();
+    infrastructure_network_startup(context);
 }
 #endif
 
 static void
-attempt_wpan_reconnect(void)
+attempt_wpan_reconnect(route_state_t *route_state)
 {
 #if defined(POSIX_BUILD)
-    if (wpan_reconnect_wakeup == NULL) {
-        wpan_reconnect_wakeup = ioloop_wakeup_create();
-        if (wpan_reconnect_wakeup == NULL) {
+    if (route_state->wpan_reconnect_wakeup == NULL) {
+        route_state->wpan_reconnect_wakeup = ioloop_wakeup_create();
+        if (route_state->wpan_reconnect_wakeup == NULL) {
             ERROR("attempt_wpan_reconnect: can't allocate wpan reconnect wait wakeup.");
             return;
         }
-        INFO("attempt_wpan_reconnect: delaying for ten seconds before attempt to reconnect to thread daemon.");
-        ioloop_add_wake_event(wpan_reconnect_wakeup, NULL, wpan_reconnect_wakeup_callback, NULL, 10 * 1000);
-        partition_state_reset();
+        INFO("delaying for ten seconds before attempt to reconnect to thread daemon.");
+        ioloop_add_wake_event(route_state->wpan_reconnect_wakeup, NULL,
+                              wpan_reconnect_wakeup_callback, NULL, 10 * 1000);
+        partition_state_reset(route_state);
 #endif
     }
 }
 #endif // RA_TESTER
 
 static void
-cti_get_tunnel_name_callback(void *UNUSED context, const char *name, cti_status_t status)
+cti_get_tunnel_name_callback(void *context, const char *name, cti_status_t status)
 {
+    route_state_t *route_state = context;
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
-        INFO("cti_get_tunnel_name_callback: disconnected");
-        attempt_wpan_reconnect();
+        INFO("disconnected");
+        attempt_wpan_reconnect(route_state);
         return;
     }
 
-    INFO("cti_get_tunnel_name_callback: " PUB_S_SRP " %d", name != NULL ? name : "<null>", status);
+    INFO("" PUB_S_SRP " %d", name != NULL ? name : "<null>", status);
     if (status != kCTIStatus_NoError) {
         return;
     }
-    num_thread_interfaces = 1;
-    if (thread_interface_name != NULL) {
-        free(thread_interface_name);
+    route_state->num_thread_interfaces = 1;
+    if (route_state->thread_interface_name != NULL) {
+        free(route_state->thread_interface_name);
     }
-    thread_interface_name = strdup(name);
-    if (thread_interface_name == NULL) {
+    route_state->thread_interface_name = strdup(name);
+    if (route_state->thread_interface_name == NULL) {
         ERROR("No memory to save thread interface name " PUB_S_SRP, name);
         return;
     }
-    INFO("Thread interface at " PUB_S_SRP, thread_interface_name);
-    partition_got_tunnel_name();
+    INFO("Thread interface at " PUB_S_SRP, route_state->thread_interface_name);
+    partition_got_tunnel_name(route_state);
 }
 
 static void
-cti_get_role_callback(void *UNUSED context, cti_network_node_type_t role, cti_status_t status)
+cti_get_role_callback(void *context, cti_network_node_type_t role, cti_status_t status)
 {
+    route_state_t *route_state = context;
     bool am_thread_router = false;
 
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
-        INFO("cti_get_role_callback: disconnected");
-        attempt_wpan_reconnect();
+        INFO("disconnected");
+        attempt_wpan_reconnect(route_state);
         return;
     }
 
     if (status == kCTIStatus_NoError) {
-        partition_last_role_change = ioloop_timenow();
+        route_state->partition_last_role_change = ioloop_timenow();
 
         if (role == kCTI_NetworkNodeType_Router || role == kCTI_NetworkNodeType_Leader) {
             am_thread_router = true;
@@ -3286,17 +3158,18 @@ cti_get_role_callback(void *UNUSED context, cti_network_node_type_t role, cti_st
 }
 
 static void
-cti_get_state_callback(void *UNUSED context, cti_network_state_t state, cti_status_t status)
+cti_get_state_callback(void *context, cti_network_state_t state, cti_status_t status)
 {
+    route_state_t *route_state = context;
     bool associated = false;
 
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
-        INFO("cti_get_state_callback: disconnected");
-        attempt_wpan_reconnect();
+        INFO("disconnected");
+        attempt_wpan_reconnect(context);
         return;
     }
 
-    partition_last_state_change = ioloop_timenow();
+    route_state->partition_last_state_change = ioloop_timenow();
 
     if (status == kCTIStatus_NoError) {
         if ((state == kCTI_NCPState_Associated)     || (state == kCTI_NCPState_Isolated) ||
@@ -3310,62 +3183,65 @@ cti_get_state_callback(void *UNUSED context, cti_network_state_t state, cti_stat
         ERROR("cti_get_state_callback: nonzero status %d", status);
     }
 
-    if (current_thread_state != state) {
+    if (route_state->current_thread_state != state) {
         if (associated) {
-            current_thread_state = state;
-            partition_maybe_enable_services(); // but probably not
+            route_state->current_thread_state = state;
+            partition_maybe_enable_services(route_state); // but probably not
         } else {
-            current_thread_state = state;
-            partition_disable_service();
+            route_state->current_thread_state = state;
+            partition_disable_service(route_state);
         }
     }
 }
 
 static void
-cti_get_partition_id_callback(void *UNUSED context, uint64_t partition_id, cti_status_t status)
+cti_get_partition_id_callback(void *context, uint64_t partition_id, cti_status_t status)
 {
+    route_state_t *route_state = context;
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
         INFO("disconnected");
-        attempt_wpan_reconnect();
+        attempt_wpan_reconnect(route_state);
         return;
     }
 
     if (status == kCTIStatus_NoError) {
         INFO("Partition ID changed to %" PRIu64, partition_id);
         // Partition ID is actually only 32 bits
-        thread_partition_id[0] = (uint8_t)((partition_id >> 24) & 255);
-        thread_partition_id[1] = (uint8_t)((partition_id >> 16) & 255);
-        thread_partition_id[2] = (uint8_t)((partition_id >> 8) & 255);
-        thread_partition_id[3] = (uint8_t)(partition_id & 255);
+        route_state->thread_partition_id[0] = (uint8_t)((partition_id >> 24) & 255);
+        route_state->thread_partition_id[1] = (uint8_t)((partition_id >> 16) & 255);
+        route_state->thread_partition_id[2] = (uint8_t)((partition_id >> 8) & 255);
+        route_state->thread_partition_id[3] = (uint8_t)(partition_id & 255);
 
-        partition_id_changed();
+        partition_id_changed(route_state);
     } else {
         ERROR("nonzero status %d", status);
     }
 }
 
 static void
-re_evaluate_interfaces(void)
+re_evaluate_interfaces(route_state_t *route_state)
 {
-    for (interface_t *interface = interfaces; interface != NULL; interface = interface->next) {
+    for (interface_t *interface = route_state->interfaces; interface != NULL; interface = interface->next) {
         interface_prefix_evaluate(interface);
     }
 
-    partition_maybe_enable_services();
+    partition_maybe_enable_services(route_state);
 }
 
 static void
-cti_get_xpanid_callback(void *UNUSED context, uint64_t new_xpanid, cti_status_t status)
+cti_get_xpanid_callback(void *context, uint64_t new_xpanid, cti_status_t status)
 {
+    route_state_t *route_state = context;
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
         INFO("disconnected");
-        attempt_wpan_reconnect();
+        attempt_wpan_reconnect(route_state);
         return;
     }
 
     if (status == kCTIStatus_NoError) {
-        if (partition_has_xpanid) {
-            ERROR("Unexpected change to XPANID from %" PRIu64 " to %" PRIu64, xpanid, new_xpanid);
+        if (route_state->partition_has_xpanid) {
+            ERROR("Unexpected change to XPANID from %" PRIu64 " to %" PRIu64,
+                  route_state->xpanid, new_xpanid);
         } else {
             INFO("XPANID is now %" PRIu64, new_xpanid);
         }
@@ -3374,37 +3250,15 @@ cti_get_xpanid_callback(void *UNUSED context, uint64_t new_xpanid, cti_status_t 
         return;
     }
 
-    xpanid = new_xpanid;
-    partition_has_xpanid = true;
-    memset(&xpanid_prefix, 0, sizeof(xpanid_prefix));
-    xpanid_prefix.s6_addr[0] = 0xfd;
+    route_state->xpanid = new_xpanid;
+    route_state->partition_has_xpanid = true;
+    memset(&route_state->xpanid_prefix, 0, sizeof(route_state->xpanid_prefix));
+    route_state->xpanid_prefix.s6_addr[0] = 0xfd;
     for (int i = 1; i < 8; i++) {
-        xpanid_prefix.s6_addr[i] = ((xpanid >> ((15 - i) * 8)) & 255);
+        route_state->xpanid_prefix.s6_addr[i] = ((route_state->xpanid >> ((15 - i) * 8)) & 255);
     }
-    have_xpanid_prefix = true;
-    re_evaluate_interfaces();
-}
-
-void
-route_evaluate_registration(int rrtype, const uint8_t *rdata, size_t rdlen)
-{
-    // If we've already enabled the stub router, or this isn't an aaaa record, do nothing.
-    if (stub_router_needed || rrtype != dns_rrtype_aaaa || rdlen != 16) {
-        return;
-    }
-    // See if the address being advertised is on a thread prefix
-    for (thread_prefix_t *prefix = thread_prefixes; prefix != NULL; prefix = prefix->next) {
-        if (!memcmp(&prefix->prefix, rdata, 8)) {
-            SEGMENTED_IPv6_ADDR_GEN_SRP(&prefix->prefix, prefix_buf);
-            SEGMENTED_IPv6_ADDR_GEN_SRP(rdata, rdata_buf);
-            INFO("host address " PRI_SEGMENTED_IPv6_ADDR_SRP " is on thread prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(rdata, rdata_buf),
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(&prefix->prefix, prefix_buf));
-            stub_router_needed = true;
-            re_evaluate_interfaces();
-            return;
-        }
-    }
+    route_state->have_xpanid_prefix = true;
+    re_evaluate_interfaces(route_state);
 }
 
 static void
@@ -3464,15 +3318,16 @@ accumulate(accumulator_t *accumulator, bool previous, bool cur, const char *name
 }
 
 static void
-cti_service_list_callback(void *UNUSED context, cti_service_vec_t *services, cti_status_t status)
+cti_service_list_callback(void *context, cti_service_vec_t *services, cti_status_t status)
 {
+    route_state_t *route_state = context;
     size_t i;
-    thread_service_t **pservice = &thread_services, *service = NULL;
-    thread_pref_id_t **ppref_id = &thread_pref_ids, *pref_id = NULL;
+    thread_service_t **pservice = &route_state->thread_services, *service = NULL;
+    thread_pref_id_t **ppref_id = &route_state->thread_pref_ids, *pref_id = NULL;
 
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
-        INFO("cti_service_list_callback: disconnected");
-        attempt_wpan_reconnect();
+        INFO("disconnected");
+        attempt_wpan_reconnect(route_state);
         return;
     }
 
@@ -3497,6 +3352,7 @@ cti_service_list_callback(void *UNUSED context, cti_service_vec_t *services, cti
                 thread_service_note(service, "went away");
                 *pservice = service->next;
                 RELEASE_HERE(service, thread_service_finalize);
+                service = NULL;
             } else {
                 // We'll re-initialize these flags from the service list when we check for duplicates.
                 service->previous_user = service->user;
@@ -3546,7 +3402,7 @@ cti_service_list_callback(void *UNUSED context, cti_service_vec_t *services, cti
         for (i = 0; i < services->num; i++) {
             cti_service_t *cti_service = services->services[i];
             if (IS_SRP_SERVICE(cti_service)) {
-                for (service = thread_services; service != NULL; service = service->next) {
+                for (service = route_state->thread_services; service != NULL; service = service->next) {
                     if (!memcmp(&service->address, cti_service->server, 16) &&
                         !memcmp(&service->port, &cti_service->server[16], 2)) {
                         break;
@@ -3575,7 +3431,7 @@ cti_service_list_callback(void *UNUSED context, cti_service_vec_t *services, cti
                     }
                 }
             } else if (IS_PREF_ID_SERVICE(cti_service)) {
-                for (pref_id = thread_pref_ids; pref_id != NULL; pref_id = pref_id->next) {
+                for (pref_id = route_state->thread_pref_ids; pref_id != NULL; pref_id = pref_id->next) {
                     if (!memcmp(&pref_id->partition_id, cti_service->server, 4) &&
                         !memcmp(pref_id->prefix, &cti_service->server[4], 5))
                     {
@@ -3608,7 +3464,7 @@ cti_service_list_callback(void *UNUSED context, cti_service_vec_t *services, cti
         }
 
         accumulator_t accumulator;
-        for (service = thread_services; service != NULL; service = service->next) {
+        for (service = route_state->thread_services; service != NULL; service = service->next) {
             accumulator_init(&accumulator);
             accumulate(&accumulator, service->previous_ncp, service->ncp, "ncp");
             accumulate(&accumulator, service->previous_stable, service->ncp, "stable");
@@ -3617,7 +3473,7 @@ cti_service_list_callback(void *UNUSED context, cti_service_vec_t *services, cti
                 thread_service_note(service, accumulator.change);
             }
         }
-        for (pref_id = thread_pref_ids; pref_id != NULL; pref_id = pref_id->next) {
+        for (pref_id = route_state->thread_pref_ids; pref_id != NULL; pref_id = pref_id->next) {
             accumulator_init(&accumulator);
             accumulate(&accumulator, pref_id->previous_ncp, pref_id->ncp, "ncp");
             accumulate(&accumulator, pref_id->previous_stable, pref_id->ncp, "stable");
@@ -3629,19 +3485,68 @@ cti_service_list_callback(void *UNUSED context, cti_service_vec_t *services, cti
 
         // At this point the thread prefix list contains the same information as what we just received.
         // Trigger a "prefix set changed" event.
-        partition_service_set_changed();
+        partition_service_set_changed(route_state);
     }
 }
 
-static void
-cti_prefix_list_callback(void *UNUSED context, cti_prefix_vec_t *prefixes, cti_status_t status)
+void
+adv_ctl_add_prefix(route_state_t *route_state, const uint8_t *const data)
 {
+    thread_prefix_t **ppref = &route_state->thread_prefixes, *prefix = NULL;
+
+    for (prefix = route_state->thread_prefixes; prefix != NULL; prefix = prefix->next) {
+        if (!memcmp(&prefix->prefix, data, BR_PREFIX_SLASH_64_BYTES)) {
+            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
+            INFO("prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " already there",
+                  SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf));
+            break;
+        }
+    }
+    if (prefix == NULL) {
+        prefix = thread_prefix_create((struct in6_addr *)data, BR_PREFIX_SLASH_64_BYTES);
+        if (prefix == NULL) {
+            ERROR("no memory for prefix.");
+        } else {
+            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
+            INFO("adding prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf));
+            prefix->next = *ppref;
+            *ppref = prefix;
+        }
+    }
+}
+
+void
+adv_ctl_remove_prefix(route_state_t *route_state, const uint8_t *const data)
+{
+    thread_prefix_t **ppref = &route_state->thread_prefixes, *prefix = NULL;
+
+    while (*ppref != NULL) {
+        prefix = *ppref;
+        if (!memcmp(&prefix->prefix, data, BR_PREFIX_SLASH_64_BYTES)) {
+            *ppref = prefix->next;
+            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
+            INFO("removing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                  SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf));
+            RELEASE_HERE(prefix, thread_prefix_finalize);
+            return;
+        } else {
+            ppref = &prefix->next;
+        }
+    }
+    INFO("no prefix removed.");
+}
+
+static void
+cti_prefix_list_callback(void *context, cti_prefix_vec_t *prefixes, cti_status_t status)
+{
+    route_state_t *route_state = context;
     size_t i;
-    thread_prefix_t **ppref = &thread_prefixes, *prefix = NULL;
+    thread_prefix_t **ppref = &route_state->thread_prefixes, *prefix = NULL;
 
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
-        INFO("cti_get_prefix_list_callback: disconnected");
-        attempt_wpan_reconnect();
+        INFO("disconnected");
+        attempt_wpan_reconnect(route_state);
         return;
     }
 
@@ -3661,7 +3566,7 @@ cti_prefix_list_callback(void *UNUSED context, cti_prefix_vec_t *prefixes, cti_s
             if (i == prefixes->num) {
                 *ppref = prefix->next;
                 SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
-                INFO("cti_prefix_list_callback: prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " went away",
+                INFO("prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " went away",
                          SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf));
                 RELEASE_HERE(prefix, thread_prefix_finalize);
             } else {
@@ -3677,7 +3582,7 @@ cti_prefix_list_callback(void *UNUSED context, cti_prefix_vec_t *prefixes, cti_s
         // Add any prefixes that are not present.
         for (i = 0; i < prefixes->num; i++) {
             cti_prefix_t *cti_prefix = prefixes->prefixes[i];
-            for (prefix = thread_prefixes; prefix != NULL; prefix = prefix->next) {
+            for (prefix = route_state->thread_prefixes; prefix != NULL; prefix = prefix->next) {
                 if (!memcmp(&prefix->prefix, &cti_prefix->prefix, 16)) {
                     break;
                 }
@@ -3688,7 +3593,7 @@ cti_prefix_list_callback(void *UNUSED context, cti_prefix_vec_t *prefixes, cti_s
                     ERROR("cti_prefix_list_callback: no memory for prefix.");
                 } else {
                     SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
-                    INFO("cti_prefix_list_callback: prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " showed up",
+                    INFO("prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " showed up",
                          SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf));
                     *ppref = prefix;
                     ppref = &prefix->next;
@@ -3710,275 +3615,191 @@ cti_prefix_list_callback(void *UNUSED context, cti_prefix_vec_t *prefixes, cti_s
 
         // At this point the thread prefix list contains the same information as what we just received.
         // Trigger a "prefix set changed" event.
-        partition_prefix_set_changed();
+        partition_prefix_set_changed(route_state);
     }
-}
-
-static void
-get_thread_interface_list(void)
-{
-#ifdef GET_TUNNEL_NAME_WITH_WPANCTL
-    char *args[] = { "list" };
-    INFO("/usr/local/bin/wpanctl list");
-    thread_interface_enumerator_process = ioloop_subproc("/usr/local/bin/wpanctl", args, 1,
-                                                         thread_interface_done,
-                                                         thread_interface_output, NULL);
-    if (thread_interface_enumerator_process == NULL) {
-        ERROR("Unable to enumerate thread interfaces.");
-    }
-#endif
-
 }
 #endif // THREAD_BORDER_ROUTER && !RA_TESTER
 
-#ifdef TCPDUMP_LOGGER
-static void
-tcpdump_output(io_t *io, void *UNUSED context)
-{
-    static char inbuf[1024];
-    static int offset;
-    ssize_t rv;
-    char *s;
-
-    if (offset + 1 != sizeof(inbuf)) {
-        rv = read(io->fd, &inbuf[offset], sizeof(inbuf) - 1 - offset);
-        if (rv < 0) {
-            ERROR("tcpdump_output: " PUB_S_SRP, strerror(errno));
-            return;
-        }
-        if (rv <= 0) {
-            INFO("Done with thread interface output.");
-            ioloop_close(io);
-            return;
-        }
-        offset += rv;
-    }
-    inbuf[offset] = 0;
-    if (offset + 1 == sizeof(inbuf)) {
-        s = &inbuf[offset];
-    } else {
-        s = strchr(inbuf, '\n');
-        if (s == NULL) {
-            return;
-        }
-        *s = 0;
-    }
-    INFO(PUB_S_SRP, inbuf);
-    if (s != &inbuf[offset]) {
-        memmove(inbuf, s, &inbuf[offset] - s);
-    }
-    offset = 0;
-}
-
-static void
-tcpdump_done(void *UNUSED context, int status, const char *error)
-{
-    if (error != NULL) {
-        ERROR("tcpdump_done: " PUB_S_SRP, error);
-    } else {
-        INFO("tcpdump_done: %d.", status);
-    }
-    ioloop_subproc_release(tcpdump_logger_process);
-    tcpdump_logger_process = NULL;
-}
-
-static void
-start_tcpdump_logger(void)
-{
-    char *args[] = { "-vv", "-s", "1500", "-n", "-e", "-i", "utun0", "-l", "udp", "port", "53" };
-    INFO("/usr/sbin/tcpdump -vv -s 1500 -n -e -i utun0 udp port 53");
-    tcpdump_logger_process = ioloop_subproc("/usr/sbin/tcpdump", args, 11, tcpdump_done,
-                                            tcpdump_output, NULL);
-    if (tcpdump_logger_process == NULL) {
-        ERROR("Unable to start tcpdump logger.");
-    }
-}
-#endif // TCPDUMP_LOGGER
-
 void
-infrastructure_network_startup(void)
+infrastructure_network_startup(route_state_t *route_state)
 {
     INFO("Thread network started.");
 
 //    ioloop_network_watcher_start(network_watch_event);
     set_thread_forwarding();
-#ifdef TCPDUMP_LOGGER
-    start_tcpdump_logger();
-#endif
 }
 
 #if defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
 static void
-thread_network_startup(void)
+thread_network_startup(route_state_t *route_state)
 {
-    get_thread_interface_list();
-
-    int status = cti_get_state(&thread_state_context, NULL, cti_get_state_callback, NULL);
+    int status = cti_get_state(&route_state->thread_state_context, route_state, cti_get_state_callback, NULL);
     if (status == kCTIStatus_NoError) {
-        status = cti_get_network_node_type(&thread_role_context, NULL, cti_get_role_callback, NULL);
+        status = cti_get_network_node_type(&route_state->thread_role_context, route_state, cti_get_role_callback, NULL);
     }
     if (status == kCTIStatus_NoError) {
-        status = cti_get_service_list(&thread_service_context, NULL, cti_service_list_callback, NULL);
+        status = cti_get_service_list(&route_state->thread_service_context, route_state, cti_service_list_callback, NULL);
     }
     if (status == kCTIStatus_NoError) {
-        status = cti_get_prefix_list(&thread_prefix_context, NULL, cti_prefix_list_callback, NULL);
+        status = cti_get_prefix_list(&route_state->thread_prefix_context, route_state, cti_prefix_list_callback, NULL);
     }
     if (status == kCTIStatus_NoError) {
-        status = cti_get_tunnel_name(NULL, cti_get_tunnel_name_callback, NULL);
+        status = cti_get_tunnel_name(route_state, cti_get_tunnel_name_callback, NULL);
     }
     if (status == kCTIStatus_NoError) {
-        status = cti_get_partition_id(&thread_partition_id_context, NULL, cti_get_partition_id_callback, NULL);
+        status = cti_get_partition_id(&route_state->thread_partition_id_context, route_state,
+                                      cti_get_partition_id_callback, NULL);
     }
     if (status == kCTIStatus_NoError) {
-        status = cti_get_extended_pan_id(&thread_xpanid_context, NULL, cti_get_xpanid_callback, NULL);
+        status = cti_get_extended_pan_id(&route_state->thread_xpanid_context, route_state, cti_get_xpanid_callback, NULL);
     }
     if (status != kCTIStatus_NoError) {
         if (status == kCTIStatus_DaemonNotRunning) {
-            attempt_wpan_reconnect();
+            attempt_wpan_reconnect(route_state);
         } else {
             ERROR("initial network setup failed");
         }
     }
-    thread_network_running = true;
+    route_state->thread_network_running = true;
 }
 #endif //  defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
 
 #ifndef RA_TESTER
 static void
-thread_network_shutdown(void)
+thread_network_shutdown(route_state_t *route_state)
 {
     // Stop publishing a default route on the Thread network.
-    if (adopted_thread_prefix != NULL) {
-        partition_unpublish_prefix(adopted_thread_prefix);
+    if (route_state->adopted_thread_prefix != NULL) {
+        partition_unpublish_prefix(route_state, route_state->adopted_thread_prefix);
         INFO("removing adopted thread prefix to remove.");
     } else {
         INFO("no adopted thread prefix to remove.");
     }
-    if (published_thread_prefix != NULL) {
-        partition_unpublish_prefix(published_thread_prefix);
+    if (route_state->published_thread_prefix != NULL) {
+        partition_unpublish_prefix(route_state, route_state->published_thread_prefix);
         INFO("removing published thread prefix to remove.");
     } else {
         INFO("no published thread prefix to remove.");
     }
 
-    if (thread_state_context) {
+    if (route_state->thread_state_context) {
         INFO("discontinuing state events");
-        cti_events_discontinue(thread_state_context);
-        thread_state_context = NULL;
+        cti_events_discontinue(route_state->thread_state_context);
+        route_state->thread_state_context = NULL;
     }
-    if (thread_role_context) {
+    if (route_state->thread_role_context) {
         INFO("discontinuing role events");
-        cti_events_discontinue(thread_role_context);
-        thread_role_context = NULL;
+        cti_events_discontinue(route_state->thread_role_context);
+        route_state->thread_role_context = NULL;
     }
-    if (thread_service_context) {
+    if (route_state->thread_service_context) {
         INFO("discontinuing service events");
-        cti_events_discontinue(thread_service_context);
-        thread_service_context = NULL;
+        cti_events_discontinue(route_state->thread_service_context);
+        route_state->thread_service_context = NULL;
     }
-    if (thread_prefix_context) {
+    if (route_state->thread_prefix_context) {
         INFO("discontinuing prefix events");
-        cti_events_discontinue(thread_prefix_context);
-        thread_prefix_context = NULL;
+        cti_events_discontinue(route_state->thread_prefix_context);
+        route_state->thread_prefix_context = NULL;
     }
-    if (thread_partition_id_context) {
+    if (route_state->thread_partition_id_context) {
         INFO("discontinuing partition ID events");
-        cti_events_discontinue(thread_partition_id_context);
-        thread_partition_id_context = NULL;
+        cti_events_discontinue(route_state->thread_partition_id_context);
+        route_state->thread_partition_id_context = NULL;
     }
-    partition_state_reset();
+    partition_state_reset(route_state);
 }
 #endif // RA_TESTER
 
 void
-infrastructure_network_shutdown(void)
+infrastructure_network_shutdown(route_state_t *route_state)
 {
     interface_t *interface;
 
 #ifndef RA_TESTER
-    if (thread_network_running) {
-        thread_network_shutdown();
+    if (route_state->thread_network_running) {
+        thread_network_shutdown(route_state);
     }
 #endif
     INFO("Infrastructure network shutdown.");
     // Stop all activity on interfaces.
-    for (interface = interfaces; interface; interface = interface->next) {
+    for (interface = route_state->interfaces; interface; interface = interface->next) {
         interface_shutdown(interface);
     }
 }
 
 #ifndef RA_TESTER
 static void
-partition_state_reset(void)
+partition_state_reset(route_state_t *route_state)
 {
     thread_prefix_t *prefix, *next_prefix = NULL;
     thread_service_t *service, *next_service = NULL;
     thread_pref_id_t *pref_id, *next_pref_id = NULL;
 
     // Remove any saved state from the thread network.
-    for (prefix = thread_prefixes; prefix != NULL; prefix = next_prefix) {
+    for (prefix = route_state->thread_prefixes; prefix != NULL; prefix = next_prefix) {
         next_prefix = prefix->next;
         RELEASE_HERE(prefix, thread_prefix_finalize);
     }
-    thread_prefixes = NULL;
+    route_state->thread_prefixes = NULL;
 
-    if (published_thread_prefix != NULL) {
-        RELEASE_HERE(published_thread_prefix, thread_prefix_finalize);
-        published_thread_prefix = NULL;
+    if (route_state->published_thread_prefix != NULL) {
+        RELEASE_HERE(route_state->published_thread_prefix, thread_prefix_finalize);
+        route_state->published_thread_prefix = NULL;
     }
-    if (adopted_thread_prefix != NULL) {
-        RELEASE_HERE(adopted_thread_prefix, thread_prefix_finalize);
-        adopted_thread_prefix = NULL;
+    if (route_state->adopted_thread_prefix != NULL) {
+        RELEASE_HERE(route_state->adopted_thread_prefix, thread_prefix_finalize);
+        route_state->adopted_thread_prefix = NULL;
     }
 
-    for (service = thread_services; service != NULL; service = next_service) {
+    for (service = route_state->thread_services; service != NULL; service = next_service) {
         next_service = service->next;
         RELEASE_HERE(service, thread_service_finalize);
     }
-    thread_services = NULL;
+    route_state->thread_services = NULL;
 
-    for (pref_id = thread_pref_ids; pref_id != NULL; pref_id = next_pref_id) {
+    for (pref_id = route_state->thread_pref_ids; pref_id != NULL; pref_id = next_pref_id) {
         next_pref_id = pref_id->next;
         RELEASE_HERE(pref_id, thread_pref_id_finalize);
     }
-    thread_pref_ids = NULL;
+    route_state->thread_pref_ids = NULL;
 
-    current_thread_state = kCTI_NCPState_Uninitialized;
+    route_state->current_thread_state = kCTI_NCPState_Uninitialized;
 
-    partition_last_prefix_set_change = 0;
-    partition_last_pref_id_set_change = 0;
-    partition_last_partition_id_change = 0;
-    partition_last_role_change = 0;
-    partition_last_state_change = 0;
-    partition_settle_start = 0;
-    partition_service_last_add_time = 0;
-    partition_id_is_known = false;
-    partition_have_prefix_list = false;
-    partition_have_pref_id_list = false;
-    partition_tunnel_name_is_known = false;
-    partition_can_advertise_service = false;
-    partition_can_provide_routing = false;
-    partition_has_xpanid = false;
-    partition_may_offer_service = false;
-    partition_settle_satisfied = true;
+    route_state->partition_last_prefix_set_change = 0;
+    route_state->partition_last_pref_id_set_change = 0;
+    route_state->partition_last_partition_id_change = 0;
+    route_state->partition_last_role_change = 0;
+    route_state->partition_last_state_change = 0;
+    route_state->partition_settle_start = 0;
+    route_state->partition_service_last_add_time = 0;
+    route_state->partition_id_is_known = false;
+    route_state->partition_have_prefix_list = false;
+    route_state->partition_have_pref_id_list = false;
+    route_state->partition_tunnel_name_is_known = false;
+    route_state->partition_can_advertise_service = false;
+    route_state->partition_can_provide_routing = false;
+    route_state->partition_has_xpanid = false;
+    route_state->partition_may_offer_service = false;
+    route_state->partition_settle_satisfied = true;
 
-    if (partition_settle_wakeup != NULL) {
-        ioloop_cancel_wake_event(partition_settle_wakeup);
+    if (route_state->partition_settle_wakeup != NULL) {
+        ioloop_cancel_wake_event(route_state->partition_settle_wakeup);
     }
 
-    if (partition_post_partition_wakeup != NULL) {
-        ioloop_cancel_wake_event(partition_post_partition_wakeup);
+    if (route_state->partition_post_partition_wakeup != NULL) {
+        ioloop_cancel_wake_event(route_state->partition_post_partition_wakeup);
     }
 
-    if (partition_pref_id_wait_wakeup != NULL) {
-        ioloop_cancel_wake_event(partition_pref_id_wait_wakeup);
+    if (route_state->partition_pref_id_wait_wakeup != NULL) {
+        ioloop_cancel_wake_event(route_state->partition_pref_id_wait_wakeup);
     }
 
-    if (partition_service_add_pending_wakeup != NULL) {
-        ioloop_cancel_wake_event(partition_service_add_pending_wakeup);
+    if (route_state->partition_service_add_pending_wakeup != NULL) {
+        ioloop_cancel_wake_event(route_state->partition_service_add_pending_wakeup);
     }
 
-    thread_network_running = false;
+    route_state->thread_network_running = false;
 }
 
 static int UNUSED
@@ -3993,97 +3814,99 @@ prefcmp(uint8_t *a, uint8_t *b, int len)
 }
 
 static void
-partition_prefix_remove_callback(void *UNUSED context, cti_status_t status)
+partition_prefix_remove_callback(void *context, cti_status_t status)
 {
+    route_state_t *UNUSED route_state = context;
     if (status != kCTIStatus_NoError) {
         ERROR("partition_prefix_remove_callback: failed to unpublish my prefix: %d.", status);
     } else {
-        INFO("partition_prefix_remove_callback: done unpublishing my prefix.");
+        INFO("done unpublishing my prefix.");
     }
 }
 
 static void
 partition_stop_advertising_pref_id_done(void *UNUSED context, cti_status_t status)
 {
-    INFO("partition_stop_advertising_pref_id_done: %d", status);
+    route_state_t *UNUSED route_state = context;
+    INFO("%d", status);
 }
 
 void
-partition_stop_advertising_pref_id(void)
+partition_stop_advertising_pref_id(route_state_t *route_state)
 {
     // This should remove any copy of the service that this BR is advertising.
     uint8_t service_info[] = { 0, 0, 0, 1 };
     int status;
 
-    INFO("partition_stop_advertising_pref_id: %" PRIu64 "/%02x" , THREAD_ENTERPRISE_NUMBER, service_info[0]);
+    INFO("%" PRIu64 "/%02x" , THREAD_ENTERPRISE_NUMBER, service_info[0]);
     service_info[0] = THREAD_PREF_ID_OPTION & 255;
-    status = cti_remove_service(NULL, partition_stop_advertising_pref_id_done,
-                                NULL,
-                                THREAD_ENTERPRISE_NUMBER, service_info, 1);
+    status = cti_remove_service(route_state, partition_stop_advertising_pref_id_done,
+                                NULL, THREAD_ENTERPRISE_NUMBER, service_info, 1);
     if (status != kCTIStatus_NoError) {
-        INFO("partition_stop_advertising_pref_id: status %d", status);
+        INFO("status %d", status);
     }
 }
 
 static void
-partition_advertise_pref_id_done(void *UNUSED context, cti_status_t status)
+partition_advertise_pref_id_done(void *context, cti_status_t status)
 {
-    INFO("partition_advertise_pref_id_done: %d", status);
+    route_state_t *UNUSED route_state = context;
+    INFO("%d", status);
 }
 
 static void
-partition_advertise_pref_id(uint8_t *prefix)
+partition_advertise_pref_id(route_state_t *route_state, uint8_t *prefix)
 {
     // This should remove any copy of the service that this BR is advertising.
     uint8_t service_info[] = { 0, 0, 0, 1 };
     uint8_t pref_id[9];
-    memcpy(pref_id, thread_partition_id, 4);
+    memcpy(pref_id, route_state->thread_partition_id, 4);
     memcpy(&pref_id[4], prefix, 5);
     uint8_t full_prefix[6] = {0xfd, prefix[0], prefix[1], prefix[2], prefix[3], prefix[4]};
 
     service_info[0] = THREAD_PREF_ID_OPTION & 255;
     IPv6_PREFIX_GEN_SRP(full_prefix, sizeof(full_prefix), prefix_buf);
-    INFO("partition_advertise_pref_id: %" PRIu64 "/%02x/%02x%02x%02x%02x" PRI_IPv6_PREFIX_SRP,
+    INFO("%" PRIu64 "/%02x/%02x%02x%02x%02x" PRI_IPv6_PREFIX_SRP,
          THREAD_ENTERPRISE_NUMBER, service_info[0], pref_id[0], pref_id[1], pref_id[2], pref_id[3],
          IPv6_PREFIX_PARAM_SRP(prefix_buf));
-    int status = cti_add_service(NULL, partition_advertise_pref_id_done, NULL,
+    int status = cti_add_service(route_state, partition_advertise_pref_id_done, NULL,
                                  THREAD_ENTERPRISE_NUMBER, service_info, 1, pref_id, sizeof pref_id);
     if (status != kCTIStatus_NoError) {
-        INFO("partition_advertise_pref_id: status %d", status);
+        INFO("status %d", status);
     }
 }
 
 static void
-partition_id_update(void)
+partition_id_update(route_state_t *route_state)
 {
-    thread_prefix_t *advertised_prefix = get_advertised_thread_prefix();
+    thread_prefix_t *advertised_prefix = get_advertised_thread_prefix(route_state);
     if (advertised_prefix == NULL) {
-        INFO("partition_id_update: no advertised prefix, not advertising pref:id.");
-    } else if (advertised_prefix == adopted_thread_prefix) {
-        INFO("partition_id_update: not advertising pref:id for adopted prefix.");
-        partition_stop_advertising_pref_id();
+        INFO("no advertised prefix, not advertising pref:id.");
+    } else if (advertised_prefix == route_state->adopted_thread_prefix) {
+        INFO("not advertising pref:id for adopted prefix.");
+        partition_stop_advertising_pref_id(route_state);
     } else {
-        partition_advertise_pref_id(((uint8_t *)&advertised_prefix->prefix) + 1);
-        INFO("partition_id_update: advertised pref:id for our prefix.");
+        partition_advertise_pref_id(route_state, ((uint8_t *)&advertised_prefix->prefix) + 1);
+        INFO("advertised pref:id for our prefix.");
     }
 }
 
 static void
-partition_unpublish_prefix(thread_prefix_t *prefix)
+partition_unpublish_prefix(route_state_t *route_state, thread_prefix_t *prefix)
 {
-    cti_status_t status = cti_remove_prefix(NULL, partition_prefix_remove_callback, NULL,
+    cti_status_t status = cti_remove_prefix(route_state, partition_prefix_remove_callback, NULL,
                                             &prefix->prefix, 64);
     if (status != kCTIStatus_NoError) {
         ERROR("partition_unpublish_prefix: prefix remove failed: %d.", status);
     }
-    partition_stop_advertising_pref_id();
+    partition_stop_advertising_pref_id(route_state);
 }
 
 static void
-partition_refresh_and_re_evaluate(void)
+partition_refresh_and_re_evaluate(route_state_t *route_state)
 {
-    refresh_interface_list();
-    routing_policy_evaluate_all_interfaces(true);
+    refresh_interface_list(route_state);
+    routing_policy_evaluate_all_interfaces(route_state, true);
 }
 
 typedef struct unadvertised_prefix_remove_state  unadvertised_prefix_remove_state_t;
@@ -4091,16 +3914,18 @@ struct unadvertised_prefix_remove_state {
     int ref_count;
     int num_unadvertised_prefixes;
     int num_removals;
-    void (*continuation)(void);
+    route_state_t *route_state;
+    void (*continuation)(route_state_t *route_state);
 };
 
 static void
 unadvertised_prefix_remove_state_finalize(unadvertised_prefix_remove_state_t *state)
 {
-    void (*continuation)(void) = state->continuation;
+    void (*continuation)(route_state_t *route_state) = state->continuation;
+    route_state_t *route_state = state->route_state;
     free(state);
     if (continuation != NULL) {
-        continuation();
+        continuation(route_state);
     } else {
         INFO("no continuation.");
     }
@@ -4112,10 +3937,10 @@ partition_remove_all_prefixes_done(void *context, cti_status_t status)
     unadvertised_prefix_remove_state_t *state = context;
     state->num_removals++;
     if (state->num_removals == state->num_unadvertised_prefixes) {
-        INFO("partition_remove_all_prefixes_done:  DONE: status = %d num_removals = %d num_unadvertised = %d",
+        INFO("DONE: status = %d num_removals = %d num_unadvertised = %d",
              status, state->num_removals, state->num_unadvertised_prefixes);
     } else {
-        INFO("partition_remove_all_prefixes_done: !DONE: status = %d num_removals = %d num_unadvertised = %d",
+        INFO("!DONE: status = %d num_removals = %d num_unadvertised = %d",
              status, state->num_removals, state->num_unadvertised_prefixes);
     }
 #ifndef __clang_analyzer__ // clang_analyzer is unable to follow the reference through the cti code.
@@ -4127,14 +3952,17 @@ static void
 partition_remove_all_unwanted_prefixes_inner(unadvertised_prefix_remove_state_t *state,
                                              thread_prefix_t *prefix, bool check)
 {
+    route_state_t *route_state = state->route_state;
     // Retain a copy of state for the partition_remove_all_prefixes_done callback, which is either called
     // when the remove finishes or directly if we decide not to remove this prefix.
     RETAIN_HERE(state);
 
     // Don't unpublish the adopted or published prefix.
     if (!check ||
-        ((published_thread_prefix == NULL || memcmp(&published_thread_prefix->prefix, &prefix->prefix, 8)) &&
-         (adopted_thread_prefix == NULL || memcmp(&adopted_thread_prefix->prefix, &prefix->prefix, 8))))
+        ((route_state->published_thread_prefix == NULL ||
+          memcmp(&route_state->published_thread_prefix->prefix, &prefix->prefix, 8)) &&
+         (route_state->adopted_thread_prefix == NULL ||
+          memcmp(&route_state->adopted_thread_prefix->prefix, &prefix->prefix, 8))))
     {
         SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
         INFO("removing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
@@ -4147,7 +3975,7 @@ partition_remove_all_unwanted_prefixes_inner(unadvertised_prefix_remove_state_t 
     } else {
         SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
         INFO("not removing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " because it's the " PUB_S_SRP " prefix",
-             published_thread_prefix == NULL ? "adopted" : "published",
+             route_state->published_thread_prefix == NULL ? "adopted" : "published",
              SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf));
         // Do the accounting anyway.
         partition_remove_all_prefixes_done(state, kCTIStatus_NotPermitted);
@@ -4155,15 +3983,17 @@ partition_remove_all_unwanted_prefixes_inner(unadvertised_prefix_remove_state_t 
 }
 
 static void
-partition_remove_all_unwanted_prefixes(void (*continuation)(void), thread_prefix_t *prefix_1, thread_prefix_t *prefix_2)
+partition_remove_all_unwanted_prefixes(route_state_t *route_state, void (*continuation)(route_state_t *route_state),
+                                       thread_prefix_t *prefix_1, thread_prefix_t *prefix_2)
 {
     unadvertised_prefix_remove_state_t *state = calloc(1, sizeof(*state));
     if (state == NULL) {
-        INFO("partition_remove_all_unwanted_prefixes: no memory");
+        INFO("no memory");
         return;
     }
     // Retain our copy of state
     RETAIN_HERE(state);
+    state->route_state = route_state;
 
     // It's possible for us to get into a state where a prefix is published by this BR, but doesn't
     // have a pref:id and isn't recognized as belonging to this BR.  This should never happen in practice,
@@ -4172,8 +4002,8 @@ partition_remove_all_unwanted_prefixes(void (*continuation)(void), thread_prefix
     thread_prefix_t *prefix;
 
     state->continuation = continuation;
-    for (prefix = thread_prefixes; prefix; prefix = prefix->next) {
-        if (!partition_pref_id_is_present(&prefix->prefix)) {
+    for (prefix = route_state->thread_prefixes; prefix; prefix = prefix->next) {
+        if (!partition_pref_id_is_present(route_state, &prefix->prefix)) {
             // It's possible for partition_remove_all_unwanted_prefixes to get called before we have a full list of
             // recently-published prefixes. It is possible for either the published prefix or the adopted prefix to
             // not be on the list of prefixes. The caller may however have wanted to change either of those pointers;
@@ -4196,10 +4026,10 @@ partition_remove_all_unwanted_prefixes(void (*continuation)(void), thread_prefix
     }
 
     // Now actually remove the prefixes.
-    for (prefix = thread_prefixes; prefix; prefix = prefix->next) {
+    for (prefix = route_state->thread_prefixes; prefix; prefix = prefix->next) {
         if (prefix_1 != prefix && prefix_2 != prefix) {
             SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
-            if (!partition_pref_id_is_present(&prefix->prefix)) {
+            if (!partition_pref_id_is_present(route_state, &prefix->prefix)) {
                 INFO("removing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
                      SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf));
                 partition_remove_all_unwanted_prefixes_inner(state, prefix, true);
@@ -4226,74 +4056,74 @@ partition_remove_all_unwanted_prefixes(void (*continuation)(void), thread_prefix
 }
 
 static void
-partition_unpublish_adopted_prefix(bool wait)
+partition_unpublish_adopted_prefix(route_state_t *route_state, bool wait)
 {
     // Unpublish the adopted prefix
-    if (adopted_thread_prefix != NULL) {
-        partition_unpublish_prefix(adopted_thread_prefix);
-        INFO("partition_unpublish_adopted_prefix: started to unadopt prefix.");
-        RELEASE_HERE(adopted_thread_prefix, thread_prefix_finalize);
-        adopted_thread_prefix = NULL;
+    if (route_state->adopted_thread_prefix != NULL) {
+        partition_unpublish_prefix(route_state, route_state->adopted_thread_prefix);
+        INFO("started to unadopt prefix.");
+        RELEASE_HERE(route_state->adopted_thread_prefix, thread_prefix_finalize);
+        route_state->adopted_thread_prefix = NULL;
     }
 
     // Something changed, so do a routing policy update unless wait==true
     if (!wait) {
-        partition_refresh_and_re_evaluate();
+        partition_refresh_and_re_evaluate(route_state);
     }
 }
 
 static void
-partition_publish_prefix_finish(void)
+partition_publish_prefix_finish(route_state_t *route_state)
 {
-    INFO("partition_publish_prefix_finish: prefix unpublishing has completed, time to update the prefix.");
+    INFO("prefix unpublishing has completed, time to update the prefix.");
 
-    partition_id_update();
-    set_thread_prefix();
+    partition_id_update(route_state);
+    set_thread_prefix(route_state);
 
     // Something changed, so do a routing policy update.
-    partition_refresh_and_re_evaluate();
+    partition_refresh_and_re_evaluate(route_state);
 }
 
 void
-partition_publish_my_prefix()
+partition_publish_my_prefix(route_state_t *route_state)
 {
-    void (*continuation)(void) = NULL;
+    void (*continuation)(route_state_t *route_state) = NULL;
     thread_prefix_t *prefix_1 = NULL;
     thread_prefix_t *prefix_2 = NULL;
 
-    if (adopted_thread_prefix != NULL) {
-        prefix_1 = adopted_thread_prefix;
-        adopted_thread_prefix = NULL;
+    if (route_state->adopted_thread_prefix != NULL) {
+        prefix_1 = route_state->adopted_thread_prefix;
+        route_state->adopted_thread_prefix = NULL;
     }
 
     // If we already have a published thread prefix, it really should be my_thread_prefix.
-    if (published_thread_prefix != NULL) {
-        SEGMENTED_IPv6_ADDR_GEN_SRP(published_thread_prefix->prefix.s6_addr, prefix_buf);
+    if (route_state->published_thread_prefix != NULL) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(route_state->published_thread_prefix->prefix.s6_addr, prefix_buf);
         // This should always be false.
-        if (memcmp(&published_thread_prefix->prefix, &my_thread_prefix, 8)) {
-            INFO("partition_publish_my_prefix: Published prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " is not my prefix",
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(published_thread_prefix->prefix.s6_addr, prefix_buf));
-            prefix_2 = published_thread_prefix;
-            published_thread_prefix = NULL;
+        if (memcmp(&route_state->published_thread_prefix->prefix, &route_state->my_thread_prefix, 8)) {
+            INFO("Published prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " is not my prefix",
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->published_thread_prefix->prefix.s6_addr, prefix_buf));
+            prefix_2 = route_state->published_thread_prefix;
+            route_state->published_thread_prefix = NULL;
             continuation = partition_publish_prefix_finish;
         } else {
-            INFO("partition_publish_my_prefix: Published prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " is my prefix",
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(published_thread_prefix->prefix.s6_addr, prefix_buf));
+            INFO("Published prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " is my prefix",
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->published_thread_prefix->prefix.s6_addr, prefix_buf));
         }
     }
-    if (published_thread_prefix == NULL) {
+    if (route_state->published_thread_prefix == NULL) {
         // Publish the prefix
-        published_thread_prefix = thread_prefix_create(&my_thread_prefix, 64);
-        if (published_thread_prefix == NULL) {
+        route_state->published_thread_prefix = thread_prefix_create(&route_state->my_thread_prefix, 64);
+        if (route_state->published_thread_prefix == NULL) {
             ERROR("partition_publish_my_prefix: No memory for locally-advertised thread prefix");
             goto out;
         }
         continuation = partition_publish_prefix_finish;
-        SEGMENTED_IPv6_ADDR_GEN_SRP(my_thread_prefix.s6_addr, prefix_buf);
-        INFO("partition_publish_my_prefix: Publishing my prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(my_thread_prefix.s6_addr, prefix_buf));
+        SEGMENTED_IPv6_ADDR_GEN_SRP(route_state->my_thread_prefix.s6_addr, prefix_buf);
+        INFO("Publishing my prefix: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->my_thread_prefix.s6_addr, prefix_buf));
     }
-    partition_remove_all_unwanted_prefixes(continuation, prefix_1, prefix_2);
+    partition_remove_all_unwanted_prefixes(route_state, continuation, prefix_1, prefix_2);
 out:
     if (prefix_1 != NULL) {
         RELEASE_HERE(prefix_1, thread_prefix_finalize);
@@ -4304,43 +4134,43 @@ out:
 }
 
 static void
-partition_adopt_prefix(thread_prefix_t *prefix)
+partition_adopt_prefix(route_state_t *route_state, thread_prefix_t *prefix)
 {
-    void (*continuation)(void) = NULL;
+    void (*continuation)(route_state_t *route_state) = NULL;
     thread_prefix_t *prefix_1 = NULL;
     thread_prefix_t *prefix_2 = NULL;
 
-    if (published_thread_prefix != NULL) {
-        SEGMENTED_IPv6_ADDR_GEN_SRP(published_thread_prefix->prefix.s6_addr, prefix_buf);
-        INFO("partition_adopt_prefix: Removing published prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(published_thread_prefix->prefix.s6_addr, prefix_buf));
-        prefix_1 = published_thread_prefix;
-        published_thread_prefix = NULL;
+    if (route_state->published_thread_prefix != NULL) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(route_state->published_thread_prefix->prefix.s6_addr, prefix_buf);
+        INFO("Removing published prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->published_thread_prefix->prefix.s6_addr, prefix_buf));
+        prefix_1 = route_state->published_thread_prefix;
+        route_state->published_thread_prefix = NULL;
     }
 
     // If we already have an advertised thread prefix, it might not have changed.
-    if (adopted_thread_prefix != NULL) {
-        SEGMENTED_IPv6_ADDR_GEN_SRP(adopted_thread_prefix->prefix.s6_addr, prefix_buf);
-        if (memcmp(&adopted_thread_prefix->prefix, &prefix->prefix, 8)) {
-            INFO("partition_adopt_prefix: Removing previously adopted prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(adopted_thread_prefix->prefix.s6_addr, prefix_buf));
-            prefix_2 = adopted_thread_prefix;
+    if (route_state->adopted_thread_prefix != NULL) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(route_state->adopted_thread_prefix->prefix.s6_addr, prefix_buf);
+        if (memcmp(&route_state->adopted_thread_prefix->prefix, &prefix->prefix, 8)) {
+            INFO("Removing previously adopted prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->adopted_thread_prefix->prefix.s6_addr, prefix_buf));
+            prefix_2 = route_state->adopted_thread_prefix;
             continuation = partition_publish_prefix_finish;
         } else {
-            INFO("partition_adopt_prefix: Keeping previously adopted prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(adopted_thread_prefix->prefix.s6_addr, prefix_buf));
+            INFO("Keeping previously adopted prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->adopted_thread_prefix->prefix.s6_addr, prefix_buf));
         }
     }
-    if (adopted_thread_prefix == NULL) {
+    if (route_state->adopted_thread_prefix == NULL) {
         // Adopt the prefix
-        adopted_thread_prefix = prefix;
-        RETAIN_HERE(adopted_thread_prefix);
+        route_state->adopted_thread_prefix = prefix;
+        RETAIN_HERE(route_state->adopted_thread_prefix);
         continuation = partition_publish_prefix_finish;
-        SEGMENTED_IPv6_ADDR_GEN_SRP(adopted_thread_prefix->prefix.s6_addr, prefix_buf);
-        INFO("partition_adopt_prefix: Adopting prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(adopted_thread_prefix->prefix.s6_addr, prefix_buf));
+        SEGMENTED_IPv6_ADDR_GEN_SRP(route_state->adopted_thread_prefix->prefix.s6_addr, prefix_buf);
+        INFO("Adopting prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->adopted_thread_prefix->prefix.s6_addr, prefix_buf));
     }
-    partition_remove_all_unwanted_prefixes(continuation, prefix_1, prefix_2);
+    partition_remove_all_unwanted_prefixes(route_state, continuation, prefix_1, prefix_2);
 
     if (prefix_1 != NULL) {
         RELEASE_HERE(prefix_1, thread_prefix_finalize);
@@ -4352,11 +4182,11 @@ partition_adopt_prefix(thread_prefix_t *prefix)
 
 // Check to see if a specific prefix is still present.
 static bool
-partition_prefix_is_present(struct in6_addr *address, int length)
+partition_prefix_is_present(route_state_t *route_state, struct in6_addr *address, int length)
 {
     thread_prefix_t *prefix;
     // For now we assume that the comparison is as a /64.
-    for (prefix = thread_prefixes; prefix; prefix = prefix->next) {
+    for (prefix = route_state->thread_prefixes; prefix; prefix = prefix->next) {
         if (prefix->prefix_len == length && !memcmp((uint8_t *)&prefix->prefix, (uint8_t *)address, 8)) {
             return true;
         }
@@ -4366,41 +4196,41 @@ partition_prefix_is_present(struct in6_addr *address, int length)
 
 // Check to see if a valid pref:id for the specified prefix is present.
 static bool
-partition_pref_id_is_present(struct in6_addr *prefix_addr)
+partition_pref_id_is_present(route_state_t *route_state, struct in6_addr *prefix_addr)
 {
     thread_pref_id_t *pref_id;
     uint8_t *prefix_bytes = (uint8_t *)prefix_addr;
 
-    INFO("partition_pref_id_is_present: published_thread_prefix = %p; prefix = %p", published_thread_prefix,
+    INFO("published_thread_prefix = %p; prefix = %p", route_state->published_thread_prefix,
          prefix_addr);
 
     // The published prefix's pref:id is always considered present.
-    if (published_thread_prefix != NULL && !memcmp(prefix_addr, &published_thread_prefix->prefix, 8)) {
-        INFO("partition_pref_id_is_present: prefix is published prefix");
+    if (route_state->published_thread_prefix != NULL &&
+        !memcmp(prefix_addr, &route_state->published_thread_prefix->prefix, 8)) {
+        INFO("prefix is published prefix");
         return true;
     }
 
-    for (pref_id = thread_pref_ids; pref_id; pref_id = pref_id->next) {
+    for (pref_id = route_state->thread_pref_ids; pref_id; pref_id = pref_id->next) {
         // A pref:id is valid if the partition ID matches the current partition ID.
         // A pref:id matches a prefix if the 40 variable bits in the ULA /48 are the same.
-        if (!memcmp(thread_partition_id, pref_id->partition_id, 4) &&
+        if (!memcmp(route_state->thread_partition_id, pref_id->partition_id, 4) &&
             !memcmp(prefix_bytes + 1, pref_id->prefix, 5))
         {
-            INFO("partition_pref_id_is_present: pref:id is present");
+            INFO("pref:id is present");
             return true;
         } else {
             IPv6_PREFIX_GEN_SRP(pref_id->prefix, sizeof(pref_id->prefix), pref_id_prefix);
-            if (memcmp(thread_partition_id, pref_id->partition_id, 4)) {
-                INFO("partition_pref_id_is_present: "
-                     "pref:id for " PRI_IPv6_PREFIX_SRP
+            if (memcmp(route_state->thread_partition_id, pref_id->partition_id, 4)) {
+                INFO("pref:id for " PRI_IPv6_PREFIX_SRP
                      ":%02x%02x%02x%02x does not match partition id %02x%02x%02x%02x",
                      IPv6_PREFIX_PARAM_SRP(pref_id_prefix),
                      pref_id->partition_id[0], pref_id->partition_id[1], pref_id->partition_id[2],
                      pref_id->partition_id[3],
-                     thread_partition_id[0], thread_partition_id[1], thread_partition_id[2], thread_partition_id[3]);
+                     route_state->thread_partition_id[0], route_state->thread_partition_id[1],
+                     route_state->thread_partition_id[2], route_state->thread_partition_id[3]);
             } else {
-                INFO("partition_pref_id_is_present: "
-                     "pref:id for " PRI_IPv6_PREFIX_SRP ":%02x%02x%02x%02x does not match prefix %02x%02x%02x%02x%02x",
+                INFO("pref:id for " PRI_IPv6_PREFIX_SRP ":%02x%02x%02x%02x does not match prefix %02x%02x%02x%02x%02x",
                      IPv6_PREFIX_PARAM_SRP(pref_id_prefix),
                      pref_id->partition_id[0], pref_id->partition_id[1], pref_id->partition_id[2],
                      pref_id->partition_id[3],
@@ -4413,17 +4243,18 @@ partition_pref_id_is_present(struct in6_addr *prefix_addr)
 
 // Find the lowest valid prefix present.  The return value may be the published prefix.
 static thread_prefix_t *
-partition_find_lowest_valid_prefix(void)
+partition_find_lowest_valid_prefix(route_state_t *route_state)
 {
-    thread_prefix_t *prefix, *lowest = published_thread_prefix;
+    thread_prefix_t *prefix, *lowest = route_state->published_thread_prefix;
 
     // Are there other prefixes published?
-    for (prefix = thread_prefixes; prefix != NULL; prefix = prefix->next) {
+    for (prefix = route_state->thread_prefixes; prefix != NULL; prefix = prefix->next) {
         // The prefix we publish doesn't count.
-        if (published_thread_prefix != NULL && !memcmp(&prefix->prefix, &published_thread_prefix->prefix, 8)) {
+        if (route_state->published_thread_prefix != NULL && !memcmp(&prefix->prefix,
+                                                                    &route_state->published_thread_prefix->prefix, 8)) {
             continue;
         }
-        if (partition_pref_id_is_present(&prefix->prefix)) {
+        if (partition_pref_id_is_present(route_state, &prefix->prefix)) {
             if (lowest == NULL || memcmp(&prefix->prefix, &lowest->prefix, 8) < 0) {
                 lowest = prefix;
             }
@@ -4435,12 +4266,12 @@ partition_find_lowest_valid_prefix(void)
 
 // Find the lowest valid pref:id.  The return value may be the pref:id for the published prefix.
 static thread_pref_id_t *
-partition_find_lowest_valid_pref_id(void)
+partition_find_lowest_valid_pref_id(route_state_t *route_state)
 {
     thread_pref_id_t *lowest = NULL;
     thread_pref_id_t *pref_id;
 
-    for (pref_id = thread_pref_ids; pref_id != NULL; pref_id = pref_id->next) {
+    for (pref_id = route_state->thread_pref_ids; pref_id != NULL; pref_id = pref_id->next) {
         if (lowest == NULL || memcmp(pref_id->prefix, lowest->prefix, 5) < 0) {
             lowest = pref_id;
         }
@@ -4456,45 +4287,50 @@ partition_find_lowest_valid_pref_id(void)
 // hold an election.  If we lose, we drop our prefix+pref:id pair in favor of the winner.  If we win,
 // we do nothing--we are expecting the BR(s) publishing the other prefix+pref:id pair(s) to drop them.
 static void
-partition_pref_id_timeout(void *UNUSED context)
+partition_pref_id_timeout(void *context)
 {
-    thread_prefix_t *prefix = partition_find_lowest_valid_prefix();
+    route_state_t *route_state = context;
+    thread_prefix_t *prefix = partition_find_lowest_valid_prefix(route_state);
 
     // This should never happen because we wouldn't have set the timeout.
     if (prefix == NULL) {
-        INFO("partition_pref_id_timeout: no published prefix.");
+        INFO("no published prefix.");
         return;
     }
 
     // If we won, do nothing.
-    if (published_thread_prefix != NULL && (prefix == published_thread_prefix ||
-                                            !memcmp(&prefix->prefix, &published_thread_prefix->prefix, 8))) {
-        INFO("partition_pref_id_timeout: published prefix is the lowest; keeping it.");
+    if (route_state->published_thread_prefix != NULL &&
+        (prefix == route_state->published_thread_prefix ||
+         !memcmp(&prefix->prefix, &route_state->published_thread_prefix->prefix, 8)))
+    {
+        INFO("published prefix is the lowest; keeping it.");
         return;
     }
 
     // published_thread_prefix should never be null here.
     // If our published prefix is not the lowest prefix, then we should drop it and adopt the lowest prefix.
-    if (published_thread_prefix != NULL && memcmp(&prefix->prefix, &published_thread_prefix->prefix, 8)) {
-        INFO("partition_pref_id_timeout: published prefix is not lowest valid prefix.  Adopting lowest valid prefix.");
-        partition_adopt_prefix(prefix);
+    if (route_state->published_thread_prefix != NULL &&
+        memcmp(&prefix->prefix, &route_state->published_thread_prefix->prefix, 8))
+    {
+        INFO("published prefix is not lowest valid prefix.  Adopting lowest valid prefix.");
+        partition_adopt_prefix(route_state, prefix);
         return;
     }
 
     // We should never get here.
-    if (adopted_thread_prefix != NULL) {
-        if (!memcmp(&adopted_thread_prefix->prefix, &prefix->prefix, 8)) {
-            ERROR("partition_pref_id_timeout: no published prefix.  Already adopted lowest.");
+    if (route_state->adopted_thread_prefix != NULL) {
+        if (!memcmp(&route_state->adopted_thread_prefix->prefix, &prefix->prefix, 8)) {
+            ERROR("no published prefix.  Already adopted lowest.");
             return;
         }
         // Unadopt this prefix since it's not lowest.
-        partition_unpublish_adopted_prefix(false);
+        partition_unpublish_adopted_prefix(route_state, false);
         // adopted_thread_prefix is now NULL
     }
 
     // And we should never get here.
-    ERROR("partition_pref_id_timeout: no published prefix.  Adopting lowest.");
-    partition_adopt_prefix(prefix);
+    ERROR("no published prefix.  Adopting lowest.");
+    partition_adopt_prefix(route_state, prefix);
 }
 
 // When we see a new partition, if there isn't a prefix to adopt and we aren't publishing one,
@@ -4506,21 +4342,24 @@ partition_pref_id_timeout(void *UNUSED context)
 // later turns out to have been a mistake, we will hold the election again and remove the one we
 // published if we don't win.
 static void
-partition_post_election_wakeup(void *UNUSED context)
+partition_post_election_wakeup(void *context)
 {
-    thread_prefix_t *prefix = partition_find_lowest_valid_prefix();
+    route_state_t *route_state = context;
+    thread_prefix_t *prefix = partition_find_lowest_valid_prefix(route_state);
 
     // There is no valid prefix published.   Publish ours.
     if (prefix == NULL) {
-        INFO("partition_post_election_wakeup: no valid thread prefix present, publishing mine.");
-        partition_publish_my_prefix();
+        INFO("no valid thread prefix present, publishing mine.");
+        partition_publish_my_prefix(route_state);
         return;
     }
 
     // It's perfectly valid to not have adopted the lowest prefix at this point.
     // However, if we have adopted a prefix, we shouldn't be here because the timeout should have been
     // canceled.
-    if (adopted_thread_prefix != NULL && memcmp(&adopted_thread_prefix->prefix, &prefix->prefix, 8)) {
+    if (route_state->adopted_thread_prefix != NULL &&
+        memcmp(&route_state->adopted_thread_prefix->prefix, &prefix->prefix, 8))
+    {
         ERROR("partition_post_election_wakeup: adopted prefix is not lowest.");
     } else {
         ERROR("partition_post_election_wakeup: adopted prefix is lowest.");
@@ -4532,9 +4371,10 @@ partition_post_election_wakeup(void *UNUSED context)
 // on all of the on-partition pref:id pairs that we see.   If we win, we publish our prefix; otherwise
 // give the winner time to publish its prefix.
 static void
-partition_post_partition_timeout(void *UNUSED context)
+partition_post_partition_timeout(void *context)
 {
-    thread_prefix_t *prefix = partition_find_lowest_valid_prefix();
+    route_state_t *route_state = context;
+    thread_prefix_t *prefix = partition_find_lowest_valid_prefix(route_state);
     thread_pref_id_t *pref_id;
 
     // Is there a prefix+pref:id published?
@@ -4545,61 +4385,64 @@ partition_post_partition_timeout(void *UNUSED context)
     }
 
     // Are there pref:id services published that list a lower ULA than ours?
-    pref_id = partition_find_lowest_valid_pref_id();
+    pref_id = partition_find_lowest_valid_pref_id(route_state);
 
     if (pref_id == NULL) {
         INFO("There are no prefixes published, publishing my prefix.");
-        partition_publish_my_prefix();
+        partition_publish_my_prefix(route_state);
         return;
     }
 
     // If not, publish ours.
-    if (memcmp(((uint8_t *)&my_thread_prefix) + 1, pref_id->prefix, 5) < 0) {
-        INFO("partition_post_partition_timeout: my prefix id is lowest, publishing my prefix.");
-        partition_publish_my_prefix();
+    if (memcmp(((uint8_t *)&route_state->my_thread_prefix) + 1, pref_id->prefix, 5) < 0) {
+        INFO("my prefix id is lowest, publishing my prefix.");
+        partition_publish_my_prefix(route_state);
         return;
     }
 
     // If so, wait another ten seconds to see if one of them publishes a prefix
     // If we have adopted a prefix, set a timer after which we will drop it and start advertising if nothing has
     // happened
-    if (partition_post_partition_wakeup != NULL) {  // shouldn't be!
-        ioloop_cancel_wake_event(partition_post_partition_wakeup);
+    if (route_state->partition_post_partition_wakeup != NULL) {  // shouldn't be!
+        ioloop_cancel_wake_event(route_state->partition_post_partition_wakeup);
     } else {
-        partition_post_partition_wakeup = ioloop_wakeup_create();
-        if (partition_post_partition_wakeup == NULL) {
+        route_state->partition_post_partition_wakeup = ioloop_wakeup_create();
+        if (route_state->partition_post_partition_wakeup == NULL) {
             ERROR("partition_post_partition_timeout: can't allocate pref:id wait wakeup.");
             return;
         }
     }
     // Allow ten seconds for the services state to settle, after which time we should either have a pref:id backing
     // up a prefix, or should advertise a prefix.
-    INFO("partition_post_partition_timeout: waiting for other BR to publish its prefixes.");
-    ioloop_add_wake_event(partition_post_partition_wakeup, NULL, partition_post_election_wakeup, NULL, 10 * 1000);
+    INFO("waiting for other BR to publish its prefixes.");
+    ioloop_add_wake_event(route_state->partition_post_partition_wakeup, NULL,
+                          partition_post_election_wakeup, NULL, 10 * 1000);
 }
 
 static void
-partition_proxy_listener_ready(void *UNUSED context, uint16_t port)
+partition_proxy_listener_ready(void *context, uint16_t port)
 {
-    INFO("partition_proxy_listener_ready: listening on port %d", port);
-    srp_service_listen_port = port;
-    if (have_non_thread_interface) {
-        partition_can_advertise_service = true;
-        partition_maybe_advertise_service();
+    srp_server_t *server_state = context;
+    route_state_t *route_state = server_state->route_state;
+    INFO("listening on port %d", port);
+    route_state->srp_service_listen_port = port;
+    if (route_state->have_non_thread_interface) {
+        route_state->partition_can_advertise_service = true;
+        partition_maybe_advertise_service(route_state);
     } else {
-        partition_discontinue_srp_service();
+        partition_discontinue_srp_service(route_state);
     }
 }
 
 void
-partition_start_srp_listener(void)
+partition_start_srp_listener(route_state_t *route_state)
 {
-    const int max_avoid_ports = 100;
+#define max_avoid_ports 100
     uint16_t avoid_ports[max_avoid_ports];
     int num_avoid_ports = 0;
     thread_service_t *service;
 
-    for (service = thread_services; service; service = service->next) {
+    for (service = route_state->thread_services; service; service = service->next) {
         // Track the port regardless.
         if (num_avoid_ports < max_avoid_ports) {
             avoid_ports[num_avoid_ports] = (service->port[0] << 8) | (service->port[1]);
@@ -4607,65 +4450,66 @@ partition_start_srp_listener(void)
         }
     }
 
-    INFO("partition_start_srp_listener: starting listener.");
-    srp_listener = srp_proxy_listen(avoid_ports, num_avoid_ports, partition_proxy_listener_ready);
-    if (srp_listener == NULL) {
+    INFO("starting listener.");
+    route_state->srp_listener = srp_proxy_listen(avoid_ports, num_avoid_ports,
+                                                 partition_proxy_listener_ready, route_state->srp_server);
+    if (route_state->srp_listener == NULL) {
         ERROR("partition_start_srp_listener: Unable to start SRP Proxy listener, so can't advertise it");
         return;
     }
 }
 
-static void
-partition_discontinue_srp_service()
+void
+partition_discontinue_srp_service(route_state_t *route_state)
 {
-    if (srp_listener != NULL) {
-        INFO("discontinuing proxy service on port %d", srp_service_listen_port);
-        srp_proxy_listener_cancel(srp_listener);
-        srp_listener = NULL;
+    if (route_state->srp_listener != NULL) {
+        INFO("discontinuing proxy service on port %d", route_state->srp_service_listen_port);
+        srp_proxy_listener_cancel(route_state->srp_listener);
+        route_state->srp_listener = NULL;
     }
 
     // Won't match
-    memset(&srp_listener_ip_address, 0, 16);
-    srp_service_listen_port = 0;
-    partition_can_advertise_service = false;
+    memset(&route_state->srp_listener_ip_address, 0, 16);
+    route_state->srp_service_listen_port = 0;
+    route_state->partition_can_advertise_service = false;
 
     // Stop advertising the service, if we are doing so.
-    partition_stop_advertising_service();
+    partition_stop_advertising_service(route_state);
 }
 
 // An address on utun0 has changed.  Evaluate what to do with our listener service.
 // This gets called from ifaddr_callback().   If we don't yet have a thread service configured,
 // it should be called for unchanged addresses as well as changed.
 static void
-partition_utun0_address_changed(const struct in6_addr *addr, enum interface_address_change change)
+partition_utun0_address_changed(route_state_t *route_state, const struct in6_addr *addr, enum interface_address_change change)
 {
     thread_prefix_t *advertised_prefix = NULL;
 
     // Figure out what our current prefix is.
-    if (published_thread_prefix != NULL) {
-        SEGMENTED_IPv6_ADDR_GEN_SRP(published_thread_prefix->prefix.s6_addr, prefix_buf);
+    if (route_state->published_thread_prefix != NULL) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(route_state->published_thread_prefix->prefix.s6_addr, prefix_buf);
         INFO("partition_utun0_address_changed: advertised prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " is my prefix.",
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(published_thread_prefix->prefix.s6_addr, prefix_buf));
-        advertised_prefix = published_thread_prefix;
-    } else if (adopted_thread_prefix != NULL) {
-        SEGMENTED_IPv6_ADDR_GEN_SRP(adopted_thread_prefix->prefix.s6_addr, prefix_buf);
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->published_thread_prefix->prefix.s6_addr, prefix_buf));
+        advertised_prefix = route_state->published_thread_prefix;
+    } else if (route_state->adopted_thread_prefix != NULL) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(route_state->adopted_thread_prefix->prefix.s6_addr, prefix_buf);
         INFO("partition_utun0_address_changed: advertised prefix " PRI_SEGMENTED_IPv6_ADDR_SRP
              " is another router's prefix.",
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(adopted_thread_prefix->prefix.s6_addr, prefix_buf));
-        advertised_prefix = adopted_thread_prefix;
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->adopted_thread_prefix->prefix.s6_addr, prefix_buf));
+        advertised_prefix = route_state->adopted_thread_prefix;
     }
 
     SEGMENTED_IPv6_ADDR_GEN_SRP(addr, addr_buf);
     // Is this the address we are currently using?
-    if (!memcmp(&srp_listener_ip_address, addr, 16)) {
+    if (!memcmp(&route_state->srp_listener_ip_address, addr, 16)) {
         // Did it go away?   If so, drop the listener.
         if (change == interface_address_deleted) {
             INFO("partition_utun0_address_changed: " PRI_SEGMENTED_IPv6_ADDR_SRP ": listener address removed.",
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(addr, addr_buf));
-            if (srp_listener != NULL) {
+            if (route_state->srp_listener != NULL) {
                 INFO("partition_utun0_address_changed: " PRI_SEGMENTED_IPv6_ADDR_SRP
                      ": canceling listener on removed address.", SEGMENTED_IPv6_ADDR_PARAM_SRP(addr, addr_buf));
-                partition_discontinue_srp_service();
+                partition_discontinue_srp_service(route_state);
             }
         } else {
             // This should never happen.
@@ -4698,26 +4542,26 @@ partition_utun0_address_changed(const struct in6_addr *addr, enum interface_addr
         if (!memcmp(&advertised_prefix->prefix, addr, 8)) {
             // If we are not listening on an address, or we are listening on an address that isn't on the
             // prefix we are advertising, we need to stop, if needed, and start up a new listener.
-            if (srp_listener_ip_address.s6_addr[0] == 0 ||
-                memcmp(&advertised_prefix->prefix, &srp_listener_ip_address, 8))
+            if (route_state->srp_listener_ip_address.s6_addr[0] == 0 ||
+                memcmp(&advertised_prefix->prefix, &route_state->srp_listener_ip_address, 8))
             {
                 // See if we already have a listener; if so, stop it.
-                if (srp_listener_ip_address.s6_addr[0] != 0) {
+                if (route_state->srp_listener_ip_address.s6_addr[0] != 0) {
                     INFO("partition_utun0_address_changed: " PRI_SEGMENTED_IPv6_ADDR_SRP ": stopping old listener.",
                          SEGMENTED_IPv6_ADDR_PARAM_SRP(addr, addr_buf));
-                    srp_proxy_listener_cancel(srp_listener);
-                    srp_listener = NULL;
-                    memset(&srp_listener_ip_address, 0, sizeof(srp_listener_ip_address));
+                    srp_proxy_listener_cancel(route_state->srp_listener);
+                    route_state->srp_listener = NULL;
+                    memset(&route_state->srp_listener_ip_address, 0, sizeof(route_state->srp_listener_ip_address));
                 }
-                if (srp_listener == NULL) {
-                    if (!have_non_thread_interface) {
+                if (route_state->srp_listener == NULL) {
+                    if (!route_state->have_non_thread_interface) {
                         INFO("partition_utun0_address_changed: not starting a listener because we have no infrastructure");
                     } else {
                         INFO("partition_utun0_address_changed: " PRI_SEGMENTED_IPv6_ADDR_SRP ": starting a new listener.",
                              SEGMENTED_IPv6_ADDR_PARAM_SRP(addr, addr_buf));
-                        memcpy(&srp_listener_ip_address, addr, 16);
-                        srp_service_listen_port = 0;
-                        partition_start_srp_listener();
+                        memcpy(&route_state->srp_listener_ip_address, addr, 16);
+                        route_state->srp_service_listen_port = 0;
+                        partition_start_srp_listener(route_state);
                     }
                 }
             }
@@ -4735,21 +4579,21 @@ partition_utun0_address_changed(const struct in6_addr *addr, enum interface_addr
 // We call this function to see if we have a complete, recent set of information; if not, we wait a bit for the set
 // to become complete, but after 500ms we assume it won't be and proceed.
 static bool
-partition_wait_for_prefix_settling(wakeup_callback_t callback, uint64_t now)
+partition_wait_for_prefix_settling(route_state_t *route_state, wakeup_callback_t callback, uint64_t now)
 {
     // Remember when we started waiting for the partition data to settle.
-    if (partition_settle_satisfied) {
-        partition_settle_start = now;
-        partition_settle_satisfied = false;
+    if (route_state->partition_settle_satisfied) {
+        route_state->partition_settle_start = now;
+        route_state->partition_settle_satisfied = false;
     }
 
-    if (partition_settle_wakeup != NULL) {
-        ioloop_cancel_wake_event(partition_settle_wakeup);
+    if (route_state->partition_settle_wakeup != NULL) {
+        ioloop_cancel_wake_event(route_state->partition_settle_wakeup);
     }
 
     // If we aren't able to offer service, just wait.
-    if (!partition_may_offer_service) {
-        INFO("partition_wait_for_prefix_settling: not able to offer service--deferring.");
+    if (!route_state->partition_may_offer_service) {
+        INFO("not able to offer service--deferring.");
         return true;
     }
 
@@ -4757,70 +4601,75 @@ partition_wait_for_prefix_settling(wakeup_callback_t callback, uint64_t now)
     // partition_settle_start is that if we've been seriously throttled for some reason, it might take
     // more than 500ms to get a callback, even though all the events came in between when we asked
     // for the initial callback and when we got it.   Tunnel ID shouldn't change after startup.
-    if (partition_last_prefix_set_change >= partition_settle_start &&
-        partition_last_pref_id_set_change >= partition_settle_start &&
-        partition_last_partition_id_change >= partition_settle_start &&
-        partition_last_role_change >= partition_settle_start &&
-        partition_last_state_change >= partition_settle_start && partition_tunnel_name_is_known)
+    if (route_state->partition_last_prefix_set_change >= route_state->partition_settle_start &&
+        route_state->partition_last_pref_id_set_change >= route_state->partition_settle_start &&
+        route_state->partition_last_partition_id_change >= route_state->partition_settle_start &&
+        route_state->partition_last_role_change >= route_state->partition_settle_start &&
+        route_state->partition_last_state_change >= route_state->partition_settle_start &&
+        route_state->partition_tunnel_name_is_known)
     {
-        partition_settle_satisfied = true;
-        INFO("partition_wait_for_prefix_settling: satisfied after %" PRIu64 "ms.", now - partition_settle_start);
+        route_state->partition_settle_satisfied = true;
+        INFO("satisfied after %" PRIu64 "ms.", now - route_state->partition_settle_start);
         return false; // means don't wait
     }
 
     // If we've waited longer than 500ms and aren't satisfied, complain, but then proceed.
-    if (now - partition_settle_start >= 500) {
-        ERROR("partition_wait_for_prefix_settling: unsatisfied after %" PRIu64 "ms", now - partition_settle_start);
-        partition_settle_satisfied = true; // not really, but there's always next time.
+    if (now - route_state->partition_settle_start >= 500) {
+        ERROR("unsatisfied after %" PRIu64 "ms",
+              now - route_state->partition_settle_start);
+        route_state->partition_settle_satisfied = true; // not really, but there's always next time.
         return false; // proceed if possible.
     }
 
     // Otherwise, wake up 500ms after we started waiting for things to settle, and reconnoiter.
-    if (partition_settle_wakeup == NULL) {
-        partition_settle_wakeup = ioloop_wakeup_create();
-        if (partition_settle_wakeup == NULL) {
-            ERROR("partition_wait_for_prefix_settling: Unable to postpone partition settlement wakeup: no memory.");
-            partition_settle_satisfied = true;
+    if (route_state->partition_settle_wakeup == NULL) {
+        route_state->partition_settle_wakeup = ioloop_wakeup_create();
+        if (route_state->partition_settle_wakeup == NULL) {
+            ERROR("Unable to postpone partition settlement wakeup: no memory.");
+            route_state->partition_settle_satisfied = true;
             return false;
         }
     }
-    ioloop_add_wake_event(partition_settle_wakeup, NULL, callback, NULL, 500 - (int)(now - partition_settle_start));
+    ioloop_add_wake_event(route_state->partition_settle_wakeup, route_state, callback, NULL,
+                          500 - (int)(now - route_state->partition_settle_start));
     return true;
 }
 
 static void
-partition_got_tunnel_name(void)
+partition_got_tunnel_name(route_state_t *route_state)
 {
-    partition_tunnel_name_is_known = true;
-    for (interface_t *interface = interfaces; interface; interface = interface->next) {
-        if (!strcmp(interface->name, thread_interface_name)) {
+    route_state->partition_tunnel_name_is_known = true;
+    for (interface_t *interface = route_state->interfaces; interface; interface = interface->next) {
+        if (!strcmp(interface->name, route_state->thread_interface_name)) {
             interface->is_thread = true;
             break;
         }
     }
-    refresh_interface_list();
+    refresh_interface_list(route_state);
 }
 
 // We have a recent prefix list and either have a recent pref:id list or one probably isn't coming.
 static void
-partition_prefix_list_or_pref_id_list_changed(void *UNUSED context)
+partition_prefix_list_or_pref_id_list_changed(void *context)
 {
+    route_state_t *route_state = context;
+
     // If we haven't had a pref:id update recently, wait a bit to see if one came with the most recent network data.
-    if (partition_wait_for_prefix_settling(partition_prefix_list_or_pref_id_list_changed, ioloop_timenow())) {
-        ERROR("partition_prefix_list_or_pref_id_list_changed: waiting for prefix info to settle.");
+    if (partition_wait_for_prefix_settling(route_state, partition_prefix_list_or_pref_id_list_changed, ioloop_timenow())) {
+        ERROR("waiting for prefix info to settle.");
         return;
     }
 
     // If we aren't ready to advertise service, do nothing.
-    if (!partition_may_offer_service) {
-        INFO("partition_prefix_list_or_pref_id_list_changed can't offer service yet.");
+    if (!route_state->partition_may_offer_service) {
+        INFO("can't offer service yet.");
         return;
     }
 
     // If there are no prefixes, then it doesn't matter what's on the prefix ID list: publish a prefix now.
-    if (thread_prefixes == NULL) {
-        INFO("partition_prefix_list_or_pref_id_list_changed have no prefixes, publishing my prefix");
-        partition_publish_my_prefix();
+    if (route_state->thread_prefixes == NULL) {
+        INFO("have no prefixes, publishing my prefix");
+        partition_publish_my_prefix(route_state);
         return;
     }
 
@@ -4828,76 +4677,75 @@ partition_prefix_list_or_pref_id_list_changed(void *UNUSED context)
     // partition ID.   We should have received it on startup.   So the case where this would happen would be if
     // on startup we simply didn't get it, which should never happen.   What we'll do if this happens is make
     // one up.
-    if (partition_id_is_known == false) {
-        ERROR("partition_prefix_list_or_pref_id_list_changed: partition ID never showed up!");
+    if (route_state->partition_id_is_known == false) {
+        ERROR("partition ID never showed up!");
     }
 
     // If we are already publishing a prefix and pref:id, we don't have to do anything to the prefix right now.
-    if (published_thread_prefix != NULL) {
+    if (route_state->published_thread_prefix != NULL) {
         // We do need to trigger an interface scan though.
-        refresh_interface_list();
+        refresh_interface_list(route_state);
 
         // Also, if there's more than one prefix present, set a timer for an hour from now, at which point we will
         // consider dropping our prefix.
-        if (thread_prefixes != NULL && thread_prefixes->next != NULL) {
-            INFO("partition_prefix_list_or_pref_id_list_changed:"
-                 "published prefix is unchanged, setting up the pref:id timer");
-            if (partition_pref_id_wait_wakeup != NULL) {
-                ioloop_cancel_wake_event(partition_pref_id_wait_wakeup);
+        if (route_state->thread_prefixes != NULL && route_state->thread_prefixes->next != NULL) {
+            INFO("published prefix is unchanged, setting up the pref:id timer");
+            if (route_state->partition_pref_id_wait_wakeup != NULL) {
+                ioloop_cancel_wake_event(route_state->partition_pref_id_wait_wakeup);
             } else {
-                partition_pref_id_wait_wakeup = ioloop_wakeup_create();
-                if (partition_pref_id_wait_wakeup == NULL) {
-                    ERROR("partition_prefix_list_or_pref_id_list_changed: "
-                          "Unable to set a timer to wake up after the an hour to check the partition id.");
+                route_state->partition_pref_id_wait_wakeup = ioloop_wakeup_create();
+                if (route_state->partition_pref_id_wait_wakeup == NULL) {
+                    ERROR("Unable to set a timer to wake up after the an hour to check the partition id.");
                     return;
                 }
             }
             // The thread network can be pretty chaotic right after the BR comes up, so if we see a partition during the
             // first 60 seconds, don't treat it as a real partition event, and do the re-election in 60 seconds rather
             // than an hour.
-            uint64_t time_since_zero = ioloop_timenow() - partition_last_state_change;
+            uint64_t time_since_zero = ioloop_timenow() - route_state->partition_last_state_change;
             uint32_t pref_id_timeout_time = 3600 * 1000;
             if (time_since_zero < 60 * 1000) {
                 pref_id_timeout_time = 60 * 1000;
             }
-            ioloop_add_wake_event(partition_pref_id_wait_wakeup, NULL, partition_pref_id_timeout, NULL,
+            ioloop_add_wake_event(route_state->partition_pref_id_wait_wakeup, route_state, partition_pref_id_timeout, NULL,
                                   pref_id_timeout_time);
             INFO("added partition pref id timeout");
         } else {
-            INFO("partition_prefix_list_or_pref_id_list_changed: published prefix is unchanged");
+            INFO("published prefix is unchanged");
         }
         return;
     }
 
     // If we have adopted a prefix and the prefix and pref:id are still present, do nothing.
-    if (adopted_thread_prefix != NULL) {
-        if (partition_prefix_is_present(&adopted_thread_prefix->prefix, adopted_thread_prefix->prefix_len) &&
-            partition_pref_id_is_present(&adopted_thread_prefix->prefix))
+    if (route_state->adopted_thread_prefix != NULL) {
+        if (partition_prefix_is_present(route_state, &route_state->adopted_thread_prefix->prefix,
+                                        route_state->adopted_thread_prefix->prefix_len) &&
+            partition_pref_id_is_present(route_state, &route_state->adopted_thread_prefix->prefix))
         {
-            INFO("partition_prefix_list_or_pref_id_list_changed: adopted prefix is unchanged");
+            INFO("adopted prefix is unchanged");
             return;
         }
         // If the adopted prefix is no longer present, stop using it.
-        partition_unpublish_adopted_prefix(false);
+        partition_unpublish_adopted_prefix(route_state, false);
         // adopted_thread_prefix is now NULL.
     }
 
     // If there is a prefix present for which there is already a matching pref:id, adopt that prefix and pref:id now.
     // drop the thread_post_partition_timeout timer.
     thread_prefix_t *prefix;
-    for (prefix = thread_prefixes; prefix; prefix = prefix->next) {
-        if (partition_pref_id_is_present(&prefix->prefix)) {
-            INFO("partition_prefix_list_or_pref_id_list_changed: adopting new prefix");
-            partition_adopt_prefix(prefix);
+    for (prefix = route_state->thread_prefixes; prefix; prefix = prefix->next) {
+        if (partition_pref_id_is_present(route_state, &prefix->prefix)) {
+            INFO("adopting new prefix");
+            partition_adopt_prefix(route_state, prefix);
             // When we adopt a prefix, it was already on-link, and quite possibly we already have an address
             // configured on that prefix on utun0.  Calling refresh_interface_list() will trigger the listener
             // if in fact that's the case.   If the address hasn't come up on utun0 yet, then when it comes up
             // that will trigger the listener.
-            refresh_interface_list();
+            refresh_interface_list(route_state);
             return;
         }
-        if (partition_post_partition_wakeup != NULL) {
-            ioloop_cancel_wake_event(partition_post_partition_wakeup);
+        if (route_state->partition_post_partition_wakeup != NULL) {
+            ioloop_cancel_wake_event(route_state->partition_post_partition_wakeup);
         }
     }
 
@@ -4909,8 +4757,8 @@ partition_prefix_list_or_pref_id_list_changed(void *UNUSED context)
     // the urgency is that if we have a partition, and both routers are still online, then routing will be
     // screwed up until we publish a new prefix and migrate all the accessories on our partition to the
     // new prefix.
-    INFO("partition_publish_prefix: there is a prefix, but no pref:id, so it's stale. Publishing my prefix.");
-    partition_publish_my_prefix();
+    INFO("there is a prefix, but no pref:id, so it's stale. Publishing my prefix.");
+    partition_publish_my_prefix(route_state);
 }
 
 // The list of published prefix has changed.  Evaluate what to do with our partition state.
@@ -4918,171 +4766,175 @@ partition_prefix_list_or_pref_id_list_changed(void *UNUSED context)
 // changes, but if we get an empty prefix list, it doesn't matter what's on the pref:id list,
 // so we act immediately.
 static void
-partition_prefix_set_changed(void)
+partition_prefix_set_changed(route_state_t *route_state)
 {
     // Time stamp most recent prefix set update.
-    partition_last_prefix_set_change = ioloop_timenow();
+    route_state->partition_last_prefix_set_change = ioloop_timenow();
 
     // Otherwise, we have a prefix list and a pref:id list, so we can make decisions.
-    partition_prefix_list_or_pref_id_list_changed(NULL);
+    partition_prefix_list_or_pref_id_list_changed(route_state);
 }
 
 // The set of published pref:id's changed.  Evaluate what to do with our pref:id
 static void
-partition_pref_id_set_changed(void)
+partition_pref_id_set_changed(route_state_t *route_state)
 {
     // Time stamp most recent prefix set update.
-    partition_last_prefix_set_change = ioloop_timenow();
+    route_state->partition_last_prefix_set_change = ioloop_timenow();
 
     // Otherwise, we have a prefix list and a pref:id list, so we can make decisions.
-    partition_prefix_list_or_pref_id_list_changed(NULL);
+    partition_prefix_list_or_pref_id_list_changed(route_state);
 }
 
 // The partition ID changed.
 static void
-partition_id_changed(void)
+partition_id_changed(route_state_t *route_state)
 {
-    partition_last_partition_id_change = ioloop_timenow();
+    route_state->partition_last_partition_id_change = ioloop_timenow();
 
     // If we've never seen a partition ID before, this is not (necessarily) a partition.
-    if (!partition_id_is_known) {
-        INFO("partition_id_changed: first time through.");
-        partition_id_is_known = true;
+    if (!route_state->partition_id_is_known) {
+        INFO("first time through.");
+        route_state->partition_id_is_known = true;
         return;
     }
 
     // If we get a partition ID when we aren't a router, we should (I think!) ignore it.
-    if (!partition_can_provide_routing) {
+    if (!route_state->partition_can_provide_routing) {
         INFO("we aren't able to offer routing yet, so ignoring.");
         return;
     }
 
     // If we are advertising a prefix, update our pref:id
-    if (published_thread_prefix != NULL) {
+    if (route_state->published_thread_prefix != NULL) {
         INFO("updating advertised prefix id");
-        partition_id_update();
+        partition_id_update(route_state);
         // In principle we didn't change anything material to the routing subsystem, so no need to re-evaluate current
         // policy.
         return;
     }
 
     // Propose our prefix as a possible lowest prefix in case there's an election.
-    partition_stop_advertising_pref_id();
-    partition_advertise_pref_id(((uint8_t *)(&my_thread_prefix)) + 1);
+    partition_stop_advertising_pref_id(route_state);
+    partition_advertise_pref_id(route_state, ((uint8_t *)(&route_state->my_thread_prefix)) + 1);
 
     // If we have adopted a prefix, set a timer after which we will drop it and start advertising if nothing has
     // happened
-    if (partition_post_partition_wakeup != NULL) {
-        ioloop_cancel_wake_event(partition_post_partition_wakeup);
+    if (route_state->partition_post_partition_wakeup != NULL) {
+        ioloop_cancel_wake_event(route_state->partition_post_partition_wakeup);
     } else {
-        partition_post_partition_wakeup = ioloop_wakeup_create();
-        if (partition_post_partition_wakeup == NULL) {
+        route_state->partition_post_partition_wakeup = ioloop_wakeup_create();
+        if (route_state->partition_post_partition_wakeup == NULL) {
             ERROR("partition_id_changed: can't allocate pref:id wait wakeup.");
             return;
         }
     }
     // Allow ten seconds for the services state to settle, after which time we should either have a pref:id backing
     // up a prefix, or should advertise a prefix.
-    INFO("partition_id_changed: waiting for other BRs to propose their prefixes.");
-    ioloop_add_wake_event(partition_post_partition_wakeup, NULL, partition_post_partition_timeout, NULL, 10 * 1000);
+    INFO("waiting for other BRs to propose their prefixes.");
+    ioloop_add_wake_event(route_state->partition_post_partition_wakeup, route_state,
+                          partition_post_partition_timeout, NULL, 10 * 1000);
 }
 
 static void
 partition_remove_service_done(void *context, cti_status_t status)
 {
-    INFO("partition_remove_service_done: %d", status);
+    route_state_t *route_state = context;
+    INFO("%d", status);
 
     // Flush any advertisements we're currently doing, since the accessories that advertised them will
     // notice the service is gone and start advertising with a different service.
 #if defined(SRP_FEATURE_REPLICATION)
-    if (!srp_replication_enabled) {
+    if (!route_state->srp_server->srp_replication_enabled) {
 #endif
-        if (context != NULL) {
-            srp_mdns_flush();
-        }
+        srp_mdns_flush(route_state->srp_server);
 #if defined(SRP_FEATURE_REPLICATION)
     }
 #endif
 }
 
 static void
-partition_stop_advertising_service(void)
+partition_stop_advertising_service(route_state_t *route_state)
 {
     // This should remove any copy of the service that this BR is advertising.
-    INFO("partition_stop_advertising_service: %" PRIu64 "/%x", THREAD_ENTERPRISE_NUMBER, THREAD_SRP_SERVER_OPTION);
+    INFO("%" PRIu64 "/%x", THREAD_ENTERPRISE_NUMBER, THREAD_SRP_SERVER_OPTION);
     uint8_t service_info[] = { 0, 0, 0, 1 };
     int status;
 
     service_info[0] = THREAD_SRP_SERVER_OPTION & 255;
-    status = cti_remove_service((void *)(ptrdiff_t)1, partition_remove_service_done, NULL,
+    status = cti_remove_service(route_state, partition_remove_service_done, NULL,
                                 THREAD_ENTERPRISE_NUMBER, service_info, 1);
     if (status != kCTIStatus_NoError) {
-        INFO("partition_stop_advertising_service: status %d", status);
+        INFO("status %d", status);
     }
 }
 
 static void
-partition_add_service_callback(void *UNUSED context, cti_status_t status)
+partition_add_service_callback(void *context, cti_status_t status)
 {
+    route_state_t *UNUSED route_state = context;
     if (status != kCTIStatus_NoError) {
-        INFO("partition_add_service_callback: status = %d", status);
+        INFO("status = %d", status);
     } else {
-        INFO("partition_add_service_callback: status = %d", status);
+        INFO("status = %d", status);
     }
 }
 
 static void
-partition_start_advertising_service(void)
+partition_start_advertising_service(route_state_t *route_state)
 {
     uint8_t service_info[] = {0, 0, 0, 1};
     uint8_t server_info[18];
     int ret;
 
-    memcpy(&server_info, &srp_listener_ip_address, 16);
-    server_info[16] = (srp_service_listen_port >> 8) & 255;
-    server_info[17] = srp_service_listen_port & 255;
+    memcpy(&server_info, &route_state->srp_listener_ip_address, 16);
+    server_info[16] = (route_state->srp_service_listen_port >> 8) & 255;
+    server_info[17] = route_state->srp_service_listen_port & 255;
 
-    SEGMENTED_IPv6_ADDR_GEN_SRP(srp_listener_ip_address.s6_addr, server_ip_buf);
+    SEGMENTED_IPv6_ADDR_GEN_SRP(route_state->srp_listener_ip_address.s6_addr, server_ip_buf);
     service_info[0] = THREAD_SRP_SERVER_OPTION & 255;
-    INFO("partition_add_srp_service: %" PRIu64 "/%02x/" PRI_SEGMENTED_IPv6_ADDR_SRP ":%d" ,
+    INFO("%" PRIu64 "/%02x/" PRI_SEGMENTED_IPv6_ADDR_SRP ":%d" ,
          THREAD_ENTERPRISE_NUMBER, service_info[0],
-         SEGMENTED_IPv6_ADDR_PARAM_SRP(srp_listener_ip_address.s6_addr, server_ip_buf), srp_service_listen_port);
+         SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->srp_listener_ip_address.s6_addr, server_ip_buf),
+         route_state->srp_service_listen_port);
 
-    ret = cti_add_service(NULL, partition_add_service_callback, NULL,
-                              THREAD_ENTERPRISE_NUMBER, service_info, 1, server_info, sizeof server_info);
+    ret = cti_add_service(route_state, partition_add_service_callback, NULL,
+                          THREAD_ENTERPRISE_NUMBER, service_info, 1, server_info, sizeof server_info);
     if (ret != kCTIStatus_NoError) {
-        INFO("partition_add_srp_service: status %d", ret);
+        INFO("status %d", ret);
     }
 
     // Wait a while for the service add to be reflected in an event.
-    partition_schedule_service_add_wakeup();
+    partition_schedule_service_add_wakeup(route_state);
 }
 
 static void
-partition_service_add_wakeup(void *UNUSED context)
+partition_service_add_wakeup(void *context)
 {
-    partition_service_last_add_time = 0;
-    partition_maybe_advertise_service();
+    route_state_t *route_state = context;
+    route_state->partition_service_last_add_time = 0;
+    partition_maybe_advertise_service(route_state);
 }
 
 static void
-partition_schedule_service_add_wakeup()
+partition_schedule_service_add_wakeup(route_state_t *route_state)
 {
-    if (partition_service_add_pending_wakeup == NULL) {
-        partition_service_add_pending_wakeup = ioloop_wakeup_create();
-        if (partition_service_add_pending_wakeup == NULL) {
+    if (route_state->partition_service_add_pending_wakeup == NULL) {
+        route_state->partition_service_add_pending_wakeup = ioloop_wakeup_create();
+        if (route_state->partition_service_add_pending_wakeup == NULL) {
             ERROR("Can't schedule service add pending wakeup: no memory!");
             return;
         }
     } else {
-        ioloop_cancel_wake_event(partition_service_add_pending_wakeup);
+        ioloop_cancel_wake_event(route_state->partition_service_add_pending_wakeup);
     }
     // Wait ten seconds.
-    ioloop_add_wake_event(partition_service_add_pending_wakeup, NULL, partition_service_add_wakeup, NULL, 10 * 1000);
+    ioloop_add_wake_event(route_state->partition_service_add_pending_wakeup, route_state,
+                          partition_service_add_wakeup, NULL, 10 * 1000);
 }
 
 static void
-partition_maybe_advertise_service(void)
+partition_maybe_advertise_service(route_state_t *route_state)
 {
     thread_service_t *service, *lowest[2];
     int num_services = 0;
@@ -5092,46 +4944,46 @@ partition_maybe_advertise_service(void)
     int64_t last_add_time;
 
     // If we aren't ready to advertise a service, there's nothing to do.
-    if (!partition_can_advertise_service) {
-        INFO("partition_maybe_advertise_service: no service to advertise yet.");
+    if (!route_state->partition_can_advertise_service) {
+        INFO("no service to advertise yet.");
         return;
     }
 
-    if (partition_service_blocked) {
-        INFO("partition_maybe_advertise_service: service advertising is disabled.");
+    if (route_state->partition_service_blocked) {
+        INFO("service advertising is disabled.");
         return;
     }
 
     for (i = 0; i < 16; i++) {
-        if (srp_listener_ip_address.s6_addr[i] != 0) {
+        if (route_state->srp_listener_ip_address.s6_addr[i] != 0) {
             break;
         }
     }
     if (i == 16) {
-        INFO("partition_maybe_advertise_service: no listener.");
+        INFO("no listener.");
         return;
     }
 
     // The add service function requires a remove prior to the add, so if we are doing an add, we need to wait
     // for things to stabilize before allowing the removal of a service to trigger a re-evaluation.
     // Therefore, if we've done an add in the past ten seconds, wait ten seconds before trying another add.
-    last_add_time = ioloop_timenow() - partition_service_last_add_time;
-    INFO("partition_maybe_advertise_service: last_add_time = %" PRId64, last_add_time);
+    last_add_time = ioloop_timenow() - route_state->partition_service_last_add_time;
+    INFO("last_add_time = %" PRId64, last_add_time);
     if (last_add_time < 10 * 1000) {
-        partition_schedule_service_add_wakeup();
+        partition_schedule_service_add_wakeup(route_state);
         return;
     }
     lowest[0] = NULL;
     lowest[1] = NULL;
 
-    for (service = thread_services; service; service = service->next) {
+    for (service = route_state->thread_services; service; service = service->next) {
         int port = (service->port[0] << 8) | service->port[1];
         SEGMENTED_IPv6_ADDR_GEN_SRP(service->address, srv_addr_buf);
 
         // A service only counts if its prefix is present and its prefix id is present and matches the
         // current partition id.
-        if (partition_prefix_is_present((struct in6_addr *)service->address, 64)) {
-            if (partition_pref_id_is_present((struct in6_addr *)service->address)) {
+        if (partition_prefix_is_present(route_state, (struct in6_addr *)service->address, 64)) {
+            if (partition_pref_id_is_present(route_state, (struct in6_addr *)service->address)) {
                 num_services++;
                 for (i = 0; i < 2; i++) {
                     if (lowest[i] == NULL) {
@@ -5174,28 +5026,28 @@ partition_maybe_advertise_service(void)
     should_remove_service = true;
     for (i = 0; i < 2; i++) {
         if (lowest[i] == NULL) {
-            INFO("partition_maybe_advertise_service: adding service because there's an open slot.");
+            INFO("adding service because there's an open slot.");
             should_remove_service = false;
             should_advertise_service = true;
             break;
         } else {
-            int sign = memcmp(((uint8_t *)(&srp_listener_ip_address)), lowest[i]->address, 16);
+            int sign = memcmp(((uint8_t *)(&route_state->srp_listener_ip_address)), lowest[i]->address, 16);
             if (sign == 0) {
                 // We're already advertising the service and we win the election.
                 // If the port hasn't changed, don't update the service
                 uint16_t port = (lowest[i]->port[0] << 8) | lowest[i]->port[1];
-                if (port != srp_service_listen_port) {
-                    INFO("partition_maybe_advertise_service: old service was present and prefix would win election.");
+                if (port != route_state->srp_service_listen_port) {
+                    INFO("old service was present and prefix would win election.");
                     should_remove_service = false;
                     should_advertise_service = true;
                 } else {
-                    INFO("partition_maybe_advertise_service: service already present and would win election.");
+                    INFO("service already present and would win election.");
                     should_remove_service = false;
                     should_advertise_service = false;
                 }
                 break;
             } else if (sign < 0) {
-                INFO("partition_maybe_advertise_service: service not present but wins election.");
+                INFO("service not present but wins election.");
                 should_remove_service = false;
                 should_advertise_service = true;
                 break;
@@ -5207,40 +5059,39 @@ partition_maybe_advertise_service(void)
 
     // Always remove service before adding it, but also remove it if it lost the election.
     if (should_remove_service) {
-        partition_stop_advertising_service();
-        partition_service_last_add_time = ioloop_timenow();
+        partition_stop_advertising_service(route_state);
+        route_state->partition_service_last_add_time = ioloop_timenow();
     }
     if (should_advertise_service) {
-        partition_start_advertising_service();
-        partition_service_last_add_time = ioloop_timenow();
+        partition_start_advertising_service(route_state);
+        route_state->partition_service_last_add_time = ioloop_timenow();
     }
 }
 
 static void
-partition_service_set_changed()
+partition_service_set_changed(route_state_t *route_state)
 {
-    partition_pref_id_set_changed();
-    partition_maybe_advertise_service();
+    partition_pref_id_set_changed(route_state);
+    partition_maybe_advertise_service(route_state);
 }
 
-static void partition_maybe_enable_services()
+static void partition_maybe_enable_services(route_state_t *route_state)
 {
-    bool am_associated = current_thread_state == kCTI_NCPState_Associated;
+    bool am_associated = route_state->current_thread_state == kCTI_NCPState_Associated;
     if (am_associated) {
-        INFO("partition_maybe_enable_services: "
-             "Enabling service, which was disabled because of the thread role or state.");
-        partition_may_offer_service = true;
-        partition_can_provide_routing = true;
-        refresh_interface_list();
-        partition_prefix_list_or_pref_id_list_changed(NULL);
-        routing_policy_evaluate_all_interfaces(true);
+        INFO("Enabling service, which was disabled because of the thread role or state.");
+        route_state->partition_may_offer_service = true;
+        route_state->partition_can_provide_routing = true;
+        refresh_interface_list(route_state);
+        partition_prefix_list_or_pref_id_list_changed(route_state);
+        routing_policy_evaluate_all_interfaces(route_state, true);
     } else {
-        INFO("partition_maybe_enable_services: Not enabling service: " PUB_S_SRP,
+        INFO("Not enabling service: " PUB_S_SRP,
              am_associated ? "associated" : "!associated");
     }
 }
 
-static void partition_disable_service()
+static void partition_disable_service(route_state_t *route_state)
 {
     bool done_something = false;
 
@@ -5248,30 +5099,30 @@ static void partition_disable_service()
     // automatically remove the published prefix.  In case this happens, we do not want to remember the
     // prefix as already having been published.  So drop our recollection of the adopted and published
     // prefixes; this will get cleaned up when the network comes back if there's an inconsistency.
-    if (adopted_thread_prefix != NULL) {
-        SEGMENTED_IPv6_ADDR_GEN_SRP(adopted_thread_prefix->prefix.s6_addr, prefix_buf);
-        INFO("partition_disable_service: unadopting prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(adopted_thread_prefix->prefix.s6_addr, prefix_buf));
-        RELEASE_HERE(adopted_thread_prefix, thread_prefix_finalize);
-        adopted_thread_prefix = NULL;
+    if (route_state->adopted_thread_prefix != NULL) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(route_state->adopted_thread_prefix->prefix.s6_addr, prefix_buf);
+        INFO("unadopting prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->adopted_thread_prefix->prefix.s6_addr, prefix_buf));
+        RELEASE_HERE(route_state->adopted_thread_prefix, thread_prefix_finalize);
+        route_state->adopted_thread_prefix = NULL;
         done_something = true;
     }
-    if (published_thread_prefix != NULL) {
-        SEGMENTED_IPv6_ADDR_GEN_SRP(published_thread_prefix->prefix.s6_addr, prefix_buf);
-        INFO("partition_disable_service: un-publishing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(published_thread_prefix->prefix.s6_addr, prefix_buf));
-        RELEASE_HERE(published_thread_prefix, thread_prefix_finalize);
-        published_thread_prefix = NULL;
+    if (route_state->published_thread_prefix != NULL) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(route_state->published_thread_prefix->prefix.s6_addr, prefix_buf);
+        INFO("un-publishing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->published_thread_prefix->prefix.s6_addr, prefix_buf));
+        RELEASE_HERE(route_state->published_thread_prefix, thread_prefix_finalize);
+        route_state->published_thread_prefix = NULL;
         done_something = true;
     }
 
     // We want to always say something when we pass through this state.
     if (!done_something) {
-	    INFO("partition_disable_service: nothing to do.");
+	    INFO("nothing to do.");
     }
 
-    partition_may_offer_service = false;
-    partition_can_provide_routing = false;
+    route_state->partition_may_offer_service = false;
+    route_state->partition_can_provide_routing = false;
 }
 #endif // RA_TESTER
 #endif // STUB_ROUTER

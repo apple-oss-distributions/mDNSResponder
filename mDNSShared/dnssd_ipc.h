@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2003-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -105,11 +105,15 @@ extern char *win32_strerror(int inErrorCode);
 #define VERSION 1
 #define IPC_FLAGS_NOREPLY       (1U << 0) // Set flag if no asynchronous replies are to be sent to client.
 #define IPC_FLAGS_TRAILING_TLVS (1U << 1) // Set flag if TLVs follow the standard request data.
+#define IPC_FLAGS_NOERRSD       (1U << 2) // Set flag if flag kDNSServiceFlagsMoreComing is set on client side.
 
-#define IPC_TLV_TYPE_RESOLVER_CONFIG_PLIST_DATA 1 // An nw_resolver_config as a binary property list.
-#define IPC_TLV_TYPE_REQUIRE_PRIVACY            2 // A uint8. Non-zero means privacy is required, zero means not required.
-#define IPC_TLV_TYPE_QUERY_ATTR_AAAA_POLICY     3 // A uint32 for a DNSServiceAAAAPolicy value.
-#define IPC_TLV_TYPE_QUERY_ATTR_FAILOVER_POLICY 4 // A uint32 for a DNSServiceFailoverPolicy value.
+#define IPC_TLV_TYPE_RESOLVER_CONFIG_PLIST_DATA     1 // An nw_resolver_config as a binary property list.
+#define IPC_TLV_TYPE_REQUIRE_PRIVACY                2 // A uint8. Non-zero means privacy required, zero means not required.
+#define IPC_TLV_TYPE_SERVICE_ATTR_AAAA_POLICY       3 // A uint32 for a DNSServiceAAAAPolicy value.
+#define IPC_TLV_TYPE_SERVICE_ATTR_FAILOVER_POLICY   4 // A uint32 for a DNSServiceFailoverPolicy value.
+#define IPC_TLV_TYPE_SERVICE_ATTR_TIMESTAMP         5 // A uint32 value for the time, in seconds, since Jan 1st 1970 UTC.
+#define IPC_TLV_TYPE_SERVICE_ATTR_VALIDATION_POLICY 6 // A uint32 for a DNSServiceValidationPolicy value.
+#define IPC_TLV_TYPE_SERVICE_ATTR_VALIDATION_DATA   7 // Validation data.
 
 // Structure packing macro. If we're not using GNUC, it's not fatal. Most compilers naturally pack the on-the-wire
 // structures correctly anyway, so a plain "struct" is usually fine. In the event that structures are not packed
@@ -160,7 +164,8 @@ typedef enum
     reg_record_reply_op,    // Up to here is in Tiger and B4W 1.0.3
     getproperty_reply_op,   // New in B4W 1.0.4
     port_mapping_reply_op,  // New in Leopard and B4W 2.0
-    addrinfo_reply_op
+    addrinfo_reply_op,
+    async_error_op
 } reply_op_t;
 
 #if defined(_WIN64)

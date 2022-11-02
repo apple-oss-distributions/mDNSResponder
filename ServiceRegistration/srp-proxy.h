@@ -21,14 +21,19 @@
 #define __SRP_PROXY_H
 
 typedef struct srp_proxy_listener_state srp_proxy_listener_state_t;
+typedef struct srp_server_state srp_server_t;
+typedef struct srpl_connection srpl_connection_t;
 
 void srp_proxy_listener_cancel(srp_proxy_listener_state_t *NONNULL listener_state);
-srp_proxy_listener_state_t *NULLABLE srp_proxy_listen(uint16_t *NULLABLE avoid_ports,
-                                                      int num_avoid_ports, ready_callback_t NULLABLE ready);
+srp_proxy_listener_state_t *NULLABLE srp_proxy_listen(uint16_t *NULLABLE avoid_ports, int num_avoid_ports,
+                                                      ready_callback_t NULLABLE ready,
+                                                      srp_server_t *NONNULL server_state);
 void srp_proxy_init(const char *NONNULL update_zone);
-bool srp_evaluate(comm_t *NONNULL comm, void *NULLABLE context,
+bool srp_evaluate(comm_t *NONNULL comm, srp_server_t *NULLABLE server_state,
+                  srpl_connection_t *NULLABLE srpl_connection,
                   dns_message_t *NONNULL message, message_t *NONNULL raw_message);
-bool srp_update_start(comm_t *NONNULL connection, void *NULLABLE context,
+bool srp_update_start(comm_t *NONNULL connection, srp_server_t *NULLABLE server_state,
+                      srpl_connection_t *NULLABLE srpl_connection,
                       dns_message_t *NONNULL parsed_message, message_t *NONNULL raw_message,
                       dns_host_description_t *NONNULL new_host, service_instance_t *NONNULL instances,
                       service_t *NONNULL services, delete_t *NULLABLE removes, dns_name_t *NONNULL update_zone,
@@ -41,8 +46,9 @@ void srp_update_free(update_t *NONNULL update);
 
 // Provided
 void dns_input(comm_t *NONNULL comm, message_t *NONNULL message, void *NULLABLE context);
-void srp_mdns_flush(void);
-bool srp_dns_evaluate(comm_t *NULLABLE connection, void *NULLABLE context, message_t *NONNULL message);
+void srp_mdns_flush(srp_server_t *NONNULL server_state);
+bool srp_dns_evaluate(comm_t *NULLABLE connection, srp_server_t *NULLABLE server_state,
+                      srpl_connection_t *NULLABLE srpl_connection, message_t *NONNULL message);
 #endif // __SRP_PROXY_H
 
 // Local Variables:

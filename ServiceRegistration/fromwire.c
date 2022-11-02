@@ -1,12 +1,12 @@
 /* fromwire.c
  *
- * Copyright (c) 2018-2021 Apple, Inc. All rights reserved.
+ * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -257,7 +257,7 @@ dns_u64_parse(const uint8_t *buf, unsigned len, unsigned *NONNULL offp, uint64_t
 }
 
 static void
-dns_rrdata_dump(dns_rr_t *rr)
+dns_rrdata_dump(dns_rr_t *rr, bool dump_to_stderr)
 {
     char nbuf[INET6_ADDRSTRLEN];
     char buf[DNS_MAX_NAME_SIZE_ESCAPED + 1];
@@ -379,7 +379,11 @@ dns_rrdata_dump(dns_rr_t *rr)
         }
         break;
     }
-    DEBUG(PUB_S_SRP, outbuf);
+    if (dump_to_stderr) {
+        fprintf(stderr, "%s\n", outbuf);
+    } else {
+        DEBUG(PUB_S_SRP, outbuf);
+    }
 }
 
 bool
@@ -472,28 +476,29 @@ dns_rdata_parse_data_(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNUL
         *offp = target;
         break;
 
-        case dns_rrtype_txt: {
-            unsigned left = target - *offp;
-            if (left != rdlen) {
-                ERROR("TXT record length %u doesn't match remaining space %d", rdlen, left);
-            }
-            if (left > UINT8_MAX) {
-                ERROR("TXT record length %u is longer than 255", left);
-            }
-            rr->data.txt.len = (uint8_t)left;
-#ifdef MALLOC_DEBUG_LOGGING
-            rr->data.txt.data = debug_malloc(rr->data.txt.len, file, line);
-#else
-            rr->data.txt.data = malloc(rr->data.txt.len);
-#endif
-            if (rr->data.txt.data == NULL) {
-                DEBUG("dns_rdata_parse: no memory for TXT RR");
-                return false;
-            }
-            memcpy(rr->data.txt.data, &buf[*offp], rr->data.txt.len);
-            *offp = target;
+    case dns_rrtype_txt:
+    {
+        unsigned left = target - *offp;
+        if (left != rdlen) {
+            ERROR("TXT record length %u doesn't match remaining space %d", rdlen, left);
         }
+        if (left > UINT8_MAX) {
+            ERROR("TXT record length %u is longer than 255", left);
+        }
+        rr->data.txt.len = (uint8_t)left;
+#ifdef MALLOC_DEBUG_LOGGING
+        rr->data.txt.data = debug_malloc(rr->data.txt.len, file, line);
+#else
+        rr->data.txt.data = malloc(rr->data.txt.len);
+#endif
+        if (rr->data.txt.data == NULL) {
+            DEBUG("dns_rdata_parse: no memory for TXT RR");
+            return false;
+        }
+        memcpy(rr->data.txt.data, &buf[*offp], rr->data.txt.len);
+        *offp = target;
         break;
+    }
 
     default:
         if (rdlen > 0) {
@@ -536,8 +541,8 @@ dns_rdata_parse_(dns_rr_t *NONNULL rr,
 }
 
 bool
-dns_rr_parse_(dns_rr_t *NONNULL rr,
-              const uint8_t *buf, unsigned len, unsigned *NONNULL offp, bool rrdata_expected, const char *file, int line)
+dns_rr_parse_(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned len, unsigned *NONNULL offp, bool rrdata_expected,
+              bool dump_stderr, const char *file, int line)
 {
     unsigned rrstart = *offp; // Needed to mark the start of the SIG RR for SIG(0).
 
@@ -564,10 +569,15 @@ dns_rr_parse_(dns_rr_t *NONNULL rr,
     }
 
     DNS_NAME_GEN_SRP(rr->name, name_buf);
-    DEBUG("rrtype: %u  qclass: %u  name: " PRI_DNS_NAME_SRP PUB_S_SRP,
-          rr->type, rr->qclass, DNS_NAME_PARAM_SRP(rr->name, name_buf), rrdata_expected ? "  rrdata:" : "");
+    if (dump_stderr) {
+        fprintf(stderr, "rrtype: %u  qclass: %u  name: %s %s\n",
+              rr->type, rr->qclass, DNS_NAME_PARAM_SRP(rr->name, name_buf), rrdata_expected ? "  rrdata:" : "");
+    } else {
+        DEBUG("rrtype: %u  qclass: %u  name: " PRI_DNS_NAME_SRP PUB_S_SRP,
+              rr->type, rr->qclass, DNS_NAME_PARAM_SRP(rr->name, name_buf), rrdata_expected ? "  rrdata:" : "");
+    }
     if (rrdata_expected) {
-        dns_rrdata_dump(rr);
+        dns_rrdata_dump(rr, dump_stderr);
     }
     return true;
 }
@@ -646,7 +656,8 @@ dns_message_free(dns_message_t *message)
 }
 
 bool
-dns_wire_parse_(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsigned len, const char *file, int line)
+dns_wire_parse_(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsigned len, bool dump_to_stderr,
+                const char *file, int line)
 {
     unsigned offset = 0;
     unsigned data_len = len - DNS_HEADER_SIZE;
@@ -683,7 +694,7 @@ dns_wire_parse_(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsig
                                                                                     \
     for (unsigned i = 0; i < rv->count; i++) {                                      \
         if (!dns_rr_parse_(&rv->sets[i], message->data, data_len, &offset,          \
-                           rrdata_expected, file, line)) {                          \
+                           rrdata_expected, dump_to_stderr, file, line)) {          \
             dns_message_free(rv);                                                   \
             ERROR(name " %d RR parse failed.\n", i);                                \
             return false;                                                           \

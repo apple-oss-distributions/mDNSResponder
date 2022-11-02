@@ -17,7 +17,10 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreFoundation/CFXPCBridge.h>
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-extension"
 #include "dns_sd.h"
+#pragma clang diagnostic pop
 #include <UserEventAgentInterface.h>
 #include <stdio.h>
 #include <stdlib.h>

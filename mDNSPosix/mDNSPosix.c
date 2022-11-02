@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,7 +61,6 @@
 
 #include "mDNSUNP.h"
 #include "GenLinkedList.h"
-#include "dnsproxy.h"
 #include "mdns_strict.h"
 
 // ***************************************************************************
@@ -209,6 +208,11 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
         sendingsocket             = thisIntf ? thisIntf->multicastSocket6 : m->p->unicastSocket6;
     }
 #endif
+    // In case we get some other address family, return an error, since it's not supported.
+    else
+    {
+        return kDNSServiceErr_BadParam;
+    }
 
     // We don't open the socket until we get a send, because we don't know whether it's IPv4 or IPv6.
     if (src)
@@ -1489,7 +1493,7 @@ mDNSlocal int SetupInterfaceList(mDNS *const m)
                 }
                 else
                 {
-                    const int ethernet_addr_len = 6;
+#define ethernet_addr_len 6
                     uint8_t hwaddr[ethernet_addr_len];
                     int hwaddr_len = 0;
 
@@ -1519,7 +1523,8 @@ mDNSlocal int SetupInterfaceList(mDNS *const m)
 #if defined(TARGET_OS_MAC) && TARGET_OS_MAC
                     for (struct ifaddrs *hw_scan = intfList; hw_scan != NULL; hw_scan = hw_scan->ifa_next)
                     {
-                        if (hw_scan->ifa_addr->sa_family == AF_LINK && !strcmp(hw_scan->ifa_name, i->ifa_name))
+                        if (hw_scan->ifa_addr != NULL &&
+                            hw_scan->ifa_addr->sa_family == AF_LINK && !strcmp(hw_scan->ifa_name, i->ifa_name))
                         {
                             struct sockaddr_dl *sdl = (struct sockaddr_dl *)hw_scan->ifa_addr;
                             if (sdl->sdl_alen == ethernet_addr_len)
@@ -1937,26 +1942,9 @@ mDNSexport void    mDNSPlatformUnlock (const mDNS *const m)
 #pragma mark ***** Strings
 #endif
 
-mDNSexport mDNSu32  mDNSPlatformStrLCopy(void *dst, const void *src, mDNSu32 len)
+mDNSexport void    mDNSPlatformStrLCopy(void *dst, const void *src, mDNSu32 len)
 {
-#if HAVE_STRLCPY
-    return ((mDNSu32)strlcpy((char *)dst, (const char *)src, len));
-#else
-    size_t srcLen;
-
-    srcLen = strlen((const char *)src);
-    if (srcLen < len)
-    {
-        memcpy(dst, src, srcLen + 1);
-    }
-    else if (len > 0)
-    {
-        memcpy(dst, src, len - 1);
-        ((char *)dst)[len - 1] = '\0';
-    }
-
-    return ((mDNSu32)srcLen);
-#endif
+    mdns_strlcpy((char *)dst, (const char *)src, len);
 }
 
 // mDNS core calls this routine to get the length of a C string.
@@ -2004,16 +1992,6 @@ mDNSexport mDNSu8 *DNSProxySetAttributes(DNSQuestion *q, DNSMessageHeader *h, DN
     return ptr;
 }
 
-mDNSexport void DNSProxyInit(mDNSu32 IpIfArr[], mDNSu32 OpIf)
-{
-    (void) IpIfArr;
-    (void) OpIf;
-}
-
-mDNSexport void DNSProxyTerminate(void)
-{
-}
-
 // mDNS core calls this routine to clear blocks of memory.
 // On the Posix platform this is a simple wrapper around ANSI C memset.
 mDNSexport void  mDNSPlatformMemZero(void *dst, mDNSu32 len)
@@ -2051,7 +2029,7 @@ mDNSexport mStatus mDNSPlatformTimeInit(void)
     return(mStatus_NoError);
 }
 
-mDNSexport mDNSs32  mDNSPlatformRawTime()
+mDNSexport mDNSs32 mDNSPlatformRawTime(void)
 {
     struct timespec tm;
     int ret = clock_gettime(CLOCK_MONOTONIC, &tm);
@@ -2064,12 +2042,33 @@ mDNSexport mDNSs32  mDNSPlatformRawTime()
     // This gives us a proper modular (cyclic) counter that has a resolution of roughly 1ms (actually 1/1024 second)
     // and correctly cycles every 2^22 seconds (4194304 seconds = approx 48 days).
 
-    return ((tm.tv_sec << 10) | (tm.tv_nsec * 2 / 1953125));
+    return (mDNSs32)(((tm.tv_sec << 10) | (tm.tv_nsec * 2 / 1953125)));
 }
 
 mDNSexport mDNSs32 mDNSPlatformUTC(void)
 {
     return time(NULL);
+}
+
+// This should return elapsed time in seconds since boot. Posix doesn't have an API for this, so we currently assume
+// that time() doesn't get adjusted, which isn't the case.
+mDNSexport mDNSs32 mDNSPlatformContinuousTimeSeconds(void)
+{
+#ifdef CLOCK_BOOTTIME
+    // CLOCK_BOOTTIME is a Linux-specific constant that indicates a monotonic time that includes time asleep
+    const int clockid = CLOCK_BOOTTIME;
+#else
+    // On MacOS, CLOCK_MONOTONIC is a monotonic time that includes time asleep. However, this may not be the case
+    // on other Posix systems, since the POSIX specification doesn't say one way or the other. E.g. on Linux
+    // time asleep is not accounted for, which is why we prefer CLOCK_BOOTTIME on Linux.
+    const int clockid = CLOCK_MONOTONIC;
+#endif
+    struct timespec tm;
+    int ret = clock_gettime(clockid, &tm);
+    assert(ret == 0); // This call will only fail if the number of seconds does not fit in an object of type time_t.
+
+    // We are only accurate to the second.
+    return (mDNSs32)tm.tv_sec;
 }
 
 mDNSexport void mDNSPlatformSendWakeupPacket(mDNSInterfaceID InterfaceID, char *EthAddr, char *IPAddr, int iteration)

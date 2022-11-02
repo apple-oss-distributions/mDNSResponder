@@ -1,12 +1,12 @@
 /* dnssd-relay.c
  *
- * Copyright (c) 2019 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -123,12 +123,12 @@ static void dso_message(comm_t *comm, const dns_wire_t *header, dso_state_t *dso
         break;
 
     case kDSOType_DNSPushUpdate:
-        INFO("dso_message: bogus push update message %d", dso->primary.opcode);
+        INFO("bogus push update message %d", dso->primary.opcode);
         dso_drop(dso);
         break;
 
     default:
-        INFO("dso_message: unexpected primary TLV %d", dso->primary.opcode);
+        INFO("unexpected primary TLV %d", dso->primary.opcode);
         dp_simple_response(comm, dns_rcode_dsotypeni);
         break;
     }
@@ -144,56 +144,56 @@ static void dns_push_callback(void *context, const void *event_context,
     case kDSOEventType_DNSMessage:
         // We shouldn't get here because we already handled any DNS messages
         message = event_context;
-        INFO("dns_push_callback: DNS Message (opcode=%d) received from " PRI_S_SRP, dns_opcode_get(message),
+        INFO("DNS Message (opcode=%d) received from " PRI_S_SRP, dns_opcode_get(message),
              dso->remote_name);
         break;
     case kDSOEventType_DNSResponse:
         // We shouldn't get here because we already handled any DNS messages
         message = event_context;
-        INFO("dns_push_callback: DNS Response (opcode=%d) received from " PRI_S_SRP, dns_opcode_get(message),
+        INFO("DNS Response (opcode=%d) received from " PRI_S_SRP, dns_opcode_get(message),
              dso->remote_name);
         break;
     case kDSOEventType_DSOMessage:
-        INFO("dns_push_callback: DSO Message (Primary TLV=%d) received from " PRI_S_SRP,
+        INFO("DSO Message (Primary TLV=%d) received from " PRI_S_SRP,
              dso->primary.opcode, dso->remote_name);
         message = event_context;
         dso_message((comm_t *)context, message, dso);
         break;
     case kDSOEventType_DSOResponse:
-        INFO("dns_push_callback: DSO Response (Primary TLV=%d) received from " PRI_S_SRP,
+        INFO("DSO Response (Primary TLV=%d) received from " PRI_S_SRP,
              dso->primary.opcode, dso->remote_name);
         break;
 
     case kDSOEventType_Finalize:
-        INFO("dns_push_callback: Finalize");
+        INFO("Finalize");
         break;
 
     case kDSOEventType_Connected:
-        INFO("dns_push_callback: Connected to " PRI_S_SRP, dso->remote_name);
+        INFO("Connected to " PRI_S_SRP, dso->remote_name);
         break;
 
     case kDSOEventType_ConnectFailed:
-        INFO("dns_push_callback: Connection to " PRI_S_SRP " failed", dso->remote_name);
+        INFO("Connection to " PRI_S_SRP " failed", dso->remote_name);
         break;
 
     case kDSOEventType_Disconnected:
-        INFO("dns_push_callback: Connection to " PRI_S_SRP " disconnected", dso->remote_name);
+        INFO("Connection to " PRI_S_SRP " disconnected", dso->remote_name);
         break;
     case kDSOEventType_ShouldReconnect:
-        INFO("dns_push_callback: Connection to " PRI_S_SRP " should reconnect (not for a server)", dso->remote_name);
+        INFO("Connection to " PRI_S_SRP " should reconnect (not for a server)", dso->remote_name);
         break;
     case kDSOEventType_Inactive:
-        INFO("dns_push_callback: Inactivity timer went off, closing connection.");
+        INFO("Inactivity timer went off, closing connection.");
         // XXX
         break;
     case kDSOEventType_Keepalive:
-        INFO("dns_push_callback: should send a keepalive now.");
+        INFO("should send a keepalive now.");
         break;
     case kDSOEventType_KeepaliveRcvd:
-        INFO("dns_push_callback: keepalive received.");
+        INFO("keepalive received.");
         break;
     case kDSOEventType_RetryDelay:
-        INFO("dns_push_callback: keepalive received.");
+        INFO("keepalive received.");
         break;
     }
 }
@@ -252,7 +252,7 @@ dp_dns_query(comm_t *comm, dns_rr_t *question)
 void dso_transport_finalize(comm_t *comm)
 {
     dso_state_t *dso = comm->dso;
-    INFO("dso_transport_finalize: " PRI_S_SRP, dso->remote_name);
+    INFO(PRI_S_SRP, dso->remote_name);
     if (comm) {
         ioloop_close(&comm->io);
     }
@@ -299,7 +299,7 @@ void dns_evaluate(comm_t *comm)
             dp_simple_response(comm, dns_rcode_formerr);
             return;
         }
-        if (!dns_rr_parse(&question, comm->message->wire.data, comm->message->length, &offset, 0)) {
+        if (!dns_rr_parse(&question, comm->message->wire.data, comm->message->length, &offset, false, false)) {
             dp_simple_response(comm, dns_rcode_formerr);
             return;
         }

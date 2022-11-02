@@ -91,7 +91,7 @@ static bool config_parse_line(void *context, const char *filename, char *line, i
 				}
 			}
 			if (config_file_verb == NULL) {
-				INFO("cfParseLine: unknown verb %s at line %d", hunks[0], lineno);
+				INFO("unknown verb %s at line %d", hunks[0], lineno);
 				return false;
 			}
 		}				
@@ -99,7 +99,7 @@ static bool config_parse_line(void *context, const char *filename, char *line, i
 	
 	// If we didn't get the hunks we needed, bail.
 	if (config_file_verb->min_hunks > num_hunks) {
-		INFO("config_file_parse_line: error: verb %s requires between %d and %d modifiers; %d given at line %d",
+		INFO("error: verb %s requires between %d and %d modifiers; %d given at line %d",
 			 hunks[0], config_file_verb->min_hunks, config_file_verb->max_hunks, num_hunks, lineno);
 		return false;
 	}
@@ -119,7 +119,7 @@ bool config_parse(void *context, const char *filename, config_file_verb_t *verbs
 
 	file = open(filename, O_RDONLY);
 	if (file < 0) {
-		INFO("cfParse: fatal: %s: %s", filename, strerror(errno));
+		INFO("fatal: %s: %s", filename, strerror(errno));
 		return false;
 	}
 
@@ -128,7 +128,7 @@ bool config_parse(void *context, const char *filename, config_file_verb_t *verbs
 	lseek(file, 0, SEEK_SET);
 	buf = malloc(flen + 1);
 	if (buf == NULL) {
-		INFO("cfParse: fatal: not enough memory for %s", filename);
+		INFO("fatal: not enough memory for %s", filename);
 		goto outclose;
 	}
 	
@@ -137,12 +137,12 @@ bool config_parse(void *context, const char *filename, config_file_verb_t *verbs
 	while (have < flen) {
 		len = read(file, &buf[have], flen - have);
 		if (len < 0) {
-			INFO("cfParse: fatal: read of %s at %lld len %lld: %s",
+			INFO("fatal: read of %s at %lld len %lld: %s",
 				 filename, (long long)have, (long long)(flen - have), strerror(errno));
 			goto outfree;
 		}
 		if (len == 0) {
-			INFO("cfParse: fatal: read of %s at %lld len %lld: zero bytes read",
+			INFO("fatal: read of %s at %lld len %lld: zero bytes read",
 				 filename, (long long)have, (long long)(flen - have));
 		outfree:
 			free(buf);

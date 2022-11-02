@@ -15,6 +15,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #if defined(WIN32) || defined(EFI32) || defined(EFI64) || defined(EFIX64)
 // Need to add Windows/EFI syslog support here
@@ -69,6 +70,12 @@ mDNSlocal void LogMsgWithLevelv(os_log_t category, os_log_type_t level, const ch
 #else
 mDNSlocal void LogMsgWithLevelv(const char *category, mDNSLogLevel_t level, const char *format, va_list args)
 {
+    // Do not print the logs if the log category is MDNS_LOG_CATEGORY_DISABLED.
+    if (strcmp(category, MDNS_LOG_CATEGORY_DISABLED) == 0)
+    {
+        return;
+    }
+
     char buffer[512];
     char *dst = buffer;
     const char *const lim = &buffer[512];
@@ -88,10 +95,10 @@ mDNSlocal void LogMsgWithLevelv(const char *category, mDNSLogLevel_t level, cons
 
 // see mDNSDebug.h
 #if !MDNS_HAS_VA_ARG_MACROS
-void LogMsg_(const char *format, ...)       LOG_HELPER_BODY(NULL, MDNS_LOG_INFO)
-void LogOperation_(const char *format, ...) LOG_HELPER_BODY(NULL, MDNS_LOG_INFO)
-void LogSPS_(const char *format, ...)       LOG_HELPER_BODY(NULL, MDNS_LOG_INFO)
-void LogInfo_(const char *format, ...)      LOG_HELPER_BODY(NULL, MDNS_LOG_INFO)
+void LogMsg_(const char *format, ...)       LOG_HELPER_BODY(NULL, MDNS_LOG_DEFAULT)
+void LogOperation_(const char *format, ...) LOG_HELPER_BODY(NULL, MDNS_LOG_DEFAULT)
+void LogSPS_(const char *format, ...)       LOG_HELPER_BODY(NULL, MDNS_LOG_DEFAULT)
+void LogInfo_(const char *format, ...)      LOG_HELPER_BODY(NULL, MDNS_LOG_DEFAULT)
 void LogDebug_(const char *format, ...)     LOG_HELPER_BODY(NULL, MDNS_LOG_DEBUG)
 #endif
 
@@ -108,6 +115,6 @@ mDNSexport void LogToFD(int fd, const char *format, ...)
     va_list args;
     va_start(args, format);
     (void)fd;
-    LogMsgWithLevelv(NULL, MDNS_LOG_INFO, format, args);
+    LogMsgWithLevelv(NULL, MDNS_LOG_DEFAULT, format, args);
     va_end(args);
 }

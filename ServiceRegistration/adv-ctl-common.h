@@ -1,6 +1,6 @@
 /* adv-ctl-common.h
  *
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,18 +21,27 @@
 #ifndef XPC_CLIENT_ADVERTISING_PROXY_H
 #define XPC_CLIENT_ADVERTISING_PROXY_H
 
-#define kDNSSDAdvertisingProxyResponse         0
-#define kDNSSDAdvertisingProxyEnable           1
-#define kDNSSDAdvertisingProxyListServiceTypes 2
-#define kDNSSDAdvertisingProxyListServices     3
-#define kDNSSDAdvertisingProxyListHosts        4
-#define kDNSSDAdvertisingProxyGetHost          5
-#define kDNSSDAdvertisingProxyFlushEntries     6
-#define kDNSSDAdvertisingProxyBlockService     7
-#define kDNSSDAdvertisingProxyUnblockService   8
-#define kDNSSDAdvertisingProxyRegenerateULA    9
-#define kDNSSDAdvertisingProxyAdvertisePrefix  10
-#define kDNSSDAdvertisingProxyGetULA           12
+#define kDNSSDAdvertisingProxyResponse                     0
+#define kDNSSDAdvertisingProxyEnable                       1
+#define kDNSSDAdvertisingProxyListServiceTypes             2
+#define kDNSSDAdvertisingProxyListServices                 3
+#define kDNSSDAdvertisingProxyListHosts                    4
+#define kDNSSDAdvertisingProxyGetHost                      5
+#define kDNSSDAdvertisingProxyFlushEntries                 6
+#define kDNSSDAdvertisingProxyBlockService                 7
+#define kDNSSDAdvertisingProxyUnblockService               8
+#define kDNSSDAdvertisingProxyRegenerateULA                9
+#define kDNSSDAdvertisingProxyAdvertisePrefix              10
+#define kDNSSDAdvertisingProxyStop                         11
+#define kDNSSDAdvertisingProxyGetULA                       12
+#define kDNSSDAdvertisingProxyDisableReplication           13
+#define kDNSSDAdvertisingProxyDropSrplConnection           14
+#define kDNSSDAdvertisingProxyUndropSrplConnection         15
+#define kDNSSDAdvertisingProxyDropSrplAdvertisement        16
+#define kDNSSDAdvertisingProxyUndropSrplAdvertisement      17
+#define kDNSSDAdvertisingProxyAddPrefix                    18
+#define kDNSSDAdvertisingProxyRemovePrefix                 19
+#define kDNSSDAdvertisingProxyStartDroppingPushConnections 20
 
 #endif /* XPC_CLIENT_ADVERTISING_PROXY_H */
 

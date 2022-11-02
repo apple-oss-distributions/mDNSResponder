@@ -113,6 +113,9 @@ dns_rrtype_to_string(const uint16_t rrtype)
         CASE_TO_STR(cdnskey);
         CASE_TO_STR(openpgpkey);
         CASE_TO_STR(csync);
+        CASE_TO_STR(zonemd);
+        CASE_TO_STR(svcb);
+        CASE_TO_STR(https);
         CASE_TO_STR(spf);
         CASE_TO_STR(uinfo);
         CASE_TO_STR(uid);
@@ -135,8 +138,20 @@ dns_rrtype_to_string(const uint16_t rrtype)
         CASE_TO_STR(caa);
         CASE_TO_STR(avc);
         CASE_TO_STR(doa);
+        CASE_TO_STR(amtrelay);
+        CASE_TO_STR(ta);
+        CASE_TO_STR(dlv);
     }
 #undef CASE_TO_STR
     FAULT("Invalid dns_rrtype - rrtype: %u", rrtype);
     return "<INVALID dns_rrtype>";
 }
+
+// Local Variables:
+// mode: C
+// tab-width: 4
+// c-file-style: "bsd"
+// c-basic-offset: 4
+// fill-column: 120
+// indent-tabs-mode: nil
+// End:

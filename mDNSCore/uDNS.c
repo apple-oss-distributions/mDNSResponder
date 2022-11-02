@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,7 +32,6 @@
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 #include "QuerierSupport.h"
 #endif
-
 
 #include "mdns_strict.h"
 
@@ -139,7 +138,7 @@ mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *domain,
 
     if (!domain) domain = (const domainname *)"";
 
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
         "mDNS_AddDNSServer(%d): Adding " PRI_IP_ADDR " for " PRI_DM_NAME " interface " PUB_S " (%p), serviceID %u, "
         "scopeType %d, resGroupID %u" PUB_S PUB_S PUB_S PUB_S PUB_S PUB_S PUB_S,
         dnsCount + 1, addr, DM_NAME_PARAM(domain), InterfaceNameForID(&mDNSStorage, interface), interface, serviceID,
@@ -246,7 +245,7 @@ mDNSexport void PenalizeDNSServer(mDNS *const m, DNSQuestion *q, mDNSOpaque16 re
 
     mDNS_CheckLock(m);
 
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
               "PenalizeDNSServer: Penalizing DNS server " PRI_IP_ADDR " question for question %p " PRI_DM_NAME " (" PUB_S ") SuppressUnusable %d",
               (q->qDNSServer ? &q->qDNSServer->addr : mDNSNULL), q, DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), q->SuppressUnusable);
 
@@ -271,17 +270,17 @@ mDNSexport void PenalizeDNSServer(mDNS *const m, DNSQuestion *q, mDNSOpaque16 re
 
     if (!StrictUnicastOrdering)
     {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "PenalizeDNSServer: Strict Unicast Ordering is FALSE");
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "PenalizeDNSServer: Strict Unicast Ordering is FALSE");
         // We penalize the server so that new queries don't pick this server for DNSSERVER_PENALTY_TIME
         // XXX Include other logic here to see if this server should really be penalized
         //
         if (q->qtype == kDNSType_PTR)
         {
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "PenalizeDNSServer: Not Penalizing PTR question");
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "PenalizeDNSServer: Not Penalizing PTR question");
         }
         else if ((rcode == kDNSFlag1_RC_FormErr) || (rcode == kDNSFlag1_RC_ServFail) || (rcode == kDNSFlag1_RC_NotImpl))
         {
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                       "PenalizeDNSServer: Not Penalizing DNS Server since it at least responded with rcode %d", rcode);
         }
         else
@@ -291,7 +290,7 @@ mDNSexport void PenalizeDNSServer(mDNS *const m, DNSQuestion *q, mDNSOpaque16 re
             {
                 reason = " because server refused to answer";
             }
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "PenalizeDNSServer: Penalizing question type %d" PUB_S,
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "PenalizeDNSServer: Penalizing question type %d" PUB_S,
                       q->qtype, reason);
             q->qDNSServer->penaltyTime = NonZeroTime(m->timenow + DNSSERVER_PENALTY_TIME);
         }
@@ -320,7 +319,7 @@ end:
             // is slow in responding and we have sent three queries. When we repeatedly call, it is
             // okay to receive the same NULL DNS server. Next time we try to send the query, we will
             // realize and re-initialize the DNS servers.
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "PenalizeDNSServer: GetServerForQuestion returned the same server NULL");
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "PenalizeDNSServer: GetServerForQuestion returned the same server NULL");
         }
     }
     else
@@ -330,7 +329,7 @@ end:
 
         if (new)
         {
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                       "PenalizeDNSServer: Server for " PRI_DM_NAME " (" PUB_S ") changed to " PRI_IP_ADDR ":%d (" PRI_DM_NAME ")",
                       DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), &q->qDNSServer->addr, mDNSVal16(q->qDNSServer->port), DM_NAME_PARAM(&q->qDNSServer->domain));
             // We want to try the next server immediately. As the question may already have backed off, reset
@@ -360,7 +359,7 @@ end:
             // the next query will not happen until cache expiry. If it is a long lived question,
             // AnswerCurrentQuestionWithResourceRecord will not set it to MaxQuestionInterval. In that case,
             // we want the normal backoff to work.
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                       "PenalizeDNSServer: Server for %p, " PRI_DM_NAME " (" PUB_S ") changed to NULL, Interval %d",
                       q, DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), q->ThisQInterval);
         }
@@ -405,7 +404,7 @@ mDNSexport DomainAuthInfo *GetAuthInfoForName_internal(mDNS *m, const domainname
         {
             DNSQuestion *q;
             DomainAuthInfo *info = *p;
-            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "GetAuthInfoForName_internal deleting expired key " PRI_DM_NAME " " PRI_DM_NAME,
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "GetAuthInfoForName_internal deleting expired key " PRI_DM_NAME " " PRI_DM_NAME,
                 DM_NAME_PARAM(&info->domain), DM_NAME_PARAM(&info->keyname));
             *p = info->next;    // Cut DomainAuthInfo from list *before* scanning our question list updating AuthInfo pointers
             for (q = m->Questions; q; q=q->next)
@@ -444,9 +443,22 @@ mDNSexport mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
 {
     DNSQuestion *q;
     DomainAuthInfo **p = &m->AuthInfoList;
-    if (!info || !b64keydata) { LogMsg("mDNS_SetSecretForDomain: ERROR: info %p b64keydata %p", info, b64keydata); return(mStatus_BadParamErr); }
+    if (!info || !b64keydata)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "No DomainAuthInfo or Base64 encoded secret - "
+            "info: %p, b64keydata: %p", info, b64keydata);
+        return mStatus_BadParamErr;
+    }
 
-    LogInfo("mDNS_SetSecretForDomain: domain %##s key %##s", domain->c, keyname->c);
+    if (DNSDigest_ConstructHMACKeyfromBase64(info, b64keydata) < 0)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "Could not convert shared secret from base64 - "
+            "domain: " PRI_DM_NAME ", key name: " PRI_DM_NAME ".", DM_NAME_PARAM(domain), DM_NAME_PARAM(keyname));
+        return mStatus_BadParamErr;
+    }
+
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "Setting shared secret for domain - "
+        "domain: " PRI_DM_NAME ", key name: " PRI_DM_NAME ".", DM_NAME_PARAM(domain), DM_NAME_PARAM(keyname));
 
     AssignDomainName(&info->domain,  domain);
     AssignDomainName(&info->keyname, keyname);
@@ -458,19 +470,17 @@ mDNSexport mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
         info->port = *port;
     else
         info->port = zeroIPPort;
-    mDNS_snprintf(info->b64keydata, sizeof(info->b64keydata), "%s", b64keydata);
-
-    if (DNSDigest_ConstructHMACKeyfromBase64(info, b64keydata) < 0)
-    {
-        LogMsg("mDNS_SetSecretForDomain: ERROR: Could not convert shared secret from base64: domain %##s key %##s %s", domain->c, keyname->c, mDNS_LoggingEnabled ? b64keydata : "");
-        return(mStatus_BadParamErr);
-    }
 
     // Don't clear deltime until after we've ascertained that b64keydata is valid
     info->deltime = 0;
 
     while (*p && (*p) != info) p=&(*p)->next;
-    if (*p) {LogInfo("mDNS_SetSecretForDomain: Domain %##s Already in list", (*p)->domain.c); return(mStatus_AlreadyRegistered);}
+    if (*p)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "DomainAuthInfo already in the list - "
+            "domain: " PRI_DM_NAME, DM_NAME_PARAM(&(*p)->domain));
+        return mStatus_AlreadyRegistered;
+    }
 
     info->next = mDNSNULL;
     *p = info;
@@ -481,9 +491,11 @@ mDNSexport mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info,
         DomainAuthInfo *newinfo = GetAuthInfoForQuestion(m, q);
         if (q->AuthInfo != newinfo)
         {
-            debugf("mDNS_SetSecretForDomain updating q->AuthInfo from %##s to %##s for %##s (%s)",
-                   q->AuthInfo ? q->AuthInfo->domain.c : mDNSNULL,
-                   newinfo     ? newinfo->domain.c : mDNSNULL, q->qname.c, DNSTypeName(q->qtype));
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG, "Updating question's AuthInfo - "
+                "qname: " PRI_DM_NAME ", qtype: " PUB_DNS_TYPE ", old AuthInfo domain: " PRI_DM_NAME
+                ", new AuthInfo domain: " PRI_DM_NAME, DM_NAME_PARAM(&q->qname), DNS_TYPE_PARAM(q->qtype),
+                DM_NAME_PARAM(q->AuthInfo ? &q->AuthInfo->domain : mDNSNULL),
+                DM_NAME_PARAM(newinfo ? &newinfo->domain : mDNSNULL));
             q->AuthInfo = newinfo;
         }
     }
@@ -923,7 +935,7 @@ mDNSexport mStatus mDNS_StopNATOperation_internal(mDNS *m, NATTraversalInfo *tra
         return(mStatus_BadReferenceErr);
     }
 
-    LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_INFO, "mDNS_StopNATOperation_internal %p %d %d %d %d", traversal,
+    LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "mDNS_StopNATOperation_internal %p %d %d %d %d", traversal,
         traversal->Protocol, mDNSVal16(traversal->IntPort), mDNSVal16(traversal->RequestedPort), traversal->NATLease);
 
     if (m->CurrentNATTraversal == traversal)
@@ -937,7 +949,7 @@ mDNSexport mStatus mDNS_StopNATOperation_internal(mDNS *m, NATTraversalInfo *tra
              (!p->Protocol && traversal->Protocol == NATOp_MapTCP && mDNSSameIPPort(traversal->IntPort, DiscardPort))) :
             (!p->Protocol || (p->Protocol == NATOp_MapTCP && mDNSSameIPPort(p->IntPort, DiscardPort))))
         {
-            LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_INFO, "Warning: Removed port mapping request %p Prot %d Int %d TTL %d "
+            LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "Warning: Removed port mapping request %p Prot %d Int %d TTL %d "
                 "duplicates existing port mapping request %p Prot %d Int %d TTL %d",
                 traversal, traversal->Protocol, mDNSVal16(traversal->IntPort), traversal->NATLease,
                 p, p->Protocol, mDNSVal16(p->IntPort), p->NATLease);
@@ -1016,7 +1028,7 @@ mDNSlocal void StartLLQPolling(mDNS *const m, DNSQuestion *q)
 
     if (q->ThisQInterval != -1)
     {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "[R%u->Q%u] Starting long-lived query polling - "
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[R%u->Q%u] Starting long-lived query polling - "
             "qname: " PRI_DM_NAME ", qtype: " PUB_S ", LLQ_State: " PUB_S ".", request_id, question_id,
             DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), LLQStateToString(q->state));
     }
@@ -1035,7 +1047,7 @@ mDNSlocal void StartLLQPolling(mDNS *const m, DNSQuestion *q)
     {
         const DNSQuestion *const zone_question = &(q->nta->question);
         const mDNSu16 zone_question_id = mDNSVal16(zone_question->TargetQID);
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "[R%u->Q%u->subQ%u] Stop getting the zone data - "
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[R%u->Q%u->subQ%u] Stop getting the zone data - "
             "zone qname: " PRI_DM_NAME ", zone qtype: " PUB_S ".", request_id, question_id, zone_question_id,
             DM_NAME_PARAM(&zone_question->qname), DNSTypeName(zone_question->qtype));
         CancelGetZoneData(m, q->nta);
@@ -1216,7 +1228,7 @@ mDNSexport uDNS_LLQType uDNS_recvLLQResponse(mDNS *const m, const DNSMessage *co
                 if (q->state == LLQ_Poll) debugf("uDNS_LLQ_Events: q->state == LLQ_Poll msg->h.id %d q->TargetQID %d", mDNSVal16(msg->h.id), mDNSVal16(q->TargetQID));
                 if (q->state == LLQ_Poll && mDNSSameOpaque16(msg->h.id, q->TargetQID))
                 {
-                    m->rec.r.resrec.RecordType = 0;     // Clear RecordType to show we're not still using it
+                    mDNSCoreResetRecord(m);
 
                     // Don't reset the state to IntialRequest as we may write that to the dynamic store
                     // and PrefPane might wrongly think that we are "Starting" instead of "Polling". If
@@ -1251,7 +1263,7 @@ mDNSexport uDNS_LLQType uDNS_recvLLQResponse(mDNS *const m, const DNSMessage *co
                     InitializeDNSMessage(&m->omsg.h, msg->h.id, ResponseFlags);
                     ackEnd = putLLQ(&m->omsg, m->omsg.data, q, &opt->u.llq);
                     if (ackEnd) mDNSSendDNSMessage(m, &m->omsg, ackEnd, mDNSInterface_Any, mDNSNULL, q->LocalSocket, srcaddr, srcport, mDNSNULL, mDNSfalse);
-                    m->rec.r.resrec.RecordType = 0;     // Clear RecordType to show we're not still using it
+                    mDNSCoreResetRecord(m);
                     debugf("uDNS_LLQ_Events: q->state == LLQ_Established msg->h.id %d q->TargetQID %d", mDNSVal16(msg->h.id), mDNSVal16(q->TargetQID));
                     *matchQuestion = q;
                     return uDNS_LLQ_Events;
@@ -1271,7 +1283,7 @@ mDNSexport uDNS_LLQType uDNS_recvLLQResponse(mDNS *const m, const DNSMessage *co
                             SetLLQTimer(m, q, &opt->u.llq);
                             q->ntries = 0;
                         }
-                        m->rec.r.resrec.RecordType = 0;     // Clear RecordType to show we're not still using it
+                        mDNSCoreResetRecord(m);
                         *matchQuestion = q;
                         return uDNS_LLQ_Ignore;
                     }
@@ -1279,7 +1291,7 @@ mDNSexport uDNS_LLQType uDNS_recvLLQResponse(mDNS *const m, const DNSMessage *co
                     {
                         LLQ_State oldstate = q->state;
                         recvSetupResponse(m, msg->h.flags.b[1] & kDNSFlag1_RC_Mask, q, &opt->u.llq);
-                        m->rec.r.resrec.RecordType = 0;     // Clear RecordType to show we're not still using it
+                        mDNSCoreResetRecord(m);
                         // We have a protocol anomaly here in the LLQ definition.
                         // Both the challenge packet from the server and the ack+answers packet have opt->u.llq.llqOp == kLLQOp_Setup.
                         // However, we need to treat them differently:
@@ -1293,7 +1305,7 @@ mDNSexport uDNS_LLQType uDNS_recvLLQResponse(mDNS *const m, const DNSMessage *co
                 }
             }
         }
-        m->rec.r.resrec.RecordType = 0;     // Clear RecordType to show we're not still using it
+        mDNSCoreResetRecord(m);
     }
     *matchQuestion = mDNSNULL;
     return uDNS_LLQ_Not;
@@ -2641,7 +2653,7 @@ mDNSexport void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn)
 {
     HostnameInfo **ptr = &m->Hostnames;
 
-    LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "mDNS_RemoveDynDNSHostName " PRI_DM_NAME, DM_NAME_PARAM(fqdn));
+    LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "mDNS_RemoveDynDNSHostName " PRI_DM_NAME, DM_NAME_PARAM(fqdn));
 
     while (*ptr && !SameDomainName(fqdn, &(*ptr)->fqdn)) ptr = &(*ptr)->next;
     if (!*ptr)
@@ -2660,12 +2672,12 @@ mDNSexport void mDNS_RemoveDynDNSHostName(mDNS *m, const domainname *fqdn)
         {
             if (f4)
             {
-                LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "mDNS_RemoveDynDNSHostName removing v4 " PRI_DM_NAME, DM_NAME_PARAM(fqdn));
+                LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "mDNS_RemoveDynDNSHostName removing v4 " PRI_DM_NAME, DM_NAME_PARAM(fqdn));
                 mDNS_Deregister_internal(m, &hi->arv4, mDNS_Dereg_normal);
             }
             if (f6)
             {
-                LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "mDNS_RemoveDynDNSHostName removing v6 " PRI_DM_NAME, DM_NAME_PARAM(fqdn));
+                LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "mDNS_RemoveDynDNSHostName removing v6 " PRI_DM_NAME, DM_NAME_PARAM(fqdn));
                 mDNS_Deregister_internal(m, &hi->arv6, mDNS_Dereg_normal);
             }
             // When both deregistrations complete we'll free the memory in the mStatus_MemFree callback
@@ -2690,14 +2702,11 @@ mDNSexport void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr, co
 {
     mDNSBool v4Changed, v6Changed, RouterChanged;
 
-    if (m->mDNS_busy != m->mDNS_reentrancy)
-        LogMsg("mDNS_SetPrimaryInterfaceInfo: mDNS_busy (%ld) != mDNS_reentrancy (%ld)", m->mDNS_busy, m->mDNS_reentrancy);
-
-    if (v4addr && v4addr->type != mDNSAddrType_IPv4) { LogMsg("mDNS_SetPrimaryInterfaceInfo v4 address - incorrect type.  Discarding. %#a", v4addr); return; }
-    if (v6addr && v6addr->type != mDNSAddrType_IPv6) { LogMsg("mDNS_SetPrimaryInterfaceInfo v6 address - incorrect type.  Discarding. %#a", v6addr); return; }
-    if (router && router->type != mDNSAddrType_IPv4) { LogMsg("mDNS_SetPrimaryInterfaceInfo passed non-v4 router.  Discarding. %#a",        router); return; }
-
     mDNS_Lock(m);
+
+    if (v4addr && v4addr->type != mDNSAddrType_IPv4) { LogMsg("mDNS_SetPrimaryInterfaceInfo v4 address - incorrect type.  Discarding. %#a", v4addr); goto exit; }
+    if (v6addr && v6addr->type != mDNSAddrType_IPv6) { LogMsg("mDNS_SetPrimaryInterfaceInfo v6 address - incorrect type.  Discarding. %#a", v6addr); goto exit; }
+    if (router && router->type != mDNSAddrType_IPv4) { LogMsg("mDNS_SetPrimaryInterfaceInfo passed non-v4 router.  Discarding. %#a",        router); goto exit; }
 
     v4Changed     = !mDNSSameIPv4Address(m->AdvertisedV4.ip.v4, v4addr ? v4addr->ip.v4 : zerov4Addr);
     v6Changed     = !mDNSSameIPv6Address(m->AdvertisedV6.ip.v6, v6addr ? v6addr->ip.v6 : zerov6Addr);
@@ -2769,6 +2778,7 @@ mDNSexport void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr, co
         m->NextSRVUpdate = NonZeroTime(m->timenow);
     }
 
+exit:
     mDNS_Unlock(m);
 }
 
@@ -2816,11 +2826,11 @@ mDNSlocal mStatus ParseTSIGError(mDNS *const m, const DNSMessage *const msg, con
             else if (err)                    { LogMsg("%##s: unknown tsig error %d", displayname->c, err); err = mStatus_UnknownErr; }
             goto finish;
         }
-        m->rec.r.resrec.RecordType = 0;     // Clear RecordType to show we're not still using it
+        mDNSCoreResetRecord(m);
     }
 
 finish:
-    m->rec.r.resrec.RecordType = 0;     // Clear RecordType to show we're not still using it
+    mDNSCoreResetRecord(m);
     return err;
 }
 
@@ -3966,7 +3976,7 @@ mDNSexport void sendLLQRefresh(mDNS *m, DNSQuestion *q)
     {
         mStatus err;
 
-        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "sendLLQRefresh: using existing UDP session " PRI_DM_NAME " (" PUB_S ")", DM_NAME_PARAM(&q->qname),
+        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "sendLLQRefresh: using existing UDP session " PRI_DM_NAME " (" PUB_S ")", DM_NAME_PARAM(&q->qname),
             DNSTypeName(q->qtype));
 
         err = mDNSSendDNSMessage(m, &m->omsg, end, mDNSInterface_Any, q->tcp ? q->tcp->sock : mDNSNULL, q->LocalSocket, &q->servAddr, q->servPort, mDNSNULL, mDNSfalse);
@@ -4071,7 +4081,7 @@ mDNSexport void DNSPushGotZoneData(mDNS *const m, const mStatus err, const ZoneD
     }
 
     // Start connecting to the DNS push server we found.
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "[R%u->Q%u->subQ%u] Found a new DNS push server for the served zone - "
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[R%u->Q%u->subQ%u] Found a new DNS push server for the served zone - "
         "server: " PRI_DM_NAME ":%d, zone: " PRI_DM_NAME ".", requestID, questionID, subquestionID,
         DM_NAME_PARAM(&zoneInfo->Host), mDNSVal16(zoneInfo->Port), DM_NAME_PARAM(&zoneInfo->ZoneName));
 
@@ -4124,8 +4134,7 @@ mDNSexport void RecordRegistrationGotZoneData(mDNS *const m, mStatus err, const 
     if (newRR->nta != zoneData)
         LogMsg("RecordRegistrationGotZoneData: nta (%p) != zoneData (%p)  %##s (%s)", newRR->nta, zoneData, newRR->resrec.name->c, DNSTypeName(newRR->resrec.rrtype));
 
-    if (m->mDNS_busy != m->mDNS_reentrancy)
-        LogMsg("RecordRegistrationGotZoneData: mDNS_busy (%ld) != mDNS_reentrancy (%ld)", m->mDNS_busy, m->mDNS_reentrancy);
+    mDNS_VerifyLockState("Check Lock", mDNSfalse, m->mDNS_busy, m->mDNS_reentrancy, __func__, __LINE__);
 
     // make sure record is still in list (!!!)
     for (ptr = m->ResourceRecords; ptr; ptr = ptr->next) if (ptr == newRR) break;
@@ -4321,7 +4330,7 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
 {
     DomainAuthInfo *info;
 
-    LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: Resource Record " PRI_S ", state %d", ARDisplayString(m, rr), rr->state);
+    LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: Resource Record " PRI_S ", state %d", ARDisplayString(m, rr), rr->state);
 
     switch (rr->state)
     {
@@ -4340,7 +4349,7 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
     case regState_NoTarget:
     case regState_Unregistered:
     case regState_Zero:
-        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: State %d for " PRI_DM_NAME " type " PUB_S,
+        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: State %d for " PRI_DM_NAME " type " PUB_S,
             rr->state, DM_NAME_PARAM(rr->resrec.name), DNSTypeName(rr->resrec.rrtype));
         // This function may be called during sleep when there are no sleep proxy servers
         if (rr->resrec.RecordType == kDNSRecordTypeDeregistering) CompleteDeregistration(m, rr);
@@ -4365,12 +4374,12 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
     {
         if (rr->InFlightRData != rr->resrec.rdata)
         {
-            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: Freeing InFlightRData for " PRI_S, ARDisplayString(m, rr));
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: Freeing InFlightRData for " PRI_S, ARDisplayString(m, rr));
             rr->UpdateCallback(m, rr, rr->InFlightRData, rr->InFlightRDLen);
             rr->InFlightRData = mDNSNULL;
         }
         else
-            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: InFlightRData same as rdata for " PRI_S, ARDisplayString(m, rr));
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: InFlightRData same as rdata for " PRI_S, ARDisplayString(m, rr));
     }
 
     if (rr->QueuedRData && rr->UpdateCallback)
@@ -4379,7 +4388,7 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
             LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: ERROR!! QueuedRData same as rdata for " PRI_S, ARDisplayString(m, rr));
         else
         {
-            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: Freeing QueuedRData for " PRI_S, ARDisplayString(m, rr));
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: Freeing QueuedRData for " PRI_S, ARDisplayString(m, rr));
             rr->UpdateCallback(m, rr, rr->QueuedRData, rr->QueuedRDLen);
             rr->QueuedRData = mDNSNULL;
         }
@@ -4406,7 +4415,7 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
         {
             if (AuthRecord_uDNS(rr) && mDNSSameOpaque16(anchorRR->updateid, rr->updateid) && anchorRR->tcp)
             {
-                LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNS_DeregisterRecord: Found Anchor RR " PRI_S " terminated", ARDisplayString(m, anchorRR));
+                LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: Found Anchor RR " PRI_S " terminated", ARDisplayString(m, anchorRR));
                 if (found)
                 {
                     LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: ERROR: Another anchorRR " PRI_S " found",
@@ -4419,7 +4428,7 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
         }
         if (!found)
         {
-            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_INFO, "uDNSDeregisterRecord: Cannot find the anchor Resource Record for " PRI_S ", not an error",
+            LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNSDeregisterRecord: Cannot find the anchor Resource Record for " PRI_S ", not an error",
                 ARDisplayString(m, rr));
         }
     }
@@ -4638,20 +4647,18 @@ mDNSlocal void uDNS_HandleLLQState(mDNS *const NONNULL m, DNSQuestion *const NON
 #endif // MDNSRESPONDER_SUPPORTS(COMMON, DNS_LLQ)
     }
 
-#if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
     if (fallBackToLLQPoll)
     {
         StartLLQPolling(m, q);
     }
-#endif // MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "[R%u->Q%u->PushS%u] LLQ_State changes - "
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[R%u->Q%u->PushS%u] LLQ_State changes - "
         "from: " PUB_S ", to: " PUB_S ", qname: " PRI_DM_NAME ", qtype: " PUB_S ".", q->request_id,
         mDNSVal16(q->TargetQID), q->dnsPushServer != mDNSNULL ? q->dnsPushServer->serial : DNS_PUSH_SERVER_INVALID_SERIAL,
         LLQStateToString(prevState), LLQStateToString(q->state), DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype));
 #else
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "[R%u->Q%u] LLQ_State changes - "
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[R%u->Q%u] LLQ_State changes - "
         "from: " PUB_S ", to: " PUB_S ", qname: " PRI_DM_NAME ", qtype: " PUB_S ".", q->request_id,
         mDNSVal16(q->TargetQID), LLQStateToString(prevState), LLQStateToString(q->state), DM_NAME_PARAM(&q->qname),
         DNSTypeName(q->qtype));
@@ -4697,7 +4704,7 @@ mDNSlocal void uDNS_CheckCurrentQuestion(mDNS *const m)
             DNSServer *orig = q->qDNSServer;
             if (orig)
             {
-                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                           "[R%u->Q%u] uDNS_CheckCurrentQuestion: Sent %d unanswered queries for " PRI_DM_NAME " (" PUB_S ") to " PRI_IP_ADDR ":%d (" PRI_DM_NAME ")",
                           q->request_id, mDNSVal16(q->TargetQID), q->unansweredQueries, DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), &orig->addr, mDNSVal16(orig->port), DM_NAME_PARAM(&orig->domain));
             }
@@ -4732,7 +4739,7 @@ mDNSlocal void uDNS_CheckCurrentQuestion(mDNS *const m)
             new = GetServerForQuestion(m, q);
             if (new)
             {
-                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                           "[R%u->Q%u] uDNS_checkCurrentQuestion: Retrying question %p " PRI_DM_NAME " (" PUB_S ") DNS Server " PRI_IP_ADDR ":%d ThisQInterval %d",
                           q->request_id, mDNSVal16(q->TargetQID), q, DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), new ? &new->addr : mDNSNULL, mDNSVal16(new ? new->port : zeroIPPort), q->ThisQInterval);
                 DNSServerChangeForQuestion(m, q, new);
@@ -4791,7 +4798,7 @@ mDNSlocal void uDNS_CheckCurrentQuestion(mDNS *const m)
             {
                 DNSServer *newServer;
 
-                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                           "[R%u->Q%u] uDNS_CheckCurrentQuestion: host unreachable error for DNS server " PRI_IP_ADDR " for question [%p] " PRI_DM_NAME " (" PUB_S ")",
                           q->request_id, mDNSVal16(q->TargetQID), &q->qDNSServer->addr, q, DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype));
 
@@ -4809,7 +4816,7 @@ mDNSlocal void uDNS_CheckCurrentQuestion(mDNS *const m)
                 }
                 if (newServer)
                 {
-                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                               "[R%u->Q%u] uDNS_checkCurrentQuestion: Retrying question %p " PRI_DM_NAME " (" PUB_S ") DNS Server " PRI_IP_ADDR ":%u ThisQInterval %d",
                               q->request_id, mDNSVal16(q->TargetQID), q, DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype),
                               newServer ? &newServer->addr : mDNSNULL, mDNSVal16(newServer ? newServer->port : zeroIPPort), q->ThisQInterval);
@@ -4880,7 +4887,7 @@ mDNSlocal void uDNS_CheckCurrentQuestion(mDNS *const m)
                 SetValidDNSServers(m, q);
                 if (mDNSOpaque128IsZero(&q->validDNSServers))
                 {
-                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                               "[R%u->Q%u] uDNS_CheckCurrentQuestion: no DNS server for " PRI_DM_NAME " (" PUB_S ")",
                               q->request_id, mDNSVal16(q->TargetQID), DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype));
                     q->ThisQInterval = 0;
@@ -4899,7 +4906,7 @@ mDNSlocal void uDNS_CheckCurrentQuestion(mDNS *const m)
                     q->qDNSServer = GetServerForQuestion(m, q);
                     for (qptr = q->next ; qptr; qptr = qptr->next)
                         if (qptr->DuplicateOf == q) { qptr->validDNSServers = q->validDNSServers; qptr->qDNSServer = q->qDNSServer; }
-                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                               "[R%u->Q%u] uDNS_checkCurrentQuestion: Tried all DNS servers, retry question %p SuppressUnusable %d " PRI_DM_NAME " (" PUB_S ") with DNS Server " PRI_IP_ADDR ":%d after 60 seconds, ThisQInterval %d",
                               q->request_id, mDNSVal16(q->TargetQID), q, q->SuppressUnusable, DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype),
                               q->qDNSServer ? &q->qDNSServer->addr : mDNSNULL, mDNSVal16(q->qDNSServer ? q->qDNSServer->port : zeroIPPort), q->ThisQInterval);
@@ -4908,7 +4915,7 @@ mDNSlocal void uDNS_CheckCurrentQuestion(mDNS *const m)
             else
             {
                 q->ThisQInterval = 0;
-                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                           "[R%u->Q%u] uDNS_CheckCurrentQuestion DNS server " PRI_IP_ADDR ":%d for " PRI_DM_NAME " is disabled",
                           q->request_id, mDNSVal16(q->TargetQID), &q->qDNSServer->addr, mDNSVal16(q->qDNSServer->port), DM_NAME_PARAM(&q->qname));
             }
@@ -4919,7 +4926,7 @@ mDNSlocal void uDNS_CheckCurrentQuestion(mDNS *const m)
                 {
                     if (SameNameCacheRecordAnswersQuestion(cr, q))
                     {
-                        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                                   "[R%u->Q%u] uDNS_CheckCurrentQuestion: Purged resourcerecord " PRI_S,
                                   q->request_id, mDNSVal16(q->TargetQID), CRDisplayString(m, cr));
                         mDNS_PurgeCacheResourceRecord(m, cr);
@@ -4939,7 +4946,7 @@ mDNSlocal void uDNS_CheckCurrentQuestion(mDNS *const m)
             CreateNewCacheEntry(m, slot, cg, NonZeroTime(m->timenow), mDNStrue, mDNSNULL);
             ScheduleNextCacheCheckTime(m, slot, NonZeroTime(m->timenow));
             m->rec.r.responseFlags = zeroID;
-            m->rec.r.resrec.RecordType = 0;     // Clear RecordType to show we're not still using it
+            mDNSCoreResetRecord(m);
             // MUST NOT touch m->CurrentQuestion (or q) after this -- client callback could have deleted it
         }
     }
@@ -5153,7 +5160,7 @@ mDNSexport void uDNS_Tasks(mDNS *const m)
         {
             if (m->timenow - d->penaltyTime >= 0)
             {
-                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                           "DNS server " PRI_IP_ADDR ":%d out of penalty box", &d->addr, mDNSVal16(d->port));
                 d->penaltyTime = 0;
             }
@@ -5726,14 +5733,30 @@ mDNSlocal void FlushAddressCacheRecords(mDNS *const m)
     {
         if (cr->resrec.InterfaceID) continue;
 
-        // If a resource record can answer A or AAAA, they need to be flushed so that we will
-        // deliver an ADD or RMV
-        if (RRTypeAnswersQuestionType(&cr->resrec, kDNSType_A) ||
-            RRTypeAnswersQuestionType(&cr->resrec, kDNSType_AAAA))
+        // If resource records can answer A, AAAA or are RRSIGs that cover A/AAAA, they need to be flushed so that we
+        // will deliver an ADD or RMV.
+
+        RRTypeAnswersQuestionTypeFlags flags = kRRTypeAnswersQuestionTypeFlagsNone;
+    #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+        // Here we are checking if the record should be decided on whether to deliver the remove event to the callback,
+        // RRSIG that covers kDNSType_A or kDNSType_AAAA should always be checked.
+        // Note that setting the two flags below will not necessarily deliver the remove event for RRSIG
+        // that covers kDNSType_A or kDNSType_AAAA records. It still needs to go through the "IsAnswer" process to
+        // determine whether to deliver the remove event.
+        flags |= kRRTypeAnswersQuestionTypeFlagsRequiresDNSSECRRToValidate;
+        flags |= kRRTypeAnswersQuestionTypeFlagsRequiresDNSSECRRValidated;
+    #endif
+        const mDNSBool typeMatches = RRTypeAnswersQuestionType(&cr->resrec, kDNSType_A, flags) ||
+                                     RRTypeAnswersQuestionType(&cr->resrec, kDNSType_AAAA, flags);
+        if (!typeMatches)
         {
-            LogInfo("FlushAddressCacheRecords: Purging Resourcerecord %s", CRDisplayString(m, cr));
-            mDNS_PurgeCacheResourceRecord(m, cr);
+            continue;
         }
+
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "FlushAddressCacheRecords: Purging Resourcerecord - "
+            "record description: " PRI_S ".", CRDisplayString(m, cr));
+
+        mDNS_PurgeCacheResourceRecord(m, cr);
     }
 }
 
@@ -5962,7 +5985,7 @@ mDNSlocal void DNSPushProcessResponses(mDNS *const m, const DNSMessage *const ms
                     DNSTypeName(q->qtype), LLQStateToString(q->state),
                     q->dnsPushServer ? (q->dnsPushServer->connection
                                       ? q->dnsPushServer->connection->remote_name
-                                      : "<no DNS push server>") : "<no DNS push server>",
+                                      : "<no DNS push connection>") : "<no DNS push server>",
                     server->connection->remote_name
                 );
 
@@ -5988,6 +6011,12 @@ mDNSlocal void DNSPushProcessResponses(mDNS *const m, const DNSMessage *const ms
 static void
 DNSPushStartConnecting(DNSPushServer *server)
 {
+    if (server->connectInfo == NULL) {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                  "[PushS%u] DNSPushStartConnecting: can't connect to server " PRI_DM_NAME "%%%u: no connectInfo",
+                  server->serial, DM_NAME_PARAM(&server->serverName), mDNSVal16(server->port));
+        return;
+    }
     if (dso_connect(server->connectInfo))
     {
         server->connectState = DNSPushServerConnectionInProgress;
@@ -6006,7 +6035,7 @@ DNSPushStartConnecting(DNSPushServer *server)
 
 static DNSPushZone *DNSPushZoneCreate(const domainname *const name, DNSPushServer *const server, mDNS *const m)
 {
-    DNSPushZone *const zone = mdns_calloc(1, sizeof(*zone));
+    DNSPushZone *const zone = mDNSPlatformMemAllocateClear(sizeof(*zone));
     if (zone == mDNSNULL)
     {
         goto exit;
@@ -6066,7 +6095,7 @@ static void ReleaseDNSPushZoneAndServerForQuestion(DNSQuestion *q)
 {
     if (q->dnsPushZone != mDNSNULL && q->dnsPushServer != mDNSNULL)
     {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "[Q%u->PushS%u] Releasing the DNS push zone and server"
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[Q%u->PushS%u] Releasing the DNS push zone and server"
             " - zone: " PRI_DM_NAME ", server: " PRI_DM_NAME ".", mDNSVal16(q->TargetQID), q->dnsPushServer->serial,
             DM_NAME_PARAM(&q->dnsPushZone->zoneName), DM_NAME_PARAM(&q->dnsPushServer->serverName));
     }
@@ -6208,6 +6237,7 @@ mDNSexport void DNSPushServerCancel(DNSPushServer *server, const mDNSBool alread
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
             "[PushS%u->DSO%u] Canceling dso_state_t for DNS push server - server: " PRI_DM_NAME ":%u.",
             server->serial, server->connection->serial, DM_NAME_PARAM(&server->serverName), mDNSVal16(server->port));
+
         dso_state_cancel(server->connection);
 
         // server->connection will be freed in dso_idle().
@@ -6231,7 +6261,7 @@ static void DNSPushDSOCallback(void *context, void *event_context,
     DNSPushServer *const server = context;
 
     const uint32_t dso_serial = dso != mDNSNULL ? dso->serial : DSO_STATE_INVALID_SERIAL;
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "[DSO%u] New DNSPushDSOCallback - "
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSO%u] New DNSPushDSOCallback - "
         "context: %p, event_context: %p, dso: %p, eventType: " PUB_S ", server state: " PUB_S ".",
         dso_serial, context, event_context, dso, dso_event_type_to_string(eventType),
         server != mDNSNULL ? DNSPushServerConnectStateToString(server->connectState) : "No server");
@@ -6376,10 +6406,10 @@ static void DNSPushDSOCallback(void *context, void *event_context,
                 StartLLQPolling(m, q);
 
                 LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
-                    "[R%u->Q%u->PushS%u->DSO%u] Received a DSO response from the DSO connection. Subscription FAILED, fall back to LLQ poll - "
-                    "qname: " PRI_DM_NAME ", qtype: " PUB_S ", server: " PRI_DM_NAME ":%u.", q->request_id,
+                    "[R%u->Q%u->PushS%u->DSO%u] Received a DSO response with non-zero error code from the DSO connection. Subscription FAILED, fall back to LLQ poll - "
+                    "qname: " PRI_DM_NAME ", qtype: " PUB_S ", server: " PRI_DM_NAME ":%u, rcode: %d.", q->request_id,
                     mDNSVal16(q->TargetQID), server->serial, dso_serial, DM_NAME_PARAM(&q->qname),
-                    DNSTypeName(q->qtype), DM_NAME_PARAM(&server->serverName), mDNSVal16(server->port));
+                    DNSTypeName(q->qtype), DM_NAME_PARAM(&server->serverName), mDNSVal16(server->port), rcode);
             }
         }
         else
@@ -6404,7 +6434,7 @@ static void DNSPushDSOCallback(void *context, void *event_context,
             // Give the context a callback with dso_life_cycle_free state, so that the context can do the final cleanup.
             dso->context_callback(dso_life_cycle_free, dso->context, dso);
         }
-        mdns_free(dso);
+        mDNSPlatformMemFree(dso);
         break;
 
     case kDSOEventType_Connected:
@@ -6429,13 +6459,24 @@ static void DNSPushDSOCallback(void *context, void *event_context,
     case kDSOEventType_Disconnected:
         disconnect_context = event_context;
 
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "[PushS%u->DSO%u] DNS push server disconnected - "
+                  "server name: " PRI_DM_NAME ":%u, delay = %u, " PUB_S, server->serial, dso->serial,
+                  DM_NAME_PARAM(&server->serverName), mDNSVal16(server->port), disconnect_context->reconnect_delay,
+                  server->connectInfo ? "connectable" : "stale");
+
+        // We can get a disconnect event after the connection has been canceled from our end; in this case, we don't
+        // have any work to do.
+        if (server->connectInfo == NULL) {
+            break;
+        }
+
         // If a network glitch broke the connection, try to reconnect immediately.  But if this happens
         // twice, don't just blindly reconnect.
         if (disconnect_context->reconnect_delay == 0)
         {
-            if ((server->lastDisconnect + 90 * mDNSPlatformOneSecond) - m->timenow > 0)
+            if (m->timenow - server->lastDisconnect < 90 * mDNSPlatformOneSecond)
             {
-                reconnect_when = 3600000; // If we get two disconnects in quick succession, wait an hour before trying again.
+                reconnect_when = 60; // If we get two disconnects in quick succession, wait a minute before trying again.
             }
             else
             {
@@ -6455,36 +6496,47 @@ static void DNSPushDSOCallback(void *context, void *event_context,
         {
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                 "[PushS%u->DSO%u] Holding the DNS push server out as not reconnectable for a while - "
-                "duration: %lfs, server name: " PRI_DM_NAME ":%u.",
-                server->serial, dso->serial, 1000.0 * (reconnect_when - m->timenow) / (double)mDNSPlatformOneSecond,
+                "duration: %d, server name: " PRI_DM_NAME ":%u.",
+                server->serial, dso->serial, reconnect_when,
                 DM_NAME_PARAM(&server->serverName), mDNSVal16(server->port));
 
             dso_schedule_reconnect(m, server->connectInfo, reconnect_when);
         }
         server->lastDisconnect = m->timenow;
-        server->connection = mDNSNULL;
         break;
 
-        // We don't reconnect unless there is demand.   The reason we have this event is so that we can
-        // leave the DNSPushServer data structure around to _prevent_ attempts to reconnect
-        // before the reconnect delay interval has expired.   When we get this call, we just free up the
-        // server.
+        // We get this event when a connection has been dropped and it's time to reconnect. This can happen either
+        // because we got a hard connection drop, or because we got a RetryDelay DSO message. In the latter case,
+        // the expectation is that we will get this callback when the delay has expired. This is actually set up
+        // in this same function when we get a kDSOEventType_RetryDelay event.
     case kDSOEventType_ShouldReconnect:
         // This should be unnecessary, but it would be bad to accidentally have a question pointing at
         // a server that had been freed, so make sure we don't.
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-            "[PushS%u->DSO%u] ShouldReconnect timer fired for the DNS push server, canceling it - "
+            "[PushS%u->DSO%u] ShouldReconnect timer fired for the DNS push server: reconnecting - "
             "server name: " PRI_DM_NAME ":%u.", server->serial, dso->serial, DM_NAME_PARAM(&server->serverName),
             mDNSVal16(server->port));
-        DNSPushServerCancel(server, mDNSfalse);
+        if (server->connectInfo == NULL) {
+            DNSPushStartConnecting(server);
+        } else {
+            server->connection = dso;
+            dso_reconnect(server->connectInfo, dso);
+        }
         break;
 
     case kDSOEventType_Keepalive:
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-            "[PushS%u->DSO%u] Keepalive timer for the DNS push server fired - server name: " PRI_DM_NAME ":%u.",
-            server->serial, dso->serial, DM_NAME_PARAM(&server->serverName), mDNSVal16(server->port));
-        keepalive_context = event_context;
-        DNSPushSendKeepalive(server, keepalive_context->inactivity_timeout, keepalive_context->keepalive_interval);
+        if (server->connection == NULL || server->connection->transport == NULL) {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                      "[PushS%u->DSO%u] Keepalive: connection to the DNS push server missing - server name: " PRI_DM_NAME ":%u.",
+                      server->serial, dso->serial, DM_NAME_PARAM(&server->serverName), mDNSVal16(server->port));
+        } else {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                      "[PushS%u->DSO%u] Keepalive timer for the DNS push server fired - server name: " PRI_DM_NAME ":%u.",
+                      server->serial, dso->serial, DM_NAME_PARAM(&server->serverName), mDNSVal16(server->port));
+            keepalive_context = event_context;
+
+            DNSPushSendKeepalive(server, keepalive_context->inactivity_timeout, keepalive_context->keepalive_interval);
+        }
         break;
 
     case kDSOEventType_KeepaliveRcvd:
@@ -6636,61 +6688,17 @@ exit:
     return *outZone != mDNSNULL && *outServer != mDNSNULL;
 }
 
-// This is called when the dso_state_t is canceled because of the transport error. The DNS push server that uses this
-// dso_state_t object will also be canceled. Therefore, dso_state_t and DNSPushServer have the same life time.
-static void CancelDNSPushServerForDSO(DNSPushServer *const server, const dso_state_t *const dso)
-{
-    if (server->connection != dso)
-    {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
-            "[DSO%u] The dso being canceled is not owned by the current DNS push server - "
-            "server serial: %u, server's dso serial: %u.", dso->serial, server->serial,
-            server->connection != NULL ? server->connection->serial : DSO_STATE_INVALID_SERIAL);
-        return;
-    }
-
-    // This is used to identify the two cases below:
-    // 1. dso_state_t is canceled because we call DNSPushServerCancel. -> server->canceling == true
-    // 2. dso_state_t is canceled because it encounters error, and it is forced to be canceled. -> server->canceling == false
-    // We only continue for case 2, because case 1 is already canceling the server.
-    if (server->canceling)
-    {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-            "[PushS%u->DSO%u] dso is being canceled on behave of server cancelation, no need to cancel the server again. - "
-            "server name: " PRI_DM_NAME ", dso remote name: " PRI_S ".", server->serial, dso->serial,
-            DM_NAME_PARAM(&server->serverName), dso->remote_name);
-        return;
-    }
-
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-        "[PushS%u->DSO%u] Canceling DNS push server because the underlying dso is canceled - "
-        "server name: " PRI_DM_NAME ", dso remote name: " PRI_S ".", server->serial, dso->serial,
-        DM_NAME_PARAM(&server->serverName), dso->remote_name);
-
-    DNSPushServerCancel(server, mDNSfalse);
-
-    // After the operations above, the only objects that hold the reference to the current DNS push server will be the
-    // dso_state_t(dso->context) and dso_connect_state_t, this reference will be released in
-    // DNSPushDSOCallback: case kDSOEventType_Finalize.
-    if (server->refCount != 1 && server->refCount != 2)
-    {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
-            "[PushS%u->DSO%u] There are still others holding references to the server being canceled - "
-            "server name: " PRI_DM_NAME ", server ref count: %u, dso remote name: " PRI_S ".", server->serial,
-            dso->serial, DM_NAME_PARAM(&server->serverName), server->refCount, dso->remote_name);
-    }
-}
-
-static void DSOLifeCycleContextCallBack(const dso_life_cycle_t life_cycle, void *const context,
+static bool DSOLifeCycleContextCallBack(const dso_life_cycle_t life_cycle, void *const context,
                                         dso_state_t *const dso)
 {
     DNSPushServer *server = context;
+    bool status = false;
     if (server == mDNSNULL || dso == mDNSNULL)
     {
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
             "DSOLifeCycleContextCallBack gets called with NULL pointer - server: %p, dso: %p.",
             context, dso);
-        return;
+        goto exit;
     }
 
     switch (life_cycle)
@@ -6699,19 +6707,27 @@ static void DSOLifeCycleContextCallBack(const dso_life_cycle_t life_cycle, void 
             DNS_PUSH_RETAIN(server);
             break;
         case dso_life_cycle_cancel:
-            CancelDNSPushServerForDSO(server, dso);
+            // If the DNS Push server is being canceled, then and only then do we want the dso to be collected.
+            if (server->canceling) {
+                status = true;
+            }
+            // Otherwise, we expect the DSO object to continue to be used for the next connection attempt to a
+            // working DSO server.
             break;
         case dso_life_cycle_free:
             DNS_PUSH_RELEASE(server, DNSPushServerFinalize);
             dso->context = mDNSNULL;
             break;
     }
+exit:
+    return status;
 }
 
-static void DSOConnectLifeCycleContextCallBack(const dso_connect_life_cycle_t life_cycle, void *const context,
+static bool DSOConnectLifeCycleContextCallBack(const dso_connect_life_cycle_t life_cycle, void *const context,
                                                dso_connect_state_t *const dso_connect)
 {
     DNSPushServer *server = context;
+    bool status = false;
 
     // Only check the parameter for dso_connect_life_cycle_create and dso_connect_life_cycle_cancel.
     if (life_cycle == dso_connect_life_cycle_create || life_cycle == dso_connect_life_cycle_cancel)
@@ -6721,7 +6737,7 @@ static void DSOConnectLifeCycleContextCallBack(const dso_connect_life_cycle_t li
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
                 "DSOConnectLifeCycleContextCallBack gets called with NULL pointer - context: %p, dso_connect: %p.",
                 context, dso_connect);
-            return;
+            goto exit;
         }
     }
 
@@ -6733,11 +6749,14 @@ static void DSOConnectLifeCycleContextCallBack(const dso_connect_life_cycle_t li
         case dso_connect_life_cycle_cancel:
             DNS_PUSH_RELEASE(server, DNSPushServerFinalize);
             dso_connect->context = mDNSNULL;
+            status = true;
             break;
         case dso_connect_life_cycle_free:
             // Do nothing, the context has been freed in dso_connect_life_cycle_cancel case above.
             break;
     }
+exit:
+    return status;
 }
 
 static DNSPushServer *DNSPushServerCreate(const domainname *const name, const mDNSIPPort port,
@@ -6751,7 +6770,7 @@ static DNSPushServer *DNSPushServerCreate(const domainname *const name, const mD
     DNSPushServer *serverToReturn = mDNSNULL;
     DNSPushServer *server = mDNSNULL;
 
-    server = mdns_calloc(1, sizeof(*server));
+    server = mDNSPlatformMemAllocateClear(sizeof(*server));
     if (server == mDNSNULL)
     {
         goto exit;
@@ -6816,7 +6835,7 @@ static DNSPushServer *DNSPushServerCreate(const domainname *const name, const mD
         serverToReturn, DM_NAME_PARAM(&serverToReturn->serverName));
 
 exit:
-    mdns_free(server);
+    mDNSPlatformMemFree(server);
     return serverToReturn;
 }
 
@@ -6859,6 +6878,15 @@ static mDNSBool SubscribeToDNSPushServer(mDNS *m, DNSQuestion *q,
     mDNSBool succeeded = DNSPushZoneAndServerCopy(m, q, &zoneSelected, &serverSelected);
     if (!succeeded)
     {
+        goto exit;
+    }
+
+    // server->connection should never be NULL here.
+    if (serverSelected->connection == NULL)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
+            "The zone being subscribed does not have any DSO object associated - zone: " PRI_DM_NAME,
+            DM_NAME_PARAM(&zoneSelected->zoneName));
         goto exit;
     }
 
@@ -6929,26 +6957,36 @@ mDNSexport void UnsubscribeQuestionFromDNSPushServer(mDNS *const NONNULL m, DNSQ
     const uint32_t server_serial = (server != mDNSNULL) ? server->serial : DNS_PUSH_SERVER_INVALID_SERIAL;
     const uint32_t dso_serial = (dso != mDNSNULL) ? dso->serial : DSO_STATE_INVALID_SERIAL;
 
-    require(server != mDNSNULL && dso != mDNSNULL, exit);
+    if (server == mDNSNULL || dso == mDNSNULL)
+    {
+        goto exit;
+    }
 
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
         "[Q%u->PushS%u->DSO%u] Unsubscribing question from the DNS push server - "
         "server name: " PRI_DM_NAME ", connect state: " PUB_S ".", qid, server_serial, dso_serial,
         DM_NAME_PARAM(&server->serverName), DNSPushServerConnectStateToString(server->connectState));
 
-    if (server->connectState == DNSPushServerSessionEstablished ||
-        server->connectState == DNSPushServerConnected)
+    // Stop any active DSO query.
+    const uint32_t disassociated_count = dso_ignore_further_responses(dso, q);
+    if (disassociated_count != 0)
     {
-        // Stop any active DSO query.
-        dso_ignore_response(dso, q);
-
-        if (dso->has_session)
+        if (server->connectState != DNSPushServerConnected && server->connectState != DNSPushServerSessionEstablished)
         {
-            // When we as a client has an established connection to the server, we will not have an established
-            // DSO session to the server until we receive an acknowledgment from the server. Therefore, only send
-            // subscription change if we have an established DSO session.
-            DNSPushSendSubscriptionChange(mDNSfalse, dso, q);
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
+                "[Q%u->PushS%u->DSO%u] Having unexpected outstanding queries while the DNS Push server is not in the connected or session established state - "
+                "server name: " PRI_DM_NAME ", connect state: " PUB_S " outstanding queries: %u.", qid, server_serial,
+                dso_serial, DM_NAME_PARAM(&server->serverName), DNSPushServerConnectStateToString(server->connectState),
+                disassociated_count);
         }
+    }
+
+    if (dso->has_session)
+    {
+        // When we as a client has an established connection to the server, we will not have an established
+        // DSO session to the server until we receive an acknowledgment from the server. Therefore, only send
+        // subscription change if we have an established DSO session.
+        DNSPushSendSubscriptionChange(mDNSfalse, dso, q);
     }
 
     // Remove any activity associated with the question.
@@ -6977,7 +7015,7 @@ mDNSexport void UnsubscribeQuestionFromDNSPushServer(mDNS *const NONNULL m, DNSQ
         // When a subscription is canceled, this original TTL needs to be restored and the record aging resumes.
         // See https://tools.ietf.org/html/rfc8765#section-6.3.1: "The TTL of an added record is stored by the client."
         cache_record->DNSPushSubscribed = mDNSfalse;
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
             "[Q%u->PushS%u->DSO%u] the cached record aging resumes due to the unsubscribed activity - "
             "qname: " PRI_DM_NAME ", qtype: " PUB_S ", TTL: %us.", qid, server_serial, dso_serial,
             DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), cache_record->resrec.rroriginalttl);

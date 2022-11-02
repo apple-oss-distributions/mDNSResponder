@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2013-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -123,7 +123,7 @@ mDNSexport void mDNSPlatformGetDNSRoutePolicy(DNSQuestion *q)
         }
         else
         {
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                 "[Q%u] mDNSPlatformGetDNSRoutePolicy: nw_interface_create_with_index() returned NULL for index %u",
                 mDNSVal16(q->TargetQID), client_ifindex);
         }
@@ -181,7 +181,7 @@ mDNSexport void mDNSPlatformGetDNSRoutePolicy(DNSQuestion *q)
         if (service_id != 0)
         {
             q->ServiceID = service_id;
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                 "[Q%u] mDNSPlatformGetDNSRoutePolicy: Query for " PRI_DM_NAME " service ID is set ->service_ID:[%d] ",
                 mDNSVal16(q->TargetQID), DM_NAME_PARAM(&q->qname), service_id);
         }
@@ -198,7 +198,7 @@ mDNSexport void mDNSPlatformGetDNSRoutePolicy(DNSQuestion *q)
 
                 if (dnspol_ifindex != client_ifindex)
                 {
-                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                         "[Q%u] mDNSPlatformGetDNSRoutePolicy: DNS Route Policy has changed the scoped ifindex from [%d] to [%d]",
                         mDNSVal16(q->TargetQID), client_ifindex, dnspol_ifindex);
                 }
@@ -208,51 +208,46 @@ mDNSexport void mDNSPlatformGetDNSRoutePolicy(DNSQuestion *q)
                 debugf("mDNSPlatformGetDNSRoutePolicy: Query for %##s (%s), PID[%d], EUID[%d], ServiceID[%d] nw_interface_t nwpath_intf is NULL ", q->qname.c, DNSTypeName(q->qtype), q->pid, q->euid, q->ServiceID);
             }
         }
-
+    }
+    else if (isUUIDSet && (nw_path_get_status(path) == nw_path_status_unsatisfied) && (nw_path_get_reason(path) != nw_path_reason_no_route))
+    {
+        isBlocked = mDNStrue;
+    }
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+    if (!isBlocked)
+    {
         uuid_clear(q->ResolverUUID);
-        if (__builtin_available(macOS 10.16, iOS 14.0, watchOS 7.0, tvOS 14.0, *))
+        if (path != NULL)
         {
-            if (path != NULL)
+            __block nw_resolver_config_t best_config = NULL;
+            __block mDNSBool best_config_allows_failover = mDNSfalse;
+            __block nw_resolver_class_t best_class = nw_resolver_class_default_direct;
+            nw_path_enumerate_resolver_configs(path,
+            ^bool(nw_resolver_config_t config)
             {
-                __block nw_resolver_config_t best_config = NULL;
-				__block mDNSBool best_config_allows_failover = mDNSfalse;
-                __block nw_resolver_class_t best_class = nw_resolver_class_default_direct;
-                nw_path_enumerate_resolver_configs(path,
-                ^bool(nw_resolver_config_t config)
+                const mDNSBool allows_failover = nw_resolver_config_get_allow_failover(config);
+                const nw_resolver_class_t class = nw_resolver_config_get_class(config);
+                if (class != nw_resolver_class_default_direct &&
+                    (!allows_failover || !q->IsFailover) &&
+                    (best_class == nw_resolver_class_default_direct || class < best_class))
                 {
-					mDNSBool allows_failover = mDNSfalse;
-					if (__builtin_available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *))
-					{
-						allows_failover = nw_resolver_config_get_allow_failover(config);
-					}
-                    const nw_resolver_class_t class = nw_resolver_config_get_class(config);
-                    if (class != nw_resolver_class_default_direct &&
-						(!allows_failover || !q->IsFailover) &&
-                        (best_class == nw_resolver_class_default_direct || class < best_class))
-                    {
-                        best_class = class;
-                        best_config = config;
-						best_config_allows_failover = allows_failover;
-                    }
-                    return true;
-                });
-                if (best_config != NULL)
-                {
-                    nw_resolver_config_get_identifier(best_config, q->ResolverUUID);
+                    best_class = class;
+                    best_config = config;
+                    best_config_allows_failover = allows_failover;
                 }
+                return true;
+            });
+            if (best_config != NULL)
+            {
+                nw_resolver_config_get_identifier(best_config, q->ResolverUUID);
             }
         }
         if (!uuid_is_null(q->ResolverUUID))
         {
             Querier_RegisterPathResolver(q->ResolverUUID);
         }
+    }
 #endif
-    }
-    else if (isUUIDSet && (nw_path_get_status(path) == nw_path_status_unsatisfied) && (nw_path_get_reason(path) != nw_path_reason_no_route))
-    {
-        isBlocked = mDNStrue;
-    }
 
 exit:
     _nw_forget(&host);

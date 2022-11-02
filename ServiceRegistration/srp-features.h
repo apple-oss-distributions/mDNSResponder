@@ -54,11 +54,6 @@
     #define SRP_FEATURE_NAT64 0
 #endif
 
-#if SRP_FEATURE_NAT64
-// True if the NAT64 feature is currently runtime enabled.
-extern bool srp_nat64_enabled;
-#endif
-
 // At present we never want this, but we're keeping the code around.
 #define SRP_ALLOWS_MDNS_CONFLICTS 0
 

@@ -496,7 +496,9 @@ typedef uint32_t DebugPropertyTag;
     work with GCC due to GCC allow a zero-length array. Using a -1 condition turned out to be more portable.
  */
 
-#define check_compile_time( X )     extern int debug_compile_time_name[ ( X ) ? 1 : -1 ]
+#ifndef check_compile_time
+    #define check_compile_time( X )     extern int debug_compile_time_name[ ( X ) ? 1 : -1 ]
+#endif
 
 //---------------------------------------------------------------------------------------------------------------------------
 /*!	@defined	check_compile_time_code
@@ -523,7 +525,9 @@ typedef uint32_t DebugPropertyTag;
     <http://www.jaggersoft.com/pubs/CVu11_5.html>
  */
 
-#define check_compile_time_code( X )    switch( 0 ) { case 0: case X:; }
+#ifndef check_compile_time_code
+    #define check_compile_time_code( X )    switch( 0 ) { case 0: case X:; }
+#endif
 
 #if 0
 #pragma mark == check macros ==

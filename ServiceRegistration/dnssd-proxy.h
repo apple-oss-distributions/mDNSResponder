@@ -54,4 +54,5 @@ bool delete_served_domain_by_interface_name(const char *const NONNULL interface_
 
 void dnssd_proxy_ifaddr_callback(void *NULLABLE context, const char *NONNULL name, const addr_t *NONNULL address,
 								 const addr_t *NONNULL mask, uint32_t UNUSED flags, enum interface_address_change event_type);
+void dp_start_dropping(void);
 #endif // #ifndef __DNSSD_PROXY_H__

@@ -1,0 +1,15 @@
+#! /bin/bash
+#
+#	Copyright (c) 2022 Apple Inc. All rights reserved.
+#
+
+declare -r script=$( basename ${BASH_SOURCE[0]} )
+declare -r header_file="${INSTALL_ROOT:?}/usr/include/dns_sd.h"
+if ! [ -f "${header_file}" ]; then
+	echo "${script}: '${header_file}' doesn't exist or isn't a regular file."
+	exit 1
+fi
+
+declare -r version_number="${1}"
+echo "${script}: Updating _DNS_SD_H definition in '${header_file}' to version number '${version_number}'."
+sed -i '' "s/#define _DNS_SD_H .*/#define _DNS_SD_H ${version_number}/" "${header_file}"

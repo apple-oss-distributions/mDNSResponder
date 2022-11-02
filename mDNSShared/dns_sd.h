@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2003-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -66,11 +66,30 @@
  */
 
 #ifndef _DNS_SD_H
-#define _DNS_SD_H 15580056
-
-#ifdef  __cplusplus
-extern "C" {
+#if defined(DNS_SD_VERSION_NUMBER_OVERRIDE) && (DNS_SD_VERSION_NUMBER_OVERRIDE > 0)
+#define _DNS_SD_H DNS_SD_VERSION_NUMBER_OVERRIDE
+#else
+#define _DNS_SD_H 16610000
 #endif
+
+/* DNS-SD API version strings are of the form x[.y[.z]].
+ * Version strings less than or equal to 1661 are encoded as (x * 10000) + (y * 100) + z, where 0 ≤ y,z ≤ 99.
+ * Version strings greater than 1661 are encoded as (x * 1000000) + (y * 1000) + z, where 0 ≤ y,z ≤ 999.
+ * Therefore, the greatest version number for the original encoding is 16610000.
+ */
+#define DNS_SD_ORIGINAL_ENCODING_VERSION_NUMBER_MAX 16610000
+
+#if !defined(__BEGIN_DECLS)
+    #if defined(__cplusplus)
+        #define __BEGIN_DECLS               extern "C" {
+        #define __END_DECLS                     }
+    #else
+        #define __BEGIN_DECLS
+        #define __END_DECLS
+    #endif
+#endif
+
+__BEGIN_DECLS
 
 /* Set to 1 if libdispatch is supported
  * Note: May also be set by project and/or Makefile
@@ -158,6 +177,16 @@ typedef INT32 int32_t;
 #include <dispatch/dispatch.h>
 #endif
 
+#ifndef DNS_SD_NULLABLE
+    #if __has_feature(nullability)
+        #define DNS_SD_NULLABLE             _Nullable
+        #define DNS_SD_NONNULL              _Nonnull
+    #else
+        #define DNS_SD_NULLABLE
+        #define DNS_SD_NONNULL
+    #endif
+#endif
+
 /* DNSServiceRef, DNSRecordRef
  *
  * Opaque internal data types.
@@ -167,6 +196,22 @@ typedef INT32 int32_t;
 
 typedef struct _DNSServiceRef_t *DNSServiceRef;
 typedef struct _DNSRecordRef_t *DNSRecordRef;
+typedef struct DNSServiceAttribute_s DNSServiceAttribute;
+typedef DNSServiceAttribute *DNSServiceAttributeRef;
+
+#if defined(__APPLE__)
+    #define DNS_SD_API_AVAILABLE(...)   API_AVAILABLE(__VA_ARGS__)
+#else
+    #define DNS_SD_API_AVAILABLE(...)   DNSSD_EXPORT
+#endif
+typedef enum
+{
+    kDNSServiceAAAAPolicyNone      = 0,
+    kDNSServiceAAAAPolicyFallback  = 1  // If AAAA record doesn't exist, query for A.
+} DNS_SD_API_AVAILABLE(macos(12.0), ios(15.0), tvos(15.0), watchos(8.0)) DNSServiceAAAAPolicy;
+
+DNSSD_EXPORT
+extern const DNSServiceAttribute kDNSServiceAttributeAAAAFallback;
 
 struct sockaddr;
 
@@ -208,6 +253,16 @@ DNS_SERVICE_FLAGS_ENUM
      * answers EVER, just that there are no more answers immediately
      * available right now at this instant. If more answers become available
      * in the future they will be delivered as usual.
+     */
+
+    kDNSServiceFlagsQueueRequest       = 0x1,
+    /* kDNSServiceFlagsQueueRequest indicates that the request will be queued;
+     * otherwise the request is sent immediately.
+     * All the queued requests will be sent to server in scatter/gather IO when function
+     * DNSServiceSendQueuedRequests is called.
+     * This flag is an input value to functions generate requests to server such as
+     * DNSServiceRegisterRecord(), which is why we can use the same value as
+     * kDNSServiceFlagsMoreComing, which is an output flag for various client callbacks.
      */
 
     kDNSServiceFlagsAutoTrigger        = 0x1,
@@ -921,37 +976,45 @@ typedef uint32_t DNSServiceFlags;
 typedef uint32_t DNSServiceProtocol;
 typedef int32_t DNSServiceErrorType;
 
-
+#if (defined(__clang__) && __clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
+#endif
 /*********************************************************************************************
 *
 * Version checking
 *
 *********************************************************************************************/
 
-/* DNSServiceGetProperty() Parameters:
+/*!
+ *  @brief
+ *                  Get value of service property.
  *
- * property:        The requested property.
+ *  @param property
+ *                  The requested property.
  *                  Currently the only property defined is kDNSServiceProperty_DaemonVersion.
  *
- * result:          Place to store result.
+ *  @param result
+ *                  Place to store result.
  *                  For retrieving DaemonVersion, this should be the address of a uint32_t.
  *
- * size:            Pointer to uint32_t containing size of the result location.
+ *  @param size
+ *                  Pointer to uint32_t containing size of the result location.
  *                  For retrieving DaemonVersion, this should be sizeof(uint32_t).
  *                  On return the uint32_t is updated to the size of the data returned.
  *                  For DaemonVersion, the returned size is always sizeof(uint32_t), but
  *                  future properties could be defined which return variable-sized results.
  *
- * return value:    Returns kDNSServiceErr_NoError on success, or kDNSServiceErr_ServiceNotRunning
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success, or kDNSServiceErr_ServiceNotRunning
  *                  if the daemon (or "system service" on Windows) is not running.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceGetProperty
 (
-    const char *property,  /* Requested property (i.e. kDNSServiceProperty_DaemonVersion) */
-    void       *result,    /* Pointer to place to store result */
-    uint32_t   *size       /* size of result location */
+    const char *property,           /* Requested property (i.e. kDNSServiceProperty_DaemonVersion) */
+    void *result,                   /* Pointer to place to store result */
+    uint32_t *size                  /* size of result location */
 );
 
 /*
@@ -969,7 +1032,17 @@ DNSServiceErrorType DNSSD_API DNSServiceGetProperty
  * uint32_t version;
  * uint32_t size = sizeof(version);
  * DNSServiceErrorType err = DNSServiceGetProperty(kDNSServiceProperty_DaemonVersion, &version, &size);
- * if (!err) printf("DNS_SD API version is %d.%d\n", version / 10000, version / 100 % 100);
+ * if (!err)
+ * {
+ *     if (version > DNS_SD_ORIGINAL_ENCODING_VERSION_NUMBER_MAX)
+ *     {
+ *         printf("DNS_SD API version is %u.%u.%u\n", version / 1000000, (version / 1000) % 1000, version % 1000);
+ *     }
+ *     else
+ *     {
+ *         printf("DNS_SD API version is %u.%u.%u\n", version / 10000, (version / 100) % 100, version % 100);
+ *     }
+ * }
  */
 
 #define kDNSServiceProperty_DaemonVersion "DaemonVersion"
@@ -980,88 +1053,91 @@ DNSServiceErrorType DNSSD_API DNSServiceGetProperty
 *
 *********************************************************************************************/
 
-/* DNSServiceRefSockFD()
+/*!
+ *  @brief
+ *                  Access underlying Unix domain socket for an initialized DNSServiceRef.
  *
- * Access underlying Unix domain socket for an initialized DNSServiceRef.
- * The DNS Service Discovery implementation uses this socket to communicate between the client and
- * the daemon. The application MUST NOT directly read from or write to this socket.
- * Access to the socket is provided so that it can be used as a kqueue event source, a CFRunLoop
- * event source, in a select() loop, etc. When the underlying event management subsystem (kqueue/
- * select/CFRunLoop etc.) indicates to the client that data is available for reading on the
- * socket, the client should call DNSServiceProcessResult(), which will extract the daemon's
- * reply from the socket, and pass it to the appropriate application callback. By using a run
- * loop or select(), results from the daemon can be processed asynchronously. Alternatively,
- * a client can choose to fork a thread and have it loop calling "DNSServiceProcessResult(ref);"
- * If DNSServiceProcessResult() is called when no data is available for reading on the socket, it
- * will block until data does become available, and then process the data and return to the caller.
- * The application is responsible for checking the return value of DNSServiceProcessResult()
- * to determine if the socket is valid and if it should continue to process data on the socket.
- * When data arrives on the socket, the client is responsible for calling DNSServiceProcessResult(ref)
- * in a timely fashion -- if the client allows a large backlog of data to build up the daemon
- * may terminate the connection.
+ *  @param sdRef
+ *                  A DNSServiceRef initialized by any of the DNSService calls.
  *
- * sdRef:           A DNSServiceRef initialized by any of the DNSService calls.
+ *  @result
+ *                  The DNSServiceRef's underlying socket descriptor, or -1 on error.
  *
- * return value:    The DNSServiceRef's underlying socket descriptor, or -1 on
- *                  error.
+ *  @discussion
+ *                  The DNS Service Discovery implementation uses this socket to communicate between the client and
+ *                  the daemon. The application MUST NOT directly read from or write to this socket.
+ *                  Access to the socket is provided so that it can be used as a kqueue event source, a CFRunLoop
+ *                  event source, in a select() loop, etc. When the underlying event management subsystem (kqueue/
+ *                  select/CFRunLoop etc.) indicates to the client that data is available for reading on the
+ *                  socket, the client should call DNSServiceProcessResult(), which will extract the daemon's
+ *                  reply from the socket, and pass it to the appropriate application callback. By using a run
+ *                  loop or select(), results from the daemon can be processed asynchronously. Alternatively,
+ *                  a client can choose to fork a thread and have it loop calling "DNSServiceProcessResult(ref);"
+ *                  If DNSServiceProcessResult() is called when no data is available for reading on the socket, it
+ *                  will block until data does become available, and then process the data and return to the caller.
+ *                  The application is responsible for checking the return value of DNSServiceProcessResult()
+ *                  to determine if the socket is valid and if it should continue to process data on the socket.
+ *                  When data arrives on the socket, the client is responsible for calling DNSServiceProcessResult(ref)
+ *                  in a timely fashion -- if the client allows a large backlog of data to build up the daemon
+ *                  may terminate the connection.
  */
-
 DNSSD_EXPORT
 dnssd_sock_t DNSSD_API DNSServiceRefSockFD(DNSServiceRef sdRef);
 
-
-/* DNSServiceProcessResult()
+/*!
+ *  @brief
+ *                  Read a reply from the daemon, calling the appropriate application callback.
  *
- * Read a reply from the daemon, calling the appropriate application callback. This call will
- * block until the daemon's response is received. Use DNSServiceRefSockFD() in
- * conjunction with a run loop or select() to determine the presence of a response from the
- * server before calling this function to process the reply without blocking. Call this function
- * at any point if it is acceptable to block until the daemon's response arrives. Note that the
- * client is responsible for ensuring that DNSServiceProcessResult() is called whenever there is
- * a reply from the daemon - the daemon may terminate its connection with a client that does not
- * process the daemon's responses.
- *
- * sdRef:           A DNSServiceRef initialized by any of the DNSService calls
+ *  @param sdRef
+ *                  A DNSServiceRef initialized by any of the DNSService calls
  *                  that take a callback parameter.
  *
- * return value:    Returns kDNSServiceErr_NoError on success, otherwise returns
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success, otherwise returns
  *                  an error code indicating the specific failure that occurred.
+ *
+ *  @discussion
+ *                  This call will block until the daemon's response is received. Use DNSServiceRefSockFD() in
+ *                  conjunction with a run loop or select() to determine the presence of a response from the
+ *                  server before calling this function to process the reply without blocking. Call this function
+ *                  at any point if it is acceptable to block until the daemon's response arrives. Note that the
+ *                  client is responsible for ensuring that DNSServiceProcessResult() is called whenever there is
+ *                  a reply from the daemon - the daemon may terminate its connection with a client that does not
+ *                  process the daemon's responses.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceProcessResult(DNSServiceRef sdRef);
 
-
-/* DNSServiceRefDeallocate()
+/*!
+ *  @brief
+ *                  Terminate a connection with the daemon and free memory associated with the DNSServiceRef.
  *
- * Terminate a connection with the daemon and free memory associated with the DNSServiceRef.
- * Any services or records registered with this DNSServiceRef will be deregistered. Any
- * Browse, Resolve, or Query operations called with this reference will be terminated.
+ *  @param sdRef
+ *                  A DNSServiceRef initialized by any of the DNSService calls.
  *
- * Note: If the reference's underlying socket is used in a run loop or select() call, it should
- * be removed BEFORE DNSServiceRefDeallocate() is called, as this function closes the reference's
- * socket.
+ *  @discussion
+ *                  Any services or records registered with this DNSServiceRef will be deregistered. Any
+ *                  Browse, Resolve, or Query operations called with this reference will be terminated.
  *
- * Note: If the reference was initialized with DNSServiceCreateConnection(), any DNSRecordRefs
- * created via this reference will be invalidated by this call - the resource records are
- * deregistered, and their DNSRecordRefs may not be used in subsequent functions. Similarly,
- * if the reference was initialized with DNSServiceRegister, and an extra resource record was
- * added to the service via DNSServiceAddRecord(), the DNSRecordRef created by the Add() call
- * is invalidated when this function is called - the DNSRecordRef may not be used in subsequent
- * functions.
+ *                  Note: If the reference's underlying socket is used in a run loop or select() call, it should
+ *                  be removed BEFORE DNSServiceRefDeallocate() is called, as this function closes the reference's
+ *                  socket.
  *
- * If the reference was passed to DNSServiceSetDispatchQueue(), DNSServiceRefDeallocate() must
- * be called on the same queue originally passed as an argument to DNSServiceSetDispatchQueue().
+ *                  Note: If the reference was initialized with DNSServiceCreateConnection(), any DNSRecordRefs
+ *                  created via this reference will be invalidated by this call - the resource records are
+ *                  deregistered, and their DNSRecordRefs may not be used in subsequent functions. Similarly,
+ *                  if the reference was initialized with DNSServiceRegister, and an extra resource record was
+ *                  added to the service via DNSServiceAddRecord(), the DNSRecordRef created by the Add() call
+ *                  is invalidated when this function is called - the DNSRecordRef may not be used in subsequent
+ *                  functions.
  *
- * Note: This call is to be used only with the DNSServiceRef defined by this API.
+ *                  If the reference was passed to DNSServiceSetDispatchQueue(), DNSServiceRefDeallocate() must
+ *                  be called on the same queue originally passed as an argument to DNSServiceSetDispatchQueue().
  *
- * sdRef:           A DNSServiceRef initialized by any of the DNSService calls.
- *
+ *                  Note: This call is to be used only with the DNSServiceRef defined by this API.
  */
-
 DNSSD_EXPORT
 void DNSSD_API DNSServiceRefDeallocate(DNSServiceRef sdRef);
-
 
 /*********************************************************************************************
 *
@@ -1069,55 +1145,49 @@ void DNSSD_API DNSServiceRefDeallocate(DNSServiceRef sdRef);
 *
 *********************************************************************************************/
 
-/* DNSServiceEnumerateDomains()
+/*!
+ *  @brief
+ *                  The definition of the DNSServiceEnumerateDomains callback function.
  *
- * Asynchronously enumerate domains available for browsing and registration.
+ *  @param sdRef
+ *                  The DNSServiceRef initialized by DNSServiceEnumerateDomains().
  *
- * The enumeration MUST be cancelled via DNSServiceRefDeallocate() when no more domains
- * are to be found.
- *
- * Note that the names returned are (like all of DNS-SD) UTF-8 strings,
- * and are escaped using standard DNS escaping rules.
- * (See "Notes on DNS Name Escaping" earlier in this file for more details.)
- * A graphical browser displaying a hierarchical tree-structured view should cut
- * the names at the bare dots to yield individual labels, then de-escape each
- * label according to the escaping rules, and then display the resulting UTF-8 text.
- *
- * DNSServiceDomainEnumReply Callback Parameters:
- *
- * sdRef:           The DNSServiceRef initialized by DNSServiceEnumerateDomains().
- *
- * flags:           Possible values are:
+ *  @param flags
+ *                  Possible values are:
  *                  kDNSServiceFlagsMoreComing
  *                  kDNSServiceFlagsAdd
  *                  kDNSServiceFlagsDefault
  *
- * interfaceIndex:  Specifies the interface on which the domain exists. (The index for a given
+ *  @param interfaceIndex
+ *                  Specifies the interface on which the domain exists. (The index for a given
  *                  interface is determined via the if_nametoindex() family of calls.)
  *
- * errorCode:       Will be kDNSServiceErr_NoError (0) on success, otherwise indicates
+ *  @param errorCode
+ *                  Will be kDNSServiceErr_NoError (0) on success, otherwise indicates
  *                  the failure that occurred (other parameters are undefined if errorCode is nonzero).
  *
- * replyDomain:     The name of the domain.
+ *  @param replyDomain
+ *                  The name of the domain.
  *
- * context:         The context pointer passed to DNSServiceEnumerateDomains.
- *
+ *  @param context
+ *                  The context pointer passed to DNSServiceEnumerateDomains.
  */
-
 typedef void (DNSSD_API *DNSServiceDomainEnumReply)
 (
     DNSServiceRef sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
     DNSServiceErrorType errorCode,
-    const char                          *replyDomain,
-    void                                *context
+    const char *replyDomain,
+    void *context
 );
 
-
-/* DNSServiceEnumerateDomains() Parameters:
+/*!
+ *  @brief
+ *                  Asynchronously enumerate domains available for browsing and registration.
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *  @param sdRef
+ *                  A pointer to an uninitialized DNSServiceRef
  *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
  *                  a copy of the shared connection reference that is to be used).
  *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
@@ -1126,37 +1196,51 @@ typedef void (DNSSD_API *DNSServiceDomainEnumReply)
  *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
  *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           Possible values are:
+ *  @param flags
+ *                  Possible values are:
  *                  kDNSServiceFlagsShareConnection to use a shared connection.
  *                  kDNSServiceFlagsBrowseDomains to enumerate domains recommended for browsing.
  *                  kDNSServiceFlagsRegistrationDomains to enumerate domains recommended
  *                  for registration.
  *
- * interfaceIndex:  If non-zero, specifies the interface on which to look for domains.
+ *  @param interfaceIndex
+ *                  If non-zero, specifies the interface on which to look for domains.
  *                  (the index for a given interface is determined via the if_nametoindex()
  *                  family of calls.) Most applications will pass 0 to enumerate domains on
  *                  all interfaces. See "Constants for specifying an interface index" for more details.
  *
- * callBack:        The function to be called when a domain is found or the call asynchronously
+ *  @param callBack
+ *                  The function to be called when a domain is found or the call asynchronously
  *                  fails.
  *
- * context:         An application context pointer which is passed to the callback function
+ *  @param context
+ *                  An application context pointer which is passed to the callback function
  *                  (may be NULL).
  *
- * return value:    Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
  *                  errors are delivered to the callback), otherwise returns an error code indicating
  *                  the error that occurred (the callback is not invoked and the DNSServiceRef
  *                  is not initialized).
+ *  @discussion
+ *                  The enumeration MUST be cancelled via DNSServiceRefDeallocate() when no more domains
+ *                  are to be found.
+ *
+ *                  Note that the names returned are (like all of DNS-SD) UTF-8 strings,
+ *                  and are escaped using standard DNS escaping rules.
+ *                  (See "Notes on DNS Name Escaping" earlier in this file for more details.)
+ *                  A graphical browser displaying a hierarchical tree-structured view should cut
+ *                  the names at the bare dots to yield individual labels, then de-escape each
+ *                  label according to the escaping rules, and then display the resulting UTF-8 text.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceEnumerateDomains
 (
-    DNSServiceRef                       *sdRef,
+    DNSServiceRef *sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
     DNSServiceDomainEnumReply callBack,
-    void                                *context  /* may be NULL */
+    void *context
 );
 
 
@@ -1166,13 +1250,15 @@ DNSServiceErrorType DNSSD_API DNSServiceEnumerateDomains
 *
 *********************************************************************************************/
 
-/* Register a service that is discovered via Browse() and Resolve() calls.
+/*!
+ *  @brief
+ *                  The definition of the DNSServiceRegister callback function.
  *
- * DNSServiceRegisterReply() Callback Parameters:
+ *  @param sdRef
+ *                  The DNSServiceRef initialized by DNSServiceRegister().
  *
- * sdRef:           The DNSServiceRef initialized by DNSServiceRegister().
- *
- * flags:           When a name is successfully registered, the callback will be
+ *  @param flags
+ *                  When a name is successfully registered, the callback will be
  *                  invoked with the kDNSServiceFlagsAdd flag set. When Wide-Area
  *                  DNS-SD is in use, it is possible for a single service to get
  *                  more than one success callback (e.g. one in the "local" multicast
@@ -1183,39 +1269,44 @@ DNSServiceErrorType DNSSD_API DNSServiceEnumerateDomains
  *                  is *not* invoked in the case where the caller explicitly terminates
  *                  the service registration by calling DNSServiceRefDeallocate(ref);
  *
- * errorCode:       Will be kDNSServiceErr_NoError on success, otherwise will
+ *  @param errorCode
+ *                  Will be kDNSServiceErr_NoError on success, otherwise will
  *                  indicate the failure that occurred (including name conflicts,
  *                  if the kDNSServiceFlagsNoAutoRename flag was used when registering.)
  *                  Other parameters are undefined if errorCode is nonzero.
  *
- * name:            The service name registered (if the application did not specify a name in
+ *  @param name
+ *                  The service name registered (if the application did not specify a name in
  *                  DNSServiceRegister(), this indicates what name was automatically chosen).
  *
- * regtype:         The type of service registered, as it was passed to the callout.
+ *  @param regtype
+ *                  The type of service registered, as it was passed to the callout.
  *
- * domain:          The domain on which the service was registered (if the application did not
+ *  @param domain
+ *                  The domain on which the service was registered (if the application did not
  *                  specify a domain in DNSServiceRegister(), this indicates the default domain
  *                  on which the service was registered).
  *
- * context:         The context pointer that was passed to the callout.
- *
+ *  @param context
+ *                  The context pointer that was passed to the callout.
  */
-
 typedef void (DNSSD_API *DNSServiceRegisterReply)
 (
     DNSServiceRef sdRef,
     DNSServiceFlags flags,
     DNSServiceErrorType errorCode,
-    const char                          *name,
-    const char                          *regtype,
-    const char                          *domain,
-    void                                *context
+    const char *name,
+    const char *regtype,
+    const char *domain,
+    void *context
 );
 
-
-/* DNSServiceRegister() Parameters:
+/*!
+ *  @brief
+ *                  Register a service that is discovered via Browse() and Resolve() calls.
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *  @param sdRef
+ *                  A pointer to an uninitialized DNSServiceRef
  *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
  *                  a copy of the shared connection reference that is to be used).
  *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
@@ -1224,18 +1315,21 @@ typedef void (DNSSD_API *DNSServiceRegisterReply)
  *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
  *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           Possible values are:
+ *  @param flags
+ *                  Possible values are:
  *                  kDNSServiceFlagsShareConnection to use a shared connection.
  *                  Other flags indicate the renaming behavior on name conflict
  *                  (not required for most applications).
  *                  See flag definitions above for details.
  *
- * interfaceIndex:  If non-zero, specifies the interface on which to register the service
+ *  @param interfaceIndex
+ *                  If non-zero, specifies the interface on which to register the service
  *                  (the index for a given interface is determined via the if_nametoindex()
  *                  family of calls.) Most applications will pass 0 to register on all
  *                  available interfaces. See "Constants for specifying an interface index" for more details.
  *
- * name:            If non-NULL, specifies the service name to be registered.
+ *  @param name
+ *                  If non-NULL, specifies the service name to be registered.
  *                  Most applications will not specify a name, in which case the computer
  *                  name is used (this name is communicated to the client via the callback).
  *                  If a name is specified, it must be 1-63 bytes of UTF-8 text.
@@ -1243,7 +1337,8 @@ typedef void (DNSSD_API *DNSServiceRegisterReply)
  *                  to a legal length, unless the NoAutoRename flag is set,
  *                  in which case kDNSServiceErr_BadParam will be returned.
  *
- * regtype:         The service type followed by the protocol, separated by a dot
+ *  @param regtype
+ *                  The service type followed by the protocol, separated by a dot
  *                  (e.g. "_ftp._tcp"). The service type must be an underscore, followed
  *                  by 1-15 characters, which may be letters, digits, or hyphens.
  *                  The transport protocol must be "_tcp" or "_udp". New service types
@@ -1278,25 +1373,30 @@ typedef void (DNSSD_API *DNSServiceRegisterReply)
  *
  *                  % dns-sd -R Test '_test._tcp,s\.one,s\,two,s\\three,s\000four' local 123
  *
- * domain:          If non-NULL, specifies the domain on which to advertise the service.
+ *  @param domain
+ *                  If non-NULL, specifies the domain on which to advertise the service.
  *                  Most applications will not specify a domain, instead automatically
  *                  registering in the default domain(s).
  *
- * host:            If non-NULL, specifies the SRV target host name. Most applications
+ *  @param host
+ *                  If non-NULL, specifies the SRV target host name. Most applications
  *                  will not specify a host, instead automatically using the machine's
  *                  default host name(s). Note that specifying a non-NULL host does NOT
  *                  create an address record for that host - the application is responsible
  *                  for ensuring that the appropriate address record exists, or creating it
  *                  via DNSServiceRegisterRecord().
  *
- * port:            The port, in network byte order, on which the service accepts connections.
+ *  @param port
+ *                  The port, in network byte order, on which the service accepts connections.
  *                  Pass 0 for a "placeholder" service (i.e. a service that will not be discovered
  *                  by browsing, but will cause a name conflict if another client tries to
  *                  register that same name). Most clients will not use placeholder services.
  *
- * txtLen:          The length of the txtRecord, in bytes. Must be zero if the txtRecord is NULL.
+ *  @param txtLen
+ *                  The length of the txtRecord, in bytes. Must be zero if the txtRecord is NULL.
  *
- * txtRecord:       The TXT record rdata. A non-NULL txtRecord MUST be a properly formatted DNS
+ *  @param txtRecord
+ *                  The TXT record rdata. A non-NULL txtRecord MUST be a properly formatted DNS
  *                  TXT record, i.e. <length byte> <data> <length byte> <data> ...
  *                  Passing NULL for the txtRecord is allowed as a synonym for txtLen=1, txtRecord="",
  *                  i.e. it creates a TXT record of length one containing a single empty string.
@@ -1306,153 +1406,227 @@ typedef void (DNSSD_API *DNSServiceRegisterReply)
  *                  data; e.g. if you allocated the storage for the txtRecord parameter with malloc()
  *                  then you can safely free that memory right after the DNSServiceRegister call returns.
  *
- * callBack:        The function to be called when the registration completes or asynchronously
+ *  @param callBack
+ *                  The function to be called when the registration completes or asynchronously
  *                  fails. The client MAY pass NULL for the callback -  The client will NOT be notified
  *                  of the default values picked on its behalf, and the client will NOT be notified of any
  *                  asynchronous errors (e.g. out of memory errors, etc.) that may prevent the registration
  *                  of the service. The client may NOT pass the NoAutoRename flag if the callback is NULL.
  *                  The client may still deregister the service at any time via DNSServiceRefDeallocate().
  *
- * context:         An application context pointer which is passed to the callback function
+ *  @param context
+ *                  An application context pointer which is passed to the callback function
  *                  (may be NULL).
  *
- * return value:    Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
  *                  errors are delivered to the callback), otherwise returns an error code indicating
  *                  the error that occurred (the callback is never invoked and the DNSServiceRef
  *                  is not initialized).
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceRegister
 (
-    DNSServiceRef                       *sdRef,
+    DNSServiceRef *sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
-    const char                          *name,         /* may be NULL */
-    const char                          *regtype,
-    const char                          *domain,       /* may be NULL */
-    const char                          *host,         /* may be NULL */
-    uint16_t port,                                     /* In network byte order */
+    const char *name,                  /* may be NULL */
+    const char *regtype,
+    const char *domain,                /* may be NULL */
+    const char *host,                  /* may be NULL */
+    uint16_t port,                     /* In network byte order */
     uint16_t txtLen,
-    const void                          *txtRecord,    /* may be NULL */
-    DNSServiceRegisterReply callBack,                  /* may be NULL */
-    void                                *context       /* may be NULL */
+    const void *txtRecord,             /* may be NULL */
+    DNSServiceRegisterReply callBack,  /* may be NULL */
+    void *context
 );
 
-
-/* DNSServiceAddRecord()
+/*!
+ *  @brief
+ *                  Add a record to a registered service.
  *
- * Add a record to a registered service. The name of the record will be the same as the
- * registered service's name.
- * The record can later be updated or deregistered by passing the RecordRef initialized
- * by this function to DNSServiceUpdateRecord() or DNSServiceRemoveRecord().
+ *  @param sdRef
+ *                  A DNSServiceRef initialized by DNSServiceRegister().
  *
- * Note that the DNSServiceAddRecord/UpdateRecord/RemoveRecord are *NOT* thread-safe
- * with respect to a single DNSServiceRef. If you plan to have multiple threads
- * in your program simultaneously add, update, or remove records from the same
- * DNSServiceRef, then it's the caller's responsibility to use a mutex lock
- * or take similar appropriate precautions to serialize those calls.
- *
- * Parameters;
- *
- * sdRef:           A DNSServiceRef initialized by DNSServiceRegister().
- *
- * RecordRef:       A pointer to an uninitialized DNSRecordRef. Upon succesfull completion of this
+ *  @param RecordRef
+ *                  A pointer to an uninitialized DNSRecordRef. Upon succesfull completion of this
  *                  call, this ref may be passed to DNSServiceUpdateRecord() or DNSServiceRemoveRecord().
  *                  If the above DNSServiceRef is passed to DNSServiceRefDeallocate(), RecordRef is also
  *                  invalidated and may not be used further.
  *
- * flags:           Currently ignored, reserved for future use.
+ *  @param flags
+ *                  Currently ignored, reserved for future use.
  *
- * rrtype:          The type of the record (e.g. kDNSServiceType_TXT, kDNSServiceType_SRV, etc)
+ *  @param rrtype
+ *                  The type of the record (e.g. kDNSServiceType_TXT, kDNSServiceType_SRV, etc)
  *
- * rdlen:           The length, in bytes, of the rdata.
+ *  @param rdlen
+ *                  The length, in bytes, of the rdata.
  *
- * rdata:           The raw rdata to be contained in the added resource record.
+ *  @param rdata
+ *                  The raw rdata to be contained in the added resource record.
  *
- * ttl:             The time to live of the resource record, in seconds.
+ *  @param ttl
+ *                  The time to live of the resource record, in seconds.
  *                  Most clients should pass 0 to indicate that the system should
  *                  select a sensible default value.
  *
- * return value:    Returns kDNSServiceErr_NoError on success, otherwise returns an
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success, otherwise returns an
  *                  error code indicating the error that occurred (the RecordRef is not initialized).
+ *
+ *  @discussion
+ *                  The name of the record will be the same as the
+ *                  registered service's name.
+ *                  The record can later be updated or deregistered by passing the RecordRef initialized
+ *                  by this function to DNSServiceUpdateRecord() or DNSServiceRemoveRecord().
+ *
+ *                  Note that the DNSServiceAddRecord/UpdateRecord/RemoveRecord are *NOT* thread-safe
+ *                  with respect to a single DNSServiceRef. If you plan to have multiple threads
+ *                  in your program simultaneously add, update, or remove records from the same
+ *                  DNSServiceRef, then it's the caller's responsibility to use a mutex lock
+ *                  or take similar appropriate precautions to serialize those calls.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceAddRecord
 (
     DNSServiceRef sdRef,
-    DNSRecordRef                        *RecordRef,
+    DNSRecordRef *RecordRef,
     DNSServiceFlags flags,
     uint16_t rrtype,
     uint16_t rdlen,
-    const void                          *rdata,
+    const void *rdata,
     uint32_t ttl
 );
 
-
-/* DNSServiceUpdateRecord
+/*!
+ *  @brief
+ *                  Update a registered resource record.
  *
- * Update a registered resource record. The record must either be:
- *   - The primary txt record of a service registered via DNSServiceRegister()
- *   - A record added to a registered service via DNSServiceAddRecord()
- *   - An individual record registered by DNSServiceRegisterRecord()
- *
- * Parameters:
- *
- * sdRef:           A DNSServiceRef that was initialized by DNSServiceRegister()
+ *  @param sdRef
+ *                  A DNSServiceRef that was initialized by DNSServiceRegister()
  *                  or DNSServiceCreateConnection().
  *
- * RecordRef:       A DNSRecordRef initialized by DNSServiceAddRecord, or NULL to update the
+ *  @param recordRef
+ *                  A DNSRecordRef initialized by DNSServiceAddRecord, or NULL to update the
  *                  service's primary txt record.
  *
- * flags:           Currently ignored, reserved for future use.
+ *  @param flags
+ *                  Currently ignored, reserved for future use.
  *
- * rdlen:           The length, in bytes, of the new rdata.
+ *  @param rdlen
+ *                  The length, in bytes, of the new rdata.
  *
- * rdata:           The new rdata to be contained in the updated resource record.
+ *  @param rdata
+ *                  The new rdata to be contained in the updated resource record.
  *
- * ttl:             The time to live of the updated resource record, in seconds.
+ *  @param ttl
+ *                  The time to live of the updated resource record, in seconds.
  *                  Most clients should pass 0 to indicate that the system should
  *                  select a sensible default value.
  *
- * return value:    Returns kDNSServiceErr_NoError on success, otherwise returns an
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success, otherwise returns an
  *                  error code indicating the error that occurred.
+ *
+ *  @discussion
+ *                  The record must either be:
+ *                  - The primary txt record of a service registered via DNSServiceRegister()
+ *                  - A record added to a registered service via DNSServiceAddRecord()
+ *                  - An individual record registered by DNSServiceRegisterRecord()
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceUpdateRecord
 (
     DNSServiceRef sdRef,
-    DNSRecordRef RecordRef,                            /* may be NULL */
+    DNSRecordRef recordRef,                  /* may be NULL */
     DNSServiceFlags flags,
     uint16_t rdlen,
-    const void                          *rdata,
+    const void *rdata,
     uint32_t ttl
 );
 
+#if (defined(__clang__) && __clang__)
+#pragma clang diagnostic pop
+#endif
 
-/* DNSServiceRemoveRecord
+/*!
+ *  @brief
+ *                  Update a registered resource record with attribute.
  *
- * Remove a record previously added to a service record set via DNSServiceAddRecord(), or deregister
- * a record registered individually via DNSServiceRegisterRecord().
+ *  @param sdRef
+ *                  A DNSServiceRef that was initialized by DNSServiceRegister()
+ *                  or DNSServiceCreateConnection().
  *
- * Parameters:
+ *  @param recordRef
+ *                  A DNSRecordRef initialized by DNSServiceAddRecord, or NULL to update the
+ *                  service's primary txt record.
  *
- * sdRef:           A DNSServiceRef initialized by DNSServiceRegister() (if the
+ *  @param flags
+ *                  Currently ignored, reserved for future use.
+ *
+ *  @param rdlen
+ *                  The length, in bytes, of the new rdata.
+ *
+ *  @param rdata
+ *                  The new rdata to be contained in the updated resource record.
+ *
+ *  @param ttl
+ *                  The time to live of the updated resource record, in seconds.
+ *                  Most clients should pass 0 to indicate that the system should
+ *                  select a sensible default value.
+ *
+ *  @param attr
+ *                  An DNSServiceAttribute pointer which is used to specify the attribute
+ *                  (may be NULL).
+ *
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success, otherwise returns an
+ *                  error code indicating the error that occurred.
+ *
+ *  @discussion
+ *                  When atrr is NULL, the functionality of the this function will be the same as
+ *                  DNSServiceUpdateRecord().
+ */
+DNSSD_EXPORT
+DNSServiceErrorType DNSSD_API DNSServiceUpdateRecordWithAttribute
+(
+    DNSServiceRef DNS_SD_NULLABLE sdRef,
+    DNSRecordRef DNS_SD_NULLABLE recordRef,
+    DNSServiceFlags flags,
+    uint16_t rdlen,
+    const void * DNS_SD_NULLABLE rdata,
+    uint32_t ttl,
+    const DNSServiceAttributeRef DNS_SD_NULLABLE attr
+);
+
+#if (defined(__clang__) && __clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
+#endif
+
+/*!
+ *  @brief
+ *                  Remove a record previously added to a service record set via DNSServiceAddRecord(), or deregister
+ *                  a record registered individually via DNSServiceRegisterRecord().
+ *
+ *  @param sdRef
+ *                  A DNSServiceRef initialized by DNSServiceRegister() (if the
  *                  record being removed was registered via DNSServiceAddRecord()) or by
  *                  DNSServiceCreateConnection() (if the record being removed was registered via
  *                  DNSServiceRegisterRecord()).
  *
- * recordRef:       A DNSRecordRef initialized by a successful call to DNSServiceAddRecord()
+ *  @param RecordRef
+ *                  A DNSRecordRef initialized by a successful call to DNSServiceAddRecord()
  *                  or DNSServiceRegisterRecord().
  *
- * flags:           Currently ignored, reserved for future use.
+ *  @param flags
+ *                  Currently ignored, reserved for future use.
  *
- * return value:    Returns kDNSServiceErr_NoError on success, otherwise returns an
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success, otherwise returns an
  *                  error code indicating the error that occurred.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceRemoveRecord
 (
@@ -1461,33 +1635,38 @@ DNSServiceErrorType DNSSD_API DNSServiceRemoveRecord
     DNSServiceFlags flags
 );
 
-
 /*********************************************************************************************
 *
 *  Service Discovery
 *
 *********************************************************************************************/
 
-/* Browse for instances of a service.
+/*!
+ *  @brief
+ *                  The definition of the DNSServiceBrowse callback function
  *
- * DNSServiceBrowseReply() Parameters:
+ *  @param sdRef
+ *                  The DNSServiceRef initialized by DNSServiceBrowse().
  *
- * sdRef:           The DNSServiceRef initialized by DNSServiceBrowse().
- *
- * flags:           Possible values are kDNSServiceFlagsMoreComing and kDNSServiceFlagsAdd.
+ *  @param flags
+ *                  Possible values are kDNSServiceFlagsMoreComing and kDNSServiceFlagsAdd.
  *                  See flag definitions for details.
  *
- * interfaceIndex:  The interface on which the service is advertised. This index should
+ *  @param interfaceIndex
+ *                  The interface on which the service is advertised. This index should
  *                  be passed to DNSServiceResolve() when resolving the service.
  *
- * errorCode:       Will be kDNSServiceErr_NoError (0) on success, otherwise will
+ *  @param errorCode
+ *                  Will be kDNSServiceErr_NoError (0) on success, otherwise will
  *                  indicate the failure that occurred. Other parameters are undefined if
  *                  the errorCode is nonzero.
  *
- * serviceName:     The discovered service name. This name should be displayed to the user,
+ *  @param serviceName
+ *                  The discovered service name. This name should be displayed to the user,
  *                  and stored for subsequent use in the DNSServiceResolve() call.
  *
- * regtype:         The service type, which is usually (but not always) the same as was passed
+ *  @param regtype
+ *                  The service type, which is usually (but not always) the same as was passed
  *                  to DNSServiceBrowse(). One case where the discovered service type may
  *                  not be the same as the requested service type is when using subtypes:
  *                  The client may want to browse for only those ftp servers that allow
@@ -1497,31 +1676,33 @@ DNSServiceErrorType DNSSD_API DNSServiceRemoveRecord
  *                  should be stored along with the name, so that it can be passed to
  *                  DNSServiceResolve() when the service is later resolved.
  *
- * domain:          The domain of the discovered service instance. This may or may not be the
+ *  @param replyDomain
+ *                  The domain of the discovered service instance. This may or may not be the
  *                  same as the domain that was passed to DNSServiceBrowse(). The domain for each
  *                  discovered service instance should be stored along with the name, so that
  *                  it can be passed to DNSServiceResolve() when the service is later resolved.
  *
- * context:         The context pointer that was passed to the callout.
- *
+ *  @param context
+ *                  The context pointer that was passed to the callout.
  */
-
 typedef void (DNSSD_API *DNSServiceBrowseReply)
 (
     DNSServiceRef sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
     DNSServiceErrorType errorCode,
-    const char                          *serviceName,
-    const char                          *regtype,
-    const char                          *replyDomain,
-    void                                *context
+    const char *serviceName,
+    const char *regtype,
+    const char *replyDomain,
+    void *context
 );
 
-
-/* DNSServiceBrowse() Parameters:
+/*!
+ *  @brief
+ *                  Browse for instances of a service.
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *  @param sdRef
+ *                  A pointer to an uninitialized DNSServiceRef
  *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
  *                  a copy of the shared connection reference that is to be used).
  *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
@@ -1530,129 +1711,117 @@ typedef void (DNSSD_API *DNSServiceBrowseReply)
  *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
  *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           Possible values are:
+ *  @param flags
+ *                  Possible values are:
  *                  kDNSServiceFlagsShareConnection to use a shared connection.
  *
- * interfaceIndex:  If non-zero, specifies the interface on which to browse for services
+ *  @param interfaceIndex
+ *                  If non-zero, specifies the interface on which to browse for services
  *                  (the index for a given interface is determined via the if_nametoindex()
  *                  family of calls.) Most applications will pass 0 to browse on all available
  *                  interfaces. See "Constants for specifying an interface index" for more details.
  *
- * regtype:         The service type being browsed for followed by the protocol, separated by a
+ *  @param regtype
+ *                  The service type being browsed for followed by the protocol, separated by a
  *                  dot (e.g. "_ftp._tcp"). The transport protocol must be "_tcp" or "_udp".
  *                  A client may optionally specify a single subtype to perform filtered browsing:
  *                  e.g. browsing for "_primarytype._tcp,_subtype" will discover only those
  *                  instances of "_primarytype._tcp" that were registered specifying "_subtype"
  *                  in their list of registered subtypes.
  *
- * domain:          If non-NULL, specifies the domain on which to browse for services.
+ *  @param domain
+ *                  If non-NULL, specifies the domain on which to browse for services.
  *                  Most applications will not specify a domain, instead browsing on the
  *                  default domain(s).
  *
- * callBack:        The function to be called when an instance of the service being browsed for
+ *  @param callBack
+ *                  The function to be called when an instance of the service being browsed for
  *                  is found, or if the call asynchronously fails.
  *
- * context:         An application context pointer which is passed to the callback function
+ *  @param context
+ *                  An application context pointer which is passed to the callback function
  *                  (may be NULL).
  *
- * return value:    Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
  *                  errors are delivered to the callback), otherwise returns an error code indicating
  *                  the error that occurred (the callback is not invoked and the DNSServiceRef
  *                  is not initialized).
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceBrowse
 (
-    DNSServiceRef                       *sdRef,
+    DNSServiceRef *sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
-    const char                          *regtype,
-    const char                          *domain,    /* may be NULL */
+    const char *regtype,
+    const char *domain,            /* may be NULL */
     DNSServiceBrowseReply callBack,
-    void                                *context    /* may be NULL */
+    void *context
 );
 
-
-/* DNSServiceResolve()
+/*!
+ *  @brief
+ *                  The definition of the DNSServiceResolve callback function.
  *
- * Resolve a service name discovered via DNSServiceBrowse() to a target host name, port number, and
- * txt record.
+ *  @param sdRef
+ *                  The DNSServiceRef initialized by DNSServiceResolve().
  *
- * Note: Applications should NOT use DNSServiceResolve() solely for txt record monitoring - use
- * DNSServiceQueryRecord() instead, as it is more efficient for this task.
+ *  @param flags
+ *                  Possible values: kDNSServiceFlagsMoreComing
  *
- * Note: When the desired results have been returned, the client MUST terminate the resolve by calling
- * DNSServiceRefDeallocate().
+ *  @param interfaceIndex
+ *                  The interface on which the service was resolved.
  *
- * Note: DNSServiceResolve() behaves correctly for typical services that have a single SRV record
- * and a single TXT record. To resolve non-standard services with multiple SRV or TXT records,
- * DNSServiceQueryRecord() should be used.
- *
- * DNSServiceResolveReply Callback Parameters:
- *
- * sdRef:           The DNSServiceRef initialized by DNSServiceResolve().
- *
- * flags:           Possible values: kDNSServiceFlagsMoreComing
- *
- * interfaceIndex:  The interface on which the service was resolved.
- *
- * errorCode:       Will be kDNSServiceErr_NoError (0) on success, otherwise will
+ *  @param errorCode
+ *                  Will be kDNSServiceErr_NoError (0) on success, otherwise will
  *                  indicate the failure that occurred. Other parameters are undefined if
  *                  the errorCode is nonzero.
  *
- * fullname:        The full service domain name, in the form <servicename>.<protocol>.<domain>.
+ *  @param fullname
+ *                  The full service domain name, in the form <servicename>.<protocol>.<domain>.
  *                  (This name is escaped following standard DNS rules, making it suitable for
  *                  passing to standard system DNS APIs such as res_query(), or to the
  *                  special-purpose functions included in this API that take fullname parameters.
  *                  See "Notes on DNS Name Escaping" earlier in this file for more details.)
  *
- * hosttarget:      The target hostname of the machine providing the service. This name can
+ *  @param hosttarget
+ *                  The target hostname of the machine providing the service. This name can
  *                  be passed to functions like gethostbyname() to identify the host's IP address.
  *
- * port:            The port, in network byte order, on which connections are accepted for this service.
+ *  @param port
+ *                  The port, in network byte order, on which connections are accepted for this service.
  *
- * txtLen:          The length of the txt record, in bytes.
+ *  @param txtLen
+ *                  The length of the txt record, in bytes.
  *
- * txtRecord:       The service's primary txt record, in standard txt record format.
+ *  @param txtRecord
+ *                  The service's primary txt record, in standard txt record format.
  *
- * context:         The context pointer that was passed to the callout.
- *
- * NOTE: In earlier versions of this header file, the txtRecord parameter was declared "const char *"
- * This is incorrect, since it contains length bytes which are values in the range 0 to 255, not -128 to +127.
- * Depending on your compiler settings, this change may cause signed/unsigned mismatch warnings.
- * These should be fixed by updating your own callback function definition to match the corrected
- * function signature using "const unsigned char *txtRecord". Making this change may also fix inadvertent
- * bugs in your callback function, where it could have incorrectly interpreted a length byte with value 250
- * as being -6 instead, with various bad consequences ranging from incorrect operation to software crashes.
- * If you need to maintain portable code that will compile cleanly with both the old and new versions of
- * this header file, you should update your callback function definition to use the correct unsigned value,
- * and then in the place where you pass your callback function to DNSServiceResolve(), use a cast to eliminate
- * the compiler warning, e.g.:
- *   DNSServiceResolve(sd, flags, index, name, regtype, domain, (DNSServiceResolveReply)MyCallback, context);
- * This will ensure that your code compiles cleanly without warnings (and more importantly, works correctly)
- * with both the old header and with the new corrected version.
- *
+ *  @param context
+ *                  The context pointer that was passed to the callout.
  */
-
 typedef void (DNSSD_API *DNSServiceResolveReply)
 (
     DNSServiceRef sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
     DNSServiceErrorType errorCode,
-    const char                          *fullname,
-    const char                          *hosttarget,
-    uint16_t port,                                   /* In network byte order */
+    const char *fullname,
+    const char *hosttarget,
+    uint16_t port,                  /* In network byte order */
     uint16_t txtLen,
-    const unsigned char                 *txtRecord,
-    void                                *context
+    const unsigned char *txtRecord,
+    void *context
 );
 
-
-/* DNSServiceResolve() Parameters
+/*!
+ *  @brief
+ *                  Resolve a service name discovered via DNSServiceBrowse() to a target host name, port number, and
+ *                  txt record.
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *  @param sdRef
+ *                  A pointer to an uninitialized DNSServiceRef
  *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
  *                  a copy of the shared connection reference that is to be used).
  *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
@@ -1661,13 +1830,15 @@ typedef void (DNSSD_API *DNSServiceResolveReply)
  *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
  *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           Possible values are:
+ *  @param flags
+ *                  Possible values are:
  *                  kDNSServiceFlagsShareConnection to use a shared connection.
  *                  Specifying kDNSServiceFlagsForceMulticast will cause query to be
  *                  performed with a link-local mDNS query, even if the name is an
  *                  apparently non-local name (i.e. a name not ending in ".local.")
  *
- * interfaceIndex:  The interface on which to resolve the service. If this resolve call is
+ *  @param interfaceIndex
+ *                  The interface on which to resolve the service. If this resolve call is
  *                  as a result of a currently active DNSServiceBrowse() operation, then the
  *                  interfaceIndex should be the index reported in the DNSServiceBrowseReply
  *                  callback. If this resolve call is using information previously saved
@@ -1675,40 +1846,69 @@ typedef void (DNSSD_API *DNSServiceResolveReply)
  *                  the desired service may now be reachable via a different physical interface.
  *                  See "Constants for specifying an interface index" for more details.
  *
- * name:            The name of the service instance to be resolved, as reported to the
+ *  @param name
+ *                  The name of the service instance to be resolved, as reported to the
  *                  DNSServiceBrowseReply() callback.
  *
- * regtype:         The type of the service instance to be resolved, as reported to the
+ *  @param regtype
+ *                  The type of the service instance to be resolved, as reported to the
  *                  DNSServiceBrowseReply() callback.
  *
- * domain:          The domain of the service instance to be resolved, as reported to the
+ *  @param domain
+ *                  The domain of the service instance to be resolved, as reported to the
  *                  DNSServiceBrowseReply() callback.
  *
- * callBack:        The function to be called when a result is found, or if the call
+ *  @param callBack
+ *                  The function to be called when a result is found, or if the call
  *                  asynchronously fails.
  *
- * context:         An application context pointer which is passed to the callback function
+ *  @param context
+ *                  An application context pointer which is passed to the callback function
  *                  (may be NULL).
  *
- * return value:    Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
  *                  errors are delivered to the callback), otherwise returns an error code indicating
  *                  the error that occurred (the callback is never invoked and the DNSServiceRef
  *                  is not initialized).
+ *  @discussion
+ *                  Note: Applications should NOT use DNSServiceResolve() solely for txt record monitoring - use
+ *                  DNSServiceQueryRecord() instead, as it is more efficient for this task.
+ *
+ *                  Note: When the desired results have been returned, the client MUST terminate the resolve by calling
+ *                  DNSServiceRefDeallocate().
+ *
+ *                  Note: DNSServiceResolve() behaves correctly for typical services that have a single SRV record
+ *                  and a single TXT record. To resolve non-standard services with multiple SRV or TXT records,
+ *                  DNSServiceQueryRecord() should be used.
+ *
+ *                  NOTE: In earlier versions of this header file, the txtRecord parameter was declared "const char *"
+ *                  This is incorrect, since it contains length bytes which are values in the range 0 to 255, not -128 to +127.
+ *                  Depending on your compiler settings, this change may cause signed/unsigned mismatch warnings.
+ *                  These should be fixed by updating your own callback function definition to match the corrected
+ *                  function signature using "const unsigned char *txtRecord". Making this change may also fix inadvertent
+ *                  bugs in your callback function, where it could have incorrectly interpreted a length byte with value 250
+ *                  as being -6 instead, with various bad consequences ranging from incorrect operation to software crashes.
+ *                  If you need to maintain portable code that will compile cleanly with both the old and new versions of
+ *                  this header file, you should update your callback function definition to use the correct unsigned value,
+ *                  and then in the place where you pass your callback function to DNSServiceResolve(), use a cast to eliminate
+ *                  the compiler warning, e.g.:
+ *                  DNSServiceResolve(sd, flags, index, name, regtype, domain, (DNSServiceResolveReply)MyCallback, context);
+ *                  This will ensure that your code compiles cleanly without warnings (and more importantly, works correctly)
+ *                  with both the old header and with the new corrected version.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceResolve
 (
-    DNSServiceRef                       *sdRef,
+    DNSServiceRef *sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
-    const char                          *name,
-    const char                          *regtype,
-    const char                          *domain,
+    const char *name,
+    const char *regtype,
+    const char *domain,
     DNSServiceResolveReply callBack,
-    void                                *context  /* may be NULL */
+    void *context
 );
-
 
 /*********************************************************************************************
 *
@@ -1716,37 +1916,45 @@ DNSServiceErrorType DNSSD_API DNSServiceResolve
 *
 *********************************************************************************************/
 
-/* DNSServiceQueryRecord
+/*!
+ *  @brief
+ *                  The definition of the DNSServiceQueryRecord callback function.
  *
- * Query for an arbitrary DNS record.
+ *  @param sdRef
+ *                  The DNSServiceRef initialized by DNSServiceQueryRecord().
  *
- * DNSServiceQueryRecordReply() Callback Parameters:
- *
- * sdRef:           The DNSServiceRef initialized by DNSServiceQueryRecord().
- *
- * flags:           Possible values are kDNSServiceFlagsMoreComing and
+ *  @param flags
+ *                  Possible values are kDNSServiceFlagsMoreComing and
  *                  kDNSServiceFlagsAdd. The Add flag is NOT set for PTR records
  *                  with a ttl of 0, i.e. "Remove" events.
  *
- * interfaceIndex:  The interface on which the query was resolved (the index for a given
+ *  @param interfaceIndex
+ *                  The interface on which the query was resolved (the index for a given
  *                  interface is determined via the if_nametoindex() family of calls).
  *                  See "Constants for specifying an interface index" for more details.
  *
- * errorCode:       Will be kDNSServiceErr_NoError on success, otherwise will
+ *  @param errorCode
+ *                  Will be kDNSServiceErr_NoError on success, otherwise will
  *                  indicate the failure that occurred. Other parameters are undefined if
  *                  errorCode is nonzero.
  *
- * fullname:        The resource record's full domain name.
+ *  @param fullname
+ *                  The resource record's full domain name.
  *
- * rrtype:          The resource record's type (e.g. kDNSServiceType_PTR, kDNSServiceType_SRV, etc)
+ *  @param rrtype
+ *                  The resource record's type (e.g. kDNSServiceType_PTR, kDNSServiceType_SRV, etc)
  *
- * rrclass:         The class of the resource record (usually kDNSServiceClass_IN).
+ *  @param rrclass
+ *                  The class of the resource record (usually kDNSServiceClass_IN).
  *
- * rdlen:           The length, in bytes, of the resource record rdata.
+ *  @param rdlen
+ *                  The length, in bytes, of the resource record rdata.
  *
- * rdata:           The raw rdata of the resource record.
+ *  @param rdata
+ *                  The raw rdata of the resource record.
  *
- * ttl:             If the client wishes to cache the result for performance reasons,
+ *  @param ttl
+ *                  If the client wishes to cache the result for performance reasons,
  *                  the TTL indicates how long the client may legitimately hold onto
  *                  this result, in seconds. After the TTL expires, the client should
  *                  consider the result no longer valid, and if it requires this data
@@ -1758,29 +1966,30 @@ DNSServiceErrorType DNSSD_API DNSServiceResolve
  *                  updated when the daemon answers from the cache, hence relying on
  *                  the accuracy of the ttl value is not recommended.
  *
- * context:         The context pointer that was passed to the callout.
- *
+ *  @param context
+ *                  The context pointer that was passed to the callout.
  */
-
 typedef void (DNSSD_API *DNSServiceQueryRecordReply)
 (
     DNSServiceRef sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
     DNSServiceErrorType errorCode,
-    const char                          *fullname,
+    const char *fullname,
     uint16_t rrtype,
     uint16_t rrclass,
     uint16_t rdlen,
-    const void                          *rdata,
+    const void *rdata,
     uint32_t ttl,
-    void                                *context
+    void *context
 );
 
-
-/* DNSServiceQueryRecord() Parameters:
+/*!
+ *  @brief
+ *                  Query for an arbitrary DNS record.
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *  @param sdRef
+ *                  A pointer to an uninitialized DNSServiceRef
  *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
  *                  a copy of the shared connection reference that is to be used).
  *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
@@ -1789,50 +1998,56 @@ typedef void (DNSSD_API *DNSServiceQueryRecordReply)
  *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
  *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           Possible values are:
+ *  @param flags
+ *                  Possible values are:
  *                  kDNSServiceFlagsShareConnection to use a shared connection.
  *                  kDNSServiceFlagsForceMulticast or kDNSServiceFlagsLongLivedQuery.
  *                  Pass kDNSServiceFlagsLongLivedQuery to create a "long-lived" unicast
  *                  query to a unicast DNS server that implements the protocol. This flag
  *                  has no effect on link-local multicast queries.
  *
- * interfaceIndex:  If non-zero, specifies the interface on which to issue the query
+ *  @param interfaceIndex
+ *                  If non-zero, specifies the interface on which to issue the query
  *                  (the index for a given interface is determined via the if_nametoindex()
  *                  family of calls.) Passing 0 causes the name to be queried for on all
  *                  interfaces. See "Constants for specifying an interface index" for more details.
  *
- * fullname:        The full domain name of the resource record to be queried for.
+ *  @param fullname
+ *                  The full domain name of the resource record to be queried for.
  *
- * rrtype:          The numerical type of the resource record to be queried for
+ *  @param rrtype
+ *                  The numerical type of the resource record to be queried for
  *                  (e.g. kDNSServiceType_PTR, kDNSServiceType_SRV, etc)
  *
- * rrclass:         The class of the resource record (usually kDNSServiceClass_IN).
+ *  @param rrclass
+ *                  The class of the resource record (usually kDNSServiceClass_IN).
  *
- * callBack:        The function to be called when a result is found, or if the call
+ *  @param callBack
+ *                  The function to be called when a result is found, or if the call
  *                  asynchronously fails.
  *
- * context:         An application context pointer which is passed to the callback function
+ *  @param context
+ *                  An application context pointer which is passed to the callback function
  *                  (may be NULL).
  *
- * return value:    Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
+ *  @result:
+ *                  Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
  *                  errors are delivered to the callback), otherwise returns an error code indicating
  *                  the error that occurred (the callback is never invoked and the DNSServiceRef
  *                  is not initialized).
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
 (
-    DNSServiceRef                       *sdRef,
+    DNSServiceRef *sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
-    const char                          *fullname,
+    const char *fullname,
     uint16_t rrtype,
     uint16_t rrclass,
     DNSServiceQueryRecordReply callBack,
-    void                                *context  /* may be NULL */
+    void *context
 );
-
 
 /*********************************************************************************************
 *
@@ -1840,28 +2055,33 @@ DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
 *
 *********************************************************************************************/
 
-/* DNSServiceGetAddrInfo
+/*!
+ *  @brief
+ *                  The definition of the DNSServiceGetAddrInfo callback function.
  *
- * Queries for the IP address of a hostname by using either Multicast or Unicast DNS.
+ *  @param sdRef
+ *                  The DNSServiceRef initialized by DNSServiceGetAddrInfo().
  *
- * DNSServiceGetAddrInfoReply() parameters:
- *
- * sdRef:           The DNSServiceRef initialized by DNSServiceGetAddrInfo().
- *
- * flags:           Possible values are kDNSServiceFlagsMoreComing and
+ *  @param flags
+ *                  Possible values are kDNSServiceFlagsMoreComing and
  *                  kDNSServiceFlagsAdd.
  *
- * interfaceIndex:  The interface to which the answers pertain.
+ *  @param interfaceIndex
+ *                  The interface to which the answers pertain.
  *
- * errorCode:       Will be kDNSServiceErr_NoError on success, otherwise will
+ *  @param errorCode
+ *                  Will be kDNSServiceErr_NoError on success, otherwise will
  *                  indicate the failure that occurred.  Other parameters are
  *                  undefined if errorCode is nonzero.
  *
- * hostname:        The fully qualified domain name of the host to be queried for.
+ *  @param hostname
+ *                  The fully qualified domain name of the host to be queried for.
  *
- * address:         IPv4 or IPv6 address.
+ *  @param address
+ *                  IPv4 or IPv6 address.
  *
- * ttl:             If the client wishes to cache the result for performance reasons,
+ *  @param ttl
+ *                  If the client wishes to cache the result for performance reasons,
  *                  the TTL indicates how long the client may legitimately hold onto
  *                  this result, in seconds. After the TTL expires, the client should
  *                  consider the result no longer valid, and if it requires this data
@@ -1873,26 +2093,27 @@ DNSServiceErrorType DNSSD_API DNSServiceQueryRecord
  *                  updated when the daemon answers from the cache, hence relying on
  *                  the accuracy of the ttl value is not recommended.
  *
- * context:         The context pointer that was passed to the callout.
- *
+ *  @param context
+ *                  The context pointer that was passed to the callout.
  */
-
 typedef void (DNSSD_API *DNSServiceGetAddrInfoReply)
 (
     DNSServiceRef sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
     DNSServiceErrorType errorCode,
-    const char                       *hostname,
-    const struct sockaddr            *address,
+    const char *hostname,
+    const struct sockaddr *address,
     uint32_t ttl,
-    void                             *context
+    void *context
 );
 
-
-/* DNSServiceGetAddrInfo() Parameters:
+/*!
+ *  @brief
+ *                  Queries for the IP address of a hostname by using either Multicast or Unicast DNS.
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *  @param sdRef
+ *                  A pointer to an uninitialized DNSServiceRef
  *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
  *                  a copy of the shared connection reference that is to be used).
  *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
@@ -1901,48 +2122,53 @@ typedef void (DNSSD_API *DNSServiceGetAddrInfoReply)
  *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
  *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           Possible values are:
+ *  @param flags
+ *                  Possible values are:
  *                  kDNSServiceFlagsShareConnection to use a shared connection.
  *                  kDNSServiceFlagsForceMulticast
  *
- * interfaceIndex:  The interface on which to issue the query.  Passing 0 causes the query to be
+ *  @param interfaceIndex
+ *                  The interface on which to issue the query.  Passing 0 causes the query to be
  *                  sent on all active interfaces via Multicast or the primary interface via Unicast.
  *
- * protocol:        Pass in kDNSServiceProtocol_IPv4 to look up IPv4 addresses, or kDNSServiceProtocol_IPv6
+ *  @param protocol
+ *                  Pass in kDNSServiceProtocol_IPv4 to look up IPv4 addresses, or kDNSServiceProtocol_IPv6
  *                  to look up IPv6 addresses, or both to look up both kinds. If neither flag is
  *                  set, the system will apply an intelligent heuristic, which is (currently)
  *                  that it will attempt to look up both, except:
  *
- *                   * If "hostname" is a wide-area unicast DNS hostname (i.e. not a ".local." name)
- *                     but this host has no routable IPv6 address, then the call will not try to
- *                     look up IPv6 addresses for "hostname", since any addresses it found would be
- *                     unlikely to be of any use anyway. Similarly, if this host has no routable
- *                     IPv4 address, the call will not try to look up IPv4 addresses for "hostname".
+ *                  * If "hostname" is a wide-area unicast DNS hostname (i.e. not a ".local." name)
+ *                  but this host has no routable IPv6 address, then the call will not try to
+ *                  look up IPv6 addresses for "hostname", since any addresses it found would be
+ *                  unlikely to be of any use anyway. Similarly, if this host has no routable
+ *                  IPv4 address, the call will not try to look up IPv4 addresses for "hostname".
  *
- * hostname:        The fully qualified domain name of the host to be queried for.
+ *  @param hostname
+ *                  The fully qualified domain name of the host to be queried for.
  *
- * callBack:        The function to be called when the query succeeds or fails asynchronously.
+ *  @param callBack
+ *                  The function to be called when the query succeeds or fails asynchronously.
  *
- * context:         An application context pointer which is passed to the callback function
+ *  @param context
+ *                  An application context pointer which is passed to the callback function
  *                  (may be NULL).
  *
- * return value:    Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
  *                  errors are delivered to the callback), otherwise returns an error code indicating
  *                  the error that occurred.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo
 (
-    DNSServiceRef                    *sdRef,
+    DNSServiceRef *sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
     DNSServiceProtocol protocol,
-    const char                       *hostname,
+    const char *hostname,
     DNSServiceGetAddrInfoReply callBack,
-    void                             *context          /* may be NULL */
+    void *context
 );
-
 
 /*********************************************************************************************
 *
@@ -1952,73 +2178,74 @@ DNSServiceErrorType DNSSD_API DNSServiceGetAddrInfo
 *
 *********************************************************************************************/
 
-/* DNSServiceCreateConnection()
+/*!
+ *  @brief
+ *                  Create a connection to the daemon allowing efficient registration of
+ *                  multiple individual records.
  *
- * Create a connection to the daemon allowing efficient registration of
- * multiple individual records.
- *
- * Parameters:
- *
- * sdRef:           A pointer to an uninitialized DNSServiceRef.
+ *  @param sdRef
+ *                  A pointer to an uninitialized DNSServiceRef.
  *                  Deallocating the reference (via DNSServiceRefDeallocate())
  *                  severs the connection and cancels all operations and
  *                  deregisters all records registered on this connection.
  *
- * return value:    Returns kDNSServiceErr_NoError on success, otherwise returns
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success, otherwise returns
  *                  an error code indicating the specific failure that occurred
  *                  (in which case the DNSServiceRef is not initialized).
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceCreateConnection(DNSServiceRef *sdRef);
 
-/* DNSServiceRegisterRecord
+/*!
+ *  @brief
+ *                  The definition of the DNSServiceRegisterRecord callback function.
  *
- * Register an individual resource record on a connected DNSServiceRef.
- *
- * Note that name conflicts occurring for records registered via this call must be handled
- * by the client in the callback.
- *
- * DNSServiceRegisterRecordReply() parameters:
- *
- * sdRef:           The connected DNSServiceRef initialized by
+ *  @param sdRef
+ *                  The connected DNSServiceRef initialized by
  *                  DNSServiceCreateConnection().
  *
- * RecordRef:       The DNSRecordRef initialized by DNSServiceRegisterRecord(). If the above
+ *  @param RecordRef
+ *                  The DNSRecordRef initialized by DNSServiceRegisterRecord(). If the above
  *                  DNSServiceRef is passed to DNSServiceRefDeallocate(), this DNSRecordRef is
  *                  invalidated, and may not be used further.
  *
- * flags:           Currently unused, reserved for future use.
+ *  @param flags
+ *                  Currently unused, reserved for future use.
  *
- * errorCode:       Will be kDNSServiceErr_NoError on success, otherwise will
+ *  @param errorCode
+ *                  Will be kDNSServiceErr_NoError on success, otherwise will
  *                  indicate the failure that occurred (including name conflicts.)
  *                  Other parameters are undefined if errorCode is nonzero.
  *
- * context:         The context pointer that was passed to the callout.
- *
+ *  @param context
+ *                  The context pointer that was passed to the callout.
  */
-
 typedef void (DNSSD_API *DNSServiceRegisterRecordReply)
 (
     DNSServiceRef sdRef,
     DNSRecordRef RecordRef,
     DNSServiceFlags flags,
     DNSServiceErrorType errorCode,
-    void                                *context
+    void *context
 );
 
-
-/* DNSServiceRegisterRecord() Parameters:
+/*!
+ *  @brief
+ *                  Register an individual resource record on a connected DNSServiceRef.
  *
- * sdRef:           A DNSServiceRef initialized by DNSServiceCreateConnection().
+ *  @param sdRef
+ *                  A DNSServiceRef initialized by DNSServiceCreateConnection().
  *
- * RecordRef:       A pointer to an uninitialized DNSRecordRef. Upon succesfull completion of this
+ *  @param RecordRef
+ *                  A pointer to an uninitialized DNSRecordRef. Upon succesfull completion of this
  *                  call, this ref may be passed to DNSServiceUpdateRecord() or DNSServiceRemoveRecord().
  *                  (To deregister ALL records registered on a single connected DNSServiceRef
  *                  and deallocate each of their corresponding DNSServiceRecordRefs, call
  *                  DNSServiceRefDeallocate()).
  *
- * flags:           Required values are:
+ *  @param flags
+ *                  Required values are:
  *                  One of kDNSServiceFlagsShared, kDNSServiceFlagsUnique or kDNSServiceFlagsKnownUnique flags.
  *
  *                  Possible values are:
@@ -2026,97 +2253,112 @@ typedef void (DNSSD_API *DNSServiceRegisterRecordReply)
  *                  a link-local mDNS registration even if the name is an apparently non-local name (i.e. a name not
  *                  ending in ".local.")
  *
- * interfaceIndex:  If non-zero, specifies the interface on which to register the record
+ *  @param interfaceIndex
+ *                  If non-zero, specifies the interface on which to register the record
  *                  (the index for a given interface is determined via the if_nametoindex()
  *                  family of calls.) Passing 0 causes the record to be registered on all interfaces.
  *                  See "Constants for specifying an interface index" for more details.
  *
- * fullname:        The full domain name of the resource record.
+ *  @param fullname
+ *                  The full domain name of the resource record.
  *
- * rrtype:          The numerical type of the resource record (e.g. kDNSServiceType_PTR, kDNSServiceType_SRV, etc)
+ *  @param rrtype
+ *                  The numerical type of the resource record (e.g. kDNSServiceType_PTR, kDNSServiceType_SRV, etc)
  *
- * rrclass:         The class of the resource record (usually kDNSServiceClass_IN)
+ *  @param rrclass
+ *                  The class of the resource record (usually kDNSServiceClass_IN)
  *
- * rdlen:           Length, in bytes, of the rdata.
+ *  @param rdlen
+ *                  Length, in bytes, of the rdata.
  *
- * rdata:           A pointer to the raw rdata, as it is to appear in the DNS record.
+ *  @param rdata
+ *                  A pointer to the raw rdata, as it is to appear in the DNS record.
  *
- * ttl:             The time to live of the resource record, in seconds.
+ *  @param ttl
+ *                  The time to live of the resource record, in seconds.
  *                  Most clients should pass 0 to indicate that the system should
  *                  select a sensible default value.
  *
- * callBack:        The function to be called when a result is found, or if the call
+ *  @param callBack
+ *                  The function to be called when a result is found, or if the call
  *                  asynchronously fails (e.g. because of a name conflict.)
  *
- * context:         An application context pointer which is passed to the callback function
+ *  @param context
+ *                  An application context pointer which is passed to the callback function
  *                  (may be NULL).
  *
- * return value:    Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
  *                  errors are delivered to the callback), otherwise returns an error code indicating
  *                  the error that occurred (the callback is never invoked and the DNSRecordRef is
  *                  not initialized).
+ *
+ *  @discussion
+ *                  Note that name conflicts occurring for records registered via this call must be handled
+ *                  by the client in the callback.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceRegisterRecord
 (
     DNSServiceRef sdRef,
-    DNSRecordRef                        *RecordRef,
+    DNSRecordRef *RecordRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
-    const char                          *fullname,
+    const char *fullname,
     uint16_t rrtype,
     uint16_t rrclass,
     uint16_t rdlen,
-    const void                          *rdata,
+    const void *rdata,
     uint32_t ttl,
     DNSServiceRegisterRecordReply callBack,
-    void                                *context    /* may be NULL */
+    void *context
 );
 
-
-/* DNSServiceReconfirmRecord
+/*!
+ *  @brief
+ *                  Instruct the daemon to verify the validity of a resource record that appears
+ *                  to be out of date (e.g. because TCP connection to a service's target failed.)
+ *                  Causes the record to be flushed from the daemon's cache (as well as all other
+ *                  daemons' caches on the network) if the record is determined to be invalid.
+ *                  Use this routine conservatively. Reconfirming a record necessarily consumes
+ *                  network bandwidth, so this should not be done indiscriminately.
  *
- * Instruct the daemon to verify the validity of a resource record that appears
- * to be out of date (e.g. because TCP connection to a service's target failed.)
- * Causes the record to be flushed from the daemon's cache (as well as all other
- * daemons' caches on the network) if the record is determined to be invalid.
- * Use this routine conservatively. Reconfirming a record necessarily consumes
- * network bandwidth, so this should not be done indiscriminately.
+ *  @param flags
+ *                  Not currently used.
  *
- * Parameters:
- *
- * flags:           Not currently used.
- *
- * interfaceIndex:  Specifies the interface of the record in question.
+ *  @param interfaceIndex
+ *                  Specifies the interface of the record in question.
  *                  The caller must specify the interface.
  *                  This API (by design) causes increased network traffic, so it requires
  *                  the caller to be precise about which record should be reconfirmed.
  *                  It is not possible to pass zero for the interface index to perform
  *                  a "wildcard" reconfirmation, where *all* matching records are reconfirmed.
  *
- * fullname:        The resource record's full domain name.
+ *  @param fullname
+ *                  The resource record's full domain name.
  *
- * rrtype:          The resource record's type (e.g. kDNSServiceType_PTR, kDNSServiceType_SRV, etc)
+ *  @param rrtype
+ *                  The resource record's type (e.g. kDNSServiceType_PTR, kDNSServiceType_SRV, etc)
  *
- * rrclass:         The class of the resource record (usually kDNSServiceClass_IN).
+ *  @param rrclass
+ *                  The class of the resource record (usually kDNSServiceClass_IN).
  *
- * rdlen:           The length, in bytes, of the resource record rdata.
+ *  @param rdlen
+ *                  The length, in bytes, of the resource record rdata.
  *
- * rdata:           The raw rdata of the resource record.
- *
+ *  @param rdata
+ *                  The raw rdata of the resource record.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
 (
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
-    const char                         *fullname,
+    const char *fullname,
     uint16_t rrtype,
     uint16_t rrclass,
     uint16_t rdlen,
-    const void                         *rdata
+    const void *rdata
 );
 
 
@@ -2126,125 +2368,71 @@ DNSServiceErrorType DNSSD_API DNSServiceReconfirmRecord
 *
 *********************************************************************************************/
 
-/* DNSServiceNATPortMappingCreate
+/*!
+ *  @brief
+ *                  The definition of the DNSServiceNATPortMappingCreate callback function.
  *
- * Request a port mapping in the NAT gateway, which maps a port on the local machine
- * to an external port on the NAT. The NAT should support either PCP, NAT-PMP or the
- * UPnP/IGD protocol for this API to create a successful mapping. Note that this API
- * currently supports IPv4 addresses/mappings only. If the NAT gateway supports PCP and
- * returns an IPv6 address (incorrectly, since this API specifically requests IPv4
- * addresses), the DNSServiceNATPortMappingReply callback will be invoked with errorCode
- * kDNSServiceErr_NATPortMappingUnsupported.
+ *  @param sdRef
+ *                  The DNSServiceRef initialized by DNSServiceNATPortMappingCreate().
  *
- * The port mapping will be renewed indefinitely until the client process exits, or
- * explicitly terminates the port mapping request by calling DNSServiceRefDeallocate().
- * The client callback will be invoked, informing the client of the NAT gateway's
- * external IP address and the external port that has been allocated for this client.
- * The client should then record this external IP address and port using whatever
- * directory service mechanism it is using to enable peers to connect to it.
- * (Clients advertising services using Wide-Area DNS-SD DO NOT need to use this API
- * -- when a client calls DNSServiceRegister() NAT mappings are automatically created
- * and the external IP address and port for the service are recorded in the global DNS.
- * Only clients using some directory mechanism other than Wide-Area DNS-SD need to use
- * this API to explicitly map their own ports.)
+ *  @param flags
+ *                  Currently unused, reserved for future use.
  *
- * It's possible that the client callback could be called multiple times, for example
- * if the NAT gateway's IP address changes, or if a configuration change results in a
- * different external port being mapped for this client. Over the lifetime of any long-lived
- * port mapping, the client should be prepared to handle these notifications of changes
- * in the environment, and should update its recorded address and/or port as appropriate.
+ *  @param interfaceIndex
+ *                  The interface through which the NAT gateway is reached.
  *
- * NOTE: There are two unusual aspects of how the DNSServiceNATPortMappingCreate API works,
- * which were intentionally designed to help simplify client code:
- *
- *  1. It's not an error to request a NAT mapping when the machine is not behind a NAT gateway.
- *     In other NAT mapping APIs, if you request a NAT mapping and the machine is not behind a NAT
- *     gateway, then the API returns an error code -- it can't get you a NAT mapping if there's no
- *     NAT gateway. The DNSServiceNATPortMappingCreate API takes a different view. Working out
- *     whether or not you need a NAT mapping can be tricky and non-obvious, particularly on
- *     a machine with multiple active network interfaces. Rather than make every client recreate
- *     this logic for deciding whether a NAT mapping is required, the PortMapping API does that
- *     work for you. If the client calls the PortMapping API when the machine already has a
- *     routable public IP address, then instead of complaining about it and giving an error,
- *     the PortMapping API just invokes your callback, giving the machine's public address
- *     and your own port number. This means you don't need to write code to work out whether
- *     your client needs to call the PortMapping API -- just call it anyway, and if it wasn't
- *     necessary, no harm is done:
- *
- *     - If the machine already has a routable public IP address, then your callback
- *       will just be invoked giving your own address and port.
- *     - If a NAT mapping is required and obtained, then your callback will be invoked
- *       giving you the external address and port.
- *     - If a NAT mapping is required but not obtained from the local NAT gateway,
- *       or the machine has no network connectivity, then your callback will be
- *       invoked giving zero address and port.
- *
- *  2. In other NAT mapping APIs, if a laptop computer is put to sleep and woken up on a new
- *     network, it's the client's job to notice this, and work out whether a NAT mapping
- *     is required on the new network, and make a new NAT mapping request if necessary.
- *     The DNSServiceNATPortMappingCreate API does this for you, automatically.
- *     The client just needs to make one call to the PortMapping API, and its callback will
- *     be invoked any time the mapping state changes. This property complements point (1) above.
- *     If the client didn't make a NAT mapping request just because it determined that one was
- *     not required at that particular moment in time, the client would then have to monitor
- *     for network state changes to determine if a NAT port mapping later became necessary.
- *     By unconditionally making a NAT mapping request, even when a NAT mapping not to be
- *     necessary, the PortMapping API will then begin monitoring network state changes on behalf of
- *     the client, and if a NAT mapping later becomes necessary, it will automatically create a NAT
- *     mapping and inform the client with a new callback giving the new address and port information.
- *
- * DNSServiceNATPortMappingReply() parameters:
- *
- * sdRef:           The DNSServiceRef initialized by DNSServiceNATPortMappingCreate().
- *
- * flags:           Currently unused, reserved for future use.
- *
- * interfaceIndex:  The interface through which the NAT gateway is reached.
- *
- * errorCode:       Will be kDNSServiceErr_NoError on success.
+ *  @param errorCode
+ *                  Will be kDNSServiceErr_NoError on success.
  *                  Will be kDNSServiceErr_DoubleNAT when the NAT gateway is itself behind one or
  *                  more layers of NAT, in which case the other parameters have the defined values.
  *                  For other failures, will indicate the failure that occurred, and the other
  *                  parameters are undefined.
  *
- * externalAddress: Four byte IPv4 address in network byte order.
+ *  @param externalAddress
+ *                  Four byte IPv4 address in network byte order.
  *
- * protocol:        Will be kDNSServiceProtocol_UDP or kDNSServiceProtocol_TCP or both.
+ *  @param protocol
+ *                  Will be kDNSServiceProtocol_UDP or kDNSServiceProtocol_TCP or both.
  *
- * internalPort:    The port on the local machine that was mapped.
+ *  @param internalPort
+ *                  The port on the local machine that was mapped.
  *
- * externalPort:    The actual external port in the NAT gateway that was mapped.
+ *  @param externalPort
+ *                  The actual external port in the NAT gateway that was mapped.
  *                  This is likely to be different than the requested external port.
  *
- * ttl:             The lifetime of the NAT port mapping created on the gateway.
+ *  @param ttl
+ *                  The lifetime of the NAT port mapping created on the gateway.
  *                  This controls how quickly stale mappings will be garbage-collected
  *                  if the client machine crashes, suffers a power failure, is disconnected
  *                  from the network, or suffers some other unfortunate demise which
  *                  causes it to vanish without explicitly removing its NAT port mapping.
  *                  It's possible that the ttl value will differ from the requested ttl value.
  *
- * context:         The context pointer that was passed to the callout.
- *
+ *  @param context
+ *                  The context pointer that was passed to the callout.
  */
-
 typedef void (DNSSD_API *DNSServiceNATPortMappingReply)
 (
     DNSServiceRef sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
     DNSServiceErrorType errorCode,
-    uint32_t externalAddress,                           /* four byte IPv4 address in network byte order */
+    uint32_t externalAddress,             /* four byte IPv4 address in network byte order */
     DNSServiceProtocol protocol,
-    uint16_t internalPort,                              /* In network byte order */
-    uint16_t externalPort,                              /* In network byte order and may be different than the requested port */
-    uint32_t ttl,                                       /* may be different than the requested ttl */
-    void                             *context
+    uint16_t internalPort,                /* In network byte order */
+    uint16_t externalPort,                /* In network byte order and may be different than the requested port */
+    uint32_t ttl,                         /* may be different than the requested ttl */
+    void *context
 );
 
-
-/* DNSServiceNATPortMappingCreate() Parameters:
+/*!
+ *  @brief
+ *                  Request a port mapping in the NAT gateway, which maps a port on the local machine
+ *                  to an external port on the NAT.
  *
- * sdRef:           A pointer to an uninitialized DNSServiceRef
+ *  @param sdRef
+ *                  A pointer to an uninitialized DNSServiceRef
  *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
  *                  a copy of the shared connection reference that is to be used).
  *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
@@ -2253,24 +2441,30 @@ typedef void (DNSSD_API *DNSServiceNATPortMappingReply)
  *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
  *                  (or by closing the underlying shared connection, if used).
  *
- * flags:           Possible values are:
+ *  @param flags
+ *                  Possible values are:
  *                  kDNSServiceFlagsShareConnection to use a shared connection.
  *
- * interfaceIndex:  The interface on which to create port mappings in a NAT gateway.
+ *  @param interfaceIndex
+ *                  The interface on which to create port mappings in a NAT gateway.
  *                  Passing 0 causes the port mapping request to be sent on the primary interface.
  *
- * protocol:        To request a port mapping, pass in kDNSServiceProtocol_UDP, or kDNSServiceProtocol_TCP,
+ *  @param protocol
+ *                  To request a port mapping, pass in kDNSServiceProtocol_UDP, or kDNSServiceProtocol_TCP,
  *                  or (kDNSServiceProtocol_UDP | kDNSServiceProtocol_TCP) to map both.
  *                  The local listening port number must also be specified in the internalPort parameter.
  *                  To just discover the NAT gateway's external IP address, pass zero for protocol,
  *                  internalPort, externalPort and ttl.
  *
- * internalPort:    The port number in network byte order on the local machine which is listening for packets.
+ *  @param internalPort
+ *                  The port number in network byte order on the local machine which is listening for packets.
  *
- * externalPort:    The requested external port in network byte order in the NAT gateway that you would
+ *  @param externalPort
+ *                  The requested external port in network byte order in the NAT gateway that you would
  *                  like to map to the internal port. Pass 0 if you don't care which external port is chosen for you.
  *
- * ttl:             The requested renewal period of the NAT port mapping, in seconds.
+ *  @param ttl
+ *                  The requested renewal period of the NAT port mapping, in seconds.
  *                  If the client machine crashes, suffers a power failure, is disconnected from
  *                  the network, or suffers some other unfortunate demise which causes it to vanish
  *                  unexpectedly without explicitly removing its NAT port mappings, then the NAT gateway
@@ -2282,34 +2476,100 @@ typedef void (DNSSD_API *DNSServiceNATPortMappingReply)
  *                  client vanishing, stale NAT port mappings will not be garbage-collected as quickly.
  *                  Most clients should pass 0 to use a system-wide default value.
  *
- * callBack:        The function to be called when the port mapping request succeeds or fails asynchronously.
+ *  @param callBack
+ *                  The function to be called when the port mapping request succeeds or fails asynchronously.
  *
- * context:         An application context pointer which is passed to the callback function
+ *  @param context
+ *                  An application context pointer which is passed to the callback function
  *                  (may be NULL).
  *
- * return value:    Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
  *                  errors are delivered to the callback), otherwise returns an error code indicating
  *                  the error that occurred.
  *
  *                  If you don't actually want a port mapped, and are just calling the API
  *                  because you want to find out the NAT's external IP address (e.g. for UI
  *                  display) then pass zero for protocol, internalPort, externalPort and ttl.
+ *
+ *  @discussion
+ *                  The NAT should support either PCP, NAT-PMP or the
+ *                  UPnP/IGD protocol for this API to create a successful mapping. Note that this API
+ *                  currently supports IPv4 addresses/mappings only. If the NAT gateway supports PCP and
+ *                  returns an IPv6 address (incorrectly, since this API specifically requests IPv4
+ *                  addresses), the DNSServiceNATPortMappingReply callback will be invoked with errorCode
+ *                  kDNSServiceErr_NATPortMappingUnsupported.
+ *
+ *                  The port mapping will be renewed indefinitely until the client process exits, or
+ *                  explicitly terminates the port mapping request by calling DNSServiceRefDeallocate().
+ *                  The client callback will be invoked, informing the client of the NAT gateway's
+ *                  external IP address and the external port that has been allocated for this client.
+ *                  The client should then record this external IP address and port using whatever
+ *                  directory service mechanism it is using to enable peers to connect to it.
+ *                  (Clients advertising services using Wide-Area DNS-SD DO NOT need to use this API
+ *                  -- when a client calls DNSServiceRegister() NAT mappings are automatically created
+ *                  and the external IP address and port for the service are recorded in the global DNS.
+ *                  Only clients using some directory mechanism other than Wide-Area DNS-SD need to use
+ *                  this API to explicitly map their own ports.)
+ *
+ *                  It's possible that the client callback could be called multiple times, for example
+ *                  if the NAT gateway's IP address changes, or if a configuration change results in a
+ *                  different external port being mapped for this client. Over the lifetime of any long-lived
+ *                  port mapping, the client should be prepared to handle these notifications of changes
+ *                  in the environment, and should update its recorded address and/or port as appropriate.
+ *
+ *                  NOTE: There are two unusual aspects of how the DNSServiceNATPortMappingCreate API works,
+ *                  which were intentionally designed to help simplify client code:
+ *
+ *                  1. It's not an error to request a NAT mapping when the machine is not behind a NAT gateway.
+ *                      In other NAT mapping APIs, if you request a NAT mapping and the machine is not behind a NAT
+ *                      gateway, then the API returns an error code -- it can't get you a NAT mapping if there's no
+ *                      NAT gateway. The DNSServiceNATPortMappingCreate API takes a different view. Working out
+ *                      whether or not you need a NAT mapping can be tricky and non-obvious, particularly on
+ *                      a machine with multiple active network interfaces. Rather than make every client recreate
+ *                      this logic for deciding whether a NAT mapping is required, the PortMapping API does that
+ *                      work for you. If the client calls the PortMapping API when the machine already has a
+ *                      routable public IP address, then instead of complaining about it and giving an error,
+ *                      the PortMapping API just invokes your callback, giving the machine's public address
+ *                      and your own port number. This means you don't need to write code to work out whether
+ *                      your client needs to call the PortMapping API -- just call it anyway, and if it wasn't
+ *                      necessary, no harm is done:
+ *
+ *                      - If the machine already has a routable public IP address, then your callback
+ *                        will just be invoked giving your own address and port.
+ *                      - If a NAT mapping is required and obtained, then your callback will be invoked
+ *                        giving you the external address and port.
+ *                      - If a NAT mapping is required but not obtained from the local NAT gateway,
+ *                        or the machine has no network connectivity, then your callback will be
+ *                        invoked giving zero address and port.
+ *
+ *                  2. In other NAT mapping APIs, if a laptop computer is put to sleep and woken up on a new
+ *                      network, it's the client's job to notice this, and work out whether a NAT mapping
+ *                      is required on the new network, and make a new NAT mapping request if necessary.
+ *                      The DNSServiceNATPortMappingCreate API does this for you, automatically.
+ *                      The client just needs to make one call to the PortMapping API, and its callback will
+ *                      be invoked any time the mapping state changes. This property complements point (1) above.
+ *                      If the client didn't make a NAT mapping request just because it determined that one was
+ *                      not required at that particular moment in time, the client would then have to monitor
+ *                      for network state changes to determine if a NAT port mapping later became necessary.
+ *                      By unconditionally making a NAT mapping request, even when a NAT mapping not to be
+ *                      necessary, the PortMapping API will then begin monitoring network state changes on behalf of
+ *                      the client, and if a NAT mapping later becomes necessary, it will automatically create a NAT
+ *                      mapping and inform the client with a new callback giving the new address and port information.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceNATPortMappingCreate
 (
-    DNSServiceRef                    *sdRef,
+    DNSServiceRef *sdRef,
     DNSServiceFlags flags,
     uint32_t interfaceIndex,
-    DNSServiceProtocol protocol,                        /* TCP and/or UDP          */
-    uint16_t internalPort,                              /* network byte order      */
-    uint16_t externalPort,                              /* network byte order      */
-    uint32_t ttl,                                       /* time to live in seconds */
+    DNSServiceProtocol protocol,                      /* TCP and/or UDP          */
+    uint16_t internalPort,                            /* network byte order      */
+    uint16_t externalPort,                            /* network byte order      */
+    uint32_t ttl,                                     /* time to live in seconds */
     DNSServiceNATPortMappingReply callBack,
-    void                             *context           /* may be NULL             */
+    void *context
 );
-
 
 /*********************************************************************************************
 *
@@ -2317,41 +2577,41 @@ DNSServiceErrorType DNSSD_API DNSServiceNATPortMappingCreate
 *
 *********************************************************************************************/
 
-/* DNSServiceConstructFullName()
+/*!
+ *  @brief
+ *                  Concatenate a three-part domain name (as returned by the above callbacks) into a
+ *                  properly-escaped full domain name. Note that callbacks in the above functions ALREADY ESCAPE
+ *                  strings where necessary.
  *
- * Concatenate a three-part domain name (as returned by the above callbacks) into a
- * properly-escaped full domain name. Note that callbacks in the above functions ALREADY ESCAPE
- * strings where necessary.
- *
- * Parameters:
- *
- * fullName:        A pointer to a buffer that where the resulting full domain name is to be written.
+ *  @param fullName
+ *                  A pointer to a buffer that where the resulting full domain name is to be written.
  *                  The buffer must be kDNSServiceMaxDomainName (1009) bytes in length to
  *                  accommodate the longest legal domain name without buffer overrun.
  *
- * service:         The service name - any dots or backslashes must NOT be escaped.
+ *  @param service
+ *                  The service name - any dots or backslashes must NOT be escaped.
  *                  May be NULL (to construct a PTR record name, e.g.
  *                  "_ftp._tcp.apple.com.").
  *
- * regtype:         The service type followed by the protocol, separated by a dot
+ *  @param regtype
+ *                  The service type followed by the protocol, separated by a dot
  *                  (e.g. "_ftp._tcp").
  *
- * domain:          The domain name, e.g. "apple.com.". Literal dots or backslashes,
+ *  @param domain
+ *                  The domain name, e.g. "apple.com.". Literal dots or backslashes,
  *                  if any, must be escaped, e.g. "1st\. Floor.apple.com."
  *
- * return value:    Returns kDNSServiceErr_NoError (0) on success, kDNSServiceErr_BadParam on error.
- *
+ *  @result:
+ *                  Returns kDNSServiceErr_NoError (0) on success, kDNSServiceErr_BadParam on error.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceConstructFullName
 (
-    char                            * const fullName,
-    const char                      * const service,      /* may be NULL */
-    const char                      * const regtype,
-    const char                      * const domain
+    char * const fullName,
+    const char * const service,      /* may be NULL */
+    const char * const regtype,
+    const char * const domain
 );
-
 
 /*********************************************************************************************
 *
@@ -2383,99 +2643,93 @@ DNSServiceErrorType DNSSD_API DNSServiceConstructFullName
 typedef union _TXTRecordRef_t { char PrivateData[16]; char *ForceNaturalAlignment; } TXTRecordRef;
 
 
-/* TXTRecordCreate()
+/*!
+ *  @brief
+ *                  Creates a new empty TXTRecordRef referencing the specified storage.
  *
- * Creates a new empty TXTRecordRef referencing the specified storage.
+ *  @param txtRecord
+ *                  A pointer to an uninitialized TXTRecordRef.
  *
- * If the buffer parameter is NULL, or the specified storage size is not
- * large enough to hold a key subsequently added using TXTRecordSetValue(),
- * then additional memory will be added as needed using malloc(). Note that
- * an existing TXT record buffer should not be passed to TXTRecordCreate
- * to create a copy of another TXT Record. The correct way to copy TXTRecordRef
- * is creating an empty TXTRecordRef with TXTRecordCreate() first, and using
- * TXTRecordSetValue to set the same value.
+ *  @param bufferLen
+ *                  The size of the storage provided in the "buffer" parameter.
  *
- * On some platforms, when memory is low, malloc() may fail. In this
- * case, TXTRecordSetValue() will return kDNSServiceErr_NoMemory, and this
- * error condition will need to be handled as appropriate by the caller.
- *
- * You can avoid the need to handle this error condition if you ensure
- * that the storage you initially provide is large enough to hold all
- * the key/value pairs that are to be added to the record.
- * The caller can precompute the exact length required for all of the
- * key/value pairs to be added, or simply provide a fixed-sized buffer
- * known in advance to be large enough.
- * A no-value (key-only) key requires  (1 + key length) bytes.
- * A key with empty value requires     (1 + key length + 1) bytes.
- * A key with non-empty value requires (1 + key length + 1 + value length).
- * For most applications, DNS-SD TXT records are generally
- * less than 100 bytes, so in most cases a simple fixed-sized
- * 256-byte buffer will be more than sufficient.
- * Recommended size limits for DNS-SD TXT Records are discussed in RFC 6763
- * <https://tools.ietf.org/html/rfc6763#section-6.2>
- *
- * Note: When passing parameters to and from these TXT record APIs,
- * the key name does not include the '=' character. The '=' character
- * is the separator between the key and value in the on-the-wire
- * packet format; it is not part of either the key or the value.
- *
- * txtRecord:       A pointer to an uninitialized TXTRecordRef.
- *
- * bufferLen:       The size of the storage provided in the "buffer" parameter.
- *
- * buffer:          Optional caller-supplied storage used to hold the TXTRecord data.
+ *  @param buffer
+ *                  Optional caller-supplied storage used to hold the TXTRecord data.
  *                  This storage must remain valid for as long as
  *                  the TXTRecordRef.
+ *  @discussion
+ *                  If the buffer parameter is NULL, or the specified storage size is not
+ *                  large enough to hold a key subsequently added using TXTRecordSetValue(),
+ *                  then additional memory will be added as needed using malloc(). Note that
+ *                  an existing TXT record buffer should not be passed to TXTRecordCreate
+ *                  to create a copy of another TXT Record. The correct way to copy TXTRecordRef
+ *                  is creating an empty TXTRecordRef with TXTRecordCreate() first, and using
+ *                  TXTRecordSetValue to set the same value.
+ *
+ *                  On some platforms, when memory is low, malloc() may fail. In this
+ *                  case, TXTRecordSetValue() will return kDNSServiceErr_NoMemory, and this
+ *                  error condition will need to be handled as appropriate by the caller.
+ *
+ *                  You can avoid the need to handle this error condition if you ensure
+ *                  that the storage you initially provide is large enough to hold all
+ *                  the key/value pairs that are to be added to the record.
+ *                  The caller can precompute the exact length required for all of the
+ *                  key/value pairs to be added, or simply provide a fixed-sized buffer
+ *                  known in advance to be large enough.
+ *                  A no-value (key-only) key requires  (1 + key length) bytes.
+ *                  A key with empty value requires     (1 + key length + 1) bytes.
+ *                  A key with non-empty value requires (1 + key length + 1 + value length).
+ *                  For most applications, DNS-SD TXT records are generally
+ *                  less than 100 bytes, so in most cases a simple fixed-sized
+ *                  256-byte buffer will be more than sufficient.
+ *                  Recommended size limits for DNS-SD TXT Records are discussed in RFC 6763
+ *                  <https://tools.ietf.org/html/rfc6763#section-6.2>
+ *
+ *                  Note: When passing parameters to and from these TXT record APIs,
+ *                  the key name does not include the '=' character. The '=' character
+ *                  is the separator between the key and value in the on-the-wire
+ *                  packet format; it is not part of either the key or the value.
  */
-
 DNSSD_EXPORT
 void DNSSD_API TXTRecordCreate
 (
-    TXTRecordRef     *txtRecord,
+    TXTRecordRef *txtRecord,
     uint16_t bufferLen,
-    void             *buffer
+    void *buffer
 );
 
-
-/* TXTRecordDeallocate()
+/*!
+ *  @brief
+ *                  Releases any resources allocated in the course of preparing a TXT Record
+ *                  using TXTRecordCreate()/TXTRecordSetValue()/TXTRecordRemoveValue().
+ *                  Ownership of the buffer provided in TXTRecordCreate() returns to the client.
  *
- * Releases any resources allocated in the course of preparing a TXT Record
- * using TXTRecordCreate()/TXTRecordSetValue()/TXTRecordRemoveValue().
- * Ownership of the buffer provided in TXTRecordCreate() returns to the client.
- *
- * txtRecord:           A TXTRecordRef initialized by calling TXTRecordCreate().
- *
+ *  @param txtRecord
+ *                  A TXTRecordRef initialized by calling TXTRecordCreate().
  */
-
 DNSSD_EXPORT
 void DNSSD_API TXTRecordDeallocate
 (
-    TXTRecordRef     *txtRecord
+    TXTRecordRef *txtRecord
 );
 
-
-/* TXTRecordSetValue()
+/*!
+ *  @brief
+ *                  Adds a key (optionally with value) to a TXTRecordRef.
  *
- * Adds a key (optionally with value) to a TXTRecordRef. If the "key" already
- * exists in the TXTRecordRef, then the current value will be replaced with
- * the new value.
- * Keys may exist in four states with respect to a given TXT record:
- *  - Absent (key does not appear at all)
- *  - Present with no value ("key" appears alone)
- *  - Present with empty value ("key=" appears in TXT record)
- *  - Present with non-empty value ("key=value" appears in TXT record)
- * For more details refer to "Data Syntax for DNS-SD TXT Records" in RFC 6763
- * <https://tools.ietf.org/html/rfc6763#section-6>
+ *  @param txtRecord
+ *                  A TXTRecordRef initialized by calling TXTRecordCreate().
  *
- * txtRecord:       A TXTRecordRef initialized by calling TXTRecordCreate().
- *
- * key:             A null-terminated string which only contains printable ASCII
+ *  @param key
+ *                  A null-terminated string which only contains printable ASCII
  *                  values (0x20-0x7E), excluding '=' (0x3D). Keys should be
  *                  9 characters or fewer (not counting the terminating null).
  *
- * valueSize:       The size of the value.
+ *  @param valueSize
+ *                  The size of the value.
  *
- * value:           Any binary value. For values that represent
+ *  @param value
+ *                  Any binary value. For values that represent
  *                  textual data, UTF-8 is STRONGLY recommended.
  *                  For values that represent textual data, valueSize
  *                  should NOT include the terminating null (if any)
@@ -2484,81 +2738,93 @@ void DNSSD_API TXTRecordDeallocate
  *                  If non-NULL but valueSize is zero, then "key=" will be
  *                  added with empty value.
  *
- * return value:    Returns kDNSServiceErr_NoError on success.
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success.
  *                  Returns kDNSServiceErr_Invalid if the "key" string contains
  *                  illegal characters.
  *                  Returns kDNSServiceErr_NoMemory if adding this key would
  *                  exceed the available storage.
- */
-
+ *
+ *  @discussion
+ *                  If the "key" already
+ *                  exists in the TXTRecordRef, then the current value will be replaced with
+ *                  the new value.
+ *                  Keys may exist in four states with respect to a given TXT record:
+ *                   - Absent (key does not appear at all)
+ *                   - Present with no value ("key" appears alone)
+ *                   - Present with empty value ("key=" appears in TXT record)
+ *                   - Present with non-empty value ("key=value" appears in TXT record)
+ *                  For more details refer to "Data Syntax for DNS-SD TXT Records" in RFC 6763
+ *                  <https://tools.ietf.org/html/rfc6763#section-6>
+*/
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API TXTRecordSetValue
 (
-    TXTRecordRef     *txtRecord,
-    const char       *key,
-    uint8_t valueSize,                 /* may be zero */
-    const void       *value            /* may be NULL */
+    TXTRecordRef *txtRecord,
+    const char *key,
+    uint8_t valueSize,           /* may be zero */
+    const void *value            /* may be NULL */
 );
 
-
-/* TXTRecordRemoveValue()
+/*!
+ *  @brief
+ *                  Removes a key from a TXTRecordRef. The "key" must be an
+ *                  ASCII string which exists in the TXTRecordRef.
  *
- * Removes a key from a TXTRecordRef. The "key" must be an
- * ASCII string which exists in the TXTRecordRef.
+ *  @param txtRecord
+ *                  A TXTRecordRef initialized by calling TXTRecordCreate().
  *
- * txtRecord:       A TXTRecordRef initialized by calling TXTRecordCreate().
+ *  @param key
+ *                  A key name which exists in the TXTRecordRef.
  *
- * key:             A key name which exists in the TXTRecordRef.
- *
- * return value:    Returns kDNSServiceErr_NoError on success.
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success.
  *                  Returns kDNSServiceErr_NoSuchKey if the "key" does not
  *                  exist in the TXTRecordRef.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API TXTRecordRemoveValue
 (
-    TXTRecordRef     *txtRecord,
-    const char       *key
+    TXTRecordRef *txtRecord,
+    const char *key
 );
 
-
-/* TXTRecordGetLength()
+/*!
+ *  @brief
+ *                  Allows you to determine the length of the raw bytes within a TXTRecordRef.
  *
- * Allows you to determine the length of the raw bytes within a TXTRecordRef.
+ *  @param txtRecord
+ *                  A TXTRecordRef initialized by calling TXTRecordCreate().
  *
- * txtRecord:       A TXTRecordRef initialized by calling TXTRecordCreate().
- *
- * return value:    Returns the size of the raw bytes inside a TXTRecordRef
+ *  @result
+ *                  Returns the size of the raw bytes inside a TXTRecordRef
  *                  which you can pass directly to DNSServiceRegister() or
  *                  to DNSServiceUpdateRecord().
  *                  Returns 0 if the TXTRecordRef is empty.
  */
-
 DNSSD_EXPORT
 uint16_t DNSSD_API TXTRecordGetLength
 (
     const TXTRecordRef *txtRecord
 );
 
-
-/* TXTRecordGetBytesPtr()
+/*!
+ *  @brief
+ *                  Allows you to retrieve a pointer to the raw bytes within a TXTRecordRef.
  *
- * Allows you to retrieve a pointer to the raw bytes within a TXTRecordRef.
+ *  @param txtRecord
+ *                  A TXTRecordRef initialized by calling TXTRecordCreate().
  *
- * txtRecord:       A TXTRecordRef initialized by calling TXTRecordCreate().
- *
- * return value:    Returns a pointer to the raw bytes inside the TXTRecordRef
+ *  @result
+ *                  Returns a pointer to the raw bytes inside the TXTRecordRef
  *                  which you can pass directly to DNSServiceRegister() or
  *                  to DNSServiceUpdateRecord().
  */
-
 DNSSD_EXPORT
 const void * DNSSD_API TXTRecordGetBytesPtr
 (
     const TXTRecordRef *txtRecord
 );
-
 
 /*********************************************************************************************
 *
@@ -2594,42 +2860,49 @@ const void * DNSSD_API TXTRecordGetBytesPtr
  * To do that, use the TXTRecordGetCount() and TXTRecordGetItemAtIndex() calls.
  */
 
-/* TXTRecordContainsKey()
+/*!
+ *  @brief
+ *                  Allows you to determine if a given TXT Record contains a specified key.
  *
- * Allows you to determine if a given TXT Record contains a specified key.
+ *  @param txtLen
+ *                  The size of the received TXT Record.
  *
- * txtLen:          The size of the received TXT Record.
+ *  @param txtRecord
+ *                  Pointer to the received TXT Record bytes.
  *
- * txtRecord:       Pointer to the received TXT Record bytes.
+ *  @param key
+ *                  A null-terminated ASCII string containing the key name.
  *
- * key:             A null-terminated ASCII string containing the key name.
- *
- * return value:    Returns 1 if the TXT Record contains the specified key.
+ *  @result
+ *                  Returns 1 if the TXT Record contains the specified key.
  *                  Otherwise, it returns 0.
  */
-
 DNSSD_EXPORT
 int DNSSD_API TXTRecordContainsKey
 (
     uint16_t txtLen,
-    const void       *txtRecord,
-    const char       *key
+    const void *txtRecord,
+    const char *key
 );
 
-
-/* TXTRecordGetValuePtr()
+/*!
+ *  @brief
+ *                  Allows you to retrieve the value for a given key from a TXT Record.
  *
- * Allows you to retrieve the value for a given key from a TXT Record.
+ *  @param txtLen
+ *                  The size of the received TXT Record
  *
- * txtLen:          The size of the received TXT Record
+ *  @param txtRecord
+ *                  Pointer to the received TXT Record bytes.
  *
- * txtRecord:       Pointer to the received TXT Record bytes.
+ *  @param key
+ *                  A null-terminated ASCII string containing the key name.
  *
- * key:             A null-terminated ASCII string containing the key name.
+ *  @param valueLen
+ *                  On output, will be set to the size of the "value" data.
  *
- * valueLen:        On output, will be set to the size of the "value" data.
- *
- * return value:    Returns NULL if the key does not exist in this TXT record,
+ *  @discussion
+ *                  Returns NULL if the key does not exist in this TXT record,
  *                  or exists with no value (to differentiate between
  *                  these two cases use TXTRecordContainsKey()).
  *                  Returns pointer to location within TXT Record bytes
@@ -2637,131 +2910,138 @@ int DNSSD_API TXTRecordContainsKey
  *                  For empty value, valueLen will be zero.
  *                  For non-empty value, valueLen will be length of value data.
  */
-
 DNSSD_EXPORT
 const void * DNSSD_API TXTRecordGetValuePtr
 (
     uint16_t txtLen,
-    const void       *txtRecord,
-    const char       *key,
-    uint8_t          *valueLen
+    const void *txtRecord,
+    const char *key,
+    uint8_t *valueLen
 );
 
-
-/* TXTRecordGetCount()
+/*!
+ *  @brief
+ *                  Returns the number of keys stored in the TXT Record. The count
+ *                  can be used with TXTRecordGetItemAtIndex() to iterate through the keys.
  *
- * Returns the number of keys stored in the TXT Record. The count
- * can be used with TXTRecordGetItemAtIndex() to iterate through the keys.
+ *  @param txtLen
+ *                  The size of the received TXT Record.
  *
- * txtLen:          The size of the received TXT Record.
+ *  @param txtRecord
+ *                  Pointer to the received TXT Record bytes.
  *
- * txtRecord:       Pointer to the received TXT Record bytes.
- *
- * return value:    Returns the total number of keys in the TXT Record.
- *
+ *  @result
+ *                  Returns the total number of keys in the TXT Record.
  */
-
 DNSSD_EXPORT
 uint16_t DNSSD_API TXTRecordGetCount
 (
     uint16_t txtLen,
-    const void       *txtRecord
+    const void *txtRecord
 );
 
-
-/* TXTRecordGetItemAtIndex()
+/*!
+ *  @brief
+ *                  Allows you to retrieve a key name and value pointer, given an index into
+ *                  a TXT Record. Legal index values range from zero to TXTRecordGetCount()-1.
+ *                  It's also possible to iterate through keys in a TXT record by simply
+ *                  calling TXTRecordGetItemAtIndex() repeatedly, beginning with index zero
+ *                  and increasing until TXTRecordGetItemAtIndex() returns kDNSServiceErr_Invalid.
  *
- * Allows you to retrieve a key name and value pointer, given an index into
- * a TXT Record. Legal index values range from zero to TXTRecordGetCount()-1.
- * It's also possible to iterate through keys in a TXT record by simply
- * calling TXTRecordGetItemAtIndex() repeatedly, beginning with index zero
- * and increasing until TXTRecordGetItemAtIndex() returns kDNSServiceErr_Invalid.
  *
- * On return:
- * For keys with no value, *value is set to NULL and *valueLen is zero.
- * For keys with empty value, *value is non-NULL and *valueLen is zero.
- * For keys with non-empty value, *value is non-NULL and *valueLen is non-zero.
+ *  @param txtLen
+ *                  The size of the received TXT Record.
  *
- * txtLen:          The size of the received TXT Record.
+ *  @param txtRecord
+ *                  Pointer to the received TXT Record bytes.
  *
- * txtRecord:       Pointer to the received TXT Record bytes.
+ *  @param itemIndex
+ *                  An index into the TXT Record.
  *
- * itemIndex:       An index into the TXT Record.
+ *  @param keyBufLen
+ *                  The size of the string buffer being supplied.
  *
- * keyBufLen:       The size of the string buffer being supplied.
- *
- * key:             A string buffer used to store the key name.
+ *  @param key
+ *                  A string buffer used to store the key name.
  *                  On return, the buffer contains a null-terminated C-string
  *                  giving the key name. DNS-SD TXT keys are usually
  *                  9 characters or fewer. To hold the maximum possible
  *                  key name, the buffer should be 256 bytes long.
  *
- * valueLen:        On output, will be set to the size of the "value" data.
+ *  @param valueLen
+ *                  On output, will be set to the size of the "value" data.
  *
- * value:           On output, *value is set to point to location within TXT
+ *  @param value
+ *                  On output, *value is set to point to location within TXT
  *                  Record bytes that holds the value data.
  *
- * return value:    Returns kDNSServiceErr_NoError on success.
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success.
  *                  Returns kDNSServiceErr_NoMemory if keyBufLen is too short.
  *                  Returns kDNSServiceErr_Invalid if index is greater than
  *                  TXTRecordGetCount()-1.
+ *                  On return:
+ *                  For keys with no value, *value is set to NULL and *valueLen is zero.
+ *                  For keys with empty value, *value is non-NULL and *valueLen is zero.
+ *                  For keys with non-empty value, *value is non-NULL and *valueLen is non-zero.
  */
-
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
 (
     uint16_t txtLen,
-    const void       *txtRecord,
+    const void *txtRecord,
     uint16_t itemIndex,
     uint16_t keyBufLen,
-    char             *key,
-    uint8_t          *valueLen,
-    const void       **value
+    char *key,
+    uint8_t *valueLen,
+    const void **value
 );
 
 #if _DNS_SD_LIBDISPATCH
-/*
- * DNSServiceSetDispatchQueue
+/*!
+ *  @brief
+ *                  Allows you to schedule a DNSServiceRef on a serial dispatch queue for receiving asynchronous
+ *                  callbacks.  It's the clients responsibility to ensure that the provided dispatch queue is running.
  *
- * Allows you to schedule a DNSServiceRef on a serial dispatch queue for receiving asynchronous
- * callbacks.  It's the clients responsibility to ensure that the provided dispatch queue is running.
- *
- * A typical application that uses CFRunLoopRun or dispatch_main on its main thread will
- * usually schedule DNSServiceRefs on its main queue (which is always a serial queue)
- * using "DNSServiceSetDispatchQueue(sdref, dispatch_get_main_queue());"
- *
- * If there is any error during the processing of events, the application callback will
- * be called with an error code. For shared connections, each subordinate DNSServiceRef
- * will get its own error callback. Currently these error callbacks only happen
- * if the daemon is manually terminated or crashes, and the error
- * code in this case is kDNSServiceErr_ServiceNotRunning. The application must call
- * DNSServiceRefDeallocate to free the DNSServiceRef when it gets such an error code.
- * These error callbacks are rare and should not normally happen on customer machines,
- * but application code should be written defensively to handle such error callbacks
- * gracefully if they occur.
- *
- * After using DNSServiceSetDispatchQueue on a DNSServiceRef, calling DNSServiceProcessResult
- * on the same DNSServiceRef will result in undefined behavior and should be avoided.
- *
- * Once the application successfully schedules a DNSServiceRef on a serial dispatch queue using
- * DNSServiceSetDispatchQueue, it cannot remove the DNSServiceRef from the dispatch queue, or use
- * DNSServiceSetDispatchQueue a second time to schedule the DNSServiceRef onto a different serial dispatch
- * queue. Once scheduled onto a dispatch queue a DNSServiceRef will deliver events to that queue until
- * the application no longer requires that operation and terminates it using DNSServiceRefDeallocate.
- * Note that the call to DNSServiceRefDeallocate() must be done on the same queue originally passed
- * as an argument to DNSServiceSetDispatchQueue().
- *
- * service:         DNSServiceRef that was allocated and returned to the application, when the
+ *  @param service
+ *                  DNSServiceRef that was allocated and returned to the application, when the
  *                  application calls one of the DNSService API.
  *
- * queue:           dispatch queue where the application callback will be scheduled
+ *  @param queue
+ *                  dispatch queue where the application callback will be scheduled
  *
- * return value:    Returns kDNSServiceErr_NoError on success.
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success.
  *                  Returns kDNSServiceErr_NoMemory if it cannot create a dispatch source
  *                  Returns kDNSServiceErr_BadParam if the service param is invalid or the
  *                  queue param is invalid
- */
-
+ *
+ *  @discussion
+ *                  A typical application that uses CFRunLoopRun or dispatch_main on its main thread will
+ *                  usually schedule DNSServiceRefs on its main queue (which is always a serial queue)
+ *                  using "DNSServiceSetDispatchQueue(sdref, dispatch_get_main_queue());"
+ *
+ *                  If there is any error during the processing of events, the application callback will
+ *                  be called with an error code. For shared connections, each subordinate DNSServiceRef
+ *                  will get its own error callback. Currently these error callbacks only happen
+ *                  if the daemon is manually terminated or crashes, and the error
+ *                  code in this case is kDNSServiceErr_ServiceNotRunning. The application must call
+ *                  DNSServiceRefDeallocate to free the DNSServiceRef when it gets such an error code.
+ *                  These error callbacks are rare and should not normally happen on customer machines,
+ *                  but application code should be written defensively to handle such error callbacks
+ *                  gracefully if they occur.
+ *
+ *                  After using DNSServiceSetDispatchQueue on a DNSServiceRef, calling DNSServiceProcessResult
+ *                  on the same DNSServiceRef will result in undefined behavior and should be avoided.
+ *
+ *                  Once the application successfully schedules a DNSServiceRef on a serial dispatch queue using
+ *                  DNSServiceSetDispatchQueue, it cannot remove the DNSServiceRef from the dispatch queue, or use
+ *                  DNSServiceSetDispatchQueue a second time to schedule the DNSServiceRef onto a different serial dispatch
+ *                  queue. Once scheduled onto a dispatch queue a DNSServiceRef will deliver events to that queue until
+ *                  the application no longer requires that operation and terminates it using DNSServiceRefDeallocate.
+ *                  Note that the call to DNSServiceRefDeallocate() must be done on the same queue originally passed
+ *                  as an argument to DNSServiceSetDispatchQueue().
+*/
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceSetDispatchQueue
 (
@@ -2775,17 +3055,17 @@ typedef void (DNSSD_API *DNSServiceSleepKeepaliveReply)
 (
     DNSServiceRef sdRef,
     DNSServiceErrorType errorCode,
-    void                                *context
+    void *context
 );
 DNSSD_EXPORT
 DNSServiceErrorType DNSSD_API DNSServiceSleepKeepalive
 (
-    DNSServiceRef                       *sdRef,
+    DNSServiceRef *sdRef,
     DNSServiceFlags flags,
     int fd,
     unsigned int timeout,
     DNSServiceSleepKeepaliveReply callBack,
-    void                                *context
+    void *context
 );
 #endif
 
@@ -2801,8 +3081,402 @@ struct CompileTimeAssertionChecks_DNS_SD
     char assert0[(sizeof(union _TXTRecordRef_t) == 16) ? 1 : -1];
 };
 
-#ifdef  __cplusplus
-}
+#if (defined(__clang__) && __clang__)
+#pragma clang diagnostic pop
 #endif
+
+/*!
+ *  @result
+ *                  Returns a DNSServiceAttribute pointer.
+ */
+DNSSD_EXPORT
+DNSServiceAttributeRef DNSSD_API DNS_SD_NULLABLE DNSServiceAttributeCreate(void);
+
+/*!
+ *  @brief
+ *                  Set the aaaa_policy value in attr.
+ *
+ *  @param attr
+ *                  DNSServiceAttribute pointer.
+ *  @param policy
+ *                  DNSServiceAAAAPolicy enum value.
+ *  @result
+ *                  Returns kDNSServiceErr_NoError.
+ */
+DNSSD_EXPORT
+DNSServiceErrorType DNSSD_API DNSServiceAttributeSetAAAAPolicy
+(
+    DNSServiceAttributeRef DNS_SD_NONNULL attr,
+    DNSServiceAAAAPolicy policy
+);
+
+/*!
+ *  @brief
+ *                  Set the timestamp value in attr.
+ *
+ *  @param attr
+ *                  DNSServiceAttribute pointer.
+ *  @param timestamp
+ *                  Relative time in seconds. Should be zero if the timestamp is now,
+ *                  30 if the timestamp is 30 seconds in the past, and so on.
+ *  @result
+ *                  Returns kDNSServiceErr_NoError.
+ */
+DNSSD_EXPORT
+DNSServiceErrorType DNSSD_API DNSServiceAttributeSetTimestamp
+(
+    DNSServiceAttributeRef DNS_SD_NONNULL attr,
+    uint32_t timestamp
+);
+
+/*!
+ *  @brief
+ *                  Free DNSServiceAttribute pointer pointed by attr,
+ *
+ *  @param attr
+ *                  An DNSServiceAttribute pointer(may be NULL).
+ */
+DNSSD_EXPORT
+void DNSSD_API DNSServiceAttributeDeallocate
+(
+    DNSServiceAttributeRef DNS_SD_NONNULL attr
+);
+
+/*!
+ *  @brief
+ *                  DNSServiceQueryRecordWithAttribute is an extention to API DNSServiceQueryRecord,
+ *                  accepting another parameter with type DNSServiceAttributeRef to specify extra attributes.
+ *
+ *  @param sdRef
+ *                  A pointer to an uninitialized DNSServiceRef
+ *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
+ *                  a copy of the shared connection reference that is to be used).
+ *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
+ *                  returns kDNSServiceErr_NoError, and the service registration
+ *                  will remain active indefinitely until the client terminates it
+ *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
+ *                  (or by closing the underlying shared connection, if used).
+ *
+ *  @param flags
+ *                  Possible values are:
+ *                  kDNSServiceFlagsShareConnection to use a shared connection.
+ *                  kDNSServiceFlagsForceMulticast or kDNSServiceFlagsLongLivedQuery.
+ *                  Pass kDNSServiceFlagsLongLivedQuery to create a "long-lived" unicast
+ *                  query to a unicast DNS server that implements the protocol. This flag
+ *                  has no effect on link-local multicast queries.
+ *
+ *  @param ifindex
+ *                  If non-zero, specifies the interface on which to register the service
+ *                  (the index for a given interface is determined via the if_nametoindex()
+ *                  family of calls.) Most applications will pass 0 to register on all
+ *                  available interfaces. See "Constants for specifying an interface index" for more details.
+ *
+ *  @param name
+ *                  The full domain name of the resource record to be queried for.
+ *
+ *  @param rrtype
+ *                  The numerical type of the resource record to be queried for
+ *                  (e.g. kDNSServiceType_PTR, kDNSServiceType_SRV, etc)
+ *
+ *  @param rrclass
+ *                  The class of the resource record (usually kDNSServiceClass_IN).
+ *
+ *  @param attr
+ *                  An DNSServiceAttribute pointer which is used to specify the attribute
+ *                  (may be NULL).
+ *
+ *  @param callback
+ *                  The function to be called when a result is found, or if the call
+ *                  asynchronously fails.
+ *
+ *  @param context
+ *                  An application context pointer which is passed to the callback function
+ *                  (may be NULL).
+ *
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
+ *                  errors are delivered to the callback), otherwise returns an error code indicating
+ *                  the error that occurred (the callback is never invoked and the DNSServiceRef
+ *                  is not initialized).
+ *
+ *  @discussion
+ *                  When atrr is NULL, the functionality of the this function will be the same as
+ *                  DNSServiceQueryRecord().
+ */
+DNSSD_EXPORT
+DNSServiceErrorType DNSSD_API DNSServiceQueryRecordWithAttribute
+(
+    DNSServiceRef DNS_SD_NONNULL * DNS_SD_NULLABLE sdRef,
+    DNSServiceFlags flags,
+    uint32_t ifindex,
+    const char * DNS_SD_NULLABLE name,
+    uint16_t rrtype,
+    uint16_t rrclass,
+    const DNSServiceAttribute * DNS_SD_NULLABLE attr,
+    DNSServiceQueryRecordReply DNS_SD_NULLABLE callback,
+    void * DNS_SD_NULLABLE context
+);
+
+/*!
+ *  @brief
+ *                  DNSServiceRegisterWithAttribute is an extention to API DNSServiceRegister,
+ *                  accepting another parameter with type DNSServiceAttributeRef to specify extra attributes.
+ *
+ *  @param sdRef
+ *                  A pointer to an uninitialized DNSServiceRef
+ *                  (or, if the kDNSServiceFlagsShareConnection flag is used,
+ *                  a copy of the shared connection reference that is to be used).
+ *                  If the call succeeds then it initializes (or updates) the DNSServiceRef,
+ *                  returns kDNSServiceErr_NoError, and the service registration
+ *                  will remain active indefinitely until the client terminates it
+ *                  by passing this DNSServiceRef to DNSServiceRefDeallocate()
+ *                  (or by closing the underlying shared connection, if used).
+ *
+ *  @param flags
+ *                  Possible values are:
+ *                  kDNSServiceFlagsShareConnection to use a shared connection.
+ *                  Other flags indicate the renaming behavior on name conflict
+ *                  (not required for most applications).
+ *                  See flag definitions above for details.
+ *
+ *  @param interfaceIndex
+ *                  If non-zero, specifies the interface on which to register the service
+ *                  (the index for a given interface is determined via the if_nametoindex()
+ *                  family of calls.) Most applications will pass 0 to register on all
+ *                  available interfaces. See "Constants for specifying an interface index" for more details.
+ *
+ *  @param name
+ *                  If non-NULL, specifies the service name to be registered.
+ *                  Most applications will not specify a name, in which case the computer
+ *                  name is used (this name is communicated to the client via the callback).
+ *                  If a name is specified, it must be 1-63 bytes of UTF-8 text.
+ *                  If the name is longer than 63 bytes it will be automatically truncated
+ *                  to a legal length, unless the NoAutoRename flag is set,
+ *                  in which case kDNSServiceErr_BadParam will be returned.
+ *
+ *  @param regtype
+ *                  The service type followed by the protocol, separated by a dot
+ *                  (e.g. "_ftp._tcp"). The service type must be an underscore, followed
+ *                  by 1-15 characters, which may be letters, digits, or hyphens.
+ *                  The transport protocol must be "_tcp" or "_udp". New service types
+ *                  should be registered at <http://www.dns-sd.org/ServiceTypes.html>.
+ *
+ *                  Additional subtypes of the primary service type (where a service
+ *                  type has defined subtypes) follow the primary service type in a
+ *                  comma-separated list, with no additional spaces, e.g.
+ *                      "_primarytype._tcp,_subtype1,_subtype2,_subtype3"
+ *                  Subtypes provide a mechanism for filtered browsing: A client browsing
+ *                  for "_primarytype._tcp" will discover all instances of this type;
+ *                  a client browsing for "_primarytype._tcp,_subtype2" will discover only
+ *                  those instances that were registered with "_subtype2" in their list of
+ *                  registered subtypes.
+ *
+ *                  The subtype mechanism can be illustrated with some examples using the
+ *                  dns-sd command-line tool:
+ *
+ *                  % dns-sd -R Simple _test._tcp "" 1001 &
+ *                  % dns-sd -R Better _test._tcp,HasFeatureA "" 1002 &
+ *                  % dns-sd -R Best   _test._tcp,HasFeatureA,HasFeatureB "" 1003 &
+ *
+ *                  Now:
+ *                  % dns-sd -B _test._tcp             # will find all three services
+ *                  % dns-sd -B _test._tcp,HasFeatureA # finds "Better" and "Best"
+ *                  % dns-sd -B _test._tcp,HasFeatureB # finds only "Best"
+ *
+ *                  Subtype labels may be up to 63 bytes long, and may contain any eight-
+ *                  bit byte values, including zero bytes. However, due to the nature of
+ *                  using a C-string-based API, conventional DNS escaping must be used for
+ *                  dots ('.'), commas (','), backslashes ('\') and zero bytes, as shown below:
+ *
+ *                  % dns-sd -R Test '_test._tcp,s\.one,s\,two,s\\three,s\000four' local 123
+ *
+ *  @param domain
+ *                  If non-NULL, specifies the domain on which to advertise the service.
+ *                  Most applications will not specify a domain, instead automatically
+ *                  registering in the default domain(s).
+ *
+ *  @param host
+ *                  If non-NULL, specifies the SRV target host name. Most applications
+ *                  will not specify a host, instead automatically using the machine's
+ *                  default host name(s). Note that specifying a non-NULL host does NOT
+ *                  create an address record for that host - the application is responsible
+ *                  for ensuring that the appropriate address record exists, or creating it
+ *                  via DNSServiceRegisterRecord().
+ *
+ *  @param PortInNetworkByteOrder
+ *                  The port, in network byte order, on which the service accepts connections.
+ *                  Pass 0 for a "placeholder" service (i.e. a service that will not be discovered
+ *                  by browsing, but will cause a name conflict if another client tries to
+ *                  register that same name). Most clients will not use placeholder services.
+ *
+ *  @param txtLen
+ *                  The length of the txtRecord, in bytes. Must be zero if the txtRecord is NULL.
+ *
+ *  @param txtRecord
+ *                  The TXT record rdata. A non-NULL txtRecord MUST be a properly formatted DNS
+ *                  TXT record, i.e. <length byte> <data> <length byte> <data> ...
+ *                  Passing NULL for the txtRecord is allowed as a synonym for txtLen=1, txtRecord="",
+ *                  i.e. it creates a TXT record of length one containing a single empty string.
+ *                  RFC 1035 doesn't allow a TXT record to contain *zero* strings, so a single empty
+ *                  string is the smallest legal DNS TXT record.
+ *                  As with the other parameters, the DNSServiceRegister call copies the txtRecord
+ *                  data; e.g. if you allocated the storage for the txtRecord parameter with malloc()
+ *                  then you can safely free that memory right after the DNSServiceRegister call returns.
+ *
+ *  @param attr
+ *                  An DNSServiceAttribute pointer which is used to specify the attribute
+ *                  (may be NULL).
+ *
+ *  @param callBack
+ *                  The function to be called when the registration completes or asynchronously
+ *                  fails. The client MAY pass NULL for the callback -  The client will NOT be notified
+ *                  of the default values picked on its behalf, and the client will NOT be notified of any
+ *                  asynchronous errors (e.g. out of memory errors, etc.) that may prevent the registration
+ *                  of the service. The client may NOT pass the NoAutoRename flag if the callback is NULL.
+ *                  The client may still deregister the service at any time via DNSServiceRefDeallocate().
+ *
+ *  @param context
+ *                  An application context pointer which is passed to the callback function
+ *                  (may be NULL).
+ *
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
+ *                  errors are delivered to the callback), otherwise returns an error code indicating
+ *                  the error that occurred (the callback is never invoked and the DNSServiceRef
+ *                  is not initialized).
+ *
+ *  @discussion
+ *                  When atrr is NULL, the functionality of the this function will be the same as
+ *                  DNSServiceRegister().
+ */
+DNSSD_EXPORT
+DNSServiceErrorType DNSSD_API DNSServiceRegisterWithAttribute
+(
+    DNSServiceRef DNS_SD_NONNULL * DNS_SD_NULLABLE sdRef,
+    DNSServiceFlags flags,
+    uint32_t interfaceIndex,
+    const char * DNS_SD_NULLABLE name,
+    const char * DNS_SD_NULLABLE regtype,
+    const char * DNS_SD_NULLABLE domain,
+    const char * DNS_SD_NULLABLE host,
+    uint16_t portInNetworkByteOrder,
+    uint16_t txtLen,
+    const void * DNS_SD_NULLABLE txtRecord,
+    const DNSServiceAttributeRef DNS_SD_NULLABLE attr,
+    DNSServiceRegisterReply DNS_SD_NULLABLE callBack,
+    void * DNS_SD_NULLABLE context
+);
+
+/*!
+ *  @brief
+ *                  DNSServiceRegisterRecordWithAttribute is an extention to API DNSServiceRegisterRecord,
+ *                  accepting another parameter with type DNSServiceAttributeRef to specify extra attributes.
+ *
+ *  @param sdRef
+ *                  The connected DNSServiceRef that was initialized by DNSServiceCreateConnection().
+ *
+ *  @param flags
+ *                  Required values are:
+ *                  One of kDNSServiceFlagsShared, kDNSServiceFlagsUnique or kDNSServiceFlagsKnownUnique flags.
+ *
+ *                  Possible values are:
+ *                  kDNSServiceFlagsForceMulticast: If it is specified, the registration will be performed just like
+ *                  a link-local mDNS registration even if the name is an apparently non-local name (i.e. a name not
+ *                  ending in ".local.")
+ *
+ *  @param interfaceIndex
+ *                  If non-zero, specifies the interface on which to register the record
+ *                  (the index for a given interface is determined via the if_nametoindex()
+ *                  family of calls.) Passing 0 causes the record to be registered on all interfaces.
+ *                  See "Constants for specifying an interface index" for more details.
+ *
+ *  @param fullname
+ *                  The full domain name of the resource record.
+ *
+ *  @param rrtype
+ *                  The numerical type of the resource record (e.g. kDNSServiceType_PTR, kDNSServiceType_SRV, etc)
+ *
+ *  @param rrclass
+ *                  The class of the resource record (usually kDNSServiceClass_IN)
+ *
+ *  @param rdlen
+ *                  Length, in bytes, of the rdata.
+ *
+ *  @param rdata
+ *                  A pointer to the raw rdata, as it is to appear in the DNS record.
+ *
+ *  @param ttl
+ *                  The time to live of the resource record, in seconds.
+ *                  Most clients should pass 0 to indicate that the system should
+ *                  select a sensible default value.
+ *
+ *  @param attr
+ *                  An DNSServiceAttribute pointer which is used to specify the attribute
+ *                  (may be NULL).
+ *
+ *  @param callBack
+ *                  The function to be called when a result is found, or if the call
+ *                  asynchronously fails (e.g. because of a name conflict.)
+ *
+ *  @param context
+ *                  An application context pointer which is passed to the callback function
+ *                  (may be NULL).
+ *
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success (any subsequent, asynchronous
+ *                  errors are delivered to the callback), otherwise returns an error code indicating
+ *                  the error that occurred (the callback is never invoked and the DNSServiceRef
+ *                  is not initialized).
+ *
+ *  @discussion
+ *                  When atrr is NULL, the functionality of the this function will be the same as
+ *                  DNSServiceRegister().
+ */
+DNSSD_EXPORT
+DNSServiceErrorType DNSSD_API DNSServiceRegisterRecordWithAttribute
+(
+    DNSServiceRef DNS_SD_NULLABLE sdRef,
+    DNSRecordRef DNS_SD_NONNULL * DNS_SD_NULLABLE recordRef,
+    DNSServiceFlags flags,
+    uint32_t interfaceIndex,
+    const char * DNS_SD_NULLABLE fullname,
+    uint16_t rrtype,
+    uint16_t rrclass,
+    uint16_t rdlen,
+    const void * DNS_SD_NULLABLE rdata,
+    uint32_t ttl,
+    const DNSServiceAttributeRef DNS_SD_NULLABLE attr,
+    DNSServiceRegisterRecordReply DNS_SD_NULLABLE callBack,
+    void * DNS_SD_NULLABLE context
+);
+
+/*!
+ *  @brief
+ *                  Send all the queued requests to server in scatter/gather IO.
+ *
+ *  @param sdRef
+ *                  The connected DNSServiceRef that was initialized by DNSServiceCreateConnection.
+ *
+ *  @result
+ *                  Returns kDNSServiceErr_NoError on success;
+ *                  Returns kDNSServiceErr_BadParam if the DNSServiceRef is not initialized;
+ *                  Returns kDNSServiceErr_Invalid if there is no queued request;
+ *                  Returns kDNSServiceErr_NoMemory if memory allocation fail.
+ *
+ *  @discussion
+ *                  The queued requests will be freed in this function.
+ *                  Example of usage:
+ *                  DNSServiceCreateConnection(sdRef)                                 //create DNSServiceRef
+ *                  DNSServiceRegisterRecord with flag kDNSServiceFlagsQueueRequest   //create and queue request
+ *                  DNSServiceRegisterRecord with flag kDNSServiceFlagsQueueRequest   //create and queue another request
+ *                  DNSServiceSendQueuedRequests(sdRef)                               //send the queued requests
+ */
+DNSSD_EXPORT
+DNSServiceErrorType DNSSD_API DNSServiceSendQueuedRequests
+(
+    DNSServiceRef DNS_SD_NULLABLE sdRef
+);
+
+__END_DECLS
 
 #endif  /* _DNS_SD_H */

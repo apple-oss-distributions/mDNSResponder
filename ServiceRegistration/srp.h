@@ -30,6 +30,10 @@ extern "C" {
 #include <limits.h>
 #include <sys/param.h>
 #endif
+#ifdef MALLOC_DEBUG_LOGGING
+#  define MDNS_NO_STRICT 1
+#endif
+
 #include "srp-features.h"           // for feature flags
 
 #ifdef __clang__

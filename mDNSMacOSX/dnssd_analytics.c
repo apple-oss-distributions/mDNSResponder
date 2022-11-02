@@ -531,7 +531,7 @@ dnssd_analytics_init()
 		xpc_activity_register("com.apple.mDNSResponder.analytics.daily", criteria, ^(xpc_activity_t activity) {
 			if (xpc_activity_should_defer(activity)) {
 			    if (xpc_activity_set_state(activity, XPC_ACTIVITY_STATE_DEFER)) {
-					LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_INFO, "com.apple.mDNSResponder.analytics.daily: Asked to defer");
+					LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_DEFAULT, "com.apple.mDNSResponder.analytics.daily: Asked to defer");
 				} else {
 					LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_ERROR, "com.apple.mDNSResponder.analytics.daily: Asked to defer but failed to set state");
 				}
@@ -547,7 +547,7 @@ dnssd_analytics_init()
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_ANALYTICS)
 					_post_dns_query_info();
 #endif	//	DNS_ANALYTICS
-					LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_INFO, "com.apple.mDNSResponder.analytics.daily Complete");
+					LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_DEFAULT, "com.apple.mDNSResponder.analytics.daily Complete");
 					mDNS_Unlock(&mDNSStorage);
 					KQueueUnlock("Analytics Update");
 #endif	//	ANALYTICS

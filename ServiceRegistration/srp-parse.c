@@ -1,6 +1,6 @@
 /* srp-parse.c
  *
- * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -129,6 +129,7 @@ send_fail_response(comm_t *connection, message_t *message, int rcode)
     struct iovec iov;
     dns_wire_t response;
 
+    INFO("rcode = " PUB_S_SRP, dns_rcode_name(rcode));
     memset(&response, 0, DNS_HEADER_SIZE);
     response.id = message->wire.id;
     response.bitfield = message->wire.bitfield;
@@ -199,7 +200,8 @@ srp_find_delete(delete_t *deletes, dns_rr_t *target)
 }
 
 bool
-srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_t *raw_message)
+srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *srpl_connection,
+             dns_message_t *message, message_t *raw_message)
 {
     unsigned i;
     dns_host_description_t *host_description = NULL;
@@ -398,6 +400,9 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
             {
                 dns_name_t *base_type_name = rr->name->next->next;
                 for (base_type = services; base_type != NULL; base_type = base_type->next) {
+                    if (!dns_names_equal(base_type->rr->data.ptr.name, rr->data.ptr.name)) {
+                        continue;
+                    }
                     if (dns_names_equal(base_type->rr->name, base_type_name)) {
                         break;
                     }
@@ -408,18 +413,6 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
                     ERROR("service subtype " PRI_DNS_NAME_SRP " for " PRI_DNS_NAME_SRP
                           " has no preceding base type ", DNS_NAME_PARAM_SRP(rr->name, name_buf),
                           DNS_NAME_PARAM_SRP(rr->data.ptr.name, target_name_buf));
-                    rcode = dns_rcode_formerr;
-                    goto out;
-                }
-                if (!dns_names_equal(base_type->rr->data.ptr.name, rr->data.ptr.name)) {
-                    DNS_NAME_GEN_SRP(rr->name, name_buf);
-                    DNS_NAME_GEN_SRP(rr->data.ptr.name, target_name_buf);
-                    DNS_NAME_GEN_SRP(base_type->rr->data.ptr.name, base_target_name_buf);
-                    ERROR("service subtype " PRI_DNS_NAME_SRP " for " PRI_DNS_NAME_SRP
-                          " doesn't match base type service " PRI_DNS_NAME_SRP,
-                          DNS_NAME_PARAM_SRP(rr->name, name_buf),
-                          DNS_NAME_PARAM_SRP(rr->data.ptr.name, target_name_buf),
-                          DNS_NAME_PARAM_SRP(base_type->rr->data.ptr.name, base_target_name_buf));
                     rcode = dns_rcode_formerr;
                     goto out;
                 }
@@ -578,6 +571,7 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
     }
 
     // Make sure that at least one service instance references the host description, unless the update is deleting the host address records.
+#ifdef REJECT_HOST_WITHOUT_SERVICES
     if (host_description->num_instances == 0 && host_description->addrs != NULL) {
         DNS_NAME_GEN_SRP(host_description->name, name_buf);
         ERROR("host description " PRI_DNS_NAME_SRP " is not referenced by any service instances.",
@@ -594,6 +588,7 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
         rcode = dns_rcode_formerr;
         goto out;
     }
+#endif
 
     for (i = 0; i < num_keys; i++) {
         // If this isn't the only key, make sure it's got the same contents as the other keys.
@@ -737,6 +732,7 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
             // if condition should always be false.
             if (uzp == NULL) {
                 ERROR("service PTR record zone match fail!!");
+                rcode = dns_rcode_formerr;
                 goto out;
             }
             replace_zone_name(&sp->rr->data.ptr.name, uzp, replacement_zone);
@@ -751,6 +747,7 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
             // if condition should always be false.
             if (uzp == NULL) {
                 ERROR("service instance SRV record zone match fail!!");
+                rcode = dns_rcode_formerr;
                 goto out;
             }
             replace_zone_name(&sip->srv->data.srv.name, uzp, replacement_zone);
@@ -766,7 +763,7 @@ srp_evaluate(comm_t *connection, void *context, dns_message_t *message, message_
          DNS_NAME_PARAM_SRP(host_description->name, host_description_name_buf), raw_message->wire.id,
          lease_time, found_lease ? " (found)" : "", serial_number, found_serial ? " (found)" : " (not sent)");
     rcode = dns_rcode_noerror;
-    ret = srp_update_start(connection, context, message, raw_message, host_description, service_instances,
+    ret = srp_update_start(connection, server_state, srpl_connection, message, raw_message, host_description, service_instances,
                            services, removes, replacement_zone == NULL ? update_zone : replacement_zone,
                            lease_time, key_lease_time, serial_number, found_serial);
     if (ret) {
@@ -808,7 +805,7 @@ success:
 }
 
 bool
-srp_dns_evaluate(comm_t *connection, void *context, message_t *message)
+srp_dns_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *srpl_connection, message_t *message)
 {
     dns_message_t *parsed_message;
 
@@ -829,7 +826,7 @@ srp_dns_evaluate(comm_t *connection, void *context, message_t *message)
     }
 
     // Parse the UPDATE message.
-    if (!dns_wire_parse(&parsed_message, &message->wire, message->length)) {
+    if (!dns_wire_parse(&parsed_message, &message->wire, message->length, false)) {
         if (connection != NULL) {
             send_fail_response(connection, message, dns_rcode_servfail);
         }
@@ -838,7 +835,7 @@ srp_dns_evaluate(comm_t *connection, void *context, message_t *message)
     }
 
     // We need the wire message to validate the signature...
-    if (!srp_evaluate(connection, context, parsed_message, message)) {
+    if (!srp_evaluate(connection, server_state, srpl_connection, parsed_message, message)) {
         // The message wasn't invalid, but wasn't an SRP message.
         dns_message_free(parsed_message);
         // dns_forward(connection)
@@ -854,7 +851,7 @@ void
 dns_input(comm_t *comm, message_t *message, void *context)
 {
     (void)context;
-    srp_dns_evaluate(comm, NULL, message);
+    srp_dns_evaluate(comm, context, NULL, message);
 }
 
 struct srp_proxy_listener_state {
@@ -882,7 +879,7 @@ srp_proxy_listener_cancel(srp_proxy_listener_state_t *listener_state)
 }
 
 srp_proxy_listener_state_t *
-srp_proxy_listen(uint16_t *avoid_ports, int num_avoid_ports, ready_callback_t ready)
+srp_proxy_listen(uint16_t *avoid_ports, int num_avoid_ports, ready_callback_t ready, srp_server_t *server_state)
 {
 #if SRP_STREAM_LISTENER_ENABLED
     uint16_t tcp_listen_port;
@@ -907,7 +904,7 @@ srp_proxy_listen(uint16_t *avoid_ports, int num_avoid_ports, ready_callback_t re
     // XXX UDP listeners should bind to interface addresses, not INADDR_ANY.
     listeners->udp_listener = ioloop_listener_create(false, false, avoid_ports,
                                                      num_avoid_ports, NULL, NULL, "UDP listener", dns_input,
-                                                     NULL, NULL, ready, NULL, NULL, NULL);
+                                                     NULL, NULL, ready, NULL, NULL, server_state);
     if (listeners->udp_listener == NULL) {
         srp_proxy_listener_cancel(listeners);
         ERROR("UDP listener: fail.");
@@ -915,7 +912,7 @@ srp_proxy_listen(uint16_t *avoid_ports, int num_avoid_ports, ready_callback_t re
     }
 #ifdef SRP_STREAM_LISTENER_ENABLED
     listeners->tcp_listener = ioloop_listener_create(true, false, NULL, 0, NULL, NULL,
-                                                     "TCP listener", dns_input, NULL, NULL, ready, NULL, NULL, NULL);
+                                                     "TCP listener", dns_input, NULL, NULL, ready, NULL, NULL, server_state);
     if (listeners->tcp_listener == NULL) {
         srp_proxy_listener_cancel(listeners);
         ERROR("TCP listener: fail.");
@@ -923,7 +920,7 @@ srp_proxy_listen(uint16_t *avoid_ports, int num_avoid_ports, ready_callback_t re
     }
 #ifndef EXCLUDE_TLS
     listeners->tls_listener = ioloop_listener_create(true, true, NULL, 0, NULL, NULL,
-                                                     "TLS listener", dns_input, NULL, NULL, ready, NULL, NULL. NULL);
+                                                     "TLS listener", dns_input, NULL, NULL, ready, NULL, NULL, server_state);
     if (listeners->tls_listener == NULL) {
         srp_proxy_listener_cancel(listeners);
         ERROR("TLS listener: fail.");

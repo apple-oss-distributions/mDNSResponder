@@ -1,0 +1,49 @@
+#! /bin/bash
+#
+#	Copyright (c) 2022 Apple Inc. All rights reserved.
+#
+
+# The 5-tuple version string scheme is a[.b[.c[.d[.e]]]], where
+#
+#   0 < a ≤ 18446743
+#   0 ≤ b ≤ 999
+#   0 ≤ c ≤ 999
+#   0 ≤ d ≤ 999
+#   0 ≤ e ≤ 999
+#
+# mDNSResponder currently encodes version strings as 32-bit unsigned integers. This only allows room for the three
+# most significant fields if the following encoding formula is used: (a × 1000000) + (b × 1000) + c.
+#
+# Note that when b = c = 999, the largest possible 32-bit unsigned integer is 4293999999, therefore 0 < a ≤ 4293
+# must hold. As a starts to get close to surpassing 4293, mDNSResponder may need to start encoding version strings
+# using a wider integer type.
+
+declare -r major_max=4293
+declare -r other_max=999
+
+declare -r version_string="${1}"
+valid=false
+if [[ ${version_string} =~ ^[0-9]+(\.[0-9]+){0,4}$ ]]; then
+	fields=(${version_string//./ })
+	major="${fields[0]}"
+	if (( ( major > 0 ) && ( major <= major_max ) )); then
+		malformed=false
+		for other_field in "${fields[@]:1}"; do
+			if (( other_field > other_max )); then
+				malformed=true
+				break
+			fi
+		done
+		if ! "${malformed}"; then
+			valid=true
+		fi
+	fi
+fi
+
+if "${valid}"; then
+	result=$( printf '%u%03u%03u' "${fields[0]:-0}" "${fields[1]:-0}" "${fields[2]:-0}" )
+else
+	result=$( printf '%u%03u%03u' "${major_max}" "${other_max}" "${other_max}" )
+fi
+
+echo "${result}"

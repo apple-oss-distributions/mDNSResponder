@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2021 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,5 +32,7 @@ extern void DNSProxyInit(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf, const mDNSu8 IPv6
 extern void DNSProxyInit(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf);
 #endif
 extern void DNSProxyTerminate(void);
+
+extern const struct mrcs_server_handlers_s kMRCSServerHandlers;
 
 #endif // __DNS_PROXY_H

@@ -21,7 +21,7 @@
 
 #ifndef __ADV_CTL_SERVER_H__
 #define __ADV_CTL_SERVER_H__
-bool adv_ctl_init(void);
+bool adv_ctl_init(void *NULLABLE context);
 #endif /* __ADV_CTL_SERVER_H__ */
 
 // Local Variables:

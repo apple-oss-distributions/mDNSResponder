@@ -312,6 +312,9 @@ struct dns_message {
 #define dns_rrtype_cdnskey    60 // [RFC7344]   DNSKEY(s) the Child wants reflected in DS
 #define dns_rrtype_openpgpkey 61 // [RFC7929]   OpenPGP Key
 #define dns_rrtype_csync      62 // [RFC7477] Child-To-Parent Synchronization
+#define dns_rrtype_zonemd     63 // [RFC8976]
+#define dns_rrtype_svcb       64 // [draft-ietf-dnsop-svcb-https-10]
+#define dns_rrtype_https      65 // [draft-ietf-dnsop-svcb-https-10]
 #define dns_rrtype_spf        99 // [RFC7208]
 #define dns_rrtype_uinfo     100 // [IANA-Reserved]
 #define dns_rrtype_uid       101 // [IANA-Reserved]
@@ -334,6 +337,9 @@ struct dns_message {
 #define dns_rrtype_caa       257 // Certification Authority Restriction [RFC6844]
 #define dns_rrtype_avc       258 // Application Visibility and Control [Wolfgang_Riedel]
 #define dns_rrtype_doa       259 // Digital Object Architecture [draft-durand-doa-over-dns]
+#define dns_rrtype_amtrelay  260 // [RFC8777]
+#define dns_rrtype_ta      32768 // Trust authorities [Sam Weiler]
+#define dns_rrtype_dlv     32769 // [RFC8749]
 
 #define dns_opt_llq            1 // On-hold [http://files.dns-sd.org/draft-sekar-dns-llq.txt]
 #define dns_opt_update_lease   2 // On-hold [http://files.dns-sd.org/draft-sekar-dns-ul.txt]
@@ -449,16 +455,17 @@ bool dns_u64_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL o
     dns_rdata_parse_data_(rr, buf, offp, target, rdlen, rrstart, __FILE__, __LINE__)
 bool dns_rdata_parse_data_(dns_rr_t *NONNULL rr, const uint8_t *NONNULL buf, unsigned *NONNULL offp,
                            unsigned target, uint16_t rdlen, unsigned rrstart, const char *NONNULL file, int line);
-#define dns_rr_parse(rrset, buf, len, offp, rrdata_permitted) \
-    dns_rr_parse_(rrset, buf, len, offp, rrdata_permitted, __FILE__, __LINE__)
+#define dns_rr_parse(rrset, buf, len, offp, rrdata_permitted, dump_to_stderr) \
+    dns_rr_parse_(rrset, buf, len, offp, rrdata_permitted, dump_to_stderr, __FILE__, __LINE__)
 bool dns_rr_parse_(dns_rr_t *NONNULL rrset, const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp,
-                   bool rrdata_permitted, const char *NONNULL file, int line);
+                   bool rrdata_permitted, bool dump_to_stderr, const char *NONNULL file, int line);
 void dns_name_free(dns_label_t *NONNULL name);
 void dns_rrdata_free(dns_rr_t *NONNULL rr);
 void dns_message_free(dns_message_t *NONNULL message);
-#define dns_wire_parse(ret, message, len) dns_wire_parse_(ret, message, len, __FILE__, __LINE__)
+#define dns_wire_parse(ret, message, len, dump_to_stderr) \
+    dns_wire_parse_(ret, message, len, dump_to_stderr, __FILE__, __LINE__)
 bool dns_wire_parse_(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *NONNULL message, unsigned len,
-                     const char *NONNULL FILE, int line);
+                     bool dump_to_stderr, const char *NONNULL FILE, int line);
 bool dns_names_equal(dns_label_t *NONNULL name1, dns_label_t *NONNULL name2);
 
 // wireutils.c

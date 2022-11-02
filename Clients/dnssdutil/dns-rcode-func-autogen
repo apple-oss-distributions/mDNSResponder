@@ -1,9 +1,9 @@
 #! /bin/bash
 #
-#	Copyright (c) 2020 Apple Inc. All rights reserved.
+#	Copyright (c) 2020-2022 Apple Inc. All rights reserved.
 #
 
-declare -r version=1.0
+declare -r version=1.1
 declare -r script=${BASH_SOURCE[0]}
 declare -r rcodesURL='https://www.iana.org/assignments/dns-parameters/dns-parameters-6.csv'
 
@@ -51,8 +51,15 @@ GetNamesAndValues()
 		
 		value=$( StripLeadingTrailingWhitespace <<< "${value}" )
 		[[ ${value} =~ ^[0-9]+$ ]] || continue
-		[ "${value}" -le 15 ] || continue
+		[ "${value}" -le 65535 ] || continue # Currently, RCODEs can be up to 16-bits in size.
 		
+		# The value 65535 is reserved according to <https://datatracker.ietf.org/doc/html/rfc6895#section-2.3>.
+		# However, the name in the CSV file is "Reserved, can be allocated by Standards Action". For simplicity, we just
+		# use the name "Reserved".
+		
+		if [ "${value}" -eq 65535 ]; then
+			name='Reserved'
+		fi
 		echo "${name},${value}"
 	done
 	shopt -u nocasematch

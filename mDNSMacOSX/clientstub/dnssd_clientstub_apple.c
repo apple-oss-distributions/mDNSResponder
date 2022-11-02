@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -68,50 +68,35 @@ exit:
 }
 
 DNSServiceErrorType DNSSD_API
+DNSServiceBrowseEx(DNSServiceRef *sdRef, DNSServiceFlags flags,
+	uint32_t interfaceIndex, const char *regtype, const char *domain, const DNSServiceAttribute * const attr,
+	DNSServiceBrowseReply callBack, void *context)
+{
+	return DNSServiceBrowseInternal(sdRef, flags, interfaceIndex, regtype, domain, attr, callBack, context);
+}
+
+DNSServiceErrorType DNSSD_API
+DNSServiceResolveEx(DNSServiceRef *sdRef, DNSServiceFlags flags,
+	uint32_t interfaceIndex, const char *name, const char *regtype, const char *domain,
+	const DNSServiceAttribute * const attr, DNSServiceResolveReply callBack, void *context)
+{
+	return DNSServiceResolveInternal(sdRef, flags, interfaceIndex, name, regtype, domain, attr, callBack, context);
+}
+
+DNSServiceErrorType DNSSD_API
+DNSServiceGetAddrInfoEx(DNSServiceRef *sdRef, DNSServiceFlags flags,
+	uint32_t interfaceIndex, DNSServiceProtocol protocol, const char *hostname, const DNSServiceAttribute * const attr,
+	DNSServiceGetAddrInfoReply callBack, void *context)
+{
+	return DNSServiceGetAddrInfoInternal(sdRef, flags, interfaceIndex, protocol, hostname, attr, callBack, context);
+}
+
+DNSServiceErrorType DNSSD_API
 DNSServiceQueryRecordEx(DNSServiceRef * const sdRef, const DNSServiceFlags flags, const uint32_t ifindex,
-	const char * const name, const uint16_t rrtype, const uint16_t rrclass, const DNSServiceQueryAttr * const attr,
+	const char * const name, const uint16_t rrtype, const uint16_t rrclass, const DNSServiceAttribute * const attr,
 	const DNSServiceQueryRecordReply callback, void * const context)
 {
 	return DNSServiceQueryRecordInternal(sdRef, flags, ifindex, name, rrtype, rrclass, attr, callback, context);
-}
-
-struct DNSServiceQueryAttr_s {
-	DNSServiceAAAAPolicy		aaaa_policy;
-	DNSServiceFailoverPolicy	failover_policy;
-};
-
-const DNSServiceQueryAttr kDNSServiceQueryAttrAAAAFallback = {
-	.aaaa_policy = kDNSServiceAAAAPolicyFallback
-};
-
-const DNSServiceQueryAttr kDNSServiceQueryAttrAllowFailover = {
-	.failover_policy = kDNSServiceFailoverPolicyAllow
-};
-
-DNSServiceQueryAttrRef DNSSD_API
-DNSServiceQueryAttrCreate(void)
-{
-	DNSServiceQueryAttrRef attr = (DNSServiceQueryAttrRef)mdns_calloc(1, sizeof(*attr));
-	return attr;
-}
-
-DNSServiceErrorType DNSSD_API
-DNSServiceQueryAttrSetAAAAPolicy(const DNSServiceQueryAttrRef attr, const DNSServiceAAAAPolicy policy)
-{
-	attr->aaaa_policy = policy;
-	return kDNSServiceErr_NoError;
-}
-
-DNSServiceErrorType DNSSD_API
-DNSServiceQueryAttrSetFailoverPolicy(const DNSServiceQueryAttrRef attr, const DNSServiceFailoverPolicy policy)
-{
-	attr->failover_policy = policy;
-	return kDNSServiceErr_NoError;
-}
-
-void DNSSD_API DNSServiceQueryAttrFree(DNSServiceQueryAttrRef attr)
-{
-	mdns_free(attr);
 }
 
 xpc_object_t
@@ -121,6 +106,18 @@ DNSServiceGetRetainedResolverDefaults(void)
 	const xpc_object_t dict_copy = g_defaults_dict ? xpc_retain(g_defaults_dict) : NULL;
 	os_unfair_lock_unlock(&g_defaults_lock);
 	return dict_copy;
+}
+
+DNSServiceAttrRef
+DNSServiceAttrCreate(void)
+{
+	return DNSServiceAttributeCreate();
+}
+
+void
+DNSServiceAttrFree(DNSServiceAttrRef attr)
+{
+	DNSServiceAttributeDeallocate(attr);
 }
 
 size_t
@@ -137,11 +134,16 @@ get_required_tlv_length_for_defaults(const xpc_object_t defaults)
 	return len;
 }
 
-size_t
-get_required_tlv_length_for_query_attr(__unused const DNSServiceQueryAttr * const attr)
+const uint8_t *
+get_validation_data_from_tlvs(const uint8_t * const ptr, const uint8_t * const limit, size_t * const length)
 {
-	// Length for IPC_TLV_TYPE_QUERY_ATTR_AAAA_POLICY and IPC_TLV_TYPE_QUERY_ATTR_FAILOVER_POLICY.
-	return (2 * get_required_tlv_uint32_length());
+	size_t len = 0;
+	const uint8_t *const data = get_tlv(ptr, limit, IPC_TLV_TYPE_SERVICE_ATTR_VALIDATION_DATA, &len);
+	if (length)
+	{
+		*length = len;
+	}
+	return data;
 }
 
 void
@@ -156,14 +158,5 @@ put_tlvs_for_defaults(const xpc_object_t defaults, ipc_msg_hdr * const hdr, uint
 	}
 	const uint8_t require_privacy = xpc_dictionary_get_bool(defaults, kDNSServiceDefaultsKey_RequirePrivacy) ? 1 : 0;
 	put_tlv_uint8(IPC_TLV_TYPE_REQUIRE_PRIVACY, require_privacy, ptr, limit);
-	hdr->ipc_flags |= IPC_FLAGS_TRAILING_TLVS;
-}
-
-void
-put_tlvs_for_query_attr(const DNSServiceQueryAttr * const attr, ipc_msg_hdr * const hdr, uint8_t ** const ptr,
-	const uint8_t * const limit)
-{
-	put_tlv_uint32(IPC_TLV_TYPE_QUERY_ATTR_AAAA_POLICY, attr->aaaa_policy, ptr, limit);
-	put_tlv_uint32(IPC_TLV_TYPE_QUERY_ATTR_FAILOVER_POLICY, attr->failover_policy, ptr, limit);
 	hdr->ipc_flags |= IPC_FLAGS_TRAILING_TLVS;
 }

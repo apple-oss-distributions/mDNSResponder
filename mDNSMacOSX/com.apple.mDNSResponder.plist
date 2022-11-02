@@ -18,9 +18,11 @@
 	<dict>
 		<key>com.apple.dnssd.service</key>
 		<true/>
-		<key>com.apple.mDNSResponder.log_utility</key>
+		<key>com.apple.mDNSResponder.control</key>
 		<true/>
 		<key>com.apple.mDNSResponder.dnsproxy</key>
+		<true/>
+		<key>com.apple.mDNSResponder.log_utility</key>
 		<true/>
 	</dict>
 	<key>Sockets</key>

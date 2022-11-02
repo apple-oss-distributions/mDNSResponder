@@ -384,7 +384,7 @@ dnssd_svcb_access_alpn_values(const uint8_t *buffer, size_t buffer_size,
 			while (value_size > 0 && value_read < value_size) {
 				char alpn_value[UINT8_MAX] = "";
 
-				uint8_t alpn_length = *(const uint8_t *)value;
+				uint8_t alpn_length = *(((const uint8_t *)value) + value_read);
 				value_read++;
 
 				if (value_read + alpn_length > value_size) {

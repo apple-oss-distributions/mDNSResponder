@@ -18,7 +18,7 @@
  */
 
 #include "srp.h"
-#ifdef THREAD_DEVKIT_ADK
+#if defined(THREAD_DEVKIT_ADK) || defined(LINUX)
 #include "../mDNSShared/dns_sd.h"
 #endif
 

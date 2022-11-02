@@ -114,22 +114,24 @@ typedef enum {
 } dnssd_getaddrinfo_state_t;
 
 struct dnssd_getaddrinfo_s {
-	struct dnssd_object_s				base;			// Object base.
-	dnssd_getaddrinfo_t					next;			// Next getaddrinfo object in list.
-	uint64_t							command_id;		// Command ID.
-	dispatch_queue_t					user_queue;		// User's dispatch queue for invoking result and event handlers.
-	dispatch_queue_t					mutex_queue;	// Mutex for accessing result_list from different queues.
-	xpc_object_t						params;			// Parameters dictionary for getaddrinfo command.
-	xpc_object_t						hostname;		// Reference to hostname from parameters dictionary.
-	dnssd_cname_array_t					cnames_a;		// Array of hostname's canonical names for A results.
-	dnssd_cname_array_t					cnames_aaaa;	// Array of hostname's canonical names for AAAA results.
-	dispatch_source_t					event_source;	// Data source for triggering result and event handlers.
-	dnssd_getaddrinfo_result_t			result_list;	// List of getaddrinfo results.
-	dnssd_getaddrinfo_result_handler_t	result_handler;	// User's result handler.
-	dnssd_event_handler_t				event_handler;	// User's event handler.
-	dnssd_getaddrinfo_state_t			state;			// Internal state.
-	OSStatus							error;			// Pending error.
-	bool								user_activated;	// True if the object has been activated by user.
+	struct dnssd_object_s				base;				// Object base.
+	dnssd_getaddrinfo_t					next;				// Next getaddrinfo object in list.
+	uint64_t							command_id;			// Command ID.
+	dispatch_queue_t					user_queue;			// User's dispatch queue for result and event handlers.
+	dispatch_queue_t					mutex_queue;		// Mutex for accessing result_list from different queues.
+	xpc_object_t						params;				// Parameters dictionary for getaddrinfo command.
+	xpc_object_t						hostname;			// Reference to hostname from parameters dictionary.
+	dnssd_cname_array_t					cnames_a;			// Array of hostname's canonical names for A results.
+	dnssd_cname_array_t					cnames_aaaa;		// Array of hostname's canonical names for AAAA results.
+	dispatch_source_t					event_source;		// Data source for triggering result and event handlers.
+	dnssd_getaddrinfo_result_t			result_list;		// List of getaddrinfo results.
+	dnssd_getaddrinfo_result_handler_t	result_handler;		// User's result handler.
+	dnssd_event_handler_t				event_handler;		// User's event handler.
+	mdns_xpc_string_t					tracker_hostname;	// The last result's tracker hostname. Used for deduping.
+	mdns_xpc_string_t					tracker_owner;		// The last result's tracker owner. Used for deduping.
+	dnssd_getaddrinfo_state_t			state;				// Internal state.
+	OSStatus							error;				// Pending error.
+	bool								user_activated;		// True if the object has been activated by user.
 };
 
 DNSSD_KIND_DEFINE(getaddrinfo, object);
@@ -153,8 +155,9 @@ struct dnssd_getaddrinfo_result_s {
 	xpc_object_t						odoh_config;		// SVCB Oblivious DoH config.
 	xpc_object_t						alpn_values;		// SVCB ALPN values.
 	xpc_object_t						service_name;		// SVCB name.
-	xpc_object_t						tracker_hostname;	// Tracker hostname [1].
-	xpc_object_t						tracker_owner;		// Tracker owner [2].
+	mdns_xpc_string_t					tracker_hostname;	// Tracker hostname [1].
+	mdns_xpc_string_t					tracker_owner;		// Tracker owner [2].
+	xpc_object_t						validation_data;	// Validation data.
 	uint16_t							port;				// SVCB port.
 	uint16_t							priority;			// SVCB priority.
 	uint32_t							if_index;			// Interface index to which the result pertains.
@@ -519,6 +522,16 @@ dnssd_getaddrinfo_add_resolver_uuid(dnssd_getaddrinfo_t me, uuid_t _Nonnull uuid
 //======================================================================================================================
 
 void
+dnssd_getaddrinfo_set_validation_data(const dnssd_getaddrinfo_t me, const uint8_t * const data_ptr,
+	const size_t data_len)
+{
+	require_return(!me->user_activated);
+	dnssd_xpc_parameters_set_validation_data(me->params, data_ptr, data_len);
+}
+
+//======================================================================================================================
+
+void
 dnssd_getaddrinfo_activate(dnssd_getaddrinfo_t me)
 {
 	if (!me->user_activated) {
@@ -593,6 +606,15 @@ _dnssd_getaddrinfo_invalidate(dnssd_getaddrinfo_t me)
 }
 
 //======================================================================================================================
+
+void
+dnssd_getaddrinfo_prohibit_encrypted_dns(const dnssd_getaddrinfo_t me, const bool prohibit)
+{
+	require_return(!me->user_activated);
+	dnssd_xpc_parameters_set_prohibit_encrypted_dns(me->params, prohibit);
+}
+
+//======================================================================================================================
 // MARK: - GetAddrInfo Private Methods
 
 static char *
@@ -655,6 +677,8 @@ _dnssd_getaddrinfo_finalize(dnssd_getaddrinfo_t me)
 	dnssd_forget(&me->cnames_aaaa);
 	BlockForget(&me->result_handler);
 	BlockForget(&me->event_handler);
+	mdns_xpc_string_forget(&me->tracker_hostname);
+	mdns_xpc_string_forget(&me->tracker_owner);
 }
 
 //======================================================================================================================
@@ -937,7 +961,7 @@ dnssd_getaddrinfo_result_is_from_cache(const dnssd_getaddrinfo_result_t me)
 const char *
 dnssd_getaddrinfo_result_get_tracker_hostname(const dnssd_getaddrinfo_result_t me)
 {
-	return xpc_string_get_string_ptr(me->tracker_hostname);
+	return mdns_xpc_string_get_string_ptr(me->tracker_hostname);
 }
 
 //======================================================================================================================
@@ -945,7 +969,7 @@ dnssd_getaddrinfo_result_get_tracker_hostname(const dnssd_getaddrinfo_result_t m
 const char *
 dnssd_getaddrinfo_result_get_tracker_owner(const dnssd_getaddrinfo_result_t me)
 {
-	return xpc_string_get_string_ptr(me->tracker_owner);
+	return mdns_xpc_string_get_string_ptr(me->tracker_owner);
 }
 
 //======================================================================================================================
@@ -962,6 +986,26 @@ dnssd_negative_reason_t
 dnssd_getaddrinfo_result_get_negative_reason(const dnssd_getaddrinfo_result_t me)
 {
 	return me->negative_reason;
+}
+
+//======================================================================================================================
+
+const uint8_t *
+dnssd_getaddrinfo_result_get_validation_data(const dnssd_getaddrinfo_result_t me, size_t * const out_length)
+{
+	const uint8_t *data_ptr;
+	size_t data_len;
+	if (me->validation_data) {
+		data_ptr = xpc_data_get_bytes_ptr(me->validation_data);
+		data_len = xpc_data_get_length(me->validation_data);
+	} else {
+		data_ptr = NULL;
+		data_len = 0;
+	}
+	if (out_length) {
+		*out_length = data_len;
+	}
+	return data_ptr;
 }
 
 //======================================================================================================================
@@ -1060,10 +1104,11 @@ _dnssd_getaddrinfo_result_finalize(dnssd_getaddrinfo_result_t me)
 	xpc_forget(&me->odoh_config);
 	xpc_forget(&me->alpn_values);
 	xpc_forget(&me->service_name);
-	xpc_forget(&me->tracker_hostname);
-	xpc_forget(&me->tracker_owner);
+	mdns_xpc_string_forget(&me->tracker_hostname);
+	mdns_xpc_string_forget(&me->tracker_owner);
 	xpc_forget(&me->ech_config);
 	xpc_forget(&me->address_hints);
+	xpc_forget(&me->validation_data);
 }
 
 //======================================================================================================================
@@ -1285,6 +1330,16 @@ _dnssd_client_connection(void)
 static void
 _dnssd_client_handle_message(xpc_object_t msg)
 {
+	// Check if the server sent a keepalive command, which requires an immediate reply.
+	const char * const command = dnssd_xpc_message_get_command(msg);
+	if (command && (strcmp(command, DNSSD_COMMAND_KEEPALIVE) == 0)) {
+		xpc_object_t reply = xpc_dictionary_create_reply(msg);
+		if (reply) {
+			xpc_dictionary_send_reply(reply);
+			xpc_forget(&reply);
+		}
+		goto exit;
+	}
 	const uint64_t command_id = dnssd_xpc_message_get_id(msg, NULL);
 	dnssd_getaddrinfo_t gai;
 	for (gai = g_gai_list; gai; gai = gai->next) {
@@ -1583,27 +1638,28 @@ static bool
 _dnssd_extract_result_dict_values(xpc_object_t result, xpc_object_t *out_hostname, DNSServiceErrorType *out_error,
 	DNSServiceFlags *out_flags, uint32_t *out_interface_index, uint16_t *out_type, uint16_t *out_class,
 	xpc_object_t *out_rdata, xpc_object_t *out_auth_tag, dnssd_getaddrinfo_result_protocol_t *out_protocol,
-	xpc_object_t *out_provider_name, xpc_object_t *out_tracker_hostname, xpc_object_t *out_tracker_owner,
-	bool *out_tracker_approved, dnssd_negative_reason_t *out_negative_reason);
+	xpc_object_t *out_provider_name, mdns_xpc_string_t *out_tracker_hostname, mdns_xpc_string_t *out_tracker_owner,
+	bool *out_tracker_approved, dnssd_negative_reason_t *out_negative_reason, xpc_object_t *out_validation_data);
 
 static dnssd_getaddrinfo_result_t
 _dnssd_getaddrinfo_result_create(dnssd_getaddrinfo_result_type_t type, xpc_object_t hostname,
 	xpc_object_t actual_hostname, dnssd_cname_array_t cname_array, int addr_family, const void *addr_data,
 	uint32_t interface_index, xpc_object_t auth_tag, dnssd_getaddrinfo_result_protocol_t protocol,
-	xpc_object_t provider_name, xpc_object_t tracker_hostname, xpc_object_t tracker_owner, bool tracker_approved,
-	dnssd_negative_reason_t negative_reason, OSStatus *out_error);
+	xpc_object_t provider_name, mdns_xpc_string_t tracker_hostname, mdns_xpc_string_t tracker_owner,
+	bool tracker_approved, dnssd_negative_reason_t negative_reason, xpc_object_t validation_data, OSStatus *out_error);
 
 static dnssd_getaddrinfo_result_t
 _dnssd_getaddrinfo_result_create_svcb(xpc_object_t hostname, xpc_object_t actual_hostname, const void *svcb_data,
 	size_t svcb_length, uint32_t interface_index, xpc_object_t auth_tag, dnssd_getaddrinfo_result_protocol_t protocol,
-	xpc_object_t provider_name, xpc_object_t tracker_hostname, xpc_object_t tracker_owner, bool tracker_approved,
-	dnssd_negative_reason_t negative_reason, OSStatus *out_error);
+	xpc_object_t provider_name, mdns_xpc_string_t tracker_hostname, mdns_xpc_string_t tracker_owner,
+	bool tracker_approved, dnssd_negative_reason_t negative_reason, xpc_object_t validation_data, OSStatus *out_error);
 
 static dnssd_getaddrinfo_result_t
 _dnssd_getaddrinfo_create_result_from_dictionary(dnssd_getaddrinfo_t me, xpc_object_t result_dict, OSStatus *out_error)
 {
 	OSStatus					err;
-	xpc_object_t				actual_hostname, rdata, auth_tag, provider_name, tracker_hostname, tracker_owner;
+	xpc_object_t				actual_hostname, rdata, auth_tag, provider_name;
+	mdns_xpc_string_t			tracker_hostname, tracker_owner;
 	DNSServiceErrorType			error;
 	DNSServiceFlags				flags;
 	uint32_t					if_index;
@@ -1611,15 +1667,25 @@ _dnssd_getaddrinfo_create_result_from_dictionary(dnssd_getaddrinfo_t me, xpc_obj
 	bool						tracker_approved;
 	dnssd_getaddrinfo_result_protocol_t protocol;
 	dnssd_negative_reason_t		negative_reason;
+	xpc_object_t				validation_data;
 
 	dnssd_getaddrinfo_result_t result = NULL;
 	const bool ok = _dnssd_extract_result_dict_values(result_dict, &actual_hostname, &error, &flags, &if_index,
 		&rtype, NULL, &rdata, &auth_tag, &protocol, &provider_name, &tracker_hostname, &tracker_owner,
-		&tracker_approved, &negative_reason);
+		&tracker_approved, &negative_reason, &validation_data);
 	require_action_quiet(ok, exit, err = kMalformedErr);
 	require_action_quiet((error == kDNSServiceErr_NoError) || (error == kDNSServiceErr_NoSuchRecord), exit,
 		err = kUnexpectedErr);
 
+	// Dedupe the tracker hostname and owner strings, which will very likely be the same across multiple results.
+	if (tracker_hostname) {
+		mdns_xpc_string_replace_if_different(&me->tracker_hostname, tracker_hostname);
+		tracker_hostname = me->tracker_hostname;
+	}
+	if (tracker_owner) {
+		mdns_xpc_string_replace_if_different(&me->tracker_owner, tracker_owner);
+		tracker_owner = me->tracker_owner;
+	}
 	switch(rtype) {
 		case kDNSServiceType_A:
 		case kDNSServiceType_AAAA: {
@@ -1650,7 +1716,7 @@ _dnssd_getaddrinfo_create_result_from_dictionary(dnssd_getaddrinfo_t me, xpc_obj
 			result = _dnssd_getaddrinfo_result_create(result_type, me->hostname, actual_hostname,
 				_dnssd_getaddrinfo_get_cname_array(me, rtype), addr_family, xpc_data_get_bytes_ptr(rdata), if_index,
 				auth_tag, protocol, provider_name, tracker_hostname, tracker_owner, tracker_approved, negative_reason,
-				&err);
+				validation_data, &err);
 			require_noerr_quiet(err, exit);
 			break;
 		}
@@ -1662,8 +1728,8 @@ _dnssd_getaddrinfo_create_result_from_dictionary(dnssd_getaddrinfo_t me, xpc_obj
 
 			// SVCB type answer
 			result = _dnssd_getaddrinfo_result_create_svcb(me->hostname, actual_hostname,
-				xpc_data_get_bytes_ptr(rdata), xpc_data_get_length(rdata), if_index, auth_tag, protocol,
-				provider_name, tracker_hostname, tracker_owner, tracker_approved, negative_reason, &err);
+				xpc_data_get_bytes_ptr(rdata), xpc_data_get_length(rdata), if_index, auth_tag, protocol, provider_name,
+				tracker_hostname, tracker_owner, tracker_approved, negative_reason, validation_data, &err);
 			require_noerr_quiet(err, exit);
 			break;
 		}
@@ -1689,8 +1755,8 @@ static bool
 _dnssd_extract_result_dict_values(xpc_object_t result, xpc_object_t *out_hostname, DNSServiceErrorType *out_error,
 	DNSServiceFlags *out_flags, uint32_t *out_interface_index, uint16_t *out_type, uint16_t *out_class,
 	xpc_object_t *out_rdata, xpc_object_t *out_auth_tag, dnssd_getaddrinfo_result_protocol_t *out_protocol,
-	xpc_object_t *out_provider_name, xpc_object_t *out_tracker_hostname, xpc_object_t *out_tracker_owner,
-	bool *out_tracker_approved, dnssd_negative_reason_t *out_negative_reason)
+	xpc_object_t *out_provider_name, mdns_xpc_string_t *out_tracker_hostname, mdns_xpc_string_t *out_tracker_owner,
+	bool *out_tracker_approved, dnssd_negative_reason_t *out_negative_reason, xpc_object_t *out_validation_data)
 {
 	bool result_is_valid = false;
 	xpc_object_t const hostname = dnssd_xpc_result_get_record_name_object(result);
@@ -1730,16 +1796,19 @@ _dnssd_extract_result_dict_values(xpc_object_t result, xpc_object_t *out_hostnam
 		*out_provider_name = dnssd_xpc_result_get_provider_name_object(result);
 	}
 	if (out_tracker_hostname) {
-		*out_tracker_hostname = dnssd_xpc_result_get_tracker_hostname_object(result);
+		*out_tracker_hostname = dnssd_xpc_result_get_tracker_hostname(result);
 	}
 	if (out_tracker_owner) {
-		*out_tracker_owner = dnssd_xpc_result_get_tracker_owner_object(result);
+		*out_tracker_owner = dnssd_xpc_result_get_tracker_owner(result);
 	}
 	if (out_tracker_approved) {
 		*out_tracker_approved = dnssd_xpc_result_get_tracker_is_approved(result);
 	}
 	if (out_negative_reason) {
 		*out_negative_reason = dnssd_xpc_result_get_negative_reason(result);
+	}
+	if (out_validation_data) {
+		*out_validation_data = dnssd_xpc_result_get_validation_data_object(result);
 	}
 	result_is_valid = true;
 
@@ -1752,8 +1821,8 @@ _dnssd_getaddrinfo_result_create(const dnssd_getaddrinfo_result_type_t type, con
 	const xpc_object_t actual_hostname, const dnssd_cname_array_t cnames, const int addr_family,
 	const void * const addr_data, const uint32_t if_index, const xpc_object_t auth_tag,
 	const dnssd_getaddrinfo_result_protocol_t protocol, const xpc_object_t provider_name,
-	const xpc_object_t tracker_hostname, const xpc_object_t tracker_owner, const bool tracker_approved,
-	const dnssd_negative_reason_t negative_reason, OSStatus * const out_error)
+	const mdns_xpc_string_t tracker_hostname, const mdns_xpc_string_t tracker_owner, const bool tracker_approved,
+	const dnssd_negative_reason_t negative_reason, const xpc_object_t validation_data, OSStatus * const out_error)
 {
 	OSStatus err;
 	dnssd_getaddrinfo_result_t result = NULL;
@@ -1823,19 +1892,17 @@ _dnssd_getaddrinfo_result_create(const dnssd_getaddrinfo_result_type_t type, con
 		require_action_quiet(obj->provider_name, exit, err = kNoResourcesErr);
 	}
 	if (tracker_hostname) {
-		require_action_quiet(xpc_get_type(tracker_hostname) == XPC_TYPE_STRING, exit, err = kTypeErr);
-
-		obj->tracker_hostname = xpc_copy(tracker_hostname);
-		require_action_quiet(obj->tracker_hostname, exit, err = kNoResourcesErr);
-
+		obj->tracker_hostname = mdns_xpc_string_retain(tracker_hostname);
 		if (tracker_owner) {
-			require_action_quiet(xpc_get_type(tracker_owner) == XPC_TYPE_STRING, exit, err = kTypeErr);
-
-			obj->tracker_owner = xpc_copy(tracker_owner);
-			require_action_quiet(obj->tracker_owner, exit, err = kNoResourcesErr);
+			obj->tracker_owner = mdns_xpc_string_retain(tracker_owner);
 		}
-
 		obj->tracker_approved = tracker_approved;
+	}
+	if (validation_data) {
+		require_action_quiet(xpc_get_type(validation_data) == XPC_TYPE_DATA, exit, err = kTypeErr);
+
+		obj->validation_data = xpc_copy(validation_data);
+		require_action_quiet(obj->validation_data, exit, err = kNoResourcesErr);
 	}
 	result	= obj;
 	obj		= NULL;
@@ -1852,8 +1919,9 @@ exit:
 static dnssd_getaddrinfo_result_t
 _dnssd_getaddrinfo_result_create_svcb(xpc_object_t hostname, xpc_object_t actual_hostname, const void *svcb_data,
 	size_t svcb_length, uint32_t interface_index, xpc_object_t auth_tag, dnssd_getaddrinfo_result_protocol_t protocol,
-	xpc_object_t provider_name, const xpc_object_t tracker_hostname, const xpc_object_t tracker_owner,
-	const bool tracker_approved, const dnssd_negative_reason_t negative_reason, OSStatus *out_error)
+	xpc_object_t provider_name, const mdns_xpc_string_t tracker_hostname, const mdns_xpc_string_t tracker_owner,
+	const bool tracker_approved, const dnssd_negative_reason_t negative_reason, xpc_object_t validation_data,
+	OSStatus *out_error)
 {
 	OSStatus err;
 	dnssd_getaddrinfo_result_t result = NULL;
@@ -1958,21 +2026,18 @@ _dnssd_getaddrinfo_result_create_svcb(xpc_object_t hostname, xpc_object_t actual
 	}
 
 	if (tracker_hostname) {
-		require_action_quiet(xpc_get_type(tracker_hostname) == XPC_TYPE_STRING, exit, err = kTypeErr);
-
-		obj->tracker_hostname = xpc_copy(tracker_hostname);
-		require_action_quiet(obj->tracker_hostname, exit, err = kNoResourcesErr);
-
+		obj->tracker_hostname = mdns_xpc_string_retain(tracker_hostname);
 		if (tracker_owner) {
-			require_action_quiet(xpc_get_type(tracker_owner) == XPC_TYPE_STRING, exit, err = kTypeErr);
-
-			obj->tracker_owner = xpc_copy(tracker_owner);
-			require_action_quiet(obj->tracker_owner, exit, err = kNoResourcesErr);
+			obj->tracker_owner = mdns_xpc_string_retain(tracker_owner);
 		}
-
 		obj->tracker_approved = tracker_approved;
 	}
+	if (validation_data) {
+		require_action_quiet(xpc_get_type(validation_data) == XPC_TYPE_DATA, exit, err = kTypeErr);
 
+		obj->validation_data = xpc_copy(validation_data);
+		require_action_quiet(obj->validation_data, exit, err = kNoResourcesErr);
+	}
 	result	= obj;
 	obj		= NULL;
 	err = kNoErr;

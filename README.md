@@ -50,6 +50,7 @@ The DNSSD Client Library provides, when used with the mDNS Responder daemon, a f
 
 [Click here to learn about the DNSSD Client Library][14]
 
+[Click here to learn about how mDNSResponder deals with time][15]
 [1]:	Documents/mDNSResponder.md
 [2]:	Documents/openthread-border-router.md
 [3]:	https://www.rfc-editor.org/rfc/rfc8766.html "RFC8766"
@@ -64,3 +65,4 @@ The DNSSD Client Library provides, when used with the mDNS Responder daemon, a f
 [12]:	Documents/srp-update-proxy.md
 [13]:	Documents/dns-sd.md
 [14]:	Documents/dnssd-client-library.md
+[15]:   Documents/relative-time-in-mDNSResponder.md

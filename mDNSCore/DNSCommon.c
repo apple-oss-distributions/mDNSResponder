@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,17 @@
 // Set mDNS_InstantiateInlines to tell mDNSEmbeddedAPI.h to instantiate inline functions, if necessary
 #define mDNS_InstantiateInlines 1
 #include "DNSCommon.h"
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+#include "dnssec_obj_rr_ds.h"   // For dnssec_obj_rr_ds_t.
+#include "dnssec_mdns_core.h"   // For DNSSEC-related operation on mDNSCore structures.
+#include "rdata_parser.h"       // For DNSSEC-related records parsing.
+#include "base_encoding.h"      // For base64 encoding.
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_UNFAIR_LOCK)
+#include <os/lock.h> // For os_unfair_lock.
+#endif
 
 // Disable certain benign warnings with Microsoft compilers
 #if (defined(_MSC_VER))
@@ -114,6 +125,21 @@ extern mDNS mDNSStorage;
 // ***************************************************************************
 // MARK: - General Utility Functions
 
+mDNSexport void CacheRecordSetResponseFlags(CacheRecord *const cr, const mDNSOpaque16 responseFlags)
+{
+    cr->responseFlags = responseFlags;
+    cr->resrec.rcode  = cr->responseFlags.b[1] & kDNSFlag1_RC_Mask;
+}
+
+mDNSexport void mDNSCoreResetRecord(mDNS *const m)
+{
+    m->rec.r.resrec.RecordType = 0; // Clear RecordType to show we're not still using it
+    CacheRecordSetResponseFlags(&m->rec.r, zeroID);
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    MDNS_DISPOSE_DNSSEC_OBJ(m->rec.r.resrec.dnssec);
+#endif
+}
+
 // return true for RFC1918 private addresses
 mDNSexport mDNSBool mDNSv4AddrIsRFC1918(const mDNSv4Addr * const addr)
 {
@@ -207,6 +233,7 @@ mDNSexport char *DNSTypeName(mDNSu16 rrtype)
     case kDNSType_DS: return("DS");
     case kDNSType_SVCB: return("SVCB");
     case kDNSType_HTTPS: return("HTTPS");
+    case kDNSType_TSR: return("TSR");
     case kDNSQType_ANY: return("ANY");
     default:            {
         static char buffer[16];
@@ -338,6 +365,7 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
     case kDNSType_AAAA: mDNS_snprintf(buffer+length, RemSpc, "%.16a", &rd->ipv6);       break;
     case kDNSType_SRV:  mDNS_snprintf(buffer+length, RemSpc, "%u %u %u %##s",
                                       rd->srv.priority, rd->srv.weight, mDNSVal16(rd->srv.port), rd->srv.target.c); break;
+    case kDNSType_TSR:  mDNS_snprintf(buffer+length, RemSpc, "%d", rd1->tsr_value);       break;
 
     case kDNSType_OPT:  {
         const rdataOPT *opt;
@@ -383,6 +411,61 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
     }
     break;
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    case kDNSType_DS: {
+        // See <https://datatracker.ietf.org/doc/html/rfc4034#section-5.3> for DS RR Presentation Format.
+
+        dnssec_error_t err;
+        dnssec_obj_rr_ds_t ds = mDNSNULL;
+        char *ds_rdata_description = mDNSNULL;
+
+        ds = dnssec_obj_rr_ds_create(rr->name->c, rr->rrclass, rr->rdata->u.data, rr->rdlength, false, &err);
+        if (err != DNSSEC_ERROR_NO_ERROR)
+        {
+            goto ds_exit;
+        }
+
+        ds_rdata_description = dnssec_obj_rr_copy_rdata_rfc_description(ds, &err);
+        if (err != DNSSEC_ERROR_NO_ERROR)
+        {
+            goto ds_exit;
+        }
+
+        mDNS_snprintf(buffer + length, RemSpc, "%s", ds_rdata_description);
+
+    ds_exit:
+        MDNS_DISPOSE_DNSSEC_OBJ(ds);
+        mDNSPlatformMemFree(ds_rdata_description);
+    }
+    break;
+
+    case kDNSType_RRSIG: {
+        // See <https://datatracker.ietf.org/doc/html/rfc4034#section-3.2> for RRSIG RR Presentation Format.
+
+        dnssec_error_t err;
+        dnssec_obj_rr_rrsig_t rrsig = NULL;
+        char *rrsig_rdata_description = mDNSNULL;
+
+        rrsig = dnssec_obj_rr_rrsig_create(rr->name->c, rr->rdata->u.data, rr->rdlength, false, &err);
+        if (err != DNSSEC_ERROR_NO_ERROR) {
+            goto rrsig_exit;
+        }
+
+        rrsig_rdata_description = dnssec_obj_rr_copy_rdata_rfc_description(rrsig, &err);
+        if (err != DNSSEC_ERROR_NO_ERROR)
+        {
+            goto rrsig_exit;
+        }
+
+        mDNS_snprintf(buffer + length, RemSpc, "%s", rrsig_rdata_description);
+
+    rrsig_exit:
+        MDNS_DISPOSE_DNSSEC_OBJ(rrsig);
+		mDNSPlatformMemFree(rrsig_rdata_description);
+    }
+    break;
+#endif
+
     case kDNSType_NSEC: {
         const domainname *next = (const domainname *)rd->data;
         int len, bitmaplen;
@@ -397,6 +480,33 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
 
     }
     break;
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    case kDNSType_DNSKEY: {
+        // See <https://datatracker.ietf.org/doc/html/rfc4034#section-2.2> for DNSKEY RR Presentation Format.
+
+        dnssec_error_t err;
+        dnssec_obj_rr_dnskey_t dnskey = mDNSNULL;
+        char *dnskey_rdata_description = mDNSNULL;
+
+        dnskey = dnssec_obj_rr_dnskey_create(rr->name->c, rr->rrclass, rr->rdata->u.data, rr->rdlength, false, &err);
+        if (err != DNSSEC_ERROR_NO_ERROR) {
+            goto dnskey_exit;
+        }
+
+        dnskey_rdata_description = dnssec_obj_rr_copy_rdata_rfc_description(dnskey, &err);
+        if (err != DNSSEC_ERROR_NO_ERROR) {
+            goto dnskey_exit;
+        }
+
+        mDNS_snprintf(buffer + length, RemSpc, "%s", dnskey_rdata_description);
+
+    dnskey_exit:
+        MDNS_DISPOSE_DNSSEC_OBJ(dnskey);
+        mDNSPlatformMemFree(dnskey_rdata_description);
+    }
+    break;
+#endif
 
     default:            mDNS_snprintf(buffer+length, RemSpc, "RDLen %d: %.*s", rr->rdlength, rr->rdlength, rd->data);
         // Really should scan buffer to check if text is valid UTF-8 and only replace with dots if not
@@ -469,6 +579,41 @@ mDNSexport mDNSBool mDNSAddrIsDNSMulticast(const mDNSAddr *ip)
     case mDNSAddrType_IPv6: return (mDNSBool)(mDNSSameIPv6Address(ip->ip.v6, AllDNSLinkGroup_v6.ip.v6));
     default: return(mDNSfalse);
     }
+}
+
+mDNSexport mDNSu32 GetEffectiveTTL(const uDNS_LLQType LLQType, mDNSu32 ttl)      // TTL in seconds
+{
+    if      (LLQType == uDNS_LLQ_Entire) ttl = kLLQ_DefLease;
+    else if (LLQType == uDNS_LLQ_Events)
+    {
+        // If the TTL is -1 for uDNS LLQ event packet, that means "remove"
+        if (ttl == 0xFFFFFFFF) ttl = 0;
+        else ttl = kLLQ_DefLease;
+    }
+    else    // else not LLQ (standard uDNS response)
+    {
+        // The TTL is already capped to a maximum value in GetLargeResourceRecord, but just to be extra safe we
+        // also do this check here to make sure we can't get overflow below when we add a quarter to the TTL
+        if (ttl > 0x60000000UL / mDNSPlatformOneSecond) ttl = 0x60000000UL / mDNSPlatformOneSecond;
+
+        ttl = RRAdjustTTL(ttl);
+
+        // For mDNS, TTL zero means "delete this record"
+        // For uDNS, TTL zero means: this data is true at this moment, but don't cache it.
+        // For the sake of network efficiency, we impose a minimum effective TTL of 15 seconds.
+        // This means that we'll do our 80, 85, 90, 95% queries at 12.00, 12.75, 13.50, 14.25 seconds
+        // respectively, and then if we get no response, delete the record from the cache at 15 seconds.
+        // This gives the server up to three seconds to respond between when we send our 80% query at 12 seconds
+        // and when we delete the record at 15 seconds. Allowing cache lifetimes less than 15 seconds would
+        // (with the current code) result in the server having even less than three seconds to respond
+        // before we deleted the record and reported a "remove" event to any active questions.
+        // Furthermore, with the current code, if we were to allow a TTL of less than 2 seconds
+        // then things really break (e.g. we end up making a negative cache entry).
+        // In the future we may want to revisit this and consider properly supporting non-cached (TTL=0) uDNS answers.
+        if (ttl < 15) ttl = 15;
+    }
+
+    return ttl;
 }
 
 // ***************************************************************************
@@ -567,6 +712,11 @@ mDNSexport mDNSBool IsLocalDomain(const domainname *d)
     if (d5 && SameDomainName(d5, nA)) return(mDNStrue);
     if (d5 && SameDomainName(d5, nB)) return(mDNStrue);
     return(mDNSfalse);
+}
+
+mDNSexport mDNSBool IsRootDomain(const domainname *const d)
+{
+    return (d->c[0] == 0);
 }
 
 mDNSexport const mDNSu8 *LastLabel(const domainname *d)
@@ -678,9 +828,10 @@ mDNSexport mDNSu8 *AppendLiteralLabelString(domainname *const name, const char *
 // AppendDNSNameString returns mDNSNULL.
 mDNSexport mDNSu8 *AppendDNSNameString(domainname *const name, const char *cstring)
 {
-    const char   *cstr      = cstring;
+    const char   *     cstr = cstring;
     mDNSu8       *      ptr = name->c + DomainNameLength(name) - 1; // Find end of current name
     const mDNSu8 *const lim = name->c + MAX_DOMAIN_NAME - 1;        // Limit of how much we can add (not counting final zero)
+    if (cstr[0] == '.' && cstr[1] == '\0') cstr++;                  // If the domain to be appended is root domain, skip it.
     while (*cstr && ptr < lim)                                      // While more characters, and space to put them...
     {
         mDNSu8 *lengthbyte = ptr++;                                 // Record where the length is going to go
@@ -907,7 +1058,7 @@ mDNSexport mDNSu8 *ConstructServiceName(domainname *const fqdn,
     len = *src;
     if (len < 2 || len > 16)
     {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "Bad service type in " PRI_DM_LABEL "." PRI_DM_NAME PRI_DM_NAME" Application protocol name must be "
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Bad service type in " PRI_DM_LABEL "." PRI_DM_NAME PRI_DM_NAME" Application protocol name must be "
             "underscore plus 1-15 characters. See <http://www.dns-sd.org/ServiceTypes.html>",
             DM_LABEL_PARAM(name), DM_NAME_PARAM(type), DM_NAME_PARAM(domain));
     }
@@ -944,7 +1095,7 @@ mDNSexport mDNSu8 *ConstructServiceName(domainname *const fqdn,
     return(dst);
 
 fail:
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "ConstructServiceName: " PUB_S ": " PRI_DM_LABEL "." PRI_DM_NAME PRI_DM_NAME , errormsg,
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "ConstructServiceName: " PUB_S ": " PRI_DM_LABEL "." PRI_DM_NAME PRI_DM_NAME , errormsg,
         DM_LABEL_PARAM(name), DM_NAME_PARAM(type), DM_NAME_PARAM(domain));
     return(mDNSNULL);
 }
@@ -1178,17 +1329,17 @@ mDNSexport void mDNS_SetupResourceRecord(AuthRecord *rr, RData *RDataStorage, mD
 
     if (InterfaceID == mDNSInterface_LocalOnly && artype != AuthRecordLocalOnly)
     {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "mDNS_SetupResourceRecord: ERROR!! Mismatch LocalOnly record InterfaceID %p called with artype %d",
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "mDNS_SetupResourceRecord: ERROR!! Mismatch LocalOnly record InterfaceID %p called with artype %d",
             InterfaceID, artype);
     }
     else if (InterfaceID == mDNSInterface_P2P && artype != AuthRecordP2P)
     {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "mDNS_SetupResourceRecord: ERROR!! Mismatch P2P record InterfaceID %p called with artype %d",
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "mDNS_SetupResourceRecord: ERROR!! Mismatch P2P record InterfaceID %p called with artype %d",
             InterfaceID, artype);
     }
     else if (!InterfaceID && (artype == AuthRecordP2P || artype == AuthRecordLocalOnly))
     {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO, "mDNS_SetupResourceRecord: ERROR!! Mismatch InterfaceAny record InterfaceID %p called with artype %d",
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "mDNS_SetupResourceRecord: ERROR!! Mismatch InterfaceAny record InterfaceID %p called with artype %d",
             InterfaceID, artype);
     }
 
@@ -1226,7 +1377,7 @@ mDNSexport void mDNS_SetupResourceRecord(AuthRecord *rr, RData *RDataStorage, mD
     rr->Additional1       = mDNSNULL;
     rr->Additional2       = mDNSNULL;
     rr->DependentOn       = mDNSNULL;
-    rr->RRSet             = mDNSNULL;
+    rr->RRSet             = 0;
     rr->RecordCallback    = Callback;
     rr->RecordContext     = Context;
 
@@ -1276,7 +1427,7 @@ mDNSexport void mDNS_SetupQuestion(DNSQuestion *const q, const mDNSInterfaceID I
     AssignDomainName(&q->qname, name);
     q->qtype               = qtype;
     q->qclass              = kDNSClass_IN;
-    q->LongLived           = (qtype == kDNSType_PTR);
+    q->LongLived           = mDNSfalse;
     q->ExpectUnique        = (qtype != kDNSType_PTR);
     q->ForceMCast          = mDNSfalse;
     q->ReturnIntermed      = mDNSfalse;
@@ -1509,6 +1660,71 @@ mDNSexport mDNSBool RRAssertsNonexistence(const ResourceRecord *const rr, mDNSu1
     return !RRAssertsExistence(rr, type);
 }
 
+mDNSexport mDNSBool RRTypeAnswersQuestionType(const ResourceRecord *const rr, const mDNSu16 qtype,
+    const RRTypeAnswersQuestionTypeFlags flags)
+{
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    // This checks if the record is what the question requires:
+    // 1. If the question does not enable DNSSEC, either "DNSSEC to be validated" nor "DNSSEC validated" record answers it.
+    // 2. If the question enables DNSSEC, and it is not a duplicate question, it needs both "DNSSEC to be validated" nor "DNSSEC validated" records:
+    //    a. Get "DNSSEC to be validated" to do DNSSEC validation.
+    //    b. Get "DNSSEC validated" to return to the client.
+    // 3. If the question enables DNSSEC, and it is a duplicate question, it only needs "DNSSEC validated" records:
+    //    a. Does not need "DNSSEC to be validated" because the non-duplicate question will do the validation.
+    //    b. Get "DNSSEC validated" to return to the client.
+    const mDNSBool requiresRRToValidate = ((flags & kRRTypeAnswersQuestionTypeFlagsRequiresDNSSECRRToValidate) != 0);
+    const mDNSBool requiresValidatedRR = ((flags & kRRTypeAnswersQuestionTypeFlagsRequiresDNSSECRRValidated) != 0);
+    if (!resource_record_answers_dnssec_question_request_type(rr, requiresRRToValidate, requiresValidatedRR))
+    {
+        return mDNSfalse;
+    }
+#else
+    (void) flags;
+#endif
+
+    // TSR should not answer any questions.
+    if (rr->rrtype == kDNSType_TSR)
+    {
+        return mDNSfalse;
+    }
+
+    // CNAME answers any questions, except negative CNAME. (this function is not responsible to check that)
+    if (rr->rrtype == kDNSType_CNAME)
+    {
+        return mDNStrue;
+    }
+
+    // The most usual case where the record type matches the question type.
+    if (rr->rrtype == qtype)
+    {
+        return mDNStrue;
+    }
+
+    // If question asks for any DNS record type, then any record type can answer this question.
+    if (qtype == kDNSQType_ANY)
+    {
+        return mDNStrue;
+    }
+
+    // If the mDNS NSEC record asserts the nonexistence of the question type, then it answers the question type
+    // negatively.
+    if (MULTICAST_NSEC(rr) && RRAssertsNonexistence(rr, qtype))
+    {
+        return mDNStrue;
+    }
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    // The type covered of RRSIG should match the non-duplicate DNSSEC question type, because RRSIG will be used by it
+    // to do DNSSEC validation.
+    if (resource_record_as_rrsig_answers_dnssec_question_type(rr, qtype))
+    {
+        return mDNStrue;
+    }
+#endif
+
+    return mDNSfalse;
+}
+
 // ResourceRecordAnswersQuestion returns mDNStrue if the given resource record is a valid answer to the given question.
 // SameNameRecordAnswersQuestion is the same, except it skips the expensive SameDomainName() call.
 // SameDomainName() is generally cheap when the names don't match, but expensive when they do match,
@@ -1518,8 +1734,6 @@ mDNSexport mDNSBool RRAssertsNonexistence(const ResourceRecord *const rr, mDNSu1
 
 mDNSlocal mDNSBool SameNameRecordAnswersQuestion(const ResourceRecord *const rr, mDNSBool isAuthRecord, const DNSQuestion *const q)
 {
-    mDNSBool checkType = mDNStrue;
-
     // LocalOnly/P2P questions can be answered with AuthRecordAny in this function. LocalOnly/P2P records
     // are handled in LocalOnlyRecordAnswersQuestion
     if (LocalOnlyOrP2PInterface(rr->InterfaceID))
@@ -1555,9 +1769,28 @@ mDNSlocal mDNSBool SameNameRecordAnswersQuestion(const ResourceRecord *const rr,
     if (rr->rrtype == kDNSType_CNAME && rr->RecordType == kDNSRecordTypePacketNegative && rr->rrtype != q->qtype)
          return mDNSfalse;
 
-
     // RR type CNAME matches any query type. QTYPE ANY matches any RR type. QCLASS ANY matches any RR class.
-    if (checkType && !RRTypeAnswersQuestionType(rr,q->qtype)) return(mDNSfalse);
+    RRTypeAnswersQuestionTypeFlags flags = kRRTypeAnswersQuestionTypeFlagsNone;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    // Primary DNSSEC requestor is the non-duplicate DNSSEC question that does the DNSSEC validation, therefore, it needs
+    // the "DNSSEC to be validated" record. (It is also DNSSEC requestor, see below)
+    if (dns_question_is_primary_dnssec_requestor(q))
+    {
+        flags |= kRRTypeAnswersQuestionTypeFlagsRequiresDNSSECRRToValidate;
+    }
+    // DNSSEC requestor is the DNSSEC question that needs DNSSEC validated result.
+    if (dns_question_is_dnssec_requestor(q))
+    {
+        flags |= kRRTypeAnswersQuestionTypeFlagsRequiresDNSSECRRValidated;
+    }
+#endif
+
+    const mDNSBool typeMatches = RRTypeAnswersQuestionType(rr, q->qtype, flags);
+    if (!typeMatches)
+    {
+        return(mDNSfalse);
+    }
+
     if (rr->rrclass != q->qclass && q->qclass != kDNSQClass_ANY) return(mDNSfalse);
 
 
@@ -1660,8 +1893,22 @@ mDNSexport mDNSBool LocalOnlyRecordAnswersQuestion(AuthRecord *const ar, const D
 
     if (ar->ARType != AuthRecordLocalOnly && rr->InterfaceID && !mDNSOpaque16IsZero(q->TargetQID)) return(mDNSfalse);
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    // No local only record can answer DNSSEC question.
+    if (dns_question_is_dnssec_requestor(q))
+    {
+        return mDNSfalse;
+    }
+#endif
+
     // RR type CNAME matches any query type. QTYPE ANY matches any RR type. QCLASS ANY matches any RR class.
-    if (!RRTypeAnswersQuestionType(rr,q->qtype)) return(mDNSfalse);
+    RRTypeAnswersQuestionTypeFlags flags = kRRTypeAnswersQuestionTypeFlagsNone;
+    const mDNSBool typeMatches = RRTypeAnswersQuestionType(rr, q->qtype, flags);
+    if (!typeMatches)
+    {
+        return mDNSfalse;
+    }
+
     if (rr->rrclass != q->qclass && q->qclass != kDNSQClass_ANY) return(mDNSfalse);
 
     return(rr->namehash == q->qnamehash && SameDomainName(rr->name, &q->qname));
@@ -1713,8 +1960,6 @@ mDNSexport mDNSBool AnyTypeRecordAnswersQuestion(const AuthRecord *const ar, con
 // mDNSCoreReceiveResponse when this function is called.
 mDNSexport mDNSBool ResourceRecordAnswersUnicastResponse(const ResourceRecord *const rr, const DNSQuestion *const q)
 {
-    mDNSBool checkType = mDNStrue;
-
     if (q->Suppressed)
         return mDNSfalse;
 
@@ -1725,9 +1970,23 @@ mDNSexport mDNSBool ResourceRecordAnswersUnicastResponse(const ResourceRecord *c
     // If ResourceRecord received via multicast, but question was unicast, then shouldn't use record to answer this question.
     if (rr->InterfaceID && !mDNSOpaque16IsZero(q->TargetQID)) return(mDNSfalse);
 
-
     // RR type CNAME matches any query type. QTYPE ANY matches any RR type. QCLASS ANY matches any RR class.
-    if (checkType && !RRTypeAnswersQuestionType(rr,q->qtype)) return(mDNSfalse);
+    RRTypeAnswersQuestionTypeFlags flags = kRRTypeAnswersQuestionTypeFlagsNone;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    // Thus routine is only used for the records received from internet. Right now, we will not receive DNSSEC validated
+    // record from wire (ODoH will probably give us validated records in the future?). Therefore, we only need to check
+    // if the record answers primary DNSSEC requestor and can be used for validation.
+    if (dns_question_is_primary_dnssec_requestor(q))
+    {
+        flags |= kRRTypeAnswersQuestionTypeFlagsRequiresDNSSECRRToValidate;
+    }
+#endif
+
+    const mDNSBool typeMatches = RRTypeAnswersQuestionType(rr, q->qtype, flags);
+    if (!typeMatches)
+    {
+        return(mDNSfalse);
+    }
 
     if (rr->rrclass != q->qclass && q->qclass != kDNSQClass_ANY) return(mDNSfalse);
 
@@ -1780,15 +2039,23 @@ mDNSexport mDNSu16 GetRDLength(const ResourceRecord *const rr, mDNSBool estimate
 
         case kDNSType_OPT:  return(rr->rdlength);
 
-        case kDNSType_NSEC: {
-            const domainname *next = (const domainname *)rd->data;
-            int dlen = DomainNameLength(next);
-            //
-            if (UNICAST_NSEC(rr))
-                return (mDNSu16)(CompressedDomainNameLength(next, name) + rr->rdlength - dlen);
-            else
+        case kDNSType_NSEC:
+        {
+            const domainname *const next = (const domainname *)rd->data;
+            const int dlen = DomainNameLength(next);
+            if (MULTICAST_NSEC(rr))
+            {
                 return (mDNSu16)((estimate ? 2 : dlen) + rr->rdlength - dlen);
+            }
+            else
+            {
+                // Unicast NSEC does not do name compression. Therefore, we can return `rdlength` directly.
+                // See [RFC 4034 4.1.1.](https://datatracker.ietf.org/doc/html/rfc4034#section-4.1.1).
+                return rr->rdlength;
+            }
         }
+
+        case kDNSType_TSR: return(sizeof(rd->tsr_value));
 
         default:            debugf("Warning! Don't know how to get length of resource type %d", rr->rrtype);
             return(rr->rdlength);
@@ -2063,6 +2330,13 @@ mDNSexport mDNSu8 *putRData(const DNSMessage *const msg, mDNSu8 *ptr, const mDNS
         *ptr++ = rdb->srv.port.b[1];
         return(putDomainNameAsLabels(msg, ptr, limit, &rdb->srv.target));
 
+    case kDNSType_TSR:  {
+            // tsr timestamp on wire is relative time since received.
+            mDNSs32 tsr_relative = mDNSPlatformContinuousTimeSeconds() - rdb->tsr_value;
+            ptr = putVal32(ptr, tsr_relative);
+            return(ptr);
+        }
+
     case kDNSType_OPT:  {
         int len = 0;
         const rdataOPT *opt;
@@ -2129,7 +2403,7 @@ mDNSexport mDNSu8 *putRData(const DNSMessage *const msg, mDNSu8 *ptr, const mDNS
         // NSEC record. The only time compression is used that when we are sending it
         // in mDNS (indicated by non-NULL "msg") and hence we handle mDNS case
         // separately.
-        if (!UNICAST_NSEC(rr))
+        if (MULTICAST_NSEC(rr))
         {
             mDNSu8 *save = ptr;
             int i, j, wlen;
@@ -3135,6 +3409,11 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
         mDNSPlatformMemCopy(rdb->data + dlen, ptr, rlen);
         break;
     }
+    case kDNSType_TSR:
+    {
+        rdb->tsr_value  = (mDNSs32) ((mDNSu32)ptr[0] << 24 | (mDNSu32)ptr[1] << 16 | (mDNSu32)ptr[2] << 8 | ptr[3]);
+        break;
+    }
     default:
         debugf("SetRData: Warning! Reading resource type %d (%s) as opaque data",
                rr->rrtype, DNSTypeName(rr->rrtype));
@@ -3351,11 +3630,11 @@ mDNSexport mDNSBool GetPktLease(mDNS *const m, const DNSMessage *const msg, cons
                 if (o->opt == kDNSOpt_Lease)
                 {
                     *lease = o->u.updatelease;
-                    m->rec.r.resrec.RecordType = 0;     // Clear RecordType to show we're not still using it
+                    mDNSCoreResetRecord(m);
                     return mDNStrue;
                 }
         }
-        m->rec.r.resrec.RecordType = 0;     // Clear RecordType to show we're not still using it
+        mDNSCoreResetRecord(m);
     }
     return mDNSfalse;
 }
@@ -3533,7 +3812,7 @@ mDNSlocal void DNSMessageDumpToLog(const DNSMessage *const msg, const mDNSu8 *co
         ptr = rdata + rdlength;
     }
 
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
         "[Q%u] DNS " PUB_S PUB_S " (%lu) (flags %02X%02X) RCODE: " PUB_S " (%d)" PUB_S PUB_S PUB_S PUB_S PUB_S PUB_S ":"
         PRI_S " %u/%u/%u " PRI_S,
         mDNSVal16(msg->h.id),
@@ -3571,7 +3850,7 @@ mDNSexport void DumpPacket(mStatus status, mDNSBool sent, const char *transport,
     interfaceName = InterfaceNameForID(&mDNSStorage, interfaceID);
 #endif
 
-    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
         "[Q%u] " PUB_S " " PUB_S " DNS Message %lu bytes from " PRI_IP_ADDR ":%d to " PRI_IP_ADDR ":%d via " PUB_S " (%p)",
         mDNSVal16(msg->h.id), action, transport, (unsigned long)(end - (const mDNSu8 *)msg),
         srcaddr ? srcaddr : &zeroIPv4Addr, mDNSVal16(srcport), dstaddr ? dstaddr : &zeroIPv4Addr, mDNSVal16(dstport),
@@ -3608,6 +3887,16 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
     SwapDNSHeaderBytes(msg);
 
     if (authInfo) DNSDigest_SignMessage(msg, &end, authInfo, 0);    // DNSDigest_SignMessage operates on message in network byte order
+
+#if defined(DEBUG) && DEBUG
+    if (authInfo && end)
+    {
+        // If this is a debug build, every time when we sign the response, use the verifying function to ensure that
+        // both functions work correctly.
+        DNSDigest_VerifyMessage_Verify(msg, end, authInfo);
+    }
+#endif
+
     if (!end)
     {
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "mDNSSendDNSMessage: DNSDigest_SignMessage failed");
@@ -3665,7 +3954,18 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
     SwapDNSHeaderBytes(msg);
 
     // Dump the packet with the HINFO and TSIG
-    if (mDNS_PacketLoggingEnabled && !mDNSOpaque16IsZero(msg->h.id))
+    mDNSBool dumpMessage = mDNSfalse;
+    if (mDNS_PacketLoggingEnabled)
+    {
+        // Dump non-mDNS messages, which have non-zero message IDs.
+        dumpMessage = !mDNSOpaque16IsZero(msg->h.id);
+#if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_DISCOVERY)
+        // Also dump mDNS messages that are sent to an address that isn't an mDNS multicast address.
+        dumpMessage = dumpMessage || (dst && !mDNSAddrIsDNSMulticast(dst) && mDNSSameIPPort(dstport, MulticastDNSPort));
+#endif
+    }
+
+    if (dumpMessage)
     {
         char *transport = "UDP";
         mDNSIPPort portNumber = udpSrc ? udpSrc->port : MulticastDNSPort;
@@ -3689,7 +3989,132 @@ mDNSexport mStatus mDNSSendDNSMessage(mDNS *const m, DNSMessage *const msg, mDNS
 // ***************************************************************************
 // MARK: - RR List Management & Task Management
 
-mDNSexport void mDNS_Lock_(mDNS *const m, const char * const functionname)
+mDNSexport void mDNS_VerifyLockState(const char *const operation, const mDNSBool checkIfLockHeld,
+    const mDNSu32 mDNS_busy, const mDNSu32 mDNS_reentrancy, const char *const functionName, const mDNSu32 lineNumber)
+{
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_UNFAIR_LOCK)
+    static os_unfair_lock logLock = OS_UNFAIR_LOCK_INIT;
+#endif
+    static const char *lastLockOperator = mDNSNULL; // The name of the function that succeeded in doing lock operation last time.
+    static mDNSu32 lineNumberlastLockOperator = 0; // The line number in the source code when this function gets called last time.
+
+#define CRASH_ON_LOCK_ERROR 0
+#if (CRASH_ON_LOCK_ERROR)
+    // When CRASH_ON_LOCK_ERROR is set to 1, if we encounter lock error, we will make mDNSResponder crash immediately
+    // to let the bug to be identified easily.
+    mDNSBool lockErrorEncountered = mDNSfalse;
+#endif
+
+    if (checkIfLockHeld)
+    {
+        // If the lock is held by the caller, then the number of times that the lock has been grabbed should be one more
+        // than the number of times that the lock has been dropped, so that only one lock is currently being held.
+        if (mDNS_busy > mDNS_reentrancy + 1)
+        {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
+                "Lock failure: Check Lock, lock was grabbed by multiple callers - "
+                "caller: " PUB_S " at line %u, last successful lock holder: " PUB_S " at line %u, "
+                "mDNS_busy (%u) != mDNS_reentrancy (%u).", functionName, lineNumber, lastLockOperator,
+                lineNumberlastLockOperator, mDNS_busy, mDNS_reentrancy);
+        #if (CRASH_ON_LOCK_ERROR)
+            lockErrorEncountered = mDNStrue;
+        #endif
+        }
+        else if (mDNS_busy < mDNS_reentrancy + 1)
+        {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
+                "Lock failure: Check Lock, last lock dropper dropped the lock before grabbing it - "
+                "caller: " PUB_S " at line %u, last lock dropper: " PUB_S " at line %u, "
+                "mDNS_busy (%u) != mDNS_reentrancy (%u).", functionName, lineNumber, lastLockOperator,
+                lineNumberlastLockOperator, mDNS_busy, mDNS_reentrancy);
+        #if (CRASH_ON_LOCK_ERROR)
+            lockErrorEncountered = mDNStrue;
+        #endif
+        }
+    }
+    else
+    {
+        // In non-critical section:
+        // The number of times that the lock has been grabbed should be equal to the number of times that the lock has
+        // been dropped, which means, no one is currently holding the real lock.
+        if (mDNS_busy == mDNS_reentrancy)
+        {
+            switch (operation[0])
+            {
+                case 'L': // "Lock" (it is paired with "Unlock")
+                case 'D': // "Drop Lock" (it is paired with "Reclaim Lock")
+                    // Add new lock state, and we need to remember who succeeds in doing the operation because it might
+                    // lead to invalid lock state.
+                #if MDNSRESPONDER_SUPPORTS(APPLE, OS_UNFAIR_LOCK)
+                    os_unfair_lock_lock(&logLock);
+                #endif
+                    lastLockOperator = functionName;
+                    lineNumberlastLockOperator = lineNumber;
+                #if MDNSRESPONDER_SUPPORTS(APPLE, OS_UNFAIR_LOCK)
+                    os_unfair_lock_unlock(&logLock);
+                #endif
+                    break;
+
+                case 'U': // "Unlock"
+                case 'R': // "Reclaim Lock"
+                    // Remove the previous lock state, and we can remove the name and the line number that has been
+                    // saved.
+                #if MDNSRESPONDER_SUPPORTS(APPLE, OS_UNFAIR_LOCK)
+                    os_unfair_lock_lock(&logLock);
+                #endif
+                    lastLockOperator = mDNSNULL;
+                    lineNumberlastLockOperator = 0;
+                #if MDNSRESPONDER_SUPPORTS(APPLE, OS_UNFAIR_LOCK)
+                    os_unfair_lock_unlock(&logLock);
+                #endif
+                case 'C': // "Check Lock"
+                    // "Check Lock" operation will never change the lock state, so no need to take a note for that.
+                    break;
+
+                default:
+                    LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT, "Invalid lock operation - " PUB_S, operation);
+                    break;
+            }
+        }
+        else if (mDNS_busy > mDNS_reentrancy)
+        {
+            // If mDNS_busy is greater than mDNS_reentrancy, there is someone who has grabbed the lock. This is invalid
+            // in a critical section.
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
+                "Lock failure: " PUB_S ", last lock holder still holds the lock - "
+                "caller: " PUB_S " at line %u, last successful lock holder: " PUB_S " at line %u, "
+                "mDNS_busy (%u) != mDNS_reentrancy (%u).", operation, functionName, lineNumber, lastLockOperator,
+                lineNumberlastLockOperator, mDNS_busy, mDNS_reentrancy);
+        #if (CRASH_ON_LOCK_ERROR)
+            lockErrorEncountered = mDNStrue;
+        #endif
+        }
+        else // m->mDNS_busy < m->mDNS_reentrancy
+        {
+            // If mDNS_busy is less than mDNS_reentrancy, something bad happens, because no one should drop the lock
+            // before grabbing it successfully. This should never heppen.
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
+                "Lock failure: " PUB_S ", last lock dropper dropped the lock before grabbing it - "
+                "caller: " PUB_S " at line %u, last lock dropper: " PUB_S " at line %u, "
+                "mDNS_busy (%u) != mDNS_reentrancy (%u).", operation, functionName, lineNumber, lastLockOperator,
+                lineNumberlastLockOperator, mDNS_busy, mDNS_reentrancy);
+        #if (CRASH_ON_LOCK_ERROR)
+            lockErrorEncountered = mDNStrue;
+        #endif
+        }
+    }
+
+#if (CRASH_ON_LOCK_ERROR)
+    if (lockErrorEncountered)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
+                  "Encounter lock error, make mDNSResponder crash immediately.");
+        assert(0);
+    }
+#endif
+}
+
+mDNSexport void mDNS_Lock_(mDNS *const m, const char *const functionName, const mDNSu32 lineNumber)
 {
     // MUST grab the platform lock FIRST!
     mDNSPlatformLock(m);
@@ -3698,21 +4123,26 @@ mDNSexport void mDNS_Lock_(mDNS *const m, const char * const functionname)
     // However, when we call a client callback mDNS_busy is one, and we increment mDNS_reentrancy too
     // If that client callback does mDNS API calls, mDNS_reentrancy and mDNS_busy will both be one
     // If mDNS_busy != mDNS_reentrancy that's a bad sign
-    if (m->mDNS_busy != m->mDNS_reentrancy)
-        LogFatalError("%s: mDNS_Lock: Locking failure! mDNS_busy (%ld) != mDNS_reentrancy (%ld)", functionname, m->mDNS_busy, m->mDNS_reentrancy);
+    mDNS_VerifyLockState("Lock", mDNSfalse, m->mDNS_busy, m->mDNS_reentrancy, functionName, lineNumber);
 
     // If this is an initial entry into the mDNSCore code, set m->timenow
     // else, if this is a re-entrant entry into the mDNSCore code, m->timenow should already be set
     if (m->mDNS_busy == 0)
     {
         if (m->timenow)
-            LogMsg("%s: mDNS_Lock: m->timenow already set (%ld/%ld)", functionname, m->timenow, mDNS_TimeNow_NoLock(m));
+        {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, PUB_S ": mDNS_Lock: m->timenow already set (%u/%u)",
+                functionName, m->timenow, mDNS_TimeNow_NoLock(m));
+        }
+
         m->timenow = mDNS_TimeNow_NoLock(m);
         if (m->timenow == 0) m->timenow = 1;
     }
     else if (m->timenow == 0)
     {
-        LogMsg("%s: mDNS_Lock: m->mDNS_busy is %ld but m->timenow not set", functionname, m->mDNS_busy);
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+            PUB_S ": mDNS_Lock: m->mDNS_busy is %u but m->timenow not set", functionName, m->mDNS_busy);
+
         m->timenow = mDNS_TimeNow_NoLock(m);
         if (m->timenow == 0) m->timenow = 1;
     }
@@ -3720,7 +4150,10 @@ mDNSexport void mDNS_Lock_(mDNS *const m, const char * const functionname)
     if (m->timenow_last - m->timenow > 0)
     {
         m->timenow_adjust += m->timenow_last - m->timenow;
-        LogMsg("%s: mDNSPlatformRawTime went backwards by %ld ticks; setting correction factor to %ld", functionname, m->timenow_last - m->timenow, m->timenow_adjust);
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+            PUB_S ": mDNSPlatformRawTime went backwards by %d ticks; setting correction factor to %d",
+            functionName, m->timenow_last - m->timenow, m->timenow_adjust);
+
         m->timenow = m->timenow_last;
     }
     m->timenow_last = m->timenow;
@@ -3766,6 +4199,30 @@ mDNSlocal mDNSs32 GetNextScheduledEvent(const mDNS *const m)
     if (m->NextBonjourDisableTime && (e - m->NextBonjourDisableTime > 0)) e = m->NextBonjourDisableTime;
 #endif
 
+    // Check if it is time to stop domain enumeration.
+    for (const DomainEnumerationOp *op = m->domainsToDoEnumeration; op != mDNSNULL; op = op->next)
+    {
+        // Iterate over all types of domain enumeration.
+        for (mDNSu32 type = 0; type < mDNS_DomainTypeMaxCount; type++)
+        {
+            if (op->enumerations[type] == mDNSNULL)
+            {
+                continue;
+            }
+
+            // Only check the domain enumeration that starts the stopping process.
+            if (op->enumerations[type]->state != DomainEnumerationState_StopInProgress)
+            {
+                continue;
+            }
+
+            if (e - op->enumerations[type]->nextStopTime > 0)
+            {
+                e = op->enumerations[type]->nextStopTime;
+            }
+        }
+    }
+
     // NextScheduledSPRetry only valid when DelaySleep not set
     if (!m->DelaySleep && m->SleepLimit && e - m->NextScheduledSPRetry > 0) e = m->NextScheduledSPRetry;
     if (m->DelaySleep && e - m->DelaySleep > 0) e = m->DelaySleep;
@@ -3790,6 +4247,13 @@ mDNSlocal mDNSs32 GetNextScheduledEvent(const mDNS *const m)
     if (e - m->NextScheduledStopTime > 0) e = m->NextScheduledStopTime;
 
     if (m->NextBLEServiceTime && (e - m->NextBLEServiceTime > 0)) e = m->NextBLEServiceTime;
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+    if (m->NextUpdateDNSSECValidatedCache && (e - m->NextUpdateDNSSECValidatedCache > 0))
+    {
+        e = m->NextUpdateDNSSECValidatedCache;
+    }
+#endif
 
     return(e);
 }
@@ -3871,27 +4335,23 @@ mDNSexport void ShowTaskSchedulingError(mDNS *const m)
     mDNS_Unlock(m);
 }
 
-mDNSexport void mDNS_Unlock_(mDNS *const m, const char *const functionname)
+mDNSexport void mDNS_Unlock_(mDNS *const m, const char *const functionName, const mDNSu32 lineNumber)
 {
     // Decrement mDNS_busy
     m->mDNS_busy--;
 
     // Check for locking failures
-    if (m->mDNS_busy != m->mDNS_reentrancy)
-    {
-        // If mDNS_busy becomes 4294967295U, which is (uint32_t)0 - 1. We are in an invalid lock state, crash
-        // mDNSResponder immediately so that launchd can restart mDNSResponder accordingly without having the user
-        // to reboot the system to get DNS back.
-        // Also assert() ensures that we will get a crash trace when it happens.
-        assert(m->mDNS_busy != UINT32_MAX);
-        LogFatalError("%s: mDNS_Unlock: Locking failure! mDNS_busy (%ld) != mDNS_reentrancy (%ld)", functionname, m->mDNS_busy, m->mDNS_reentrancy);
-    }
+    mDNS_VerifyLockState("Unlock", mDNSfalse, m->mDNS_busy, m->mDNS_reentrancy, functionName, lineNumber);
 
     // If this is a final exit from the mDNSCore code, set m->NextScheduledEvent and clear m->timenow
     if (m->mDNS_busy == 0)
     {
         m->NextScheduledEvent = GetNextScheduledEvent(m);
-        if (m->timenow == 0) LogMsg("%s: mDNS_Unlock: ERROR! m->timenow aready zero", functionname);
+        if (m->timenow == 0)
+        {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, PUB_S ": mDNS_Unlock: ERROR! m->timenow aready zero",
+                      functionName);
+        }
         m->timenow = 0;
     }
 
@@ -4041,17 +4501,28 @@ decimal:    if (!F.havePrecision)
                     s = mDNS_VACB;              // Adjust s to point to the start of the buffer, not the end
                     if (F.altForm)
                     {
-                        mDNSAddr *ip = (mDNSAddr*)a;
+                        const mDNSAddr *const ip = (const mDNSAddr *)a;
                         switch (ip->type)
                         {
                         case mDNSAddrType_IPv4: F.precision =  4; a = (unsigned char *)&ip->ip.v4; break;
                         case mDNSAddrType_IPv6: F.precision = 16; a = (unsigned char *)&ip->ip.v6; break;
-                        default:                F.precision =  0; break;
+                        default:
+                            if (ip->type == mDNSAddrType_None)
+                            {
+                                i = mDNS_snprintf(mDNS_VACB, sizeof(mDNS_VACB), "<<UNSPECIFIED IP ADDRESS>>");
+                            }
+                            else
+                            {
+                                i = mDNS_snprintf(mDNS_VACB, sizeof(mDNS_VACB),
+                                    "<<ERROR: %%#a used with unsupported type: %d>>", ip->type);
+                            }
+                            F.precision = 0;
+                            break;
                         }
                     }
-                    if (F.altForm && !F.precision)
-                        i = mDNS_snprintf(mDNS_VACB, sizeof(mDNS_VACB), "«ZERO ADDRESS»");
-                    else switch (F.precision)
+                    if (!F.altForm || (F.precision != 0))
+                    {
+                        switch (F.precision)
                         {
                         case  4: i = mDNS_snprintf(mDNS_VACB, sizeof(mDNS_VACB), "%d.%d.%d.%d",
                                                    a[0], a[1], a[2], a[3]); break;
@@ -4117,6 +4588,7 @@ decimal:    if (!F.havePrecision)
                         default: i = mDNS_snprintf(mDNS_VACB, sizeof(mDNS_VACB), "%s", "<< ERROR: Must specify"
                                                    " address size (i.e. %.4a=IPv4, %.6a=Ethernet, %.16a=IPv6) >>"); break;
                         }
+                    }
                 }
             }
             break;

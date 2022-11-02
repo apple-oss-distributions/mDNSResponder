@@ -604,44 +604,6 @@ dns_sig0_signature_to_wire_(dns_towire_state_t *NONNULL txn, srp_key_t *key, uin
     }
 }
 
-#ifdef MALLOC_DEBUG_LOGGING
-#undef malloc
-#undef calloc
-#undef strdup
-#undef free
-
-void *
-debug_malloc(size_t len, const char *file, int line)
-{
-    void *ret = malloc(len);
-    INFO("%p: malloc(%zu) at " PUB_S_SRP ":%d", ret, len, file, line);
-    return ret;
-}
-
-void *
-debug_calloc(size_t count, size_t len, const char *file, int line)
-{
-    void *ret = calloc(count, len);
-    INFO("%p: calloc(%zu, %zu) at " PUB_S_SRP ":%d", ret, count, len, file, line);
-    return ret;
-}
-
-char *
-debug_strdup(const char *s, const char *file, int line)
-{
-    char *ret = strdup(s);
-    INFO("%p: strdup(%p) at " PUB_S_SRP ":%d", ret, s, file, line);
-    return ret;
-}
-
-void
-debug_free(void *p, const char *file, int line)
-{
-    INFO("%p: free() at " PUB_S_SRP ":%d", p, file, line);
-    free(p);
-}
-#endif
-
 // Local Variables:
 // mode: C
 // tab-width: 4

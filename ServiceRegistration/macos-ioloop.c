@@ -1,6 +1,6 @@
 /* macos-ioloop.c
  *
- * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -284,6 +284,9 @@ ioloop_comm_cancel(comm_t *connection)
 void
 ioloop_comm_context_set(comm_t *comm, void *context, finalize_callback_t callback)
 {
+    if (comm->context != NULL && comm->finalize != NULL) {
+        comm->finalize(comm->context);
+    }
     comm->finalize = callback;
     comm->context = context;
 }
@@ -320,8 +323,9 @@ ioloop_message_release_(message_t *message, const char *file, int line)
     RELEASE(message, message_finalize);
 }
 
-bool
-ioloop_send_message(comm_t *connection, message_t *responding_to, struct iovec *iov, int iov_len)
+static bool
+ioloop_send_message_inner(comm_t *connection, message_t *responding_to,
+                          struct iovec *iov, int iov_len, bool final, bool send_length)
 {
     dispatch_data_t data = NULL, new_data, combined;
     int i;
@@ -369,7 +373,7 @@ ioloop_send_message(comm_t *connection, message_t *responding_to, struct iovec *
     }
 
     // TCP requires a length as well as the payload.
-    if (connection->tcp_stream) {
+    if (send_length && connection->tcp_stream) {
         len = htons(len);
         new_data = dispatch_data_create(&len, sizeof (len), ioloop_main_queue, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
         if (new_data == NULL) {
@@ -392,10 +396,35 @@ ioloop_send_message(comm_t *connection, message_t *responding_to, struct iovec *
         ERROR("Dropping pending write on " PRI_S_SRP, connection->name ? connection->name : "<null>");
     }
     connection->pending_write = data;
+    connection->final_data = final;
     if (connection->connection_ready) {
         return connection_write_now(connection);
     }
     return true;
+}
+
+bool
+ioloop_send_message(comm_t *connection, message_t *responding_to, struct iovec *iov, int iov_len)
+{
+    return ioloop_send_message_inner(connection, responding_to, iov, iov_len, false, true);
+}
+
+bool
+ioloop_send_final_message(comm_t *connection, message_t *responding_to, struct iovec *iov, int iov_len)
+{
+    return ioloop_send_message_inner(connection, responding_to, iov, iov_len, true, true);
+}
+
+bool
+ioloop_send_data(comm_t *connection, message_t *responding_to, struct iovec *iov, int iov_len)
+{
+    return ioloop_send_message_inner(connection, responding_to, iov, iov_len, false, false);
+}
+
+bool
+ioloop_send_final_data(comm_t *connection, message_t *responding_to, struct iovec *iov, int iov_len)
+{
+    return ioloop_send_message_inner(connection, responding_to, iov, iov_len, true, false);
 }
 
 static bool
@@ -405,7 +434,10 @@ connection_write_now(comm_t *connection)
     // there's a write in progress.
     connection->writes_pending++;
     RETAIN_HERE(connection);
-    nw_connection_send(connection->connection, connection->pending_write, NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT, true,
+    nw_connection_send(connection->connection, connection->pending_write,
+                       (connection->final_data
+                        ? NW_CONNECTION_FINAL_MESSAGE_CONTEXT
+                        : NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT), true,
                        ^(nw_error_t  _Nullable error) {
                            if (error != NULL) {
                                ERROR("ioloop_send_message: write failed: " PUB_S_SRP,
@@ -767,6 +799,7 @@ connection_callback(comm_t *listener, nw_connection_t new_connection)
     connection->datagram_callback = listener->datagram_callback;
     connection->tcp_stream = listener->tcp_stream;
     connection->server = true;
+    connection->context = listener->context;
     RETAIN_HERE(connection); // The connection state changed handler has a reference to the connection.
     nw_connection_set_state_changed_handler(connection->connection,
                                             ^(nw_connection_state_t state, nw_error_t error)
@@ -846,25 +879,25 @@ ioloop_listener_state_changed_handler(comm_t *listener, nw_listener_state_t stat
     if (error != NULL) {
         char errbuf[512];
         connection_error_to_string(error, errbuf, sizeof(errbuf));
-        INFO("nw_listener_create:state changed: " PUB_S_SRP, errbuf);
+        INFO("state changed: " PUB_S_SRP, errbuf);
         if (listener->listener != NULL) {
             nw_listener_cancel(listener->listener);
         }
     } else {
         if (state == nw_listener_state_waiting) {
-            INFO("nw_listener_create: waiting");
+            INFO("waiting");
             return;
         } else if (state == nw_listener_state_failed) {
-            INFO("nw_listener_create: failed");
+            INFO("failed");
             nw_listener_cancel(listener->listener);
         } else if (state == nw_listener_state_ready) {
-            INFO("nw_listener_create: ready");
+            INFO("ready");
             if (listener->avoiding) {
                 listener->listen_port = nw_listener_get_port(listener->listener);
                 if (listener->avoid_ports != NULL) {
                     for (i = 0; i < listener->num_avoid_ports; i++) {
                         if (listener->avoid_ports[i] == listener->listen_port) {
-                            INFO("ioloop_listener_state_changed_handler: Got port %d, which we are avoiding.",
+                            INFO("Got port %d, which we are avoiding.",
                                  listener->listen_port);
                             listener->avoiding = true;
                             listener->listen_port = 0;
@@ -873,14 +906,14 @@ ioloop_listener_state_changed_handler(comm_t *listener, nw_listener_state_t stat
                         }
                     }
                 }
-                INFO("ioloop_listener_state_changed_handler: Got port %d.", listener->listen_port);
+                INFO("Got port %d.", listener->listen_port);
                 listener->avoiding = false;
                 if (listener->ready) {
                     listener->ready(listener->context, listener->listen_port);
                 }
             }
         } else if (state == nw_listener_state_cancelled) {
-            INFO("ioloop_listener_state_changed_handler: cancelled");
+            INFO("cancelled");
             nw_release(listener->listener);
             listener->listener = NULL;
             if (listener->avoiding) {
@@ -936,7 +969,7 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
         return NULL;
     }
 
-    sprintf(portbuf, "%d", port);
+    snprintf(portbuf, sizeof(portbuf), "%d", port);
     listener = calloc(1, sizeof(*listener));
     if (listener == NULL) {
         if (ip_address == NULL) {
@@ -1005,58 +1038,15 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
     }
 
     if (stream) {
-        // TODO: Revert the following code change to the previous one once the port reuse issue has been fixed:
-        // rdar://83071926 (Delete `nw_parameters_create_legacy_tcp_socket()` when creating/recreating TLS listener in srp-mdns-proxy)
-        // nw_parameters_create_secure_tcp() cannot be used when port number is specified to a fixed value because of:
-        // rdar://82847729 ("Address Already in Use" error creating listener if there are established inbound connections to the port)
-        // The TLS listener will get Address Already in Use error even with nw_parameters_set_reuse_local_address set.
-        // To get around the skywalk port reuse issue, nw_parameters_create_legacy_tcp_socket() is used to force the
-        // listener to use socket instead of skywalk.
-
-        nw_parameters_t parameters = NULL;
-        nw_protocol_options_t tls_options = NULL;
-
-        if (listener->listen_port == 0) {
-            // If not port is specified, we will get whatever port is available from the kernel, thus no need to switch
-            // to legacy socket tcp.
-            parameters = nw_parameters_create_secure_tcp(NW_PARAMETERS_DISABLE_PROTOCOL,
-                                                         NW_PARAMETERS_DEFAULT_CONFIGURATION);
-        } else {
-            parameters = nw_parameters_create_legacy_tcp_socket(NW_PARAMETERS_DEFAULT_CONFIGURATION);
-        }
-        if (parameters == NULL) {
-            goto configure_tls_exit;
+        nw_parameters_configure_protocol_block_t configure_tls_block = NW_PARAMETERS_DISABLE_PROTOCOL;
+        if (tls && tls_config != NULL) {
+            configure_tls_block = ^(nw_protocol_options_t tls_options) {
+                tls_config_context_t tls_context = {tls_options, ioloop_main_queue};
+                tls_config((void *)&tls_context);
+            };
         }
 
-        // If TLS is not enabled, use TCP directly.
-        if (!tls || tls_config == NULL) {
-            listener->parameters = parameters;
-            parameters = NULL;
-            goto configure_tls_exit;
-        }
-
-        tls_options = nw_tls_create_options();
-        if (tls_options == NULL) {
-            goto configure_tls_exit;
-        }
-
-        // Enable TLS and configure TLS identity.
-        nw_parameters_add_protocol_stack_member(parameters, nw_protocol_level_application, 0,
-                                                (nw_protocol_parameters_t)tls_options);
-
-        tls_config_context_t tls_context = {tls_options, ioloop_main_queue};
-        tls_config((void *)&tls_context);
-
-        listener->parameters = parameters;
-        parameters = NULL;
-
-    configure_tls_exit:
-        if (tls_options != NULL) {
-            nw_release(tls_options);
-        }
-        if (parameters != NULL) {
-            nw_release(parameters);
-        }
+        listener->parameters = nw_parameters_create_secure_tcp(configure_tls_block, NW_PARAMETERS_DEFAULT_CONFIGURATION);
     } else {
         if (tls) {
             ERROR("DTLS support not implemented.");
@@ -1127,7 +1117,7 @@ ioloop_connection_create(addr_t *NONNULL remote_address, bool tls, bool stream, 
     inet_ntop(remote_address->sa.sa_family, (remote_address->sa.sa_family == AF_INET
                                              ? (void *)&remote_address->sin.sin_addr
                                              : (void *)&remote_address->sin6.sin6_addr), addrbuf, sizeof addrbuf);
-    sprintf(portbuf, "%d", (remote_address->sa.sa_family == AF_INET
+    snprintf(portbuf, sizeof(portbuf), "%d", (remote_address->sa.sa_family == AF_INET
                             ? ntohs(remote_address->sin.sin_port)
                             : ntohs(remote_address->sin6.sin6_port)));
     connection = calloc(1, sizeof(*connection));
@@ -1156,14 +1146,9 @@ ioloop_connection_create(addr_t *NONNULL remote_address, bool tls, bool stream, 
                 sec_protocol_options_set_verify_block(sec_options,
                                                       ^(sec_protocol_metadata_t metadata, sec_trust_t trust_ref,
                                                         sec_protocol_verify_complete_t complete) {
-#if !defined(__OPEN_SOURCE) && (TARGET_OS_TV || TARGET_OS_IPHONE || TARGET_OS_WATCH)
-                                                          tls_keychain_context_t keychain_context = {metadata, trust_ref};
-                                                          const bool valid = opportunistic ? true : tls_cert_evaluate(&keychain_context);
-#else
                                                           (void) metadata;
                                                           (void) trust_ref;
                                                           const bool valid = true;
-#endif
                                                           complete(valid);
                                                       }, ioloop_main_queue);
                 nw_release(sec_options);
@@ -1197,11 +1182,14 @@ ioloop_connection_create(addr_t *NONNULL remote_address, bool tls, bool stream, 
         nw_release(ip_options);
     }
 
-    nw_protocol_options_t tcp_options = nw_protocol_stack_copy_transport_protocol(protocol_stack);
-    nw_tcp_options_set_no_delay(tcp_options, true);
-    nw_tcp_options_set_enable_keepalive(tcp_options, true);
-    nw_release(tcp_options);
-    nw_release(protocol_stack);
+    // Only set TCP options for TCP connections.
+    if (stream) {
+        nw_protocol_options_t tcp_options = nw_protocol_stack_copy_transport_protocol(protocol_stack);
+        nw_tcp_options_set_no_delay(tcp_options, true);
+        nw_tcp_options_set_enable_keepalive(tcp_options, true);
+        nw_release(tcp_options);
+        nw_release(protocol_stack);
+    }
 
     connection->name = strdup(addrbuf);
 
@@ -1402,7 +1390,7 @@ ioloop_dnssd_txn_cancel(dnssd_txn_t *txn)
         DNSServiceRefDeallocate(txn->sdref);
         txn->sdref = NULL;
     } else {
-        INFO("ioloop_dnssd_txn_cancel: dead transaction.");
+        INFO("dead transaction.");
     }
 }
 

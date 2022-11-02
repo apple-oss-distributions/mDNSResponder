@@ -1,6 +1,6 @@
 /* srp-replication.c
  *
- * Copyright (c) 2020-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * This file contains the SRP Advertising Proxy, which is an SRP Server
- * that offers registered addresses using mDNS.
+ * This file contains an implementation of SRP Replication, which allows two or more
+ * SRP servers to cooperatively maintain an SRP registration dataset.
  */
 
 #include <stdlib.h>
@@ -43,8 +43,8 @@
 #include "srp-proxy.h"
 #include "srp-mdns-proxy.h"
 #include "config-parse.h"
-#include "route.h"
 #include "cti-services.h"
+#include "route.h"
 #define DNSMessageHeader dns_wire_t
 #include "dso.h"
 #include "dso-utils.h"
@@ -53,9 +53,7 @@
 #include "srp-replication.h"
 
 static char *current_thread_domain_name;
-static srpl_domain_t *srpl_domains;
 static unclaimed_connection_t *unclaimed_connections;
-static uint64_t server_id;
 
 #define srpl_event_content_type_set(event, content_type) \
     srpl_event_content_type_set_(event, content_type, __FILE__, __LINE__)
@@ -69,13 +67,38 @@ static void srpl_connection_discontinue(srpl_connection_t *srpl_connection);
 static void srpl_connection_next_state(srpl_connection_t *srpl_connection, srpl_state_t state);
 static void srpl_event_initialize(srpl_event_t *event, srpl_event_type_t event_type);
 static void srpl_event_deliver(srpl_connection_t *srpl_connection, srpl_event_t *event);
-static void srpl_domain_advertise(void);
+static void srpl_domain_advertise(srp_server_t *server_state);
+static void srpl_connection_finalize(srpl_connection_t *srpl_connection);
+static void srpl_instance_reconnect(void *context);
+static bool srpl_domain_browse_start(srpl_domain_t *domain);
+static const char *srpl_state_name(srpl_state_t state);
 
 #ifdef DEBUG
 #define STATE_DEBUGGING_ABORT() abort();
 #else
 #define STATE_DEBUGGING_ABORT()
 #endif
+
+// Return continuous time, if provided by O.S., otherwise unadjusted time.
+time_t srpl_time(void)
+{
+#ifdef CLOCK_BOOTTIME
+    // CLOCK_BOOTTIME is a Linux-specific constant that indicates a monotonic time that includes time asleep
+    const int clockid = CLOCK_BOOTTIME;
+#elif defined(CLOCK_MONOTONIC_RAW)
+    // On MacOS, CLOCK_MONOTONIC_RAW is a monotonic time that includes time asleep and is not adjusted.
+    // According to the man page, CLOCK_MONOTONIC on MacOS violates the POSIX spec in that it can be adjusted.
+    const int clockid = CLOCK_MONOTONIC_RAW;
+#else
+    // On other Posix systems, CLOCK_MONOTONIC should be the right thing, at least according to the POSIX spec.
+    const int clockid = CLOCK_MONOTONIC;
+#endif
+    struct timespec tm;
+    clock_gettime(clockid, &tm);
+
+    // We are only accurate to the second.
+    return tm.tv_sec;
+}
 
 //
 // 1. Enumerate all SRP servers that are participating in synchronization on infrastructure: This is done by looking up
@@ -319,6 +342,13 @@ address_query_txn_fail(void *context, int err)
     address_query_cancel(address);
 }
 
+static void
+address_query_context_release(void *context)
+{
+    address_query_t *address = context;
+    RELEASE_HERE(address, address_query_finalize);
+}
+
 static address_query_t *
 address_query_create(const char *hostname, void *context, address_change_callback_t change_callback,
                      address_query_cancel_callback_t cancel_callback)
@@ -328,6 +358,7 @@ address_query_create(const char *hostname, void *context, address_change_callbac
     dnssd_txn_t **txn;
 
     require_action_quiet(address != NULL, exit_no_free, ERROR("No memory for address query."));
+    RETAIN_HERE(address); // We return a retained object, or free it.
     address->hostname = strdup(hostname);
     require_action_quiet(address->hostname != NULL, exit, ERROR("No memory for address query hostname."));
 
@@ -342,22 +373,23 @@ address_query_create(const char *hostname, void *context, address_change_callbac
                                    hostname, ret));
 
         txn = i ? &address->a_query : &address->aaaa_query;
-        *txn = ioloop_dnssd_txn_add(sdref, address, NULL, address_query_txn_fail);
+        *txn = ioloop_dnssd_txn_add(sdref, address, address_query_context_release, address_query_txn_fail);
         require_action_quiet(*txn != NULL, exit,
                              ERROR("Unable to set up ioloop transaction for " PRI_S_SRP " query on " THREAD_BROWSING_DOMAIN,
                                    hostname);
                              DNSServiceRefDeallocate(sdref));
+        RETAIN_HERE(address); // For the QueryRecord context
     }
     address->change_callback = change_callback;
     address->cancel_callback = cancel_callback;
     address->context = context;
     address->cur_address = -1;
-    RETAIN_HERE(address);
-    if (false) {
-    exit:
-        RELEASE_HERE(address, address_query_finalize);
-        address = NULL;
-    }
+    return address;
+
+exit:
+    RELEASE_HERE(address, address_query_finalize);
+    address = NULL;
+
 exit_no_free:
     return address;
 }
@@ -376,11 +408,38 @@ srpl_domain_finalize(srpl_domain_t *domain)
 static void
 srpl_instance_finalize(srpl_instance_t *instance)
 {
+    if (instance->resolve_txn != NULL) {
+        ioloop_dnssd_txn_cancel(instance->resolve_txn);
+        ioloop_dnssd_txn_release(instance->resolve_txn);
+        instance->resolve_txn = NULL;
+    }
     if (instance->domain != NULL) {
         RELEASE_HERE(instance->domain, srpl_domain_finalize);
     }
     free(instance->instance_name);
     free(instance->name);
+    if (instance->incoming != NULL) {
+        srpl_connection_discontinue(instance->incoming);
+        RELEASE_HERE(instance->incoming, srpl_connection_finalize);
+    }
+    if (instance->outgoing != NULL) {
+        srpl_connection_discontinue(instance->outgoing);
+        RELEASE_HERE(instance->outgoing, srpl_connection_finalize);
+    }
+    if (instance->address_query != NULL) {
+        address_query_cancel(instance->address_query);
+        RELEASE_HERE(instance->address_query, address_query_finalize);
+    }
+    if (instance->discontinue_timeout != NULL) {
+        ioloop_cancel_wake_event(instance->discontinue_timeout);
+        ioloop_wakeup_release(instance->discontinue_timeout);
+        instance->discontinue_timeout = NULL;
+    }
+    if (instance->reconnect_timeout != NULL) {
+        ioloop_cancel_wake_event(instance->reconnect_timeout);
+        ioloop_wakeup_release(instance->reconnect_timeout);
+        instance->reconnect_timeout = NULL;
+    }
     free(instance);
 }
 
@@ -550,6 +609,22 @@ srpl_connection_create(srpl_instance_t *instance, bool outgoing)
 }
 
 static void
+srpl_connection_context_release(void *context)
+{
+    srpl_connection_t *srpl_connection = context;
+
+    RELEASE_HERE(srpl_connection, srpl_connection_finalize);
+}
+
+static void
+srpl_instance_context_release(void *context)
+{
+    srpl_instance_t *instance = context;
+
+    RELEASE_HERE(instance, srpl_instance_finalize);
+}
+
+static void
 srpl_instance_discontinue_timeout(void *context)
 {
     srpl_instance_t **sp = NULL, *instance = context;
@@ -564,6 +639,7 @@ srpl_instance_discontinue_timeout(void *context)
     if (instance->discontinue_timeout != NULL) {
         ioloop_cancel_wake_event(instance->discontinue_timeout);
         ioloop_wakeup_release(instance->discontinue_timeout);
+        instance->discontinue_timeout = NULL;
     }
     if (instance->address_query != NULL) {
         address_query_cancel(instance->address_query);
@@ -571,7 +647,9 @@ srpl_instance_discontinue_timeout(void *context)
         instance->address_query = NULL;
     }
     for (int i = 0; i < 2; i++) {
-        srpl_connection_t *srpl_connection = i ? instance->incoming : instance->outgoing;
+        srpl_connection_t **cp = i ? &instance->incoming : &instance->outgoing;
+        srpl_connection_t *srpl_connection = *cp;
+        *cp = NULL;
         if (srpl_connection == NULL) {
             continue;
         }
@@ -580,6 +658,8 @@ srpl_instance_discontinue_timeout(void *context)
         if (srpl_connection->connection != NULL) {
             srpl_connection_discontinue(srpl_connection);
         }
+        // The instance no longer has a reference to the srpl_connection object.
+        RELEASE_HERE(srpl_connection, srpl_connection_finalize);
     }
     if (instance->resolve_txn != NULL) {
         ioloop_dnssd_txn_cancel(instance->resolve_txn);
@@ -623,24 +703,76 @@ srpl_instance_discontinue(srpl_instance_t *instance)
             return;
         }
     }
-    ioloop_add_wake_event(instance->discontinue_timeout, instance, srpl_instance_discontinue_timeout, NULL, 30 * 1000);
+    RETAIN_HERE(instance);
+    ioloop_add_wake_event(instance->discontinue_timeout, instance, srpl_instance_discontinue_timeout, srpl_instance_context_release, 30 * 1000);
 }
 
-static void
-srpl_connection_context_release(void *context)
+void
+srpl_disable(srp_server_t *server_state)
 {
-    srpl_connection_t *srpl_connection = context;
+    srpl_domain_t *domain;
+    srpl_instance_t *instance, *next;
 
-    RELEASE_HERE(srpl_connection, srpl_connection_finalize);
+    for (domain = server_state->srpl_domains; domain != NULL; domain = domain->next) {
+        for (instance = domain->instances; instance != NULL; instance = next) {
+            next = instance->next;
+            srpl_instance_discontinue_timeout(instance);
+        }
+        if (domain->query != NULL) {
+            ioloop_dnssd_txn_cancel(domain->query);
+            ioloop_dnssd_txn_release(domain->query);
+            domain->query = NULL;
+        }
+    }
+    if (server_state->srpl_advertise_txn != NULL) {
+        ioloop_dnssd_txn_cancel(server_state->srpl_advertise_txn);
+        ioloop_dnssd_txn_release(server_state->srpl_advertise_txn);
+        server_state->srpl_advertise_txn = NULL;
+    }
+    server_state->srp_replication_enabled = false;
 }
 
-static void
-srpl_instance_context_release(void *context)
+void
+srpl_drop_srpl_connection(srp_server_t *NONNULL server_state)
 {
-    srpl_instance_t *instance = context;
-
-    RELEASE_HERE(instance, srpl_instance_finalize);
+    for (srpl_domain_t *domain = server_state->srpl_domains; domain != NULL; domain = domain->next) {
+        for (srpl_instance_t *instance = domain->instances; instance != NULL; instance = instance->next) {
+            if (instance->incoming != NULL && instance->incoming->state > srpl_state_disconnect_wait) {
+                srpl_connection_discontinue(instance->incoming);
+            }
+            if (instance->outgoing != NULL && instance->outgoing->state > srpl_state_disconnect_wait) {
+                srpl_connection_discontinue(instance->outgoing);
+            }
+        }
+    }
 }
+
+void
+srpl_undrop_srpl_connection(srp_server_t *NONNULL server_state)
+{
+    for (srpl_domain_t *domain = server_state->srpl_domains; domain != NULL; domain = domain->next) {
+        for (srpl_instance_t *instance = domain->instances; instance != NULL; instance = instance->next) {
+            srpl_instance_reconnect(instance);
+        }
+    }
+}
+
+void
+srpl_drop_srpl_advertisement(srp_server_t *NONNULL server_state)
+{
+    if (server_state->srpl_advertise_txn != NULL) {
+        ioloop_dnssd_txn_cancel(server_state->srpl_advertise_txn);
+        ioloop_dnssd_txn_release(server_state->srpl_advertise_txn);
+        server_state->srpl_advertise_txn = NULL;
+    }
+}
+
+void
+srpl_undrop_srpl_advertisement(srp_server_t *NONNULL server_state)
+{
+    srpl_domain_advertise(server_state);
+}
+
 
 // Copy from into to, and then NULL out the host pointer in from, which is not refcounted, so that we don't get a
 // double free later. Add a reference to the message, since it is refcounted.
@@ -776,6 +908,16 @@ srpl_dso_message_setup(dso_state_t *dso, dso_message_t *state, dns_towire_state_
     return true;
 }
 
+static srp_server_t *
+srpl_connection_server_state(srpl_connection_t *srpl_connection)
+{
+    if (srpl_connection->instance == NULL || srpl_connection->instance->domain == NULL) {
+        INFO("connection has no server_state %p.", srpl_connection->instance);
+        return NULL;
+    }
+    return srpl_connection->instance->domain->server_state;
+}
+
 static bool
 srpl_session_message_send(srpl_connection_t *srpl_connection, bool response)
 {
@@ -783,6 +925,10 @@ srpl_session_message_send(srpl_connection_t *srpl_connection, bool response)
     dns_towire_state_t towire;
     dso_message_t message;
     struct iovec iov;
+    srp_server_t *server_state = srpl_connection_server_state(srpl_connection);
+    if (server_state == NULL) {
+        return false;
+    }
 
     if (!srpl_dso_message_setup(srpl_connection->dso, &message, &towire, dsobuf, sizeof(dsobuf),
                                 srpl_connection_message_get(srpl_connection), response, 0, srpl_connection)) {
@@ -790,7 +936,7 @@ srpl_session_message_send(srpl_connection_t *srpl_connection, bool response)
     }
     dns_u16_to_wire(&towire, kDSOType_SRPLSession);
     dns_rdlength_begin(&towire);
-    dns_u64_to_wire(&towire, server_id);
+    dns_u64_to_wire(&towire, server_state->server_id);
     dns_rdlength_end(&towire);
     if (towire.error) {
         ERROR("ran out of message space at " PUB_S_SRP ", :%d", __FILE__, towire.line);
@@ -802,7 +948,7 @@ srpl_session_message_send(srpl_connection_t *srpl_connection, bool response)
     ioloop_send_message(srpl_connection->connection, srpl_connection_message_get(srpl_connection), &iov, 1);
 
     INFO(PRI_S_SRP " sent SRPLSession " PUB_S_SRP ", id %" PRIx64, srpl_connection->name,
-         response ? "response" : "message", server_id);
+         response ? "response" : "message", server_state->server_id);
     return true;
 }
 
@@ -855,7 +1001,7 @@ srpl_candidate_message_send(srpl_connection_t *srpl_connection, adv_host_t *host
     dns_rdlength_end(&towire);
     dns_u16_to_wire(&towire, kDSOType_SRPLTimeOffset);
     dns_rdlength_begin(&towire);
-    dns_u32_to_wire(&towire, (uint32_t)(time(NULL) - host->update_time));
+    dns_u32_to_wire(&towire, (uint32_t)(srpl_time() - host->update_time));
     dns_rdlength_end(&towire);
     dns_u16_to_wire(&towire, kDSOType_SRPLKeyID);
     dns_rdlength_begin(&towire);
@@ -926,7 +1072,7 @@ srpl_host_message_send(srpl_connection_t *srpl_connection, adv_host_t *host)
     dns_rdlength_end(&towire);
     dns_u16_to_wire(&towire, kDSOType_SRPLTimeOffset);
     dns_rdlength_begin(&towire);
-    dns_u32_to_wire(&towire, (uint32_t)(time(NULL) - host->update_time));
+    dns_u32_to_wire(&towire, (uint32_t)(srpl_time() - host->update_time));
     dns_rdlength_end(&towire);
     dns_u16_to_wire(&towire, kDSOType_SRPLServerStableID);
     dns_rdlength_begin(&towire);
@@ -987,6 +1133,10 @@ srpl_retry_delay_send(srpl_connection_t *srpl_connection, uint32_t delay)
     dns_towire_state_t towire;
     dso_message_t message;
     struct iovec iov;
+    srp_server_t *server_state = srpl_connection_server_state(srpl_connection);
+    if (server_state == NULL) {
+        return false;
+    }
 
     // If this isn't a server, there's no benefit to sending retry delay.
     if (!srpl_connection->is_server) {
@@ -1011,7 +1161,7 @@ srpl_retry_delay_send(srpl_connection_t *srpl_connection, uint32_t delay)
     iov.iov_base = dsobuf;
     ioloop_send_message(srpl_connection->connection, srpl_connection_message_get(srpl_connection), &iov, 1);
 
-    INFO(PRI_S_SRP " sent SRPLHost response, id %" PRIx64, srpl_connection->name, server_id);
+    INFO(PRI_S_SRP " sent SRPLHost response, id %" PRIx64, srpl_connection->name, server_state->server_id);
     return true;
 }
 static bool
@@ -1208,7 +1358,7 @@ srpl_candidate_message(srpl_connection_t *srpl_connection, message_t *message, d
     }
 
     srpl_connection_message_set(srpl_connection, message);
-    event.content.candidate->update_time = time(NULL) - event.content.candidate->update_offset;
+    event.content.candidate->update_time = srpl_time() - event.content.candidate->update_offset;
     srpl_event_deliver(srpl_connection, &event);
     srpl_event_content_type_set(&event, srpl_event_content_type_none);
     return;
@@ -1318,7 +1468,7 @@ srpl_host_message(srpl_connection_t *srpl_connection, message_t *message, dso_st
              DNS_NAME_PARAM_SRP(event.content.host_update.hostname, hostname_buf),
              event.content.host_update.server_stable_id);
         event.content.host_update.update_time =
-            time(NULL) - event.content.host_update.update_offset;
+            srpl_time() - event.content.host_update.update_offset;
         event.content.host_update.message->received_time = event.content.host_update.update_time;
         srpl_connection_message_set(srpl_connection, message);
         srpl_event_deliver(srpl_connection, &event);
@@ -1404,7 +1554,7 @@ srpl_dso_message(srpl_connection_t *srpl_connection, message_t *message, dso_sta
         break;
 
     default:
-        INFO("dso_message: unexpected primary TLV %d", dso->primary.opcode);
+        INFO("unexpected primary TLV %d", dso->primary.opcode);
         dso_simple_response(srpl_connection->connection, NULL, &message->wire, dns_rcode_dsotypeni);
         break;
     }
@@ -1412,9 +1562,8 @@ srpl_dso_message(srpl_connection_t *srpl_connection, message_t *message, dso_sta
 }
 
 static void
-srpl_unclaimed_finalize(void *context)
+srpl_unclaimed_finalize(unclaimed_connection_t *unclaimed)
 {
-    unclaimed_connection_t *unclaimed = context;
     if (unclaimed->wakeup_timeout != NULL) {
         ioloop_wakeup_release(unclaimed->wakeup_timeout);
         unclaimed->wakeup_timeout = NULL;
@@ -1422,7 +1571,7 @@ srpl_unclaimed_finalize(void *context)
     if (unclaimed->message != NULL) {
         ioloop_message_release(unclaimed->message);
     }
-    free(context);
+    free(unclaimed);
 }
 
 static void
@@ -1501,7 +1650,7 @@ srpl_unclaimed_context_release(void *context)
 }
 
 static void
-srpl_add_unclaimed_server(comm_t *connection, message_t *message, dso_state_t *dso)
+srpl_add_unclaimed_server(comm_t *connection, message_t *message, dso_state_t *dso, srp_server_t *server_state)
 {
     unclaimed_connection_t **up, *unclaimed = calloc(1, sizeof(*unclaimed));
     if (unclaimed == NULL) {
@@ -1520,6 +1669,7 @@ srpl_add_unclaimed_server(comm_t *connection, message_t *message, dso_state_t *d
         }
         unclaimed->dso = dso;
         unclaimed->message = message;
+        unclaimed->server_state = server_state;
         ioloop_message_retain(message);
         unclaimed->connection = connection;
         unclaimed->address = connection->address;
@@ -1641,8 +1791,7 @@ srpl_associate_incoming_with_instance(comm_t *connection, message_t *message,
         ioloop_comm_cancel(connection);
         return;
     }
-    instance->incoming = srpl_connection;
-    RETAIN_HERE(instance->incoming);
+    instance->incoming = srpl_connection; // Retained via create/copy rule.
     srpl_connection->connection = connection;
     ioloop_comm_retain(srpl_connection->connection);
     srpl_connection->dso = dso;
@@ -1660,7 +1809,7 @@ srpl_associate_incoming_with_instance(comm_t *connection, message_t *message,
 }
 
 void
-srpl_dso_server_message(comm_t *connection, message_t *message, dso_state_t *dso)
+srpl_dso_server_message(comm_t *connection, message_t *message, dso_state_t *dso, srp_server_t *server_state)
 {
     srpl_domain_t *domain;
     srpl_instance_t *instance;
@@ -1668,7 +1817,7 @@ srpl_dso_server_message(comm_t *connection, message_t *message, dso_state_t *dso
     int i;
 
     // Figure out from which instance this connection originated
-    for (domain = srpl_domains; domain != NULL; domain = domain->next) {
+    for (domain = server_state->srpl_domains; domain != NULL; domain = domain->next) {
         for (instance = domain->instances; instance != NULL; instance = instance->next) {
             address = instance->address_query;
             if (address == NULL) {
@@ -1686,7 +1835,7 @@ srpl_dso_server_message(comm_t *connection, message_t *message, dso_state_t *dso
     }
 
     INFO("incoming SRP Replication server connection from unrecognized server " PRI_S_SRP, connection->name);
-    srpl_add_unclaimed_server(connection, message, dso);
+    srpl_add_unclaimed_server(connection, message, dso, server_state);
 }
 
 static void
@@ -1702,8 +1851,6 @@ srpl_connected(comm_t *connection, void *context)
         srpl_disconnect(srpl_connection);
         return;
     }
-    srpl_connection->connection = connection;
-    ioloop_comm_retain(srpl_connection->connection);
     srpl_connection->dso = connection->dso;
 
     // Generate an event indicating that we've been connected
@@ -1769,7 +1916,7 @@ srpl_my_address_check(const addr_t *address)
     interface_address_state_t *ifa;
     static time_t last_fetch = 0;
     // Update the interface address list every sixty seconds, but only if we're asked to check an address.
-    const time_t now = time(NULL);
+    const time_t now = srpl_time();
     if (now - last_fetch > 60) {
         last_fetch = now;
         ioloop_map_interface_addresses_here(&ifaddrs, NULL, NULL, NULL);
@@ -1805,7 +1952,10 @@ srpl_instance_address_callback(void *context, addr_t *address, bool added, int e
                 srpl_associate_incoming_with_instance(unclaimed->connection,
                                                       unclaimed->message, unclaimed->dso, instance);
                 unclaimed->dso = NULL;
-                *up = unclaimed->next;
+                // srpl_associate_incoming_with_instance retains unclaimed->connection. srpl_unclaimed_cancel would
+                // release it, but it also cancels it, which we don't want, so release it and NULL it out now.
+                ioloop_comm_release(unclaimed->connection);
+                unclaimed->connection = NULL;
                 srpl_unclaimed_cancel(unclaimed);
                 break;
             } else {
@@ -1838,7 +1988,7 @@ srpl_instance_address_callback(void *context, addr_t *address, bool added, int e
         }
 
         // Generate an event indicating that we have a new address.
-        if (instance->outgoing != NULL) {
+        else if (instance->outgoing != NULL) {
             srpl_event_t event;
             srpl_event_initialize(&event, srpl_event_address_add);
             srpl_event_deliver(instance->outgoing, &event);
@@ -1848,11 +1998,13 @@ srpl_instance_address_callback(void *context, addr_t *address, bool added, int e
         srpl_event_initialize(&event, srpl_event_address_remove);
 
         // Generate an event indicating that an address has been removed.
-        if (instance->incoming != NULL) {
-            srpl_event_deliver(instance->incoming, &event);
-        }
-        if (instance->outgoing != NULL) {
-            srpl_event_deliver(instance->outgoing, &event);
+        if (!instance->is_me) {
+            if (instance->incoming != NULL) {
+                srpl_event_deliver(instance->incoming, &event);
+            }
+            if (instance->outgoing != NULL) {
+                srpl_event_deliver(instance->outgoing, &event);
+            }
         }
     }
 }
@@ -1927,7 +2079,6 @@ srpl_instance_add(const char *hostname, const char *instance_name,
         if (instance->address_query == NULL) {
             INFO("unable to create address query");
         } else {
-            RETAIN_HERE(instance->address_query);
             RETAIN_HERE(instance); // retain for the address query.
         }
     }
@@ -1936,15 +2087,7 @@ srpl_instance_add(const char *hostname, const char *instance_name,
         instance->outgoing = srpl_connection_create(instance, true);
         srpl_connection_next_state(instance->outgoing, srpl_state_disconnected);
     }
-
-    if (instance->discontinue_timeout != NULL) {
-        if (instance->discontinuing) {
-            INFO("discontinue on instance " PRI_S_SRP " canceled.", instance->name);
-        }
-        ioloop_cancel_wake_event(instance->discontinue_timeout);
-    }
     instance->num_copies++;
-    instance->discontinuing = false;
 
     // If this add changed the server ID, we may want to re-attempt a connect.
     if (have_server_id && (!instance->have_server_id || instance->server_id != advertised_server_id)) {
@@ -2003,6 +2146,8 @@ srpl_resolve_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags UNUSED flags, 
         return;
     }
 
+    INFO("server " PRI_S_SRP " for " PRI_S_SRP, fullname, domain->name);
+
     server_id_string = TXTRecordGetValuePtr(txtLen, txtRecord, "server-id", &server_id_string_len);
     if (server_id_string != NULL && server_id_string_len < INT64_HEX_STRING_MAX) {
         char *endptr, *nulptr;
@@ -2031,6 +2176,14 @@ srpl_resolve_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags UNUSED flags, 
 }
 
 static void
+srpl_browse_restart(void *context)
+{
+    srpl_domain_t *domain = context;
+    ERROR("restarting browse on domain " PRI_S_SRP, domain->name);
+    srpl_domain_browse_start(domain);
+}
+
+static void
 srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t interfaceIndex,
                      DNSServiceErrorType errorCode, const char *serviceName, const char *regtype,
                      const char *replyDomain, void *context)
@@ -2044,6 +2197,23 @@ srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t
             ioloop_dnssd_txn_release(domain->query);
             domain->query = NULL;
         }
+
+        // Get rid of all instances on the domain, because we aren't going to get remove events for them.
+        // If we start a new browse and get add events while the connections are still up, this will
+        // have no effect.
+        for (srpl_instance_t *instance = domain->instances; instance; instance = instance->next) {
+            INFO("_srpl-tls._tcp service instance " PRI_S_SRP " went away.", instance->instance_name);
+            instance->num_copies = 0;
+            srpl_instance_discontinue(instance);
+        }
+
+        if (domain->server_state->srpl_browse_wakeup == NULL) {
+            domain->server_state->srpl_browse_wakeup = ioloop_wakeup_create();
+        }
+        if (domain->server_state->srpl_browse_wakeup != NULL) {
+            ioloop_add_wake_event(domain->server_state->srpl_browse_wakeup,
+                                  domain, srpl_browse_restart, NULL, 1000);
+        }
         return;
     }
 
@@ -2055,10 +2225,15 @@ srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t
         // See if we already have an instance going; if so, just increment the number of copies of the instance that we've found.
         for (sp = &domain->instances; *sp; sp = &(*sp)->next) {
             instance = *sp;
-            if (!strcmp(instance->instance_name, instance_name) && instance->resolve_txn != NULL) {
-                instance->num_copies++;
-                INFO("duplicate add for " PRI_S_SRP, instance_name);
-                return;
+            if (!strcmp(instance->instance_name, instance_name)) {
+                if (instance->resolve_txn != NULL) {
+                    instance->num_copies++;
+                    INFO("duplicate add for " PRI_S_SRP, instance_name);
+                    return;
+                }
+                // In this case the instance went away and came back, so instance->resolve_txn is NULL, but the instance still exists.
+                INFO(PRI_S_SRP " went away but came back.", instance_name);
+                break;
             }
         }
 
@@ -2068,8 +2243,7 @@ srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t
                 ERROR("no memory for instance" PRI_S_SRP, instance_name);
                 return;
             }
-            // Retain the instance object in case it gets removed while the resolve is still active. We do this here in case the
-            // resolve_txn allocation fails. When the transaction is canceled, the reference to the instance object will be dropped.
+            // This retain is for the instance list on the domain.
             RETAIN_HERE(instance);
             instance->domain = domain;
             RETAIN_HERE(instance->domain);
@@ -2080,24 +2254,38 @@ srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t
                 RELEASE_HERE(instance, srpl_instance_finalize);
                 return;
             }
+        }
 
-            int err = DNSServiceResolve(&sdref, 0, interfaceIndex,
-                                        serviceName, regtype, replyDomain, srpl_resolve_callback, instance);
-            if (err != kDNSServiceErr_NoError) {
-                ERROR("unable to resolve " PRI_S_SRP ": code %d", instance_name, err);
-                RELEASE_HERE(instance, srpl_instance_finalize);
-                return;
+        int err = DNSServiceResolve(&sdref, 0, interfaceIndex,
+                                    serviceName, regtype, replyDomain, srpl_resolve_callback, instance);
+        if (err != kDNSServiceErr_NoError) {
+            ERROR("unable to resolve " PRI_S_SRP ": code %d", instance_name, err);
+            RELEASE_HERE(instance, srpl_instance_finalize);
+            return;
+        }
+        instance->resolve_txn = ioloop_dnssd_txn_add(sdref, instance, srpl_instance_context_release, NULL);
+        if (instance->resolve_txn == NULL) {
+            ERROR("unable to allocate dnssd_txn_t for " PRI_S_SRP, instance_name);
+            DNSServiceRefDeallocate(sdref);
+            return;
+        }
+        // Retain for the dnssd_txn.
+        RETAIN_HERE(instance);
+        INFO("resolving " PRI_S_SRP, instance_name);
+
+        // If we have a discontinue timer going, cancel it.
+        if (instance->discontinue_timeout != NULL) {
+            if (instance->discontinuing) {
+                INFO("discontinue on instance " PRI_S_SRP " canceled.", instance->name);
+                ioloop_cancel_wake_event(instance->discontinue_timeout);
+                instance->discontinuing = false;
             }
-            instance->resolve_txn = ioloop_dnssd_txn_add(sdref, instance, srpl_instance_context_release, NULL);
-            if (instance->resolve_txn == NULL) {
-                ERROR("unable to allocate dnssd_txn_t for " PRI_S_SRP, instance_name);
-                DNSServiceRefDeallocate(sdref);
-                RELEASE_HERE(instance, srpl_instance_finalize);
-                return;
-            }
-            INFO("resolving " PRI_S_SRP, instance_name);
+        }
+
+        // If we created a new instance object, put it at the end of the list.
+        // The instance is already retained when it's allocated.
+        if (*sp == NULL) {
             *sp = instance;
-            RETAIN_HERE(instance);
         }
     } else {
         INFO("_srpl-tls._tcp service instance " PRI_S_SRP " went away.", instance_name);
@@ -2125,15 +2313,36 @@ srpl_dnssd_txn_fail(void *context, int err)
     ERROR("service browse " PRI_S_SRP " i/o failure: %d", domain->name, err);
 }
 
+static bool
+srpl_domain_browse_start(srpl_domain_t *domain)
+{
+    int ret;
+    DNSServiceRef sdref;
+
+    INFO("starting browse on _srpl-tls._tcp");
+    // Look for an NS record for the specified domain using mDNS, not DNS.
+    ret = DNSServiceBrowse(&sdref, kDNSServiceFlagsLongLivedQuery,
+                           kDNSServiceInterfaceIndexAny, "_srpl-tls._tcp", NULL, srpl_browse_callback, domain);
+    if (ret != kDNSServiceErr_NoError) {
+        ERROR("Unable to query for NS records for " PRI_S_SRP, domain->name);
+        return false;
+    }
+    domain->query = ioloop_dnssd_txn_add(sdref, srpl_domain_context_release, NULL, srpl_dnssd_txn_fail);
+    if (domain->query == NULL) {
+        ERROR("Unable to set up ioloop transaction for NS query on " PRI_S_SRP, domain->name);
+        DNSServiceRefDeallocate(sdref);
+        return false;
+    }
+    return true;
+}
+
 static void
-srpl_domain_add(const char *domain_name)
+srpl_domain_add(srp_server_t *server_state, const char *domain_name)
 {
     srpl_domain_t **dp, *domain;
-    DNSServiceRef sdref;
-    int ret;
 
     // Find the domain, if it's already there.
-    for (dp = &srpl_domains; *dp; dp = &(*dp)->next) {
+    for (dp = &server_state->srpl_domains; *dp; dp = &(*dp)->next) {
         domain = *dp;
         if (!strcasecmp(domain->name, domain_name)) {
             break;
@@ -2157,19 +2366,11 @@ srpl_domain_add(const char *domain_name)
         return;
     }
 
-    // Look for an NS record for the specified domain using mDNS, not DNS.
-    ret = DNSServiceBrowse(&sdref, kDNSServiceFlagsLongLivedQuery,
-                                kDNSServiceInterfaceIndexAny, "_srpl-tls._tcp", NULL, srpl_browse_callback, domain);
-    if (ret != kDNSServiceErr_NoError) {
-        ERROR("Unable to query for NS records for " PRI_S_SRP, domain_name);
+    // Start a browse on the domain.
+    if (!srpl_domain_browse_start(domain)) {
         return;
     }
-    domain->query = ioloop_dnssd_txn_add(sdref, srpl_domain_context_release, NULL, srpl_dnssd_txn_fail);
-    if (domain->query == NULL) {
-        ERROR("Unable to set up ioloop transaction for NS query on " PRI_S_SRP, domain_name);
-        DNSServiceRefDeallocate(sdref);
-        return;
-    }
+    domain->server_state = server_state;
     RETAIN_HERE(domain);
 }
 
@@ -2221,10 +2422,12 @@ event_is_message(srpl_event_t *event)
     return false;
 }
 
-// States that require an instance (most states)
+// States that require an instance (most states). We also validate the chain up to the server state, because
+// it's possible for that to go away and yet still for one last event to arrive, at least in principle.
 #define REQUIRE_SRPL_INSTANCE(srpl_connection)                                                              \
     do {                                                                                                    \
-        if ((srpl_connection)->instance == NULL) {                                                          \
+        if ((srpl_connection)->instance == NULL || (srpl_connection)->instance->domain == NULL ||           \
+            (srpl_connection)->instance->domain->server_state == NULL) {                                    \
             ERROR(PRI_S_SRP ": no instance in state " PUB_S_SRP, srpl_connection->name,                     \
                   srpl_connection->state_name);                                                             \
             return srpl_state_invalid;                                                                      \
@@ -2300,7 +2503,8 @@ srpl_instance_reconnect(void *context)
     }
     // We shouldn't have an outgoing connection.
     if (instance->outgoing != NULL && instance->outgoing->state != srpl_state_idle) {
-        FAULT(PRI_S_SRP ": got to srpl_instance_reconnect with a non-idle outgoing connection.", instance->name);
+        FAULT(PRI_S_SRP ": got to srpl_instance_reconnect with a non-idle (" PUB_S_SRP ") outgoing connection.",
+              instance->name, srpl_state_name(instance->outgoing->state));
         return;
     }
 
@@ -2325,7 +2529,9 @@ srpl_connection_drop_state_delay(srpl_instance_t *instance, srpl_connection_t *s
     if (instance->reconnect_timeout == NULL) {
         FAULT(PRI_S_SRP "disconnecting, but can't reconnect!", srpl_connection->name);
     } else {
-        ioloop_add_wake_event(instance->reconnect_timeout, instance, srpl_instance_reconnect, NULL, delay * MSEC_PER_SEC);
+        RETAIN_HERE(instance);
+        ioloop_add_wake_event(instance->reconnect_timeout,
+                              instance, srpl_instance_reconnect, srpl_instance_context_release, delay * MSEC_PER_SEC);
     }
 
     if (srpl_connection == instance->incoming) {
@@ -2339,7 +2545,11 @@ srpl_connection_drop_state_delay(srpl_instance_t *instance, srpl_connection_t *s
 static srpl_state_t
 srpl_connection_drop_state(srpl_instance_t *instance, srpl_connection_t *srpl_connection)
 {
-    return srpl_connection_drop_state_delay(instance, srpl_connection, 300);
+    if (instance == NULL) {
+        return srpl_state_disconnect;
+    } else {
+        return srpl_connection_drop_state_delay(instance, srpl_connection, 300);
+    }
 }
 
 // Call when there's a protocol error, so that we don't start reconnecting over and over.
@@ -2600,8 +2810,13 @@ srpl_server_id_response_wait_action(srpl_connection_t *srpl_connection, srpl_eve
 static srpl_state_t
 srpl_evaluate_incoming_continue(srpl_connection_t *srpl_connection)
 {
+    srp_server_t *server_state = srpl_connection_server_state(srpl_connection);
+    if (server_state == NULL) {
+        return srpl_state_invalid;
+    }
+
     INFO(PRI_S_SRP ": our server id %" PRIx64 " < remote server id %" PRIx64,
-         srpl_connection->name, server_id, srpl_connection->remote_server_id);
+         srpl_connection->name, server_state->server_id, srpl_connection->remote_server_id);
     if (srpl_connection->is_server) {
         return srpl_state_session_response_send;
     } else {
@@ -2613,8 +2828,12 @@ srpl_evaluate_incoming_continue(srpl_connection_t *srpl_connection)
 static srpl_state_t
 srpl_evaluate_incoming_disconnect(srpl_connection_t *srpl_connection, bool bad)
 {
+    srp_server_t *server_state = srpl_connection_server_state(srpl_connection);
+    if (server_state == NULL) {
+        return srpl_state_invalid;
+    }
     INFO(PRI_S_SRP ": our server id %" PRIx64 " > remote server id %" PRIx64,
-         srpl_connection->name, server_id, srpl_connection->remote_server_id);
+         srpl_connection->name, server_state->server_id, srpl_connection->remote_server_id);
     if (srpl_connection->instance->is_me) {
         return srpl_evaluate_incoming_continue(srpl_connection);
     } else {
@@ -2634,16 +2853,20 @@ srpl_server_id_evaluate_action(srpl_connection_t *srpl_connection, srpl_event_t 
     REQUIRE_SRPL_EVENT_NULL(srpl_connection, event);
     REQUIRE_SRPL_INSTANCE(srpl_connection);
     STATE_ANNOUNCE_NO_EVENTS(srpl_connection);
+    srp_server_t *server_state = srpl_connection_server_state(srpl_connection);
+    if (server_state == NULL) {
+        return srpl_state_invalid;
+    }
 
     // Compare the server id we received to our own
     // Return one of "outgoing id equal", "outgoing id less" or "outgoing id more"
-    if (server_id > srpl_connection->remote_server_id) {
+    if (server_state->server_id > srpl_connection->remote_server_id) {
         return srpl_evaluate_incoming_disconnect(srpl_connection, false);
-    } else if (server_id < srpl_connection->remote_server_id) {
+    } else if (server_state->server_id < srpl_connection->remote_server_id) {
         return srpl_evaluate_incoming_continue(srpl_connection);
     } else {
         INFO(PRI_S_SRP ": our server id %" PRIx64 " == remote server id %" PRIx64,
-             srpl_connection->name, server_id, srpl_connection->remote_server_id);
+             srpl_connection->name, server_state->server_id, srpl_connection->remote_server_id);
         if (srpl_connection->is_server) {
             return srpl_state_server_id_regenerate;
         } else {
@@ -2659,13 +2882,17 @@ srpl_server_id_regenerate_action(srpl_connection_t *srpl_connection, srpl_event_
     REQUIRE_SRPL_EVENT_NULL(srpl_connection, event);
     REQUIRE_SRPL_INSTANCE(srpl_connection);
     STATE_ANNOUNCE_NO_EVENTS(srpl_connection);
+    srp_server_t *server_state = srpl_connection_server_state(srpl_connection);
+    if (server_state == NULL) {
+        return srpl_state_invalid;
+    }
 
     // Generate a new server id
-    server_id = srp_random64();
-    INFO(PRI_S_SRP ": new server id %" PRIx64, srpl_connection->name, server_id);
+    server_state->server_id = srp_random64();
+    INFO(PRI_S_SRP ": new server id %" PRIx64, srpl_connection->name, server_state->server_id);
 
     // Re-advertise the domain with the new server ID.
-    srpl_domain_advertise();
+    srpl_domain_advertise(srpl_connection->instance->domain->server_state);
 
     // return the server id in a "new server id" event.
     return srpl_state_server_id_evaluate;
@@ -2731,19 +2958,26 @@ srpl_candidate_host_check(srpl_connection_t *srpl_connection, adv_host_t *host)
     // Evaluate candidate
     // Return "host candidate wanted" or "host candidate not wanted" event
     if (host == NULL) {
+        INFO("host is NULL, answer is yes.");
         return srpl_candidate_yes;
     } else {
         if (host->removed) {
+            INFO("host is removed, answer is yes.");
             return srpl_candidate_yes;
         } else if (host->key_id != srpl_connection->candidate->key_id) {
+            INFO("host key conflict (%x vs %x), answer is conflict.", host->key_id, srpl_connection->candidate->key_id);
             return srpl_candidate_conflict;
         } else {
             // We allow for a bit of jitter. Bear in mind that candidates only happen on startup, so
             // even if a previous run of the SRP server on this device was responsible for registering
             // the candidate, we don't have it, so we still need it.
             if (host->update_time - srpl_connection->candidate->update_time > SRPL_UPDATE_JITTER_WINDOW) {
+                INFO("host update time %" PRId64 " candidate update time %" PRId64 ", answer is no.",
+                     (int64_t)host->update_time, (int64_t)srpl_connection->candidate->update_time);
                 return srpl_candidate_no;
             } else {
+                INFO("host update time %" PRId64 " candidate update time %" PRId64 ", answer is yes.",
+                     (int64_t)host->update_time, (int64_t)srpl_connection->candidate->update_time);
                 return srpl_candidate_yes;
             }
         }
@@ -2759,7 +2993,8 @@ srpl_candidate_check_action(srpl_connection_t *srpl_connection, srpl_event_t *ev
     REQUIRE_SRPL_INSTANCE(srpl_connection);
     STATE_ANNOUNCE_NO_EVENTS_NAME(srpl_connection, srpl_connection->candidate->name);
 
-    adv_host_t *host = srp_adv_host_copy(srpl_connection->candidate->name);
+    adv_host_t *host = srp_adv_host_copy(srpl_connection->instance->domain->server_state,
+                                         srpl_connection->candidate->name);
     srpl_candidate_disposition_t disposition = srpl_candidate_host_check(srpl_connection, host);
     if (host != NULL) {
         srp_adv_host_release(host);
@@ -2810,15 +3045,16 @@ srpl_candidate_host_prepare_action(srpl_connection_t *srpl_connection, srpl_even
 
     // Apply the host from the event to the current host list
     // Return no event
-    adv_host_t *host = srp_adv_host_copy(srpl_connection->candidate->name);
+    adv_host_t *host = srp_adv_host_copy(srpl_connection->instance->domain->server_state,
+                                         srpl_connection->candidate->name);
     if (host == NULL) {
         // If we don't have this host, we can apply the update immediately.
         return srpl_state_candidate_host_apply;
     }
-    if (host->srpl_connection != NULL || host->updates != NULL) {
-        // We are processing an update from a different srpl server.
-        INFO(PRI_S_SRP ": host->srpl_connection = %p  host->updates=%p--going into contention",
-             srpl_connection->name, host->srpl_connection, host->updates);
+    if (host->srpl_connection != NULL || host->update != NULL) {
+        // We are processing an update from a different srpl server or a client.
+        INFO(PRI_S_SRP ": host->srpl_connection = %p  host->update=%p--going into contention",
+             srpl_connection->name, host->srpl_connection, host->update);
         srp_adv_host_release(host);
         return srpl_state_candidate_host_contention_wait;
     } else {
@@ -2891,7 +3127,8 @@ srpl_candidate_host_re_evaluate_action(srpl_connection_t *srpl_connection, srpl_
     }
     // If it was invalidated, or if we got here directly, look up the host by name
     if (host == NULL) {
-        host = srp_adv_host_copy(srpl_connection->candidate->name);
+        host = srp_adv_host_copy(srpl_connection->instance->domain->server_state,
+                                 srpl_connection->candidate->name);
         srpl_connection->candidate->host = host;
     }
     // It's possible that the host is gone; in this case we definitely want the update.
@@ -2924,7 +3161,8 @@ srpl_candidate_host_re_evaluate_action(srpl_connection_t *srpl_connection, srpl_
 static bool
 srpl_connection_host_apply(srpl_connection_t *srpl_connection)
 {
-    if (!srp_dns_evaluate(NULL, srpl_connection, srpl_connection->stashed_host.message)) {
+    if (!srp_dns_evaluate(NULL, srpl_connection->instance->domain->server_state,
+                          srpl_connection, srpl_connection->stashed_host.message)) {
         srpl_host_response_send(srpl_connection, dns_rcode_formerr);
         return false;
     }
@@ -2962,8 +3200,9 @@ static void
 srpl_deferred_advertise_finished_event_deliver(void *context)
 {
     srpl_event_t *event = context;
+    srp_server_t *server_state = event->content.advertise_finished.server_state;
 
-    for (srpl_domain_t *domain = srpl_domains; domain != NULL; domain = domain->next) {
+    for (srpl_domain_t *domain = server_state->srpl_domains; domain != NULL; domain = domain->next) {
         for (srpl_instance_t *instance = domain->instances; instance != NULL; instance = instance->next) {
             if (instance->outgoing != NULL) {
                 srpl_event_deliver(instance->outgoing, event);
@@ -2982,7 +3221,7 @@ srpl_deferred_advertise_finished_event_deliver(void *context)
 // advertise_finished, we do not want any state machine to advance immediately, so we defer delivery of this
 // event until the next time we return to the main event loop.
 void
-srpl_advertise_finished_event_send(char *hostname, int rcode)
+srpl_advertise_finished_event_send(char *hostname, int rcode, srp_server_t *server_state)
 {
     srpl_event_t *event = calloc(1, sizeof(*event));
     if (event == NULL) {
@@ -2993,6 +3232,7 @@ srpl_advertise_finished_event_send(char *hostname, int rcode)
     srpl_event_initialize(event, srpl_event_advertise_finished);
     event->content.advertise_finished.rcode = rcode;
     event->content.advertise_finished.hostname = strdup(hostname);
+    event->content.advertise_finished.server_state = server_state;
     if (event->content.advertise_finished.hostname == NULL) {
         INFO(PRI_S_SRP ": no memory for hostname", hostname);
         free(event);
@@ -3045,7 +3285,8 @@ srpl_send_candidates_received_action(srpl_connection_t *srpl_connection, srpl_ev
     }
     // Generate a list of candidates from the current host list.
     // Return no event
-    num_candidates = srp_current_valid_host_count();
+    srp_server_t *server_state = srpl_connection->instance->domain->server_state;
+    num_candidates = srp_current_valid_host_count(server_state);
     if (num_candidates > 0) {
         adv_host_t **candidates = calloc(num_candidates, sizeof(*candidates));
         int copied_candidates;
@@ -3053,7 +3294,7 @@ srpl_send_candidates_received_action(srpl_connection_t *srpl_connection, srpl_ev
             ERROR("unable to allocate candidates list.");
             return srpl_connection_drop_state(srpl_connection->instance, srpl_connection);
         }
-        copied_candidates = srp_hosts_to_array(candidates, num_candidates);
+        copied_candidates = srp_hosts_to_array(server_state, candidates, num_candidates);
         if (copied_candidates > num_candidates) {
             FAULT("copied_candidates %d > num_candidates %d",
                   copied_candidates, num_candidates);
@@ -3065,8 +3306,8 @@ srpl_send_candidates_received_action(srpl_connection_t *srpl_connection, srpl_ev
             num_candidates = copied_candidates;
         }
         srpl_connection->candidates = candidates;
-        srpl_connection->candidates_not_generated = false;
     }
+    srpl_connection->candidates_not_generated = false;
     srpl_connection->num_candidates = num_candidates;
     srpl_connection->current_candidate = -1;
     return srpl_state_send_candidates_remaining_check;
@@ -3308,18 +3549,19 @@ srpl_stashed_host_check_action(srpl_connection_t *srpl_connection, srpl_event_t 
     REQUIRE_SRPL_INSTANCE(srpl_connection);
     STATE_ANNOUNCE_NO_EVENTS_NAME(srpl_connection, srpl_connection->stashed_host.hostname);
 
-    adv_host_t *host = srp_adv_host_copy(srpl_connection->stashed_host.hostname);
+    adv_host_t *host = srp_adv_host_copy(srpl_connection->instance->domain->server_state,
+                                         srpl_connection->stashed_host.hostname);
     // No contention...
     if (host == NULL) {
         INFO("applying host because it doesn't exist locally.");
         return srpl_state_stashed_host_apply;
-    } else if (host->updates == NULL && host->srpl_connection == NULL && host->clients == NULL) {
+    } else if (host->update == NULL && host->srpl_connection == NULL) {
         INFO("applying host because there's no contention.");
         srp_adv_host_release(host);
         return srpl_state_stashed_host_apply;
     } else {
-        INFO("not applying host because there is contention. host->updates %p   host->srpl_connection: %p  host->clients: %p",
-             host->updates, host->srpl_connection, host->clients);
+        INFO("not applying host because there is contention. host->update %p   host->srpl_connection: %p",
+             host->update, host->srpl_connection);
     }
     srp_adv_host_release(host);
     return srpl_state_ready; // Wait for something to happen
@@ -3485,7 +3727,12 @@ static void
 srpl_deferred_srp_client_update_finished_event_deliver(void *context)
 {
     srpl_event_t *event = context;
-    for (srpl_domain_t *domain = srpl_domains; domain != NULL; domain = domain->next) {
+    srp_server_t *server_state = event->content.client_result.host->server_state;
+    if (server_state == NULL) {
+        FAULT("server state is NULL."); // this can't currently happen, because we just finished updating the host.
+        goto out;
+    }
+    for (srpl_domain_t *domain = server_state->srpl_domains; domain != NULL; domain = domain->next) {
         for (srpl_instance_t *instance = domain->instances; instance != NULL; instance = instance->next) {
             if (instance->outgoing != NULL) {
                 srpl_srp_client_update_send_event_to_connection(instance->outgoing, event);
@@ -3495,6 +3742,7 @@ srpl_deferred_srp_client_update_finished_event_deliver(void *context)
             }
         }
     }
+out:
     srp_adv_host_release(event->content.client_result.host);
     free(event);
 }
@@ -3698,6 +3946,17 @@ srpl_event_configuration_get(srpl_event_type_t event)
     return &srpl_event_configurations[event];
 }
 
+static const char *
+srpl_state_name(srpl_state_t state)
+{
+    for (unsigned i = 0; i < SRPL_NUM_CONNECTION_STATES; i++) {
+        if (srpl_connection_states[i].state == state) {
+            return srpl_connection_states[i].name;
+        }
+    }
+    return "unknown state";
+}
+
 static void
 srpl_event_initialize(srpl_event_t *event, srpl_event_type_t event_type)
 {
@@ -3733,22 +3992,35 @@ srpl_event_deliver(srpl_connection_t *srpl_connection, srpl_event_t *event)
     }
 }
 
-dnssd_txn_t *srpl_advertise_txn;
+static void
+srpl_re_register(void *context)
+{
+    INFO("re-registering SRPL service");
+    srpl_domain_advertise(context);
+}
 
 static void
 srpl_register_completion(DNSServiceRef UNUSED sdref, DNSServiceFlags UNUSED flags, DNSServiceErrorType error_code,
-                         const char *name, const char *regtype, const char *domain, void *UNUSED context)
+                         const char *name, const char *regtype, const char *domain, void *context)
 {
+    srp_server_t *server_state = context;
+
     if (error_code != kDNSServiceErr_NoError) {
         ERROR("unable to advertise _srpl-tls._tcp service: %d", error_code);
-
+        if (server_state->srpl_register_wakeup == NULL) {
+            server_state->srpl_register_wakeup = ioloop_wakeup_create();
+        }
+        if (server_state->srpl_register_wakeup != NULL) {
+            // Try registering again in one second.
+            ioloop_add_wake_event(server_state->srpl_register_wakeup, server_state, srpl_re_register, NULL, 1000);
+        }
         return;
     }
     INFO("registered SRP Replication instance name " PRI_S_SRP "." PUB_S_SRP "." PRI_S_SRP, name, regtype, domain);
 }
 
 static void
-srpl_domain_advertise(void)
+srpl_domain_advertise(srp_server_t *server_state)
 {
     DNSServiceRef sdref = NULL;
     TXTRecordRef txt_record;
@@ -3762,7 +4034,7 @@ srpl_domain_advertise(void)
         goto exit;
     }
 
-    snprintf(server_id_buf, sizeof(server_id_buf), "%" PRIx64, server_id);
+    snprintf(server_id_buf, sizeof(server_id_buf), "%" PRIx64, server_state->server_id);
     err = TXTRecordSetValue(&txt_record, "server-id", strlen(server_id_buf), server_id_buf);
     if (err != kDNSServiceErr_NoError) {
         ERROR("unable to set server-id in TXT record for _srpl-tls._tcp to " PUB_S_SRP, server_id_buf);
@@ -3770,22 +4042,22 @@ srpl_domain_advertise(void)
     }
 
     // If there is already a registration, get rid of it
-    if (srpl_advertise_txn != NULL) {
-        ioloop_dnssd_txn_cancel(srpl_advertise_txn);
-        ioloop_dnssd_txn_release(srpl_advertise_txn);
-        srpl_advertise_txn = NULL;
+    if (server_state->srpl_advertise_txn != NULL) {
+        ioloop_dnssd_txn_cancel(server_state->srpl_advertise_txn);
+        ioloop_dnssd_txn_release(server_state->srpl_advertise_txn);
+        server_state->srpl_advertise_txn = NULL;
     }
 
     err = DNSServiceRegister(&sdref, kDNSServiceFlagsUnique,
                              kDNSServiceInterfaceIndexAny, NULL, "_srpl-tls._tcp", NULL,
                              NULL, htons(853), TXTRecordGetLength(&txt_record), TXTRecordGetBytesPtr(&txt_record),
-                             srpl_register_completion, NULL);
+                             srpl_register_completion, server_state);
     if (err != kDNSServiceErr_NoError) {
         ERROR("unable to advertise _srpl-tls._tcp service");
         goto exit;
     }
-    srpl_advertise_txn = ioloop_dnssd_txn_add(sdref, NULL, NULL, NULL);
-    if (srpl_advertise_txn == NULL) {
+    server_state->srpl_advertise_txn = ioloop_dnssd_txn_add(sdref, NULL, NULL, NULL);
+    if (server_state->srpl_advertise_txn == NULL) {
         ERROR("unable to set up a dnssd_txn_t for _srpl-tls._tcp advertisement.");
         goto exit;
     }
@@ -3799,11 +4071,12 @@ exit:
 }
 
 static void
-srpl_thread_network_name_callback(void *UNUSED NULLABLE context, const char *NULLABLE thread_network_name, cti_status_t status)
+srpl_thread_network_name_callback(void *NULLABLE context, const char *NULLABLE thread_network_name, cti_status_t status)
 {
     size_t thread_domain_size;
     char domain_buf[kDNSServiceMaxDomainName];
     char *new_thread_domain_name;
+    srp_server_t *server_state = context;
 
     if (thread_network_name == NULL || status != kCTIStatus_NoError) {
         ERROR("unable to get thread network name.");
@@ -3821,18 +4094,19 @@ srpl_thread_network_name_callback(void *UNUSED NULLABLE context, const char *NUL
     if (current_thread_domain_name != NULL) {
         srpl_domain_rename(current_thread_domain_name, new_thread_domain_name);
     }
-    srpl_domain_add(new_thread_domain_name);
+    srpl_domain_add(server_state, new_thread_domain_name);
     free(current_thread_domain_name);
     current_thread_domain_name = new_thread_domain_name;
 
-    srpl_domain_advertise();
+    srpl_domain_advertise(server_state);
 }
 
 void
-srpl_startup(void)
+srpl_startup(srp_server_t *server_state)
 {
-    server_id = srp_random64();
-    cti_get_thread_network_name(NULL, srpl_thread_network_name_callback, NULL);
+    server_state->server_id = srp_random64();
+    INFO("server id = %" PRIx64, server_state->server_id);
+    cti_get_thread_network_name(server_state, srpl_thread_network_name_callback, NULL);
 }
 #endif // SRP_FEATURE_REPLICATION
 

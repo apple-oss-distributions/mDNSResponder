@@ -1,7 +1,7 @@
 //
 //  strict.h
 //
-//  Copyright (c) 2017-2020 Apple Inc. All rights reserved.
+//  Copyright (c) 2017-2022 Apple Inc. All rights reserved.
 //
 // Strictly enforces checks for memory allocation failures and setting pointers to NULL after free, based on NRSafeish.h
 // from the NetworkRelay project and nw_strict.h from libnetcore. This header file is intended to help the compiler
@@ -18,6 +18,10 @@
 #ifdef __BLOCKS__
 #include <Block.h>
 #endif // __BLOCKS__
+
+#ifdef __cplusplus
+#include <new>
+#endif // __cplusplus
 
 #pragma mark - Abort
 
@@ -200,6 +204,92 @@ char *strict_strdup(const char *string)
     return result;
 }
 
+static
+__attribute__((__warn_unused_result__))
+inline __attribute__((always_inline))
+char *strict_strndup(const char *string, size_t n)
+{
+    if (_STRICT_UNLIKELY_IS_NULL(string)) {
+        STRICT_ABORT("strict_strndup called with NULL string");
+        // Not reached
+    }
+
+    char *result = strndup(string, n);
+    if (_STRICT_UNLIKELY_BOOL(result == NULL)) {
+        STRICT_ABORT("strndup() failed");
+        // Not reached
+    }
+    return result;
+}
+
+#define strict_strlcpy(DST, SRC, DST_LEN) _strict_strlcpy((char *_Nonnull)DST, (const char *_Nonnull)SRC, DST_LEN)
+
+// An almost drop-in replacement for strlcpy that doesn't require src
+// to be NULL terminated. Unlike strlcpy, it returns void rather than
+// strlen(src).
+static
+inline __attribute__((always_inline))
+void _strict_strlcpy(char *dst, const char *src, size_t dst_len)
+{
+	if (_STRICT_UNLIKELY_IS_NULL(dst)) {
+		STRICT_ABORT("strict_strlcpy called with NULL dst");
+		// Not reached
+	}
+
+	if (_STRICT_UNLIKELY_IS_NULL(src)) {
+		STRICT_ABORT("strict_strlcpy called with NULL src");
+		// Not reached
+	}
+
+	size_t bytes_to_copy = dst_len;
+
+	// Copy as many bytes as we can while making sure
+	// we leave one byte (the last byte) of dst for
+	// the trailing \0 if necessary.
+	while (bytes_to_copy > 1) {
+		if ((*dst++ = *src++) == '\0') {
+			bytes_to_copy = 0;
+			// Although functionally unnecessary, breaking out of the while loop here
+			// is significantly more performant than going back into the while and
+			// breaking out because bytes_to_copy is no longer > 1.
+			break;
+		} else {
+			bytes_to_copy--;
+		}
+	}
+
+	if (bytes_to_copy == 1 && dst_len != 0) {
+		*dst = '\0';
+	}
+}
+
+#define strict_strlcat(DST, SRC, DST_LEN) _strict_strlcat((char *_Nonnull)DST, (const char *_Nonnull)SRC, DST_LEN)
+
+// An almost drop-in replacement for strlcat that doesn't require src
+// to be NULL terminated. Unlike strlcat, it returns void rather than
+// strlen(src) + strlen(dst).
+static
+inline __attribute__((always_inline))
+void _strict_strlcat(char *dst, const char *src, size_t dst_len)
+{
+	if (_STRICT_UNLIKELY_IS_NULL(dst)) {
+		STRICT_ABORT("strict_strlcat called with NULL dst");
+		// Not reached
+	}
+
+	if (_STRICT_UNLIKELY_IS_NULL(src)) {
+		STRICT_ABORT("strict_strlcat called with NULL src");
+		// Not reached
+	}
+
+	while (dst_len != 0 && *dst != '\0') {
+		dst_len--;
+		dst++;
+	}
+
+	_strict_strlcpy(dst, src, dst_len);
+}
+
 #define STRICT_ALLOC_ALIGN_TYPE(align, type)    \
     (type*)strict_memalign(align, sizeof(type))
 
@@ -319,6 +409,60 @@ void *strict_malloc_zone_memalign(malloc_zone_t *zone, size_t alignment, size_t 
 
 __END_DECLS
 
+#if defined(__cplusplus)
+template<class T>
+__attribute__((__warn_unused_result__))
+inline __attribute__((always_inline))
+T * _Nonnull strict_new()
+{
+	// Strictly speaking, we neither need to make sure new doesn't throw,
+	// nor check if new returned nullptr because strict_calloc is supplying
+	// the memory and it is guaranteed to either return the bytes requested
+	// or abort. But we'll check for nullptr to be extra defensive.
+	T *buffer = new (strict_calloc(1, sizeof(T))) T;
+	if (_STRICT_UNLIKELY_IS_NULL(buffer)) {
+		STRICT_ABORT("strict_new(%s) failed", __PRETTY_FUNCTION__);
+		// Not reached
+	}
+	return buffer;
+}
+
+template<class T>
+inline __attribute__((always_inline))
+T * _Nonnull strict_placement_new(void * _Nonnull _buffer)
+{
+	if (_buffer == nullptr) {
+		STRICT_ABORT("strict_placement_new(%s) called with NULL buffer", __PRETTY_FUNCTION__);
+	}
+
+	// Strictly speaking, we neither need to make sure new doesn't throw,
+	// nor check if new returned nullptr because the buffer passed in was
+	// checked to be non-null. But we'll check for nullptr to be extra
+	// defensive.
+	T *buffer = new (_buffer) T;
+	if (_STRICT_UNLIKELY_IS_NULL(buffer)) {
+		STRICT_ABORT("strict_placement_new(%s) failed", __PRETTY_FUNCTION__);
+		// Not reached
+	}
+	return buffer;
+}
+
+#define STRICT_NEW_TYPE(TYPE)									\
+	strict_new<TYPE>()
+
+#define STRICT_PLACEMENT_NEW_TYPE(TYPE, MEMORY)					\
+	strict_placement_new<TYPE>(MEMORY)
+
+template<class T>
+inline __attribute__((always_inline))
+void strict_delete(T ptr)
+{
+	if (ptr != nullptr) {
+		delete ptr;
+	}
+}
+#endif // __cplusplus
+
 #pragma mark - Dispose
 
 #define _STRICT_DISPOSE_NOT_NULL_TEMPLATE(ptr, function)        \
@@ -399,6 +543,13 @@ __END_DECLS
 #define STRICT_DISPOSE_ADDRINFO(ptr)    \
     _STRICT_DISPOSE_TEMPLATE(ptr, freeaddrinfo)
 
+#if defined(__cplusplus)
+#define STRICT_DELETE(ptr)					\
+	_STRICT_DISPOSE_TEMPLATE(ptr, strict_delete)
+#define STRICT_DELETE_THIS(ptr)				\
+	strict_delete(ptr)
+#endif // __cplusplus
+
 #pragma mark - Poison
 
 #if !defined(BUILD_TEXT_BASED_API) || BUILD_TEXT_BASED_API == 0
@@ -413,8 +564,13 @@ __END_DECLS
 #pragma GCC poison reallocf			// use STRICT_REALLOCF_TYPE or strict_reallocf instead
 #pragma GCC poison posix_memalign	// use STRICT_ALLOC_ALIGN_TYPE instead
 #pragma GCC poison strdup			// use strict_strdup instead
+#pragma GCC poison strndup			// use strict_strndup instead
 #pragma GCC poison free				// use strict_free or STRICT_DISPOSE_ALLOCATED instead
 #pragma GCC poison CFRelease		// use STRICT_DISPOSE_CF_OBJECT instead
+#if defined(__cplusplus)
+#pragma GCC poison new				// use STRICT_NEW_TYPE or strict_new instead
+#pragma GCC poison delete			// use STRICT_DELETE, STRICT_DELETE_THIS or strict_delete instead
+#endif // __cplusplus
 
 #pragma GCC poison malloc_zone_malloc   // use strict_malloc_zone_malloc instead
 #pragma GCC poison malloc_zone_calloc   // use strict_malloc_zone_calloc instead
@@ -426,12 +582,27 @@ __END_DECLS
 #ifdef strncat
 #undef strncat
 #endif // strncat
-#pragma GCC poison strncat			// use strlcat instead
+#pragma GCC poison strncat			// use strict_strlcat instead
 
 #ifdef strncpy
 #undef strncpy
 #endif // strncpy
-#pragma GCC poison strncpy			// use strlcpy instead
+#pragma GCC poison strncpy			// use strict_strlcpy instead
+
+#ifdef strlcpy
+#undef strlcpy
+#endif // strlcpy
+#pragma GCC poison strlcpy			// use strict_strlcpy instead
+
+#ifdef strlcat
+#undef strlcat
+#endif // strlcat
+#pragma GCC poison strlcat			// use strict_strlcat instead
+
+#ifdef sprintf
+#undef sprintf
+#endif // sprintf
+#pragma GCC poison sprintf			// use snprintf instead
 #endif // DO_NOT_POISON_UNSAFE_STRING_FUNCTIONS
 
 // The following may be defines. GCC poison doesn't work with defines,

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,13 +22,15 @@
 
 #ifndef NULLABLE
 	#ifdef __clang__
-		#define NULLABLE _Nullable
-		#define NONNULL _Nonnull
-		#define UNUSED __unused
+		#define NULLABLE			_Nullable
+		#define NONNULL				_Nonnull
+		#define NULL_UNSPECIFIED	_Null_unspecified
+		#define UNUSED				__unused
 	#else
 		#define NULLABLE
 		#define NONNULL
-		#define UNUSED __attribute__((unused))
+		#define NULL_UNSPECIFIED
+		#define UNUSED				__attribute__((unused))
 	#endif
 #endif
 

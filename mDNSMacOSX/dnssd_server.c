@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@
 #include "dnssd_private.h"
 #include "gai_options.h"
 #include "mDNSMacOSX.h"
+#include "termination_reason.h"
 
 #include <bsm/libbsm.h>
 #include <CoreUtils/CommonServices.h>
@@ -33,6 +34,7 @@
 #include <mdns/resource_record.h>
 #include <mdns/system.h>
 #include <mdns/ticks.h>
+#include <mdns/xpc.h>
 #include <net/necp.h>
 #include <os/lock.h>
 #include <stdatomic.h>
@@ -51,6 +53,10 @@
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
 #include "resolved_cache.h"
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+#include <mdns/signed_result.h>
 #endif
 
 #include "mdns_strict.h"
@@ -165,16 +171,19 @@ struct dx_session_s {
 	dx_session_t		next;						// Next session in list.
 	dx_request_t		request_list;				// List of outstanding requests.
 	xpc_connection_t	connection;					// Underlying XPC connection.
+	dispatch_source_t	idle_timer;					// Timer for detecting idleness.
+	dispatch_source_t	keepalive_reply_timer;		// Timer for enforcing a time limit on keepalive replies.
 	uint64_t			pending_send_start_ticks;	// Start time in mach ticks of the current pending send condition.
 	audit_token_t		audit_token;				// Client's audit_token.
 	uid_t				client_euid;				// Client's EUID.
 	pid_t				client_pid;					// Client's PID.
 	uint32_t			pending_send_count;			// Count of sent messages that still haven't been processed.
-	uint32_t			pending_send_count_max;		// Maximum pending_send_count value.
 	char				client_name[MAXCOMLEN];		// Client's process name.
-	bool				has_delegate_entitlement;	// True if the client is entitled to be a delegate.
 	bool				terminated;					// True if the session was prematurely ended due to a fatal error.
+	bool				log_pending_send_counts;	// True if pending send counts should be logged.
 };
+
+check_compile_time(sizeof(struct dx_session_s) <= 128);
 
 static void
 _dx_session_invalidate(dx_session_t session);
@@ -237,43 +246,46 @@ OS_CLOSED_OPTIONS(dx_gai_state, uint8_t,
 //    results and restarting the underlying DNSQuestions in failover mode (latter case).
 
 struct dx_gai_request_s {
-	struct dx_request_s			base;					// Request object base.
-	GetAddrInfoClientRequest	gai;					// Underlying GAI request.
-	QueryRecordClientRequest	query;					// Underlying SVCB/HTTPS query request.
-	dx_gai_result_t				results;				// List of pending results.
-	char *						hostname;				// Hostname C string to be resolved for getaddrinfo request.
-	mdns_domain_name_t			last_domain_name;		// Domain name of the most recent result.
-	xpc_object_t				last_tracker_hostname;	// Tracker hostname of the most recent result as an XPC string.
-	xpc_object_t				last_tracker_owner;		// Tracker owner of the most recent result as an XPC string.
-	const char *				svcb_name;				// If non-NULL, the name of the SVCB/HTTPS record to query for.
-	uuid_t *					resolver_uuid;			// The resolver UUID to use for UUID-scoped requests.
-	mdns_dns_service_id_t		custom_service_id;		// ID for this request's custom DNS service.
-	xpc_object_t				cnames_a;				// Hostname's canonical names for A records as an XPC array.
-	ssize_t						cnames_a_expire_idx;	// Index of the first expired canonical name in cnames_a.
-	xpc_object_t				cnames_aaaa;			// Hostname's canonical names for AAAA records as an XPC array.
-	ssize_t						cnames_aaaa_expire_idx;	// Index of the first expired canonical name in cnames_aaaa.
-	audit_token_t *				delegator_audit_token;	// The delegator's audit token.
-	xpc_object_t				fallback_dns_config;	// Fallback DNS configuration.
+	struct dx_request_s				base;					// Request object base.
+	GetAddrInfoClientRequest		gai;					// Underlying GAI request.
+	QueryRecordClientRequest		query;					// Underlying SVCB/HTTPS query request.
+	dx_gai_result_t					results;				// List of pending results.
+	char *							hostname;				// Hostname C string to be resolved for getaddrinfo request.
+	mdns_domain_name_t				last_domain_name;		// Domain name of the most recent result.
+	mdns_xpc_string_t				last_tracker_hostname;	// Tracker hostname of the most recent result (XPC string).
+	mdns_xpc_string_t				last_tracker_owner;		// Tracker owner of the most recent result (XPC string).
+	const char *					svcb_name;				// If non-NULL, name of the SVCB/HTTPS record to query for.
+	uuid_t *						resolver_uuid;			// The resolver UUID to use for UUID-scoped requests.
+	mdns_dns_service_id_t			custom_service_id;		// ID for this request's custom DNS service.
+	xpc_object_t					cnames_a;				// Hostname's canonical names for A records (XPC array).
+	ssize_t							cnames_a_expire_idx;	// Index of the first expired canonical name in cnames_a.
+	xpc_object_t					cnames_aaaa;			// Hostname's canonical names for AAAA records (XPC array).
+	ssize_t							cnames_aaaa_expire_idx;	// Index of the first expired canonical name in cnames_aaaa.
+	audit_token_t *					delegator_audit_token;	// The delegator's audit token.
+	xpc_object_t					fallback_dns_config;	// Fallback DNS configuration.
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
-	mdns_trust_t				trust;					// Trust instance if status is mdns_trust_status_pending
+	mdns_trust_t					trust;					// Trust instance if status is mdns_trust_status_pending
 #endif
-	char *						svcb_name_memory;		// Memory that was allocated for svcb_name.
-	DNSServiceFlags				flags;					// The request's flags parameter.
-	uint32_t					ifindex;				// The interface index to use for interface-scoped requests.
-	DNSServiceProtocol			protocols;				// Used to specify IPv4, IPv6, both, or any IP address types.
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+	mdns_signed_resolve_result_t	signed_resolve;			// Signed resolve result with which to sign results.
+#endif
+	char *							svcb_name_memory;		// Memory that was allocated for svcb_name.
+	DNSServiceFlags					flags;					// The request's flags parameter.
+	uint32_t						ifindex;				// The interface index to use for interface-scoped requests.
+	DNSServiceProtocol				protocols;				// Used to specify IPv4, IPv6, or any IP address types.
 #if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
-	dnssd_log_privacy_level_t	log_privacy_level;		// The log privacy level of this request.
+	dnssd_log_privacy_level_t		log_privacy_level;		// The log privacy level of this request.
 #endif
-	pid_t						effective_pid;			// Effective client PID.
-	uuid_t						effective_uuid;			// Effective client UUID.
-	uint16_t					svcb_type;				// If svcb_name is non-NULL, the type for the SVCB/HTTPS query.
-	dx_gai_state_t				state;					// Collection of state bits.
-	mdns_gai_options_t			options;				// Additional request options.
-	bool						cnames_a_changed;		// True if cnames_a has changed.
-	bool						cnames_aaaa_changed;	// True if cnames_aaaa has changed.
+	pid_t							effective_pid;			// Effective client PID.
+	uuid_t							effective_uuid;			// Effective client UUID.
+	uint16_t						svcb_type;				// If svcb_name is non-NULL, the type for SVCB/HTTPS query.
+	dx_gai_state_t					state;					// Collection of state bits.
+	mdns_gai_options_t				options;				// Additional request options.
+	bool							cnames_a_changed;		// True if cnames_a has changed.
+	bool							cnames_aaaa_changed;	// True if cnames_aaaa has changed.
 };
 
-check_compile_time(sizeof(struct dx_gai_request_s) <= 1544);
+check_compile_time(sizeof(struct dx_gai_request_s) <= 1560);
 
 typedef xpc_object_t
 (*dx_request_take_results_f)(dx_any_request_t request);
@@ -332,21 +344,24 @@ DX_REQUEST_SUBKIND_DEFINE(gai,
 typedef uint8_t dx_auth_tag_t[DNSSD_AUTHENTICATION_TAG_SIZE];
 
 struct dx_gai_result_s {
-	struct dx_object_s		base;				// Object base.
-	dx_gai_result_t			next;				// Next result in list.
-	mdns_resource_record_t	record;				// Result's resource record.
-	mdns_dns_service_t		service;			// The DNS service that was the source of the record.
-	xpc_object_t			cname_update;		// If non-NULL, XPC array to use for a CNAME chain update.
-	xpc_object_t			tracker_hostname;	// If non-NULL, tracker hostname as an XPC string.
-	xpc_object_t			tracker_owner;		// If non-NULL, owner of the tracker hostname as an XPC string.
-	dx_auth_tag_t *			auth_tag;			// Optional authentication tag for hostname+IP addresses.
-	DNSServiceFlags			flags;				// The result's flags.
-	dnssd_negative_reason_t	negative_reason;	// Reason code for negative results.
-	DNSServiceErrorType		error;				// Error returned by mDNS core.
-	uint32_t				ifindex;			// The interface index associated with the result.
-	mdns_resolver_type_t	protocol;			// The transport protocol used to obtain the record.
-	uint16_t				question_id;		// ID of the DNSQuestion used to get the result. For logging purposes.
-	bool					tracker_is_approved;// True if the assoicated tracker is approved for the client.
+	struct dx_object_s				base;				// Object base.
+	dx_gai_result_t					next;				// Next result in list.
+	mdns_resource_record_t			record;				// Result's resource record.
+	mdns_xpc_string_t				provider_name;		// The DNS service's provider name, if any.
+	xpc_object_t					cname_update;		// If non-NULL, XPC array to use for a CNAME chain update.
+	mdns_xpc_string_t				tracker_hostname;	// If non-NULL, tracker hostname as an XPC string.
+	mdns_xpc_string_t				tracker_owner;		// If non-NULL, owner of the tracker hostname as an XPC string.
+	dx_auth_tag_t *					auth_tag;			// Optional authentication tag for hostname+IP addresses.
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+	mdns_signed_hostname_result_t	signed_hostname;	// Signed hostname result.
+#endif
+	DNSServiceFlags					flags;				// The result's flags.
+	dnssd_negative_reason_t			negative_reason;	// Reason code for negative results.
+	DNSServiceErrorType				error;				// Error returned by mDNS core.
+	uint32_t						ifindex;			// The interface index associated with the result.
+	mdns_resolver_type_t			protocol;			// The transport protocol used to obtain the record.
+	uint16_t						question_id;		// ID of DNSQuestion used to get result. Used for logging.
+	bool							tracker_is_approved;// True if the assoicated tracker is approved for the client.
 };
 
 static void
@@ -399,7 +414,10 @@ static void
 _dx_session_send_message(dx_session_t session, xpc_object_t msg);
 
 static void
-_dx_session_terminate(dx_session_t session);
+_dx_session_terminate(dx_session_t session, mdns_termination_reason_t reason);
+
+static void
+_dx_session_reset_idle_timer(dx_session_t session);
 
 static void
 _dx_session_log_error(dx_session_t session, DNSServiceErrorType error);
@@ -411,7 +429,7 @@ static void
 _dx_session_log_pending_send_count_decrease(dx_session_t session);
 
 static void
-_dx_session_log_termination(dx_session_t session);
+_dx_session_log_termination(dx_session_t session, mdns_termination_reason_t reason);
 
 static xpc_object_t
 _dx_request_take_results(dx_request_t request);
@@ -517,9 +535,6 @@ _dx_kqueue_locked(const char *description, bool need_lock, dx_block_t block);
 
 static void
 _dx_replace_domain_name(mdns_domain_name_t *ptr, const domainname *name);
-
-static void
-_dx_replace_xpc_string(xpc_object_t *ptr, const char *string);
 
 static bool
 _dx_qc_result_is_add(QC_result qc_result);
@@ -657,7 +672,7 @@ static void
 _dx_server_check_sessions(void)
 {
 	if (g_session_list) {
-		const uint64_t now_ticks = mach_continuous_time();
+		const uint64_t now_ticks = mach_absolute_time();
 		for (dx_session_t session = g_session_list; session; session = session->next) {
 			_dx_session_check(session, now_ticks);
 		}
@@ -740,8 +755,6 @@ _dx_invalidate(const dx_any_t any)
 //======================================================================================================================
 // MARK: - Session Methods
 
-#define DNSSD_DELEGATE_ENTITLEMENT	"com.apple.private.network.socket-delegate"
-
 static dx_session_t
 _dx_session_create(const xpc_connection_t connection)
 {
@@ -754,14 +767,6 @@ _dx_session_create(const xpc_connection_t connection)
 	obj->client_pid  = xpc_connection_get_pid(obj->connection);
 	obj->client_euid = xpc_connection_get_euid(obj->connection);
 	mdns_system_pid_to_name(obj->client_pid, obj->client_name);
-
-	xpc_object_t value = xpc_connection_copy_entitlement_value(obj->connection, DNSSD_DELEGATE_ENTITLEMENT);
-	if (value) {
-		if (value == XPC_BOOL_TRUE) {
-			obj->has_delegate_entitlement = true;
-		}
-		xpc_forget(&value);
-	}
 
 exit:
 	return obj;
@@ -790,6 +795,7 @@ _dx_session_activate(const dx_session_t me)
 		}
 	});
 	xpc_connection_activate(me->connection);
+	_dx_session_reset_idle_timer(me);
 }
 
 //======================================================================================================================
@@ -798,6 +804,8 @@ static void
 _dx_session_invalidate(const dx_session_t me)
 {
 	xpc_connection_forget(&me->connection);
+	dispatch_source_forget(&me->idle_timer);
+	dispatch_source_forget(&me->keepalive_reply_timer);
 	dx_request_t req;
 	while ((req = me->request_list) != NULL)
 	{
@@ -824,14 +832,15 @@ _dx_session_handle_message(const dx_session_t me, const xpc_object_t msg)
 		err = kDNSServiceErr_BadParam;
 	}
 
-exit:;
+exit:
+	_dx_session_reset_idle_timer(me);
 	xpc_object_t reply = xpc_dictionary_create_reply(msg);
 	if (likely(reply)) {
 		dnssd_xpc_message_set_error(reply, err);
 		_dx_session_send_message(me, reply);
 		xpc_forget(&reply);
 	} else {
-		_dx_session_terminate(me);
+		_dx_session_terminate(me, mdns_termination_reason_client_error);
 	}
 }
 
@@ -923,19 +932,20 @@ _dx_session_append_request(const dx_session_t me, const dx_any_request_t any)
 static void
 _dx_session_check(const dx_session_t me, const uint64_t now_ticks)
 {
-	bool terminate;
-	xpc_object_t results = NULL;
-	require_action_quiet(me->connection, exit, terminate = false);
+	require_return(me->connection);
 
+	xpc_object_t results = NULL;
+	mdns_termination_reason_t terminate_reason;
 	if (me->pending_send_count > 0) {
 		const uint64_t elapsed_secs = (now_ticks - me->pending_send_start_ticks) / mdns_mach_ticks_per_second();
-		require_action_quiet(elapsed_secs < DX_SESSION_BACK_PRESSURE_TIMEOUT_SECS, exit, terminate = true);
+		require_action_quiet(elapsed_secs < DX_SESSION_BACK_PRESSURE_TIMEOUT_SECS, exit,
+			terminate_reason = mdns_termination_reason_back_pressure);
 	}
 	for (dx_request_t req = me->request_list; req; req = req->next) {
 		results = _dx_request_take_results(req);
 		if (results) {
 			xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
-			require_action_quiet(msg, exit, terminate = true);
+			require_action_quiet(msg, exit, terminate_reason = mdns_termination_reason_server_error);
 
 			dnssd_xpc_message_set_id(msg, req->command_id);
 			dnssd_xpc_message_set_error(msg, kDNSServiceErr_NoError);
@@ -945,13 +955,13 @@ _dx_session_check(const dx_session_t me, const uint64_t now_ticks)
 			xpc_forget(&msg);
 		}
 		const bool ok = _dx_request_send_pending_error(req);
-		require_action_quiet(ok, exit, terminate = true);
+		require_action_quiet(ok, exit, terminate_reason = mdns_termination_reason_server_error);
 	}
-	terminate = false;
+	terminate_reason = mdns_termination_reason_none;
 
 exit:
-	if (unlikely(terminate)) {
-		_dx_session_terminate(me);
+	if (terminate_reason != mdns_termination_reason_none) {
+		_dx_session_terminate(me, terminate_reason);
 	}
 	xpc_forget(&results);
 }
@@ -961,42 +971,155 @@ exit:
 static void
 _dx_session_send_message(const dx_session_t me, const xpc_object_t msg)
 {
-	require_quiet(me->connection, exit);
+	require_return(me->connection);
 
 	xpc_connection_send_message(me->connection, msg);
-	if (me->pending_send_count++ == 0) {
-		me->pending_send_start_ticks = mach_continuous_time();
+	++me->pending_send_count;
+	if (me->pending_send_count == 1) {
+		me->pending_send_start_ticks = mach_absolute_time();
 	} else {
+		if (me->pending_send_count == 2) {
+			me->log_pending_send_counts = true;
+		}
 		_dx_session_log_pending_send_count_increase(me);
 	}
-	me->pending_send_count_max = me->pending_send_count;
 	_dx_retain(me);
 	xpc_connection_send_barrier(me->connection,
 	^{
 		--me->pending_send_count;
-		if (me->pending_send_count_max > 1) {
+		if (me->log_pending_send_counts) {
 			_dx_session_log_pending_send_count_decrease(me);
 		}
 		if (me->pending_send_count == 0) {
-			me->pending_send_count_max = 0;
+			me->log_pending_send_counts = false;
 		}
 		_dx_release(me);
 	});
-
-exit:
-	return;
 }
 
 //======================================================================================================================
 
 static void
-_dx_session_terminate(const dx_session_t me)
+_dx_session_terminate(const dx_session_t me, const mdns_termination_reason_t reason)
 {
 	if (!me->terminated) {
-		_dx_session_log_termination(me);
+		_dx_session_log_termination(me, reason);
 		xpc_connection_forget(&me->connection);
 		me->terminated = true;
 	}
+}
+
+//======================================================================================================================
+
+static dispatch_source_t
+_dx_create_oneshot_timer(const uint32_t interval_ms, const unsigned int leeway_percent_numerator)
+{
+	const dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, _dx_server_queue());
+	require_quiet(timer, exit);
+
+	const unsigned int numerator = Min(leeway_percent_numerator, 100);
+	const uint64_t leeway_ns = interval_ms * (numerator * (UINT64_C_safe(kNanosecondsPerMillisecond) / 100));
+	dispatch_source_set_timer(timer, dispatch_time_milliseconds(interval_ms), DISPATCH_TIME_FOREVER, leeway_ns);
+
+exit:
+	return timer;
+}
+
+//======================================================================================================================
+
+#define DX_SESSION_KEEPALIVE_TIMEOUT_MS	(5 * kMillisecondsPerSecond)
+
+static void
+_dx_session_send_keepalive_message(const dx_session_t me)
+{
+	require_return(me->connection && !me->keepalive_reply_timer);
+
+	static xpc_object_t s_keepalive_msg = NULL;
+	if (!s_keepalive_msg) {
+		s_keepalive_msg = xpc_dictionary_create_empty();
+		require_return(s_keepalive_msg);
+
+		dnssd_xpc_message_set_command(s_keepalive_msg, DNSSD_COMMAND_KEEPALIVE);
+	}
+	me->keepalive_reply_timer = _dx_create_oneshot_timer(DX_SESSION_KEEPALIVE_TIMEOUT_MS, 5);
+	require_return(me->keepalive_reply_timer);
+
+	_dx_retain(me);
+	xpc_connection_send_message_with_reply(me->connection, s_keepalive_msg, _dx_server_queue(),
+	^(xpc_object_t reply)
+	{
+		if (me->connection && (xpc_get_type(reply) == XPC_TYPE_DICTIONARY)) {
+			dispatch_source_forget(&me->keepalive_reply_timer);
+			_dx_session_reset_idle_timer(me);
+		}
+		_dx_release(me);
+	});
+	dispatch_source_set_event_handler(me->keepalive_reply_timer,
+	^{
+		dispatch_source_forget(&me->keepalive_reply_timer);
+		_dx_session_terminate(me, mdns_termination_reason_keepalive_timeout);
+	});
+	dispatch_activate(me->keepalive_reply_timer);
+}
+
+//======================================================================================================================
+
+#define DX_SESSION_IDLE_TIMEOUT_WITH_REQUESTS_MS	(1 * kSecondsPerMinute * kMillisecondsPerSecond)
+#define DX_SESSION_IDLE_TIMEOUT_WITHOUT_REQUESTS_MS	(5 * kSecondsPerMinute * kMillisecondsPerSecond)
+
+static void
+_dx_session_reset_idle_timer(const dx_session_t me)
+{
+	require_return(!me->keepalive_reply_timer);
+
+	dispatch_source_forget(&me->idle_timer);
+	uint32_t idle_interval_ms;
+	if (me->request_list) {
+		idle_interval_ms = DX_SESSION_IDLE_TIMEOUT_WITH_REQUESTS_MS;
+	} else {
+		idle_interval_ms = DX_SESSION_IDLE_TIMEOUT_WITHOUT_REQUESTS_MS;
+	}
+	me->idle_timer = _dx_create_oneshot_timer(idle_interval_ms, 5);
+	require_return(me->idle_timer);
+
+	dispatch_source_set_event_handler(me->idle_timer,
+	^{
+		dispatch_source_forget(&me->idle_timer);
+		if (me->request_list) {
+			_dx_session_send_keepalive_message(me);
+		} else {
+			_dx_session_terminate(me, mdns_termination_reason_idle);
+		}
+	});
+	dispatch_activate(me->idle_timer);
+}
+
+//======================================================================================================================
+
+static bool
+_dx_session_has_entitlement(const dx_session_t me, const char * const entitlement)
+{
+	bool entitled = false;
+	if (me->connection) {
+		entitled = mdns_xpc_connection_is_entitled(me->connection, entitlement);
+	}
+	return entitled;
+}
+
+//======================================================================================================================
+
+static bool
+_dx_session_has_delegate_entitlement(const dx_session_t me)
+{
+	return _dx_session_has_entitlement(me, "com.apple.private.network.socket-delegate");
+}
+
+//======================================================================================================================
+
+static bool
+_dx_session_has_prohibit_encrypted_dns_entitlement(const dx_session_t me)
+{
+	return _dx_session_has_entitlement(me, "com.apple.private.dnssd.prohibit-encrypted-dns");
 }
 
 //======================================================================================================================
@@ -1032,11 +1155,13 @@ _dx_session_log_pending_send_count_decrease(const dx_session_t me)
 //======================================================================================================================
 
 static void
-_dx_session_log_termination(const dx_session_t me)
+_dx_session_log_termination(const dx_session_t me, const mdns_termination_reason_t reason)
 {
-	os_log_error(_mdns_server_log(),
-		"XPC session termination -- pending send count: %u, pending send count max: %u, client pid: %lld (%{public}s)",
-		me->pending_send_count, me->pending_send_count_max, (long long)me->client_pid, me->client_name);
+	os_log_with_type(_mdns_server_log(),
+		(reason == mdns_termination_reason_idle) ? OS_LOG_TYPE_INFO : OS_LOG_TYPE_DEFAULT,
+		"Session terminated -- reason: %{mdns:termination_reason}d, pending send count: %u, client pid: %lld "
+		"(%{public}s)",
+		reason, me->pending_send_count, (long long)me->client_pid, me->client_name);
 }
 
 //======================================================================================================================
@@ -1169,7 +1294,11 @@ _dx_gai_request_activate(const dx_gai_request_t me)
 	DNSServiceErrorType err;
 	bool defer_start = false;
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
-	if (os_feature_enabled(mDNSResponder, bonjour_privacy)) {
+	bool privacy_check_done = false;
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+	privacy_check_done = (me->signed_resolve != NULL);
+#endif
+	if (!privacy_check_done && os_feature_enabled(mDNSResponder, bonjour_privacy)) {
 		err = _dx_gai_request_trust_check(me, &defer_start);
 		require_noerr_quiet(err, exit);
 	}
@@ -1272,9 +1401,12 @@ _dx_gai_request_invalidate(const dx_gai_request_t me)
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
 	mdns_trust_forget(&me->trust);
 #endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+	mdns_forget(&me->signed_resolve);
+#endif
 	mdns_forget(&me->last_domain_name);
-	xpc_forget(&me->last_tracker_hostname);
-	xpc_forget(&me->last_tracker_owner);
+	mdns_xpc_string_forget(&me->last_tracker_hostname);
+	mdns_xpc_string_forget(&me->last_tracker_owner);
 }
 
 //======================================================================================================================
@@ -1298,6 +1430,9 @@ static DNSServiceErrorType
 _dx_gai_request_parse_params(const dx_gai_request_t me, const xpc_object_t params)
 {
 	DNSServiceErrorType err;
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+	mdns_signed_resolve_result_t signed_resolve = NULL;
+#endif
 	const char * const hostname = dnssd_xpc_parameters_get_hostname(params);
 	require_action_quiet(hostname, exit, err = kDNSServiceErr_BadParam);
 
@@ -1333,7 +1468,9 @@ _dx_gai_request_parse_params(const dx_gai_request_t me, const xpc_object_t param
 		}
 	}
 	if (delegator_audit_token || delegator_uuid || (delegator_pid != 0)) {
-		require_action_quiet(session->has_delegate_entitlement, exit, err = kDNSServiceErr_NoAuth);
+		const bool entitled = _dx_session_has_delegate_entitlement(session);
+		require_action_quiet(entitled, exit, err = kDNSServiceErr_NoAuth);
+
 		if (delegator_audit_token) {
 			me->delegator_audit_token = (audit_token_t *)mdns_memdup(delegator_audit_token,
 				sizeof(*delegator_audit_token));
@@ -1405,10 +1542,46 @@ _dx_gai_request_parse_params(const dx_gai_request_t me, const xpc_object_t param
 #if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
 	me->log_privacy_level = dnssd_xpc_parameters_get_log_privacy_level(params);
 #endif
+	if (dnssd_xpc_parameters_get_prohibit_encrypted_dns(params)) {
+		const bool entitled = _dx_session_has_prohibit_encrypted_dns_entitlement(session);
+		require_action_quiet(entitled, exit, err = kDNSServiceErr_NoAuth);
+
+		me->options |= mdns_gai_option_prohibit_encrypted_dns;
+	}
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+	size_t signed_data_len;
+	const uint8_t * const signed_data = dnssd_xpc_parameters_get_validation_data(params, &signed_data_len);
+	if (signed_data) {
+		// Get signed_result data and validate
+		OSStatus create_err;
+		signed_resolve = mdns_signed_resolve_result_create_from_data(signed_data, signed_data_len, &create_err);
+		require_action_quiet(signed_resolve, exit, err = kDNSServiceErr_Invalid; os_log_error(_mdns_server_log(),
+			"[R%u] Failed to create signed resolve result from data: %{mdns:err}ld",
+			me->base.request_id, (long)create_err));
+
+		// Use signed result to verify params otherwise don't set the signed result instance to fallback to trust
+		if (mdns_signed_resolve_result_contains(signed_resolve, me->hostname, me->ifindex)) {
+			const bool allowed = mdns_system_is_signed_result_uuid_valid(mdns_signed_result_get_uuid(signed_resolve));
+			require_action_quiet(allowed, exit, err = kDNSServiceErr_PolicyDenied; os_log_error(_mdns_server_log(),
+				"[R%u] Signed result UUID revoked.", me->base.request_id));
+
+			os_log_debug(_mdns_server_log(), "[R%u] Allowing signed result", me->base.request_id);
+			me->signed_resolve = signed_resolve;
+			signed_resolve = NULL;
+		} else {
+			os_log_error(_mdns_server_log(),
+				"[R%u] Signed resolve result does not cover request -- hostname: %{private,mask.hash}s, ifindex: %u",
+				me->base.request_id, me->hostname, me->ifindex);
+		}
+	}
+#endif
 	_dx_gai_request_log_start(me, delegator_pid, delegator_uuid);
 	err = kDNSServiceErr_NoError;
 
 exit:
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+	mdns_forget(&signed_resolve);
+#endif
 	return err;
 }
 
@@ -1767,6 +1940,14 @@ _dx_gai_request_query_result_handler(mDNS * const m, DNSQuestion * const q, cons
 			if (svcb_doh_uri) {
 				// Pass the domain to map if the record is DNSSEC signed.
 				char *svcb_domain = NULL;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
+				char svcb_domain_buffer[MAX_ESCAPED_DOMAIN_NAME] = "";
+				if (resource_record_get_validation_result(answer) == dnssec_secure) {
+					if (ConvertDomainNameToCString(answer->name, svcb_domain_buffer)) {
+						svcb_domain = svcb_domain_buffer;
+					}
+				}
+#endif
 				Querier_RegisterDoHURI(svcb_doh_uri, svcb_domain);
 				ForgetMem(&svcb_doh_uri);
 			}
@@ -1834,19 +2015,38 @@ _dx_gai_request_enqueue_result(const dx_gai_request_t me, const QC_result qc_res
 	result->ifindex     = mDNSPlatformInterfaceIndexfromInterfaceID(&mDNSStorage, answer->InterfaceID, mDNStrue);
 	result->protocol    = answer->protocol;
 	result->question_id = mDNSVal16(q->TargetQID);
-	result->service     = answer->dnsservice;
-	if (result->service) {
-		mdns_retain(result->service);
+	if (answer->dnsservice) {
+		result->provider_name = mdns_dns_service_copy_provider_name(answer->dnsservice);
 	}
-	const int record_type = mdns_resource_record_get_type(result->record);
-	if ((me->options & mdns_gai_option_auth_tags) && is_add && !result_error) {
-		uint8_t auth_tag[DNSSD_AUTHENTICATION_TAG_SIZE];
-		const bool ok = _dx_authenticate_address_rdata(me->effective_uuid, me->hostname, record_type,
-			mdns_resource_record_get_rdata_bytes_ptr(result->record), auth_tag);
-		if (ok) {
-			check_compile_time(sizeof(*result->auth_tag) == sizeof(auth_tag));
-			result->auth_tag = (dx_auth_tag_t *)mdns_memdup(auth_tag, sizeof(*result->auth_tag));
+	const uint16_t record_type = mdns_resource_record_get_type(result->record);
+	if (is_add && !result_error) {
+		if (me->options & mdns_gai_option_auth_tags) {
+			uint8_t auth_tag[DNSSD_AUTHENTICATION_TAG_SIZE];
+			const bool ok = _dx_authenticate_address_rdata(me->effective_uuid, me->hostname, record_type,
+				mdns_resource_record_get_rdata_bytes_ptr(result->record), auth_tag);
+			if (ok) {
+				check_compile_time(sizeof(*result->auth_tag) == sizeof(auth_tag));
+				result->auth_tag = (dx_auth_tag_t *)mdns_memdup(auth_tag, sizeof(*result->auth_tag));
+			}
 		}
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+		if (me->signed_resolve && ((record_type == kDNSType_A) || (record_type == kDNSType_AAAA))) {
+			OSStatus create_err;
+			mdns_signed_hostname_result_t signed_hostname;
+			if (record_type == kDNSType_A) {
+				signed_hostname = mdns_signed_hostname_result_create_ipv4(me->signed_resolve, rdata_ptr, &create_err);
+			} else {
+				signed_hostname = mdns_signed_hostname_result_create_ipv6(me->signed_resolve, rdata_ptr,
+					result->ifindex, &create_err);
+			}
+			result->signed_hostname = signed_hostname;
+			if (!result->signed_hostname) {
+				os_log_error(_mdns_server_log(),
+					"[R%u] Failed to create IPv%d signed hostname result: %{mdns:err}ld",
+					me->base.request_id, (record_type == kDNSType_A) ? 4 : 6, (long)create_err);
+			}
+		}
+#endif
 	}
 	result->cname_update = _dx_gai_request_copy_cname_update(me, record_type);
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
@@ -1856,17 +2056,17 @@ _dx_gai_request_enqueue_result(const dx_gai_request_t me, const QC_result qc_res
 		bool approved_domain = false;
 		const tracker_state_t tracker_state = resolved_cache_get_tracker_state(q, &hostname, &owner, &approved_domain);
 		if ((tracker_state == tracker_state_known_tracker) && hostname) {
-			_dx_replace_xpc_string(&me->last_tracker_hostname, hostname);
+			mdns_xpc_string_recreate(&me->last_tracker_hostname, hostname);
 			require_action_quiet(me->last_tracker_hostname, exit, err = kDNSServiceErr_NoMemory);
 
 			result->tracker_hostname = me->last_tracker_hostname;
 			xpc_retain(result->tracker_hostname);
 			if (owner) {
-				_dx_replace_xpc_string(&me->last_tracker_owner, owner);
+				mdns_xpc_string_recreate(&me->last_tracker_owner, owner);
 				require_action_quiet(me->last_tracker_owner, exit, err = kDNSServiceErr_NoMemory);
 
 				result->tracker_owner = me->last_tracker_owner;
-				xpc_retain(result->tracker_owner);
+				mdns_xpc_string_retain(result->tracker_owner);
 			}
 			if (approved_domain) {
 				result->tracker_is_approved = true;
@@ -2005,8 +2205,9 @@ _dx_gai_request_log_error(const dx_gai_request_t me, const DNSServiceErrorType e
 {
 	const dx_session_t session = me->base.session;
 	os_log_error(_mdns_server_log(),
-		"[R%u] getaddrinfo error -- error: %{mdns:err}ld, client pid: %lld (%{public}s)",
-		me->base.request_id, (long)error, (long long)session->client_pid, session->client_name);
+		"[R%u] getaddrinfo error -- hostname: %{private,mask.hash}s, error: %{mdns:err}ld"", "
+		"client pid: %lld (%{public}s)",
+		me->base.request_id, me->hostname, (long)error, (long long)session->client_pid, session->client_name);
 }
 
 //======================================================================================================================
@@ -2019,17 +2220,18 @@ _dx_gai_request_start_client_requests(const dx_gai_request_t me, const bool need
 	// Set up GetAddrInfo parameters.
 	GetAddrInfoClientRequestParams gai_params;
 	GetAddrInfoClientRequestParamsInit(&gai_params);
-	gai_params.hostnameStr		= me->hostname;
-	gai_params.requestID		= me->base.request_id;
-	gai_params.interfaceIndex	= me->ifindex;
-	gai_params.flags			= me->flags;
-	gai_params.protocols		= me->protocols;
-	gai_params.effectivePID		= me->effective_pid;
-	gai_params.effectiveUUID	= me->effective_uuid;
-	gai_params.peerUID			= session->client_euid;
+	gai_params.hostnameStr				= me->hostname;
+	gai_params.requestID				= me->base.request_id;
+	gai_params.interfaceIndex			= me->ifindex;
+	gai_params.flags					= me->flags;
+	gai_params.protocols				= me->protocols;
+	gai_params.effectivePID				= me->effective_pid;
+	gai_params.effectiveUUID			= me->effective_uuid;
+	gai_params.peerUID					= session->client_euid;
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
-	gai_params.needEncryption	= (me->options & mdns_gai_option_need_encryption) != 0;
-	gai_params.failoverMode		= (me->state & dx_gai_state_failover_mode) != 0;
+	gai_params.needEncryption			= (me->options & mdns_gai_option_need_encryption) != 0;
+	gai_params.failoverMode				= (me->state & dx_gai_state_failover_mode) != 0;
+	gai_params.prohibitEncryptedDNS		= (me->options & mdns_gai_option_prohibit_encrypted_dns) != 0;
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
 	gai_params.peerAuditToken			= &session->audit_token;
@@ -2057,6 +2259,7 @@ _dx_gai_request_start_client_requests(const dx_gai_request_t me, const bool need
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 		query_params.needEncryption			= (me->options & mdns_gai_option_need_encryption) != 0;
 		query_params.failoverMode			= (me->state & dx_gai_state_failover_mode) != 0;
+		query_params.prohibitEncryptedDNS	= (me->options & mdns_gai_option_prohibit_encrypted_dns) != 0;
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
 		query_params.peerAuditToken			= &session->audit_token;
@@ -2113,11 +2316,14 @@ static void
 _dx_gai_result_finalize(const dx_gai_result_t me)
 {
 	mdns_forget(&me->record);
-	mdns_forget(&me->service);
+	mdns_xpc_string_forget(&me->provider_name);
 	xpc_forget(&me->cname_update);
-	xpc_forget(&me->tracker_hostname);
-	xpc_forget(&me->tracker_owner);
+	mdns_xpc_string_forget(&me->tracker_hostname);
+	mdns_xpc_string_forget(&me->tracker_owner);
 	ForgetMem(&me->auth_tag);
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+	mdns_forget(&me->signed_hostname);
+#endif
 }
 
 //======================================================================================================================
@@ -2157,11 +2363,8 @@ _dx_gai_result_to_dictionary(const dx_gai_result_t me)
 	if (me->negative_reason != dnssd_negative_reason_none) {
 		dnssd_xpc_result_set_negative_reason(result, me->negative_reason);
 	}
-	if (me->service) {
-		const char * const provider_name = mdns_dns_service_get_provider_name(me->service);
-		if (provider_name) {
-			dnssd_xpc_result_set_provider_name(result, provider_name);
-		}
+	if (me->provider_name) {
+		dnssd_xpc_result_set_provider_name(result, me->provider_name);
 	}
 	if (me->auth_tag) {
 		dnssd_xpc_result_set_authentication_tag(result, me->auth_tag, sizeof(*me->auth_tag));
@@ -2176,6 +2379,15 @@ _dx_gai_result_to_dictionary(const dx_gai_result_t me)
 		}
 		dnssd_xpc_result_set_tracker_is_approved(result, me->tracker_is_approved);
 	}
+#if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
+	if (me->signed_hostname) {
+		size_t data_len;
+		const uint8_t * const data = mdns_signed_result_get_data(me->signed_hostname, &data_len);
+		if (data) {
+			dnssd_xpc_result_set_validation_data(result, data, data_len);
+		}
+	}
+#endif
 	return result;
 }
 
@@ -2278,18 +2490,6 @@ _dx_replace_domain_name(mdns_domain_name_t * const ptr, const domainname * const
 	if (!original || !SameDomainNameBytes(mdns_domain_name_get_labels(original), name->c)) {
 		mdns_forget(ptr);
 		*ptr = mdns_domain_name_create_with_labels(name->c, NULL);
-	}
-}
-
-//======================================================================================================================
-
-static void
-_dx_replace_xpc_string(xpc_object_t * const ptr, const char * const string)
-{
-	const char * const original = *ptr ? xpc_string_get_string_ptr(*ptr) : NULL;
-	if (!original || (strcmp(original, string) != 0)) {
-		xpc_forget(ptr);
-		*ptr = xpc_string_create(string);
 	}
 }
 

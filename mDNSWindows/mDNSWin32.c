@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -601,7 +601,7 @@ mDNSexport void	mDNSPlatformUnlock( const mDNS * const inMDNS )
 //	mDNSPlatformStrLCopy
 //===========================================================================================================================
 
-mDNSexport mDNSu32	mDNSPlatformStrLCopy( void *inDst, const void *inSrc, mDNSu32 inSize )
+mDNSexport void	mDNSPlatformStrLCopy( void *inDst, const void *inSrc, mDNSu32 inSize )
 {
 	const char *		src = (const char *) inSrc;
 	
@@ -615,19 +615,11 @@ mDNSexport mDNSu32	mDNSPlatformStrLCopy( void *inDst, const void *inSrc, mDNSu32
 			if( ( *dst++ = *src++ ) == '\0' )
 			{
 				// Null terminator encountered, so exit.
-				goto exit;
+				return;
 			}
 		}
 		*dst = '\0';
 	}
-	
-	while( *src++ != '\0' )
-	{
-		// Stop at null terminator.
-	}
-	
-exit:
-	return( (mDNSu32)( src - (const char *) inSrc ) - 1 );
 }
 
 //===========================================================================================================================
@@ -811,6 +803,23 @@ mDNSexport mDNSs32	mDNSPlatformRawTime( void )
 mDNSexport mDNSs32	mDNSPlatformUTC( void )
 {
 	return ( mDNSs32 ) time( NULL );
+}
+
+//===========================================================================================================================
+//	mDNSPlatformContinuousTimeSeconds
+//===========================================================================================================================
+
+mDNSexport mDNSs32	mDNSPlatformContinuousTimeSeconds( void )
+{
+	// The caller is expecting a signed time since an epoch. This is expected to
+	// wrap at the epoch, and the epoch could be boot time or 1970, or something else;
+	// in this case it's boot time, so it would be surprising for the tick count to
+	// ever be big enough to go negative when cast to signed. However, the caller
+	// is expected to use two's complement math, so if this were to wrap, it should
+	// behave correctly. We use GetTickCount64() rather than GetTickCount() because
+	// GetTickCount() would wrap after 47 days, and two's complement comparisons
+	// wouldn't work because we're dividing by 1000.
+	return ( mDNSs32 ) (GetTickCount64( NULL ) / 1000ULL);
 }
 
 //===========================================================================================================================
@@ -1096,7 +1105,7 @@ mDNSPlatformTCPConnect
 
 	// Setup connection data object
 
-	sock->userCallback	= inCallback;
+	sock->tcpConnectionCallback = inCallback;
 	sock->userContext	= inContext;
 
 	mDNSPlatformMemZero(&saddr, sizeof(saddr));
@@ -1262,7 +1271,7 @@ TCPSocketNotification( SOCKET sock, LPWSANETWORKEVENTS event, void *context )
 	DEBUG_UNUSED( sock );
 
 	require_action( tcpSock, exit, err = mStatus_BadParamErr );
-	callback = ( TCPConnectionCallback ) tcpSock->userCallback;
+	callback = tcpSock->tcpConnectionCallback;
 	require_action( callback, exit, err = mStatus_BadParamErr );
 
 	if ( event && ( event->lNetworkEvents & FD_CONNECT ) )
@@ -1989,9 +1998,7 @@ SetDomainFromDHCP( void )
 
 	for ( pAdapter = pAdapterInfo; pAdapter; pAdapter = pAdapter->Next )
 	{
-		if ( pAdapter->IpAddressList.IpAddress.String &&
-			 pAdapter->IpAddressList.IpAddress.String[0] &&
-			 pAdapter->GatewayList.IpAddress.String &&
+		if ( pAdapter->IpAddressList.IpAddress.String[0] &&
 			 pAdapter->GatewayList.IpAddress.String[0] &&
 			 ( !index || ( pAdapter->Index == index ) ) )
 		{
@@ -2083,9 +2090,7 @@ mDNSPlatformGetPrimaryInterface( mDNSAddr * v4, mDNSAddr * v6, mDNSAddr * router
 
 	for ( pAdapter = pAdapterInfo; pAdapter; pAdapter = pAdapter->Next )
 	{
-		if ( pAdapter->IpAddressList.IpAddress.String &&
-			 pAdapter->IpAddressList.IpAddress.String[0] &&
-			 pAdapter->GatewayList.IpAddress.String &&
+		if ( pAdapter->IpAddressList.IpAddress.String[0] &&
 			 pAdapter->GatewayList.IpAddress.String[0] &&
 			 ( StringToAddress( v4, pAdapter->IpAddressList.IpAddress.String ) == mStatus_NoError ) &&
 			 ( StringToAddress( router, pAdapter->GatewayList.IpAddress.String ) == mStatus_NoError ) &&

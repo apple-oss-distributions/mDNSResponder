@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,15 @@
 
 #ifndef __mDNSFeatures_h
 #define __mDNSFeatures_h
+
+#define HAS_FEATURE_CAT(A, B)       A ## B
+#define HAS_FEATURE_CHECK_0         1
+#define HAS_FEATURE_CHECK_1         1
+#define HAS_FEATURE(X)              ((X) / HAS_FEATURE_CAT(HAS_FEATURE_CHECK_, X))
+
+#define MDNSRESPONDER_SUPPORTS(PLATFORM, FEATURE) \
+    (MDNSRESPONDER_PLATFORM_ ## PLATFORM && \
+    HAS_FEATURE(MDNSRESPONDER_SUPPORTS_ ## PLATFORM ## _ ## FEATURE))
 
 #ifndef MDNSRESPONDER_PLATFORM_APPLE
 #define MDNSRESPONDER_PLATFORM_APPLE        0
@@ -65,14 +74,5 @@
         #define MDNSRESPONDER_SUPPORTS_COMMON_LOCAL_DNS_RESOLVER_DISCOVERY 0
     #endif
 #endif
-
-#define HAS_FEATURE_CAT(A, B)       A ## B
-#define HAS_FEATURE_CHECK_0         1
-#define HAS_FEATURE_CHECK_1         1
-#define HAS_FEATURE(X)              ((X) / HAS_FEATURE_CAT(HAS_FEATURE_CHECK_, X))
-
-#define MDNSRESPONDER_SUPPORTS(PLATFORM, FEATURE) \
-    (MDNSRESPONDER_PLATFORM_ ## PLATFORM && \
-    HAS_FEATURE(MDNSRESPONDER_SUPPORTS_ ## PLATFORM ## _ ## FEATURE))
 
 #endif  // __mDNSFeatures_h

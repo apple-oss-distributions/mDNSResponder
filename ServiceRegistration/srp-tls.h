@@ -86,6 +86,26 @@ srp_tls_get_next_rotation_time(void);
 void
 srp_tls_dispose(void);
 
+/*!
+ *  @brief
+ *      Schedule a wake up event so that the TLS certificate that is expiring
+ *      soon can be replaced with a newer one.
+ *
+ *  @param tls_listener_wakeup
+ *      The pointer to the tls_listener_wakeup context that can be used to
+ *      schedule a wakeup event.
+ *
+ *  @param tls_listener_to_rotate
+ *      The TLS listener object created before that needs to be rotated.
+ *
+ *  @discussion
+ *      The TLS rotation time is controlled by
+ *      <code>TLS_CERTIFICATE_VALID_PERIOD_SECS</code>.
+ */
+void
+schedule_tls_certificate_rotation(wakeup_t * NULLABLE * NONNULL tls_listener_wakeup,
+	comm_t * NONNULL tls_listener_to_rotate);
+
 #endif // __SRP_TLS_H
 
 // Local Variables:

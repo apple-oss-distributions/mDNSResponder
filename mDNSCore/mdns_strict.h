@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2020-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,6 +63,7 @@
 #define mdns_memalign strict_memalign
 #define MDNS_ALLOC_ALIGN_TYPE STRICT_ALLOC_ALIGN_TYPE
 #define mdns_strdup strict_strdup
+#define mdns_strlcpy strict_strlcpy
 
 #pragma mark -- Dispose --
 
@@ -105,11 +106,33 @@
 
 #else  // !MDNS_NO_STRICT
 
+#include <stddef.h>
+#include <stdlib.h>
+
 #define mdns_malloc 			malloc
 #define mdns_calloc 			calloc
 #define mdns_strdup 			strdup
 #define mdns_free(obj) \
 	_MDNS_STRICT_DISPOSE_TEMPLATE(obj, free)
+
+static
+inline __attribute__((always_inline))
+void _mdns_strict_strlcpy(char * const restrict dst, const char * const restrict src, const size_t dst_len)
+{
+	if (dst_len == 0) {
+		return;
+	}
+
+	char *d = dst;
+	const char *s = src;
+	for (size_t n = dst_len - 1; n > 0; n--) {
+		if ((*d++ = *s++) == '\0') {
+			return;
+		}
+	}
+	*d = '\0';
+}
+#define mdns_strlcpy			_mdns_strict_strlcpy
 
 
 #define MDNS_DISPOSE_DNS_SERVICE_REF(obj) _MDNS_STRICT_DISPOSE_TEMPLATE(obj, DNSServiceRefDeallocate)
