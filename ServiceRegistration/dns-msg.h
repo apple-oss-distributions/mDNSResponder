@@ -431,9 +431,9 @@ void dns_edns0_option_end_(dns_towire_state_t *NONNULL txn, int line);
 void dns_sig0_signature_to_wire_(dns_towire_state_t *NONNULL txn,
                                  srp_key_t *NONNULL key, uint16_t key_tag,
                                  dns_name_pointer_t *NONNULL signer, const char *NONNULL signer_hostname,
-                                 const char *NONNULL signer_domain, int line);
-#define dns_sig0_signature_to_wire(txn, key, key_tag, signer, signer_hostname, signer_domain) \
-    dns_sig0_signature_to_wire_(txn, key, key_tag, signer, signer_hostname, signer_domain, __LINE__)
+                                 const char *NONNULL signer_domain, uint32_t timenow, int line);
+#define dns_sig0_signature_to_wire(txn, key, key_tag, signer, signer_hostname, signer_domain, timenow) \
+    dns_sig0_signature_to_wire_(txn, key, key_tag, signer, signer_hostname, signer_domain, timenow, __LINE__)
 
 int dns_send_to_server(dns_transaction_t *NONNULL txn,
                        const char *NONNULL anycast_address, uint16_t port,

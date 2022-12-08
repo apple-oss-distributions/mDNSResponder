@@ -1233,7 +1233,7 @@ static void dso_connect_internal(dso_connect_state_t *cs, mDNSBool reconnecting)
                 // If we cannot find dso_connect_state_t in the system's list, it means that we have already canceled it
                 // in dso_connect_state_cancel() including the corresponding nw_connection_t. Therefore, there is no
                 // need to cancel the nw_connection_t again.
-                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT, "[DSOC%u->C%" PRIu64
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[DSOC%u->C%" PRIu64
                           "] No connect state found - nw_connection_state_t: " PUB_S ".",
                           serial, nw_connection_id, nw_connection_state_to_string(state));
             } else {

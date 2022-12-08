@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2007-2022 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -271,6 +271,7 @@ static void ShowNameConflictNotification(CFMutableArrayRef header, CFStringRef s
 
     CFDictionarySetValue(dictionary, kCFUserNotificationAlertHeaderKey, header);
     CFDictionarySetValue(dictionary, kCFUserNotificationAlertMessageKey, subtext);
+    CFDictionarySetValue(dictionary, kCFUserNotificationDefaultButtonTitleKey, CFSTR("OK"));
 
     CFURLRef urlRef = CFURLCreateWithFileSystemPath(NULL, CFSTR("/System/Library/CoreServices/mDNSResponder.bundle"), kCFURLPOSIXPathStyle, true);
     if (urlRef) { CFDictionarySetValue(dictionary, kCFUserNotificationLocalizationURLKey, urlRef); CFRelease(urlRef); }

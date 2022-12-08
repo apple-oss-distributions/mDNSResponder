@@ -57,6 +57,7 @@ struct srp_server_state {
     uint32_t min_lease_time; // thirty seconds
 
     bool srp_replication_enabled;
+    bool break_srpl_time;
 #if SRP_FEATURE_NAT64
     bool srp_nat64_enabled;
 #endif
@@ -183,6 +184,10 @@ struct adv_update {
     // a host after a server restart, or else renaming a host after a late name conflict. In this
     // case, we do not want to extend the lease--just get the host registration right.
     int64_t lease_expiry;
+
+    // The time when we started doing the update. If we get a retransmission, we can compare the current
+    // to this time to see if we ought to try again.
+    time_t start_time;
 
     // True if we are registering the key to hold the hostname.
     bool registering_key;

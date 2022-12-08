@@ -162,6 +162,9 @@ int32_t dso_idle(void *context, int32_t now, int32_t next_timer_event)
             // it.
             dso->cb(dso->context, NULL, dso, kDSOEventType_Finalize);
         } else {
+            if (dso->additl != dso->additl_buf) {
+                mdns_free(dso->additl);
+            }
             mdns_free(dso);
         }
         // Do not touch dso after this point, because it has been freed.
@@ -262,6 +265,10 @@ dso_state_t *dso_state_create(bool is_server, int max_outstanding_queries, const
     // DSO_STATE_INVALID_SERIAL(0) is used to identify invalid dso_state_t.
     static uint32_t dso_state_serial = DSO_STATE_INVALID_SERIAL + 1;
     dso->serial = dso_state_serial++;
+
+    // Set up additional additional pointer.
+    dso->additl = dso->additl_buf;
+    dso->max_additls = MAX_ADDITLS;
 
     dso->next = dso_connections;
     dso_connections = dso;
@@ -801,43 +808,64 @@ void dso_message_received(dso_state_t *dso, const uint8_t *message, size_t messa
     }
 
     // Get the primary TLV and count how many TLVs there are in total
-    offset = 12;
-    while (offset < message_length) {
-        // Get the TLV opcode
-        const uint16_t opcode = (uint16_t)(((uint16_t)message[offset]) << 8) + message[offset + 1];
-        // And the length
-        const uint16_t length = (uint16_t)(((uint16_t)message[offset + 2]) << 8) + message[offset + 3];
+    for (int k = 0; k < 2; k++) {
+        unsigned num_additls = 0;
+        offset = 12;
+        while (offset < message_length) {
+            // Get the TLV opcode
+            const uint16_t opcode = (uint16_t)(((uint16_t)message[offset]) << 8) + message[offset + 1];
+            // And the length
+            const uint16_t length = (uint16_t)(((uint16_t)message[offset + 2]) << 8) + message[offset + 3];
 
-        // Is there room for the contents of this TLV?
-        if (length + offset > message_length) {
-            LogMsg("dso_message_received: fatal: %s: TLV (%d %ld) extends past end (%ld)",
-                   dso->remote_name, opcode, (long)length, (long)message_length);
+            // Is there room for the contents of this TLV?
+            if (length + offset > message_length) {
+                LogMsg("dso_message_received: fatal: %s: TLV (%d %ld) extends past end (%ld)",
+                       dso->remote_name, opcode, (long)length, (long)message_length);
 
-            // Short messages are a fatal error. XXX check DSO document
-            dso_state_cancel(dso);
-            goto out;
-        }
+                // Short messages are a fatal error. XXX check DSO document
+                dso_state_cancel(dso);
+                goto out;
+            }
 
-        // Is this the primary TLV?
-        if (offset == 12) {
-            dso->primary.opcode = opcode;
-            dso->primary.length = length;
-            dso->primary.payload = &message[offset + 4];
-            dso->num_additls = 0;
-        } else {
-            if (dso->num_additls < MAX_ADDITLS) {
-                dso->additl[dso->num_additls].opcode = opcode;
-                dso->additl[dso->num_additls].length = length;
-                dso->additl[dso->num_additls].payload = &message[offset + 4];
-                dso->num_additls++;
+            if (k == 0) {
+                num_additls++;
             } else {
-                // XXX MAX_ADDITLS should be enough for all possible additional TLVs, so this
-                // XXX should never happen; if it does, maybe it's a fatal error.
-                LogMsg("dso_message_received: %s: ignoring additional TLV (%d %ld) in excess of %d",
-                       dso->remote_name, opcode, (long)length, MAX_ADDITLS);
+                // Is this the primary TLV?
+                if (offset == 12) {
+                    dso->primary.opcode = opcode;
+                    dso->primary.length = length;
+                    dso->primary.payload = &message[offset + 4];
+                    dso->num_additls = 0;
+                } else {
+                    if (dso->num_additls < dso->max_additls) {
+                        dso->additl[dso->num_additls].opcode = opcode;
+                        dso->additl[dso->num_additls].length = length;
+                        dso->additl[dso->num_additls].payload = &message[offset + 4];
+                        dso->num_additls++;
+                    } else {
+                        // XXX MAX_ADDITLS should be enough for all possible additional TLVs, so this
+                        // XXX should never happen; if it does, maybe it's a fatal error.
+                        LogMsg("dso_message_received: %s: ignoring additional TLV (%d %ld) in excess of %d",
+                               dso->remote_name, opcode, (long)length, dso->max_additls);
+                    }
+                }
+            }
+            offset += 4 + length;
+        }
+        if (k == 0) {
+            if (num_additls > dso->max_additls) {
+                if (dso->additl != dso->additl_buf) {
+                    mdns_free(dso->additl);
+                }
+                dso->additl = mdns_calloc(num_additls, sizeof(*dso->additl));
+                if (dso->additl == NULL) {
+                    dso->additl = dso->additl_buf;
+                    dso->max_additls = MAX_ADDITLS;
+                } else {
+                    dso->max_additls = num_additls;
+                }
             }
         }
-        offset += 4 + length;
     }
 
     // Call the callback with the message or response

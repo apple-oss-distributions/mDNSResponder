@@ -76,7 +76,8 @@ struct message {
 #endif
     int ifindex;
     uint16_t length;
-    time_t received_time; // Only for SRP Replication, zero otherwise.
+    time_t received_time;      // Only for SRP Replication, zero otherwise.
+    uint32_t lease, key_lease; // For SRP replication, leases agreed to by original registrar
     dns_wire_t wire;
 };
 
@@ -298,6 +299,7 @@ bool ioloop_send_data(comm_t *NONNULL connection, message_t *NULLABLE responding
                       struct iovec *NONNULL iov, int iov_len);
 bool ioloop_send_final_data(comm_t *NONNULL connection, message_t *NULLABLE responding_to,
                             struct iovec *NONNULL iov, int iov_len);
+void ioloop_strcpy(char *NONNULL dest, const char *NONNULL src, size_t lim);
 bool ioloop_map_interface_addresses(const char *NULLABLE ifname, void *NULLABLE context, interface_callback_t NULLABLE callback);
 #define ioloop_map_interface_addresses_here(here, ifname, context, callback) \
     ioloop_map_interface_addresses_here_(here, ifname, context, callback, __FILE__, __LINE__)
@@ -349,6 +351,7 @@ bool srp_load_file_data(void *NULLABLE host_context, const char *NONNULL filenam
                         uint16_t *NONNULL length, uint16_t buffer_size);
 bool srp_store_file_data(void *NULLABLE host_context, const char *NONNULL filename, uint8_t *NONNULL buffer,
                          uint16_t length);
+time_t srp_time(void);
 
 // Local Variables:
 // mode: C

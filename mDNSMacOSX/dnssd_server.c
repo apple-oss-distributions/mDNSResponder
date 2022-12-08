@@ -1722,7 +1722,6 @@ _dx_gai_request_restart_client_requests_in_failover_mode(const dx_gai_request_t 
 {
 	if (!(me->state & dx_gai_state_failover_mode)) {
 		_dx_gai_request_stop_client_requests(me, false);
-		_dx_gai_result_list_forget(&me->results);
 		os_log(_mdns_server_log(), "[R%u] getaddrinfo failover restart", me->base.request_id);
 		me->state |= dx_gai_state_failover_mode;
 		_dx_gai_request_start_client_requests(me, false);
@@ -2280,32 +2279,39 @@ static bool
 _dx_gai_request_check_for_failover_restart(const dx_gai_request_t me, const ResourceRecord * const answer,
 	const bool answer_is_expired, const bool answer_is_positive)
 {
-	bool restart = false;
+	__block bool restart = false;
+	__block dx_gai_result_t free_list = NULL;
 	if ((me->state & DX_GAI_STATE_WAITING_FOR_RESULTS) && !answer_is_expired) {
-		if (answer_is_positive) {
-			switch (answer->rrtype) {
-				case kDNSType_A:
-				case kDNSType_AAAA:
-				case kDNSType_HTTPS:
-					me->state &= ~DX_GAI_STATE_WAITING_FOR_RESULTS;
-					break;
-			}
-		} else {
-			switch (answer->rrtype) {
-				case kDNSServiceType_A:
-					me->state &= ~dx_gai_state_waiting_for_a;
-					break;
+		_dx_request_locked(me,
+		^{
+			if (answer_is_positive) {
+				switch (answer->rrtype) {
+					case kDNSType_A:
+					case kDNSType_AAAA:
+					case kDNSType_HTTPS:
+						me->state &= ~DX_GAI_STATE_WAITING_FOR_RESULTS;
+						break;
+				}
+			} else {
+				switch (answer->rrtype) {
+					case kDNSServiceType_A:
+						me->state &= ~dx_gai_state_waiting_for_a;
+						break;
 
-				case kDNSServiceType_AAAA:
-					me->state &= ~dx_gai_state_waiting_for_aaaa;
-					break;
+					case kDNSServiceType_AAAA:
+						me->state &= ~dx_gai_state_waiting_for_aaaa;
+						break;
+				}
+				const dx_gai_state_t state = me->state;
+				if (!(state & DX_GAI_STATE_WAITING_FOR_RESULTS) && (state & dx_gai_state_service_allowed_failover)) {
+					restart = true;
+					free_list = me->results;
+					me->results = NULL;
+				}
 			}
-			const dx_gai_state_t state = me->state;
-			if (!(state & DX_GAI_STATE_WAITING_FOR_RESULTS) && (state & dx_gai_state_service_allowed_failover)) {
-				restart = true;
-			}
-		}
+		});
 	}
+	_dx_gai_result_list_forget(&free_list);
 	return restart;
 }
 

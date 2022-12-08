@@ -156,6 +156,9 @@ int srp_set_wakeup(void *NULLABLE host_context,
 // This is called to cancel a wakeup, and should not fail even if there is no wakeup pending.
 int srp_cancel_wakeup(void *NULLABLE host_context, void *NONNULL context);
 
+// Returns the current wall clock time in seconds since 1970
+uint32_t srp_timenow(void);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

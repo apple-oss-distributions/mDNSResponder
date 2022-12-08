@@ -308,6 +308,16 @@ start_dropping_push_connections_callback(advertising_proxy_conn_ref cref, void *
     exit(0);
 }
 
+static void
+start_breaking_time_validation_callback(advertising_proxy_conn_ref cref, void *result, advertising_proxy_error_type err)
+{
+    INFO("start_breaking_time_validation: cref %p  response %p   err %d.", cref, result, err);
+    if (err != kDNSSDAdvertisingProxyStatus_NoError) {
+        exit(1);
+    }
+    exit(0);
+}
+
 static comm_t *tcp_connection;
 bool do_tcp_zero_test = false;
 bool do_tcp_fin_length = false;
@@ -408,6 +418,7 @@ usage(void)
     fprintf(stderr, "        drop-srpl-advertisement   -- stop advertising srpl service (but keep it around)\n");
     fprintf(stderr, "        undrop-srpl-advertisement -- resume advertising srpl service\n");
     fprintf(stderr, "        start-dropping-push       -- start repeatedly dropping any active push connections after 90 seconds\n");
+    fprintf(stderr, "        start-breaking-time       -- start breaking time validation on replicated SRP registrations\n");
 #ifdef NOTYET
     fprintf(stderr, "        flush                     -- flush all entries from the SRP proxy (for testing only)\n");
 #endif
@@ -432,6 +443,7 @@ bool undrop_srpl_advertisement;
 bool start_dropping_push_connections;
 bool add_thread_prefix = false;
 bool remove_thread_prefix = false;
+bool start_breaking_time_validation = false;
 uint8_t prefix_buf[16];
 #ifdef NOTYET
 bool watch = false;
@@ -496,6 +508,9 @@ start_activities(void *context)
     }
     if (err == kDNSSDAdvertisingProxyStatus_NoError && start_dropping_push_connections) {
         err = advertising_proxy_start_dropping_push_connections(&cref, main_queue, start_dropping_push_connections_callback);
+    }
+    if (err == kDNSSDAdvertisingProxyStatus_NoError && start_breaking_time_validation) {
+        err = advertising_proxy_start_breaking_time_validation(&cref, main_queue, start_breaking_time_validation_callback);
     }
     if (err != kDNSSDAdvertisingProxyStatus_NoError) {
         exit(1);
@@ -604,6 +619,9 @@ main(int argc, char **argv)
             something = true;
         } else if (!strcmp(argv[i], "start-dropping-push")) {
             start_dropping_push_connections = true;
+            something = true;
+        } else if (!strcmp(argv[i], "start-breaking-time")) {
+            start_breaking_time_validation = true;
             something = true;
 #ifdef NOTYET
 		} else if (!strcmp(argv[i], "watch")) {

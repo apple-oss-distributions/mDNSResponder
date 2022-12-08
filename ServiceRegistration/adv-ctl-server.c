@@ -467,6 +467,11 @@ adv_ctl_message_parse(advertising_proxy_conn_ref connection, void *context)
         dp_start_smashing();
         break;
 
+    case kDNSSDAdvertisingProxyStartBreakingTimeValidation:
+        INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyStartBreakingTimeValidation request.",
+             connection->uid, connection->pid);
+        adv_ctl_start_breaking_time(context);
+
 	default:
         ERROR("Client uid %d pid %d sent a request with unknown message type %d.",
 			  connection->uid, connection->gid, connection->message_type);

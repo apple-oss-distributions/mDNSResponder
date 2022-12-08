@@ -813,13 +813,32 @@ udp_retransmit(void *v_update_context)
                 ERROR("udp_retransmit: error %d creating udp context.", err);
             } else {
                 if (context->server->rr.type == dns_rrtype_a) {
+#ifdef THREAD_DEVKIT_ADK
+                    INFO("updating server at address %d.%d.%d.%d", (context->server->rr.data.a.s_addr >> 24) & 255,
+                         (context->server->rr.data.a.s_addr >> 16) & 255,
+                         (context->server->rr.data.a.s_addr >> 8) & 255, (context->server->rr.data.a.s_addr) & 255);
+#else
                     IPv4_ADDR_GEN_SRP(&context->server->rr.data.a, addr_buf);
                     INFO("updating server at address " PRI_IPv4_ADDR_SRP,
                          IPv4_ADDR_PARAM_SRP(&context->server->rr.data.a, addr_buf));
+#endif
                 } else if (context->server->rr.type == dns_rrtype_aaaa) {
+#ifdef THREAD_DEVKIT_ADK
+                    INFO("updating server at address "
+                         "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
+                         context->server->rr.data.aaaa.s6_addr[0], context->server->rr.data.aaaa.s6_addr[1],
+                         context->server->rr.data.aaaa.s6_addr[2], context->server->rr.data.aaaa.s6_addr[3],
+                         context->server->rr.data.aaaa.s6_addr[4], context->server->rr.data.aaaa.s6_addr[5],
+                         context->server->rr.data.aaaa.s6_addr[6], context->server->rr.data.aaaa.s6_addr[7],
+                         context->server->rr.data.aaaa.s6_addr[8], context->server->rr.data.aaaa.s6_addr[9],
+                         context->server->rr.data.aaaa.s6_addr[10], context->server->rr.data.aaaa.s6_addr[11],
+                         context->server->rr.data.aaaa.s6_addr[12], context->server->rr.data.aaaa.s6_addr[13],
+                         context->server->rr.data.aaaa.s6_addr[14], context->server->rr.data.aaaa.s6_addr[15]);
+#else
                     SEGMENTED_IPv6_ADDR_GEN_SRP(&context->server->rr.data.aaaa, addr_buf);
                     INFO("updating server at address " PRI_SEGMENTED_IPv6_ADDR_SRP,
                          SEGMENTED_IPv6_ADDR_PARAM_SRP(&context->server->rr.data.aaaa, addr_buf));
+#endif
                 }
                 context->connected = true;
             }
@@ -1083,8 +1102,6 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
             if (conflict_hostname != NULL) {
                 free(conflict_hostname);
             }
-        } else {
-            resolve_name_conflict = true;
         }
 
         bool resolve_with_callback = false;
@@ -1131,7 +1148,7 @@ udp_response(void *v_update_context, void *v_message, size_t message_length)
 // Generate a new SRP update message
 static dns_wire_t *
 generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t update_key_lease_time,
-                    size_t *NONNULL p_length, service_addr_t *server, uint32_t serial, bool removing)
+                    size_t *NONNULL p_length, service_addr_t * UNUSED server, uint32_t serial, bool removing)
 {
     dns_wire_t *message;
     const char *zone_name = "default.service.arpa";
@@ -1143,7 +1160,7 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
     dns_name_pointer_t p_zone_name;
     dns_name_pointer_t p_service_name;
     dns_name_pointer_t p_service_instance_name;
-    int line, pass;
+    int line;
     service_addr_t *addr;
     reg_state_t *reg;
     char *conflict_hostname = NULL, *chosen_hostname;
@@ -1223,35 +1240,16 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
     //      RDLENGTH = number of RRs * RR length (4 or 16)
     //      RDATA = <the data>
     if (!removing) {
-        for (pass = 0; pass < 2; pass++) {
-            bool have_good_address = false;
-
-            for (addr = interfaces; addr; addr = addr->next) {
-                // If we have an IPv6 address that's on the same prefix as the server's address, send only that
-                // IPv6 address.
-                if (addr->rr.type != dns_rrtype_aaaa ||
-                    (addr->rr.type == server->rr.type && !memcmp(&addr->rr.data, &server->rr.data, 8)))
-                {
-                    have_good_address = true;
-                }
-                if (have_good_address || pass == 1) {
-                    dns_pointer_to_wire(NULL, &towire, &p_host_name); CH;
-                    dns_u16_to_wire(&towire, addr->rr.type); CH;
-                    dns_u16_to_wire(&towire, dns_qclass_in); CH;
-                    dns_ttl_to_wire(&towire, 3600); CH;
-                    dns_rdlength_begin(&towire); CH;
-                    dns_rdata_raw_data_to_wire(&towire, &addr->rr.data,
-                                               addr->rr.type == dns_rrtype_a ? 4 : 16); CH;
-                    dns_rdlength_end(&towire); CH;
-                    INCREMENT(message->nscount);
-                }
-                if (have_good_address) {
-                    break;
-                }
-            }
-            if (have_good_address) {
-                break;
-            }
+        for (addr = interfaces; addr; addr = addr->next) {
+            dns_pointer_to_wire(NULL, &towire, &p_host_name); CH;
+            dns_u16_to_wire(&towire, addr->rr.type); CH;
+            dns_u16_to_wire(&towire, dns_qclass_in); CH;
+            dns_ttl_to_wire(&towire, 3600); CH;
+            dns_rdlength_begin(&towire); CH;
+            dns_rdata_raw_data_to_wire(&towire, &addr->rr.data,
+                                       addr->rr.type == dns_rrtype_a ? 4 : 16); CH;
+            dns_rdlength_end(&towire); CH;
+            INCREMENT(message->nscount);
         }
    }
 
@@ -1455,7 +1453,8 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
     INCREMENT(message->arcount);
 
     // The signature must be computed before counting the signature RR in the header counts.
-    dns_sig0_signature_to_wire(&towire, client->key, key_tag, &p_host_name, chosen_hostname, zone_name); CH;
+    dns_sig0_signature_to_wire(&towire,
+                               client->key, key_tag, &p_host_name, chosen_hostname, zone_name, srp_timenow()); CH;
     INCREMENT(message->arcount);
     *p_length = towire.p - (uint8_t *)message;
 
@@ -1614,6 +1613,14 @@ found:
     udp_retransmit(client->active_update);
     return kDNSServiceErr_NoError;
 }
+
+#ifdef THREAD_DEVKIT_ADK
+uint32_t
+srp_timenow(void)
+{
+    return 0;
+}
+#endif // THREAD_DEVKIT_ADK
 
 // Local Variables:
 // mode: C

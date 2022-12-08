@@ -39,6 +39,17 @@
 
 interface_address_state_t *interface_addresses;
 
+void
+ioloop_strcpy(char *dest, const char *src, size_t lim)
+{
+    size_t len = strlen(src);
+    if (len >= lim - 1) {
+      len = lim - 1;
+    }
+    memcpy(dest, src, len);
+    dest[len] = 0;
+}
+
 bool
 ioloop_map_interface_addresses(const char *ifname, void *context, interface_callback_t callback)
 {

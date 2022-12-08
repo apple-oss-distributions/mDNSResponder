@@ -2017,18 +2017,12 @@ mDNSexport mStatus mDNS_Deregister_internal(mDNS *const m, AuthRecord *const rr,
     AuthRecord **p = &m->ResourceRecords;   // Find this record in our list of active records
     mDNSBool dupList = mDNSfalse;
     AuthRecord *tsr = mDNSNULL, *ar;
-    mDNSu32 count = 0;  // Count the number of records sharing the same name with the rr record other than TSR record.
 
     for (ar = m->ResourceRecords; ar; ar = ar->next)
     {
-        if (SameResourceRecordNameClassInterface(ar, rr))
+        if (ar->resrec.rrtype == kDNSType_TSR && ar != rr && SameResourceRecordNameClassInterface(ar, rr))
         {
-            if (ar->resrec.rrtype == kDNSType_TSR)
-            {
-                tsr = ar;
-            } else {
-                count++;
-            }
+            tsr = ar;
         }
     }
     if (RRLocalOnly(rr))
@@ -2285,22 +2279,24 @@ mDNSexport mStatus mDNS_Deregister_internal(mDNS *const m, AuthRecord *const rr,
         }
     }
     mDNS_UpdateAllowSleep(m);
-    // When same name TSR record is found and count is 1, this means that the last record sharing the same
-    // name with the TSR record was deregistered.  In this case, we should deregister the TSR record.
-    // Notice that if we call mDNS_Deregister_internal() to deregister the TSR record itself, count would be
-    // 0.
-    if (tsr && count == 1)
+    // When the last record sharing the same with the TSR record was deregistered, we should deregister the TSR record.
+    if (tsr)
     {
+        for (ar = m->ResourceRecords; ar; ar = ar->next)
+        {
+            if (ar->resrec.rrtype != kDNSType_TSR && SameResourceRecordNameClassInterface(ar, tsr))
+            {
+                goto done;  // Keep the TSR record if there is record sharing the same name.
+            }
+        }
+
         const RDataBody2 *const rdb = (RDataBody2 *)tsr->resrec.rdata->u.data;
         LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT, "Removing orphaned TSR - name: " PRI_DM_NAME ", timestamp: %d",
                   DM_NAME_PARAM(tsr->resrec.name), rdb->tsr_value);
-        if(mDNS_Deregister_internal(m, tsr, mDNS_Dereg_normal))
-        {
-            LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_ERROR, "Failed to deregister orphaned TSR - name: " PRI_DM_NAME
-                      ", timestamp: %d", DM_NAME_PARAM(tsr->resrec.name), rdb->tsr_value);
-            freeL("Orphaned TSR AuthRecord mDNS_Deregister", tsr);
-        }
+        mDNS_Deregister_internal(m, tsr, mDNS_Dereg_repeat);
     }
+
+done:
     return(mStatus_NoError);
 }
 
@@ -7972,7 +7968,6 @@ mDNSlocal mDNSBool ProbeHasIdenticalRR(mDNS *const m, const DNSMessage *const qu
         if (m->rec.r.resrec.rrtype != kDNSType_TSR && IdenticalSameNameRecord(&m->rec.r.resrec, &our->resrec))
         {
             mDNSCoreResetRecord(m);
-            LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT, "Found identical rr in probe: " PRI_S, CRDisplayString(m, &m->rec.r));
             result = mDNStrue;
             goto done;
         }

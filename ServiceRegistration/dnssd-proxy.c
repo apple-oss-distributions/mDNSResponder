@@ -158,6 +158,12 @@ question_t *NULLABLE questions_without_domain;
 // the tracker is collected. If there is a DSO object on the tracker, the tracker is not responsible for tracking
 // idle state.
 
+typedef enum {
+    dp_tracker_session_none,
+    dp_tracker_session_push,
+    dp_tracker_session_srpl
+} dp_tracker_session_type_t;
+
 typedef struct dnssd_query dnssd_query_t;
 typedef struct dp_tracker {
     int ref_count;
@@ -165,6 +171,7 @@ typedef struct dp_tracker {
     dnssd_query_t *dns_queries;
     dso_state_t *dso;
     wakeup_t *idle_timeout;
+    dp_tracker_session_type_t session_type;
 } dp_tracker_t;
 
 struct answer {
@@ -241,7 +248,7 @@ char *tls_key_filename = "/etc/dnssd-proxy/server.key";
 comm_t *listener[4 + MAX_ADDRS];
 int num_listeners;
 served_domain_t *served_domains;
-int num_dso_connections; // Number of connections from DNS Push clients
+int num_push_sessions; // Number of connections from DNS Push clients
 
 static dnssd_proxy_advertisements_t advertisements;
 
@@ -282,6 +289,11 @@ bool tls_fail = false; // Command line argument, for testing.
 #define TOWIRE_CHECK(note, towire, func) { func; if ((towire)->error != 0 && failnote == NULL) failnote = (note); }
 #define BUSY_RETRY_DELAY_MS (5 * 60 * 1000) // Five minutes.
 #define MAX_DSO_CONNECTIONS 15 // Should be enough for a typical home network, assuming more hosts -> more BRs
+
+// RFC8766 says for us to clamp the TTL on proxied mDNS records to 10s. In practice this appears to be much
+// too short, because if the DNSSD server (e.g. mDNSResponder) is doing an LLQ, this results in a refresh
+// interval of <10s, which is kind of painful.
+#define RFC8766_TTL_CLAMP 300
 
 #define VALIDATE_TRACKER_CONNECTION_NON_NULL()                      \
     do {                                                            \
@@ -497,6 +509,20 @@ dp_tracker_context_release(void *context)
 }
 
 static void
+dp_tracker_went_away(dp_tracker_t *tracker)
+{
+    // Reduce the number of outstanding connections (should never go below zero).
+    if (tracker->session_type == dp_tracker_session_push) {
+        if (--num_push_sessions < 0) {
+            FAULT("DNS Push connection count went negative");
+            num_push_sessions = 0;
+        } else {
+            INFO("dso connection count dropped: %d", num_push_sessions);
+        }
+    }
+}
+
+static void
 dp_tracker_idle(void *context)
 {
     dp_tracker_t *tracker = context;
@@ -635,13 +661,8 @@ dp_tracker_disconnected(comm_t *UNUSED connection, void *context, int UNUSED err
             activity = tracker->dso->activities;
         }
         dso_state_cancel(tracker->dso);
-        // Reduce the number of outstanding connections (should never go below zero).
-        if (--num_dso_connections < 0) {
-            FAULT("dso connection count went negative");
-            num_dso_connections = 0;
-        } else {
-            INFO("dso connection count dropped: %d", num_dso_connections);
-        }
+        dp_tracker_went_away(tracker);
+        tracker->session_type = dp_tracker_session_none;
         tracker->dso = NULL;
     }
 
@@ -2020,7 +2041,7 @@ dp_query_append_nat64_prefix_records(dnssd_query_t *query)
     for (size_t i = 0; i < countof(ipv4_addrs);) {
         memcpy(&rdata[12], ipv4_addrs[i], 4);
         const bool added = dp_query_add_data_to_response(query, "ipv4only.arpa.", dns_rrtype_aaaa, query->question_asked->qclass,
-                                                         (uint16_t)sizeof(rdata), rdata, 10, true);
+                                                         (uint16_t)sizeof(rdata), rdata, RFC8766_TTL_CLAMP, true);
         if (query->towire.truncated) {
             if (query->tracker->connection->tcp_stream) {
                 if (embiggen(query)) {
@@ -2062,7 +2083,7 @@ dns_query_answer_process(DNSServiceFlags flags, DNSServiceErrorType errorCode,
 #endif
     re_add:
         record_added = dp_query_add_data_to_response(query, fullname, rrtype, rrclass, rdlen, rdata,
-            ttl > 10 ? 10 : ttl, false); // Per dnssd-hybrid 5.5.1, limit ttl to 10 seconds
+            ttl > RFC8766_TTL_CLAMP ? RFC8766_TTL_CLAMP : ttl, false);
         if (query->towire.truncated) {
             if (query->tracker->connection->tcp_stream) {
                 if (embiggen(query)) {
@@ -2796,8 +2817,41 @@ out:
     dns_name_free(question.name);
 }
 
+static bool
+dso_limit(dp_tracker_t *tracker, message_t *message, dp_tracker_session_type_t session_type)
+{
+    if (num_push_sessions == MAX_DSO_CONNECTIONS) {
+        // We are too busy. Return a retry-delay response.
+        INFO("no more DNS Push connections allowed--sending retry-delay: %d", num_push_sessions);
+        dso_retry_delay_response(tracker->connection, message, &message->wire, dns_rcode_servfail, BUSY_RETRY_DELAY_MS);
+
+        // Cancel the connection after five seconds
+        dp_tracker_idle_after(tracker, 5, NULL);
+        return true;
+    }
+
+    // Count this as a DSO connection.
+    (num_push_sessions)++;
+    INFO("new DNS Push connection, count is now %d", num_push_sessions);
+
+    tracker->session_type = session_type;
+    return false;
+}
+
 static void dso_message(dp_tracker_t *tracker, message_t *message, dso_state_t *dso)
 {
+    // For the first DSO message we get on a connection, see if we already have too many connections of
+    // the same type. We track SRP replication and DNS Push separately, because we don't want a surfeit of
+    // DNS Push messages to prevent replication from working. A surfeit of SRP Replication connections is
+    // less likely, and less problematic.
+    if (tracker->session_type == dp_tracker_session_none) {
+        if (dso->primary.opcode != kDSOType_SRPLSession) {
+            if (dso_limit(tracker, message, dp_tracker_session_push)) {
+                return;
+            }
+        }
+    }
+
     switch(dso->primary.opcode) {
     case kDSOType_DNSPushSubscribe:
         dns_push_subscription_change("DNS Push Subscribe", tracker, &message->wire, dso);
@@ -3005,15 +3059,6 @@ dnssd_proxy_dns_evaluate(comm_t *comm, message_t *message, dp_tracker_t *tracker
         }
 
         if (!tracker->dso) {
-            if (num_dso_connections == MAX_DSO_CONNECTIONS) {
-                // We are too busy. Return a retry-delay response.
-                INFO("no more DSO connections allowed--sending retry-delay: %d", num_dso_connections);
-                dso_retry_delay_response(comm, message, &message->wire, dns_rcode_servfail, BUSY_RETRY_DELAY_MS);
-
-                // Cancel the connection after five seconds
-                dp_tracker_idle_after(tracker, 5, NULL);
-                return;
-            }
             tracker->dso = dso_state_create(true, 2, comm->name, dns_push_callback, tracker, NULL, comm);
             if (!tracker->dso) {
                 ERROR("Unable to create a dso context for %s", comm->name);
@@ -3023,10 +3068,6 @@ dnssd_proxy_dns_evaluate(comm_t *comm, message_t *message, dp_tracker_t *tracker
             }
             tracker->dso->transport_finalize = dso_transport_finalize;
             comm->dso = tracker->dso;
-
-            // Count this as a DSO connection.
-            num_dso_connections++;
-            INFO("new dso connection, count is now %d", num_dso_connections);
         }
         dp_tracker_not_idle(tracker);
         dso_message_received(comm->dso, (uint8_t *)&message->wire, message->length, message);

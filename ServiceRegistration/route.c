@@ -1821,6 +1821,8 @@ interface_prefix_configure(struct in6_addr prefix, interface_t *interface)
     char addrbuf[INET6_ADDRSTRLEN + 4];
     // Use our ULA prefix as the host identifier.
     memcpy(&interface_address.s6_addr[10], &route_state->srp_server->ula_prefix.s6_addr[0], 6);
+    interface_address.s6_addr[8] = (interface->index >> 8) & 255;
+    interface_address.s6_addr[9] = interface->index & 255;
     inet_ntop(AF_INET6, &interface_address, addrbuf, INET6_ADDRSTRLEN);
 #if   defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG)
     char *args[] = { "set", interface->name, "MANUAL-V6", addrbuf, "64" };

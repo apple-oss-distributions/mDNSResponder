@@ -36,11 +36,9 @@
 #endif
 
 // Feature: Background Assets Support
-// Radar:   <rdar://problem/91014171>
-// Enabled: iOS (non-reality) & macOS
 
 #if !defined(MDNSRESPONDER_SUPPORTS_APPLE_BACKGROUND_ASSETS)
-    #if ((TARGET_OS_IOS ) || TARGET_OS_OSX)
+    #if (TARGET_OS_IOS || TARGET_OS_OSX)
         #define MDNSRESPONDER_SUPPORTS_APPLE_BACKGROUND_ASSETS      1
     #else
         #define MDNSRESPONDER_SUPPORTS_APPLE_BACKGROUND_ASSETS      0

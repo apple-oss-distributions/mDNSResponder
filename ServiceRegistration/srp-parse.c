@@ -243,6 +243,8 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
         return false;
     }
 
+    raw_message->received_time = srp_time();
+
     update_zone = message->questions[0].name;
     if (service_update_zone != NULL && dns_names_equal_text(update_zone, "default.service.arpa.")) {
         INFO(PRI_S_SRP " is in default.service.arpa, using replacement zone: " PUB_S_SRP,
@@ -688,12 +690,14 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
     // mean the host that send this doesn't have a working clock.   One being zero and the other not isn't
     // valid unless it's 1970.
     if (signature->data.sig.inception != 0 || signature->data.sig.expiry != 0) {
+        gettimeofday(&now, NULL);
         if (raw_message->received_time != 0) {
-            now.tv_sec = raw_message->received_time;
+            // The received time is in srp_time, but the signature time will be in wall clock time, so
+            // convert from srpl_time to wall clock time.
+            now.tv_sec = raw_message->received_time - srp_time() + now.tv_sec;
             now.tv_usec = 0;
-        } else {
-            gettimeofday(&now, NULL);
         }
+
         // The sender does the bracketing, so we can just do a simple comparison.
         if ((uint32_t)(now.tv_sec & UINT32_MAX) > signature->data.sig.expiry ||
             (uint32_t)(now.tv_sec & UINT32_MAX) < signature->data.sig.inception) {
@@ -773,8 +777,13 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
     goto out;
 
 badsig:
-    // True means it was intended for us, and shouldn't be forwarded.
-    ret = true;
+    if (srpl_connection == NULL) {
+        // True means it was intended for us, and shouldn't be forwarded.
+        ret = true;
+    } else {
+        // For SRP replication, we need to return false when the signature check fails.
+        ret = false;
+    }
     // We're not actually going to return this; it simply indicates that we aren't sending a fail response.
     rcode = dns_rcode_noerror;
     // Because we're saying this is ours, we have to free the parsed message.
@@ -796,7 +805,7 @@ success:
         dp = next;
     }
 
-    if (ret == true && rcode != dns_rcode_noerror) {
+    if (ret == true && rcode != dns_rcode_noerror && srpl_connection == NULL) {
         if (connection != NULL) {
             send_fail_response(connection, raw_message, rcode);
         }
@@ -836,11 +845,15 @@ srp_dns_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection
 
     // We need the wire message to validate the signature...
     if (!srp_evaluate(connection, server_state, srpl_connection, parsed_message, message)) {
-        // The message wasn't invalid, but wasn't an SRP message.
-        dns_message_free(parsed_message);
-        // dns_forward(connection)
-        if (connection != NULL) {
-            send_fail_response(connection, message, dns_rcode_refused);
+        // For srpl connections, a false return value means the update failed. For regular SRP updates,
+        // a false return value means that the update was not consumed.
+        if (!srpl_connection) {
+            // The message wasn't invalid, but wasn't an SRP message.
+            dns_message_free(parsed_message);
+            // dns_forward(connection)
+            if (connection != NULL) {
+                send_fail_response(connection, message, dns_rcode_refused);
+            }
         }
         return false;
     }

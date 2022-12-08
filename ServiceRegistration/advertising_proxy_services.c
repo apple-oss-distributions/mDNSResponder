@@ -470,6 +470,16 @@ advertising_proxy_start_dropping_push_connections(advertising_proxy_conn_ref *co
     return errx;
 }
 
+advertising_proxy_error_type
+advertising_proxy_start_breaking_time_validation(advertising_proxy_conn_ref *conn_ref,
+                                                 run_context_t client_queue, advertising_proxy_reply callback)
+{
+    advertising_proxy_error_type errx;
+    errx = adv_send_command(conn_ref, client_queue, "advertising_proxy_start_breaking_time_validation",
+                            kDNSSDAdvertisingProxyStartBreakingTimeValidation, callback, NULL, 0);
+    return errx;
+}
+
 // Local Variables:
 // mode: C
 // tab-width: 4

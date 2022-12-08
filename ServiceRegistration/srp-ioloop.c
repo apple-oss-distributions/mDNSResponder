@@ -55,10 +55,12 @@ static int push_unsubscribe = false;
 static int push_exhaust = false;
 static bool test_subtypes = false;
 static bool test_diff_subtypes = false;
-static uint8_t first_bogus_address[] = { 198, 51, 100, 1 }; // RFC 5737 documentaiton prefix TEST-NET-2
-static uint8_t second_bogus_address[] = { 203, 0, 113, 1 }; // RFC 5737 documentaiton prefix TEST-NET-3
+static uint8_t first_bogus_address[] = { 198, 51, 100, 1 }; // RFC 5737 documentation prefix TEST-NET-2
+static uint8_t second_bogus_address[] = { 203, 0, 113, 1 }; // RFC 5737 documentation prefix TEST-NET-3
 static bool host_only = false;
 extern bool zero_addresses;
+static bool expire_instance = false;
+static bool test_bad_sig_time = false;
 
 const uint64_t thread_enterprise_number = 52627;
 
@@ -308,6 +310,16 @@ srp_send_datagram(void *host_context, void *context, void *message, size_t messa
     return err;
 }
 
+uint32_t
+srp_timenow(void)
+{
+    time_t now = time(NULL);
+    if (test_bad_sig_time) {
+        return (uint32_t)(now - 10000);
+    }
+    return (uint32_t)now;
+}
+
 static void
 interface_callback(void *context, const char *NONNULL name,
                    const addr_t *NONNULL address, const addr_t *NONNULL netmask,
@@ -453,33 +465,55 @@ register_callback(DNSServiceRef sdref, DNSServiceFlags flags, DNSServiceErrorTyp
     (void)domain;
     INFO("Register Reply for %s: %d", client->name, errorCode);
 
-    if (errorCode == kDNSServiceErr_NoError && change_txt_record && !client->updated_txt_record) {
-        TXTRecordRef txt;
-        const void *txt_data = NULL;
-        uint16_t txt_len = 0;
-        char txt_buf[128];
+    if (errorCode == kDNSServiceErr_NoError) {
+        if ((change_txt_record  && !client->updated_txt_record) || expire_instance) {
+            TXTRecordRef txt;
+            const void *txt_data = NULL;
+            uint16_t txt_len = 0;
+            char txt_buf[128];
 
-        TXTRecordCreate(&txt, sizeof(txt_buf), txt_buf);
-        TXTRecordSetValue(&txt, "foo", 1, "1");
-        TXTRecordSetValue(&txt, "bar", 3, "1.1");
-        txt_data = TXTRecordGetBytesPtr(&txt);
-        txt_len = TXTRecordGetLength(&txt);
+            TXTRecordCreate(&txt, sizeof(txt_buf), txt_buf);
+            TXTRecordSetValue(&txt, "foo", 1, "1");
+            TXTRecordSetValue(&txt, "bar", 3, "1.1");
+            txt_data = TXTRecordGetBytesPtr(&txt);
+            txt_len = TXTRecordGetLength(&txt);
 
-        (void)DNSServiceUpdateRecord(sdref, NULL, 0, txt_len, txt_data, 0);
-        client->updated_txt_record = true;
-        srp_network_state_stable(NULL);
-        return;
-    }
+            if (expire_instance) {
+                char hnbuf[128];
+                ioloop_strcpy(hnbuf, name, sizeof(hnbuf));
 
-    if (errorCode == kDNSServiceErr_NoError && delete_registrations) {
-        client->wakeup = ioloop_wakeup_create();
-        if (client->wakeup == NULL) {
-            ERROR("Unable to allocate a wakeup for %s.", client->name);
-            exit(1);
+                // silently let the first expire. This is just going to leak the data, but since this is a one-shot test
+                // that's not an actual problem.
+                DNSServiceRefDeallocate(sdref);
+
+                DNSServiceRef nsdref;
+                expecting_second_add = true;
+                // register a second instance
+                int err = DNSServiceRegister(&nsdref, 0, 0, hnbuf, "_second._tcp,foo", 0, 0, htons(1234),
+                                             txt_len, txt_data, second_register_callback, client);
+                if (err != kDNSServiceErr_NoError) {
+                    ERROR("second DNSServiceRegister failed: %d", err);
+                    exit(1);
+                }
+            } else {
+                (void)DNSServiceUpdateRecord(sdref, NULL, 0, txt_len, txt_data, 0);
+                client->updated_txt_record = true;
+            }
+            srp_network_state_stable(NULL);
+            return;
         }
 
-        // Do a remove in five seconds.
-        ioloop_add_wake_event(client->wakeup, client, remove_callback, NULL, 5000);
+        if (delete_registrations) {
+            client->wakeup = ioloop_wakeup_create();
+            if (client->wakeup == NULL) {
+                ERROR("Unable to allocate a wakeup for %s.", client->name);
+                exit(1);
+            }
+
+            // Do a remove in five seconds.
+            ioloop_add_wake_event(client->wakeup, client, remove_callback, NULL, 5000);
+            return;
+        }
     }
 
     // We get this with the duplicate instance name. In this case, we change the host IP address. This validates
@@ -490,8 +524,8 @@ register_callback(DNSServiceRef sdref, DNSServiceFlags flags, DNSServiceErrorTyp
         char rtbuf[128];
         srp_delete_interface_address(dns_rrtype_a, first_bogus_address, sizeof(first_bogus_address));
         srp_add_interface_address(dns_rrtype_a, second_bogus_address, sizeof(second_bogus_address));
-        strcpy(nnbuf, name);
-        strcpy(rtbuf, regtype);
+        ioloop_strcpy(nnbuf, name, sizeof(nnbuf));
+        ioloop_strcpy(rtbuf, regtype, sizeof(rtbuf));
         nnbuf[0] = 'a';
         INFO("changing service instance name from " PRI_S_SRP " to " PRI_S_SRP " type " PRI_S_SRP, name, nnbuf, rtbuf);
         DNSServiceRefDeallocate(sdref);
@@ -851,7 +885,8 @@ usage(void)
             "           [--interface <interface name>] [--bogusify-signatures] [--remove-added-service]\n"
             "           [--dup-instance-name] [--service-port <port number>] [--expire-added-service]\n"
             "           [--random-txt-record] [--bogus-remove] [--test-subtypes] [--test-diff-subtypes]\n"
-            "           [--new-ip-dup] [--push-exhaust]\n");
+            "           [--new-ip-dup] [--push-exhaust] [--test-bad-sig-time] [--zero-addresses]\n"
+            "           [--host-only] [--expire-instance]");
     exit(1);
 }
 
@@ -1003,6 +1038,10 @@ main(int argc, char **argv)
             host_only = true;
         } else if (!strcmp(argv[i], "--zero-addresses")) {
             zero_addresses = true;
+        } else if (!strcmp(argv[i], "--expire-instance")) {
+            expire_instance = true;
+        } else if (!strcmp(argv[i], "--test-bad-sig-time")) {
+            test_bad_sig_time = true;
         } else if (!strcmp(argv[i], "--service-type")) {
             if (i + 1 == argc) {
                 usage();
@@ -1053,7 +1092,7 @@ main(int argc, char **argv)
 
     if (dup_instance_name) {
         num_clients = 2;
-        strcpy(instance_name, "dup-name-test");
+        ioloop_strcpy(instance_name, "dup-name-test", sizeof(instance_name));
     }
     if (new_ip_dup || zero_addresses) {
         // Set up the test to validate the "failed update removes address" code in srp-mdns-proxy.

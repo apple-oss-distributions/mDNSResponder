@@ -24,7 +24,7 @@
 #include "nullability.h"
 
 // Maximum number of additional TLVs we support in a DSO message.
-#define MAX_ADDITLS           10
+#define MAX_ADDITLS           2
 
 // Use 0 to represent an invalid ID for the object dso_connect_t.
 #define DSO_STATE_INVALID_SERIAL 0
@@ -71,6 +71,7 @@ typedef enum {
     kDSOType_SRPLTimeOffset = 0xF916,
     kDSOType_SRPLKeyID = 0xF917,
     kDSOType_SRPLServerStableID = 0xF918,
+    kDSOType_SRPLVersion = 0xF919,
 } dso_message_types_t;
 
 // When a DSO message arrives, or one that was sent is acknowledged, or the state of the DSO connection
@@ -178,30 +179,32 @@ typedef bool (*dso_life_cycle_context_callback_t)(const dso_life_cycle_t life_cy
 // DNS Stateless Operations state
 struct dso_state {
     dso_state_t *next;
-    void *context;                   // The context of the next layer up (e.g., a Discovery Proxy)
+    void *context;                     // The context of the next layer up (e.g., a Discovery Proxy)
     // The callback gets called when dso_state_t is created, canceled or freed.
     dso_life_cycle_context_callback_t context_callback;
-    dso_event_callback_t cb;         // Called when an event happens
+    dso_event_callback_t cb;           // Called when an event happens
 
     // Transport state; handled separately for reusability
-    dso_transport_t *transport;		 // The transport (e.g., dso-transport.c or other).
+    dso_transport_t *transport;        // The transport (e.g., dso-transport.c or other).
     dso_transport_finalize_t transport_finalize;
 
-    uint32_t serial;                 // Unique serial number which can be used after the DSO has been dropped.
-    bool is_server;                  // True if the endpoint represented by this DSO state is a server
-                                     // (according to the DSO spec)
-    bool has_session;                // True if DSO session establishment has happened for this DSO endpoint
-    event_time_t response_awaited;   // If we are waiting for a session-establishing response, when it's
-                                     // expected; otherwise zero.
-    uint32_t keepalive_interval;     // Time between keepalives (to be sent, on client, expected, on server)
-    uint32_t inactivity_timeout;     // Session can't be inactive more than this amount of time.
-    event_time_t keepalive_due;      // When the next keepalive is due (to be received or sent)
-    event_time_t inactivity_due;     // When next activity has to happen for connection to remain active
-    dso_activity_t *activities;      // Outstanding DSO activities.
+    uint32_t serial;                   // Unique serial number which can be used after the DSO has been dropped.
+    bool is_server;                    // True if the endpoint represented by this DSO state is a server
+                                       // (according to the DSO spec)
+    bool has_session;                  // True if DSO session establishment has happened for this DSO endpoint
+    event_time_t response_awaited;     // If we are waiting for a session-establishing response, when it's
+                                       // expected; otherwise zero.
+    uint32_t keepalive_interval;       // Time between keepalives (to be sent, on client, expected, on server)
+    uint32_t inactivity_timeout;       // Session can't be inactive more than this amount of time.
+    event_time_t keepalive_due;        // When the next keepalive is due (to be received or sent)
+    event_time_t inactivity_due;       // When next activity has to happen for connection to remain active
+    dso_activity_t *activities;        // Outstanding DSO activities.
 
-    dso_tlv_t primary;               // Primary TLV for current message
-    dso_tlv_t additl[MAX_ADDITLS];   // Additional TLVs
-    int num_additls;                 // Number of additional TLVs in this message
+    dso_tlv_t primary;                 // Primary TLV for current message
+    dso_tlv_t *additl;                 // Additional TLVs
+    unsigned num_additls;              // Number of additional TLVs in this message
+    unsigned max_additls;              // Maximum number of additional TLVs this DSO state can represent
+    dso_tlv_t additl_buf[MAX_ADDITLS]; // Initial buffer for additional TLVs.
 
     char *remote_name;
 

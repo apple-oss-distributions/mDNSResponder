@@ -274,10 +274,10 @@
 #define IS_IPV6_ADDR_GUA(ADDR) ( ((ADDR)[0] & 0xE0) == 0x20 )
 #define ADDRESS_RANGE_STR(ADDR) (                                                           \
                                     IS_IPV6_ADDR_ULA(ADDR) ?                                \
-                                        " (ULA)" :                                          \
+                                        "ULA: " :                                           \
                                         (( IS_IPV6_ADDR_LUA(ADDR) ) ?                       \
-                                                " (LUA)" :                                  \
-                                                ( IS_IPV6_ADDR_GUA(ADDR) ? " (GUA)" : "" )) \
+                                                "LUA: " :                                   \
+                                                ( IS_IPV6_ADDR_GUA(ADDR) ? "GUA: " : "" ))  \
                                 )
 
 // Logging macros
@@ -306,18 +306,18 @@
     // IPv6
     #define IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME) do {} while(0)
     #define PUB_IPv6_ADDR_SRP "%{public, network:in6_addr}.16P%{public}s"
-    #define PRI_IPv6_ADDR_SRP "%{private, mask.hash, network:in6_addr}.16P%{public}s"
-    #define IPv6_ADDR_PARAM_SRP(ADDR, BUF) ((uint8_t *)ADDR), ADDRESS_RANGE_STR((uint8_t *)ADDR)
+    #define PRI_IPv6_ADDR_SRP "%{public}s%{private, mask.hash, network:in6_addr}.16P"
+    #define IPv6_ADDR_PARAM_SRP(ADDR, BUF) ADDRESS_RANGE_STR((uint8_t *)(ADDR)), ((uint8_t *)(ADDR))
     // Segmented IPv6
     // Subnet part can always be public.
     #define SEGMENTED_IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME) do {} while(0)
     #define PUB_SEGMENTED_IPv6_ADDR_SRP "{%{public, srp:in6_addr_segment}.6P%{public}s, " \
                                             "%{public, srp:in6_addr_segment}.2P, " \
                                             "%{public, srp:in6_addr_segment}.8P}"
-    #define PRI_SEGMENTED_IPv6_ADDR_SRP "{%{private, mask.hash, srp:in6_addr_segment}.6P%{public}s, " \
-                                            "%{public, mask.hash, srp:in6_addr_segment}.2P, " \
+    #define PRI_SEGMENTED_IPv6_ADDR_SRP "{%{public}s%{private, mask.hash, srp:in6_addr_segment}.6P:" \
+                                            "%{public, mask.hash, srp:in6_addr_segment}.2P:" \
                                             "%{private, mask.hash, srp:in6_addr_segment}.8P}"
-    #define SEGMENTED_IPv6_ADDR_PARAM_SRP(ADDR, BUF) ((uint8_t *)(ADDR)), ADDRESS_RANGE_STR((uint8_t *)ADDR), \
+    #define SEGMENTED_IPv6_ADDR_PARAM_SRP(ADDR, BUF) ADDRESS_RANGE_STR((uint8_t *)(ADDR)), ((uint8_t *)(ADDR)), \
                                                         ((uint8_t *)(ADDR) + 6), ((uint8_t *)(ADDR) + 8)
     // MAC address
     #define PUB_MAC_ADDR_SRP "%{public, srp:mac_addr}.6P"

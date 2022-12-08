@@ -527,13 +527,10 @@ dns_edns0_option_end_(dns_towire_state_t *NONNULL txn, int line)
 void
 dns_sig0_signature_to_wire_(dns_towire_state_t *NONNULL txn, srp_key_t *key, uint16_t key_tag,
                             dns_name_pointer_t *NONNULL signer, const char *NONNULL signer_hostname,
-                            const char *NONNULL signer_domain, int line)
+                            const char *NONNULL signer_domain, uint32_t timenow, int line)
 {
     size_t siglen = srp_signature_length(key);
     uint8_t *start, *p_signer, *p_signature, *rrstart = txn->p;
-#ifndef NO_CLOCK
-    struct timeval now;
-#endif
 
     // 1 name (root)
     // 2 type (SIG)
@@ -556,20 +553,14 @@ dns_sig0_signature_to_wire_(dns_towire_state_t *NONNULL txn, srp_key_t *key, uin
         dns_u8_to_wire(txn, srp_key_algorithm(key));
         dns_u8_to_wire(txn, 0); // labels field doesn't apply for transaction signature
         dns_ttl_to_wire(txn, 0); // original ttl doesn't apply
-#ifndef NO_CLOCK
-        gettimeofday(&now, NULL);
-        uint32_t sec = (uint32_t)now.tv_sec;
-        // In te extraordinarily unlikely event that time_t has rolled over
-        if (sec < 300) {
-#endif
+        // If timenow is <300, it's either just after the epoch, or the caller doesn't know what time it is.
+        if (timenow < 300) {
             dns_u32_to_wire(txn, 0); // Indicate that we have no clock: set expiry and inception times to zero
             dns_u32_to_wire(txn, 0);
-#ifndef NO_CLOCK
         } else {
-            dns_u32_to_wire(txn, sec + 300); // signature expiration time is five minutes from now
-            dns_u32_to_wire(txn, sec - 300); // signature inception time, five minutes in the past
+            dns_u32_to_wire(txn, timenow + 300); // signature expiration time is five minutes from now
+            dns_u32_to_wire(txn, timenow - 300); // signature inception time, five minutes in the past
         }
-#endif
         dns_u16_to_wire(txn, key_tag);
 
         p_signer = txn->p;

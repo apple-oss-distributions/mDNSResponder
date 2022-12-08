@@ -456,6 +456,12 @@ srp_thread_shutdown(otInstance *instance)
     return kDNSServiceErr_NoError;
 }
 
+uint32_t
+srp_timenow(void)
+{
+    return 0;
+}
+
 // Local Variables:
 // mode: C
 // tab-width: 4
