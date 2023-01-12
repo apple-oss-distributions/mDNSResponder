@@ -2029,6 +2029,26 @@ set_thread_prefix(route_state_t *route_state)
 #endif // THREAD_BORDER_ROUTRER && !RA_TESTER
 
 static void
+route_information_to_wire(dns_towire_state_t *towire, void *prefix_data,
+                          const char *source_interface, const char *dest_interface)
+{
+    uint8_t *prefix = prefix_data;
+
+#ifndef ND_OPT_ROUTE_INFORMATION
+#define ND_OPT_ROUTE_INFORMATION 24
+#endif
+    dns_u8_to_wire(towire, ND_OPT_ROUTE_INFORMATION);
+    dns_u8_to_wire(towire, 2); // length / 8
+    dns_u8_to_wire(towire, 64); // Interface prefixes are always 64 bits
+    dns_u8_to_wire(towire, 0); // There's no reason at present to prefer one Thread BR over another
+    dns_u32_to_wire(towire, BR_PREFIX_LIFETIME); // Route lifetime 1800 seconds (30 minutes)
+    dns_rdata_raw_data_to_wire(towire, prefix, 8); // /64 requires 8 bytes.
+    SEGMENTED_IPv6_ADDR_GEN_SRP(prefix, thread_prefix_buf);
+    INFO("Sending route to " PRI_SEGMENTED_IPv6_ADDR_SRP "%%" PUB_S_SRP " on " PUB_S_SRP,
+         SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix, thread_prefix_buf), source_interface, dest_interface);
+}
+
+static void
 router_advertisement_send(interface_t *interface, const struct in6_addr *destination)
 {
     uint8_t *message;
@@ -2117,9 +2137,6 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
 
     }
 
-#ifndef ND_OPT_ROUTE_INFORMATION
-#define ND_OPT_ROUTE_INFORMATION 24
-#endif
     // In principle we can either send routes to links that are reachable by this router,
     // or just advertise a router to the entire ULA /48.   In theory it doesn't matter
     // which we do; if we support HNCP at some point we probably need to be specific, but
@@ -2155,16 +2172,7 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
 #endif
             )
         {
-            dns_u8_to_wire(&towire, ND_OPT_ROUTE_INFORMATION);
-            dns_u8_to_wire(&towire, 2); // length / 8
-            dns_u8_to_wire(&towire, 64); // Interface prefixes are always 64 bits
-            dns_u8_to_wire(&towire, 0); // There's no reason at present to prefer one Thread BR over another
-            dns_u32_to_wire(&towire, BR_PREFIX_LIFETIME); // Route lifetime 1800 seconds (30 minutes)
-            dns_rdata_raw_data_to_wire(&towire, &ifroute->ipv6_prefix, 8); // /64 requires 8 bytes.
-            SEGMENTED_IPv6_ADDR_GEN_SRP(ifroute->ipv6_prefix.s6_addr, ipv6_prefix_buf);
-            INFO("Sending route to " PRI_SEGMENTED_IPv6_ADDR_SRP "%%" PUB_S_SRP " on " PUB_S_SRP,
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(ifroute->ipv6_prefix.s6_addr, ipv6_prefix_buf),
-                 ifroute->name, interface->name);
+            route_information_to_wire(&towire, &ifroute->ipv6_prefix, ifroute->name, interface->name);
         }
     }
 #endif // ROUTE_BETWEEN_NON_THREAD_LINKS || RA_TESTER
@@ -2173,16 +2181,17 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
     // Send route information option for thread prefix
     thread_prefix_t *advertised_thread_prefix = get_advertised_thread_prefix(route_state);
     if (advertised_thread_prefix != NULL) {
-        dns_u8_to_wire(&towire, ND_OPT_ROUTE_INFORMATION);
-        dns_u8_to_wire(&towire, 2); // length / 8
-        dns_u8_to_wire(&towire, 64); // Interface prefixes are always 64 bits
-        dns_u8_to_wire(&towire, 0); // There's no reason at present to prefer one Thread BR over another
-        dns_u32_to_wire(&towire, BR_PREFIX_LIFETIME); // Route lifetime 1800 seconds (30 minutes)
-        dns_rdata_raw_data_to_wire(&towire, &advertised_thread_prefix->prefix, 8); // /64 requires 8 bytes.
-        SEGMENTED_IPv6_ADDR_GEN_SRP(advertised_thread_prefix->prefix.s6_addr, thread_prefix_buf);
-        INFO("Sending route to " PRI_SEGMENTED_IPv6_ADDR_SRP "%%" PUB_S_SRP " on " PUB_S_SRP,
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(advertised_thread_prefix->prefix.s6_addr, thread_prefix_buf),
-             route_state->thread_interface_name, interface->name);
+        route_information_to_wire(&towire, &advertised_thread_prefix->prefix, route_state->thread_interface_name,
+                                  interface->name);
+    }
+
+    // Send RIOs for any other prefixes that appear on the Thread network
+    for (struct thread_prefix *prefix = route_state->thread_prefixes; prefix != NULL; prefix = prefix->next) {
+        // We've already published the advertised prefix, so don't repeat that.
+        if (advertised_thread_prefix != NULL && !memcmp(&prefix->prefix, &advertised_thread_prefix->prefix, 8)) {
+            continue;
+        }
+        route_information_to_wire(&towire, &prefix->prefix, route_state->thread_interface_name, interface->name);
     }
 #endif
 #else

@@ -93,8 +93,12 @@ remove_shared_record(srp_server_t *server_state, adv_record_t *record)
         if (err == kDNSServiceErr_NoError) {
             RELEASE_HERE(record, adv_record_finalize); // Release the DNSService callback's reference
         } else {
-            FAULT("DNSServiceRemoveRecord(%p, %p, 0) returned %d",
-                  server_state->shared_registration_txn->sdref, record->rref, err);
+            // If there was an update pending that didn't get marked complete, we might get an error from
+            // DNSServiceRemoveRecord, and that's okay. Otherwise, we shouldn't get an error.
+            if (!record->update_pending) {
+                FAULT("DNSServiceRemoveRecord(%p, %p, 0) returned %d",
+                      server_state->shared_registration_txn->sdref, record->rref, err);
+            }
         }
     }
     record->rref = NULL;
@@ -458,10 +462,24 @@ adv_instance_vec_remove_update(adv_instance_vec_t *vec, adv_update_t *update)
 }
 
 static void
+adv_instances_cancel(adv_instance_vec_t *instances)
+{
+    for (int i = 0; i < instances->num; i++) {
+        adv_instance_t *instance = instances->vec[i];
+        if (instance != NULL && instance->txn != NULL) {
+            ioloop_dnssd_txn_cancel(instance->txn);
+            ioloop_dnssd_txn_release(instance->txn);
+            instance->txn = NULL;
+        }
+    }
+}
+
+static void
 adv_update_free_instance_vectors(adv_update_t *NONNULL update)
 {
     if (update->update_instances != NULL) {
         adv_instance_vec_remove_update(update->update_instances, update);
+        adv_instances_cancel(update->update_instances);
         RELEASE_HERE(update->update_instances, adv_instance_vec_finalize);
         update->update_instances = NULL;
     }
@@ -477,6 +495,7 @@ adv_update_free_instance_vectors(adv_update_t *NONNULL update)
     }
     if (update->add_instances != NULL) {
         adv_instance_vec_remove_update(update->add_instances, update);
+        adv_instances_cancel(update->add_instances);
         RELEASE_HERE(update->add_instances, adv_instance_vec_finalize);
         update->add_instances = NULL;
     }
@@ -1273,10 +1292,13 @@ update_finished(adv_update_t *update)
         client_free(client);
         update->client = NULL;
         if (host->message->received_time != 0) {
+            INFO("setting host update time based on message received time: %ld", host->message->received_time);
             host->update_time = host->message->received_time;
         } else {
+            INFO("setting host update time based on current time: %ld", host->message->received_time);
             host->update_time = srp_time();
         }
+
         // It would probably be harmless to set this for replications, since the value currently wouldn't change,
         // but to avoid future issues we only set this if it's a direct SRP update and not a replicated update.
         if (host->message->lease == 0) {
@@ -1284,7 +1306,6 @@ update_finished(adv_update_t *update)
             host->message->key_lease = host->key_lease;
         }
     }
-
     RETAIN_HERE(update); // We need to hold a reference to the update since this might be the last.
 
     // The update should still be on the host.
@@ -1571,6 +1592,15 @@ extract_instance_name(char *instance_name, size_t instance_name_max,
     return true;
 }
 
+void
+srp_format_time_offset(char *buf, size_t buf_len, time_t offset)
+{
+    struct tm tm_now;
+    time_t when = time(NULL) - offset;
+    localtime_r(&when, &tm_now);
+    strftime(buf, buf_len, "%F %T", &tm_now);
+}
+
 static bool
 register_instance(adv_instance_t *instance)
 {
@@ -1593,19 +1623,29 @@ register_instance(adv_instance_t *instance)
             ERROR("Failed to create new DNSServiceAttributeRef");
             err = kDNSServiceErr_NoMemory;
         } else {
+            uint32_t offset = 0;
+            char time_buf[28];
+
             if (instance->update->client != NULL && instance->update->client->message != NULL &&
                 instance->update->client->message->received_time != 0)
             {
-                DNSServiceAttributeSetTimestamp(attr, (uint32_t)(srp_time() - instance->update->client->message->received_time));
+                offset = (uint32_t)(srp_time() - instance->update->client->message->received_time);
+                srp_format_time_offset(time_buf, sizeof(time_buf), offset);
             } else {
-                DNSServiceAttributeSetTimestamp(attr, 0);
+                static char msg[] = "now";
+                memcpy(time_buf, msg, sizeof(msg));
             }
+            DNSServiceAttributeSetTimestamp(attr, offset);
             err = DNSServiceRegisterWithAttribute(&service_ref, (kDNSServiceFlagsShareConnection | kDNSServiceFlagsNoAutoRename),
                                                   server_state->advertise_interface,
                                                   instance->instance_name, instance->service_type, local_suffix,
                                                   instance->host->registered_name, htons(instance->port), instance->txt_length,
                                                   instance->txt_data, attr, register_instance_completion, instance);
             DNSServiceAttributeDeallocate(attr);
+            if (err == kDNSServiceErr_NoError) {
+                INFO("DNSServiceRegister TSR for " PRI_S_SRP " set to " PUB_S_SRP,
+                     instance->host == NULL ? "<null>" : instance->host->name, time_buf);
+            }
         }
     } else {
         err = DNSServiceRegister(&service_ref,
@@ -1637,7 +1677,7 @@ register_instance(adv_instance_t *instance)
     }
     // After DNSServiceRegister succeeds, it creates a copy of DNSServiceRef that indirectly uses the shared connection,
     // so we update it here.
-    instance->txn = ioloop_dnssd_txn_add(service_ref, instance, adv_instance_context_release, NULL);
+    instance->txn = ioloop_dnssd_txn_add_subordinate(service_ref, instance, adv_instance_context_release, NULL);
     if (instance->txn == NULL) {
         ERROR("no memory for instance transaction.");
         goto exit;
@@ -2026,13 +2066,18 @@ register_host_record(adv_host_t *host, adv_record_t *record)
             ERROR("Failed to create new DNSServiceAttributeRef");
             return false;
         } else {
+            uint32_t offset = 0;
+            char time_buf[28];
             if (host->update != NULL && host->update->client != NULL && host->update->client->message != NULL &&
                 host->update->client->message->received_time != 0)
             {
-                DNSServiceAttributeSetTimestamp(attr, (uint32_t)(srp_time() - host->update->client->message->received_time));
+                offset = (uint32_t)(srp_time() - host->update->client->message->received_time);
+                srp_format_time_offset(time_buf, sizeof(time_buf), offset);
             } else {
-                DNSServiceAttributeSetTimestamp(attr, 0);
+                static char msg[] = "now";
+                memcpy(time_buf, msg, sizeof(msg));
             }
+            DNSServiceAttributeSetTimestamp(attr, offset);
             err = DNSServiceRegisterRecordWithAttribute(service_ref, &record->rref,
                                                         kDNSServiceFlagsQueueRequest | kDNSServiceFlagsUnique,
                                                         host->server_state->advertise_interface, host->registered_name,
@@ -2040,6 +2085,9 @@ register_host_record(adv_host_t *host, adv_record_t *record)
                                                         ADDRESS_RECORD_TTL, attr, register_host_record_completion,
                                                         record);
             DNSServiceAttributeDeallocate(attr);
+            if (err == kDNSServiceErr_NoError) {
+                INFO("DNSServiceRegisterRecord TSR for " PRI_S_SRP " set to " PUB_S_SRP, host->name, time_buf);
+            }
         }
     } else {
         err = DNSServiceRegisterRecord(service_ref, &record->rref, kDNSServiceFlagsUnique,
@@ -2085,17 +2133,23 @@ update_instance_tsr(adv_instance_t *instance)
         if (attr == NULL) {
             ERROR("failed to create new DNSServiceAttributeRef");
         } else {
+            uint32_t offset = 0;
+            char time_buf[28];
             if (instance->update != NULL && instance->update->client != NULL && instance->update->client->message != NULL &&
                 instance->update->client->message->received_time != 0)
             {
-                DNSServiceAttributeSetTimestamp(attr, (uint32_t)(srp_time() - instance->update->client->message->received_time));
+                offset = (uint32_t)(srp_time() - instance->update->client->message->received_time);
+                srp_format_time_offset(time_buf, sizeof(time_buf), offset);
             } else {
-                DNSServiceAttributeSetTimestamp(attr, 0);
+                static char msg[] = "now";
+                memcpy(time_buf, msg, sizeof(msg));
             }
+            DNSServiceAttributeSetTimestamp(attr, offset);
             err = DNSServiceUpdateRecordWithAttribute(instance->txn->sdref, NULL, 0, 0, NULL, 0, attr);
             DNSServiceAttributeDeallocate(attr);
             if (err == kDNSServiceErr_NoError) {
-                INFO("DNSServiceUpdateRecordWithAttribute for instance tsr succeed");
+                INFO("DNSServiceRegisterUpdateRecord TSR for " PRI_S_SRP " set to " PUB_S_SRP,
+                     instance->host == NULL ? "<null>" : instance->host->name, time_buf);
             } else {
                 INFO("DNSServiceUpdateRecordWithAttribute for instance tsr failed: %d", err);
                 // We should never get a bad reference error; if we do, it's likely the result of a previous
@@ -2111,7 +2165,7 @@ update_instance_tsr(adv_instance_t *instance)
 }
 
 static void
-update_host_tsr(adv_record_t *record)
+update_host_tsr(adv_record_t *record, adv_update_t *update)
 {
     DNSServiceAttributeRef attr;
     int err;
@@ -2136,17 +2190,21 @@ update_host_tsr(adv_record_t *record)
         if (attr == NULL) {
             ERROR("failed to create new DNSServiceAttributeRef");
         } else {
-            if (record->update != NULL && record->update->client != NULL && record->update->client->message != NULL &&
-                record->update->client->message->received_time != 0)
-            {
-                DNSServiceAttributeSetTimestamp(attr, (uint32_t)(srp_time() - record->update->client->message->received_time));
+            uint32_t offset = 0;
+            char time_buf[28];
+            if (update->client != NULL && update->client->message != NULL && update->client->message->received_time != 0) {
+                offset = (uint32_t)(srp_time() - update->client->message->received_time);
+                srp_format_time_offset(time_buf, sizeof(time_buf), offset);
             } else {
-                DNSServiceAttributeSetTimestamp(attr, 0);
+                static char msg[] = "now";
+                memcpy(time_buf, msg, sizeof(msg));
             }
+            DNSServiceAttributeSetTimestamp(attr, offset);
             err = DNSServiceUpdateRecordWithAttribute(shared_txn->sdref, record->rref, 0, 0, NULL, 0, attr);
             DNSServiceAttributeDeallocate(attr);
             if (err == kDNSServiceErr_NoError) {
-                INFO("DNSServiceUpdateRecordWithAttribute for host tsr succeed");
+                INFO("DNSServiceUpdateRecord TSR for " PRI_S_SRP " set to " PUB_S_SRP,
+                     record->host == NULL ? "<null>" : record->host->name, time_buf);
             } else {
                 INFO("DNSServiceUpdateRecordWithAttribute for host tsr failed: %d", err);
             }
@@ -2217,7 +2275,7 @@ start_host_update(adv_host_t *host)
         if (record == NULL) {
             INFO("no key record found.");
         } else {
-            update_host_tsr(record);
+            update_host_tsr(record, update);
         }
     }
 
@@ -2307,6 +2365,7 @@ start_host_update(adv_host_t *host)
     }
 
     if (__builtin_available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *)) {
+        INFO("DNSServiceSendQueuedRequests()");
         err = DNSServiceSendQueuedRequests(host->server_state->shared_registration_txn->sdref);
         if (err == kDNSServiceErr_Invalid) {
             INFO("no queued requests.");
@@ -3029,6 +3088,7 @@ found_something:
     // so we can safely ignore it. If we're getting a replication update, it can't be newer than the current update.
     // So we can ignore it--we'll send a replication update when we're done processing the client update.
     if (host->update != NULL) {
+#ifdef SRP_DETECT_STALLS
         time_t now = srp_time();
         // It's possible that we could get an update that stalls due to a problem communicating with mDNSResponder
         // and that a timing race prevents this from being detected correctly. In this case, cancel the update and
@@ -3039,6 +3099,7 @@ found_something:
             update_failed(host->update, dns_rcode_servfail, false, false);
             service_disconnected(server_state, (intptr_t)server_state->shared_registration_txn);
         } else {
+#endif // SRP_DETECT_STALLS
             INFO("dropping retransmission of in-progress update for host " PRI_S_SRP, host->name);
 #if SRP_FEATURE_REPLICATION
             srp_replication_advertise_finished(host, host->name, server_state, srpl_connection,
@@ -3048,7 +3109,9 @@ found_something:
             srp_update_free_parts(instances, NULL, services, removes, new_host);
             dns_message_free(parsed_message);
             return true;
+#ifdef SRP_DETECT_STALLS
         }
+#endif
     }
 
     // If this is a remove, remove the host registrations and mark the host removed. We keep it around until the

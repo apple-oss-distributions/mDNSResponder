@@ -199,11 +199,13 @@ struct srpl_srp_client_update_result {
 
 struct srpl_host_update {
     message_t *NULLABLE *NULLABLE messages;
+    intptr_t orig_buffer;
     uint64_t server_stable_id;
     dns_name_t *NULLABLE hostname;
     uint32_t update_offset;
     int num_messages, max_messages, messages_processed;
     int rcode;
+    unsigned num_bytes;
 };
 
 struct srpl_event {

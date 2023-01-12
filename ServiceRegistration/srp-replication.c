@@ -571,6 +571,7 @@ srpl_connection_finalize(srpl_connection_t *srpl_connection)
     }
     if (srpl_connection->reconnect_wakeup != NULL) {
         ioloop_cancel_wake_event(srpl_connection->reconnect_wakeup);
+        ioloop_wakeup_release(srpl_connection->reconnect_wakeup);
         srpl_connection->reconnect_wakeup = NULL;
     }
     free(srpl_connection->name);
@@ -1188,7 +1189,7 @@ srpl_host_message_send(srpl_connection_t *srpl_connection, adv_host_t *host)
     if (!SRPL_SUPPORTS(srpl_connection, SRPL_VARIATION_MULTI_MESSAGE)) {
         dns_u16_to_wire(&towire, kDSOType_SRPLTimeOffset);
         dns_rdlength_begin(&towire);
-        dns_u32_to_wire(&towire, (uint32_t)(srpl_now - host->update_time));
+        dns_u32_to_wire(&towire, (uint32_t)(srpl_now - host->message->received_time));
         dns_rdlength_end(&towire);
     }
     dns_u16_to_wire(&towire, kDSOType_SRPLServerStableID);
@@ -1336,7 +1337,8 @@ srpl_find_dso_additionals(srpl_connection_t *srpl_connection, dso_state_t *dso, 
                 indices[j] = i;
                 unsigned offp = 0;
                 if (!iterator(j, dso->additl[i].payload, &offp, dso->additl[i].length, context) ||
-                    offp != dso->additl[i].length) {
+                    offp != dso->additl[i].length)
+                {
                     ERROR(PRI_S_SRP ": invalid " PUB_S_SRP " for " PUB_S_SRP ".",
                           srpl_connection->name, names[j], message_name);
                     found = true; // So we don't complain later.
@@ -1380,6 +1382,10 @@ srpl_connection_discontinue(srpl_connection_t *srpl_connection)
     // discontinue.
     if (srpl_connection->reconnect_wakeup != NULL) {
         ioloop_cancel_wake_event(srpl_connection->reconnect_wakeup);
+        // We have to get rid of the wakeup here because it's holding a reference to the connection, which we may want to
+        // have go away.
+        ioloop_wakeup_release(srpl_connection->reconnect_wakeup);
+        srpl_connection->reconnect_wakeup = NULL;
     }
     srpl_connection_reset(srpl_connection);
     srpl_connection_next_state(srpl_connection, srpl_state_disconnect);
@@ -1427,7 +1433,7 @@ srpl_session_message_parse(srpl_connection_t *srpl_connection,
         return false;
     }
 
-    if (protocol_version == 1) {
+    if (protocol_version >= 1) {
         srpl_connection->variation_mask |= SRPL_VARIATION_MULTI_MESSAGE;
     }
     INFO(PRI_S_SRP " received " PUB_S_SRP ", id %" PRIx64,
@@ -1600,7 +1606,18 @@ srpl_host_message_parse_in(int index, const uint8_t *buffer, unsigned *offp, uin
 
     switch(index) {
     case 0: // Host Name
-        return dns_name_parse(&update->hostname, buffer, length, offp, length);
+        if (update->hostname == NULL) {
+            unsigned offp_orig = *offp;
+            bool ret = dns_name_parse(&update->hostname, buffer, length, offp, length);
+            update->num_bytes = *offp - offp_orig;
+            update->orig_buffer = (intptr_t)buffer;
+            return ret;
+        } else {
+            if ((intptr_t)buffer == update->orig_buffer) {
+                (*offp) += update->num_bytes;
+            }
+            return true;
+        }
     case 1: // Host Message
         if (update->messages != NULL) {
             const uint8_t *message_buffer;
@@ -1620,7 +1637,8 @@ srpl_host_message_parse_in(int index, const uint8_t *buffer, unsigned *offp, uin
                 uint32_t time_offset = 0;
                 if (!(dns_u32_parse(buffer, length, offp, &message->lease) &&
                       dns_u32_parse(buffer, length, offp, &message->key_lease) &&
-                      dns_u32_parse(buffer, length, offp, &time_offset))) {
+                      dns_u32_parse(buffer, length, offp, &time_offset)))
+                {
                     return false;
                 }
                 message->received_time = srp_time() - time_offset;
@@ -1645,6 +1663,8 @@ srpl_host_message_parse_in(int index, const uint8_t *buffer, unsigned *offp, uin
 static void
 srpl_host_message(srpl_connection_t *srpl_connection, message_t *message, dso_state_t *dso)
 {
+    srpl_event_t event;
+    memset(&event, 0, sizeof(event));
     srpl_connection_message_set(srpl_connection, message);
     if (dso->primary.length != 0) {
         ERROR(PRI_S_SRP ": invalid DSO Primary length %d for SRPLHost message.",
@@ -1657,7 +1677,6 @@ srpl_host_message(srpl_connection_t *srpl_connection, message_t *message, dso_st
         bool required[4] = { true, true, false, true };
         bool multiple[4] = { false, true, false, false };
         int indices[4];
-        srpl_event_t event;
         int num_additls = 4;
 
         // Parse host message
@@ -1717,6 +1736,9 @@ srpl_host_message(srpl_connection_t *srpl_connection, message_t *message, dso_st
 fail:
     INFO(PRI_S_SRP " received invalid SRPLHost message %x", srpl_connection->name, ntohs(message->wire.id));
 fail_no_message:
+    if (event.content_type == srpl_event_content_type_host_update) {
+        srpl_event_content_type_set(&event, srpl_event_content_type_none);
+    }
     srpl_disconnect(srpl_connection);
     return;
 }
@@ -3402,6 +3424,10 @@ srpl_candidate_host_re_evaluate_action(srpl_connection_t *srpl_connection, srpl_
 static bool
 srpl_connection_host_apply(srpl_connection_t *srpl_connection)
 {
+    DNS_NAME_GEN_SRP(srpl_connection->stashed_host.hostname, name_buf);
+    INFO("applying update from " PRI_S_SRP " for host " PRI_DNS_NAME_SRP " message #%d",
+         srpl_connection->name, DNS_NAME_PARAM_SRP(srpl_connection->stashed_host.hostname, name_buf),
+         srpl_connection->stashed_host.messages_processed);
     if (!srp_dns_evaluate(NULL, srpl_connection->instance->domain->server_state, srpl_connection,
                           srpl_connection->stashed_host.messages[srpl_connection->stashed_host.messages_processed]))
     {

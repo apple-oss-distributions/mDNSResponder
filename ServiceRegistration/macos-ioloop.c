@@ -1421,9 +1421,9 @@ ioloop_dnssd_txn_release_(dnssd_txn_t *dnssd_txn, const char *file, int line)
 }
 
 dnssd_txn_t *
-ioloop_dnssd_txn_add_(DNSServiceRef ref, void *context, dnssd_txn_finalize_callback_t finalize_callback,
-                      dnssd_txn_failure_callback_t failure_callback,
-                      const char *file, int line)
+ioloop_dnssd_txn_add_subordinate_(DNSServiceRef ref, void *context, dnssd_txn_finalize_callback_t finalize_callback,
+                                  dnssd_txn_failure_callback_t failure_callback,
+                                  const char *file, int line)
 {
     dnssd_txn_t *txn = calloc(1, sizeof(*txn));
     (void)file; (void)line;
@@ -1434,10 +1434,22 @@ ioloop_dnssd_txn_add_(DNSServiceRef ref, void *context, dnssd_txn_finalize_callb
         txn->sdref = ref;
         txn->context = context;
         txn->finalize_callback = finalize_callback;
+    }
+    return txn;
+}
+
+dnssd_txn_t *
+ioloop_dnssd_txn_add_(DNSServiceRef ref, void *context, dnssd_txn_finalize_callback_t finalize_callback,
+                      dnssd_txn_failure_callback_t failure_callback,
+                      const char *file, int line)
+{
+    dnssd_txn_t *txn = ioloop_dnssd_txn_add_subordinate_(ref, context, finalize_callback, failure_callback, file, line);
+    if (txn != NULL) {
         DNSServiceSetDispatchQueue(ref, ioloop_main_queue);
     }
     return txn;
 }
+
 
 void
 ioloop_dnssd_txn_set_aux_pointer(dnssd_txn_t *NONNULL txn, void *aux_pointer)

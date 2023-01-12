@@ -38,6 +38,8 @@
 #include "srp-gw.h"
 #include "config-parse.h"
 #include "srp-proxy.h"
+#include "srp-mdns-proxy.h"
+#include "srp-replication.h"
 
 static dns_name_t *service_update_zone; // The zone to update when we receive an update for default.service.arpa.
 
@@ -243,7 +245,10 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
         return false;
     }
 
-    raw_message->received_time = srp_time();
+
+    if (srpl_connection == NULL) {
+        raw_message->received_time = srp_time();
+    }
 
     update_zone = message->questions[0].name;
     if (service_update_zone != NULL && dns_names_equal_text(update_zone, "default.service.arpa.")) {
@@ -763,12 +768,22 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
 
     // Start the update.
     DNS_NAME_GEN_SRP(host_description->name, host_description_name_buf);
-    INFO("update for " PRI_DNS_NAME_SRP " xid %x validates, lease time %d%s, serial %" PRIu32 "%s.",
-         DNS_NAME_PARAM_SRP(host_description->name, host_description_name_buf), raw_message->wire.id,
-         lease_time, found_lease ? " (found)" : "", serial_number, found_serial ? " (found)" : " (not sent)");
+    char time_buf[28];
+    if (raw_message->received_time == 0) {
+        static char msg[] = "not set";
+        memcpy(time_buf, msg, sizeof(msg));
+    } else {
+        srp_format_time_offset(time_buf, sizeof(time_buf), srp_time() - raw_message->received_time);
+    }
+
+    INFO("update for " PRI_DNS_NAME_SRP " xid %x validates, lease time %d%s, receive_time "
+         PUB_S_SRP ", remote " PRI_S_SRP ".",
+         DNS_NAME_PARAM_SRP(host_description->name, host_description_name_buf), raw_message->wire.id, lease_time,
+         found_lease ? " (found)" : "", time_buf, srpl_connection == NULL ? "(none)" : srpl_connection->name);
     rcode = dns_rcode_noerror;
-    ret = srp_update_start(connection, server_state, srpl_connection, message, raw_message, host_description, service_instances,
-                           services, removes, replacement_zone == NULL ? update_zone : replacement_zone,
+    ret = srp_update_start(connection, server_state, srpl_connection, message, raw_message, host_description,
+                           service_instances, services, removes,
+                           replacement_zone == NULL ? update_zone : replacement_zone,
                            lease_time, key_lease_time, serial_number, found_serial);
     if (ret) {
         goto success;

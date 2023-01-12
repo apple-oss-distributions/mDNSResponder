@@ -1687,14 +1687,28 @@ ioloop_dnssd_txn_release_(dnssd_txn_t *dnssd_txn, const char *file, int line)
 }
 
 dnssd_txn_t *
-ioloop_dnssd_txn_add_(DNSServiceRef ref, void *context,
-                      dnssd_txn_finalize_callback_t callback, dnssd_txn_failure_callback_t failure_callback,
-                      const char *file, int line)
+ioloop_dnssd_txn_add_subordinate_(DNSServiceRef ref, void *context,
+                                  dnssd_txn_finalize_callback_t callback, dnssd_txn_failure_callback_t failure_callback,
+                                  const char *file, int line)
 {
     dnssd_txn_t *txn = calloc(1, sizeof(*txn));
     if (txn != NULL) {
         RETAIN(txn);
         txn->sdref = ref;
+        txn->finalize_callback = callback;
+        txn->failure_callback = failure_callback;
+        txn->context = context;
+    }
+    return txn;
+}
+
+dnssd_txn_t *
+ioloop_dnssd_txn_add_(DNSServiceRef ref, void *context,
+                      dnssd_txn_finalize_callback_t callback, dnssd_txn_failure_callback_t failure_callback,
+                      const char *file, int line)
+{
+    dnssd_txn_t *txn = ioloop_dnssd_txn_add_subordinate_(ref, context, callback, failure_callback, file, line);
+    if (txn != NULL) {
         txn->io = ioloop_file_descriptor_create(DNSServiceRefSockFD(txn->sdref), txn, dnssd_txn_io_finalize);
         if (txn->io == NULL) {
             RELEASE_HERE(txn, dnssd_txn_finalize);
@@ -1702,9 +1716,6 @@ ioloop_dnssd_txn_add_(DNSServiceRef ref, void *context,
         }
         // io holds a reference to txn
         RETAIN_HERE(txn);
-        txn->finalize_callback = callback;
-        txn->failure_callback = failure_callback;
-        txn->context = context;
         ioloop_add_reader(txn->io, dnssd_txn_callback);
     }
     return txn;

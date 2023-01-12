@@ -1599,6 +1599,7 @@ mDNSlocal mStatus regRecordAddTSRRecord(request_state *const request, AuthRecord
     // tsr timestamp in memory is time of receipt
     ar->resrec.rdata->u.tsr_value = tsrTimestamp;
     ar->resrec.namehash = DomainNameHashValue(ar->resrec.name);
+    ar->RecordCallback = regrecord_callback;
     SetNewRData(&ar->resrec, mDNSNULL, 0);  // Sets ar->rdatahash for us
 
     ar->ForceMCast            = ((request->flags & kDNSServiceFlagsForceMulticast) != 0);
