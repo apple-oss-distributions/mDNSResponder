@@ -34,7 +34,7 @@
 #include <sys/un.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/signal.h>
+#include <signal.h>
 #include "cti-server.h"
 #include "cti-proto.h"
 

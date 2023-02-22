@@ -32,7 +32,7 @@
 #include <sys/un.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/signal.h>
+#include <signal.h>
 
 #ifdef OPENTHREAD_PLATFORM_POSIX
 #include "cti-server.h"

@@ -215,7 +215,7 @@ recvfrom_flags(int fd, void *ptr, size_t nbytes, int *flagsp,
 #ifdef NOT_HAVE_DAEMON
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/signal.h>
+#include <signal.h>
 
 int daemon(int nochdir, int noclose)
 {
