@@ -2912,7 +2912,11 @@ exit:
 mDNSlocal mStatus add_domain_to_browser(request_state *info, const domainname *d)
 {
     browser_t *b, *p;
+#if defined(TARGET_OS_MAC) && TARGET_OS_MAC
     __block mStatus err;
+#else
+    mStatus err;
+#endif
 
     for (p = info->u.browser.browsers; p; p = p->next)
     {
