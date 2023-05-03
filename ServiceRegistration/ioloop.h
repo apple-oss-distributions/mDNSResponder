@@ -76,8 +76,7 @@ struct message {
 #endif
     int ifindex;
     uint16_t length;
-    time_t received_time;      // Only for SRP Replication, zero otherwise.
-    uint32_t lease, key_lease; // For SRP replication, leases agreed to by original registrar
+    time_t received_time; // Only for SRP Replication, zero otherwise.
     dns_wire_t wire;
 };
 
@@ -299,7 +298,6 @@ bool ioloop_send_data(comm_t *NONNULL connection, message_t *NULLABLE responding
                       struct iovec *NONNULL iov, int iov_len);
 bool ioloop_send_final_data(comm_t *NONNULL connection, message_t *NULLABLE responding_to,
                             struct iovec *NONNULL iov, int iov_len);
-void ioloop_strcpy(char *NONNULL dest, const char *NONNULL src, size_t lim);
 bool ioloop_map_interface_addresses(const char *NULLABLE ifname, void *NULLABLE context, interface_callback_t NULLABLE callback);
 #define ioloop_map_interface_addresses_here(here, ifname, context, callback) \
     ioloop_map_interface_addresses_here_(here, ifname, context, callback, __FILE__, __LINE__)
@@ -322,12 +320,6 @@ dnssd_txn_t *NULLABLE
 ioloop_dnssd_txn_add_(DNSServiceRef NONNULL ref, void *NULLABLE context,
                       dnssd_txn_finalize_callback_t NULLABLE callback,
                       dnssd_txn_failure_callback_t NULLABLE failure_callback, const char *NONNULL file, int line);
-#define ioloop_dnssd_txn_add_subordinate(ref, context, finalize_callback, failure_callback) \
-    ioloop_dnssd_txn_add_subordinate_(ref, context, finalize_callback, failure_callback, __FILE__, __LINE__)
-dnssd_txn_t *NULLABLE
-ioloop_dnssd_txn_add_subordinate_(DNSServiceRef NONNULL ref, void *NULLABLE context,
-                                  dnssd_txn_finalize_callback_t NULLABLE callback,
-                                  dnssd_txn_failure_callback_t NULLABLE failure_callback, const char *NONNULL file, int line);
 void ioloop_dnssd_txn_cancel(dnssd_txn_t *NONNULL txn);
 #define ioloop_dnssd_txn_retain(txn) ioloop_dnssd_txn_retain_(txn, __FILE__, __LINE__)
 void ioloop_dnssd_txn_retain_(dnssd_txn_t *NONNULL txn, const char *NONNULL file, int line);
@@ -357,8 +349,6 @@ bool srp_load_file_data(void *NULLABLE host_context, const char *NONNULL filenam
                         uint16_t *NONNULL length, uint16_t buffer_size);
 bool srp_store_file_data(void *NULLABLE host_context, const char *NONNULL filename, uint8_t *NONNULL buffer,
                          uint16_t length);
-time_t srp_time(void);
-void srp_format_time_offset(char *NONNULL buf, size_t buf_len, time_t offset);
 
 // Local Variables:
 // mode: C

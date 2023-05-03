@@ -42,7 +42,6 @@
 #define kDNSSDAdvertisingProxyAddPrefix                    18
 #define kDNSSDAdvertisingProxyRemovePrefix                 19
 #define kDNSSDAdvertisingProxyStartDroppingPushConnections 20
-#define kDNSSDAdvertisingProxyStartBreakingTimeValidation  21
 
 #endif /* XPC_CLIENT_ADVERTISING_PROXY_H */
 

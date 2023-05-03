@@ -198,14 +198,12 @@ struct srpl_srp_client_update_result {
 };
 
 struct srpl_host_update {
-    message_t *NULLABLE *NULLABLE messages;
-    intptr_t orig_buffer;
+    message_t *NULLABLE message;
     uint64_t server_stable_id;
-    dns_name_t *NULLABLE hostname;
     uint32_t update_offset;
-    int num_messages, max_messages, messages_processed;
+    time_t update_time;
+    dns_name_t *NULLABLE hostname;
     int rcode;
-    unsigned num_bytes;
 };
 
 struct srpl_event {
@@ -251,7 +249,6 @@ struct srpl_connection {
     int current_candidate;
     int retry_delay; // How long to send when we send a retry_delay message
     srpl_state_t state, next_state;
-    uint32_t variation_mask; // Protocol variations to support pre-standard TLV formats
     bool is_server;
     bool database_synchronized;
     bool candidates_not_generated; // If this is true, we haven't generated a candidates list yet.
@@ -303,7 +300,7 @@ struct unclaimed_connection {
 
 
 #define SRPL_RETRY_DELAY_LENGTH        DSO_MESSAGE_MIN_LENGTH + sizeof(uint32_t)
-#define SRPL_SESSION_MESSAGE_LENGTH    DSO_MESSAGE_MIN_LENGTH + sizeof(uint64_t) + DSO_TLV_HEADER_SIZE + sizeof(uint16_t)
+#define SRPL_SESSION_MESSAGE_LENGTH    DSO_MESSAGE_MIN_LENGTH + sizeof(uint64_t) // DSO header + 8 byte session ID
 #define SRPL_SEND_CANDIDATES_LENGTH    DSO_MESSAGE_MIN_LENGTH
 #define SRPL_CANDIDATE_MESSAGE_LENGTH  (DSO_MESSAGE_MIN_LENGTH + \
                                         DNS_MAX_NAME_SIZE + DSO_TLV_HEADER_SIZE + \
@@ -318,13 +315,8 @@ struct unclaimed_connection {
 
 #define SRPL_UPDATE_JITTER_WINDOW 10
 
-// SRP Replication protocol versioning
-#define SRPL_CURRENT_VERSION                1
-#define SRPL_VARIATION_MULTI_MESSAGE        1
-#define SRPL_SUPPORTS(srpl_connection, variation) \
-    (((srpl_connection)->variation_mask & ~(variation)) != 0)
-
 // Exported functions...
+time_t srpl_time(void);
 void srpl_startup(srp_server_t *NONNULL srp_server);
 void srpl_disable(srp_server_t *NONNULL srp_server);
 void srpl_drop_srpl_connection(srp_server_t *NONNULL srp_server);

@@ -80,7 +80,7 @@ static const char *srpl_state_name(srpl_state_t state);
 #endif
 
 // Return continuous time, if provided by O.S., otherwise unadjusted time.
-time_t srp_time(void)
+time_t srpl_time(void)
 {
 #ifdef CLOCK_BOOTTIME
     // CLOCK_BOOTTIME is a Linux-specific constant that indicates a monotonic time that includes time asleep
@@ -527,13 +527,9 @@ srpl_connection_candidate_set(srpl_connection_t *srpl_connection, srpl_candidate
 static void
 srpl_host_update_parts_free(srpl_host_update_t *update)
 {
-    if (update->messages != NULL) {
-        for (int i = 0; i < update->num_messages; i++) {
-            ioloop_message_release(update->messages[i]);
-        }
-        free(update->messages);
-        update->messages = NULL;
-        update->num_messages = update->max_messages = update->messages_processed = 0;
+    if (update->message != NULL) {
+        ioloop_message_release(update->message);
+        update->message = NULL;
     }
     if (update->hostname != NULL) {
         dns_name_free(update->hostname);
@@ -547,7 +543,6 @@ srpl_connection_reset(srpl_connection_t *srpl_connection)
 {
     srpl_connection->candidates_not_generated = true;
     srpl_connection->database_synchronized = false;
-    INFO("freeing parts");
     srpl_host_update_parts_free(&srpl_connection->stashed_host);
     srpl_connection_message_set(srpl_connection, NULL);
     if (srpl_connection->candidate != NULL) {
@@ -571,7 +566,6 @@ srpl_connection_finalize(srpl_connection_t *srpl_connection)
     }
     if (srpl_connection->reconnect_wakeup != NULL) {
         ioloop_cancel_wake_event(srpl_connection->reconnect_wakeup);
-        ioloop_wakeup_release(srpl_connection->reconnect_wakeup);
         srpl_connection->reconnect_wakeup = NULL;
     }
     free(srpl_connection->name);
@@ -786,9 +780,8 @@ static void
 srpl_host_update_steal_parts(srpl_host_update_t *to, srpl_host_update_t *from)
 {
     *to = *from;
+    ioloop_message_retain(to->message);
     from->hostname = NULL;
-    from->messages = NULL;
-    from->num_messages = from->max_messages = from->messages_processed = 0;
 }
 
 static bool
@@ -811,7 +804,6 @@ srpl_event_content_type_set_(srpl_event_t *event, srpl_event_content_type_t cont
         }
         break;
     case srpl_event_content_type_host_update:
-        INFO("freeing parts");
         srpl_host_update_parts_free(&event->content.host_update);
         break;
     }
@@ -834,18 +826,6 @@ srpl_incoming_connection_is_active(srpl_instance_t *instance)
         return false;
     }
     switch(instance->incoming->state) {
-    case srpl_state_disconnected:
-    case srpl_state_next_address_get:
-    case srpl_state_connect:
-    case srpl_state_idle:
-    case srpl_state_reconnect_wait:
-    case srpl_state_retry_delay_send:
-    case srpl_state_disconnect:
-    case srpl_state_disconnect_wait:
-    case srpl_state_connecting:
-    case srpl_state_server_id_send:
-    case srpl_state_server_id_response_wait:
-    case srpl_state_server_id_evaluate:
     case srpl_state_session_message_wait:
         return false;
     default:
@@ -920,12 +900,7 @@ srpl_dso_message_setup(dso_state_t *dso, dso_message_t *state, dns_towire_state_
         return false;
     }
 
-    // We don't crash when this happens, but it's definitely a coding error.
-    if (response && message == NULL) {
-        FAULT("preparing a response with no message to respond to");
-    }
-    dso_make_message(state, buffer, buffer_size, dso, false, response,
-                     (response && message != NULL) ? message->wire.id : 0, rcode, context);
+    dso_make_message(state, buffer, buffer_size, dso, false, response, response ? message->wire.id : 0, rcode, context);
     memset(towire, 0, sizeof(*towire));
     towire->p = &buffer[DNS_HEADER_SIZE];
     towire->lim = towire->p + (buffer_size - DNS_HEADER_SIZE);
@@ -963,11 +938,6 @@ srpl_session_message_send(srpl_connection_t *srpl_connection, bool response)
     dns_rdlength_begin(&towire);
     dns_u64_to_wire(&towire, server_state->server_id);
     dns_rdlength_end(&towire);
-    dns_u16_to_wire(&towire, kDSOType_SRPLVersion);
-    dns_rdlength_begin(&towire);
-    dns_u16_to_wire(&towire, SRPL_CURRENT_VERSION);
-    dns_rdlength_end(&towire);
-
     if (towire.error) {
         ERROR("ran out of message space at " PUB_S_SRP ", :%d", __FILE__, towire.line);
         return false;
@@ -1017,19 +987,10 @@ srpl_candidate_message_send(srpl_connection_t *srpl_connection, adv_host_t *host
     dns_towire_state_t towire;
     dso_message_t message;
     struct iovec iov;
-    time_t update_time = host->update_time;
 
     if (!srpl_dso_message_setup(srpl_connection->dso, &message, &towire,
                                 dsobuf, sizeof(dsobuf), NULL, false, 0, srpl_connection)) {
         return false;
-    }
-
-    // For testing, make the update time really wrong so that signature validation fails. This will not actually
-    // cause a failure unless the SRP requestor sends a time range, so really only useful for testing with the
-    // mDNSResponder srp-client, not with e.g. a Thread client.
-    if (host->server_state != NULL && host->server_state->break_srpl_time) {
-        INFO("breaking time: %lu -> %lu", (unsigned long)update_time, (unsigned long)(update_time - 1800));
-        update_time -= 1800;
     }
     dns_u16_to_wire(&towire, kDSOType_SRPLCandidate);
     dns_rdlength_begin(&towire);
@@ -1040,7 +1001,7 @@ srpl_candidate_message_send(srpl_connection_t *srpl_connection, adv_host_t *host
     dns_rdlength_end(&towire);
     dns_u16_to_wire(&towire, kDSOType_SRPLTimeOffset);
     dns_rdlength_begin(&towire);
-    dns_u32_to_wire(&towire, (uint32_t)(srp_time() - update_time));
+    dns_u32_to_wire(&towire, (uint32_t)(srpl_time() - host->update_time));
     dns_rdlength_end(&towire);
     dns_u16_to_wire(&towire, kDSOType_SRPLKeyID);
     dns_rdlength_begin(&towire);
@@ -1090,92 +1051,17 @@ srpl_candidate_response_send(srpl_connection_t *srpl_connection, dso_message_typ
     return true;
 }
 
-// Qsort comparison function for message receipt times.
-static int
-srpl_message_compare(const void *v1, const void *v2)
-{
-    const message_t *m1 = v1, *m2 = v2;
-    if (m1->received_time - m2->received_time < 0) {
-        return -1;
-    } else if(m1->received_time - m2->received_time > 0) {
-        return 1;
-    } else {
-        return 0;
-    }
-}
-
 static bool
 srpl_host_message_send(srpl_connection_t *srpl_connection, adv_host_t *host)
 {
-    uint8_t *dsobuf = NULL;
-    size_t dsobuf_length = SRPL_HOST_MESSAGE_LENGTH;
+    uint8_t dsobuf[SRPL_HOST_MESSAGE_LENGTH];
     dns_towire_state_t towire;
     dso_message_t message;
-    struct iovec *iov = NULL;
-    int num_messages; // Number of SRP updates we need to send
-    int iovec_count = 1, iov_cur = 0;
-    message_t **messages = NULL;
-    bool rv = false;
-
-    if (host->message == NULL) {
-        FAULT("no host message to send for " PRI_S_SRP " on " PRI_S_SRP ".", host->name, srpl_connection->name);
-        goto out;
-    }
-    iovec_count++;
-    num_messages = 1;
-    if (SRPL_SUPPORTS(srpl_connection, SRPL_VARIATION_MULTI_MESSAGE)) {
-        for (int i = 0; i < host->instances->num; i++) {
-            adv_instance_t *instance = host->instances->vec[i];
-            if (instance != NULL) {
-                if (instance->message != NULL && instance->message != host->message && instance->message != NULL) {
-                    num_messages++;
-                    iovec_count += 2;
-                    // Account for additional HostMessage TLV.
-                    dsobuf_length += DSO_TLV_HEADER_SIZE + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
-                }
-            }
-        }
-        messages = calloc(1, sizeof (*messages));
-        if (messages == NULL) {
-            INFO("no memory for message vector");
-            goto out;
-        }
-        messages[0] = host->message;
-        num_messages = 1;
-        for (int i = 0; i < host->instances->num; i++) {
-            adv_instance_t *instance = host->instances->vec[i];
-            if (instance != NULL) {
-                if (instance->message != NULL && instance->message != host->message && instance->message != NULL) {
-                    messages[num_messages] = instance->message;
-                }
-            }
-        }
-        qsort(messages, num_messages, sizeof(*messages), srpl_message_compare);
-    }
-    iov = calloc(iovec_count, sizeof(*iov));
-    if (iov == NULL) {
-        ERROR("no memory for iovec.");
-        goto out;
-    }
-    dsobuf = malloc(dsobuf_length);
-    if (dsobuf == NULL) {
-        ERROR("no memory for dso buffer");
-        goto out;
-    }
+    struct iovec iov[2];
 
     if (!srpl_dso_message_setup(srpl_connection->dso, &message, &towire,
-                                dsobuf, dsobuf_length, NULL, false, 0, srpl_connection)) {
-        goto out;
-    }
-
-    time_t srpl_now = srp_time();
-
-    // For testing, make the update time really wrong so that signature validation fails. This will not actually
-    // cause a failure unless the SRP requestor sends a time range, so really only useful for testing with the
-    // mDNSResponder srp-client, not with e.g. a Thread client.
-    if (host->server_state != NULL && host->server_state->break_srpl_time) {
-        INFO("breaking time: %lu -> %lu", (unsigned long)srpl_now, (unsigned long)(srpl_now + 1800));
-        srpl_now += 1800;
+                                dsobuf, sizeof(dsobuf), NULL, false, 0, srpl_connection)) {
+        return false;
     }
     dns_u16_to_wire(&towire, kDSOType_SRPLHost);
     dns_rdlength_begin(&towire);
@@ -1184,64 +1070,30 @@ srpl_host_message_send(srpl_connection_t *srpl_connection, adv_host_t *host)
     dns_rdlength_begin(&towire);
     dns_full_name_to_wire(NULL, &towire, host->name);
     dns_rdlength_end(&towire);
-    // v0 of the protocol only includes one host message option, and timeoffset is sent
-    // as its own secondary TLV.
-    if (!SRPL_SUPPORTS(srpl_connection, SRPL_VARIATION_MULTI_MESSAGE)) {
-        dns_u16_to_wire(&towire, kDSOType_SRPLTimeOffset);
-        dns_rdlength_begin(&towire);
-        dns_u32_to_wire(&towire, (uint32_t)(srpl_now - host->message->received_time));
-        dns_rdlength_end(&towire);
-    }
+    dns_u16_to_wire(&towire, kDSOType_SRPLTimeOffset);
+    dns_rdlength_begin(&towire);
+    dns_u32_to_wire(&towire, (uint32_t)(srpl_time() - host->update_time));
+    dns_rdlength_end(&towire);
     dns_u16_to_wire(&towire, kDSOType_SRPLServerStableID);
     dns_rdlength_begin(&towire);
     dns_u64_to_wire(&towire, host->server_stable_id);
     dns_rdlength_end(&towire);
-    if (!SRPL_SUPPORTS(srpl_connection, SRPL_VARIATION_MULTI_MESSAGE)) {
-        dns_u16_to_wire(&towire, kDSOType_SRPLHostMessage);
-        dns_u16_to_wire(&towire, host->message->length);
-        iov[iov_cur].iov_len = towire.p - dsobuf;
-        iov[iov_cur].iov_base = dsobuf;
-        iov_cur++;
-        iov[iov_cur].iov_len = host->message->length;
-        iov[iov_cur].iov_base = &host->message->wire;
-        iov_cur++;
-    } else {
-        for (int i = 0; i < num_messages; i++) {
-            uint8_t *start = towire.p;
-            dns_u16_to_wire(&towire, kDSOType_SRPLHostMessage);
-            dns_u16_to_wire(&towire, 12 + messages[i]->length);
-            dns_u32_to_wire(&towire, messages[i]->lease);
-            dns_u32_to_wire(&towire, messages[i]->key_lease);
-            dns_u32_to_wire(&towire, (uint32_t)(srpl_now - messages[i]->received_time));
-            iov[iov_cur].iov_len = towire.p - start;
-            iov[iov_cur].iov_base = start;
-            iov_cur++;
-            iov[iov_cur].iov_len = messages[i]->length;
-            iov[iov_cur].iov_base = &messages[i]->wire;
-            iov_cur++;
-        }
-    }
-
+    dns_u16_to_wire(&towire, kDSOType_SRPLHostMessage);
+    dns_u16_to_wire(&towire, host->message->length);
     if (towire.error) {
         ERROR("ran out of message space at " PUB_S_SRP ", :%d", __FILE__, towire.line);
-        goto out;
+        return false;
     }
-    ioloop_send_message(srpl_connection->connection, srpl_connection_message_get(srpl_connection), iov, iov_cur);
+    memset(&iov, 0, sizeof(iov));
+    iov[0].iov_len = towire.p - dsobuf;
+    iov[0].iov_base = dsobuf;
+    iov[1].iov_len = host->message->length;
+    iov[1].iov_base = &host->message->wire;
+    ioloop_send_message(srpl_connection->connection, srpl_connection_message_get(srpl_connection), iov, 2);
 
     INFO(PRI_S_SRP " sent SRPLHost message %02x%02x " PRI_S_SRP " stable ID %" PRIx64,
          srpl_connection->name, message.buf[0], message.buf[1], host->name, host->server_stable_id);
-    rv = true;
-    out:
-    if (messages != NULL) {
-        free(messages);
-    }
-    if (iov != NULL) {
-        free(iov);
-    }
-    if (dsobuf != NULL) {
-        free(dsobuf);
-    }
-    return rv;
+    return true;
 }
 
 
@@ -1313,9 +1165,9 @@ srpl_retry_delay_send(srpl_connection_t *srpl_connection, uint32_t delay)
     return true;
 }
 static bool
-srpl_find_dso_additionals(srpl_connection_t *srpl_connection, dso_state_t *dso, const dso_message_types_t *additionals,
-                          bool *required, bool *multiple, const char **names, int *indices, int num,
-                          int min_additls, int max_additls, const char *message_name, void *context,
+srpl_find_dso_additionals(srpl_connection_t *srpl_connection, dso_state_t *dso,
+                          const dso_message_types_t *additionals, bool *required, const char **names, int *indices,
+                          int num, int min_additls, int max_additls, const char *message_name, void *context,
                           bool (*iterator)(int index, const uint8_t *buf, unsigned *offp, uint16_t len, void *context))
 {
     int ret = true;
@@ -1324,11 +1176,11 @@ srpl_find_dso_additionals(srpl_connection_t *srpl_connection, dso_state_t *dso, 
     for (int j = 0; j < num; j++) {
         indices[j] = -1;
     }
-    for (unsigned i = 0; i < dso->num_additls; i++) {
+    for (int i = 0; i < dso->num_additls; i++) {
         bool found = false;
         for (int j = 0; j < num; j++) {
             if (dso->additl[i].opcode == additionals[j]) {
-                if (indices[j] != -1 && (multiple == NULL || multiple[j] == false)) {
+                if (indices[j] != -1) {
                     ERROR(PRI_S_SRP ": duplicate " PUB_S_SRP " for " PUB_S_SRP ".",
                           srpl_connection->name, names[j], message_name);
                     ret = false;
@@ -1337,8 +1189,7 @@ srpl_find_dso_additionals(srpl_connection_t *srpl_connection, dso_state_t *dso, 
                 indices[j] = i;
                 unsigned offp = 0;
                 if (!iterator(j, dso->additl[i].payload, &offp, dso->additl[i].length, context) ||
-                    offp != dso->additl[i].length)
-                {
+                    offp != dso->additl[i].length) {
                     ERROR(PRI_S_SRP ": invalid " PUB_S_SRP " for " PUB_S_SRP ".",
                           srpl_connection->name, names[j], message_name);
                     found = true; // So we don't complain later.
@@ -1353,6 +1204,7 @@ srpl_find_dso_additionals(srpl_connection_t *srpl_connection, dso_state_t *dso, 
         if (!found) {
             ERROR(PRI_S_SRP ": unexpected opcode %x for " PUB_S_SRP ".",
                   srpl_connection->name, dso->additl[i].opcode, message_name);
+            ret = false;
         }
     }
     for (int j = 0; j < num; j++) {
@@ -1378,41 +1230,14 @@ static void
 srpl_connection_discontinue(srpl_connection_t *srpl_connection)
 {
     srpl_connection->candidates_not_generated = true;
-    // Cancel any outstanding reconnect wakeup event, so that we don't accidentally restart the connection we decided to
-    // discontinue.
-    if (srpl_connection->reconnect_wakeup != NULL) {
-        ioloop_cancel_wake_event(srpl_connection->reconnect_wakeup);
-        // We have to get rid of the wakeup here because it's holding a reference to the connection, which we may want to
-        // have go away.
-        ioloop_wakeup_release(srpl_connection->reconnect_wakeup);
-        srpl_connection->reconnect_wakeup = NULL;
-    }
     srpl_connection_reset(srpl_connection);
     srpl_connection_next_state(srpl_connection, srpl_state_disconnect);
-}
-
-static bool
-srpl_session_message_parse_in(int index, const uint8_t *buffer, unsigned *offp, uint16_t length, void *context)
-{
-    uint16_t *remote_version = context;
-
-    switch(index) {
-    case 0:
-        return dns_u16_parse(buffer, length, offp, remote_version);
-    }
-    return false;
 }
 
 static bool
 srpl_session_message_parse(srpl_connection_t *srpl_connection,
                            srpl_event_t *event, dso_state_t *dso, const char *message_name)
 {
-    const char *names[1] = { "Protocol Version" };
-    dso_message_types_t additionals[1] = { kDSOType_SRPLVersion };
-    bool required[1] = { false };
-    int indices[1];
-    uint16_t protocol_version = 0;
-
     if (dso->primary.length != 8) {
         ERROR(PRI_S_SRP ": invalid DSO Primary length %d for " PUB_S_SRP ".",
               srpl_connection->name, dso->primary.length, message_name);
@@ -1426,19 +1251,11 @@ srpl_session_message_parse(srpl_connection_t *srpl_connection,
                   srpl_connection->name, message_name);
             return false;
         }
-    }
-    if (!srpl_find_dso_additionals(srpl_connection, dso, additionals,
-                                   required, NULL, names, indices, 1, 0, 1, "SRPLSession message",
-                                   &protocol_version, srpl_session_message_parse_in)) {
-        return false;
-    }
 
-    if (protocol_version >= 1) {
-        srpl_connection->variation_mask |= SRPL_VARIATION_MULTI_MESSAGE;
+        INFO(PRI_S_SRP " received " PUB_S_SRP ", id %" PRIx64,
+             srpl_connection->name, message_name, event->content.server_id);
+        return true;
     }
-    INFO(PRI_S_SRP " received " PUB_S_SRP ", id %" PRIx64,
-         srpl_connection->name, message_name, event->content.server_id);
-    return true;
 }
 
 static void
@@ -1447,11 +1264,11 @@ srpl_session_message(srpl_connection_t *srpl_connection, message_t *message, dso
     srpl_event_t event;
     srpl_event_initialize(&event, srpl_event_session_message_received);
 
-    srpl_connection_message_set(srpl_connection, message);
     if (!srpl_session_message_parse(srpl_connection, &event, dso, "SRPLSession message")) {
         srpl_disconnect(srpl_connection);
         return;
     }
+    srpl_connection_message_set(srpl_connection, message);
     srpl_event_deliver(srpl_connection, &event);
 }
 
@@ -1485,14 +1302,13 @@ srpl_send_candidates_message(srpl_connection_t *srpl_connection, message_t *mess
     srpl_event_t event;
     srpl_event_initialize(&event, srpl_event_send_candidates_message_received);
 
-    srpl_connection_message_set(srpl_connection, message);
     if (srpl_send_candidates_message_parse(srpl_connection, dso, "SRPLSendCandidates message")) {
         INFO(PRI_S_SRP " received SRPLSendCandidates query", srpl_connection->name);
 
+        srpl_connection_message_set(srpl_connection, message);
         srpl_event_deliver(srpl_connection, &event);
         return;
     }
-    srpl_disconnect(srpl_connection);
 }
 
 static void
@@ -1534,15 +1350,15 @@ srpl_candidate_message(srpl_connection_t *srpl_connection, message_t *message, d
 
     srpl_event_t event;
     srpl_event_initialize(&event, srpl_event_candidate_received);
-    srpl_connection_message_set(srpl_connection, message);
     if (!srpl_event_content_type_set(&event, srpl_event_content_type_candidate) ||
         !srpl_find_dso_additionals(srpl_connection, dso, additionals,
-                                   required, NULL, names, indices, 3, 3, 3, "SRPLCandidate message",
+                                   required, names, indices, 3, 3, 3, "SRPLCandidate message",
                                    event.content.candidate, srpl_candidate_message_parse_in)) {
         goto fail;
     }
 
-    event.content.candidate->update_time = srp_time() - event.content.candidate->update_offset;
+    srpl_connection_message_set(srpl_connection, message);
+    event.content.candidate->update_time = srpl_time() - event.content.candidate->update_offset;
     srpl_event_deliver(srpl_connection, &event);
     srpl_event_content_type_set(&event, srpl_event_content_type_none);
     return;
@@ -1588,7 +1404,7 @@ srpl_candidate_response(srpl_connection_t *srpl_connection, dso_state_t *dso)
     srpl_event_initialize(&event, srpl_event_candidate_response_received);
     srpl_event_content_type_set(&event, srpl_event_content_type_candidate_disposition);
     if (!srpl_find_dso_additionals(srpl_connection, dso, additionals,
-                                   required, NULL, names, indices, 3, 1, 1, "SRPLCandidate reply",
+                                   required, names, indices, 3, 1, 1, "SRPLCandidate reply",
                                    &event.content.disposition, srpl_candidate_response_parse_in)) {
         goto fail;
     }
@@ -1605,57 +1421,20 @@ srpl_host_message_parse_in(int index, const uint8_t *buffer, unsigned *offp, uin
     srpl_host_update_t *update = context;
 
     switch(index) {
-    case 0: // Host Name
-        if (update->hostname == NULL) {
-            unsigned offp_orig = *offp;
-            bool ret = dns_name_parse(&update->hostname, buffer, length, offp, length);
-            update->num_bytes = *offp - offp_orig;
-            update->orig_buffer = (intptr_t)buffer;
-            return ret;
-        } else {
-            if ((intptr_t)buffer == update->orig_buffer) {
-                (*offp) += update->num_bytes;
-            }
-            return true;
+    case 0:
+        return dns_name_parse(&update->hostname, buffer, length, offp, length);
+    case 1:
+        return dns_u32_parse(buffer, length, offp, &update->update_offset);
+    case 2:
+        update->message = ioloop_message_create(length);
+        if (update->message == NULL) {
+            return false;
         }
-    case 1: // Host Message
-        if (update->messages != NULL) {
-            const uint8_t *message_buffer;
-            size_t message_length;
-            if (update->rcode) {
-                message_buffer = buffer + 24; // lease, key-lease, time offset
-                message_length = length - 24;
-            } else {
-                message_buffer = buffer;
-                message_length = length;
-            }
-            message_t *message = ioloop_message_create(message_length);
-            if (message == NULL) {
-                return false;
-            }
-            if (update->rcode) {
-                uint32_t time_offset = 0;
-                if (!(dns_u32_parse(buffer, length, offp, &message->lease) &&
-                      dns_u32_parse(buffer, length, offp, &message->key_lease) &&
-                      dns_u32_parse(buffer, length, offp, &time_offset)))
-                {
-                    return false;
-                }
-                message->received_time = srp_time() - time_offset;
-            }
-            memcpy(&message->wire, message_buffer, message_length);
-
-            // We are parsing across the same message, so we can't exceed max_messages here.
-            update->messages[update->num_messages++] = message;
-        } else {
-            update->max_messages++;
-        }
+        memcpy(&update->message->wire, buffer, length);
         *offp = length;
         return true;
-    case 2: // Server Stable ID
+    case 3:
         return dns_u64_parse(buffer, length, offp, &update->server_stable_id);
-    case 3: // Time Offset
-        return dns_u32_parse(buffer, length, offp, &update->update_offset);
     }
     return false;
 }
@@ -1663,45 +1442,23 @@ srpl_host_message_parse_in(int index, const uint8_t *buffer, unsigned *offp, uin
 static void
 srpl_host_message(srpl_connection_t *srpl_connection, message_t *message, dso_state_t *dso)
 {
-    srpl_event_t event;
-    memset(&event, 0, sizeof(event));
-    srpl_connection_message_set(srpl_connection, message);
     if (dso->primary.length != 0) {
         ERROR(PRI_S_SRP ": invalid DSO Primary length %d for SRPLHost message.",
               srpl_connection->name, dso->primary.length);
         goto fail;
     } else {
-        const char *names[4] = { "Host Name", "Host Message", "Server Stable ID", "Time Offset" };
-        dso_message_types_t additionals[4] = { kDSOType_SRPLHostname, kDSOType_SRPLHostMessage,
-            kDSOType_SRPLServerStableID, kDSOType_SRPLTimeOffset };
-        bool required[4] = { true, true, false, true };
-        bool multiple[4] = { false, true, false, false };
+        const char *names[4] = { "Host Name", "Time Offset", "Host Message", "Server Stable ID" };
+        dso_message_types_t additionals[4] = { kDSOType_SRPLHostname, kDSOType_SRPLTimeOffset, kDSOType_SRPLHostMessage,
+            kDSOType_SRPLServerStableID };
+        bool required[4] = { true, true, true, false };
         int indices[4];
-        int num_additls = 4;
+        srpl_event_t event;
 
         // Parse host message
         srpl_event_initialize(&event, srpl_event_host_message_received);
         srpl_event_content_type_set(&event, srpl_event_content_type_host_update);
-        if (SRPL_SUPPORTS(srpl_connection, SRPL_VARIATION_MULTI_MESSAGE)) {
-            num_additls--;
-            event.content.host_update.rcode = 1; // temporarily use rcode for flag
-        }
-
-        if (!srpl_find_dso_additionals(srpl_connection, dso, additionals, required, multiple, names, indices,
-                                       num_additls, num_additls - 1, num_additls, "SRPLHost message",
-                                       &event.content.host_update, srpl_host_message_parse_in)) {
-            goto fail;
-        }
-        // update->max_messages can't be zero here, or we would have gotten a false return from
-        // srpl_find_dso_additionals and not gotten here.
-        event.content.host_update.messages = calloc(event.content.host_update.max_messages,
-                                                    sizeof (*event.content.host_update.messages));
-        if (event.content.host_update.messages == NULL) {
-            goto fail;
-        }
-        // Now that we know how many messages, we can copy them out.
-        if (!srpl_find_dso_additionals(srpl_connection, dso, additionals, required, multiple, names, indices,
-                                       num_additls, num_additls - 1, num_additls, "SRPLHost message",
+        if (!srpl_find_dso_additionals(srpl_connection, dso, additionals,
+                                       required, names, indices, 4, 3, 4, "SRPLHost message",
                                        &event.content.host_update, srpl_host_message_parse_in)) {
             goto fail;
         }
@@ -1710,35 +1467,16 @@ srpl_host_message(srpl_connection_t *srpl_connection, message_t *message, dso_st
              srpl_connection->name, ntohs(message->wire.id),
              DNS_NAME_PARAM_SRP(event.content.host_update.hostname, hostname_buf),
              event.content.host_update.server_stable_id);
-        if (!SRPL_SUPPORTS(srpl_connection, SRPL_VARIATION_MULTI_MESSAGE)) {
-            time_t update_time = srp_time() - event.content.host_update.update_offset;
-            event.content.host_update.messages[0]->received_time = update_time;
-        } else {
-            // Make sure times are sequential.
-            time_t last_received_time = event.content.host_update.messages[0]->received_time;
-            for (int i = 0; i < event.content.host_update.num_messages; i++) {
-                time_t cur_received_time = event.content.host_update.messages[i]->received_time;
-                if (cur_received_time - last_received_time <= 0) {
-                    INFO(PRI_S_SRP
-                         " received invalid SRPLHost message %x with message %d time %lld <= message %d time %lld",
-                         srpl_connection->name, ntohs(event.content.host_update.messages[i]->wire.id),
-                         i, (long long)cur_received_time, i - 1, (long long)last_received_time);
-                    goto fail_no_message;
-                }
-                last_received_time = cur_received_time;
-            }
-        }
-        event.content.host_update.rcode = 0;
+        event.content.host_update.update_time =
+            srpl_time() - event.content.host_update.update_offset;
+        event.content.host_update.message->received_time = event.content.host_update.update_time;
+        srpl_connection_message_set(srpl_connection, message);
         srpl_event_deliver(srpl_connection, &event);
         srpl_event_content_type_set(&event, srpl_event_content_type_none);
     }
     return;
 fail:
     INFO(PRI_S_SRP " received invalid SRPLHost message %x", srpl_connection->name, ntohs(message->wire.id));
-fail_no_message:
-    if (event.content_type == srpl_event_content_type_host_update) {
-        srpl_event_content_type_set(&event, srpl_event_content_type_none);
-    }
     srpl_disconnect(srpl_connection);
     return;
 }
@@ -2178,8 +1916,8 @@ srpl_my_address_check(const addr_t *address)
     interface_address_state_t *ifa;
     static time_t last_fetch = 0;
     // Update the interface address list every sixty seconds, but only if we're asked to check an address.
-    const time_t now = srp_time();
-    if (last_fetch == 0 || now - last_fetch > 60) {
+    const time_t now = srpl_time();
+    if (now - last_fetch > 60) {
         last_fetch = now;
         ioloop_map_interface_addresses_here(&ifaddrs, NULL, NULL, NULL);
     }
@@ -2204,7 +1942,6 @@ srpl_instance_address_callback(void *context, addr_t *address, bool added, int e
         }
         return;
     }
-
     if (added) {
         unclaimed_connection_t **up = &unclaimed_connections;
         while (*up != NULL) {
@@ -2350,6 +2087,7 @@ srpl_instance_add(const char *hostname, const char *instance_name,
         instance->outgoing = srpl_connection_create(instance, true);
         srpl_connection_next_state(instance->outgoing, srpl_state_disconnected);
     }
+    instance->num_copies++;
 
     // If this add changed the server ID, we may want to re-attempt a connect.
     if (have_server_id && (!instance->have_server_id || instance->server_id != advertised_server_id)) {
@@ -2516,7 +2254,6 @@ srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t
                 RELEASE_HERE(instance, srpl_instance_finalize);
                 return;
             }
-            instance->num_copies = 1;
         }
 
         int err = DNSServiceResolve(&sdref, 0, interfaceIndex,
@@ -3424,13 +3161,8 @@ srpl_candidate_host_re_evaluate_action(srpl_connection_t *srpl_connection, srpl_
 static bool
 srpl_connection_host_apply(srpl_connection_t *srpl_connection)
 {
-    DNS_NAME_GEN_SRP(srpl_connection->stashed_host.hostname, name_buf);
-    INFO("applying update from " PRI_S_SRP " for host " PRI_DNS_NAME_SRP " message #%d",
-         srpl_connection->name, DNS_NAME_PARAM_SRP(srpl_connection->stashed_host.hostname, name_buf),
-         srpl_connection->stashed_host.messages_processed);
-    if (!srp_dns_evaluate(NULL, srpl_connection->instance->domain->server_state, srpl_connection,
-                          srpl_connection->stashed_host.messages[srpl_connection->stashed_host.messages_processed]))
-    {
+    if (!srp_dns_evaluate(NULL, srpl_connection->instance->domain->server_state,
+                          srpl_connection, srpl_connection->stashed_host.message)) {
         srpl_host_response_send(srpl_connection, dns_rcode_formerr);
         return false;
     }
@@ -3523,14 +3255,7 @@ srpl_candidate_host_apply_wait_action(srpl_connection_t *srpl_connection, srpl_e
     if (event == NULL) {
         return srpl_state_invalid; // Wait for events.
     } else if (event->event_type == srpl_event_advertise_finished) {
-        if (srpl_connection->stashed_host.rcode == dns_rcode_noerror) {
-            srpl_connection->stashed_host.messages_processed++;
-            if (srpl_connection->stashed_host.messages_processed < srpl_connection->stashed_host.num_messages) {
-                return srpl_state_candidate_host_apply;
-            }
-        }
         srpl_host_response_send(srpl_connection, event->content.advertise_finished.rcode);
-        INFO("freeing parts");
         srpl_host_update_parts_free(&srpl_connection->stashed_host);
         return srpl_state_send_candidates_wait;
     } else {
@@ -3655,10 +3380,7 @@ srpl_candidate_host_send_action(srpl_connection_t *srpl_connection, srpl_event_t
     if (!srp_adv_host_valid(host) || host->message == NULL) {
         return srpl_state_send_candidates_remaining_check;
     }
-    if (!srpl_host_message_send(srpl_connection, host)) {
-        srpl_disconnect(srpl_connection);
-        return srpl_state_invalid;
-    }
+    srpl_host_message_send(srpl_connection, host);
     return srpl_state_candidate_host_response_wait;
 }
 
@@ -3735,7 +3457,7 @@ srpl_ready_action(srpl_connection_t *srpl_connection, srpl_event_t *event)
         }
         return srpl_state_invalid;
     } else if (event->event_type == srpl_event_host_message_received) {
-        if (srpl_connection->stashed_host.messages != NULL) {
+        if (srpl_connection->stashed_host.message != NULL) {
             FAULT(PRI_S_SRP ": stashed host present but host message received", srpl_connection->name);
             return srpl_connection_drop_state(srpl_connection->instance, srpl_connection);
         }
@@ -3879,18 +3601,7 @@ srpl_stashed_host_finished_action(srpl_connection_t *srpl_connection, srpl_event
         FAULT(PRI_S_SRP ": stashed host not present, but advertise_finished event received.", srpl_connection->name);
         return srpl_state_ready;
     }
-    if (srpl_connection->stashed_host.messages == NULL) {
-        FAULT(PRI_S_SRP ": stashed host present, no messages.", srpl_connection->name);
-        return srpl_state_ready;
-    }
-    if (srpl_connection->stashed_host.rcode == dns_rcode_noerror) {
-        srpl_connection->stashed_host.messages_processed++;
-        if (srpl_connection->stashed_host.messages_processed < srpl_connection->stashed_host.num_messages) {
-            return srpl_state_stashed_host_apply;
-        }
-    }
     srpl_host_response_send(srpl_connection, srpl_connection->stashed_host.rcode);
-    INFO("freeing parts");
     srpl_host_update_parts_free(&srpl_connection->stashed_host);
     return srpl_state_ready;
 }

@@ -2007,34 +2007,6 @@ mDNSlocal void CompleteRDataUpdate(mDNS *const m, AuthRecord *const rr)
         rr->UpdateCallback(m, rr, OldRData, OldRDLen);          // ... and let the client know
 }
 
-mDNSlocal AuthRecord *FindOrphanedTSR(mDNS *const m, const mDNSInterfaceID interfaceID, const mDNSu16 rrClass,
-    const mDNSu32 nameHash, const domainname *const name)
-{
-    AuthRecord *tsr = mDNSNULL;
-
-    for (AuthRecord *ar = m->ResourceRecords; ar && !tsr; ar = ar->next)
-    {
-        const ResourceRecord *const rr = &ar->resrec;
-        if ((rr->rrtype == kDNSType_TSR) && (rr->InterfaceID == interfaceID) &&
-            (rr->rrclass == rrClass) && (rr->namehash == nameHash) && (SameDomainName(rr->name, name)))
-        {
-            tsr = ar;
-        }
-    }
-
-    for (const AuthRecord *ar = m->ResourceRecords; ar && tsr ; ar = ar->next)
-    {
-        if (ar->resrec.rrtype != kDNSType_TSR && SameResourceRecordNameClassInterface(ar, tsr))
-        {
-            // There is at least one non-TSR record that has the same name, class and interface index with the TSR.
-            // So this TSR is not an orphan.
-            tsr = mDNSNULL;
-        }
-    }
-
-    return tsr;
-}
-
 // Note: mDNS_Deregister_internal can call a user callback, which may change the record list and/or question list.
 // Any code walking either list must use the CurrentQuestion and/or CurrentRecord mechanism to protect against this.
 // Exported so uDNS.c can call this
@@ -2044,14 +2016,21 @@ mDNSexport mStatus mDNS_Deregister_internal(mDNS *const m, AuthRecord *const rr,
     mDNSu8 RecordType = rr->resrec.RecordType;
     AuthRecord **p = &m->ResourceRecords;   // Find this record in our list of active records
     mDNSBool dupList = mDNSfalse;
+    AuthRecord *tsr = mDNSNULL, *ar;
+    mDNSu32 count = 0;  // Count the number of records sharing the same name with the rr record other than TSR record.
 
-    const mDNSInterfaceID interfeceIDToMatchTSR = rr->resrec.InterfaceID;
-    const mDNSu16 rrClassToMatchTSR = rr->resrec.rrclass;
-    const mDNSu32 nameHashToMatchTSR = rr->resrec.namehash;
-    domainname nameToMatchTSR;
-    AssignDomainName(&nameToMatchTSR, rr->resrec.name);
-    const mDNSBool isTSR = (rr->resrec.rrtype == kDNSType_TSR);
-
+    for (ar = m->ResourceRecords; ar; ar = ar->next)
+    {
+        if (SameResourceRecordNameClassInterface(ar, rr))
+        {
+            if (ar->resrec.rrtype == kDNSType_TSR)
+            {
+                tsr = ar;
+            } else {
+                count++;
+            }
+        }
+    }
     if (RRLocalOnly(rr))
     {
         AuthGroup *a;
@@ -2306,20 +2285,22 @@ mDNSexport mStatus mDNS_Deregister_internal(mDNS *const m, AuthRecord *const rr,
         }
     }
     mDNS_UpdateAllowSleep(m);
-
-    // Find the corresponding TSR after we have finished the clean process.
-    AuthRecord *const tsr = isTSR ? NULL :
-        FindOrphanedTSR(m, interfeceIDToMatchTSR, rrClassToMatchTSR, nameHashToMatchTSR, &nameToMatchTSR);
-
-    // When the last record sharing the same with the TSR record was deregistered, we should deregister the TSR record.
-    if (tsr)
+    // When same name TSR record is found and count is 1, this means that the last record sharing the same
+    // name with the TSR record was deregistered.  In this case, we should deregister the TSR record.
+    // Notice that if we call mDNS_Deregister_internal() to deregister the TSR record itself, count would be
+    // 0.
+    if (tsr && count == 1)
     {
         const RDataBody2 *const rdb = (RDataBody2 *)tsr->resrec.rdata->u.data;
-        LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT, "Removing orphaned TSR - name: " PRI_DM_NAME ", timestamp: %d, ptr: %p",
-                  DM_NAME_PARAM(tsr->resrec.name), rdb->tsr_value, tsr);
-        mDNS_Deregister_internal(m, tsr, mDNS_Dereg_repeat);
+        LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT, "Removing orphaned TSR - name: " PRI_DM_NAME ", timestamp: %d",
+                  DM_NAME_PARAM(tsr->resrec.name), rdb->tsr_value);
+        if(mDNS_Deregister_internal(m, tsr, mDNS_Dereg_normal))
+        {
+            LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_ERROR, "Failed to deregister orphaned TSR - name: " PRI_DM_NAME
+                      ", timestamp: %d", DM_NAME_PARAM(tsr->resrec.name), rdb->tsr_value);
+            freeL("Orphaned TSR AuthRecord mDNS_Deregister", tsr);
+        }
     }
-
     return(mStatus_NoError);
 }
 
@@ -7847,7 +7828,7 @@ mDNSlocal int CompareTSRValue(const ResourceRecord *const ourTSR, const Resource
     LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT, "CompareTSRValue: Pkt Record - name: " PRI_DM_NAME
               ", interface id: %p, pktTimeOfReceipt: %d", DM_NAME_PARAM(pktTSR->name), pktTSR->InterfaceID, pktTimeOfReceipt);
     LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT, "CompareTSRValue: Our Record - conflict: " PUB_S
-              ", interface id: %p, ourTimeOfReceipt: %d", result < 0 ? "lose" : "win", ourTSR->InterfaceID, ourTimeOfReceipt);
+              ", interface id: %p, ourTimeOfReceipt: %d", result ? "lose" : "win", ourTSR->InterfaceID, ourTimeOfReceipt);
     return result;
 }
 
@@ -7991,6 +7972,7 @@ mDNSlocal mDNSBool ProbeHasIdenticalRR(mDNS *const m, const DNSMessage *const qu
         if (m->rec.r.resrec.rrtype != kDNSType_TSR && IdenticalSameNameRecord(&m->rec.r.resrec, &our->resrec))
         {
             mDNSCoreResetRecord(m);
+            LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT, "Found identical rr in probe: " PRI_S, CRDisplayString(m, &m->rec.r));
             result = mDNStrue;
             goto done;
         }
@@ -10874,16 +10856,13 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m, const DNSMessage *const re
                 // (apparently) local source address that pertain to a record of our own that's in probing state
                 if (!AcceptableResponse && !(ResponseSrcLocal && rr->resrec.RecordType == kDNSRecordTypeUnique)) continue;
 
-                // Don't check conflict for TSR record
-                if (rr->resrec.rrtype == kDNSType_TSR) continue;
-
                 if (PacketRRMatchesSignature(&m->rec.r, rr))        // If interface, name, type (if shared record) and class match...
                 {
                     // check to see if previously marked as tentative
                     if(CheckAndResetRRTentative(m, rr))
                     {
                         LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT,"mDNSCoreReceiveResponse: tentative is true, ProbeCount %d; "
-                            "will deregister %s due to multicast conflict via interface %d", rr->ProbeCount, ARDisplayString(m, rr),
+                            "will deregister %s due to multiscast conflict via interface %d", rr->ProbeCount, ARDisplayString(m, rr),
                             IIDPrintable(InterfaceID));
                         m->mDNSStats.NameConflicts++;
 #if MDNSRESPONDER_SUPPORTS(APPLE, D2D)
