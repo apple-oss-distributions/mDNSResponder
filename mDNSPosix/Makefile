@@ -69,6 +69,10 @@ LINKOPTS_PTHREAD = -lpthread
 LDSUFFIX = so
 JAVACFLAGS_OS = -fPIC -shared -ldns_sd
 
+ifeq ($(unicast_disabled), y)
+CFLAGS_COMMON += -DUNICAST_DISABLED
+endif
+
 # Set up diverging paths for debug vs. prod builds
 ifeq "$(DEBUG)" "1"
 CFLAGS_DEBUGGING = -g -DMDNS_DEBUGMSGS=2
