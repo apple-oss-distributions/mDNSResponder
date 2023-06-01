@@ -37,7 +37,13 @@
 
 #############################################################################
 
-LIBVERS = 1
+
+
+LIB_MAJOR_VER = 1
+LIB_MINOR_VER = 0
+LIB_PATCH_VER = 0
+LIBVERS = $(LIB_MAJOR_VER).$(LIB_MINOR_VER).$(LIB_PATCH_VER)
+
 
 COREDIR = ../mDNSCore
 SHAREDDIR ?= ../mDNSShared
@@ -53,18 +59,24 @@ else ifeq ($(SYSTEM), Linux)
   os=linux
 endif
 
-CC = cc
+ifneq ($(findstring $(os),solaris x),)
+CC ?= gcc
+LD ?= gcc
+else
+CC ?= cc
+LD ?= ld
+endif
+
 BISON = bison
 FLEX = flex
-ST = strip
-LD = ld
+STRIP ?= strip
 SOOPTS = -shared
 CP = cp
 RM = rm
 LN = ln -s -f
 CFLAGS_COMMON = -I$(COREDIR) -I$(SHAREDDIR) -I$(UTILDIR) -I$(DSODIR) -I$(SERVICEREGISTRATIONDIR) -I$(OBJDIR) -fwrapv -W -Wall -DPOSIX_BUILD -DPID_FILE=\"/var/run/mdnsd.pid\" -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\"
 CFLAGS_PTHREAD =
-LINKOPTS =
+LINKOPTS += ${LDFLAGS}
 LINKOPTS_PTHREAD = -lpthread
 LDSUFFIX = so
 JAVACFLAGS_OS = -fPIC -shared -ldns_sd
@@ -78,13 +90,13 @@ ifeq "$(DEBUG)" "1"
 CFLAGS_DEBUGGING = -g -DMDNS_DEBUGMSGS=2
 OBJDIR = objects/debug
 BUILDDIR = build/debug
-STRIP = echo
+MDNS_STRIP = echo
 else
 ifeq "$(DEBUGSYMS)" "1"
 CFLAGS_DEBUGGING = -g -DMDNS_DEBUGMSGS=0
 OBJDIR = objects/prod
 BUILDDIR = build/prod
-STRIP = echo
+MDNS_STRIP = echo
 else
 # We use -Os for two reasons:
 # 1. We want to make small binaries, suitable for putting into hardware devices
@@ -92,7 +104,7 @@ else
 CFLAGS_DEBUGGING = -g -DMDNS_DEBUGMSGS=0
 OBJDIR ?= objects/prod
 BUILDDIR ?= build/prod
-STRIP = $(ST) -S
+MDNS_STRIP = $(STRIP) -S
 endif
 endif
 
@@ -101,13 +113,11 @@ ifeq ($(os),solaris)
 CFLAGS_DEBUGGING = -O0 -DMDNS_DEBUGMSGS=0
 CFLAGS_OS = -DNOT_HAVE_DAEMON -DNOT_HAVE_SA_LEN -DNOT_HAVE_SOCKLEN_T -DNOT_HAVE_IF_NAMETOINDEX \
 	 -DLOG_PERROR=0 -D_XPG4_2 -D__EXTENSIONS__ -DHAVE_BROKEN_RECVIF_NAME -DTARGET_OS_SOLARIS
-CC = gcc
-LD = gcc
 SOOPTS = -shared
-LINKOPTS = -lsocket -lnsl -lresolv
+LINKOPTS += -lsocket -lnsl -lresolv
 JAVACFLAGS_OS += -I$(JDK)/include/solaris
 ifneq ($(DEBUG),1)
-STRIP = $(ST)
+MDNS_STRIP = $(STRIP)
 endif
 else
 
@@ -166,10 +176,9 @@ CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror -Wdeclaration-after-statement \
 	-D__MAC_OS_X_VERSION_MIN_REQUIRED=__MAC_OS_X_VERSION_10_4 \
 	-DHAVE_STRLCPY=1 -DTARGET_OS_MAC \
 	-D__APPLE_USE_RFC_2292 #-Wunreachable-code
-CC = gcc
 LD = $(CC)
 SOOPTS = -dynamiclib
-LINKOPTS = -lSystem
+LINKOPTS += -lSystem
 LDSUFFIX = dylib
 JDK = /System/Library/Frameworks/JavaVM.framework/Home
 JAVACFLAGS_OS = -dynamiclib -I/System/Library/Frameworks/JavaVM.framework/Headers -framework JavaVM
@@ -233,7 +242,7 @@ endif
 endif
 endif
 
-MDNSCFLAGS = $(CFLAGS) $(CFLAGS_COMMON) $(CFLAGS_OS) $(CFLAGS_DEBUGGING)
+MDNSCFLAGS = $(CFLAGS) $(CFLAGS_COMMON) $(CFLAGS_OS) $(CFLAGS_DEBUGGING) $(CPPFLAGS) $(CXXFLAGS)
 
 #############################################################################
 
@@ -271,7 +280,7 @@ Daemon: setup $(BUILDDIR)/mdnsd
 
 $(BUILDDIR)/mdnsd: $(DAEMONOBJS)
 	$(CC) -o $@ $+ $(LINKOPTS)
-	$(STRIP) $@
+	$(MDNS_STRIP) $@
 
 # libdns_sd target builds the client library
 libdns_sd: setup $(BUILDDIR)/libdns_sd.$(LDSUFFIX)
@@ -280,8 +289,8 @@ libdns_sd: setup $(BUILDDIR)/libdns_sd.$(LDSUFFIX)
 CLIENTLIBOBJS = $(OBJDIR)/dnssd_clientlib.c.so.o $(OBJDIR)/dnssd_clientstub.c.so.o $(OBJDIR)/dnssd_ipc.c.so.o $(OBJDIR)/dnssd_errstring.c.so.o
 
 $(BUILDDIR)/libdns_sd.$(LDSUFFIX): $(CLIENTLIBOBJS)
-	$(LD) $(SOOPTS) $(LINKOPTS) -o $@ $+
-	$(STRIP) $@
+	$(LD) $(SOOPTS) $(LINKOPTS) -Wl,-soname,libdns_sd.$(LDSUFFIX).$(LIB_MAJOR_VER) -o $@ $+
+	$(MDNS_STRIP) $@
 
 Clients: setup libdns_sd ../Clients/build/dns-sd
 	@echo "Clients done"
@@ -295,7 +304,7 @@ nss_mdns: setup $(BUILDDIR)/$(NSSLIBFILE)
 
 $(BUILDDIR)/$(NSSLIBFILE): $(CLIENTLIBOBJS) $(OBJDIR)/nss_mdns.c.so.o
 	$(LD) $(SOOPTS) $(LINKOPTS) -o $@ $+
-	$(STRIP) $@
+	$(MDNS_STRIP) $@
 
 #############################################################################
 
@@ -326,7 +335,8 @@ $(INSTBASE)/sbin/mdnsd: $(BUILDDIR)/mdnsd $(STARTUPSCRIPTDIR)/$(STARTUPSCRIPTNAM
 
 $(INSTBASE)/lib/libdns_sd.$(LDSUFFIX).$(LIBVERS): $(BUILDDIR)/libdns_sd.$(LDSUFFIX)
 	$(CP) $< $@
-	$(LN) $@ $(INSTBASE)/lib/libdns_sd.$(LDSUFFIX)
+	$(LN) libdns_sd.$(LDSUFFIX).$(LIBVERS) $(INSTBASE)/lib/libdns_sd.$(LDSUFFIX).$(LIB_MAJOR_VER)
+	$(LN) libdns_sd.$(LDSUFFIX).$(LIB_MAJOR_VER) $(INSTBASE)/lib/libdns_sd.$(LDSUFFIX)
 ifdef LDCONFIG
 	# -m means 'merge into existing database', -R means 'rescan directories'
 	$(LDCONFIG) -mR
