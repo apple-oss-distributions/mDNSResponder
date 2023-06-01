@@ -3037,6 +3037,7 @@ extern void mDNS_SetPrimaryInterfaceInfo(mDNS *m, const mDNSAddr *v4addr,  const
 extern DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInterfaceID interface, mDNSs32 serviceID, const mDNSAddr *addr,
                                     const mDNSIPPort port, ScopeType scopeType, mDNSu32 timeout, mDNSBool cellIntf, mDNSBool isExpensive, mDNSBool isConstrained, mDNSBool isCLAT46,
                                     mDNSu32 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO);
+extern void mDNS_ClearDNSServers(mDNS *const m);
 extern void PenalizeDNSServer(mDNS *const m, DNSQuestion *q, mDNSOpaque16 responseFlags);
 #endif
 extern void mDNS_AddSearchDomain(const domainname *const domain, mDNSInterfaceID InterfaceID);

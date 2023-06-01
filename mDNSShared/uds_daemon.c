@@ -28,6 +28,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "mDNSEmbeddedAPI.h"
 #include "DNSCommon.h"
@@ -104,6 +105,7 @@ static char* boundPath = NULL;
 #else
 static char* boundPath = MDNS_UDS_SERVERPATH;
 #endif
+static char udsServerPath[128] = {0};
 #if DEBUG
 #define MDNS_UDS_SERVERPATH_DEBUG "/var/tmp/mDNSResponder"
 #endif
@@ -2913,7 +2915,11 @@ exit:
 mDNSlocal mStatus add_domain_to_browser(request_state *info, const domainname *d)
 {
     browser_t *b, *p;
+#if MDNSRESPONDER_PLATFORM_APPLE
     __block mStatus err;
+#else
+    mStatus err;
+#endif
 
     for (p = info->u.browser.browsers; p; p = p->next)
     {
@@ -5899,6 +5905,12 @@ mDNSexport int udsserver_init(dnssd_sock_t skts[], const size_t count)
         #else
         {
             mode_t mask = umask(0);
+            char* uds_serverpath = getenv(MDNS_UDS_SERVERPATH_ENVVAR);
+            if (uds_serverpath != NULL && strlen(uds_serverpath) < sizeof(udsServerPath))
+            {
+                strcpy(udsServerPath, uds_serverpath);
+                boundPath = udsServerPath;
+            }
             unlink(boundPath);  // OK if this fails
             laddr.sun_family = AF_LOCAL;
             #ifndef NOT_HAVE_SA_LEN

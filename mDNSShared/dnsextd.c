@@ -3101,6 +3101,7 @@ DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, const mDNSInter
                              mDNSu32 scopedType, mDNSu32 timeout, mDNSBool isCell, mDNSBool isExpensive, mDNSBool isConstrained,  mDNSBool isCLAT46, mDNSu32 resGroupID, mDNSBool reqA, mDNSBool reqAAAA, mDNSBool reqDO)
 { ( void ) m; ( void ) d; ( void ) interface; ( void ) serviceID; ( void ) addr; ( void ) port; ( void ) scopedType; ( void ) timeout; (void) isCell; (void) isExpensive; (void) isConstrained; (void) isCLAT46;
     (void) resGroupID; (void) reqA; (void) reqAAAA; (void) reqDO; return(NULL); }
+void mDNS_ClearDNSServers(mDNS *const m) { (void) m;}
 void mDNS_AddSearchDomain(const domainname *const domain, mDNSInterfaceID InterfaceID) { (void)domain; (void) InterfaceID;}
 void mDNS_AddDynDNSHostName(mDNS *m, const domainname *fqdn, mDNSRecordCallback *StatusCallback, const void *StatusContext)
 { ( void ) m; ( void ) fqdn; ( void ) StatusCallback; ( void ) StatusContext; }

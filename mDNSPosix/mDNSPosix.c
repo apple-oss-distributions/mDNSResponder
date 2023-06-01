@@ -20,6 +20,7 @@
 #include "DNSCommon.h"
 #include "mDNSPosix.h"               // Defines the specific types needed to run mDNS on this platform
 #include "PlatformCommon.h"
+#include "uds_daemon.h"
 #include "dns_sd.h"
 
 #include <assert.h>
@@ -159,6 +160,19 @@ mDNSlocal void SockAddrTomDNSAddr(const struct sockaddr *const sa, mDNSAddr *ipA
 #pragma mark ***** Send and Receive
 #endif
 
+mDNSlocal PosixNetworkInterface *IfindexToInterfaceInfoPosix(mDNSInterfaceID InterfaceID)
+{
+    mDNS *const m = &mDNSStorage;
+    mDNSu32 ifindex = (mDNSu32)(uintptr_t)InterfaceID;
+    PosixNetworkInterface *intf;
+
+    intf = (PosixNetworkInterface*)(m->HostInterfaces);
+    while ((intf != NULL) && (mDNSu32) intf->index != ifindex)
+        intf = (PosixNetworkInterface *)(intf->coreIntf.next);
+
+    return intf ? intf->aliasIntf : mDNSNULL;
+}
+
 // mDNS core calls this routine when it needs to send a packet.
 mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const msg, const mDNSu8 *const end,
                                        mDNSInterfaceID InterfaceID, UDPSocket *src, const mDNSAddr *dst,
@@ -166,7 +180,7 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
 {
     int err = 0;
     struct sockaddr_storage to;
-    PosixNetworkInterface * thisIntf = (PosixNetworkInterface *)(InterfaceID);
+    PosixNetworkInterface * thisIntf;
     int sendingsocket = -1;
     struct sockaddr *sa = (struct sockaddr *)&to;
 
@@ -176,6 +190,13 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
     assert(msg != NULL);
     assert(end != NULL);
     assert((((char *) end) - ((char *) msg)) > 0);
+
+    thisIntf = IfindexToInterfaceInfoPosix(InterfaceID);
+    if (thisIntf == NULL)
+    {
+        LogMsg("mDNSPlatformSendUDP: Invalid argument -interface index is set to %p", InterfaceID);
+        return mStatus_BadParamErr;
+    }
 
     if (dstPort.NotAnInteger == 0)
     {
@@ -652,9 +673,9 @@ mDNSexport mStatus mDNSPlatformTCPConnect(TCPSocket *sock, const mDNSAddr *dst, 
     }
 
     // If we've been asked to bind to a single interface, do it.  See comment in mDNSMacOSX.c for more info.
-    if (InterfaceID)
+    PosixNetworkInterface *iface = IfindexToInterfaceInfoPosix(InterfaceID);
+    if (iface)
     {
-        PosixNetworkInterface *iface = (PosixNetworkInterface *)InterfaceID;
 #if defined(SO_BINDTODEVICE)
         result = setsockopt(sock->events.fd,
                             SOL_SOCKET, SO_BINDTODEVICE, iface->intfName, strlen(iface->intfName));
@@ -989,7 +1010,7 @@ mDNSexport mDNSInterfaceID mDNSPlatformInterfaceIDfromInterfaceIndex(mDNS *const
     while ((intf != NULL) && (mDNSu32) intf->index != index)
         intf = (PosixNetworkInterface *)(intf->coreIntf.next);
 
-    return (mDNSInterfaceID) intf;
+    return intf ? intf->coreIntf.InterfaceID : mDNSNULL;
 }
 
 mDNSexport mDNSu32 mDNSPlatformInterfaceIndexfromInterfaceID(mDNS *const m, mDNSInterfaceID id, mDNSBool suppressNetworkChange)
@@ -1004,14 +1025,14 @@ mDNSexport mDNSu32 mDNSPlatformInterfaceIndexfromInterfaceID(mDNS *const m, mDNS
     if (id == mDNSInterface_Any      ) return(kDNSServiceInterfaceIndexAny);
 
     intf = (PosixNetworkInterface*)(m->HostInterfaces);
-    while ((intf != NULL) && (mDNSInterfaceID) intf != id)
+    while ((intf != NULL) && intf->coreIntf.InterfaceID != id)
         intf = (PosixNetworkInterface *)(intf->coreIntf.next);
 
     if (intf) return intf->index;
 
     // If we didn't find the interface, check the RecentInterfaces list as well
     intf = gRecentInterfaces;
-    while ((intf != NULL) && (mDNSInterfaceID) intf != id)
+    while ((intf != NULL) && intf->coreIntf.InterfaceID != id)
         intf = (PosixNetworkInterface *)(intf->coreIntf.next);
 
     return intf ? intf->index : 0;
@@ -1398,7 +1419,8 @@ mDNSlocal int SetupOneInterface(mDNS *const m, struct sockaddr *intfAddr, struct
 #endif
         alias                      = SearchForInterfaceByName(m, intf->intfName);
         if (alias == NULL) alias   = intf;
-        intf->coreIntf.InterfaceID = (mDNSInterfaceID)alias;
+        intf->coreIntf.InterfaceID = (mDNSInterfaceID)(uintptr_t)alias->index;
+        intf->aliasIntf = alias;
 
         if (alias != intf)
             debugf("SetupOneInterface: %s %#a is an alias of %#a", intfName, &intf->coreIntf.ip, &alias->coreIntf.ip);
@@ -1598,9 +1620,14 @@ mDNSlocal mStatus OpenIfNotifySocket(int *pFD)
     snl.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR;
     ret = bind(sock, (struct sockaddr *) &snl, sizeof snl);
     if (0 == ret)
+    {
         *pFD = sock;
+    }
     else
+    {
         err = errno;
+        close(sock);
+    }
 
     return err;
 }
@@ -1790,13 +1817,31 @@ mDNSlocal mStatus WatchForInterfaceChange(mDNS *const m)
         return mStatus_NoMemoryErr;
 
     pChgRec->mDNS = m;
+    pChgRec->NotifySD = -1;
     err = OpenIfNotifySocket(&pChgRec->NotifySD);
-    if (err == 0)
-        err = mDNSPosixAddFDToEventLoop(pChgRec->NotifySD, InterfaceChangeCallback, pChgRec);
+    if (err == 0 && 0 == (err = mDNSPosixAddFDToEventLoop(pChgRec->NotifySD, InterfaceChangeCallback, pChgRec)))
+        m->p->intfChg = pChgRec;
     if (err)
+    {
+        if (pChgRec->NotifySD >= 0)
+        {
+             close(pChgRec->NotifySD);
+        }
         mDNSPlatformMemFree(pChgRec);
+    }
 
     return err;
+}
+
+mDNSlocal void UnwatchForInterfaceChange(mDNS *const m)
+{
+    IfChangeRec *pChgRec = m->p->intfChg;
+    if (pChgRec != NULL)
+    {
+        mDNSPosixRemoveFDFromEventLoop(pChgRec->NotifySD);
+        close(pChgRec->NotifySD);
+        mDNSPlatformMemFree(pChgRec);
+    }
 }
 
 // Test to see if we're the first client running on UDP port 5353, by trying to bind to 5353 without using SO_REUSEPORT.
@@ -1853,9 +1898,13 @@ mDNSexport mStatus mDNSPlatformInit(mDNS *const m)
     if (err == mStatus_NoError) err = SetupInterfaceList(m);
 
     // Tell mDNS core about DNS Servers
+#ifndef UNICAST_DISABLED
     mDNS_Lock(m);
     if (err == mStatus_NoError) ParseDNSServers(m, uDNS_SERVERS_FILE);
     mDNS_Unlock(m);
+#endif //UNICAST_DISABLED
+
+    m->p->intfChg = NULL;
 
     if (err == mStatus_NoError)
     {
@@ -1888,6 +1937,12 @@ mDNSexport void mDNSPlatformClose(mDNS *const m)
 {
     int rv;
     assert(m != NULL);
+#ifndef UNICAST_DISABLED
+    mDNS_Lock(m);
+    mDNS_ClearDNSServers(m);
+    mDNS_Unlock(m);
+#endif //UNICAST_DISABLED
+    UnwatchForInterfaceChange(m);
     ClearInterfaceList(m);
     if (m->p->unicastSocket4 != -1)
     {

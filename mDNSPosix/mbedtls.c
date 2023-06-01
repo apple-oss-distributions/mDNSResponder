@@ -218,10 +218,12 @@ mDNSPosixTLSRead(TCPSocket *sock, void *buf, unsigned long buflen, mDNSBool *clo
             // and then re-enable read events.   What we don't want is to keep calling
             // read, because that will spin.
             return 0;
+#ifdef MBEDTLS_ERR_SSL_ASYNC_IN_PROGRESS
         case MBEDTLS_ERR_SSL_ASYNC_IN_PROGRESS:
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "Got async in progress in TLS read!");
             // No idea how to handle this yet.
             return 0;
+#endif
 #ifdef MBEDTLS_ERR_SSL_CRYPTO_IN_PROGRESS
         case MBEDTLS_ERR_SSL_CRYPTO_IN_PROGRESS:
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "Got crypto in progress in TLS read!");
@@ -259,9 +261,11 @@ mDNSPosixTLSWrite(TCPSocket *sock, const void *buf, unsigned long buflen)
         case MBEDTLS_ERR_SSL_WANT_WRITE:
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "Got SSL want write in TLS read!");
             return 0;
+#ifdef MBEDTLS_ERR_SSL_ASYNC_IN_PROGRESS
         case MBEDTLS_ERR_SSL_ASYNC_IN_PROGRESS:
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "Got async in progress in TLS read!");
             return 0;
+#endif
 #ifdef MBEDTLS_ERR_SSL_CRYPTO_IN_PROGRESS
         case MBEDTLS_ERR_SSL_CRYPTO_IN_PROGRESS:
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR, "Got crypto in progress in TLS read!");

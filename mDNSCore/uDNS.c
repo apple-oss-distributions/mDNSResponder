@@ -234,6 +234,20 @@ mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *domain,
     return(server);
 }
 
+void mDNS_ClearDNSServers(mDNS *const m)
+{
+    mDNS_CheckLock(m);
+    DNSServer *p = m->DNSServers;
+    DNSServer *next = mDNSNULL;
+    while (p)
+    {
+        next = p->next;
+        mDNSPlatformMemFree(p);
+        p = next;
+    }
+    m->DNSServers = mDNSNULL;
+}
+
 // PenalizeDNSServer is called when the number of queries to the unicast
 // DNS server exceeds MAX_UCAST_UNANSWERED_QUERIES or when we receive an
 // error e.g., SERV_FAIL from DNS server.
@@ -7243,7 +7257,7 @@ mDNSexport mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info, const 
     return mStatus_UnsupportedErr;
 }
 
-mDNSexport domainname  *uDNS_GetNextSearchDomain(mDNSInterfaceID InterfaceID, mDNSs8 *searchIndex, mDNSBool ignoreDotLocal)
+mDNSexport domainname  *uDNS_GetNextSearchDomain(mDNSInterfaceID InterfaceID, int *searchIndex, mDNSBool ignoreDotLocal)
 {
     (void) InterfaceID;
     (void) searchIndex;
@@ -7298,6 +7312,11 @@ mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *d, cons
     (void) reqDO;
 
     return mDNSNULL;
+}
+
+void mDNS_ClearDNSServers(mDNS *const m)
+{
+    (void) m;
 }
 
 mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
