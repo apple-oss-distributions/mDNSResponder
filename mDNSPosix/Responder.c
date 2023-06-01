@@ -632,10 +632,13 @@ static mStatus RegisterOurServices(void)
 static void DeregisterOurServices(void)
 {
     PosixService *thisServ;
+    int thisServID;
 
     while (gServiceList != NULL) {
         thisServ = gServiceList;
         gServiceList = thisServ->next;
+
+        thisServID = thisServ->serviceID;
 
         mDNS_DeregisterService(&mDNSStorage, &thisServ->coreServ);
 
@@ -643,7 +646,7 @@ static void DeregisterOurServices(void)
             fprintf(stderr,
                     "%s: Deregistered service %d\n",
                     gProgramName,
-                    thisServ->serviceID);
+                    thisServID);
         }
     }
 }

@@ -1620,9 +1620,14 @@ mDNSlocal mStatus OpenIfNotifySocket(int *pFD)
     snl.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR;
     ret = bind(sock, (struct sockaddr *) &snl, sizeof snl);
     if (0 == ret)
+    {
         *pFD = sock;
+    }
     else
+    {
         err = errno;
+        close(sock);
+    }
 
     return err;
 }
@@ -1812,13 +1817,31 @@ mDNSlocal mStatus WatchForInterfaceChange(mDNS *const m)
         return mStatus_NoMemoryErr;
 
     pChgRec->mDNS = m;
+    pChgRec->NotifySD = -1;
     err = OpenIfNotifySocket(&pChgRec->NotifySD);
-    if (err == 0)
-        err = mDNSPosixAddFDToEventLoop(pChgRec->NotifySD, InterfaceChangeCallback, pChgRec);
+    if (err == 0 && 0 == (err = mDNSPosixAddFDToEventLoop(pChgRec->NotifySD, InterfaceChangeCallback, pChgRec)))
+        m->p->intfChg = pChgRec;
     if (err)
+    {
+        if (pChgRec->NotifySD >= 0)
+        {
+             close(pChgRec->NotifySD);
+        }
         mDNSPlatformMemFree(pChgRec);
+    }
 
     return err;
+}
+
+mDNSlocal void UnwatchForInterfaceChange(mDNS *const m)
+{
+    IfChangeRec *pChgRec = m->p->intfChg;
+    if (pChgRec != NULL)
+    {
+        mDNSPosixRemoveFDFromEventLoop(pChgRec->NotifySD);
+        close(pChgRec->NotifySD);
+        mDNSPlatformMemFree(pChgRec);
+    }
 }
 
 // Test to see if we're the first client running on UDP port 5353, by trying to bind to 5353 without using SO_REUSEPORT.
@@ -1875,9 +1898,13 @@ mDNSexport mStatus mDNSPlatformInit(mDNS *const m)
     if (err == mStatus_NoError) err = SetupInterfaceList(m);
 
     // Tell mDNS core about DNS Servers
+#ifndef UNICAST_DISABLED
     mDNS_Lock(m);
     if (err == mStatus_NoError) ParseDNSServers(m, uDNS_SERVERS_FILE);
     mDNS_Unlock(m);
+#endif //UNICAST_DISABLED
+
+    m->p->intfChg = NULL;
 
     if (err == mStatus_NoError)
     {
@@ -1910,6 +1937,12 @@ mDNSexport void mDNSPlatformClose(mDNS *const m)
 {
     int rv;
     assert(m != NULL);
+#ifndef UNICAST_DISABLED
+    mDNS_Lock(m);
+    mDNS_ClearDNSServers(m);
+    mDNS_Unlock(m);
+#endif //UNICAST_DISABLED
+    UnwatchForInterfaceChange(m);
     ClearInterfaceList(m);
     if (m->p->unicastSocket4 != -1)
     {

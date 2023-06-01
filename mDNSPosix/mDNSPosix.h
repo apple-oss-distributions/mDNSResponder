@@ -51,6 +51,7 @@ extern int gMDNSPlatformPosixVerboseLevel;
 
 struct mDNS_PlatformSupport_struct
 {
+    void* intfChg;
     int unicastSocket4;
 #if HAVE_IPV6
     int unicastSocket6;
