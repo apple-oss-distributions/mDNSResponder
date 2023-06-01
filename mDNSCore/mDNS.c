@@ -9849,7 +9849,7 @@ mDNSlocal void mDNSCoreReceiveNoUnicastAnswers(mDNS *const m, const DNSMessage *
 #else
                             const DNSServRef dnsserv = qptr->qDNSServer;
 #endif
-                            debugf("mDNSCoreReceiveNoUnicastAnswers making negative cache entry TTL %d for %##s (%s)", negttl, name->c, DNSTypeName(q.qtype));
+                            debugf("mDNSCoreReceiveNoUnicastAnswers making negative cache entry TTL %d for %##s (%s)", negttl, currentQName->c, DNSTypeName(q.qtype));
                             // Create a negative record for the current name in the CNAME chain.
                             MakeNegativeCacheRecord(m, &m->rec.r, currentQName, currentQNameHash, q.qtype, q.qclass, negttl, mDNSInterface_Any,
                                 dnsserv, response->h.flags);
