@@ -104,13 +104,13 @@ $(BUILDDIR)/dnssd-relay:  $(OBJDIR)/dnssd-relay.o $(DSOOBJS) $(IOOBJS) $(CFOBJS)
 $(BUILDDIR)/dnssd-proxy:  $(OBJDIR)/dnssd-proxy.o $(SIMPLEOBJS) $(DSOOBJS) $(MDNSOBJS) $(FROMWIREOBJS) $(IOOBJS) $(CFOBJS) $(OBJDIR)/srp-log.o
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
-$(BUILDDIR)/srp-client:	$(OBJDIR)/srp-ioloop.o $(OBJDIR)/srp-client.o $(OBJDIR)/dnssd_clientlib.o $(CTIOBJS) $(SIMPLEOBJS) $(IOWOTLSOBJS) $(CFOBJS)
+$(BUILDDIR)/srp-client:	$(OBJDIR)/srp-ioloop.o $(OBJDIR)/srp-client.o $(OBJDIR)/dnssd_clientlib.o $(CTIOBJS) $(SIMPLEOBJS) $(IOWOTLSOBJS) $(CFOBJS) $(DSOOBJS) $(FROMWIREOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(BUILDDIR)/srp-dns-proxy:	$(OBJDIR)/srp-dns-proxy.o $(OBJDIR)/srp-parse.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
-$(BUILDDIR)/srp-mdns-proxy:	$(OBJDIR)/srp-mdns-proxy.o $(OBJDIR)/srp-parse.o $(OBJDIR)/route.o $(OBJDIR)/adv-ctl-server.o $(OBJDIR)/combined-dnssd-proxy.o $(OBJDIR)/srp-replication.o $(OBJDIR)/srp-log.o $(CTIOBJS) $(MDNSOBJS) $(SIMPLEOBJS) $(DSOOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
+$(BUILDDIR)/srp-mdns-proxy:	$(OBJDIR)/srp-mdns-proxy.o $(OBJDIR)/srp-parse.o $(OBJDIR)/route.o $(OBJDIR)/omr-watcher.o $(OBJDIR)/adv-ctl-server.o $(OBJDIR)/combined-dnssd-proxy.o $(OBJDIR)/srp-replication.o $(OBJDIR)/srp-log.o $(CTIOBJS) $(MDNSOBJS) $(SIMPLEOBJS) $(DSOOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(BUILDDIR)/keydump:	$(OBJDIR)/keydump.o $(MDNSOBJS) $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS)

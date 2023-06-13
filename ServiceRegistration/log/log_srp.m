@@ -22,11 +22,12 @@ struct srp_os_log_formatter {
 static NS_RETURNS_RETAINED NSAttributedString *
 srp_os_log_copy_formatted_string_ipv6_addr_segment(id value)
 {
-#define PREFIX_CLASS_MAX_LENGTH 6 // 6 is for <space>(ULA) or <space>(LUA) or <space>(GUA)
+#define PREFIX_CLASS_MAX_LENGTH 6 // 6 is for xxx:<space> where X is ULA, GUA, LLA or nothing.
 	NSData *data;
-	const uint8_t * addr_data;
 	NSAttributedString * a_str;
 	char buf[INET6_ADDRSTRLEN + PREFIX_CLASS_MAX_LENGTH];
+	uint16_t words[8]; // Word buffer
+    int num_words = 0;
 	char *delimiter;
 	char *ptr;
 	char *ptr_limit;
@@ -43,22 +44,27 @@ srp_os_log_copy_formatted_string_ipv6_addr_segment(id value)
 #define IPv6_ADDR_SIZE 16
 	require_action(data.bytes != nil && data.length > 0 && data.length <= IPv6_ADDR_SIZE, exit,
 		a_str = AStrWithFormat(@"<failed to decode - NIL or invalid data length: %lu>", (unsigned long)data.length));
+	require_action((data.length & 1) == 0, exit,
+		a_str = AStrWithFormat(@"<failed to decode - odd data length: %lu>", (unsigned long)data.length));
 
-	addr_data = data.bytes;
+    const uint8_t *dptr = data.bytes;
+
+    // Clump bytes into sixteen-bit words.
+	for (size_t i = 0; i < data.length; i += 2) {
+        words[num_words] = (uint16_t)((dptr[i]) << 8) | (uint16_t)(dptr[i + 1]);
+        num_words++;
+    }
+
 	delimiter = "";
 	ptr = buf;
 	ptr_limit = buf + sizeof(buf);
-	for (size_t i = 0; i < data.length; i++) {
+	for (int i = 0; i < num_words; i++) {
 		size_t remaining = (size_t)(ptr_limit - ptr);
-		int result = snprintf(ptr, remaining, "%s%02x", delimiter, addr_data[i]);
+		int result = snprintf(ptr, remaining, "%s%x", delimiter, words[i]);
 		require_action(result > 0 && (size_t) result < remaining, exit,
-			a_str = AStrWithFormat(@"<failed to decode - snprintf: result: %ld remain: %lu>", i, remaining));
+			a_str = AStrWithFormat(@"<failed to decode - snprintf: result: %d remain: %lu>", i, remaining));
 		ptr += result;
-		if ((i + 1) % 2 == 0) {
-			delimiter = ":";
-		} else {
-			delimiter = "";
-		}
+        delimiter = ":";
 	}
 
 	ns_str = @(buf);
@@ -155,3 +161,12 @@ OSLogCopyFormattedString(const char *type, id value, __unused os_log_type_info_t
 
 	return result_str;
 }
+
+// Local Variables:
+// mode: C
+// tab-width: 4
+// c-file-style: "bsd"
+// c-basic-offset: 4
+// fill-column: 108
+// indent-tabs-mode: nil
+// End:
