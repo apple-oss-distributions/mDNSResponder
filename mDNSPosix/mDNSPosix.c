@@ -1895,6 +1895,7 @@ mDNSlocal void InterfaceChangeCallback(int fd, void *context)
 	    continue;
 
         if ((ifa_loop4 == NULL) &&
+            ((*ifi)->ifa_addr != NULL) &&
             ((*ifi)->ifa_addr->sa_family == AF_INET) &&
             ((*ifi)->ifa_flags & IFF_UP) &&
             ((*ifi)->ifa_flags & IFF_LOOPBACK))
@@ -1903,7 +1904,8 @@ mDNSlocal void InterfaceChangeCallback(int fd, void *context)
             continue;
         }
 
-        if (     (((*ifi)->ifa_addr->sa_family == AF_INET)
+        if (     ((*ifi)->ifa_addr != NULL) &&
+                 (((*ifi)->ifa_addr->sa_family == AF_INET)
 #if HAVE_IPV6
                   || ((*ifi)->ifa_addr->sa_family == AF_INET6)
 #endif
