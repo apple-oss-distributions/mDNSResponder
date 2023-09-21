@@ -2192,6 +2192,120 @@
 		</dict>
 		<dict>
 			<key>TestName</key>
+			<string>mDNS Discovery 500-200-1</string>
+			<key>Description</key>
+			<string>Tests mDNS discovery and resolution of 500 service instances with one 200-byte TXT record, one A record, and one AAAA record.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>mdnsdiscovery</string>
+				<string>--interface</string>
+				<string>lo0</string>
+				<string>--instanceCount</string>
+				<string>500</string>
+				<string>--txtSize</string>
+				<string>200</string>
+				<string>--browseTime</string>
+				<string>20</string>
+				<string>--countA</string>
+				<string>1</string>
+				<string>--countAAAA</string>
+				<string>1</string>
+				<string>--ipv4</string>
+				<string>--ipv6</string>
+				<string>--format</string>
+				<string>json</string>
+				<string>--flushCache</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNS Discovery 500-200-1 w/Memory Limit</string>
+			<key>Description</key>
+			<string>Tests mDNS discovery and resolution of 500 service instances with one 200-byte TXT record, one A record, and one AAAA record. Also, requires that mDNSResponder&apos;s heap memory growth doesn&apos;t exceed 3.1 MB. Note: This test comes after the &quot;mDNS Discovery 500-200-1&quot; test to ensure that mDNSResponder&apos;s record cache capacity doesn&apos;t have to grow during this test because we don&apos;t want increases to mDNSResponder&apos;s record cache capacity to be misconstrued as memory growth for client requests.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>120</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>mdnsdiscovery</string>
+				<string>--interface</string>
+				<string>lo0</string>
+				<string>--instanceCount</string>
+				<string>500</string>
+				<string>--txtSize</string>
+				<string>200</string>
+				<string>--browseTime</string>
+				<string>20</string>
+				<string>--countA</string>
+				<string>1</string>
+				<string>--countAAAA</string>
+				<string>1</string>
+				<string>--ipv4</string>
+				<string>--ipv6</string>
+				<string>--format</string>
+				<string>json</string>
+				<string>--flushCache</string>
+				<string>--memoryLimit</string>
+				<string>3250586</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
 			<string>DotLocal Queries</string>
 			<key>Description</key>
 			<string>Tests DNS and mDNS queries for domain names in the local domain.</string>
@@ -3386,6 +3500,182 @@
 			<array>
 				<string>/usr/bin/leaks</string>
 				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNS Object Unit - DNSObjDomainNameTest</string>
+			<key>Description</key>
+			<string>Test dns_obj_domain_name_t object</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSObjDomainNameTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNS Object Unit - DNSObjRRTest</string>
+			<key>Description</key>
+			<string>Test dns_obj_rr_t object</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSObjRRTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNS Object Unit - DNSObjRRSOATest</string>
+			<key>Description</key>
+			<string>Test dns_obj_rr_soa_t object</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSObjRRSOATest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNS Object Unit - DNSObjRRSRVTest</string>
+			<key>Description</key>
+			<string>Test dns_obj_rr_srv_t object</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSObjRRSRVTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNS Object Unit - DNSObjRRDSTest</string>
+			<key>Description</key>
+			<string>Test dns_obj_rr_ds_t object</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSObjRRDSTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNS Object Unit - DNSObjRRDNSKeyTest</string>
+			<key>Description</key>
+			<string>Test dns_obj_rr_dnskey_t object</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSObjRRDNSKeyTest</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNS Object Unit - DNSObjRRNSEC3Test</string>
+			<key>Description</key>
+			<string>Test dns_obj_rr_nsec3_t object</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>DNSObjRRNSEC3Test</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>UTF8 Validator Test</string>
+			<key>Description</key>
+			<string>Test mDNSAreUTF8String.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>5</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>xctest</string>
+				<string>-c</string>
+				<string>UTF8ValidatorTest</string>
 			</array>
 		</dict>
 	</array>

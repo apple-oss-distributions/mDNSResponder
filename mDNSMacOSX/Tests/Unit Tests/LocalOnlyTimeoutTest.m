@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2023 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -143,7 +143,7 @@ mDNSlocal mStatus InitEtcHostsRecords(void)
 	XCTAssertEqual(req->interfaceIndex, kDNSServiceInterfaceIndexLocalOnly);
     XCTAssertNotEqual(req->terminate, (req_termination_fn)0);
 
-	q = &req->u.queryrecord.op.q;
+	q = &req->queryrecord->op.q;
 	XCTAssertEqual(q, m->NewLocalOnlyQuestions);
 	XCTAssertNil((__bridge id)m->Questions);
 	XCTAssertNil((__bridge id)m->NewQuestions);
@@ -290,7 +290,7 @@ mDNSlocal mStatus InitEtcHostsRecords(void)
     XCTAssertNotEqual(req->terminate, (req_termination_fn)0);
     XCTAssertNil((__bridge id)m->Questions);
 
-	q = &req->u.queryrecord.op.q;
+	q = &req->queryrecord->op.q;
 	XCTAssertEqual(q, m->NewLocalOnlyQuestions);
 	XCTAssertEqual(q->SuppressUnusable, 1);
 	XCTAssertEqual(q->ReturnIntermed, 1);
@@ -318,7 +318,7 @@ mDNSlocal mStatus InitEtcHostsRecords(void)
 	m->NextScheduledEvent = mDNS_TimeNow_NoLock(m);
 	mDNS_Execute(m);															// Regress <rdar://problem/28721294>
     XCTAssertNil((__bridge id)m->NewLocalOnlyQuestions);
-	XCTAssertEqual(req->u.queryrecord.op.answered, 1);
+	XCTAssertEqual(req->queryrecord->op.answered, 1);
 	XCTAssertEqual(q->LOAddressAnswers, 1);
 	XCTAssertEqual(q, m->LocalOnlyQuestions);
 

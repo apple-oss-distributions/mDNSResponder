@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2020, 2023 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,11 @@
  */
 
 #import "dnssd_object.h"
-#import "mdns_strict.h"
 
 #import <stdlib.h>
 #import <os/object_private.h>
+
+#import "mdns_strict.h"
 
 //======================================================================================================================
 // MARK: - Class Declarations

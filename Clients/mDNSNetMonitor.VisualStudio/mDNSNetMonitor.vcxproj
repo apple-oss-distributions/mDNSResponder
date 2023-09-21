@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|ARM64">
@@ -107,7 +107,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>../../mDNSWindows/SystemService;../../mDNSWindows;../../mDNSShared;../../mDNSShared/utilities;../../mDNSCore;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;_WIN32_WINNT=0x0501;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;_USE_32BIT_TIME_T;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;_WIN32_WINNT=0x0600;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;_USE_32BIT_TIME_T;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PrecompiledHeader>
@@ -132,7 +132,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>../../mDNSWindows/SystemService;../../mDNSWindows;../../mDNSShared;../../mDNSShared/utilities;../../mDNSCore;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;_WIN32_WINNT=0x0501;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;_WIN32_WINNT=0x0600;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PrecompiledHeader>
@@ -156,7 +156,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>../../mDNSWindows/SystemService;../../mDNSWindows;../../mDNSShared;../../mDNSShared/utilities;../../mDNSCore;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;_WIN32_WINNT=0x0501;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;_WIN32_WINNT=0x0600;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PrecompiledHeader>
@@ -179,7 +179,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <AdditionalIncludeDirectories>../../mDNSWindows/SystemService;../../mDNSWindows;../../mDNSShared;../../mDNSShared/utilities;../../mDNSCore;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;_WIN32_WINNT=0x0501;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;_USE_32BIT_TIME_T;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;_WIN32_WINNT=0x0600;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;_USE_32BIT_TIME_T;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
@@ -204,7 +204,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>../../mDNSWindows/SystemService;../../mDNSWindows;../../mDNSShared;../../mDNSShared/utilities;../../mDNSCore;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;_WIN32_WINNT=0x0501;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;_WIN32_WINNT=0x0600;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
@@ -228,7 +228,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <ClCompile>
       <AdditionalIncludeDirectories>../../mDNSWindows/SystemService;../../mDNSWindows;../../mDNSShared;../../mDNSShared/utilities;../../mDNSCore;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;C:/Program Files/Microsoft SDKs/Windows/v6.1/Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;_WIN32_WINNT=0x0501;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;_WIN32_WINNT=0x0600;MDNS_DEBUGMSGS=0;TARGET_OS_WIN32;WIN32_LEAN_AND_MEAN;USE_TCP_LOOPBACK;PLATFORM_NO_STRSEP;PLATFORM_NO_EPIPE;PLATFORM_NO_RLIMIT;PID_FILE=;UNICODE;_UNICODE;_CRT_SECURE_NO_DEPRECATE;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>

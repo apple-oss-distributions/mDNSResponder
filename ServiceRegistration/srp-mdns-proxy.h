@@ -1,0 +1,273 @@
+/* srp-mdns-proxy.h
+ *
+ * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This file contains structure definitions used by the SRP Advertising Proxy.
+ */
+
+#ifndef __SRP_MDNS_PROXY_H__
+#define __SRP_MDNS_PROXY_H__ 1
+
+#include <stddef.h> // For ptrdiff_t
+#include "ioloop-common.h" // for service_connection_t
+
+#define PLATFORM_ADVERTISE_INTERFACE kDNSServiceInterfaceIndexAny
+
+typedef struct adv_instance adv_instance_t;
+typedef struct adv_record_registration adv_record_t;
+typedef struct adv_host adv_host_t;
+typedef struct adv_update adv_update_t;
+typedef struct client_update client_update_t;
+typedef struct adv_instance_vec adv_instance_vec_t;
+typedef struct adv_record_vec adv_record_vec_t;
+typedef struct srpl_connection srpl_connection_t;
+typedef struct srp_server_state srp_server_t;
+typedef struct route_state route_state_t;
+typedef struct srp_wanted_state srp_wanted_state_t; // private
+typedef struct srp_xpc_client srp_xpc_client_t;     // private
+typedef struct srpl_domain srpl_domain_t;           // private
+typedef struct service_tracker service_tracker_t;
+typedef struct thread_tracker thread_tracker_t;
+typedef struct node_type_tracker node_type_tracker_t;
+typedef struct service_publisher service_publisher_t;
+typedef struct dns_host_description dns_host_description_t;
+typedef struct service_instance service_instance_t;
+typedef struct service service_t;
+typedef struct delete delete_t;
+typedef struct _cti_connection_t *cti_connection_t;
+typedef struct dnssd_proxy_advertisements dnssd_proxy_advertisements_t;
+typedef struct dnssd_client dnssd_client_t;
+typedef struct probe_state probe_state_t;
+
+// Server internal state
+struct srp_server_state {
+    char *NULLABLE name;
+    adv_host_t *NULLABLE hosts;
+    dnssd_txn_t *NULLABLE shared_registration_txn;
+    srpl_domain_t *NULLABLE srpl_domains;
+#if STUB_ROUTER
+    route_state_t *NULLABLE route_state;
+#endif
+#if THREAD_DEVICE
+    service_tracker_t *NULLABLE service_tracker;
+    service_publisher_t *NULLABLE service_publisher;
+    thread_tracker_t *NULLABLE thread_tracker;
+    node_type_tracker_t *NULLABLE node_type_tracker;
+#endif
+    dnssd_proxy_advertisements_t *NULLABLE dnssd_proxy_advertisements;
+    dnssd_client_t *NULLABLE dnssd_client;
+    io_t *NULLABLE adv_ctl_listener;
+    wakeup_t *NULLABLE srpl_browse_wakeup;
+    wakeup_t *NULLABLE object_allocation_stats_dump_wakeup;
+    struct in6_addr ula_prefix;
+    uint64_t xpanid;
+    int advertise_interface;
+
+    uint32_t max_lease_time;
+    uint32_t min_lease_time; // thirty seconds
+    uint32_t key_max_lease_time;
+    uint32_t key_min_lease_time; // thirty seconds
+
+    uint16_t rloc16;
+
+    bool have_rloc16;
+    bool have_mesh_local_address;
+    bool srp_replication_enabled;
+    bool break_srpl_time;
+    bool stub_router_enabled;
+    bool srp_unicast_service_blocked;
+    bool srp_anycast_service_blocked;
+#if SRP_FEATURE_NAT64
+    bool srp_nat64_enabled;
+#endif
+};
+
+struct adv_instance {
+    int ref_count;
+    dnssd_txn_t *NULLABLE txn;           // The dnssd_txn_t that was created from the shared connection.
+    intptr_t shared_txn;                 // The shared txn on which the txn for this instance's registration was created
+    adv_host_t *NULLABLE host;           // Host to which this service instance belongs
+    adv_update_t *NULLABLE update;       // Ongoing update that currently owns this instance, if any.
+    char *NONNULL instance_name;         // Single label instance name (future: service instance FQDN)
+    char *NONNULL service_type;          // Two label service type (e.g., _ipps._tcp)
+    int port;                            // Port on which service can be found.
+    char *NULLABLE txt_data;             // Contents of txt record
+    uint16_t txt_length;                 // length of txt record contents
+    message_t *NULLABLE message;         // Message that produces the current value of this instance
+    ptrdiff_t recent_message;            // Most recent message (never dereference--this is for comparison only).
+    int64_t lease_expiry;                // Time when lease expires, relative to ioloop_timenow().
+    bool removed;                        // True if this instance is being kept around for replication.
+    bool update_pending;                 // True if we got a conflict while updating and are waiting to try again
+    bool anycast;                        // True if service registration is through anycast service.
+};
+
+// A record registration
+struct adv_record_registration {
+    int ref_count;
+    DNSRecordRef NULLABLE rref;            // The RecordRef we get back from DNSServiceRegisterRecord().
+    adv_host_t *NULLABLE host;             // The host object to which this record refers.
+    intptr_t shared_txn;                   // The shared transaction on which this record was registered.
+    adv_update_t *NULLABLE update;         // The ongoing update, if any
+    uint8_t *NULLABLE rdata;
+    uint16_t rrtype;                       // For hosts, always A or AAAA, for instances always TXT, PTR or SRV.
+    uint16_t rdlen;                        // Length of the RR
+    bool update_pending;                   // True if we are updating this record and haven't gotten a response yet.
+};
+
+struct adv_host {
+    int ref_count;
+    srp_server_t *NULLABLE server_state;   // Server state to which this host belongs.
+    wakeup_t *NONNULL retry_wakeup;        // Wakeup for retry when we run into a temporary failure
+    wakeup_t *NONNULL lease_wakeup;        // Wakeup at least expiry time
+    adv_host_t *NULLABLE next;             // Hosts are maintained in a linked list.
+    adv_update_t *NULLABLE update;         // Update to this host, if one is being done
+    char *NONNULL name;                    // Name of host (without domain)
+    char *NULLABLE registered_name;        // The name that is registered, which may be different due to mDNS conflict
+    message_t *NULLABLE message;           // Most recent successful SRP update for this host
+    srpl_connection_t *NULLABLE srpl_connection; // SRP replication server that is currently updating this host.
+    int name_serial;                       // The number we are using to disambiguate the name.
+    adv_record_vec_t *NULLABLE addresses;  // One or more address records
+    adv_record_t *NULLABLE key_record;     // Key record, if we registered that.
+    adv_instance_vec_t *NULLABLE instances; // Zero or more service instances.
+
+    dns_rr_t key;                          // The key data represented as an RR; key->name is NULL.
+    uint32_t key_id;                       // A possibly-unique id that is computed across the key for brevity in
+                                           // debugging
+    int retry_interval;                    // Interval to wait before attempting to re-register after the daemon has
+                                           // died.
+    time_t update_time;                    // Time when the update completed.
+    uint64_t update_server_id;             // Server ID from server that sent the update
+    uint64_t server_stable_id;             // Stable ID of server that got update from client (we're using server ULA).
+    uint16_t key_rdlen;                    // Length of key
+    uint8_t *NULLABLE key_rdata;           // Raw KEY rdata, suitable for DNSServiceRegisterRecord().
+    uint32_t lease_interval;               // Interval for address lease
+    uint32_t key_lease;                    // Interval for key lease
+    uint32_t serial_number;                // Client's serial number
+    bool have_serial_number;               // True if we have received or generate a serial number.
+    int64_t lease_expiry;                  // Time when lease expires, relative to ioloop_timenow().
+    bool removed;                          // True if this host has been removed (and is being kept for replication)
+
+    // True if we have a pending late conflict resolution. If we get a conflict after the update for the
+    // host registration has expired, and there happens to be another update in progress, then we want
+    // to defer the host registration.
+    bool update_pending;
+};
+
+struct adv_update {
+    int ref_count;
+
+    adv_host_t *NULLABLE host;              // Host being updated
+
+    // Connection state, if applicable, of the client request that produced this update.
+    client_update_t *NULLABLE client;
+    int num_outstanding_updates;   // Total count updates that have been issued but not yet confirmed.
+
+    // Addresses to apply to the host.  At present only one address is ever advertised, but we remember all the
+    // addresses that were registered.
+    adv_record_vec_t *NULLABLE remove_addresses;
+    adv_record_vec_t *NULLABLE add_addresses;
+
+    // If non-null, this update is changing the advertised address of the host to the referenced address.
+    adv_record_t *NULLABLE key;
+
+    // The set of instances from the update that already exist but have changed.
+    // This array mirrors the array of instances configured on the host; entries to be updated
+    // are non-NULL, entries that don't need updated are NULL.
+    adv_instance_vec_t *NONNULL update_instances;
+
+    // The set of instances that exist and need to be removed.
+    adv_instance_vec_t *NONNULL remove_instances;
+
+    // The set of instances that exist and were renewed
+    adv_instance_vec_t *NONNULL renew_instances;
+
+    // The set of instances that need to be added.
+    adv_instance_vec_t *NONNULL add_instances;
+
+    // Outstanding instance updates
+    int num_instances_started;
+    int num_instances_completed;
+
+    // Outstanding record updates
+    int num_records_started;
+    int num_records_completed;
+
+    // Lease intervals for host entry and key entry.
+    uint32_t host_lease, key_lease;
+
+    // If nonzero, this is an explicit expiry time for the lease, because the update is restoring
+    // a host after a server restart, or else renaming a host after a late name conflict. In this
+    // case, we do not want to extend the lease--just get the host registration right.
+    int64_t lease_expiry;
+
+    // The time when we started doing the update. If we get a retransmission, we can compare the current
+    // to this time to see if we ought to try again.
+    time_t start_time;
+
+    // True if we are registering the key to hold the hostname.
+    bool registering_key;
+};
+
+struct adv_instance_vec {
+    int ref_count;
+    int num;
+    adv_instance_t * NULLABLE *NONNULL vec;
+};
+
+struct adv_record_vec {
+    int ref_count;
+    int num;
+    adv_record_t * NULLABLE *NONNULL vec;
+};
+
+struct client_update {
+    client_update_t *NULLABLE next;
+    comm_t *NONNULL connection;               // Connection on which in-process update was received.
+    dns_message_t *NONNULL parsed_message;    // Message that triggered the update.
+    message_t *NONNULL message;               // Message that triggered the update.
+
+    dns_host_description_t *NONNULL host;     // Host data parsed from message
+    service_instance_t *NULLABLE instances;   // Service instances parsed from message
+    service_t *NONNULL services;              // Services parsed from message
+    delete_t *NULLABLE removes;               // Removes parsed from message
+    dns_name_t *NONNULL update_zone;          // Zone being updated
+    uint32_t host_lease, key_lease;           // Lease intervals for host entry and key entry.
+    uint32_t serial_number;                   // Serial number sent by client, if one was sent
+    bool serial_sent;                         // True if serial number was sent.
+};
+
+// Exported functions.
+#define srp_adv_host_release(host) srp_adv_host_release_(host, __FILE__, __LINE__)
+void srp_adv_host_release_(adv_host_t *NONNULL host, const char *NONNULL file, int line);
+#define srp_adv_host_retain(host) srp_adv_host_retain_(host, __FILE__, __LINE__)
+void srp_adv_host_retain_(adv_host_t *NONNULL host, const char *NONNULL file, int line);
+#define srp_adv_host_copy(server_state, name) srp_adv_host_copy_(server_state, name, __FILE__, __LINE__)
+adv_host_t *NULLABLE srp_adv_host_copy_(srp_server_t *NONNULL server_state, dns_name_t *NONNULL name,
+                                        const char *NONNULL file, int line);
+int srp_current_valid_host_count(srp_server_t *NONNULL server_state);
+int srp_hosts_to_array(srp_server_t *NONNULL server_state, adv_host_t *NONNULL *NULLABLE host_array, int max_hosts);
+bool srp_adv_host_valid(adv_host_t *NONNULL host);
+srp_server_t *NULLABLE server_state_create(const char *NONNULL name, int interface_index, int max_lease_time,
+                                           int min_lease_time, int key_max_lease_time, int key_min_lease_time);
+#endif // __SRP_MDNS_PROXY_H__
+
+// Local Variables:
+// mode: C
+// tab-width: 4
+// c-file-style: "bsd"
+// c-basic-offset: 4
+// fill-column: 120
+// indent-tabs-mode: nil
+// End:

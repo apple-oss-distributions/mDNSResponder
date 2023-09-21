@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2023 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -181,7 +181,7 @@ char test_order_domainname_cstr[] = "web.mydomain.test.";
     XCTAssertEqual(req->interfaceIndex, kDNSServiceInterfaceIndexAny);
     
     // Verify the query fields were set as expected
-    q = &req->u.queryrecord.op.q;
+    q = &req->queryrecord->op.q;
     XCTAssertNotEqual(q, (DNSQuestion *)mDNSNULL);
     XCTAssertEqual(q, m->Questions);
     XCTAssertEqual(q, m->NewQuestions);
@@ -230,7 +230,7 @@ char test_order_domainname_cstr[] = "web.mydomain.test.";
     DNSMessage *msgptr;
     size_t msgsz;
     request_state* req = client_request_message;
-    DNSQuestion *q = &req->u.queryrecord.op.q;
+    DNSQuestion *q = &req->queryrecord->op.q;
     mStatus status;
 
     // 1)

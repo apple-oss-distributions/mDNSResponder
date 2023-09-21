@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -205,6 +205,42 @@ exit:
     return nsa_str;
 }
 
+static NS_RETURNS_RETAINED NSAttributedString *
+MDNSOLCopyFormattedStringMDNSNameHashTypeBytes(id value)
+{
+    NSMutableString *nsstr = [[NSMutableString alloc] initWithCapacity:0];
+    require_return_value(nsstr, nil);
+
+    NSAttributedString * nsa_str;
+    NSData *data;
+
+    require_action_quiet([(NSObject *)value isKindOfClass:[NSData class]], exit,
+        nsa_str = MDNSASWithFormat(@"<failed to decode - invalid data type: %@>", [(NSObject *)value description]));
+
+    data = (NSData *)value;
+    require_action_quiet(data.bytes != NULL, exit, nsa_str = MDNSASWithFormat(@"<failed to decode - NIL data >"));
+
+    const uint8_t * const bytes = data.bytes;
+    const size_t length = data.length;
+
+    const size_t pair_bytes_len = sizeof(uint32_t) + sizeof(uint16_t);
+
+    const char *sep = "";
+    for (size_t i = 0, count = length / pair_bytes_len; i < count; i++)
+    {
+        const uint8_t *ptr = bytes + (pair_bytes_len * i);
+        const uint32_t nameHash = ReadBig32(ptr);
+        ptr += 4;
+        const uint16_t type = ReadBig16(ptr);
+        [nsstr appendFormat:@"%s(%x %s)", sep, nameHash, DNSRecordTypeValueToString(type)];
+        sep = " ";
+    }
+    nsa_str = MDNSAS(nsstr);
+
+exit:
+    return nsa_str;
+}
+
 struct MDNSOLFormatters {
     const char *type;
     NS_RETURNS_RETAINED NSAttributedString *(*function)(id);
@@ -216,11 +252,12 @@ OSLogCopyFormattedString(const char *type, id value, __unused os_log_type_info_t
 {
     NSAttributedString *nsa_str = nil;
     static const struct MDNSOLFormatters formatters[] = {
-        { .type = "ip_addr",        .function = MDNSOLCopyFormattedStringmDNSIPAddr },
-        { .type = "mac_addr",       .function = MDNSOLCopyFormattedStringmDNSMACAddr },
-        { .type = "domain_name",    .function = MDNSOLCopyFormattedStringmDNSLabelSequenceName },
-        { .type = "domain_label",   .function = MDNSOLCopyFormattedStringmDNSLabel},
-        { .type = "hex_sequence",   .function = MDNSOLCopyFormattedStringHexSequence},
+        { .type = "ip_addr",                    .function = MDNSOLCopyFormattedStringmDNSIPAddr },
+        { .type = "mac_addr",                   .function = MDNSOLCopyFormattedStringmDNSMACAddr },
+        { .type = "domain_name",                .function = MDNSOLCopyFormattedStringmDNSLabelSequenceName },
+        { .type = "domain_label",               .function = MDNSOLCopyFormattedStringmDNSLabel},
+        { .type = "hex_sequence",               .function = MDNSOLCopyFormattedStringHexSequence},
+        { .type = "mdns_name_hash_type_bytes",  .function = MDNSOLCopyFormattedStringMDNSNameHashTypeBytes},
     };
 
     for (int i = 0; i < (int)(sizeof(formatters) / sizeof(formatters[0])); i++) {

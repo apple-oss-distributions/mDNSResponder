@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -356,7 +356,7 @@ mDNSlocal mDNSBool HasReplyWithInterfaceIndex(reply_state * reply, mDNSu32 inter
     XCTAssertEqual(req->flags, kDNSServiceFlagsReturnIntermediates);
     
     // Verify the query fields were set as expected
-    q = &req->u.queryrecord.op.q;
+    q = &req->queryrecord->op.q;
     XCTAssertNotEqual(q, (DNSQuestion *)mDNSNULL);
     if (m->Questions)
     {

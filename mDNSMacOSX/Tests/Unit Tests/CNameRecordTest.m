@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2023 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -148,7 +148,7 @@ static const mDNSv4Addr dns_response_ipv4 = {{ 10, 100, 0, 1 }};
     XCTAssertEqual(req->interfaceIndex, kDNSServiceInterfaceIndexAny);
     
     // Verify the query fields were set as expected
-    q = &req->u.queryrecord.op.q;
+    q = &req->queryrecord->op.q;
     XCTAssertNotEqual(q, (DNSQuestion *)mDNSNULL);
     XCTAssertEqual(q, m->Questions);
     XCTAssertEqual(q, m->NewQuestions);
@@ -199,7 +199,7 @@ static const mDNSv4Addr dns_response_ipv4 = {{ 10, 100, 0, 1 }};
     size_t msgsz = sizeof(query_response_msgbuf);
     struct reply_state *reply;
     request_state* req = client_request_message;
-    DNSQuestion *q = &req->u.queryrecord.op.q;
+    DNSQuestion *q = &req->queryrecord->op.q;
     const uint8_t *data;
     const uint8_t *end;
     char name[kDNSServiceMaxDomainName];
@@ -302,7 +302,7 @@ static const mDNSv4Addr dns_response_ipv4 = {{ 10, 100, 0, 1 }};
 {
     mDNS *const m = &mDNSStorage;
     request_state*  req = client_request_message;
-    DNSQuestion*    q = &req->u.queryrecord.op.q;
+    DNSQuestion*    q = &req->queryrecord->op.q;
     mDNSu32 CacheUsed =0, notUsed =0;
     const uint8_t *data;
     const uint8_t *end;

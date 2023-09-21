@@ -1,0 +1,4 @@
+module dnssdPrivate [system] {
+  header "dns_sd_private.h"
+  export *
+}

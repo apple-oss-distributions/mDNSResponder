@@ -5,9 +5,9 @@
 
     ./AppleInternal/Bonjour SDK/include/dns_sd.h
 
-    ./AppleInternal/Bonjour SDK/lib/Win32/dnssd.lib -> dnssd_stub.lib
+    ./AppleInternal/Bonjour SDK/lib/Win32/dnssd.lib
 
-    ./AppleInternal/Bonjour SDK/lib/x64/dnssd.lib -> dnssd_stub.lib
+    ./AppleInternal/Bonjour SDK/lib/x64/dnssd.lib
 
     ./AppleInternal/Bonjour SDK/WINDOWS/system32/Win32/dns-sd.exe -> bin/Win32/
     ./AppleInternal/Bonjour SDK/WINDOWS/system32/Win32/dnssd.dll -> bin/Win32/
@@ -15,7 +15,7 @@
     ./AppleInternal/Bonjour SDK/WINDOWS/system32/x64/dns-sd.exe -> bin/x64/
     ./AppleInternal/Bonjour SDK/WINDOWS/system32/x64/dnssd.dll -> bin/x64/
 
-    Added (2021):
+    Added (2021-2023):
 
     ./AppleInternal/Bonjour SDK/bin/Win32/mDNSResponderDLL.dll
     ./AppleInternal/Bonjour SDK/bin/Win32/mDNSResponderDLL.pdb
@@ -28,6 +28,10 @@
 
     ./AppleInternal/Bonjour SDK/bin/x64/dnssd.dll
     ./AppleInternal/Bonjour SDK/bin/x64/dnssd.pdb
+
+    ./AppleInternal/Bonjour SDK/bin/Win32/dnssd_imp.lib
+
+    ./AppleInternal/Bonjour SDK/bin/x64/dnssd_imp.lib
 
     Removed (2021):
 
