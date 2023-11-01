@@ -1493,7 +1493,7 @@ static void dso_connect_state_process_address_port_change(const mDNSAddr *addr_c
             // will notice that and terminate the connection by itself.
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                 "[DSOC%u] The address being removed has been tried for the connection or is being used right now - "
-                "address: " PRI_IP_ADDR ":%u.", cs->serial, &addr_changed, mDNSVal16(cs->config_port));
+                "address: " PRI_IP_ADDR ":%u.", cs->serial, addr_changed, mDNSVal16(cs->config_port));
         }
     }
 

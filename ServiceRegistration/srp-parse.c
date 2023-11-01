@@ -893,12 +893,11 @@ struct srp_proxy_listener_state {
 
 comm_t *
 srp_proxy_listen(uint16_t *avoid_ports, int num_avoid_ports, ready_callback_t ready, cancel_callback_t cancel_callback,
-                 void *context)
+                 addr_t *address, void *context)
 {
     // XXX UDP listeners should bind to interface addresses, not INADDR_ANY.
-    return ioloop_listener_create(false, false, avoid_ports,
-                                  num_avoid_ports, NULL, NULL, "SRP UDP listener", dns_input,
-                                  NULL, cancel_callback, ready, NULL, NULL, context);
+    return ioloop_listener_create(false, false, avoid_ports, num_avoid_ports, address, NULL, "SRP UDP listener",
+                                  dns_input, NULL, cancel_callback, ready, NULL, NULL, context);
 }
 
 void

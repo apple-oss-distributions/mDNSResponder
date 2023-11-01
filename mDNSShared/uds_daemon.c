@@ -406,6 +406,17 @@ mDNSexport int IsDebugSocketInUse(void)
 }
 #endif
 
+mDNSlocal void resolve_result_finalize(request_resolve *resolve);
+#define resolve_result_forget(PTR)              \
+    do                                          \
+    {                                           \
+        if (*(PTR))                             \
+        {                                       \
+            resolve_result_finalize(*(PTR));    \
+            *(PTR) = NULL;                      \
+        }                                       \
+    } while(0)
+
 mDNSlocal void request_state_forget(request_state **const ptr)
 {
     request_state *req = *ptr;
@@ -413,7 +424,9 @@ mDNSlocal void request_state_forget(request_state **const ptr)
 
     freeL("request_enumeration/request_state_forget", req->enumeration);
     freeL("request_servicereg/request_state_forget", req->servicereg);
-    freeL("request_resolve/request_state_forget", req->resolve);
+
+    resolve_result_forget(&req->resolve);
+
     freeL("QueryRecordClientRequest/request_state_forget", req->queryrecord);
     freeL("request_browse/request_state_forget", req->browse);
     freeL("request_port_mapping/request_state_forget", req->pm);
@@ -3904,14 +3917,114 @@ mDNSlocal mStatus _handle_resolve_request_start(request_state *const request, co
     return err;
 }
 
+mDNSlocal void resolve_result_forget_srv(request_resolve *const resolve)
+{
+    mDNSPlatformMemForget(&resolve->srv_target_name);
+    resolve->srv_port = zeroIPPort;
+    resolve->srv_negative = mDNSfalse;
+}
+
+mDNSlocal void resolve_result_forget_txt(request_resolve *const resolve)
+{
+    mDNSPlatformMemForget(&resolve->txt_rdata);
+    resolve->txt_rdlength = 0;
+    resolve->txt_negative = mDNSfalse;
+}
+
+mDNSlocal void resolve_result_finalize(request_resolve *resolve)
+{
+    mDNSPlatformMemForget(&resolve->srv_target_name);
+    mDNSPlatformMemForget(&resolve->txt_rdata);
+    freeL("request_resolve/request_state_forget", resolve);
+}
+
+mDNSlocal mDNSBool resolve_result_is_complete(const request_resolve *const resolve)
+{
+    // Positive and negative answers are both considered "completed responses"
+    const mDNSBool got_srv = (resolve->srv_negative || resolve->srv_target_name);
+    const mDNSBool got_txt = (resolve->txt_negative || resolve->txt_rdata);
+    const mDNSBool response_completes = (got_srv && got_txt);
+    return response_completes;
+}
+
+mDNSlocal void resolve_result_save_answer(request_resolve *const resolve, const ResourceRecord *const answer,
+    const QC_result add_record)
+{
+    const mDNSu16 rrtype = answer->rrtype;
+
+    // If the record is being removed, in this case, only positive answer will be removed.
+    if (!add_record)
+    {
+        // Clear any positive rdata we held previously
+        if (rrtype == kDNSType_SRV)
+        {
+            resolve_result_forget_srv(resolve);
+        }
+        else
+        {
+            resolve_result_forget_txt(resolve);
+        }
+
+        // For resolve request, we do not deliver remove event to the client.
+        return;
+    }
+
+    // The answer is newly added.
+    const mDNSBool negative_answer = (answer->RecordType == kDNSRecordTypePacketNegative);
+    if (rrtype == kDNSType_SRV)
+    {
+        mDNSPlatformMemForget(&resolve->srv_target_name);
+        if (negative_answer)
+        {
+            resolve->srv_port = zeroIPPort;
+            resolve->srv_negative = mDNStrue;
+        }
+        else
+        {
+            // Copy the target name and port number from the rdata of the SRV record.
+            const domainname *const target_name = &answer->rdata->u.srv.target;
+            const mDNSu16 target_name_length = DomainNameLength(target_name);
+            mdns_require_return(target_name_length > 0);
+
+            resolve->srv_target_name = mDNSPlatformMemAllocateClear(target_name_length);
+            mdns_require_return(resolve->srv_target_name);
+
+            AssignDomainName(resolve->srv_target_name, target_name);
+            resolve->srv_port = answer->rdata->u.srv.port;
+            resolve->srv_negative = mDNSfalse;
+        }
+    }
+    else
+    {
+        mDNSPlatformMemForget(&resolve->txt_rdata);
+        if (negative_answer)
+        {
+            resolve->txt_rdlength = 0;
+            resolve->txt_negative = mDNStrue;
+        }
+        else
+        {
+            // Copy the rdata of TXT record directly.
+            const mDNSu8 *const txt_rdata = answer->rdata->u.data;
+            const mDNSu16 txt_rdlength = answer->rdlength;
+            mdns_require_return(txt_rdlength > 0);
+
+            resolve->txt_rdata = mDNSPlatformMemAllocateClear(txt_rdlength);
+            mdns_require_return(resolve->txt_rdata);
+
+            mDNSPlatformMemCopy(resolve->txt_rdata, txt_rdata, txt_rdlength);
+            resolve->txt_rdlength = txt_rdlength;
+            resolve->txt_negative = mDNSfalse;
+        }
+    }
+}
+
 mDNSlocal void resolve_result_callback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 {
     size_t len = 0;
     char fullname[MAX_ESCAPED_DOMAIN_NAME], target[MAX_ESCAPED_DOMAIN_NAME] = "0";
     uint8_t *data;
     reply_state *rep;
-    const DNSServiceErrorType error =
-        (answer->RecordType == kDNSRecordTypePacketNegative) ? kDNSServiceErr_NoSuchRecord : kDNSServiceErr_NoError;
     (void)m; // Unused
 
     request_state *const req = question->QuestionContext;
@@ -3923,27 +4036,56 @@ mDNSlocal void resolve_result_callback(mDNS *const m, DNSQuestion *question, con
         req->request_id, DM_NAME_PARAM(&question->qname), name_hash, ADD_RMV_U_PARAM(AddRecord),
         mDNSPlatformInterfaceIndexfromInterfaceID(m, answer->InterfaceID, mDNSfalse), RRDisplayString(m, answer));
 
+    const mDNSu16 rrtype = answer->rrtype;
+    mdns_require_return((rrtype == kDNSType_SRV) || (rrtype == kDNSType_TXT));
+
     request_resolve *const resolve = req->resolve;
-    if (!AddRecord)
+    resolve_result_save_answer(resolve, answer, AddRecord);
+    if (!resolve_result_is_complete(resolve))
     {
-        if (resolve->srv == answer) resolve->srv = mDNSNULL;
-        if (resolve->txt == answer) resolve->txt = mDNSNULL;
+        // Wait until we have both SRV record and TXT record(either positive or negative).
         return;
     }
 
-    if (answer->rrtype == kDNSType_SRV) resolve->srv = answer;
-    if (answer->rrtype == kDNSType_TXT) resolve->txt = answer;
-
-    if (!resolve->txt || !resolve->srv) return;     // only deliver result to client if we have both answers
+    // 4 cases:
+    // SRV positive, TXT positive -> kDNSServiceErr_NoError
+    // SRV negative, TXT positive -> kDNSServiceErr_NoSuchRecord
+    // SRV positive, TXT negative -> kDNSServiceErr_NoError
+    // SRV negative, TXT negative -> kDNSServiceErr_NoSuchRecord
+    // The intuition here is that having positive SRV or not decides whether we are able to use the service.
+    // The TXT record only provides auxiliary information about the service.
+    const DNSServiceErrorType error = ((resolve->srv_negative) ? kDNSServiceErr_NoSuchRecord : kDNSServiceErr_NoError);
 
     ConvertDomainNameToCString(answer->name, fullname);
 
+    // Prepare the data to be returned to the client.
     mDNSu32 target_name_hash = 0;
-    if (answer->RecordType != kDNSRecordTypePacketNegative)
+    if (!resolve->srv_negative)
     {
-        ConvertDomainNameToCString(&resolve->srv->rdata->u.srv.target, target);
-        target_name_hash = mDNS_NonCryptoHash(mDNSNonCryptoHash_FNV1a, resolve->srv->rdata->u.srv.target.c,
-            DomainNameLength(&resolve->srv->rdata->u.srv.target));
+        const domainname *const srv_target = resolve->srv_target_name;
+        const mDNSu16 srv_target_len = DomainNameLength(srv_target);
+        ConvertDomainNameToCString(srv_target, target);
+        target_name_hash = mDNS_NonCryptoHash(mDNSNonCryptoHash_FNV1a, srv_target->c, srv_target_len);
+    }
+
+    // We need to return SRV target name, SRV port number and TXT rdata to the client.
+    // Set them to the empty data filled with 0 initially.
+    const mDNSu8 temp_empty_data[1] = {0};
+    const mDNSu8 *srv_target_data = temp_empty_data;
+    mDNSIPPort srv_port = {0};
+    const mDNSu8 *txt_rdata = temp_empty_data;
+    mDNSu16 txt_rdlength = 0;
+
+    // If SRV or TXT record is positive, set the pointer to the rdata we have copied before.
+    if (!resolve->srv_negative)
+    {
+        srv_target_data = resolve->srv_target_name->c;
+        srv_port = resolve->srv_port;
+    }
+    if (!resolve->txt_negative)
+    {
+        txt_rdata = resolve->txt_rdata;
+        txt_rdlength = resolve->txt_rdlength;
     }
 
     mDNSu32 interface_index = mDNSPlatformInterfaceIndexfromInterfaceID(m, answer->InterfaceID, mDNSfalse);
@@ -3954,7 +4096,7 @@ mDNSlocal void resolve_result_callback(mDNS *const m, DNSQuestion *question, con
     len += strlen(fullname) + 1;
     len += strlen(target) + 1;
     len += 2 * sizeof(mDNSu16);  // port, txtLen
-    len += resolve->txt->rdlength;
+    len += txt_rdlength;
 #if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
     mdns_signed_resolve_result_t signed_result = NULL;
     const uint8_t *signed_data = NULL;
@@ -3972,9 +4114,9 @@ mDNSlocal void resolve_result_callback(mDNS *const m, DNSQuestion *question, con
         }
         else
         {
-            signed_result = mdns_signed_resolve_result_create(browseResult, resolve->srv->rdata->u.srv.target.c,
-                resolve->srv->rdata->u.srv.port.NotAnInteger, interface_index, resolve->txt->rdata->u.data,
-                resolve->txt->rdlength, &err);
+            // If the SRV record is negative, then we will sign rdata filled with zeros.
+            signed_result = mdns_signed_resolve_result_create(browseResult, srv_target_data, srv_port.NotAnInteger,
+                interface_index, txt_rdata, txt_rdlength, &err);
         }
         if (!signed_result || err != 0)
         {
@@ -4007,10 +4149,10 @@ mDNSlocal void resolve_result_callback(mDNS *const m, DNSQuestion *question, con
     // write reply data to message
     put_string(fullname, &data);
     put_string(target, &data);
-    *data++ =  resolve->srv->rdata->u.srv.port.b[0];
-    *data++ =  resolve->srv->rdata->u.srv.port.b[1];
-    put_uint16(resolve->txt->rdlength, &data);
-    put_rdata(resolve->txt->rdlength, resolve->txt->rdata->u.data, &data);
+    *data++ = srv_port.b[0];
+    *data++ = srv_port.b[1];
+    put_uint16(txt_rdlength, &data);
+    put_rdata(txt_rdlength, txt_rdata, &data);
 #if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
     if (signed_data)
     {
@@ -4019,10 +4161,19 @@ mDNSlocal void resolve_result_callback(mDNS *const m, DNSQuestion *question, con
     mdns_forget(&signed_result);
 #endif
 
-    LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT,
-        "[R%d->Q%d] DNSServiceResolve(" PRI_S "(%x)) RESULT   " PRI_S "(%x):%d",
-        req->request_id, mDNSVal16(question->TargetQID), fullname, name_hash, target, target_name_hash,
-        mDNSVal16(resolve->srv->rdata->u.srv.port));
+    if (error == kDNSServiceErr_NoError)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT,
+            "[R%d->Q%d] DNSServiceResolve(" PRI_S "(%x)) RESULT   " PRI_S "(%x):%d",
+            req->request_id, mDNSVal16(question->TargetQID), fullname, name_hash, target, target_name_hash,
+            mDNSVal16(srv_port));
+    }
+    else
+    {
+        LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT,
+            "[R%d->Q%d] DNSServiceResolve(" PRI_S "(%x)) NoSuchRecord",
+            req->request_id, mDNSVal16(question->TargetQID), fullname, name_hash);
+    }
     append_reply(req, rep);
 }
 
@@ -7336,8 +7487,8 @@ mDNSexport mDNSs32 udsserver_idle(mDNSs32 nextevent)
             if (resolve->ReportTime && ((now - resolve->ReportTime) >= 0))
             {
                 resolve->ReportTime = 0;
-                // if client received results and resolve still active
-                if (resolve->txt && resolve->srv)
+                // if client received results (we have both SRV and TXT record) and resolve still active
+                if (resolve_result_is_complete(resolve))
                 {
                     LogMsgNoIdent("Client application PID[%d](%s) has received results for DNSServiceResolve(%##s) yet remains active over two minutes.", r->process_id, r->pid_name, resolve->qsrv.qname.c);
                 }

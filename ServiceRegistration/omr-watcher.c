@@ -70,13 +70,13 @@
 #include "srp.h"
 #include "dns-msg.h"
 #include "ioloop.h"
-#include "adv-ctl-server.h"
 #include "srp-crypto.h"
 
 #include "cti-services.h"
 #include "srp-gw.h"
 #include "srp-proxy.h"
 #include "srp-mdns-proxy.h"
+#include "adv-ctl-server.h"
 #include "dnssd-proxy.h"
 #include "srp-proxy.h"
 #include "route.h"
@@ -107,6 +107,7 @@ struct omr_watcher {
     bool purge_pending;
     bool first_time;
     bool prefix_recheck_pending;
+    bool awaiting_unpublication;
 };
 
 static void
@@ -272,6 +273,7 @@ omr_watcher_prefix_list_callback(void *context, cti_prefix_vec_t *prefixes, cti_
     size_t i;
     omr_prefix_t **ppref = &omw->prefixes, *prefix = NULL, **new = NULL;
     bool something_changed = false;
+    bool user_prefix_seen = false;
 
     INFO("status: %d  prefixes: %p  count: %d", status, prefixes, prefixes == NULL ? -1 : (int)prefixes->num);
 
@@ -356,6 +358,7 @@ omr_watcher_prefix_list_callback(void *context, cti_prefix_vec_t *prefixes, cti_
             if (cti_prefix->ncp) {
                 prefix->ncp = true;
             } else {
+                user_prefix_seen = true;
                 prefix->user = true;
             }
             if (cti_prefix->stable) {
@@ -388,6 +391,10 @@ omr_watcher_prefix_list_callback(void *context, cti_prefix_vec_t *prefixes, cti_
     if (something_changed || omw->first_time) {
         omr_watcher_send_prefix_event(omw, omr_watcher_event_prefix_update_finished, omw->prefixes, NULL);
         omw->first_time = false;
+    }
+    if (!user_prefix_seen && omw->route_state->srp_server->awaiting_prefix_removal) {
+        omw->route_state->srp_server->awaiting_prefix_removal = false;
+        adv_ctl_thread_shutdown_status_check(omw->route_state->srp_server);
     }
 out:
     // Discontinue events (currently we'll only get one callback: this just dereferences the object so it can be freed.)
@@ -515,7 +522,8 @@ omr_watcher_prefix_list_fetch(omr_watcher_t *watcher)
         watcher->prefix_recheck_pending = true;
     }
 
-    int rv = cti_get_onmesh_prefix_list(watcher->route_state->srp_server, &watcher->prefix_connection, watcher, omr_watcher_prefix_list_callback, NULL);
+    int rv = cti_get_onmesh_prefix_list(watcher->route_state->srp_server, &watcher->prefix_connection,
+                                        watcher, omr_watcher_prefix_list_callback, NULL);
     if (rv != kCTIStatus_NoError) {
         ERROR("can't get onmesh prefix list: %d", rv);
         return;

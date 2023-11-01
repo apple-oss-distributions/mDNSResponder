@@ -64,13 +64,13 @@
 #include "srp.h"
 #include "dns-msg.h"
 #include "ioloop.h"
-#include "adv-ctl-server.h"
 #include "srp-crypto.h"
 
 #include "cti-services.h"
 #include "srp-gw.h"
 #include "srp-proxy.h"
 #include "srp-mdns-proxy.h"
+#include "adv-ctl-server.h"
 #include "dnssd-proxy.h"
 #include "srp-proxy.h"
 #include "route.h"
@@ -117,7 +117,7 @@ struct service_publisher {
     thread_service_t *published_unicast_service;
     thread_service_t *published_anycast_service;
     thread_service_t *publication_queue;
-    cti_connection_t ml_eid_connection;
+    cti_connection_t active_data_set_connection;
     struct in6_addr thread_mesh_local_address;
     int startup_delay_range;
     uint16_t srp_listener_port;
@@ -127,11 +127,59 @@ struct service_publisher {
     bool canceled;
     bool have_srp_listener;
     bool seen_service_list;
+    bool stopped;
 };
 
 static uint64_t service_publisher_serial_number;
 
 static void service_publisher_queue_run(service_publisher_t *publisher);
+
+bool
+service_publisher_is_address_mesh_local(service_publisher_t *publisher, addr_t *address)
+{
+    if (address->sa.sa_family == AF_INET) {
+        IPv4_ADDR_GEN_SRP(&address->sin.sin_addr, addr_buf);
+        INFO(PRI_IPv4_ADDR_SRP "is not mesh-local", IPv4_ADDR_PARAM_SRP(&address->sin.sin_addr, addr_buf));
+        return false;
+    }
+    if (address->sa.sa_family != AF_INET6) {
+        INFO("address family %d can't be mesh-local", address->sa.sa_family);
+        return false;
+    }
+
+    uint8_t *addr_ptr = (uint8_t *)&address->sin6.sin6_addr;
+    SEGMENTED_IPv6_ADDR_GEN_SRP(addr_ptr, addr_buf);
+    if (!publisher->have_ml_eid) {
+        INFO(PRI_SEGMENTED_IPv6_ADDR_SRP "is not mesh-local",
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(addr_ptr, addr_buf));
+        return false;
+    }
+
+    int i;
+    for (i = 0; i < 15; i++) {
+        if (addr_ptr[i] != 0) {
+            break;
+        }
+    }
+    if (i == 15 && addr_ptr[i] == 1) {
+        INFO(PRI_SEGMENTED_IPv6_ADDR_SRP " is the IPv6 localhost address.",
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(addr_ptr, addr_buf));
+        return true;
+    }
+
+    SEGMENTED_IPv6_ADDR_GEN_SRP(&publisher->thread_mesh_local_address, mle_buf);
+    if (in6prefix_compare(&address->sin6.sin6_addr, &publisher->thread_mesh_local_address, 8)) {
+        INFO(PRI_SEGMENTED_IPv6_ADDR_SRP
+             " is not on the same prefix as mesh-local address " PRI_SEGMENTED_IPv6_ADDR_SRP ".",
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(addr_ptr, addr_buf),
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(&publisher->thread_mesh_local_address, mle_buf));
+        return false;
+    }
+    INFO(PRI_SEGMENTED_IPv6_ADDR_SRP "is on the same prefix as mesh-local address " PRI_SEGMENTED_IPv6_ADDR_SRP ".",
+         SEGMENTED_IPv6_ADDR_PARAM_SRP(addr_ptr, addr_buf),
+         SEGMENTED_IPv6_ADDR_PARAM_SRP(&publisher->thread_mesh_local_address, mle_buf));
+    return true;
+}
 
 static void
 service_publisher_finalize(service_publisher_t *publisher)
@@ -295,10 +343,25 @@ service_publisher_queue_update(service_publisher_t *publisher, thread_service_t 
     for (ppref = &publisher->publication_queue; *ppref != NULL; ppref = &(*ppref)->next)
         ;
     *ppref = service;
-    // Retained the service on the queue. When adding a service we also retain the
-    // service as publisher->published_service, so that retain is always explicit and this retain is always implicit.
+    // Retain the service on the queue.
     thread_service_retain(*ppref);
     service_publisher_queue_run(publisher);
+}
+
+static thread_service_t *
+service_publisher_create_service_for_queue(thread_service_t *service)
+{
+    switch(service->service_type) {
+    case unicast_service:
+        return thread_service_unicast_create(service->rloc16, service->u.unicast.address.s6_addr,
+                                             service->u.unicast.port, service->service_id);
+    case anycast_service:
+        return thread_service_anycast_create(service->rloc16, service->u.anycast.sequence_number, service->service_id);
+    case pref_id:
+        return thread_service_pref_id_create(service->rloc16, service->u.pref_id.partition_id,
+                                             service->u.pref_id.prefix, service->service_id);
+    }
+    return NULL;
 }
 
 static void UNUSED
@@ -326,35 +389,27 @@ service_publisher_service_unpublish(service_publisher_t *publisher, thread_servi
         ERROR("request to unpublished service that's not present");
         return;
     }
-    service_publisher_queue_update(publisher, service, want_delete);
-    thread_service_release(service);
+
+    thread_service_t *to_delete = service_publisher_create_service_for_queue(service);
+    service_publisher_queue_update(publisher, to_delete, want_delete);
+    thread_service_release(to_delete); // service_publisher_queue_update explicitly retains the references it makes.
+    thread_service_release(service); // No longer published.
 }
 
 static void
 service_publisher_unpublish_stale_service(service_publisher_t *publisher, thread_service_t *service)
 {
-    thread_service_t *to_delete;
+    // If there's a stale service, don't try to publish the real service until we see the stale service go away.
+    INFO("setting seen_service_list to false");
+    publisher->seen_service_list = false;
 
-    switch(service->service_type) {
-    case unicast_service:
-        to_delete = thread_service_unicast_create(service->rloc16,
-                                                  service->u.unicast.address.s6_addr,
-                                                  service->u.unicast.port, service->service_id);
-        break;
-    case anycast_service:
-        to_delete = thread_service_anycast_create(service->rloc16,
-                                                  service->u.anycast.sequence_number, service->service_id);
-        break;
-    case pref_id:
-        to_delete = thread_service_pref_id_create(service->rloc16,
-                                                  service->u.pref_id.partition_id,
-                                                  service->u.pref_id.prefix, service->service_id);
-        break;
-    }
+    thread_service_t *to_delete = service_publisher_create_service_for_queue(service);
+
     if (to_delete == NULL) {
         thread_service_note(publisher->id, service, "no memory for service to delete");
     } else {
         service_publisher_queue_update(publisher, to_delete, want_delete);
+        thread_service_release(to_delete); // service_publisher_queue_update explicitly retains all the references it makes
         service->ignore = true;
     }
 }
@@ -465,6 +520,7 @@ service_publisher_service_tracker_callback(void *context)
     // If we get a service list update when we're associated, set the seen_service-list flag to true. This tells us we can proceed
     // with publishing a service if we just associated to the thread network.
     if (thread_tracker_associated_get(publisher->server_state->thread_tracker, false)) {
+        INFO("setting seen_service_list to true");
         publisher->seen_service_list = true;
     }
 
@@ -630,6 +686,7 @@ service_publisher_can_publish(service_publisher_t *publisher)
     if (!thread_tracker_associated_get(server_state->thread_tracker, false)) {
         associated = false;
         can_publish = false;
+        INFO("setting seen_service_list to false");
         publisher->seen_service_list = false;
     }
 
@@ -644,15 +701,19 @@ service_publisher_can_publish(service_publisher_t *publisher)
     if (!publisher->seen_service_list) {
         can_publish = false;
     }
+    if (publisher->stopped) {
+        can_publish = false;
+    }
 
-    INFO(PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
+    INFO(PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
          can_publish ?                         "can publish" :  "can't publish",
          publisher->seen_service_list ?                   "" : " have not seen service list",
          no_competing_service ?                           "" : " competing service present",
          no_anycast_service ?                             "" : " anycast service present",
          associated ?                                     "" : " not associated ",
          router ?                                         "" : " not a router ",
-         have_ml_eid ?                                    "" : " no ml-eid ");
+         have_ml_eid ?                                    "" : " no ml-eid ",
+         publisher->stopped ?                     " stopped" : "");
     return can_publish;
 }
 
@@ -674,6 +735,19 @@ service_publisher_could_publish(service_publisher_t *publisher)
         return true;
     }
     return false;
+}
+
+void
+service_publisher_stop_publishing(service_publisher_t *publisher)
+{
+    publisher->stopped = true;
+    state_machine_event_t *event = state_machine_event_create(state_machine_event_type_stop, NULL);
+    if (event == NULL) {
+        ERROR("unable to allocate event to deliver");
+        return;
+    }
+    state_machine_event_deliver(&publisher->state_header, event);
+    RELEASE_HERE(event, state_machine_event);
 }
 
 // We go to this state whenever we think we might need to publish, but are not yet publishing. So this state
@@ -768,7 +842,8 @@ service_publisher_listener_start(service_publisher_t *publisher)
         service_publisher_listener_cancel(publisher);
     }
     publisher->srp_listener = srp_proxy_listen(NULL, 0, service_publisher_listener_ready,
-                                               service_publisher_listener_cancel_callback, publisher->server_state);
+                                               service_publisher_listener_cancel_callback, NULL,
+                                               publisher->server_state);
     if (publisher->srp_listener == NULL) {
         ERROR("failed to setup SRP listener");
     }
@@ -836,9 +911,13 @@ service_publisher_action_publishing(state_machine_header_t *state_header, state_
     }
 
     // Any other event triggers a re-evaluation.
-    if (event->type == state_machine_event_type_ml_eid_changed ||
-        !service_publisher_can_publish(publisher))
-    {
+    if (event->type == state_machine_event_type_ml_eid_changed) {
+        service_publisher_listener_cancel(publisher);
+        service_publisher_service_unpublish(publisher, unicast_service);
+        return service_publisher_state_startup;
+    }
+
+    if (!service_publisher_can_publish(publisher)) {
         service_publisher_listener_cancel(publisher);
         service_publisher_service_unpublish(publisher, unicast_service);
         return service_publisher_state_not_publishing;
@@ -850,11 +929,14 @@ service_publisher_action_publishing(state_machine_header_t *state_header, state_
 void
 service_publisher_cancel(service_publisher_t *publisher)
 {
+    service_publisher_listener_cancel(publisher);
     service_tracker_callback_cancel(publisher->server_state->service_tracker, publisher);
     thread_tracker_callback_cancel(publisher->server_state->thread_tracker, publisher);
     node_type_tracker_callback_cancel(publisher->server_state->node_type_tracker, publisher);
-    cti_events_discontinue(publisher->ml_eid_connection);
-    publisher->ml_eid_connection = NULL;
+    if (publisher->active_data_set_connection != NULL) {
+        cti_events_discontinue(publisher->active_data_set_connection);
+    }
+    publisher->active_data_set_connection = NULL;
 }
 
 service_publisher_t *
@@ -966,15 +1048,40 @@ fail:
     return;
 }
 
-void
-service_publisher_start(service_publisher_t *publisher)
+static void
+service_publisher_active_data_set_changed_callback(void *context, cti_status_t status)
 {
-    // Get mesh local address
-    cti_status_t status = cti_get_mesh_local_address(publisher->server_state, &publisher->ml_eid_connection, publisher,
+    service_publisher_t *publisher = context;
+
+    if (status != kCTIStatus_NoError) {
+        ERROR("error %d", status);
+        RELEASE_HERE(publisher, service_publisher); // no more callbacks
+        cti_events_discontinue(publisher->active_data_set_connection);
+        publisher->active_data_set_connection = NULL;
+        return;
+    }
+
+    status = cti_get_mesh_local_address(publisher->server_state, publisher,
                                                      service_publisher_get_mesh_local_address_callback, NULL);
     if (status != kCTIStatus_NoError) {
         ERROR("cti_get_mesh_local_address failed with status %d", status);
+    } else {
+        RETAIN_HERE(publisher, service_publisher); // for mesh-local callback
     }
+}
+
+void
+service_publisher_start(service_publisher_t *publisher)
+{
+    cti_status_t status = cti_track_active_data_set(publisher->server_state, &publisher->active_data_set_connection,
+                                                    publisher, service_publisher_active_data_set_changed_callback,
+                                                    NULL);
+    if (status != kCTIStatus_NoError) {
+        ERROR("unable to start tracking active dataset: %d", status);
+    } else {
+        RETAIN_HERE(publisher, service_publisher); // for callback
+    }
+    service_publisher_active_data_set_changed_callback(publisher, kCTIStatus_NoError); // Get the initial state.
     state_machine_next_state(&publisher->state_header, service_publisher_state_startup);
 }
 

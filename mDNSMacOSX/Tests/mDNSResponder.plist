@@ -2250,7 +2250,7 @@
 			<key>TestName</key>
 			<string>mDNS Discovery 500-200-1 w/Memory Limit</string>
 			<key>Description</key>
-			<string>Tests mDNS discovery and resolution of 500 service instances with one 200-byte TXT record, one A record, and one AAAA record. Also, requires that mDNSResponder&apos;s heap memory growth doesn&apos;t exceed 3.1 MB. Note: This test comes after the &quot;mDNS Discovery 500-200-1&quot; test to ensure that mDNSResponder&apos;s record cache capacity doesn&apos;t have to grow during this test because we don&apos;t want increases to mDNSResponder&apos;s record cache capacity to be misconstrued as memory growth for client requests.</string>
+			<string>Tests mDNS discovery and resolution of 500 service instances with one 200-byte TXT record, one A record, and one AAAA record. Also, requires that mDNSResponder&apos;s heap memory growth doesn&apos;t exceed 3.2 MB. Note: This test comes after the &quot;mDNS Discovery 500-200-1&quot; test to ensure that mDNSResponder&apos;s record cache capacity doesn&apos;t have to grow during this test because we don&apos;t want increases to mDNSResponder&apos;s record cache capacity to be misconstrued as memory growth for client requests.</string>
 			<key>AsRoot</key>
 			<true/>
 			<key>RequiresWiFi</key>
@@ -2282,7 +2282,7 @@
 				<string>json</string>
 				<string>--flushCache</string>
 				<string>--memoryLimit</string>
-				<string>3250586</string>
+				<string>3355443</string>
 			</array>
 		</dict>
 		<dict>

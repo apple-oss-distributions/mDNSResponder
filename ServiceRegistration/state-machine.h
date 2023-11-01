@@ -135,6 +135,7 @@ typedef enum {
     state_machine_event_type_probe_completed,
     state_machine_event_type_got_mesh_local_prefix,
     state_machine_event_type_daemon_disconnect,
+    state_machine_event_type_stop,
 } state_machine_event_type_t;
 
 typedef struct state_machine_event state_machine_event_t;

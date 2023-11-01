@@ -64,7 +64,6 @@ union addr {
         int index;
         uint8_t addr[8];
     } ether_addr;
-    struct sockaddr_un sun;
 };
 
 #define IOLOOP_NTOP(addr, buf) \
@@ -377,7 +376,7 @@ bool srp_store_file_data(void *NULLABLE host_context, const char *NONNULL filena
 time_t srp_time(void);
 void srp_format_time_offset(char *NONNULL buf, size_t buf_len, time_t offset);
 
-const struct sockaddr *NULLABLE connection_get_local_address(comm_t *NULLABLE connection);
+const struct sockaddr *NULLABLE connection_get_local_address(message_t *NULLABLE message);
 
 #if !UDP_LISTENER_USES_CONNECTION_GROUPS
 bool ioloop_udp_send_message(comm_t *NONNULL comm, addr_t *NULLABLE source, addr_t *NONNULL dest, int ifindex,

@@ -27,6 +27,7 @@ typedef struct service_tracker service_tracker_t;
 RELEASE_RETAIN_DECLS(service_tracker);
 void service_tracker_stop(service_tracker_t *NONNULL tracker);
 void service_tracker_cancel(service_tracker_t *NONNULL tracker);
+bool service_tracker_local_service_seen(service_tracker_t *NONNULL tracker);
 service_tracker_t *NULLABLE service_tracker_create(srp_server_t *NONNULL route_state);
 void service_tracker_set_reconnect_callback(service_tracker_t *NONNULL tracker,
 										  void (*NULLABLE reconnect_callback)(void *NULLABLE context));

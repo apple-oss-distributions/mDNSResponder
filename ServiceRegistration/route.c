@@ -74,10 +74,10 @@
 #include "srp.h"
 #include "dns-msg.h"
 #include "ioloop.h"
-#include "adv-ctl-server.h"
 #include "srp-crypto.h"
 #include "srp-gw.h"
 #include "srp-mdns-proxy.h"
+#include "adv-ctl-server.h"
 #include "srp-replication.h"
 
 # define THREAD_DATA_DIR "/var/lib/openthread"
@@ -938,6 +938,9 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
             for (i = 0; i < router->num_options; i++, option++) {
                 if (option->type == icmp_option_prefix_information) {
                     prefix_information_t *prefix = &option->option.prefix_information;
+#ifndef RA_TESTER
+                    omr_publisher_check_prefix(route_state->omr_publisher, &prefix->prefix, prefix->length);
+#endif
                     if (prefix_usable(interface, route_state, router, prefix)) {
                         // We don't consider the prefix we would advertise to be infrastructure-provided if we see it
                         // advertised by another router, because that router is also a Thread BR, and we don't want
@@ -1933,15 +1936,6 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
     dns_u32_to_wire(&towire, 0);                // Reachable time for NUD, we have no opinion on this.
     dns_u32_to_wire(&towire, 0);                // Retransmission timer, again we have no opinion.
 
-    // Send Source link-layer address option
-    if (interface->have_link_layer_address) {
-        dns_u8_to_wire(&towire, ND_OPT_SOURCE_LINKADDR);
-        dns_u8_to_wire(&towire, 1); // length / 8
-        dns_rdata_raw_data_to_wire(&towire, &interface->link_layer, sizeof(interface->link_layer));
-        INFO("advertising source lladdr " PRI_MAC_ADDR_SRP
-             " on " PUB_S_SRP, MAC_ADDR_PARAM_SRP(interface->link_layer), interface->name);
-    }
-
 #ifndef RA_TESTER
     // Send MTU of 1280 for Thread?
     if (interface->is_thread) {
@@ -2036,6 +2030,15 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
     dns_u8_to_wire(&towire, RA_FLAGS1_STUB_ROUTER);
     dns_u8_to_wire(&towire, 0); // Five bytes of zero flag bits
     dns_u32_to_wire(&towire, 0);
+
+    // Send Source link-layer address option
+    if (interface->have_link_layer_address) {
+        dns_u8_to_wire(&towire, ND_OPT_SOURCE_LINKADDR);
+        dns_u8_to_wire(&towire, 1); // length / 8
+        dns_rdata_raw_data_to_wire(&towire, &interface->link_layer, sizeof(interface->link_layer));
+        INFO("advertising source lladdr " PRI_MAC_ADDR_SRP
+             " on " PUB_S_SRP, MAC_ADDR_PARAM_SRP(interface->link_layer), interface->name);
+    }
 
     if (towire.error) {
         ERROR("No space in ICMP output buffer for " PUB_S_SRP " at route.c:%d", interface->name, towire.line);
@@ -3238,8 +3241,7 @@ thread_network_startup(route_state_t *route_state)
                                 route_rloc16_callback, NULL);
     }
     if (status == kCTIStatus_NoError) {
-        status = cti_get_mesh_local_prefix(route_state->srp_server,
-                                           &route_state->thread_ml_prefix_connection, route_state,
+        status = cti_get_mesh_local_prefix(route_state->srp_server, route_state,
                                            route_get_mesh_local_prefix_callback, NULL);
     }
     if (status != kCTIStatus_NoError) {
@@ -3517,7 +3519,7 @@ partition_start_srp_listener(route_state_t *route_state)
 
     INFO("starting listener.");
     route_state->srp_listener = srp_proxy_listen(avoid_ports, num_avoid_ports, partition_proxy_listener_ready,
-                                                 partition_srp_listener_canceled, route_state->srp_server);
+                                                 partition_srp_listener_canceled, NULL, route_state->srp_server);
     if (route_state->srp_listener == NULL) {
         ERROR("partition_start_srp_listener: Unable to start SRP Proxy listener, so can't advertise it");
         return;
@@ -3742,6 +3744,7 @@ partition_stop_advertising_service(route_state_t *route_state)
     if (status != kCTIStatus_NoError) {
         INFO("status %d", status);
     }
+    route_state->advertising_srp_unicast_service = false;
 }
 
 void
@@ -3800,6 +3803,7 @@ partition_start_advertising_service(route_state_t *route_state)
 
     // Wait a while for the service add to be reflected in an event.
     partition_schedule_service_add_wakeup(route_state);
+    route_state->advertising_srp_unicast_service = true;
 }
 
 static void

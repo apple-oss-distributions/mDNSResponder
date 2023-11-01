@@ -7080,12 +7080,16 @@ DNSPushUpdateQuestionDuplicate(DNSQuestion *const NONNULL primary, DNSQuestion *
     }
     if (primary->dnsPushServer != mDNSNULL)
     {
-        if (primary->dnsPushServer->connection != mDNSNULL)
+        dso_state_t *const dso_state = primary->dnsPushServer->connection;
+        if (dso_state)
         {
+            // Update the outstanding query context from the old primary being stopped to the new primary.
+            dso_update_outstanding_query_context(dso_state, primary, duplicate);
+
             // Also update the context of the dso_activity_t since we are replacing the original primary question with
             // the new one(which is previously a duplicate of the primary question).
-            dso_activity_t *const activity = dso_find_activity(primary->dnsPushServer->connection, mDNSNULL,
-                                                               kDNSPushActivity_Subscription, primary);
+            dso_activity_t *const activity = dso_find_activity(dso_state, mDNSNULL, kDNSPushActivity_Subscription,
+                primary);
             if (activity != mDNSNULL)
             {
                 activity->context = duplicate;

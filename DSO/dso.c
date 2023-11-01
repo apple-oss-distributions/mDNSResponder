@@ -567,6 +567,17 @@ uint32_t dso_ignore_further_responses(dso_state_t *dso, const void *const contex
     return disassociated_count;
 }
 
+void dso_update_outstanding_query_context(dso_state_t *const dso, const void *const old_context,
+    void *const new_context)
+{
+    dso_outstanding_query_state_t *const states = dso->outstanding_queries;
+    for (int i = 0; i < states->max_outstanding_queries; i++) {
+        if (states->queries[i].context == old_context) {
+            states->queries[i].context = new_context;
+        }
+    }
+}
+
 uint32_t dso_connections_reset_outstanding_query_context(const void *const context)
 {
     uint32_t reset_count = 0;

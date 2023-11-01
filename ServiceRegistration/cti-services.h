@@ -241,10 +241,10 @@ cti_get_tunnel_name_(srp_server_t *NULLABLE server, void *NULLABLE context, cti_
  *
  */
 
-#define cti_get_mesh_local_prefix(server, ref, context, callback, client_queue) \
-    cti_get_mesh_local_prefix_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
+#define cti_get_mesh_local_prefix(server, context, callback, client_queue) \
+    cti_get_mesh_local_prefix_(server, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_mesh_local_prefix_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref,
+cti_get_mesh_local_prefix_(srp_server_t *NULLABLE server,
                            void *NULLABLE context, cti_string_property_reply_t NONNULL callback,
                            run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
@@ -252,9 +252,6 @@ cti_get_mesh_local_prefix_(srp_server_t *NULLABLE server, cti_connection_t NULLA
  *
  * Get the mesh_local IPv6 address that is in use on this device on the Thread mesh. The address is passed to the reply
  * callback if the request succeeds; otherwise an error is either returned immediately or returned to the callback.
- *
- * ref:            A pointer to a reference to the connection is stored through ref if ref is not NULL.
- *                 When events are no longer needed, call cti_discontinue_events() on the returned pointer.
  *
  * context:        An anonymous pointer that will be passed along to the callback when
  *                 an event occurs.
@@ -269,10 +266,10 @@ cti_get_mesh_local_prefix_(srp_server_t *NULLABLE server, cti_connection_t NULLA
  *
  */
 
-#define cti_get_mesh_local_address(server, ref, context, callback, client_queue) \
-    cti_get_mesh_local_address_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
+#define cti_get_mesh_local_address(server, context, callback, client_queue) \
+    cti_get_mesh_local_address_(server, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_mesh_local_address_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref,
+cti_get_mesh_local_address_(srp_server_t *NULLABLE server,
                             void *NULLABLE context, cti_string_property_reply_t NONNULL callback,
                             run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
@@ -1216,6 +1213,56 @@ typedef void
 DNS_SERVICES_EXPORT cti_status_t
 cti_get_rloc16_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref,
                 void *NULLABLE context, cti_rloc16_reply_t NONNULL callback,
+                run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
+
+/* cti_active_data_set_change_reply: Callback from cti_get_active_data_set_change()
+ *
+ * Called when an error occurs during processing of the cti_get_active_data_set_change call, or when the active data set
+ * is updated.
+ *
+ * In the case of an error, the callback will not be called again, and the caller is responsible for
+ * releasing the connection state and restarting if needed.
+ *
+ * The callback will be called whenever the active data set changes.
+ *
+ * cti_active_data_set_change_reply parameters:
+ *
+ * context:           The context that was passed to the cti call to which this is a callback.
+ *
+ * status:            Will be kCTIStatus_NoError if the active_data_set_change request is successful, or will indicate the failure
+ *                    that occurred.
+ *
+ */
+typedef void
+(*cti_reply_t)(void *NULLABLE context, cti_status_t status);
+
+/* cti_get_active_data_set_change
+ *
+ * Requests wpantund to immediately send the active_data_set_change of the local device. Whenever the ACTIVE_DATA_SET_CHANGE
+ * changes, the callback will be called again with the new ACTIVE_DATA_SET_CHANGE.  A return value of
+ * kCTIStatus_NoError means that the caller can expect the reply callback to be called at least once.  Any
+ * other error means that the request could not be sent, and the callback will never be called.
+ *
+ * ref:            A pointer to a reference to the connection is stored through ref if ref is not NULL.
+ *                 When events are no longer needed, call cti_discontinue_events() on the returned pointer.
+ *
+ * context:        An anonymous pointer that will be passed along to the callback when
+ *                 an event occurs.
+ * callback:       CallBack function for the client that indicates success or failure.
+ *
+ * client_queue:   Queue the client wants to schedule the callback on
+ *
+ * return value:   Returns kCTIStatus_NoError when no error otherwise returns an error code indicating
+ *                 the error that occurred. Note: A return value of kCTIStatus_NoError does not mean
+ *                 that the request succeeded, merely that it was successfully started.
+ *
+ */
+#define cti_track_active_data_set(server, ref, context, callback, client_queue) \
+    cti_track_active_data_set_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
+
+DNS_SERVICES_EXPORT cti_status_t
+cti_track_active_data_set_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref,
+                void *NULLABLE context, cti_reply_t NONNULL callback,
                 run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
 /* cti_events_discontinue

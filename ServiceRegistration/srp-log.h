@@ -36,7 +36,7 @@
 #endif // #ifdef __APPLE__
 
 #ifdef DEBUG
-    #undef DEBUG
+#    undef DEBUG
     // #define DEBUG_VERBOSE
 #endif
 
@@ -47,111 +47,113 @@
 // MARK: - Log Macros
 
 #ifdef FUZZING
-    #define OPENLOG(progname, consolep)
-    #define ERROR(fmt, ...)
-    #define INFO(fmt, ...)
-    #define DEBUG(fmt, ...)
-    #define FAULT(fmt, ...)
+#    define OPENLOG(progname, consolep)
+#    define ERROR(fmt, ...)
+#    define INFO(fmt, ...)
+#    define DEBUG(fmt, ...)
+#    define FAULT(fmt, ...)
 #elif defined(THREAD_DEVKIT_ADK)
 
-    #include "srp-platform.h"
+#    include "srp-platform.h"
 
-    #define OPENLOG(progname, consolep) srp_openlog(option)
-    #define ERROR(fmt, ...)   srp_log_error(fmt, ##__VA_ARGS__)
-    #define INFO(fmt, ...)    srp_log_info(fmt, ##__VA_ARGS__)
-    #ifdef DEBUG_VERBOSE
-        #define DEBUG(fmt, ...) srp_log_debug(fmt, ##__VA_ARGS__)
-    #else
-        #define DEBUG(fmt, ...)
-    #endif // DEBUG VERBOSE
-    #define FAULT(fmt, ...) srp_log_error(fmt, ##__VA_ARGS__)
-    #define NO_CLOCK
+#    define OPENLOG(progname, consolep) srp_openlog(option)
+#    define ERROR(fmt, ...)   srp_log_error(fmt, ##__VA_ARGS__)
+#    define INFO(fmt, ...)    srp_log_info(fmt, ##__VA_ARGS__)
+#    ifdef DEBUG_VERBOSE
+#        define DEBUG(fmt, ...) srp_log_debug(fmt, ##__VA_ARGS__)
+#    else
+#        define DEBUG(fmt, ...)
+#    endif // DEBUG VERBOSE
+#    define FAULT(fmt, ...) srp_log_error(fmt, ##__VA_ARGS__)
+#    define NO_CLOCK
 #else // ifdef THREAD_DEVKIT_ADK
 
-    #ifdef LOG_FPRINTF_STDERR
-        #define OPENLOG(progname, consolep) do { (void)(consolep); (void)progname; } while (0)
-        #define ERROR(fmt, ...) fprintf(stderr, "%s: " fmt "\n", __FUNCTION__, ##__VA_ARGS__)
-        #define INFO(fmt, ...)  fprintf(stderr, "%s: " fmt "\n", __FUNCTION__, ##__VA_ARGS__)
-        #define FAULT(fmt, ...) fprintf(stderr, "%s: " fmt "\n", __FUNCTION__, ##__VA_ARGS__)
-        #ifdef DEBUG_VERBOSE
-            #ifdef IOLOOP_MACOS
+#    ifdef LOG_FPRINTF_STDERR
+#        define OPENLOG(progname, consolep) do { (void)(consolep); (void)progname; } while (0)
+#        define ERROR(fmt, ...) fprintf(stderr, "%s: " fmt "\n", __FUNCTION__, ##__VA_ARGS__)
+#        define INFO(fmt, ...)  fprintf(stderr, "%s: " fmt "\n", __FUNCTION__, ##__VA_ARGS__)
+#        define FAULT(fmt, ...) fprintf(stderr, "%s: " fmt "\n", __FUNCTION__, ##__VA_ARGS__)
+#        ifdef DEBUG_VERBOSE
+#            ifdef IOLOOP_MACOS
                 int get_num_fds(void);
-            #endif // ifdef IOLOOP_MACOS
-            #define DEBUG(fmt, ...) fprintf(stderr, "%s: " fmt "\n", __FUNCTION__, ##__VA_ARGS__)
-        #else // ifdef DEBUG_VERBOSE
-            #define DEBUG(fmt, ...)
-        #endif
-        #define FAULT(fmt, ...) fprintf(stderr, "%s: " fmt "\n", __FUNCTION__, ##__VA_ARGS__)
-    #else // ifdef LOG_FPRINTF_STDERR
-        #include <syslog.h>
+#            endif // ifdef IOLOOP_MACOS
+#            define DEBUG(fmt, ...) fprintf(stderr, "%s: " fmt "\n", __FUNCTION__, ##__VA_ARGS__)
+#        else // ifdef DEBUG_VERBOSE
+#            define DEBUG(fmt, ...)
+#        endif
+#        define FAULT(fmt, ...) fprintf(stderr, "%s: " fmt "\n", __FUNCTION__, ##__VA_ARGS__)
+#    else // ifdef LOG_FPRINTF_STDERR
+#        include <syslog.h>
 
         // Apple device always has OS_LOG support.
-        #ifdef __APPLE__
-            #define OS_LOG_ENABLED 1
-            #include <os/log.h>
+#        ifdef __APPLE__
+#            define OS_LOG_ENABLED 1
+#            include <os/log.h>
+extern os_log_t global_os_log;
+
 
             // Define log level
-            #define LOG_TYPE_FAULT      OS_LOG_TYPE_FAULT
-            #define LOG_TYPE_ERROR      OS_LOG_TYPE_ERROR
-            #define LOG_TYPE_DEFAULT    OS_LOG_TYPE_DEFAULT
-            #define LOG_TYPE_DEBUG      OS_LOG_TYPE_DEBUG
+#            define LOG_TYPE_FAULT      OS_LOG_TYPE_FAULT
+#            define LOG_TYPE_ERROR      OS_LOG_TYPE_ERROR
+#            define LOG_TYPE_INFO       OS_LOG_TYPE_DEFAULT
+#            define LOG_TYPE_DEBUG      OS_LOG_TYPE_DEBUG
             // Define log macro
-            #define log_with_component_and_type(CATEGORY, LEVEL, FORMAT, ...) \
-                os_log_with_type((CATEGORY), (LEVEL), ("%{public}s: " FORMAT), __FUNCTION__, ##__VA_ARGS__)
+#            define SRP_OS_LOG(component, type, format, ...) \
+                os_log_with_type((component), (type), ("%{public}s: " format), __FUNCTION__, ##__VA_ARGS__)
 
-            #define OPENLOG(progname, consolep) \
-                do { if (consolep) { putenv("ACTIVITY_LOG_STDERR=1"); } (void)progname; } while (0)
-            #define FAULT(FORMAT, ...)  log_with_component_and_type(OS_LOG_DEFAULT, LOG_TYPE_FAULT, \
-                                            FORMAT, ##__VA_ARGS__)
-            #define ERROR(FORMAT, ...)  log_with_component_and_type(OS_LOG_DEFAULT, LOG_TYPE_ERROR, \
-                                            FORMAT, ##__VA_ARGS__)
+#            define OPENLOG(progname, consolep) \
+                do { \
+                    if (consolep) {                                         \
+                        putenv("ACTIVITY_LOG_STDERR=1"); \
+                    } \
+                    (void)progname; \
+                    global_os_log = os_log_create("com.apple.srp-mdns-proxy", "0"); \
+                } while (0)
+#            define FAULT(format, ...)  SRP_OS_LOG(global_os_log, LOG_TYPE_FAULT, format, ##__VA_ARGS__)
+#            define ERROR(format, ...)  SRP_OS_LOG(global_os_log, LOG_TYPE_ERROR, format, ##__VA_ARGS__)
 
-            #ifdef DEBUG_VERBOSE
-                #ifdef DEBUG_FD_LEAKS
+#            ifdef DEBUG_VERBOSE
+#                ifdef DEBUG_FD_LEAKS
                     int get_num_fds(void);
-                    #define INFO(FORMAT, ...) \
+#                    define INFO(format, ...) \
                         do { \
                             int foo = get_num_fds(); \
-                            log_with_component_and_type(OS_LOG_DEFAULT, LOG_TYPE_DEFAULT, "%d " FORMAT, foo, \
-                                ##__VA_ARGS__); \
+                            SRP_OS_LOG(global_os_log, LOG_TYPE_INFO, "%d " format, foo, ##__VA_ARGS__); \
                         } while(0)
-                #else // ifdef IOLOOP_MACOS
-                    #define INFO(FORMAT, ...)   log_with_component_and_type(OS_LOG_DEFAULT, \
-                                                    LOG_TYPE_DEFAULT, FORMAT, ##__VA_ARGS__)
-                #endif // ifdef IOLOOP_MACOS
+#                else // ifdef IOLOOP_MACOS
+#                    define INFO(format, ...) SRP_OS_LOG(global_os_log, LOG_TYPE_INFO, format, ##__VA_ARGS__)
+#                endif // ifdef IOLOOP_MACOS
 
-                #define DEBUG(FORMAT, ...)  log_with_component_and_type(OS_LOG_DEFAULT, \
-                                                LOG_TYPE_DEBUG, FORMAT, ##__VA_ARGS__)
-            #else // ifdef DEBUG_VERBOSE
-                #define INFO(FORMAT, ...)   log_with_component_and_type(OS_LOG_DEFAULT, \
-                                                LOG_TYPE_DEFAULT, FORMAT, ##__VA_ARGS__)
-                #define DEBUG(FORMAT, ...)  do {} while(0)
-            #endif // ifdef DEBUG_VERBOSE
-        #else // ifdef __APPLE__
-            #define OS_LOG_ENABLED 0
+#                define DEBUG(format, ...) SRP_OS_LOG(global_os_log, LOG_TYPE_DEBUG, format, ##__VA_ARGS__)
+#            else // ifdef DEBUG_VERBOSE
+#                define INFO(format, ...) SRP_OS_LOG(global_os_log, LOG_TYPE_INFO, format, ##__VA_ARGS__)
+#                define DEBUG(format, ...)  do {} while(0)
+#            endif // ifdef DEBUG_VERBOSE
+#        else // ifdef __APPLE__
+#            define OS_LOG_ENABLED 0
 
-            #define OPENLOG(progname, consolep) openlog(progname, (consolep ? LOG_PERROR : 0) | LOG_PID, LOG_DAEMON)
-            #define FAULT(fmt, ...) syslog(LOG_CRIT, "%s: " fmt, __FUNCTION__, ##__VA_ARGS__)
-            #define ERROR(fmt, ...) syslog(LOG_ERR, "%s: " fmt, __FUNCTION__, ##__VA_ARGS__)
+#            define OPENLOG(progname, consolep) openlog(progname, (consolep ? LOG_PERROR : 0) | LOG_PID, LOG_DAEMON)
+#            define FAULT(fmt, ...) syslog(LOG_CRIT, "%s: " fmt, __FUNCTION__, ##__VA_ARGS__)
+#            define ERROR(fmt, ...) syslog(LOG_ERR, "%s: " fmt, __FUNCTION__, ##__VA_ARGS__)
 
-            #ifdef DEBUG_VERBOSE
-                #ifdef DEBUG_FD_LEAKS
+#            ifdef DEBUG_VERBOSE
+#                ifdef DEBUG_FD_LEAKS
                     int get_num_fds(void);
-                    #define INFO(fmt, ...) \
+#                    define INFO(fmt, ...) \
                         do { \
                             int foo = get_num_fds(); \
                             syslog(LOG_INFO, "%s: %d " fmt, __FUNCTION__, foo, ##__VA_ARGS__); \
                         } while (0)
-                #else // ifdef IOLOOP_MACOS
-                    #define INFO(fmt, ...)  syslog(LOG_INFO, "%s: " fmt, __FUNCTION__, ##__VA_ARGS__)
-                #endif // ifdef IOLOOP_MACOS
-                #define DEBUG(fmt, ...) syslog(LOG_DEBUG, "%s: " fmt, __FUNCTION__, ##__VA_ARGS__)
-            #else // ifdef DEBUG_VERBOSE
-                #define INFO(fmt, ...)  syslog(LOG_INFO, "%s: " fmt, __FUNCTION__, ##__VA_ARGS__)
-                #define DEBUG(fmt, ...) do {} while(0)
-            #endif // ifdef DEBUG_VERBOSE
-        #endif // ifdef __APPLE__
-    #endif // ifdef LOG_FPRINTF_STDERR
+#                else // ifdef IOLOOP_MACOS
+#                    define INFO(fmt, ...)  syslog(LOG_INFO, "%s: " fmt, __FUNCTION__, ##__VA_ARGS__)
+#                endif // ifdef IOLOOP_MACOS
+#                define DEBUG(fmt, ...) syslog(LOG_DEBUG, "%s: " fmt, __FUNCTION__, ##__VA_ARGS__)
+#            else // ifdef DEBUG_VERBOSE
+#                define INFO(fmt, ...)  syslog(LOG_INFO, "%s: " fmt, __FUNCTION__, ##__VA_ARGS__)
+#                define DEBUG(fmt, ...) do {} while(0)
+#            endif // ifdef DEBUG_VERBOSE
+#        endif // ifdef __APPLE__
+#    endif // ifdef LOG_FPRINTF_STDERR
 #endif // ifdef THREAD_DEVKIT_ADK
 
 //======================================================================================================================
@@ -162,13 +164,13 @@
  * would be shown as a hashing value, which could be used as a way to associate other SRP logs even if it's redacted.
  *
  * On Apple platforms, the current existing log routines will be defined as:
- * #define log_with_component_and_type(CATEGORY, LEVEL, FORMAT, ...) os_log_with_type((CATEGORY), (LEVEL), (FORMAT), \
+ * #define log_with_component_and_type(CATEGORY, LEVEL, format, ...) os_log_with_type((CATEGORY), (LEVEL), (format), \
  *                                                                      ##__VA_ARGS__)
- * #define ERROR(FORMAT, ...)  log_with_component_and_type(OS_LOG_DEFAULT, LOG_TYPE_ERROR, FORMAT, ##__VA_ARGS__)
- * #define INFO(FORMAT, ...)   log_with_component_and_type(OS_LOG_DEFAULT, LOG_TYPE_DEFAULT, FORMAT, ##__VA_ARGS__)
- * #define DEBUG(FORMAT, ...)  log_with_component_and_type(OS_LOG_DEFAULT, LOG_TYPE_DEBUG, FORMAT, ##__VA_ARGS__)
+ * #define ERROR(format, ...)  log_with_component_and_type(OS_LOG_DEFAULT, LOG_TYPE_ERROR, format, ##__VA_ARGS__)
+ * #define INFO(format, ...)   log_with_component_and_type(OS_LOG_DEFAULT, LOG_TYPE_DEFAULT, format, ##__VA_ARGS__)
+ * #define DEBUG(format, ...)  log_with_component_and_type(OS_LOG_DEFAULT, LOG_TYPE_DEBUG, format, ##__VA_ARGS__)
  * And to follow the same log level with os_log, FAULT() is defined.
- * #define FAULT(FORMAT, ...)  log_with_component_and_type(OS_LOG_DEFAULT, LOG_TYPE_FAULT, FORMAT, ##__VA_ARGS__)
+ * #define FAULT(format, ...)  log_with_component_and_type(OS_LOG_DEFAULT, LOG_TYPE_FAULT, format, ##__VA_ARGS__)
  * Therefore, all the previous logs would be put under OS_LOG_DEFAULT category.
  * FAULT level lof will be mapped to  LOG_TYPE_FAULT in os_log.
  * ERROR level log will be mapped to LOG_TYPE_ERROR in os_log.
@@ -284,64 +286,64 @@
 #if OS_LOG_ENABLED
     // Define log specifier
     // String
-    #define PUB_S_SRP "%{public}s"
-    #define PRI_S_SRP "%{private, mask.hash}s"
+#    define PUB_S_SRP "%{public}s"
+#    define PRI_S_SRP "%{private, mask.hash}s"
     // DNS name, when the pointer to DNS name is NULL, <NULL> will be logged.
-    #define DNS_NAME_GEN_SRP(NAME, BUF_NAME) \
+#    define DNS_NAME_GEN_SRP(NAME, BUF_NAME) \
         char BUF_NAME[DNS_MAX_NAME_SIZE_ESCAPED + 1]; \
         if (NAME != NULL) { \
             dns_name_print(NAME, BUF_NAME, sizeof(BUF_NAME)); \
         } else { \
             snprintf(BUF_NAME, sizeof(BUF_NAME), "<null>"); \
         }
-    #define PUB_DNS_NAME_SRP PUB_S_SRP
-    #define PRI_DNS_NAME_SRP PRI_S_SRP
-    #define DNS_NAME_PARAM_SRP(NAME, BUF) (BUF)
+#    define PUB_DNS_NAME_SRP PUB_S_SRP
+#    define PRI_DNS_NAME_SRP PRI_S_SRP
+#    define DNS_NAME_PARAM_SRP(NAME, BUF) (BUF)
     // IP address
     // IPv4
-    #define IPv4_ADDR_GEN_SRP(ADDR, BUF_NAME) do {} while(0)
-    #define PUB_IPv4_ADDR_SRP "%{public, network:in_addr}.4P"
-    #define PRI_IPv4_ADDR_SRP "%{private, mask.hash, network:in_addr}.4P"
-    #define IPv4_ADDR_PARAM_SRP(ADDR, BUF) ((uint8_t *)ADDR)
+#    define IPv4_ADDR_GEN_SRP(ADDR, BUF_NAME) do {} while(0)
+#    define PUB_IPv4_ADDR_SRP "%{public, network:in_addr}.4P"
+#    define PRI_IPv4_ADDR_SRP "%{private, mask.hash, network:in_addr}.4P"
+#    define IPv4_ADDR_PARAM_SRP(ADDR, BUF) ((uint8_t *)ADDR)
     // IPv6
-    #define IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME) do {} while(0)
-    #define PUB_IPv6_ADDR_SRP "%{public, network:in6_addr}.16P%{public}s"
-    #define PRI_IPv6_ADDR_SRP "%{public}s%{private, mask.hash, network:in6_addr}.16P"
-    #define IPv6_ADDR_PARAM_SRP(ADDR, BUF) ADDRESS_RANGE_STR((uint8_t *)(ADDR)), ((uint8_t *)(ADDR))
+#    define IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME) do {} while(0)
+#    define PUB_IPv6_ADDR_SRP "%{public, network:in6_addr}.16P%{public}s"
+#    define PRI_IPv6_ADDR_SRP "%{public}s%{private, mask.hash, network:in6_addr}.16P"
+#    define IPv6_ADDR_PARAM_SRP(ADDR, BUF) ADDRESS_RANGE_STR((uint8_t *)(ADDR)), ((uint8_t *)(ADDR))
     // Segmented IPv6
     // Subnet part can always be public.
-    #define SEGMENTED_IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME) do {} while(0)
-    #define PUB_SEGMENTED_IPv6_ADDR_SRP "{%{public, srp:in6_addr_segment}.6P%{public}s, " \
+#    define SEGMENTED_IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME) do {} while(0)
+#    define PUB_SEGMENTED_IPv6_ADDR_SRP "{%{public, srp:in6_addr_segment}.6P%{public}s, " \
                                             "%{public, srp:in6_addr_segment}.2P, " \
                                             "%{public, srp:in6_addr_segment}.8P}"
-    #define PRI_SEGMENTED_IPv6_ADDR_SRP "{%{public}s%{private, mask.hash, srp:in6_addr_segment}.6P:" \
+#    define PRI_SEGMENTED_IPv6_ADDR_SRP "{%{public}s%{private, mask.hash, srp:in6_addr_segment}.6P:" \
                                             "%{public, mask.hash, srp:in6_addr_segment}.2P:" \
                                             "%{private, mask.hash, srp:in6_addr_segment}.8P}"
-    #define SEGMENTED_IPv6_ADDR_PARAM_SRP(ADDR, BUF) ADDRESS_RANGE_STR((uint8_t *)(ADDR)), ((uint8_t *)(ADDR)), \
+#    define SEGMENTED_IPv6_ADDR_PARAM_SRP(ADDR, BUF) ADDRESS_RANGE_STR((uint8_t *)(ADDR)), ((uint8_t *)(ADDR)), \
                                                         ((uint8_t *)(ADDR) + 6), ((uint8_t *)(ADDR) + 8)
     // MAC address
-    #define PUB_MAC_ADDR_SRP "%{public, srp:mac_addr}.6P"
-    #define PRI_MAC_ADDR_SRP "%{private, mask.hash, srp:mac_addr}.6P"
-    #define MAC_ADDR_PARAM_SRP(ADDR) ((uint8_t *)ADDR)
+#    define PUB_MAC_ADDR_SRP "%{public, srp:mac_addr}.6P"
+#    define PRI_MAC_ADDR_SRP "%{private, mask.hash, srp:mac_addr}.6P"
+#    define MAC_ADDR_PARAM_SRP(ADDR) ((uint8_t *)ADDR)
 
 #else // ifdef OS_LOG_ENABLED
     // When os_log is not available, all logs would be public.
     // Define log specifier
     // String
-    #define PUB_S_SRP "%s"
-    #define PRI_S_SRP PUB_S_SRP
+#    define PUB_S_SRP "%s"
+#    define PRI_S_SRP PUB_S_SRP
     // DNS name, when the pointer to DNS name is NULL, <NULL> will be logged.
-    #if defined(MDNS_NO_STRICT) && (!MDNS_NO_STRICT)
-        #define SRP_LOG_STRNCPY_STRICT mdns_strlcpy
-    #else
-        #define SRP_LOG_STRNCPY_STRICT strlcpy
-    #endif
-    #ifdef IOLOOP_MACOS
-        #define SRP_LOG_STRNCPY SRP_LOG_STRNCPY_STRICT
-    #else
-        #define SRP_LOG_STRNCPY strncpy
-    #endif // IOLOOP_MACOS
-    #define DNS_NAME_GEN_SRP(NAME, BUF_NAME) \
+#    if defined(MDNS_NO_STRICT) && (!MDNS_NO_STRICT)
+#        define SRP_LOG_STRNCPY_STRICT mdns_strlcpy
+#    else
+#        define SRP_LOG_STRNCPY_STRICT strlcpy
+#    endif
+#    ifdef IOLOOP_MACOS
+#        define SRP_LOG_STRNCPY SRP_LOG_STRNCPY_STRICT
+#    else
+#        define SRP_LOG_STRNCPY strncpy
+#    endif // IOLOOP_MACOS
+#    define DNS_NAME_GEN_SRP(NAME, BUF_NAME) \
         char BUF_NAME[DNS_MAX_NAME_SIZE_ESCAPED + 1]; \
         if (NAME != NULL) { \
             dns_name_print(NAME, BUF_NAME, sizeof(BUF_NAME)); \
@@ -349,32 +351,32 @@
             SRP_LOG_STRNCPY(BUF_NAME, "<null>", \
                             sizeof("<null>") < sizeof(BUF_NAME) ? sizeof("<null>") : sizeof(BUF_NAME)); \
         }
-    #define PUB_DNS_NAME_SRP "%s"
-    #define PRI_DNS_NAME_SRP PUB_DNS_NAME_SRP
-    #define DNS_NAME_PARAM_SRP(NAME, BUF) (BUF)
+#    define PUB_DNS_NAME_SRP "%s"
+#    define PRI_DNS_NAME_SRP PUB_DNS_NAME_SRP
+#    define DNS_NAME_PARAM_SRP(NAME, BUF) (BUF)
     // IP address
     // IPv4
-    #define IPv4_ADDR_GEN_SRP(ADDR, BUF_NAME) char BUF_NAME[INET_ADDRSTRLEN]; \
+#    define IPv4_ADDR_GEN_SRP(ADDR, BUF_NAME) char BUF_NAME[INET_ADDRSTRLEN]; \
                                                     inet_ntop(AF_INET, ((uint8_t *)ADDR), BUF_NAME, sizeof(BUF_NAME))
-    #define PUB_IPv4_ADDR_SRP "%s"
-    #define PRI_IPv4_ADDR_SRP PUB_IPv4_ADDR_SRP
-    #define IPv4_ADDR_PARAM_SRP(ADDR, BUF) (BUF)
+#    define PUB_IPv4_ADDR_SRP "%s"
+#    define PRI_IPv4_ADDR_SRP PUB_IPv4_ADDR_SRP
+#    define IPv4_ADDR_PARAM_SRP(ADDR, BUF) (BUF)
     // IPv6
-    #define IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME) char BUF_NAME[INET6_ADDRSTRLEN]; \
+#    define IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME) char BUF_NAME[INET6_ADDRSTRLEN]; \
                                                     inet_ntop(AF_INET6, ((uint8_t *)ADDR), BUF_NAME, sizeof(BUF_NAME))
-    #define PUB_IPv6_ADDR_SRP "%s%s"
-    #define PRI_IPv6_ADDR_SRP PUB_IPv6_ADDR_SRP
-    #define IPv6_ADDR_PARAM_SRP(ADDR, BUF) (BUF), ADDRESS_RANGE_STR((uint8_t *)ADDR)
+#    define PUB_IPv6_ADDR_SRP "%s%s"
+#    define PRI_IPv6_ADDR_SRP PUB_IPv6_ADDR_SRP
+#    define IPv6_ADDR_PARAM_SRP(ADDR, BUF) (BUF), ADDRESS_RANGE_STR((uint8_t *)ADDR)
     // Segmented IPv6
-    #define SEGMENTED_IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME) IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME)
+#    define SEGMENTED_IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME) IPv6_ADDR_GEN_SRP(ADDR, BUF_NAME)
 
-    #define PUB_SEGMENTED_IPv6_ADDR_SRP PUB_IPv6_ADDR_SRP
-    #define PRI_SEGMENTED_IPv6_ADDR_SRP PRI_IPv6_ADDR_SRP
-    #define SEGMENTED_IPv6_ADDR_PARAM_SRP(ADDR, BUF) IPv6_ADDR_PARAM_SRP(ADDR, BUF)
+#    define PUB_SEGMENTED_IPv6_ADDR_SRP PUB_IPv6_ADDR_SRP
+#    define PRI_SEGMENTED_IPv6_ADDR_SRP PRI_IPv6_ADDR_SRP
+#    define SEGMENTED_IPv6_ADDR_PARAM_SRP(ADDR, BUF) IPv6_ADDR_PARAM_SRP(ADDR, BUF)
     // MAC address
-    #define PUB_MAC_ADDR_SRP "%02x:%02x:%02x:%02x:%02x:%02x"
-    #define PRI_MAC_ADDR_SRP PUB_MAC_ADDR_SRP
-    #define MAC_ADDR_PARAM_SRP(ADDR) ((uint8_t *)ADDR)[0], ((uint8_t *)ADDR)[1], ((uint8_t *)ADDR)[2], \
+#    define PUB_MAC_ADDR_SRP "%02x:%02x:%02x:%02x:%02x:%02x"
+#    define PRI_MAC_ADDR_SRP PUB_MAC_ADDR_SRP
+#    define MAC_ADDR_PARAM_SRP(ADDR) ((uint8_t *)ADDR)[0], ((uint8_t *)ADDR)[1], ((uint8_t *)ADDR)[2], \
                                         ((uint8_t *)ADDR)[3], ((uint8_t *)ADDR)[4], ((uint8_t *)ADDR)[5]
 
 #endif // ifdef OS_LOG_ENABLED

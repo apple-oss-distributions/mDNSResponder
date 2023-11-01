@@ -345,6 +345,7 @@ struct route_state {
     bool have_mesh_local_prefix;
     bool have_mesh_local_address;
     bool advertising_srp_anycast_service;
+    bool advertising_srp_unicast_service;
     bool have_proposed_srp_listener_address;
     bool seen_listener_address;
     struct in6_addr thread_mesh_local_prefix;

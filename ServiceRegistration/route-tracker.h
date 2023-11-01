@@ -38,10 +38,12 @@ route_tracker_t *NULLABLE route_tracker_create(route_state_t *NONNULL route_stat
 void route_tracker_set_reconnect_callback(route_tracker_t *NONNULL route_tracker,
                                           void (*NULLABLE reconnect_callback)(void *NULLABLE context));
 void route_tracker_start(route_tracker_t *NONNULL tracker);
+void route_tracker_shutdown(route_state_t *NULLABLE route_state);
 #ifndef BUILD_TEST_ENTRY_POINTS
 void route_tracker_route_state_changed(route_tracker_t *NONNULL tracker, interface_t *NULLABLE interface);
 void route_tracker_interface_configuration_changed(route_tracker_t *NONNULL tracker);
 void route_tracker_monitor_mesh_routes(route_tracker_t *NONNULL tracker, cti_route_vec_t *NONNULL routes);
+bool route_tracker_local_routes_seen(route_tracker_t *NULLABLE tracker);
 #else //  BUILD_TEST_ENTRY_POINTS
 void route_tracker_test_start(int iterations);
 #endif //  BUILD_TEST_ENTRY_POINTS

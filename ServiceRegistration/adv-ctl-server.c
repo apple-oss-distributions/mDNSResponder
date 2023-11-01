@@ -52,10 +52,17 @@
 #include "thread-service.h"
 #include "omr-watcher.h"
 #include "omr-publisher.h"
+#include "dnssd-client.h"
+#include "service-publisher.h"
+#include "thread-tracker.h"
+#include "service-tracker.h"
+#include "route-tracker.h"
 
 #include "cti-proto.h"
 #include "adv-ctl-common.h"
 #include "advertising_proxy_services.h"
+
+static void srp_xpc_client_finalize(srp_wanted_state_t *wanted);
 
 
 static int
@@ -218,6 +225,141 @@ adv_ctl_start_breaking_time(void *context)
 
     server_state->break_srpl_time = true;
 }
+
+#if STUB_ROUTER || THREAD_DEVICE
+static void
+adv_ctl_thread_shutdown_continue(void *context)
+{
+    srp_server_t *server_state = context;
+
+    if (server_state->shutdown_timeout != NULL) {
+        ioloop_cancel_wake_event(server_state->shutdown_timeout);
+        ioloop_wakeup_release(server_state->shutdown_timeout);
+        server_state->shutdown_timeout = NULL;
+    }
+
+    xpc_object_t response;
+    response = xpc_dictionary_create_reply(server_state->shutdown_request);
+    if (response == NULL) {
+        ERROR("adv_xpc_message: Unable to create reply dictionary.");
+        return;
+    }
+    xpc_dictionary_set_uint64(response, kDNSSDAdvertisingProxyResponseStatus, 0);
+    xpc_connection_send_message(server_state->shutdown_connection, response);
+    xpc_release(response);
+    xpc_release(server_state->shutdown_request);
+    server_state->shutdown_request = NULL;
+    xpc_release(server_state->shutdown_connection);
+    server_state->shutdown_connection = NULL;
+
+    server_state->awaiting_service_removal = false;
+    server_state->awaiting_prefix_removal = false;
+
+    if (server_state->wanted != NULL) {
+        INFO("clearing server_state->wanted (%p) unconditionally.", server_state->wanted);
+        srp_xpc_client_finalize(server_state->wanted);
+    }
+}
+
+static void
+adv_ctl_start_thread_shutdown_timer(srp_server_t *server_state)
+{
+    if (server_state->shutdown_timeout == NULL) {
+        server_state->shutdown_timeout = ioloop_wakeup_create();
+    }
+    // If we can't allocate the shutdown timer, send the response immediately (which also probably won't
+    // work, oh well).
+    if (server_state->shutdown_timeout == NULL) {
+        adv_ctl_thread_shutdown_continue(server_state);
+        return;
+    }
+    // Wait no longer than two seconds for thread network data update
+    ioloop_add_wake_event(server_state->shutdown_timeout,
+                          server_state, adv_ctl_thread_shutdown_continue, NULL, 2 * IOLOOP_SECOND);
+}
+
+static bool
+adv_ctl_start_thread_shutdown(xpc_object_t request, xpc_connection_t connection, void *context)
+{
+    srp_server_t *server_state = context;
+
+    server_state->shutdown_connection = connection;
+    xpc_retain(server_state->shutdown_connection);
+    server_state->shutdown_request = request;
+    xpc_retain(server_state->shutdown_request);
+    if (0) {
+#if STUB_ROUTER
+    } else if (server_state->stub_router_enabled) {
+        if (server_state->service_tracker != NULL &&
+            service_tracker_local_service_seen(server_state->service_tracker))
+        {
+            server_state->awaiting_service_removal = true;
+        }
+        if (server_state->route_state->omr_publisher != NULL &&
+            omr_publisher_publishing_prefix(server_state->route_state->omr_publisher))
+        {
+            omr_publisher_unpublish_prefix(server_state->route_state->omr_publisher);
+            if (server_state->route_state->omr_watcher != NULL) {
+                server_state->awaiting_prefix_removal = true;
+            }
+        }
+        if (route_tracker_local_routes_seen(server_state->route_state->route_tracker)) {
+            nat64_thread_shutdown(server_state->route_state);
+            route_tracker_shutdown(server_state->route_state);
+            server_state->awaiting_route_removal = true;
+        }
+        srpl_shutdown(server_state);
+        partition_discontinue_all_srp_service(server_state->route_state);
+        adv_ctl_start_thread_shutdown_timer(server_state);
+        adv_ctl_thread_shutdown_status_check(server_state);
+#endif
+#if THREAD_DEVICE
+    } else {
+        if (server_state->dnssd_client != NULL) {
+            dnssd_client_cancel(server_state->dnssd_client);
+            dnssd_client_release(server_state->dnssd_client);
+            server_state->dnssd_client = NULL;
+        }
+        if (server_state->service_publisher != NULL) {
+            service_publisher_stop_publishing(server_state->service_publisher);
+            service_publisher_cancel(server_state->service_publisher);
+            service_publisher_release(server_state->service_publisher);
+            server_state->service_publisher = NULL;
+            if (server_state->service_tracker != NULL &&
+                service_tracker_local_service_seen(server_state->service_tracker))
+            {
+                server_state->awaiting_service_removal = true;
+            }
+        }
+        adv_ctl_thread_shutdown_status_check(server_state);
+        adv_ctl_start_thread_shutdown_timer(server_state);
+#endif
+    }
+    return true;
+}
+
+void
+adv_ctl_thread_shutdown_status_check(srp_server_t *server_state)
+{
+    if (0) {
+#if STUB_ROUTER
+    } else if (server_state->stub_router_enabled) {
+        if (!server_state->awaiting_prefix_removal &&
+            !server_state->awaiting_service_removal &&
+            !server_state->awaiting_route_removal)
+        {
+            adv_ctl_thread_shutdown_continue(server_state);
+        }
+#endif
+#if THREAD_DEVICE
+    } else {
+        if (!server_state->awaiting_service_removal) {
+            adv_ctl_thread_shutdown_continue(server_state);
+        }
+#endif
+    }
+}
+#endif // STUB_ROUTER || THREAD_DEVICE
 
 static int
 adv_ctl_block_anycast_service(bool block, void *context)
@@ -597,6 +739,11 @@ adv_ctl_message_parse(advertising_proxy_conn_ref connection)
              connection->uid, connection->pid);
         adv_ctl_start_breaking_time(connection->context);
         break;
+
+    case kDNSSDAdvertisingProxyStartThreadShutdown:
+        INFO("Client uid %d pid %d sent a kDNSSDAdvertisingProxyStartThreadShutdown request.",
+             connection->uid, connection->pid);
+        return adv_ctl_start_thread_shutdown(request, connection, context);
 
     case kDNSSDAdvertisingProxySetVariable:
         void *data = NULL;

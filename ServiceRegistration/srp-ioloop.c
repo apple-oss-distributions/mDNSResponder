@@ -52,6 +52,7 @@ static int bogusify_signatures = false;
 static int bogus_remove = false;
 static int push_query = false;
 static int push_unsubscribe = false;
+static int push_send_bogus_keepalive = false;
 static int push_exhaust = false;
 static bool test_subtypes = false;
 static bool test_renew_subtypes = false;
@@ -70,6 +71,7 @@ cti_connection_t thread_service_context;
 static const char *interface_name = NULL;
 static wakeup_t *wait_for_remote_disconnect = NULL;
 static dso_state_t *disconnect_expected = NULL;
+os_log_t global_os_log;
 
 #define SRP_IO_CONTEXT_MAGIC 0xFEEDFACEFADEBEEFULL  // BEES!   Everybody gets BEES!
 typedef struct io_context {
@@ -572,23 +574,26 @@ send_push_unsubscribe(void)
     uint8_t *buffer = (uint8_t *)&dns_message;
     dns_towire_state_t towire;
     dso_message_t message;
-    dso_make_message(&message, buffer, sizeof(dns_message), dso_connection->dso, true, false, 0, 0, NULL);
-    memset(&towire, 0, sizeof(towire));
-    towire.p = &buffer[DNS_HEADER_SIZE];
-    towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);
-    towire.message = &dns_message;
-    dns_u16_to_wire(&towire, kDSOType_DNSPushUnsubscribe);
-    dns_rdlength_begin(&towire);
-    dns_full_name_to_wire(NULL, &towire, "_hap._udp.openthread.thread.home.arpa");
-    dns_u16_to_wire(&towire, dns_rrtype_ptr);
-    dns_u16_to_wire(&towire, dns_qclass_in);
-    dns_rdlength_end(&towire);
+    if (!push_send_bogus_keepalive) {
+        INFO("unsubscribe");
+        dso_make_message(&message, buffer, sizeof(dns_message), dso_connection->dso, true, false, 0, 0, NULL);
+        memset(&towire, 0, sizeof(towire));
+        towire.p = &buffer[DNS_HEADER_SIZE];
+        towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);
+        towire.message = &dns_message;
+        dns_u16_to_wire(&towire, kDSOType_DNSPushUnsubscribe);
+        dns_rdlength_begin(&towire);
+        dns_full_name_to_wire(NULL, &towire, "_airplay._tcp.openthread.thread.home.arpa");
+        dns_u16_to_wire(&towire, dns_rrtype_ptr);
+        dns_u16_to_wire(&towire, dns_qclass_in);
+        dns_rdlength_end(&towire);
 
-    memset(&iov, 0, sizeof(iov));
-    iov.iov_len = towire.p - buffer;
-    iov.iov_base = buffer;
-    ioloop_send_message(dso_connection, NULL, &iov, 1);
-    subscribe_xid = dns_message.id; // We need this to identify the response.
+        memset(&iov, 0, sizeof(iov));
+        iov.iov_len = towire.p - buffer;
+        iov.iov_base = buffer;
+        ioloop_send_message(dso_connection, NULL, &iov, 1);
+        subscribe_xid = dns_message.id; // We need this to identify the response.
+    }
 
     // Send a keepalive message so that we can get the response, since the unsubscribe is not a response-requiring request.
     dso_make_message(&message, buffer, sizeof(dns_message), dso_connection->dso, false, false, 0, 0, NULL);
@@ -601,6 +606,11 @@ send_push_unsubscribe(void)
     dns_u32_to_wire(&towire, 600);
     dns_u32_to_wire(&towire, 600);
     dns_rdlength_end(&towire);
+    if (push_send_bogus_keepalive) {
+        INFO("sending bogus keepalive");
+        // Send a badly formatted message.
+        dns_u32_to_wire(&towire, 0x12345678);
+    }
     keepalive_xid = dns_message.id;
     memset(&iov, 0, sizeof(iov));
     iov.iov_len = towire.p - buffer;
@@ -825,7 +835,7 @@ dso_connected(comm_t *connection, void *UNUSED context)
     towire.message = &dns_message;
     dns_u16_to_wire(&towire, kDSOType_DNSPushSubscribe);
     dns_rdlength_begin(&towire);
-    dns_full_name_to_wire(NULL, &towire, "_hap._udp.openthread.thread.home.arpa");
+    dns_full_name_to_wire(NULL, &towire, "_airplay._tcp.openthread.thread.home.arpa");
     dns_u16_to_wire(&towire, dns_rrtype_ptr);
     dns_u16_to_wire(&towire, dns_qclass_in);
     dns_rdlength_end(&towire);
@@ -1043,6 +1053,10 @@ main(int argc, char **argv)
             push_query = true;
         } else if (!strcmp(argv[i], "--push-unsubscribe")) {
             push_unsubscribe = true;
+        } else if (!strcmp(argv[i], "--push-send-bogus-keepalive")) {
+            push_query = true;
+            push_unsubscribe = true;
+            push_send_bogus_keepalive = true;
         } else if (!strcmp(argv[i], "--push-exhaust")) {
             push_exhaust = true;
         } else if (!strcmp(argv[i], "--test-subtypes")) {

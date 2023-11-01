@@ -2374,9 +2374,13 @@ struct mDNS_struct
     mDNSu8 SleepState;                  // Set if we're sleeping
     mDNSu8 SleepSeqNum;                 // "Epoch number" of our current period of wakefulness
     mDNSu8 SystemWakeOnLANEnabled;      // Set if we want to register with a Sleep Proxy before going to sleep
+#if !MDNSRESPONDER_SUPPORTS(APPLE, NO_WAKE_FOR_NET_ACCESS)
     mDNSu8 SentSleepProxyRegistration;  // Set if we registered (or tried to register) with a Sleep Proxy
+#endif
     mDNSu8 SystemSleepOnlyIfWakeOnLAN;  // Set if we may only sleep if we managed to register with a Sleep Proxy
+#if !MDNSRESPONDER_SUPPORTS(APPLE, NO_WAKE_FOR_NET_ACCESS)
     mDNSs32 AnnounceOwner;              // After waking from sleep, include OWNER option in packets until this time
+#endif
     mDNSs32 DelaySleep;                 // To inhibit re-sleeping too quickly right after wake
     mDNSs32 SleepLimit;                 // Time window to allow deregistrations, etc.,
                                         // during which underying platform layer should inhibit system sleep
@@ -3245,6 +3249,16 @@ extern void *   mDNSPlatformMemAllocate(mDNSu32 len);
 extern void *   mDNSPlatformMemAllocateClear(mDNSu32 len);
 extern void     mDNSPlatformMemFree(void *mem);
 #endif // MDNS_MALLOC_DEBUGGING
+
+#define mDNSPlatformMemForget(PTR)          \
+    do                                      \
+    {                                       \
+        if (*(PTR))                         \
+        {                                   \
+            mDNSPlatformMemFree(*(PTR));    \
+            *(PTR) = NULL;                  \
+        }                                   \
+    } while(0)
 
 // If the platform doesn't have a strong PRNG, we define a naive multiply-and-add based on a seed
 // from the platform layer.  Long-term, we should embed an arc4 implementation, but the strength

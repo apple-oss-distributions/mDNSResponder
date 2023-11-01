@@ -70,6 +70,7 @@
 static const char local_suffix_ld[] = ".local";
 static const char *local_suffix = &local_suffix_ld[1];
 
+os_log_t global_os_log;
 void *dns_service_op_not_to_be_freed;
 srp_server_t *srp_servers;
 const uint8_t thread_anycast_preamble[7] = { 0, 0, 0, 0xff, 0xfe, 0, 0xfc };
@@ -1156,7 +1157,7 @@ update_finished(adv_update_t *update)
                         INFO("retaining " PRI_SEGMENTED_IPv6_ADDR_SRP "on host " PRI_S_SRP,
                              SEGMENTED_IPv6_ADDR_PARAM_SRP(rdp, rdp_buf), host->registered_name);
                     } else {
-                        IPv4_ADDR_GEN_SRP(rec->rdata, addr_buf);
+                        IPv4_ADDR_GEN_SRP(rdp, rdp_buf);
                         INFO("retaining " PRI_IPv4_ADDR_SRP "on host " PRI_S_SRP,
                              IPv4_ADDR_PARAM_SRP(rdp, rdp_buf), host->registered_name);
                     }
@@ -1178,7 +1179,7 @@ update_finished(adv_update_t *update)
                         INFO("adding " PRI_SEGMENTED_IPv6_ADDR_SRP "to host " PRI_S_SRP,
                              SEGMENTED_IPv6_ADDR_PARAM_SRP(rdp, rdp_buf), host->registered_name);
                     } else {
-                        IPv4_ADDR_GEN_SRP(rec->rdata, addr_buf);
+                        IPv4_ADDR_GEN_SRP(rdp, rdp_buf);
                         INFO("adding " PRI_IPv4_ADDR_SRP "to host " PRI_S_SRP,
                              IPv4_ADDR_PARAM_SRP(rdp, rdp_buf), host->registered_name);
                     }
@@ -2899,7 +2900,7 @@ prepare_update(adv_host_t *host, client_update_t *client_update)
 
         prepared_instance->anycast = false;
         if (client_update != NULL && client_update->connection != NULL) {
-            const struct sockaddr *server_addr = connection_get_local_address(client_update->connection);
+            const struct sockaddr *server_addr = connection_get_local_address(client_update->message);
             if (server_addr && server_addr->sa_family == AF_INET6) {
                 const struct in6_addr *const ipv6_address = &(((const struct sockaddr_in6 *)server_addr)->sin6_addr);
                 uint16_t server_port = ntohs(((const struct sockaddr_in6 *)server_addr)->sin6_port);
@@ -3635,18 +3636,10 @@ main(int argc, char **argv)
 #endif
 
 #if (SRP_FEATURE_COMBINED_SRP_DNSSD_PROXY)
-#  if STUB_ROUTER || !THREAD_DEVICE
-    if (0) {
-#    if STUB_ROUTER
-    } else if (!stub_router_enabled) {
-#    endif
-    } else {
-        if (!init_dnssd_proxy(srp_servers)) {
-            ERROR("main: failed to setup dnssd-proxy");
-            return 1;
-        }
+    if (!init_dnssd_proxy(srp_servers)) {
+        ERROR("main: failed to setup dnssd-proxy");
+        return 1;
     }
-#  endif // STUB_ROUTER
 #endif // #if (SRP_FEATURE_COMBINED_SRP_DNSSD_PROXY)
 
 #if STUB_ROUTER

@@ -69,6 +69,10 @@
 #include "cti-services.h"
 #include "route.h"
 #include "srp-replication.h"
+#if THREAD_DEVICE
+#  include "state-machine.h"
+#  include "service-publisher.h"
+#endif
 #if SRP_FEATURE_NAT64
 #include "dns_sd_private.h"
 #include "nat64-macos.h"
@@ -339,9 +343,11 @@ static bool
 dnssd_hardwired_setup_dns_push_for_domain(served_domain_t *const NONNULL served_domain);
 #endif // SRP_FEATURE_DYNAMIC_CONFIGURATION
 
+#if STUB_ROUTER
 static bool
 start_timer_to_advertise(dnssd_proxy_advertisements_t *NONNULL context,
     const char *const NULLABLE domain_to_advertise, const uint32_t interval);
+#endif
 
 static bool
 interface_process_addr_change(dp_interface_t *const NONNULL interface, const addr_t *const NONNULL address,
@@ -2646,7 +2652,7 @@ dns_push_query_answer_process(DNSServiceFlags flags, DNSServiceErrorType errorCo
 
 // This is the callback for both dns query and dns push query results.
 static void
-dns_question_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t UNUSED interfaceIndex,
+dns_question_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t interfaceIndex,
                       DNSServiceErrorType errorCode, const char *fullname, uint16_t rrtype, uint16_t rrclass,
                       uint16_t rdlen, const void *rdata, uint32_t ttl, void *context)
 {
@@ -3661,6 +3667,25 @@ dns_proxy_input(comm_t *comm, message_t *message, void *context)
     IOLOOP_NTOP(&comm->address, buf);
     INFO("[QID %x] Received a new DNS message - src: " PRI_S_SRP ", message length: %u bytes.",
          ntohs(message->wire.id), buf, message->length);
+#if THREAD_DEVICE
+    if (0
+#  if STUB_ROUTER
+        || !srp_servers->stub_router_enabled
+#  else
+        || true
+#  endif
+        )
+    {
+        if (srp_servers->service_publisher == NULL ||
+            !service_publisher_is_address_mesh_local(srp_servers->service_publisher,
+                                                     comm->tcp_stream ? &comm->address : &message->src))
+        {
+            dso_simple_response(comm, message, &message->wire, dns_rcode_refused);
+            return;
+        }
+
+    }
+#endif // THREAD_DEVICE
 
     dnssd_proxy_dns_evaluate(comm, message, context);
 }
@@ -3740,7 +3765,7 @@ delete_served_domain(served_domain_t *const served_domain)
 {
     INFO("served domain removed - domain name: " PRI_S_SRP, served_domain->domain);
 
-    // free struct interface *NULLABLE interface
+   // free struct interface *NULLABLE interface
     if (served_domain->interface != NULL) {
         interface_addr_t *current = served_domain->interface->addresses;
         interface_addr_t *next;
@@ -4449,18 +4474,12 @@ interface_add_new_address(dp_interface_t *const NONNULL interface, const addr_t 
     new_if_addr->mask = *mask;
     new_if_addr->next = NULL;
 
-    interface_addr_t *prev;
-    interface_addr_t *current;
+    interface_addr_t **ap;
 
-    for (prev = NULL, current = interface->addresses; current != NULL; prev = current, current = current->next)
+    for (ap = &interface->addresses; *ap != NULL; ap = &(*ap)->next)
         ;
 
-    if (prev != NULL) {
-        prev->next = new_if_addr;
-    } else {
-        interface->addresses = new_if_addr;
-    }
-
+    *ap = new_if_addr;
     succeeded = true;;
 exit:
     return succeeded;
@@ -4472,25 +4491,21 @@ interface_remove_old_address(dp_interface_t *const NONNULL interface, const addr
 {
     bool succeeded;
     interface_addr_t addr_to_remove = {NULL, *address, *mask};
-    interface_addr_t *prev;
+    interface_addr_t **ap;
     interface_addr_t *current;
 
-    for (prev = NULL, current = interface->addresses; current != NULL; prev = current, current = current->next) {
-        if (interface_addr_t_equal(current, &addr_to_remove)) {
+    for (ap = &interface->addresses; *ap != NULL; ap = &(*ap)->next) {
+        if (interface_addr_t_equal(*ap, &addr_to_remove)) {
             break;
         }
     }
-    if (current == NULL) {
+    if (*ap == NULL) {
         INFO("address not found in the interface address list - interface name: " PUB_S_SRP, interface->name);
         succeeded = false;
         goto exit;
     }
-
-    if (prev != NULL) {
-        prev->next = current->next;
-    } else {
-        interface->addresses = NULL;
-    }
+    current = *ap;
+    *ap = current->next;
     free(current);
 
     succeeded = true;
@@ -4886,6 +4901,7 @@ exit:
 
 #define ADVERTISEMENT_RETRY_TIMER 10 * MSEC_PER_SEC
 
+#if STUB_ROUTER
 static void
 advertisements_finalize(void *context)
 {
@@ -5078,6 +5094,7 @@ advertise_dnssd_proxy(srp_server_t *server_state, const char *const NONNULL doma
     // Start advertisement (wait for ADVERTISEMENT_RETRY_TIMER to allow mDNSResponder to start).
     return start_timer_to_advertise(server_state->dnssd_proxy_advertisements, domain_to_advertise, ADVERTISEMENT_RETRY_TIMER);
 }
+#endif // STUB_ROUTER
 
 #if SRP_FEATURE_COMBINED_SRP_DNSSD_PROXY
 #  if SRP_FEATURE_DYNAMIC_CONFIGURATION
@@ -5210,8 +5227,12 @@ init_dnssd_proxy(srp_server_t *server_state)
     succeeded = start_dnssd_proxy_listener();
     require_action_quiet(succeeded, exit, ERROR("start_dnssd_proxy_listener failed"));
 
-    succeeded = advertise_dnssd_proxy(server_state, THREAD_BROWSING_DOMAIN);
-    require_action_quiet(succeeded, exit, ERROR("advertise_dnssd_proxy failed"));
+#if STUB_ROUTER
+    if (srp_servers->stub_router_enabled) {
+        succeeded = advertise_dnssd_proxy(server_state, THREAD_BROWSING_DOMAIN);
+        require_action_quiet(succeeded, exit, ERROR("advertise_dnssd_proxy failed"));
+    }
+#endif
 
 #if SRP_FEATURE_DYNAMIC_CONFIGURATION
     succeeded = served_domain_init(server_state);

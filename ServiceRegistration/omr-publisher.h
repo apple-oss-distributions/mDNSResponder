@@ -39,6 +39,7 @@ void omr_publisher_start(omr_publisher_t *NONNULL publisher);
 omr_prefix_t *NULLABLE omr_publisher_published_prefix_get(omr_publisher_t *NONNULL publisher);
 void omr_publisher_force_publication(omr_publisher_t *NONNULL publisher, omr_prefix_priority_t priority);
 void omr_publisher_interface_configuration_changed(omr_publisher_t *NONNULL publisher);
+bool omr_publisher_publishing_prefix(omr_publisher_t *NONNULL publisher);
 
 // The OMR publisher knows whether the prefix being published can be used for routing, even if it's not publishing it itself.
 // If there is a medium- or high-priority prefix published by some other router, that prefix can be assumed to be routable.
@@ -47,6 +48,12 @@ void omr_publisher_interface_configuration_changed(omr_publisher_t *NONNULL publ
 // Of course it still works for routing between Thread and the adjacent infrastructure link--what it can't be used for is
 // routing across a multi-link infrastructure network or to the internet.
 bool omr_publisher_have_routable_prefix(omr_publisher_t *NONNULL publisher);
+
+// Check that the prefix that we saw in an RA is not also the one we are publishing on Thread. This can happen with broken DHCP
+// PD servers, and we have seen it in some home routers.
+void omr_publisher_check_prefix(omr_publisher_t *NULLABLE publisher, struct in6_addr *NONNULL prefix, int len);
+
+void omr_publisher_unpublish_prefix(omr_publisher_t *NONNULL publisher);
 #endif // __OMR_PUBLISHER_H__
 
 // Local Variables:

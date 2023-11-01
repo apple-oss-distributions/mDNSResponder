@@ -3251,24 +3251,48 @@ mDNSlocal mStatus UpdateInterfaceList(mDNSs32 utc)
                 }
                 else
                 {
+                    mDNSBool addInterface = mDNStrue;
+                    const sa_family_t family = ifa->ifa_addr->sa_family;
                     // Make sure ifa_netmask->sa_family is set correctly
                     // <rdar://problem/5492035> getifaddrs is returning invalid netmask family for fw0 and vmnet
-                    ifa->ifa_netmask->sa_family = ifa->ifa_addr->sa_family;
-                    int ifru_flags6 = 0;
-
-                    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
-                    if (ifa->ifa_addr->sa_family == AF_INET6 && InfoSocket >= 0)
+                    ifa->ifa_netmask->sa_family = family;
+                    switch (family)
                     {
-                        struct in6_ifreq ifr6;
-                        mDNSPlatformMemZero((char *)&ifr6, sizeof(ifr6));
-                        mdns_strlcpy(ifr6.ifr_name, ifa->ifa_name, sizeof(ifr6.ifr_name));
-                        ifr6.ifr_addr = *sin6;
-                        if (ioctl(InfoSocket, SIOCGIFAFLAG_IN6, &ifr6) != -1)
-                            ifru_flags6 = ifr6.ifr_ifru.ifru_flags6;
-                        verbosedebugf("%s %.16a %04X %04X", ifa->ifa_name, &sin6->sin6_addr, ifa->ifa_flags, ifru_flags6);
+                        case AF_INET:
+                        {
+                            struct sockaddr_in *const netmask = (struct sockaddr_in *)ifa->ifa_netmask;
+                            // If an IPv4 address has an all-ones netmask, then it's on a /32 subnet with exactly
+                            // one IPv4 address. It generally doesn't make sense to use such an IPv4 address for
+                            // mDNS. These type of IPv4 addresses are usually special-purpose. For example, IPv4
+                            // addresses used for 464XLAT have an all-ones netmask.
+                            if (netmask->sin_addr.s_addr == 0xFFFFFFFFU)
+                            {
+                                addInterface = mDNSfalse;
+                            }
+                            break;
+                        }
+                        case AF_INET6:
+                        {
+                            int ifru_flags6 = 0;
+                            struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
+                            if (InfoSocket >= 0)
+                            {
+                                struct in6_ifreq ifr6;
+                                mDNSPlatformMemZero((char *)&ifr6, sizeof(ifr6));
+                                mdns_strlcpy(ifr6.ifr_name, ifa->ifa_name, sizeof(ifr6.ifr_name));
+                                ifr6.ifr_addr = *sin6;
+                                if (ioctl(InfoSocket, SIOCGIFAFLAG_IN6, &ifr6) != -1)
+                                    ifru_flags6 = ifr6.ifr_ifru.ifru_flags6;
+                                verbosedebugf("%s %.16a %04X %04X", ifa->ifa_name, &sin6->sin6_addr, ifa->ifa_flags, ifru_flags6);
+                            }
+                            if (ifru_flags6 & (IN6_IFF_TENTATIVE | IN6_IFF_DETACHED | IN6_IFF_DEPRECATED | IN6_IFF_TEMPORARY))
+                            {
+                                addInterface = mDNSfalse;
+                            }
+                            break;
+                        }
                     }
-
-                    if (!(ifru_flags6 & (IN6_IFF_TENTATIVE | IN6_IFF_DETACHED | IN6_IFF_DEPRECATED | IN6_IFF_TEMPORARY)))
+                    if (addInterface)
                     {
                         AddInterfaceToList(ifa, utc);
                     }

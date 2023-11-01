@@ -41,6 +41,7 @@ int adv_host_created;
 int adv_host_finalized;
 int advertising_proxy_conn_ref_created;
 int advertising_proxy_conn_ref_finalized;
+os_log_t global_os_log;
 #endif
 
 static void
@@ -533,6 +534,16 @@ advertising_proxy_unblock_anycast_service(advertising_proxy_conn_ref *conn_ref,
     advertising_proxy_error_type errx;
     errx = adv_send_command(conn_ref, client_queue, "advertising_proxy_disable_unblock_anycast_service",
                             kDNSSDAdvertisingProxyUnblockAnycastService, callback, NULL, 0);
+    return errx;
+}
+
+advertising_proxy_error_type
+advertising_proxy_start_thread_shutdown(advertising_proxy_conn_ref *conn_ref,
+                                        run_context_t client_queue, advertising_proxy_reply callback)
+{
+    advertising_proxy_error_type errx;
+    errx = adv_send_command(conn_ref, client_queue, "advertising_proxy_start_thread_shutdown",
+                            kDNSSDAdvertisingProxyStartThreadShutdown, callback, NULL, 0);
     return errx;
 }
 

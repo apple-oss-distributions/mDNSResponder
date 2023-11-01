@@ -803,6 +803,39 @@ advertising_proxy_error_type advertising_proxy_start_breaking_time_validation
     advertising_proxy_reply             NULLABLE callback
 );
 
+/* advertising_proxy_start_start_thread_shutdown
+ *
+ * For testing, start breaking SIG(0) validation on replicated host messages. This tests that we correctly
+ * handle such failures in the SRP replication protocol.
+ *
+ * advertising_proxy_start_dropping_push_connections() Parameters:
+ *
+ * conn_ref:                  A pointer to advertising_proxy_conn_ref that is initialized to NULL.
+ *                            If the call succeeds it will be initialized to a non-NULL value.
+ *                            The same conn_ref can be used for more than one call.
+ *
+ * clientq:                   Queue the client wants to schedule the callback on (Note: Must not be NULL)
+ *
+ * callback:                  Callback function for the client that indicates success or failure.
+ *                            Callback is not called until either the command has failed, or has completed.
+ *                            Completion in this case means that all Thread services and prefixes were
+ *                            successfully removed from the Thread network data and a network data update
+ *                            was seen with this information removed, or else two seconds passed without
+ *                            seeing the update (in which case we give up).
+ *
+ * return value:              Returns kDNSSDAdvertisingProxy_NoError when no error otherwise returns an
+ *                            error code indicating the error that occurred.
+ *
+ */
+
+DNS_SERVICES_EXPORT
+advertising_proxy_error_type advertising_proxy_start_thread_shutdown
+(
+    advertising_proxy_conn_ref NONNULL *NULLABLE conn_ref,
+    run_context_t                        NONNULL clientq,
+    advertising_proxy_reply             NULLABLE callback
+);
+
 /* advertising_proxy_set-variable
  *
  * Set the specified variable to the specified value on the advertising proxy

@@ -1117,7 +1117,9 @@ nat64_infra_prefix_publisher_publishing_action(nat64_infra_prefix_publisher_t *s
     NAT64_STATE_ANNOUNCE(state_machine, event);
     if (event == NULL) {
         return nat64_infra_prefix_publisher_state_invalid;
-    } else if (event->event_type == nat64_event_nat64_infra_prefix_publisher_infra_prefix_changed) {
+    } else if (event->event_type == nat64_event_nat64_infra_prefix_publisher_infra_prefix_changed ||
+			   event->event_type == nat64_event_nat64_infra_prefix_publisher_shutdown)
+	{
         nat64_prefix_t *infra_prefix;
         for (infra_prefix = event->prefix; infra_prefix; infra_prefix = infra_prefix->next) {
             if (!in6prefix_compare(&infra_prefix->prefix, &state_machine->proposed_prefix->prefix, NAT64_PREFIX_SLASH_96_BYTES)) {
@@ -1145,7 +1147,9 @@ nat64_infra_prefix_publisher_publishing_action(nat64_infra_prefix_publisher_t *s
             INFO("no longer publishing infra prefix.");
             return nat64_infra_prefix_publisher_state_wait;
         }
-    } else if (event->event_type == nat64_event_nat64_infra_prefix_publisher_routable_omr_prefix_went_away) {
+    } else if (event->event_type == nat64_event_nat64_infra_prefix_publisher_routable_omr_prefix_went_away ||
+			   event->event_type == nat64_event_nat64_infra_prefix_publisher_shutdown)
+	{
         // Routable OMR prefix is gone
         SEGMENTED_IPv6_ADDR_GEN_SRP(state_machine->proposed_prefix->prefix.s6_addr, nat64_prefix_buf);
         INFO("Routable OMR prefix is gone, unpublishing infra prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
@@ -1222,6 +1226,7 @@ nat64_infra_prefix_publisher_event_configuration_t nat64_infra_prefix_publisher_
     NAT64_EVENT_NAME_DECL(nat64_infra_prefix_publisher_infra_prefix_changed),
     NAT64_EVENT_NAME_DECL(nat64_infra_prefix_publisher_routable_omr_prefix_went_away),
     NAT64_EVENT_NAME_DECL(nat64_infra_prefix_publisher_routable_omr_prefix_showed_up),
+    NAT64_EVENT_NAME_DECL(nat64_infra_prefix_publisher_shutdown),
 };
 #define INFRA_PREFIX_PUBLISHER_NUM_EVENT_TYPES (sizeof(nat64_infra_prefix_publisher_event_configurations) / sizeof(nat64_infra_prefix_publisher_event_configuration_t))
 
@@ -1407,7 +1412,9 @@ nat64_br_prefix_publisher_publishing_action(nat64_br_prefix_publisher_t *state_m
                 }
             }
         }
-    } else if (event->event_type == nat64_event_nat64_br_prefix_publisher_ipv4_default_route_went_away) {
+    } else if (event->event_type == nat64_event_nat64_br_prefix_publisher_ipv4_default_route_went_away ||
+			   event->event_type == nat64_event_nat64_br_prefix_publisher_shutdown)
+	{
         nat64_unpublish_br_prefix(state_machine);
         return nat64_br_prefix_publisher_state_wait_for_anything;
     } else if (event->event_type == nat64_event_nat64_br_prefix_publisher_infra_prefix_changed) {
@@ -1450,6 +1457,7 @@ nat64_br_prefix_publisher_event_configuration_t nat64_br_prefix_publisher_event_
     NAT64_EVENT_NAME_DECL(nat64_br_prefix_publisher_ipv4_default_route_went_away),
     NAT64_EVENT_NAME_DECL(nat64_br_prefix_publisher_thread_prefix_changed),
     NAT64_EVENT_NAME_DECL(nat64_br_prefix_publisher_infra_prefix_changed),
+    NAT64_EVENT_NAME_DECL(nat64_br_prefix_publisher_shutdown),
 };
 #define BR_PREFIX_PUBLISHER_NUM_EVENT_TYPES (sizeof(nat64_br_prefix_publisher_event_configurations) / sizeof(nat64_br_prefix_publisher_event_configuration_t))
 
@@ -1721,5 +1729,21 @@ nat64_offmesh_route_list_callback(route_state_t *route_state, cti_route_vec_t *r
         NAT64_EVENT_ANNOUNCE(state_machine, out_event);
         nat64_thread_prefix_monitor_event_deliver(state_machine, &out_event);
     }
+}
+
+void
+nat64_thread_shutdown(route_state_t *route_state)
+{
+	nat64_t *nat64 = route_state->nat64;
+	if (nat64->nat64_infra_prefix_publisher != NULL) {
+		nat64_infra_prefix_publisher_event_t infra_event;
+		nat64_infra_prefix_publisher_event_init(&infra_event, nat64_event_nat64_infra_prefix_publisher_shutdown);
+		nat64_infra_prefix_publisher_event_deliver(nat64->nat64_infra_prefix_publisher, &infra_event);
+	}
+	if (nat64->nat64_br_prefix_publisher != NULL) {
+		nat64_br_prefix_publisher_event_t br_event;
+		nat64_br_prefix_publisher_event_init(&br_event, nat64_event_nat64_br_prefix_publisher_shutdown);
+		nat64_br_prefix_publisher_event_deliver(nat64->nat64_br_prefix_publisher, &br_event);
+	}
 }
 #endif

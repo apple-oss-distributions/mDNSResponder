@@ -130,12 +130,21 @@ typedef struct
 {
     DNSQuestion qtxt;
     DNSQuestion qsrv;
-    const ResourceRecord *txt;
-    const ResourceRecord *srv;
+
+    domainname *srv_target_name;    // Dynamically allocated SRV rdata(target name)
+    mDNSu8 *txt_rdata;              // Dynamically allocated TXT rdata.
+    mDNSIPPort srv_port;            // The port number specified in the SRV rdata.
+    mDNSu16 txt_rdlength;           // The length of the TXT record rdata.
+
     mDNSs32 ReportTime;
     mDNSBool external_advertise;
+    mDNSBool srv_negative;          // Whether we have received a negative SRV record. If true, srv_target_name is
+                                    // always NULL and srv_port's value has no meaning. When srv_target_name is
+                                    // non-NULL, srv_negative is always false;
+    mDNSBool txt_negative;          // Whether we have received a negative TXT record. If true, txt_rdata is always NULL
+                                    // and txt_rdlength is 0. When txt_rdata is non-NULL, txt_negative is always false.
 } request_resolve;
-mdns_compile_time_max_size_check(request_resolve, 1416);
+mdns_compile_time_max_size_check(request_resolve, 1424);
 
 typedef struct
 {

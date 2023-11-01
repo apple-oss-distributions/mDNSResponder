@@ -171,6 +171,7 @@ typedef enum nat64_infra_prefix_publisher_event_type {
     nat64_event_nat64_infra_prefix_publisher_infra_prefix_changed,
     nat64_event_nat64_infra_prefix_publisher_routable_omr_prefix_went_away,
     nat64_event_nat64_infra_prefix_publisher_routable_omr_prefix_showed_up,
+    nat64_event_nat64_infra_prefix_publisher_shutdown,
 } nat64_infra_prefix_publisher_event_type_t;
 
 typedef struct nat64_infra_prefix_publisher_event {
@@ -206,6 +207,7 @@ typedef enum nat64_br_prefix_publisher_event_type {
     nat64_event_nat64_br_prefix_publisher_ipv4_default_route_went_away,
     nat64_event_nat64_br_prefix_publisher_thread_prefix_changed,
     nat64_event_nat64_br_prefix_publisher_infra_prefix_changed,
+    nat64_event_nat64_br_prefix_publisher_shutdown,
 } nat64_br_prefix_publisher_event_type_t;
 
 typedef struct nat64_br_prefix_publisher_event {
@@ -260,4 +262,5 @@ void nat64_default_route_update(nat64_t *NONNULL nat64, bool has_ipv4_connectivi
 void nat64_omr_route_update(nat64_t *NONNULL nat64, bool has_routable_omr_prefix);
 void nat64_stop(route_state_t *NONNULL route_state);
 void nat64_start(route_state_t *NONNULL route_state);
+void nat64_thread_shutdown(route_state_t *NONNULL route_state);
 #endif /* NAT64_H */

@@ -48,6 +48,7 @@
 #include "route.h"
 #include "nat64.h"
 #include "nat64-macos.h"
+#include "adv-ctl-server.h"
 
 #define STATE_MACHINE_IMPLEMENTATION 1
 typedef enum {
@@ -85,6 +86,8 @@ struct route_tracker {
     prefix_tracker_t *update_queue;
     interface_t *infrastructure;
     bool canceled;
+    bool user_route_seen;
+    bool blocked;
 #ifdef BUILD_TEST_ENTRY_POINTS
     uint32_t current_mask, add_mask, remove_mask, intended_mask;
     cti_reply_t callback;
@@ -461,6 +464,10 @@ route_tracker_publish_changes(route_tracker_t *tracker)
 void
 route_tracker_route_state_changed(route_tracker_t *tracker, interface_t *interface)
 {
+    if (tracker->blocked) {
+        INFO("tracker is blocked");
+        return;
+    }
     if (tracker->route_state == NULL) {
         ERROR("tracker has no route_state");
         return;
@@ -511,6 +518,10 @@ void
 route_tracker_interface_configuration_changed(route_tracker_t *tracker)
 {
     interface_t *preferred = NULL;
+    if (tracker->blocked) {
+        INFO("tracker is blocked");
+        return;
+    }
     if (tracker->route_state == NULL) {
         ERROR("tracker has no route_state");
         return;
@@ -561,12 +572,38 @@ route_tracker_interface_configuration_changed(route_tracker_t *tracker)
 void
 route_tracker_monitor_mesh_routes(route_tracker_t *tracker, cti_route_vec_t *routes)
 {
+    tracker->user_route_seen = false;
     for (size_t i = 0; i < routes->num; i++) {
         cti_route_t *route = routes->routes[i];
         if (route && route->origin == offmesh_route_origin_user) {
             route_tracker_track_prefix(tracker, &route->prefix, route->prefix_length, 100, 100, false);
+            tracker->user_route_seen = true;
         }
     }
+    if (!tracker->user_route_seen && tracker->route_state->srp_server->awaiting_route_removal) {
+        tracker->route_state->srp_server->awaiting_route_removal = false;
+        adv_ctl_thread_shutdown_status_check(tracker->route_state->srp_server);
+    }
+}
+
+bool
+route_tracker_local_routes_seen(route_tracker_t *tracker)
+{
+    if (tracker != NULL) {
+        return tracker->user_route_seen;
+    }
+    return false;
+}
+
+void
+route_tracker_shutdown(route_state_t *route_state)
+{
+    if (route_state == NULL || route_state->route_tracker == NULL) {
+        return;
+    }
+    route_tracker_reset_counts(route_state->route_tracker);
+    route_tracker_publish_changes(route_state->route_tracker);
+    route_state->route_tracker->blocked = true;
 }
 #else // !defined(BUILD_TEST_ENTRY_POINTS)
 

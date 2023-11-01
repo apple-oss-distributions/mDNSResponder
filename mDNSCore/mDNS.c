@@ -2839,6 +2839,21 @@ mDNSlocal mDNSBool ShouldSendGoodbyesBeforeSleep(mDNS *const m, const NetworkInt
     }
 }
 
+mDNSlocal mDNSu32 DetermineOwnerRecordSpace(const NetworkInterfaceInfo *const intf)
+{
+    mDNSu32 space = 0;
+#if !MDNSRESPONDER_SUPPORTS(APPLE, NO_WAKE_FOR_NET_ACCESS)
+    mDNS *const m = &mDNSStorage;
+    if (m->AnnounceOwner && intf->MAC.l[0])
+    {
+        space = DNSOpt_Header_Space + DNSOpt_Owner_Space(&m->PrimaryMAC, &intf->MAC);
+    }
+#else
+    (void)intf;
+#endif
+    return space;
+}
+
 // Note about acceleration of announcements to facilitate automatic coalescing of
 // multiple independent threads of announcements into a single synchronized thread:
 // The announcements in the packet may be at different stages of maturity;
@@ -3066,7 +3081,7 @@ mDNSlocal void SendResponses(mDNS *const m)
 
     while (intf)
     {
-        int OwnerRecordSpace = (m->AnnounceOwner && intf->MAC.l[0]) ? DNSOpt_Header_Space + DNSOpt_Owner_Space(&m->PrimaryMAC, &intf->MAC) : 0;
+        const mDNSu32 OwnerRecordSpace = DetermineOwnerRecordSpace(intf);
         int TraceRecordSpace = (mDNS_McastTracingEnabled && MDNS_TRACER) ? DNSOpt_Header_Space + DNSOpt_TraceData_Space : 0;
         int numDereg    = 0;
         int numAnnounce = 0;
@@ -4217,7 +4232,7 @@ mDNSlocal void SendQueries(mDNS *const m)
     // go through our interface list sending the appropriate queries on each interface
     while (intf)
     {
-        int OwnerRecordSpace = (m->AnnounceOwner && intf->MAC.l[0]) ? DNSOpt_Header_Space + DNSOpt_Owner_Space(&m->PrimaryMAC, &intf->MAC) : 0;
+        const mDNSu32 OwnerRecordSpace = DetermineOwnerRecordSpace(intf);
         int TraceRecordSpace = (mDNS_McastTracingEnabled && MDNS_TRACER) ? DNSOpt_Header_Space + DNSOpt_TraceData_Space : 0;
         mDNSu8 *queryptr = m->omsg.data;
         mDNSBool useBackgroundTrafficClass = mDNSfalse;    // set if we should use background traffic class
@@ -6286,11 +6301,13 @@ mDNSexport mDNSs32 mDNS_Execute(mDNS *const m)
         ResolverDiscovery_PerformPeriodicTasks();
     #endif
 
+    #if !MDNSRESPONDER_SUPPORTS(APPLE, NO_WAKE_FOR_NET_ACCESS)
         // Clear AnnounceOwner if necessary. (Do this *before* SendQueries() and SendResponses().)
         if (m->AnnounceOwner && m->timenow - m->AnnounceOwner >= 0)
         {
             m->AnnounceOwner = 0;
         }
+    #endif
 
         if (m->DelaySleep && m->timenow - m->DelaySleep >= 0)
         {
@@ -7105,8 +7122,10 @@ mDNSlocal void SendSPSRegistrationForOwner(mDNS *const m, NetworkInterfaceInfo *
             else
             {
                 mStatus err;
+            #if !MDNSRESPONDER_SUPPORTS(APPLE, NO_WAKE_FOR_NET_ACCESS)
                 // Once we've attempted to register, we need to include our OWNER option in our packets when we re-awaken
                 m->SentSleepProxyRegistration = mDNStrue;
+            #endif
 
                 LogSPS("SendSPSRegistration: Sending Update %s %d (%d) id %5d with %d records %d bytes to %#a:%d", intf->ifname, intf->NextSPSAttempt, sps,
                        mDNSVal16(m->omsg.h.id), m->omsg.h.mDNS_numUpdates, p - m->omsg.data, &intf->SPSAddr[sps], mDNSVal16(intf->SPSPort[sps]));
@@ -7677,12 +7696,14 @@ mDNSexport void mDNSCoreMachineSleep(mDNS *const m, mDNSBool sleep)
         {
             m->SleepState = SleepState_Awake;
             m->SleepSeqNum++;
+        #if !MDNSRESPONDER_SUPPORTS(APPLE, NO_WAKE_FOR_NET_ACCESS)
             if (m->SentSleepProxyRegistration)		// Include OWNER option in packets for 60 seconds after waking
             {
                 m->SentSleepProxyRegistration = mDNSfalse;
                 m->AnnounceOwner = NonZeroTime(m->timenow + 60 * mDNSPlatformOneSecond);
                 LogInfo("mDNSCoreMachineSleep: Waking, Setting AnnounceOwner");
             }
+        #endif
             // If the machine wakes and then immediately tries to sleep again (e.g. a maintenance wake)
             // then we enforce a minimum delay of five seconds before we begin sleep processing.
             // This is to allow time for the Ethernet link to come up, DHCP to get an address, mDNS to issue queries, etc.,
@@ -15900,12 +15921,14 @@ mDNSexport mStatus mDNS_RegisterInterface(mDNS *const m, NetworkInterfaceInfo *s
                 m->SuppressProbes = NonZeroTime(m->timenow + probedelay);
         }
 
+    #if !MDNSRESPONDER_SUPPORTS(APPLE, NO_WAKE_FOR_NET_ACCESS)
         // Include OWNER option in packets for 60 seconds after connecting to the network. Setting
         // it here also handles the wake up case as the network link comes UP after waking causing
         // us to reconnect to the network. If we do this as part of the wake up code, it is possible
         // that the network link comes UP after 60 seconds and we never set the OWNER option
         m->AnnounceOwner = NonZeroTime(m->timenow + 60 * mDNSPlatformOneSecond);
         LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEBUG, "Setting AnnounceOwner");
+    #endif
 
         m->mDNSStats.InterfaceUp++;
         for (q = m->Questions; q; q=q->next)                                // Scan our list of questions
@@ -17308,8 +17331,10 @@ mDNSlocal mStatus mDNS_InitStorage(mDNS *const m, mDNS_PlatformSupport *const p,
     m->SleepState              = SleepState_Awake;
     m->SleepSeqNum             = 0;
     m->SystemWakeOnLANEnabled  = mDNSfalse;
+#if !MDNSRESPONDER_SUPPORTS(APPLE, NO_WAKE_FOR_NET_ACCESS)
     m->SentSleepProxyRegistration = mDNSfalse;
     m->AnnounceOwner           = NonZeroTime(timenow + 60 * mDNSPlatformOneSecond);
+#endif
     m->DelaySleep              = 0;
     m->SleepLimit              = 0;
 

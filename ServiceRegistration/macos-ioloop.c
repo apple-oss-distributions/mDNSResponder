@@ -1925,30 +1925,13 @@ ioloop_run_async(async_callback_t callback, void *context)
 }
 
 const struct sockaddr *
-connection_get_local_address(comm_t *connection)
+connection_get_local_address(message_t *message)
 {
-#if UDP_LISTENER_USES_CONNECTION_GROUPS
-    nw_endpoint_t local_endpoint = NULL;
-    nw_connection_group_t connection_group = connection->listener_state != NULL?
-                                             connection->listener_state->connection_group:
-                                             NULL;
-    const struct sockaddr *local_addr = NULL;
-
-    require_action_quiet(connection_group, exit, ERROR("connection group is NULL."));
-    require_action_quiet(connection->content_context, exit, ERROR("content_context is NULL."));
-    local_endpoint = nw_connection_group_copy_local_endpoint_for_message(connection_group, connection->content_context);
-    require_action(local_endpoint, exit, ERROR("no resources for local endpoint"));
-    local_addr = nw_endpoint_get_address(local_endpoint);
-    require_action(local_addr, exit, ERROR("fail to get local address"));
-
-exit:
-    if (local_endpoint != NULL) {
-        nw_release(local_endpoint);
+    if (message == NULL) {
+        ERROR("message is NULL.");
+        return NULL;
     }
-    return local_addr;
-#else
-    return &connection->address.sa;
-#endif // UDP_LISTENER_USES_CONNECTION_GROUPS
+    return &message->local.sa;
 }
 
 // Local Variables:

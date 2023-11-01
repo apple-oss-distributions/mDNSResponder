@@ -239,6 +239,25 @@ dso_activity_t *dso_add_activity(dso_state_t *dso, const char *name, const char 
                                             void *context, void (*finalize)(dso_activity_t *));
 void dso_drop_activity(dso_state_t *dso, dso_activity_t *activity);
 uint32_t dso_ignore_further_responses(dso_state_t *dso, const void *context);
+
+/*!
+ *  @brief
+ *      Update the context of the outstanding queries in the DSO state.
+ *
+ *  @param dso
+ *      The reference to the DSO state.
+ *
+ *  @param old_context
+ *      The original context of the outstanding query to be updated.
+ *
+ *  @param new_context
+ *      The new context to set for the same outstanding query.
+ *
+ *  @discussion
+ *      This function must be called to update the the query context if the new one invalidates the old one.
+ */
+void dso_update_outstanding_query_context(dso_state_t *dso, const void *old_context, void *new_context);
+
 uint32_t dso_connections_reset_outstanding_query_context(const void *context);
 bool dso_make_message(dso_message_t *state, uint8_t *outbuf, size_t outbuf_size, dso_state_t *dso,
                       bool unidirectional, bool response, uint16_t xid, int rcode, void *callback_state);

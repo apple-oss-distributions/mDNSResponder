@@ -48,6 +48,7 @@
 #include "thread-service.h"
 #include "service-tracker.h"
 #include "probe-srp.h"
+#include "adv-ctl-server.h"
 
 struct service_tracker_callback {
 	service_tracker_callback_t *next;
@@ -65,6 +66,7 @@ struct service_tracker {
 	service_tracker_callback_t *callbacks;
     thread_service_t *NULLABLE thread_services;
     uint16_t rloc16;
+    bool user_service_seen;
 };
 
 static uint64_t service_tracker_serial_number = 0;
@@ -125,6 +127,7 @@ service_tracker_callback(void *context, cti_service_vec_t *services, cti_status_
     service_tracker_t *tracker = context;
     size_t i;
     thread_service_t **pservice = &tracker->thread_services, *service = NULL;
+    tracker->user_service_seen = false;
 
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
         INFO("[ST%lld] disconnected", tracker->id);
@@ -259,6 +262,7 @@ service_tracker_callback(void *context, cti_service_vec_t *services, cti_status_
                     service->ncp = true;
                 } else {
                     service->user = true;
+                    tracker->user_service_seen = true;
                 }
                 if (cti_service->flags & kCTIFlag_Stable) {
                     service->stable = true;
@@ -282,7 +286,17 @@ service_tracker_callback(void *context, cti_service_vec_t *services, cti_status_
         for (service_tracker_callback_t *callback = tracker->callbacks; callback != NULL; callback = callback->next) {
             callback->callback(callback->context);
         }
+        if (!tracker->user_service_seen && tracker->server_state->awaiting_service_removal) {
+            tracker->server_state->awaiting_service_removal = false;
+            adv_ctl_thread_shutdown_status_check(tracker->server_state);
+        }
     }
+}
+
+bool
+service_tracker_local_service_seen(service_tracker_t *tracker)
+{
+    return tracker->user_service_seen;
 }
 
 service_tracker_t *

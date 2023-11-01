@@ -1859,11 +1859,10 @@ ioloop_run_async(async_callback_t callback, void *context)
 }
 
 const struct sockaddr *
-connection_get_local_address(comm_t *connection)
+connection_get_local_address(message_t *message)
 {
-    message_t *message = connection->message;
     if (message == NULL) {
-        ERROR("message is NULL.")
+        ERROR("message is NULL.");
         return NULL;
     }
     return &message->local.sa;

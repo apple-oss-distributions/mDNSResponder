@@ -117,6 +117,12 @@ thread_device_rloc16_callback(void *context, uint16_t rloc16, cti_status_t statu
 void
 thread_device_startup(srp_server_t *NONNULL server_state)
 {
+    // Just in case we get called without a shutdown having happened, before starting up again, do the
+    // shutdown. This will be a no-op if it has already been done.
+    thread_device_shutdown(server_state);
+
+    INFO("starting up");
+
     // Before we can actually do anything, we need our RLOC16.
     int status = cti_get_rloc16(server_state, &server_state->thread_rloc16_context, server_state,
                                 thread_device_rloc16_callback, NULL);
@@ -128,6 +134,7 @@ thread_device_startup(srp_server_t *NONNULL server_state)
 void
 thread_device_stop(srp_server_t *NONNULL server_state)
 {
+    INFO("stopping");
     if (server_state->service_tracker != NULL) {
         service_tracker_cancel(server_state->service_tracker);
         service_tracker_release(server_state->service_tracker);
@@ -158,11 +165,13 @@ thread_device_stop(srp_server_t *NONNULL server_state)
 void
 thread_device_shutdown(srp_server_t *NONNULL server_state)
 {
+    INFO("shutting down");
     if (server_state->thread_rloc16_context != NULL) {
         cti_events_discontinue(server_state->thread_rloc16_context);
         server_state->thread_rloc16_context = NULL;
     }
     thread_device_stop(server_state);
+    srp_mdns_flush(server_state);
 }
 
 // Local Variables:

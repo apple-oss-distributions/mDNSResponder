@@ -361,6 +361,16 @@ unblock_anycast_service_callback(advertising_proxy_conn_ref cref, void *result, 
     exit(0);
 }
 
+static void
+start_thread_shutdown_callback(advertising_proxy_conn_ref cref, void *result, advertising_proxy_error_type err)
+{
+    INFO("cref %p  response %p   err %d.", cref, result, err);
+    if (err != kDNSSDAdvertisingProxyStatus_NoError) {
+        exit(1);
+    }
+    exit(0);
+}
+
 typedef struct variable variable_t;
 struct variable {
     variable_t *next;
@@ -488,8 +498,9 @@ usage(void)
     fprintf(stderr, "        start-dropping-push       -- start repeatedly dropping any active push connections after 90 seconds\n");
     fprintf(stderr, "        start-breaking-time       -- start breaking time validation on replicated SRP registrations\n");
     fprintf(stderr, "        set [variable] [value]    -- set the value of variable to value (e.g. set min-lease-time 100)\n");
-    fprintf(stderr, "        block-anycast-service      -- block advertising anycast service\n");
-    fprintf(stderr, "        unblock-anycast-service    -- unblock advertising anycast service\n");
+    fprintf(stderr, "        block-anycast-service     -- block advertising anycast service\n");
+    fprintf(stderr, "        unblock-anycast-service   -- unblock advertising anycast service\n");
+    fprintf(stderr, "        start-thread-shutdown     -- start thread network shutdown\n");
 #ifdef NOTYET
     fprintf(stderr, "        flush                     -- flush all entries from the SRP proxy (for testing only)\n");
 #endif
@@ -521,6 +532,7 @@ bool start_breaking_time_validation = false;
 bool test_route_tracker = false;
 bool block_anycast_service = false;
 bool unblock_anycast_service = false;
+bool start_thread_shutdown = false;
 uint8_t prefix_buf[16];
 #ifdef NOTYET
 bool watch = false;
@@ -601,6 +613,9 @@ start_activities(void *context)
     }
     if (err == kDNSSDAdvertisingProxyStatus_NoError && unblock_anycast_service) {
         err = advertising_proxy_unblock_anycast_service(&cref, main_queue, unblock_anycast_service_callback);
+    }
+    if (err == kDNSSDAdvertisingProxyStatus_NoError && start_thread_shutdown) {
+        err = advertising_proxy_start_thread_shutdown(&cref, main_queue, start_thread_shutdown_callback);
     }
     if (err == kDNSSDAdvertisingProxyStatus_NoError && test_route_tracker) {
         route_tracker_test_start(1000);
@@ -752,6 +767,9 @@ main(int argc, char **argv)
             something = true;
         } else if (!strcmp(argv[i], "test-route-tracker")) {
             test_route_tracker = true;
+            something = true;
+        } else if (!strcmp(argv[i], "start-thread-shutdown")) {
+            start_thread_shutdown = true;
             something = true;
         } else if (!strcmp(argv[i], "set")) {
             if (i + 2 >= argc) {

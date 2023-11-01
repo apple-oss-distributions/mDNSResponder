@@ -130,6 +130,7 @@ state_machine_event_configuration_t state_machine_event_configurations[] = {
     EVENT_NAME_DECL(probe_completed),
     EVENT_NAME_DECL(got_mesh_local_prefix),
     EVENT_NAME_DECL(daemon_disconnect),
+    EVENT_NAME_DECL(stop),
 };
 #define STATE_MACHINE_NUM_EVENT_TYPES (sizeof(state_machine_event_configurations) / sizeof(state_machine_event_configuration_t))
 

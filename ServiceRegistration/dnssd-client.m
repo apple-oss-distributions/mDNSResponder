@@ -59,18 +59,19 @@
 #include <network_information.h>
 
 #include <CoreUtils/CoreUtils.h>
+#import <NetworkExtension/NEPolicySession.h>
 #endif // IOLOOP_MACOS
 
 #include "srp.h"
 #include "dns-msg.h"
 #include "ioloop.h"
-#include "adv-ctl-server.h"
 #include "srp-crypto.h"
 
 #include "cti-services.h"
 #include "srp-gw.h"
 #include "srp-proxy.h"
 #include "srp-mdns-proxy.h"
+#include "adv-ctl-server.h"
 #include "dnssd-proxy.h"
 #include "srp-proxy.h"
 #include "route.h"
@@ -98,12 +99,17 @@ struct dnssd_client {
     state_machine_header_t state_header;
     char *id;
     srp_server_t *server_state;
-    cti_connection_t ml_prefix_connection;
+    cti_connection_t active_data_set_connection;
     struct in6_addr mesh_local_prefix;
+#if PUBLISH_USING_DNSSERVICE_API
+    DNSRecordRef aaaa_record_ref, ns_record_ref;
+#else
+    nw_resolver_config_t resolver_config;
+    NEPolicySession *policy_session;
+#endif
     bool have_mesh_local_prefix;
     bool first_time;
     bool canceled;
-    DNSRecordRef aaaa_record_ref, ns_record_ref;
     dnssd_txn_t *shared_txn;
     thread_service_t *published_service;
     DNSServiceRef shared_connection;
@@ -155,6 +161,7 @@ dnssd_client_probe_callback(thread_service_t *UNUSED service, void *context, boo
     }
     state_machine_event_deliver(&client->state_header, event);
     RELEASE_HERE(event, state_machine_event);
+    RELEASE_HERE(client, dnssd_client);
 }
 
 static void
@@ -199,9 +206,11 @@ dnssd_client_get_mesh_local_prefix_callback(void *context, const char *prefix_st
     state_machine_event_deliver(&client->state_header, event);
     RELEASE_HERE(event, state_machine_event);
 fail:
+    RELEASE_HERE(client, dnssd_client); // was retained for callback, can only get one callback
     return;
 }
 
+#if PUBLISH_USING_DNSSERVICE_API
 static void
 dnssd_client_remove_published_service(dnssd_client_t *client)
 {
@@ -293,6 +302,7 @@ dnssd_client_service_publish(dnssd_client_t *client)
     if (client->shared_txn == NULL) {
         return dnssd_client_service_unpublish(client);
     }
+    RETAIN_HERE(client, dnssd_client); // For the shared transaction's callbacks
 
     //   Set up AAAA record for dnssd-server.local
     uint8_t *aaaa_rdata;
@@ -323,10 +333,10 @@ dnssd_client_service_publish(dnssd_client_t *client)
     err = DNSServiceRegisterRecord(client->shared_connection, &client->ns_record_ref,
                                    kDNSServiceFlagsKnownUnique | kDNSServiceFlagsForceMulticast,
                                    client->interface_index,
-                                   "openthread.thread.home.arpa", kDNSServiceType_NS, kDNSServiceClass_IN,
+                                   "default.service.arpa", kDNSServiceType_NS, kDNSServiceClass_IN,
                                    towire.p - message.data, message.data, 0, dnssd_client_record_callback, client);
     if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceRegisterRecord failed - record: " "openthread.thread.home.arpa" " NS " "dnssd-server.local");
+        ERROR("DNSServiceRegisterRecord failed - record: " "default.service.arpa" " NS " "dnssd-server.local");
         return dnssd_client_service_unpublish(client);
     }
 
@@ -337,19 +347,93 @@ dnssd_client_service_publish(dnssd_client_t *client)
     towire.lim = &message.data[DNS_DATA_SIZE];
     towire.p = message.data;
 
-    dns_full_name_to_wire(NULL, &towire, "thread.service.arpa.");
+    dns_full_name_to_wire(NULL, &towire, "default.service.arpa.");
     err = DNSServiceRegisterRecord(client->service_ref, &client->ptr_record_ref,
                                    kDNSServiceFlagsKnownUnique, server_state->advertise_interface, AUTOMATIC_BROWSING_DOMAIN,
                                    kDNSServiceType_PTR, kDNSServiceClass_IN, towire.p - message.data, message.data, 0,
                                    dnssd_client_record_callback, client);
     if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceRegisterRecord failed - record: " AUTOMATIC_BROWSING_DOMAIN " PTR " "openthread.thread.home.arpa");
+        ERROR("DNSServiceRegisterRecord failed - record: " AUTOMATIC_BROWSING_DOMAIN " PTR " "default.service.arpa");
         return dnssd_client_service_unpublish(client);
     }
 #endif
 
     return dnssd_client_state_invalid;
 }
+#else
+static state_machine_state_t
+dnssd_client_remove_published_service(dnssd_client_t *client)
+{
+    if (client->resolver_config != NULL) {
+        nw_release(client->resolver_config);
+        client->resolver_config = NULL;
+    }
+    if (client->policy_session != NULL) {
+        [client->policy_session release];
+        client->policy_session = NULL;
+    }
+    return dnssd_client_state_not_client;
+}
+
+static state_machine_state_t
+dnssd_client_service_unpublish(dnssd_client_t *client)
+{
+    if (client->resolver_config != NULL) {
+        thread_service_note(client->id, client->published_service, "unpublishing service");
+    }
+    dnssd_client_remove_published_service(client);
+
+    return dnssd_client_state_not_client;
+}
+
+static state_machine_state_t
+dnssd_client_service_publish(dnssd_client_t *client)
+{
+    dnssd_client_service_unpublish(client);
+
+    nw_resolver_config_t config = nw_resolver_config_create();
+    nw_resolver_config_set_protocol(config, nw_resolver_protocol_dns53);
+    nw_resolver_config_set_class(config, nw_resolver_class_designated_direct);
+    uint8_t *aaaa_data;
+    if (client->published_service->service_type == unicast_service) {
+        aaaa_data = &client->published_service->u.unicast.address.s6_addr[0];
+    } else if (client->published_service->service_type == anycast_service) {
+        aaaa_data = &client->published_service->u.anycast.address.s6_addr[0];
+    }
+    char name_server_address[INET6_ADDRSTRLEN];
+    inet_ntop(AF_INET6, aaaa_data, name_server_address, sizeof(name_server_address));
+    nw_resolver_config_add_name_server(config, name_server_address);
+
+    NSUUID *uuid = [[NSUUID alloc] init];
+
+    uuid_t uuid_bytes;
+    [uuid getUUIDBytes:uuid_bytes];
+    nw_resolver_config_set_identifier(config, uuid_bytes);
+
+    bool published = nw_resolver_config_publish(config);
+    if (published) {
+        INFO("Registered resolver at " PRI_S_SRP " uuid %{uuid_t}.16P", name_server_address, uuid_bytes);
+        client->resolver_config = config;
+    } else {
+        ERROR("Failed to register resolver");
+        nw_release(config);
+        return dnssd_client_state_not_client;
+    }
+
+    client->policy_session = [[NEPolicySession alloc] init];
+
+    NEPolicy *policy = [[NEPolicy alloc] initWithOrder:1 result:[NEPolicyResult netAgentUUID:uuid]
+                        conditions:@[ [NEPolicyCondition domain:@"default.service.arpa"] ]];
+    [client->policy_session addPolicy: policy ];
+    [policy release];
+    [uuid release];
+
+    client->policy_session.priority = NEPolicySessionPriorityHigh;
+    [client->policy_session apply];
+
+    return dnssd_client_state_invalid;
+}
+#endif // PUBLISH_USING_DNSSERVICE_API
 
 static state_machine_state_t dnssd_client_action_startup(state_machine_header_t *state_header,
                                                          state_machine_event_t *event);
@@ -374,7 +458,7 @@ static state_machine_decl_t dnssd_client_states[] = {
 #define STATE_MACHINE_HEADER_TO_CLIENT(state_header)                                       \
     if (state_header->state_machine_type != state_machine_type_dnssd_client) {             \
         ERROR("state header type isn't omr_client: %d", state_header->state_machine_type); \
-        return dnssd_client_state_invalid;												   \
+        return dnssd_client_state_invalid;                                                 \
     }                                                                                      \
     dnssd_client_t *client = state_header->state_object
 
@@ -403,8 +487,7 @@ dnssd_client_should_be_client(dnssd_client_t *client)
     return should_be_client;
 }
 
-// We get into this state when there is no SRP service published on the Thread network other than our own.
-// If we stop publishing (because a BR-based service showed up), then we go to the probe state.
+// We start in this state and remain here until we get a mesh-local prefix.
 static state_machine_state_t
 dnssd_client_action_startup(state_machine_header_t *state_header, state_machine_event_t *event)
 {
@@ -504,8 +587,12 @@ dnssd_client_cancel(dnssd_client_t *client)
 {
     service_tracker_callback_cancel(client->server_state->service_tracker, client);
     thread_tracker_callback_cancel(client->server_state->thread_tracker, client);
-    cti_events_discontinue(client->ml_prefix_connection);
-    client->ml_prefix_connection = NULL;
+    if (client->active_data_set_connection != NULL) {
+        cti_events_discontinue(client->active_data_set_connection);
+        RELEASE_HERE(client, dnssd_client); // callback held reference
+        client->active_data_set_connection = NULL;
+    }
+    dnssd_client_remove_published_service(client);
 }
 
 dnssd_client_t *
@@ -558,18 +645,47 @@ dnssd_client_get_tunnel_name_callback(void *context, const char *name, cti_statu
     dnssd_client_t *client = context;
     if (status != kCTIStatus_NoError) {
         INFO("didn't get tunnel name, error code %d", status);
-        return;
+        goto fail;
     }
     client->interface_index = if_nametoindex(name);
+fail:
+    RELEASE_HERE(client, dnssd_client); // was retained for callback, can only get one callback
+}
+
+static void
+dnssd_client_active_data_set_changed_callback(void *context, cti_status_t status)
+{
+    dnssd_client_t *client = context;
+
+    if (status != kCTIStatus_NoError) {
+        ERROR("error %d", status);
+        RELEASE_HERE(client, dnssd_client); // no more callbacks
+        cti_events_discontinue(client->active_data_set_connection);
+        client->active_data_set_connection = NULL;
+        return;
+    }
+
+    status = cti_get_mesh_local_prefix(client->server_state, client, dnssd_client_get_mesh_local_prefix_callback, NULL);
+    if (status != kCTIStatus_NoError) {
+        ERROR("cti_get_mesh_local_prefix failed with status %d", status);
+    } else {
+        RETAIN_HERE(client, dnssd_client); // for mesh-local callback
+    }
+    status = cti_get_tunnel_name(client->server_state, client, dnssd_client_get_tunnel_name_callback, NULL);
+    if (status != kCTIStatus_NoError) {
+        ERROR("cti_get_tunnel_name failed with status %d", status);
+    } else {
+        RETAIN_HERE(client, dnssd_client); // for tunnel name callback
+    }
 }
 
 void
 dnssd_client_start(dnssd_client_t *client)
 {
-    cti_get_mesh_local_prefix(client->server_state, &client->ml_prefix_connection, client,
-                              dnssd_client_get_mesh_local_prefix_callback, NULL);
-    cti_get_tunnel_name(client->server_state, client, dnssd_client_get_tunnel_name_callback, NULL);
+    cti_track_active_data_set(client->server_state, &client->active_data_set_connection,
+                              client, dnssd_client_active_data_set_changed_callback, NULL);
     RETAIN_HERE(client, dnssd_client); // for callback
+    dnssd_client_active_data_set_changed_callback(client, kCTIStatus_NoError); // Get the initial state.
     state_machine_next_state(&client->state_header, dnssd_client_state_startup);
 }
 

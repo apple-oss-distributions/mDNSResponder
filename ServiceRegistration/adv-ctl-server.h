@@ -21,6 +21,7 @@
 
 #ifndef __ADV_CTL_SERVER_H__
 #define __ADV_CTL_SERVER_H__
+void adv_ctl_thread_shutdown_status_check(srp_server_t *NONNULL server_state);
 bool adv_ctl_init(void *NULLABLE context);
 #endif /* __ADV_CTL_SERVER_H__ */
 
