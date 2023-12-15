@@ -111,6 +111,7 @@ struct adv_instance {
     bool removed;                        // True if this instance is being kept around for replication.
     bool update_pending;                 // True if we got a conflict while updating and are waiting to try again
     bool anycast;                        // True if service registration is through anycast service.
+    bool skip_update;                    // True if we shouldn't actually register this instance
 };
 
 // A record registration
@@ -154,8 +155,6 @@ struct adv_host {
     uint8_t *NULLABLE key_rdata;           // Raw KEY rdata, suitable for DNSServiceRegisterRecord().
     uint32_t lease_interval;               // Interval for address lease
     uint32_t key_lease;                    // Interval for key lease
-    uint32_t serial_number;                // Client's serial number
-    bool have_serial_number;               // True if we have received or generate a serial number.
     int64_t lease_expiry;                  // Time when lease expires, relative to ioloop_timenow().
     bool removed;                          // True if this host has been removed (and is being kept for replication)
 
@@ -234,18 +233,25 @@ struct adv_record_vec {
 
 struct client_update {
     client_update_t *NULLABLE next;
-    comm_t *NONNULL connection;               // Connection on which in-process update was received.
-    dns_message_t *NONNULL parsed_message;    // Message that triggered the update.
-    message_t *NONNULL message;               // Message that triggered the update.
+    comm_t *NULLABLE connection;                 // Connection on which in-process update was received.
+    srpl_connection_t *NULLABLE srpl_connection; // SRP replication connection on which update was received.
+    dns_message_t *NULLABLE parsed_message;      // Message that triggered the update.
+    message_t *NULLABLE message;                 // Message that triggered the update.
 
-    dns_host_description_t *NONNULL host;     // Host data parsed from message
-    service_instance_t *NULLABLE instances;   // Service instances parsed from message
-    service_t *NONNULL services;              // Services parsed from message
-    delete_t *NULLABLE removes;               // Removes parsed from message
-    dns_name_t *NONNULL update_zone;          // Zone being updated
-    uint32_t host_lease, key_lease;           // Lease intervals for host entry and key entry.
-    uint32_t serial_number;                   // Serial number sent by client, if one was sent
-    bool serial_sent;                         // True if serial number was sent.
+    dns_host_description_t *NULLABLE host;       // Host data parsed from message
+    service_instance_t *NULLABLE instances;      // Service instances parsed from message
+    service_t *NULLABLE services;                // Services parsed from message
+    delete_t *NULLABLE removes;                  // Removes parsed from message
+    dns_name_t *NULLABLE update_zone;            // Zone being updated
+    srp_server_t *NULLABLE server_state;         // SRP server state associated with this update, for testing
+    uint32_t host_lease, key_lease;              // Lease intervals for host entry and key entry.
+    int index;                                   // Message number for multi-message SRP updates
+    uint8_t rcode;
+    bool skip;                                   // If true, this update is completely overshadowed by later updates and we
+                                                 // should skip it.
+    bool drop;                                   // If true, the signature on this message didn't validate and we mustn't
+                                                 // send a response
+    bool skip_host_updates;                      // If true, don't actually register any host records.
 };
 
 // Exported functions.

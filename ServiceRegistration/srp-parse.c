@@ -48,40 +48,43 @@ static dns_name_t *service_update_zone; // The zone to update when we receive an
 // Free the data structures into which the SRP update was parsed.   The pointers to the various DNS objects that these
 // structures point to are owned by the parsed DNS message, and so these do not need to be freed here.
 void
-srp_update_free_parts(service_instance_t *service_instances, service_instance_t *added_instances,
-                      service_t *services, delete_t *removes, dns_host_description_t *host_description)
+srp_parse_client_updates_free(client_update_t *messages)
 {
-    service_instance_t *sip;
-    service_t *sp;
-    delete_t *dp;
+    client_update_t *message = messages;
+    while (message) {
+        client_update_t *next_message = message->next;
 
-    for (sip = service_instances; sip; ) {
-        service_instance_t *next = sip->next;
-        free(sip);
-        sip = next;
-    }
-    for (sip = added_instances; sip; ) {
-        service_instance_t *next = sip->next;
-        free(sip);
-        sip = next;
-    }
-    for (sp = services; sp; ) {
-        service_t *next = sp->next;
-        free(sp);
-        sp = next;
-    }
-    for (dp = removes; dp != NULL; ) {
-        delete_t *next = dp->next;
-        free(dp);
-        dp = next;
-    }
-    if (host_description != NULL) {
-        host_addr_t *host_addr, *next;
-        for (host_addr = host_description->addrs; host_addr; host_addr = next) {
-            next = host_addr->next;
-            free(host_addr);
+        for (service_instance_t *sip = message->instances; sip; ) {
+            service_instance_t *next = sip->next;
+            free(sip);
+            sip = next;
         }
-        free(host_description);
+        for (service_t *sp = message->services; sp; ) {
+            service_t *next = sp->next;
+            free(sp);
+            sp = next;
+        }
+        for (delete_t *dp = message->removes; dp != NULL; ) {
+            delete_t *next = dp->next;
+            free(dp);
+            dp = next;
+        }
+        if (message->host != NULL) {
+            host_addr_t *host_addr, *next;
+            for (host_addr = message->host->addrs; host_addr; host_addr = next) {
+                next = host_addr->next;
+                free(host_addr);
+            }
+            free(message->host);
+        }
+        if (message->parsed_message != NULL) {
+            dns_message_free(message->parsed_message);
+        }
+        if (message->message != NULL) {
+            ioloop_message_release(message->message);
+        }
+        free(message);
+        message = next_message;
     }
 }
 
@@ -203,9 +206,42 @@ srp_find_delete(delete_t *deletes, dns_rr_t *target)
     return NULL;
 }
 
-bool
-srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *srpl_connection,
-             dns_message_t *message, message_t *raw_message)
+static bool
+srp_parse_lease_times(dns_message_t *message, uint32_t *r_lease, uint32_t *r_key_lease)
+{
+    // Get the lease time. We need this to differentiate between a mass host deletion and an add.
+    uint32_t lease_time = 3600;
+    uint32_t key_lease_time = 604800;
+    bool found_lease = false;
+    for (dns_edns0_t *edns0 = message->edns0; edns0; edns0 = edns0->next) {
+        if (edns0->type == dns_opt_update_lease) {
+            unsigned off = 0;
+            if (edns0->length != 4 && edns0->length != 8) {
+                ERROR("edns0 update-lease option length bogus: %d", edns0->length);
+                return false;
+            }
+            dns_u32_parse(edns0->data, edns0->length, &off, &lease_time);
+            if (edns0->length == 8) {
+                dns_u32_parse(edns0->data, edns0->length, &off, &key_lease_time);
+            } else {
+                key_lease_time = 7 * lease_time;
+            }
+            found_lease = true;
+        }
+    }
+
+    // Update-lease option is required for SRP.
+    if (!found_lease) {
+        ERROR("no update-lease edns0 option found in supposed SRP update");
+        return false;
+    }
+    *r_lease = lease_time;
+    *r_key_lease = key_lease_time;
+    return true;
+}
+
+client_update_t *
+srp_evaluate(const char *remote_name, dns_message_t **in_parsed_message, message_t *raw_message, int index)
 {
     unsigned i;
     dns_host_description_t *host_description = NULL;
@@ -213,51 +249,78 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
     service_instance_t *service_instances = NULL, *sip, **sipp = &service_instances;
     service_t *services = NULL, *sp, **spp = &services;
     dns_rr_t *signature;
-    bool ret = false;
     struct timeval now;
-    dns_name_t *update_zone, *replacement_zone;
+    dns_name_t *update_zone = NULL, *replacement_zone = NULL;
     dns_name_t *uzp;
     dns_rr_t *key = NULL;
     dns_rr_t **keys = NULL;
     unsigned num_keys = 0;
     unsigned max_keys = 1;
     bool found_key = false;
-    uint32_t lease_time, key_lease_time, serial_number;
-    dns_edns0_t *edns0;
-    int rcode = dns_rcode_servfail;
-    bool found_lease = false;
-    bool found_serial = false;
-    char namebuf1[DNS_MAX_NAME_SIZE], namebuf2[DNS_MAX_NAME_SIZE];
+    char namebuf2[DNS_MAX_NAME_SIZE];
+    dns_message_t *message;
 
+
+    client_update_t *ret = calloc(1, sizeof(*ret));
+    if (ret == NULL) {
+        ERROR("no memory for client update");
+        return NULL;
+    }
+
+    ret->drop = false;
+    ret->rcode = dns_rcode_servfail;
+
+    if (in_parsed_message != NULL) {
+        ret->parsed_message = *in_parsed_message;
+        *in_parsed_message = NULL;
+    } else {
+        // Parse the UPDATE message.
+        if (!dns_wire_parse(&ret->parsed_message, &raw_message->wire, raw_message->length, false)) {
+            ERROR("dns_wire_parse failed.");
+            goto out;
+        }
+    }
+    ret->message = raw_message;
+    RETAIN_HERE(ret->message, message);
+    message = ret->parsed_message; // For brevity
+
+    if (!srp_parse_lease_times(ret->parsed_message, &ret->host_lease, &ret->key_lease)) {
+        ret->rcode = dns_rcode_formerr;
+        goto out;
+    }
 
     // Update requires a single SOA record as the question
     if (message->qdcount != 1) {
         ERROR("update received with qdcount > 1");
-        return false;
+        ret->rcode = dns_rcode_formerr;
+        return ret;
     }
 
     // Update should contain zero answers.
     if (message->ancount != 0) {
         ERROR("update received with ancount > 0");
-        return false;
+        ret->rcode = dns_rcode_formerr;
+        return ret;
     }
 
     if (message->questions[0].type != dns_rrtype_soa) {
         ERROR("update received with rrtype %d instead of SOA in question section.",
               message->questions[0].type);
-        return false;
+        ret->rcode = dns_rcode_formerr;
+        return ret;
     }
 
-
-    if (srpl_connection == NULL) {
+    if (remote_name == NULL) {
         raw_message->received_time = srp_time();
     }
 
     update_zone = message->questions[0].name;
     if (service_update_zone != NULL && dns_names_equal_text(update_zone, "default.service.arpa.")) {
+#if SRP_PARSE_DEBUG_VERBOSE
         INFO(PRI_S_SRP " is in default.service.arpa, using replacement zone: " PUB_S_SRP,
              dns_name_print(update_zone, namebuf2, sizeof(namebuf2)),
              dns_name_print(service_update_zone, namebuf1, sizeof(namebuf1)));
+#endif
         replacement_zone = service_update_zone;
     } else {
         INFO(PRI_S_SRP " is not in default.service.arpa, or no replacement zone (%p)",
@@ -275,7 +338,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
         if (rr->type == dns_rrtype_any && rr->qclass == dns_qclass_any && rr->ttl == 0) {
             int status = make_delete(&deletes, NULL, rr, update_zone);
             if (status != dns_rcode_noerror) {
-                rcode = status;
+                ret->rcode = status;
                 goto out;
             }
         }
@@ -327,7 +390,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
                     DNS_NAME_GEN_SRP(rr->name, name_buf);
                     ERROR("ADD for hostname " PRI_DNS_NAME_SRP " without a preceding delete.",
                           DNS_NAME_PARAM_SRP(rr->name, name_buf));
-                    rcode = dns_rcode_formerr;
+                    ret->rcode = dns_rcode_formerr;
                     goto out;
                 }
                 host_description->delete = dp;
@@ -354,7 +417,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
                 DNS_NAME_GEN_SRP(rr->name, name_buf);
                 ERROR("ADD for service instance not preceded by delete: " PRI_DNS_NAME_SRP,
                       DNS_NAME_PARAM_SRP(rr->name, name_buf));
-                rcode = dns_rcode_formerr;
+                ret->rcode = dns_rcode_formerr;
                 goto out;
             }
             for (sip = service_instances; sip; sip = sip->next) {
@@ -380,7 +443,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
                     DNS_NAME_GEN_SRP(rr->name, name_buf);
                     ERROR("more than one SRV rr received for service instance: " PRI_DNS_NAME_SRP,
                           DNS_NAME_PARAM_SRP(rr->name, name_buf));
-                    rcode = dns_rcode_formerr;
+                    ret->rcode = dns_rcode_formerr;
                     goto out;
                 }
                 sip->srv = rr;
@@ -389,7 +452,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
                     DNS_NAME_GEN_SRP(rr->name, name_buf);
                     ERROR("more than one TXT rr received for service instance: " PRI_DNS_NAME_SRP,
                           DNS_NAME_PARAM_SRP(rr->name, name_buf));
-                    rcode = dns_rcode_formerr;
+                    ret->rcode = dns_rcode_formerr;
                     goto out;
                 }
                 sip->txt = rr;
@@ -423,7 +486,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
                     ERROR("service subtype " PRI_DNS_NAME_SRP " for " PRI_DNS_NAME_SRP
                           " has no preceding base type ", DNS_NAME_PARAM_SRP(rr->name, name_buf),
                           DNS_NAME_PARAM_SRP(rr->data.ptr.name, target_name_buf));
-                    rcode = dns_rcode_formerr;
+                    ret->rcode = dns_rcode_formerr;
                     goto out;
                 }
             }
@@ -432,7 +495,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
             if (rr->qclass == dns_qclass_none && rr->ttl == 0) {
                 int status = make_delete(&deletes, &dp, rr, update_zone);
                 if (status != dns_rcode_noerror) {
-                    rcode = status;
+                    ret->rcode = status;
                     goto out;
                 }
             } else {
@@ -460,7 +523,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
                     ERROR("service name " PRI_DNS_NAME_SRP " for " PRI_DNS_NAME_SRP
                           " is not in the update zone", DNS_NAME_PARAM_SRP(rr->name, name_buf),
                           DNS_NAME_PARAM_SRP(rr->data.ptr.name, data_name_buf));
-                    rcode = dns_rcode_formerr;
+                    ret->rcode = dns_rcode_formerr;
                     goto out;
                 }
             }
@@ -471,7 +534,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
             DNS_NAME_GEN_SRP(rr->name, name_buf);
             ERROR("unexpected rrtype %d on " PRI_DNS_NAME_SRP " in update.", rr->type,
                   DNS_NAME_PARAM_SRP(rr->name, name_buf));
-            rcode = dns_rcode_formerr;
+            ret->rcode = dns_rcode_formerr;
             goto out;
         }
     }
@@ -479,40 +542,9 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
     // Now that we've scanned the whole update, do the consistency checks for updates that might
     // not have come in order.
 
-    // Get the lease time. We need this to differentiate between a mass host deletion and an add.
-    lease_time = 3600;
-    key_lease_time = 604800;
-    serial_number = 0;
-    for (edns0 = message->edns0; edns0; edns0 = edns0->next) {
-        if (edns0->type == dns_opt_update_lease) {
-            unsigned off = 0;
-            if (edns0->length != 4 && edns0->length != 8) {
-                ERROR("edns0 update-lease option length bogus: %d", edns0->length);
-                rcode = dns_rcode_formerr;
-                goto out;
-            }
-            dns_u32_parse(edns0->data, edns0->length, &off, &lease_time);
-            if (edns0->length == 8) {
-                dns_u32_parse(edns0->data, edns0->length, &off, &key_lease_time);
-            } else {
-                key_lease_time = 7 * lease_time;
-            }
-            found_lease = true;
-        } else if (edns0->type == dns_opt_srp_serial) {
-            unsigned off = 0;
-            if (edns0->length != 4) {
-                ERROR("edns0 srp serial number length bogus: %d", edns0->length);
-                rcode = dns_rcode_formerr;
-                goto out;
-            }
-            dns_u32_parse(edns0->data, edns0->length, &off, &serial_number);
-            found_serial = true;
-        }
-    }
-
-    // If we don't yet have a host description, but this is a delete of the entire host registration (lease_time == 0) and
+    // If we don't yet have a host description, but this is a delete of the entire host registration (host_lease == 0) and
     // we do have a delete record and a key record for the host, create a host description with no addresses here.
-    if (host_description == NULL && lease_time == 0) {
+    if (host_description == NULL && ret->host_lease == 0) {
         // If we get here and we have a key, then that suggests that this SRP update is a host remove with a KEY RR to
         // authenticate it (and possibly leave behind).
         if (key != NULL) {
@@ -532,7 +564,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
     // Make sure there's a host description.
     if (!host_description) {
         ERROR("SRP update does not include a host description.");
-        rcode = dns_rcode_formerr;
+        ret->rcode = dns_rcode_formerr;
         goto out;
     }
 
@@ -558,7 +590,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
             DNS_NAME_GEN_SRP(sp->rr->name, name_buf);
             ERROR("service points to an instance that's not included: " PRI_DNS_NAME_SRP,
                   DNS_NAME_PARAM_SRP(sp->rr->name, name_buf));
-            rcode = dns_rcode_formerr;
+            ret->rcode = dns_rcode_formerr;
             goto out;
         }
     }
@@ -569,7 +601,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
             DNS_NAME_GEN_SRP(sip->name, name_buf);
             ERROR("service instance update for " PRI_DNS_NAME_SRP
                   " is not referenced by a service update.", DNS_NAME_PARAM_SRP(sip->name, name_buf));
-            rcode = dns_rcode_formerr;
+            ret->rcode = dns_rcode_formerr;
             goto out;
         }
 
@@ -586,16 +618,16 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
         DNS_NAME_GEN_SRP(host_description->name, name_buf);
         ERROR("host description " PRI_DNS_NAME_SRP " is not referenced by any service instances.",
               DNS_NAME_PARAM_SRP(host_description->name, name_buf));
-        rcode = dns_rcode_formerr;
+        ret->rcode = dns_rcode_formerr;
         goto out;
     }
 
     // Make sure the host description has at least one address record, unless we're deleting the host.
-    if (host_description->addrs == NULL && host_description->num_instances != 0 && lease_time != 0) {
+    if (host_description->addrs == NULL && host_description->num_instances != 0 && ret->host_lease != 0) {
         DNS_NAME_GEN_SRP(host_description->name, name_buf);
         ERROR("host description " PRI_DNS_NAME_SRP " doesn't contain any IP addresses, but services are being added.",
               DNS_NAME_PARAM_SRP(host_description->name, name_buf));
-        rcode = dns_rcode_formerr;
+        ret->rcode = dns_rcode_formerr;
         goto out;
     }
 #endif
@@ -605,7 +637,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
         if (i > 0) {
             if (!dns_keys_rdata_equal(key, keys[i])) {
                 ERROR("more than one key presented");
-                rcode = dns_rcode_formerr;
+                ret->rcode = dns_rcode_formerr;
                 goto out;
             }
             // This is a hack so that if num_keys == 1, we don't have to allocate keys[].
@@ -629,7 +661,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
             DNS_NAME_GEN_SRP(key->name, key_name_buf);
             ERROR("key present for name " PRI_DNS_NAME_SRP
                   " which is neither a host nor an instance name.", DNS_NAME_PARAM_SRP(key->name, key_name_buf));
-            rcode = dns_rcode_formerr;
+            ret->rcode = dns_rcode_formerr;
             goto out;
         }
     }
@@ -643,7 +675,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
         DNS_NAME_GEN_SRP(host_description->name, host_name_buf);
         ERROR("host description " PRI_DNS_NAME_SRP " doesn't contain a key.",
               DNS_NAME_PARAM_SRP(host_description->name, host_name_buf));
-        rcode = dns_rcode_formerr;
+        ret->rcode = dns_rcode_formerr;
         goto out;
     }
 
@@ -672,13 +704,13 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
     // will either accept or reject it.
     if (message->arcount < 1) {
         ERROR("signature not present");
-        rcode = dns_rcode_formerr;
+        ret->rcode = dns_rcode_formerr;
         goto out;
     }
     signature = &message->additional[message->arcount -1];
     if (signature->type != dns_rrtype_sig) {
         ERROR("signature is not at the end or is not present");
-        rcode = dns_rcode_formerr;
+        ret->rcode = dns_rcode_formerr;
         goto out;
     }
 
@@ -690,7 +722,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
         ERROR("signer " PRI_DNS_NAME_SRP " doesn't match host " PRI_DNS_NAME_SRP,
               DNS_NAME_PARAM_SRP(signature->data.sig.signer, signer_name_buf),
               DNS_NAME_PARAM_SRP(host_description->name, host_name_buf));
-        rcode = dns_rcode_formerr;
+        ret->rcode = dns_rcode_formerr;
         goto out;
     }
 
@@ -735,6 +767,11 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
             replace_zone_name(&dp->name, dp->zone, replacement_zone);
         }
 
+        // We also need to update the names of removes.
+        for (dp = removes; dp; dp = dp->next) {
+            replace_zone_name(&dp->name, dp->zone, replacement_zone);
+        }
+
         // All services have PTR records, which point to names.   Both the service name and the
         // PTR name have to be fixed up.
         for (sp = services; sp; sp = sp->next) {
@@ -744,7 +781,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
             // if condition should always be false.
             if (uzp == NULL) {
                 ERROR("service PTR record zone match fail!!");
-                rcode = dns_rcode_formerr;
+                ret->rcode = dns_rcode_formerr;
                 goto out;
             }
             replace_zone_name(&sp->rr->data.ptr.name, uzp, replacement_zone);
@@ -759,7 +796,7 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
             // if condition should always be false.
             if (uzp == NULL) {
                 ERROR("service instance SRV record zone match fail!!");
-                rcode = dns_rcode_formerr;
+                ret->rcode = dns_rcode_formerr;
                 goto out;
             }
             replace_zone_name(&sip->srv->data.srv.name, uzp, replacement_zone);
@@ -779,42 +816,17 @@ srp_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *
         srp_format_time_offset(time_buf, sizeof(time_buf), srp_time() - raw_message->received_time);
     }
 
-    INFO("update for " PRI_DNS_NAME_SRP " xid %x validates, lease time %d%s, receive_time "
+    INFO("update for " PRI_DNS_NAME_SRP " #%d, xid %x validates, lease time %d, receive_time "
          PUB_S_SRP ", remote " PRI_S_SRP ".",
-         DNS_NAME_PARAM_SRP(host_description->name, host_description_name_buf), raw_message->wire.id, lease_time,
-         found_lease ? " (found)" : "", time_buf, srpl_connection == NULL ? "(none)" : srpl_connection->name);
-    rcode = dns_rcode_noerror;
-    ret = srp_update_start(connection, server_state, srpl_connection, message, raw_message, host_description,
-                           service_instances, services, removes,
-                           replacement_zone == NULL ? update_zone : replacement_zone,
-                           lease_time, key_lease_time, serial_number, found_serial);
-    if (ret) {
-        goto success;
-    }
-    ERROR("update start failed");
+         DNS_NAME_PARAM_SRP(host_description->name, host_description_name_buf), index, raw_message->wire.id,
+         ret->host_lease, time_buf, remote_name == NULL ? "(none)" : remote_name);
+    ret->rcode = dns_rcode_noerror;
     goto out;
 
 badsig:
-    if (srpl_connection == NULL) {
-        // True means it was intended for us, and shouldn't be forwarded.
-        ret = true;
-    } else {
-        // For SRP replication, we need to return false when the signature check fails.
-        ret = false;
-    }
-    // We're not actually going to return this; it simply indicates that we aren't sending a fail response.
-    rcode = dns_rcode_noerror;
-    // Because we're saying this is ours, we have to free the parsed message.
-    dns_message_free(message);
+    ret->drop = true;
 
 out:
-    // free everything we allocated but (it turns out) aren't going to use
-    if (keys != NULL) {
-        free(keys);
-    }
-    srp_update_free_parts(service_instances, NULL, services, removes, host_description);
-
-success:
     // No matter how we get out of this, we free the delete structures that weren't dangling removes,
     // because they are not used to do the update.
     for (dp = deletes; dp; ) {
@@ -823,66 +835,170 @@ success:
         dp = next;
     }
 
-    if (ret == true && rcode != dns_rcode_noerror && srpl_connection == NULL) {
-        if (connection != NULL) {
-            send_fail_response(connection, raw_message, rcode);
-        }
-    }
+    // We always return what we got, even if we failed
+    ret->host = host_description;
+    ret->instances = service_instances;
+    ret->services = services;
+    ret->removes = removes;
+    ret->update_zone = replacement_zone == NULL ? update_zone : replacement_zone;
     return ret;
 }
 
 bool
-srp_dns_evaluate(comm_t *connection, srp_server_t *server_state, srpl_connection_t *srpl_connection, message_t *message)
+srp_dns_evaluate(comm_t *connection, srp_server_t *server_state, message_t *message, dns_message_t **p_parsed_message)
 {
-    dns_message_t *parsed_message;
+    bool continuing = false;
+    client_update_t *update = NULL;
 
     // Drop incoming responses--we're a server, so we only accept queries.
     if (dns_qr_get(&message->wire) == dns_qr_response) {
-        ERROR("dns_evaluate: received a message that was a DNS response: %d", dns_opcode_get(&message->wire));
-        return false;
+        ERROR("received a message that was a DNS response: %d", dns_opcode_get(&message->wire));
+        goto out;
     }
 
     // Forward incoming messages that are queries but not updates.
     // XXX do this later--for now we operate only as a translator, not a proxy.
     if (dns_opcode_get(&message->wire) != dns_opcode_update) {
-        if (connection != NULL) {
-            send_fail_response(connection, message, dns_rcode_refused);
-        }
-        ERROR("dns_evaluate: received a message that was not a DNS update: %d", dns_opcode_get(&message->wire));
-        return false;
-    }
-
-    // Parse the UPDATE message.
-    if (!dns_wire_parse(&parsed_message, &message->wire, message->length, false)) {
-        if (connection != NULL) {
-            send_fail_response(connection, message, dns_rcode_servfail);
-        }
-        ERROR("dns_wire_parse failed.");
-        return false;
+        // dns_forward(connection)
+        send_fail_response(connection, message, dns_rcode_refused);
+        ERROR("received a message that was not a DNS update: %d", dns_opcode_get(&message->wire));
+        goto out;
     }
 
     // We need the wire message to validate the signature...
-    if (!srp_evaluate(connection, server_state, srpl_connection, parsed_message, message)) {
-        // For srpl connections, a false return value means the update failed. For regular SRP updates,
-        // a false return value means that the update was not consumed.
-        if (!srpl_connection) {
-            // The message wasn't invalid, but wasn't an SRP message.
-            dns_message_free(parsed_message);
-            // dns_forward(connection)
-            if (connection != NULL) {
-                send_fail_response(connection, message, dns_rcode_refused);
+    update = srp_evaluate(NULL, p_parsed_message, message, 0);
+    if (update == NULL) {
+        send_fail_response(connection, message, dns_rcode_servfail);
+        goto out;
+    }
+    if (update->rcode != dns_rcode_noerror) {
+        if (!update->drop) {
+            send_fail_response(connection, message, update->rcode);
+        }
+        goto out;
+    }
+
+    update->connection = connection;
+    ioloop_comm_retain(update->connection);
+    update->server_state = server_state;
+
+    continuing = srp_update_start(update);
+    goto good;
+out:
+    srp_parse_client_updates_free(update);
+good:
+    return continuing;
+}
+
+#if SRP_FEATURE_REPLICATION
+static bool
+srp_parse_eliminate_shadowed_updates(srp_server_t *server_state, client_update_t *new_message, client_update_t *old_message)
+{
+    (void)server_state;
+
+    // We only ever want the last host update.
+    old_message->skip_host_updates = true;
+
+    // Look for matching instances.
+    for (service_instance_t *old = old_message->instances; old != NULL; old = old->next) {
+        for (service_instance_t *new = new_message->instances; new != NULL; new = new->next) {
+            if (dns_names_equal(old->name, new->name)) {
+                old->skip_update = true;
             }
         }
-        return false;
+        for (delete_t *delete = new_message->removes; delete != NULL; delete = delete->next) {
+            DNS_NAME_GEN_SRP(old->name, old_name_buf);
+            DNS_NAME_GEN_SRP(delete->name, delete_name_buf);
+            INFO("old service " PRI_DNS_NAME_SRP ", delete " PRI_DNS_NAME_SRP,
+                 DNS_NAME_PARAM_SRP(old->name, old_name_buf), DNS_NAME_PARAM_SRP(delete->name, delete_name_buf));
+            if (dns_names_equal(old->name, delete->name)) {
+                old->skip_update = true;
+            }
+        }
     }
     return true;
 }
 
+// For SRP replication
+bool
+srp_parse_host_messages_evaluate(srp_server_t *UNUSED server_state, srpl_connection_t *srpl_connection,
+                                 message_t **messages, int num_messages)
+{
+    client_update_t *client_updates = NULL;
+    bool ret = false;
+
+    for (int i = 0; i < num_messages; i++) {
+        message_t *message = messages[i];
+
+        // Drop incoming responses--we're a server, so we only accept queries.
+        if (dns_qr_get(&message->wire) == dns_qr_response) {
+            ERROR("received a message that was a DNS response: %d", dns_opcode_get(&message->wire));
+            goto out;
+        }
+
+        // Forward incoming messages that are queries but not updates.
+        // XXX do this later--for now we operate only as a translator, not a proxy.
+        if (dns_opcode_get(&message->wire) != dns_opcode_update) {
+            ERROR("received a message that was not a DNS update: %d", dns_opcode_get(&message->wire));
+            goto out;
+        }
+
+        // We need the wire message to validate the signature...
+        client_update_t *update = srp_evaluate(srpl_connection->name, NULL, message, i);
+        if (update == NULL || update->rcode != dns_rcode_noerror) {
+            goto out;
+        }
+
+        update->srpl_connection = srpl_connection;
+        srpl_connection_retain(update->srpl_connection);
+        update->server_state = server_state;
+        update->index = i;
+
+        // We build the list of messages so that message 0 winds up at the /end/ of the list; message 0 is
+        // the earliest message.
+        update->next = client_updates;
+        client_updates = update;
+    }
+
+    // Now that we've parsed and validated everything, eliminate earlier updates that are in the shadow of
+    // later updates.
+    // The list off of client_updates is ordered with most recent messages first, so what we want to do
+    // is, for each message on the list, see if any earlier messages update the same instance. If so, remove
+    // the earlier update, since it is out of date and could create a conflict if we tried to apply it.
+    // If we get an update that deletes the host, every update earlier than that is invalidated. It would
+    // be weird for us to get an update that is earlier than a full delete, but we could well get a full
+    // delete as the earliest recorded update.
+    for (client_update_t *em = client_updates; em != NULL; em = em->next) {
+        for (client_update_t *lem = em->next; lem != NULL; lem = lem->next) {
+            srp_parse_eliminate_shadowed_updates(server_state, em, lem);
+        }
+    }
+
+    // Now re-order the list oldest to newest.
+    client_update_t *current = client_updates, *next = NULL, *prev = NULL;
+    while (current != NULL) {
+        next = current->next;
+        current->next = prev;
+        prev = current;
+        current = next;
+    }
+    client_updates = prev;
+
+    // Now that we've eliminated shadowed updates, we can actually call srp_update_start.
+    ret = srp_update_start(client_updates);
+    goto good;
+out:
+    srp_parse_client_updates_free(client_updates);
+good:
+    return ret;
+}
+#endif
+
 void
 dns_input(comm_t *comm, message_t *message, void *context)
 {
-    (void)context;
-    srp_dns_evaluate(comm, context, NULL, message);
+    srp_server_t *server_state = context;
+    srp_dns_evaluate(comm, server_state, message, NULL);
 }
 
 struct srp_proxy_listener_state {
@@ -893,11 +1009,11 @@ struct srp_proxy_listener_state {
 
 comm_t *
 srp_proxy_listen(uint16_t *avoid_ports, int num_avoid_ports, ready_callback_t ready, cancel_callback_t cancel_callback,
-                 addr_t *address, void *context)
+                 addr_t *address, finalize_callback_t context_release_callback, void *context)
 {
     // XXX UDP listeners should bind to interface addresses, not INADDR_ANY.
     return ioloop_listener_create(false, false, avoid_ports, num_avoid_ports, address, NULL, "SRP UDP listener",
-                                  dns_input, NULL, cancel_callback, ready, NULL, NULL, context);
+                                  dns_input, NULL, cancel_callback, ready, context_release_callback, NULL, context);
 }
 
 void

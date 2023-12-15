@@ -139,8 +139,12 @@ service_publisher_is_address_mesh_local(service_publisher_t *publisher, addr_t *
 {
     if (address->sa.sa_family == AF_INET) {
         IPv4_ADDR_GEN_SRP(&address->sin.sin_addr, addr_buf);
-        INFO(PRI_IPv4_ADDR_SRP "is not mesh-local", IPv4_ADDR_PARAM_SRP(&address->sin.sin_addr, addr_buf));
-        return false;
+        if (!IN_LOOPBACK(address->sin.sin_addr.s_addr)) {
+            INFO(PRI_IPv4_ADDR_SRP "is not mesh-local", IPv4_ADDR_PARAM_SRP(&address->sin.sin_addr, addr_buf));
+            return false;
+        }
+        INFO(PRI_IPv4_ADDR_SRP "is the IPv4 loopback address", IPv4_ADDR_PARAM_SRP(&address->sin.sin_addr, addr_buf));
+        return true;
     }
     if (address->sa.sa_family != AF_INET6) {
         INFO("address family %d can't be mesh-local", address->sa.sa_family);
@@ -149,22 +153,22 @@ service_publisher_is_address_mesh_local(service_publisher_t *publisher, addr_t *
 
     uint8_t *addr_ptr = (uint8_t *)&address->sin6.sin6_addr;
     SEGMENTED_IPv6_ADDR_GEN_SRP(addr_ptr, addr_buf);
+    if (IN6_IS_ADDR_LOOPBACK(&address->sin6.sin6_addr)) {
+        INFO(PRI_SEGMENTED_IPv6_ADDR_SRP " is the IPv6 loopback address.",
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(addr_ptr, addr_buf));
+        return true;
+    }
+    static const uint8_t ipv4mapped_loopback[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 127, 0, 0, 1 };
+    if (!memcmp(&address->sin6.sin6_addr, ipv4mapped_loopback, sizeof(ipv4mapped_loopback))) {
+        INFO(PRI_SEGMENTED_IPv6_ADDR_SRP " is the IPv4-mapped loopback address.",
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(addr_ptr, addr_buf));
+        return true;
+    }
+
     if (!publisher->have_ml_eid) {
         INFO(PRI_SEGMENTED_IPv6_ADDR_SRP "is not mesh-local",
              SEGMENTED_IPv6_ADDR_PARAM_SRP(addr_ptr, addr_buf));
         return false;
-    }
-
-    int i;
-    for (i = 0; i < 15; i++) {
-        if (addr_ptr[i] != 0) {
-            break;
-        }
-    }
-    if (i == 15 && addr_ptr[i] == 1) {
-        INFO(PRI_SEGMENTED_IPv6_ADDR_SRP " is the IPv6 localhost address.",
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(addr_ptr, addr_buf));
-        return true;
     }
 
     SEGMENTED_IPv6_ADDR_GEN_SRP(&publisher->thread_mesh_local_address, mle_buf);
@@ -816,6 +820,7 @@ service_publisher_listener_cancel(service_publisher_t *publisher)
         ioloop_comm_release(publisher->srp_listener);
         publisher->srp_listener = NULL;
     }
+    srp_mdns_flush(publisher->server_state);
 }
 
 static void
@@ -843,10 +848,12 @@ service_publisher_listener_start(service_publisher_t *publisher)
     }
     publisher->srp_listener = srp_proxy_listen(NULL, 0, service_publisher_listener_ready,
                                                service_publisher_listener_cancel_callback, NULL,
-                                               publisher->server_state);
+                                               service_publisher_context_release, publisher->server_state);
     if (publisher->srp_listener == NULL) {
         ERROR("failed to setup SRP listener");
     }
+    // The listener needs to hold a reference on the service publisher until its context release callback is called.
+    RETAIN_HERE(publisher, service_publisher);
 }
 
 // We go to this state when we have decided to publish, but perhaps do not currently have an SRP listener

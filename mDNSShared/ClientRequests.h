@@ -36,6 +36,7 @@ typedef struct
     void *                      resultContext;          // Context to pass to result handler.
     mDNSu32                     reqID;                  // Client request ID.
     int                         searchListIndex;        // Index that indicates the next search domain to try.
+    int                         searchListIndexLast;    // Value of searchListIndex prior to calling NextSearchDomain().
 #if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_DOTLOCAL)
     DNSQuestion *               q2;                     // DNSQuestion for unicast version of a record with a dot-local name.
     mDNSu16                     q2Type;                 // q2's original qtype value.
@@ -78,7 +79,7 @@ typedef struct
     QueryRecordOp       op; // Query record operation object.
 
 }   QueryRecordClientRequest;
-mdns_compile_time_max_size_check(QueryRecordClientRequest, 792);
+mdns_compile_time_max_size_check(QueryRecordClientRequest, 800);
 
 typedef struct
 {

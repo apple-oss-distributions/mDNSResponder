@@ -344,6 +344,45 @@
 		</dict>
 		<dict>
 			<key>TestName</key>
+			<string>Optimistic DNS</string>
+			<key>Description</key>
+			<string>Tests mDNSResponder&apos;s Optimistic DNS functionality.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>300</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>optimisticDNS</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
 			<string>mDNS Discovery 1-1-1</string>
 			<key>Description</key>
 			<string>Tests mDNS discovery and resolution of one service instance with one one-byte TXT record, one A record, and one AAAA record.</string>
@@ -2536,6 +2575,10 @@
 			<key>Command</key>
 			<array>
 				<string>/usr/local/bin/dnssdutil</string>
+				<string>wifi</string>
+				<string>off</string>
+				<string>&amp;&amp;</string>
+				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>probeconflicts</string>
 				<string>--interface</string>
@@ -2581,6 +2624,10 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>wifi</string>
+				<string>off</string>
+				<string>&amp;&amp;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>probeconflicts</string>

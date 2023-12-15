@@ -102,11 +102,10 @@ static void
 nat64_infra_prefix_monitor_cancel(nat64_infra_prefix_monitor_t *monitor)
 {
     if (monitor != NULL) {
-        nat64_prefix_t **ppref, *prefix;
-        ppref = &monitor->infra_nat64_prefixes;
-        while (*ppref != NULL) {
-            prefix = *ppref;
-            ppref = &prefix->next;
+        nat64_prefix_t *next;
+        for (nat64_prefix_t *prefix = monitor->infra_nat64_prefixes; prefix != NULL; prefix = next) {
+            next = prefix->next;
+            prefix->next = NULL;
             RELEASE_HERE(prefix, nat64_prefix);
         }
         monitor->infra_nat64_prefixes = NULL;
@@ -142,6 +141,7 @@ nat64_thread_prefix_monitor_cancel(nat64_thread_prefix_monitor_t *monitor)
         nat64_prefix_t *next;
         for (nat64_prefix_t *prefix = monitor->thread_nat64_prefixes; prefix != NULL; prefix = next) {
             next = prefix->next;
+            prefix->next = NULL;
             RELEASE_HERE(prefix, nat64_prefix);
         }
         monitor->thread_nat64_prefixes = NULL;
@@ -1118,8 +1118,8 @@ nat64_infra_prefix_publisher_publishing_action(nat64_infra_prefix_publisher_t *s
     if (event == NULL) {
         return nat64_infra_prefix_publisher_state_invalid;
     } else if (event->event_type == nat64_event_nat64_infra_prefix_publisher_infra_prefix_changed ||
-			   event->event_type == nat64_event_nat64_infra_prefix_publisher_shutdown)
-	{
+               event->event_type == nat64_event_nat64_infra_prefix_publisher_shutdown)
+    {
         nat64_prefix_t *infra_prefix;
         for (infra_prefix = event->prefix; infra_prefix; infra_prefix = infra_prefix->next) {
             if (!in6prefix_compare(&infra_prefix->prefix, &state_machine->proposed_prefix->prefix, NAT64_PREFIX_SLASH_96_BYTES)) {
@@ -1148,8 +1148,8 @@ nat64_infra_prefix_publisher_publishing_action(nat64_infra_prefix_publisher_t *s
             return nat64_infra_prefix_publisher_state_wait;
         }
     } else if (event->event_type == nat64_event_nat64_infra_prefix_publisher_routable_omr_prefix_went_away ||
-			   event->event_type == nat64_event_nat64_infra_prefix_publisher_shutdown)
-	{
+               event->event_type == nat64_event_nat64_infra_prefix_publisher_shutdown)
+    {
         // Routable OMR prefix is gone
         SEGMENTED_IPv6_ADDR_GEN_SRP(state_machine->proposed_prefix->prefix.s6_addr, nat64_prefix_buf);
         INFO("Routable OMR prefix is gone, unpublishing infra prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
@@ -1413,8 +1413,8 @@ nat64_br_prefix_publisher_publishing_action(nat64_br_prefix_publisher_t *state_m
             }
         }
     } else if (event->event_type == nat64_event_nat64_br_prefix_publisher_ipv4_default_route_went_away ||
-			   event->event_type == nat64_event_nat64_br_prefix_publisher_shutdown)
-	{
+               event->event_type == nat64_event_nat64_br_prefix_publisher_shutdown)
+    {
         nat64_unpublish_br_prefix(state_machine);
         return nat64_br_prefix_publisher_state_wait_for_anything;
     } else if (event->event_type == nat64_event_nat64_br_prefix_publisher_infra_prefix_changed) {
@@ -1734,16 +1734,25 @@ nat64_offmesh_route_list_callback(route_state_t *route_state, cti_route_vec_t *r
 void
 nat64_thread_shutdown(route_state_t *route_state)
 {
-	nat64_t *nat64 = route_state->nat64;
-	if (nat64->nat64_infra_prefix_publisher != NULL) {
-		nat64_infra_prefix_publisher_event_t infra_event;
-		nat64_infra_prefix_publisher_event_init(&infra_event, nat64_event_nat64_infra_prefix_publisher_shutdown);
-		nat64_infra_prefix_publisher_event_deliver(nat64->nat64_infra_prefix_publisher, &infra_event);
-	}
-	if (nat64->nat64_br_prefix_publisher != NULL) {
-		nat64_br_prefix_publisher_event_t br_event;
-		nat64_br_prefix_publisher_event_init(&br_event, nat64_event_nat64_br_prefix_publisher_shutdown);
-		nat64_br_prefix_publisher_event_deliver(nat64->nat64_br_prefix_publisher, &br_event);
-	}
+    nat64_t *nat64 = route_state->nat64;
+    if (nat64->nat64_infra_prefix_publisher != NULL) {
+        nat64_infra_prefix_publisher_event_t infra_event;
+        nat64_infra_prefix_publisher_event_init(&infra_event, nat64_event_nat64_infra_prefix_publisher_shutdown);
+        nat64_infra_prefix_publisher_event_deliver(nat64->nat64_infra_prefix_publisher, &infra_event);
+    }
+    if (nat64->nat64_br_prefix_publisher != NULL) {
+        nat64_br_prefix_publisher_event_t br_event;
+        nat64_br_prefix_publisher_event_init(&br_event, nat64_event_nat64_br_prefix_publisher_shutdown);
+        nat64_br_prefix_publisher_event_deliver(nat64->nat64_br_prefix_publisher, &br_event);
+    }
 }
 #endif
+
+// Local Variables:
+// mode: C
+// tab-width: 4
+// c-file-style: "bsd"
+// c-basic-offset: 4
+// fill-column: 120
+// indent-tabs-mode: nil
+// End:

@@ -3880,12 +3880,30 @@ mDNSlocal mDNSBool AddRecordInProbe(const AuthRecord *const ar, const mDNSBool h
     {
         return mDNSfalse;
     }
-    // rr is not in probing stage and not dependent on other records
-    // This is to exclude record that's already verified, but include TXT and TSR record if it's service registration
-    // Refer to rdar://109086182 and rdar://109635078
-    if (rr->resrec.RecordType != kDNSRecordTypeUnique && !rr->DependentOn)
+    // If a probe question is being sent for an AuthRecord and the AuthRecord is associated with a TSR record, then
+    // all of the AuthRecords with the same name from the same client connection need to be present in the
+    // authority section. So if one of them happens to have already gotten past the probing stage, it still needs
+    // to be included. Currently, individually-registered AuthRecords from the same client connection will have the
+    // same non-zero RRSet value.
+    mDNSBool skipProbingStageCheck = mDNSfalse;
+    if (hasTSR)
     {
-        return mDNSfalse;
+        const uintptr_t s1 = ar->RRSet ? ar->RRSet : (uintptr_t)ar;
+        const uintptr_t s2 = rr->RRSet ? rr->RRSet : (uintptr_t)rr;
+        if (s1 == s2)
+        {
+            skipProbingStageCheck = mDNStrue;
+        }
+    }
+    if (!skipProbingStageCheck)
+    {
+        // rr is not in probing stage and not dependent on other records
+        // This is to exclude record that's already verified, but include TXT and TSR record if it's service registration
+        // Refer to rdar://109086182 and rdar://109635078
+        if (rr->resrec.RecordType != kDNSRecordTypeUnique && !rr->DependentOn)
+        {
+            return mDNSfalse;
+        }
     }
     // Has the same name, class, interface with ar
     if (SameResourceRecordNameClassInterface(ar, rr))

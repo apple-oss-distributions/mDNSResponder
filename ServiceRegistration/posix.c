@@ -71,6 +71,12 @@ ioloop_dump_object_allocation_stats(void)
             INFO(PUB_S_SRP, outbuf);
         }
     }
+    int num_fds = get_num_fds();
+    if (num_fds < 0) {
+        FAULT("out of file descriptors!!");
+        abort();
+    }
+    INFO("%d file descriptors in use", num_fds);
 }
 
 interface_address_state_t *interface_addresses;
@@ -459,14 +465,22 @@ time_t srp_time(void)
     return tm.tv_sec;
 }
 
-#ifdef DEBUG_FD_LEAKS
 int
 get_num_fds(void)
 {
-    DIR *dirfd = opendir("/dev/fd");
     int num = 0;
+    DIR *dirfd = opendir("/dev/fd");
     if (dirfd == NULL) {
-        return -1;
+        if (errno == EMFILE) {
+            FAULT("per-process open file limit reached.");
+            return -1;
+        } else if (errno == ENFILE) {
+            FAULT("per-system open file limit reached.");
+            return -1;
+        } else {
+            ERROR("errno %d " PUB_S_SRP, errno, strerror(errno));
+            return 0;
+        }
     }
     while (readdir(dirfd) != NULL) {
         num++;
@@ -474,7 +488,6 @@ get_num_fds(void)
     closedir(dirfd);
     return num;
 }
-#endif // DEBUG_VERBOSE
 
 #ifdef MALLOC_DEBUG_LOGGING
 #undef malloc

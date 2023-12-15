@@ -23,31 +23,26 @@
 typedef struct srp_proxy_listener_state srp_proxy_listener_state_t;
 typedef struct srp_server_state srp_server_t;
 typedef struct srpl_connection srpl_connection_t;
+typedef struct client_update client_update_t;
 
 void srp_proxy_listener_cancel(srp_proxy_listener_state_t *NONNULL listener_state);
 comm_t *NULLABLE srp_proxy_listen(uint16_t *NULLABLE avoid_ports, int num_avoid_ports, ready_callback_t NULLABLE ready,
-                                  cancel_callback_t NULLABLE cancel, addr_t *NULLABLE address, void *NONNULL context);
+                                  cancel_callback_t NULLABLE cancel, addr_t *NULLABLE address,
+                                  finalize_callback_t NULLABLE context_callback, void *NONNULL context);
 void srp_proxy_init(const char *NONNULL update_zone);
-bool srp_evaluate(comm_t *NONNULL comm, srp_server_t *NULLABLE server_state,
-                  srpl_connection_t *NULLABLE srpl_connection,
-                  dns_message_t *NONNULL message, message_t *NONNULL raw_message);
-bool srp_update_start(comm_t *NONNULL connection, srp_server_t *NULLABLE server_state,
-                      srpl_connection_t *NULLABLE srpl_connection,
-                      dns_message_t *NONNULL parsed_message, message_t *NONNULL raw_message,
-                      dns_host_description_t *NONNULL new_host, service_instance_t *NONNULL instances,
-                      service_t *NONNULL services, delete_t *NULLABLE removes, dns_name_t *NONNULL update_zone,
-                      uint32_t lease_time, uint32_t key_lease_time, uint32_t serial_number, bool found_serial);
-void srp_update_free_parts(service_instance_t *NULLABLE service_instances, service_instance_t *NULLABLE added_instances,
-                           service_t *NULLABLE services, delete_t *NULLABLE removes,
-                           dns_host_description_t *NULLABLE host_description);
-void srp_update_free(update_t *NONNULL update);
-
+client_update_t *NULLABLE srp_evaluate(const char *NULLABLE remote_name,
+                                       dns_message_t *NONNULL *NULLABLE in_parsed_message,
+                                       message_t *NONNULL raw_message, int index);
+bool srp_update_start(client_update_t *NONNULL client_update);
+void srp_parse_client_updates_free(client_update_t *NULLABLE messages);
 
 // Provided
 void dns_input(comm_t *NONNULL comm, message_t *NONNULL message, void *NULLABLE context);
 void srp_mdns_flush(srp_server_t *NONNULL server_state);
-bool srp_dns_evaluate(comm_t *NULLABLE connection, srp_server_t *NULLABLE server_state,
-                      srpl_connection_t *NULLABLE srpl_connection, message_t *NONNULL message);
+bool srp_dns_evaluate(comm_t *NONNULL connection, srp_server_t *NULLABLE server_state,
+                      message_t *NONNULL message, dns_message_t *NONNULL *NULLABLE p_parsed_message);
+bool srp_parse_host_messages_evaluate(srp_server_t *NONNULL server_state, srpl_connection_t *NONNULL srpl_connection,
+                                      message_t *NONNULL *NONNULL messages, int num_messages);
 #endif // __SRP_PROXY_H
 
 // Local Variables:

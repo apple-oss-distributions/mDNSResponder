@@ -2170,27 +2170,36 @@ static CLIOption	kDNSSECTestOpts[] =
 	CLI_OPTION_END()
 };
 
+static void	OptimisticDNSTestCommand( void );
+
+static CLIOption		kOptimisticDNSTestOpts[] =
+{
+	CLI_SECTION( "Exit Status", "This command exits with a status code of 0 if the test passed and a non-zero status code if it fails.\n" ),
+	CLI_OPTION_END()
+};
+
 static CLIOption		kTestOpts[] =
 {
-	Command( "gaiperf",        GAIPerfCmd,           kGAIPerfOpts,            "Runs DNSServiceGetAddrInfo() performance tests.", false ),
-	Command( "mdnsdiscovery",  MDNSDiscoveryTestCmd, kMDNSDiscoveryTestOpts,  "Tests mDNS service discovery for correctness.", false ),
-	Command( "dotlocal",       DotLocalTestCmd,      kDotLocalTestOpts,       "Tests DNS and mDNS queries for domain names in the local domain.", false ),
-	Command( "probeconflicts", ProbeConflictTestCmd, kProbeConflictTestOpts,  "Tests various probing conflict scenarios.", false ),
-	Command( "registration",   RegistrationTestCmd,  kRegistrationTestOpts,   "Tests service registrations.", false ),
+	Command( "gaiperf",                       GAIPerfCmd,                  kGAIPerfOpts,                  "Runs DNSServiceGetAddrInfo() performance tests.", false ),
+	Command( "mdnsdiscovery",                 MDNSDiscoveryTestCmd,        kMDNSDiscoveryTestOpts,        "Tests mDNS service discovery for correctness.", false ),
+	Command( "dotlocal",                      DotLocalTestCmd,             kDotLocalTestOpts,             "Tests DNS and mDNS queries for domain names in the local domain.", false ),
+	Command( "probeconflicts",                ProbeConflictTestCmd,        kProbeConflictTestOpts,        "Tests various probing conflict scenarios.", false ),
+	Command( "registration",                  RegistrationTestCmd,         kRegistrationTestOpts,         "Tests service registrations.", false ),
 #if( MDNSRESPONDER_PROJECT )
-	Command( "fallback",       FallbackTestCmd,      kFallbackTestOpts,       "Tests DNS server fallback.", false ),
-    Command( "expensive_constrained_updates", ExpensiveConstrainedTestCmd, kExpensiveConstrainedTestOpts, "Tests if the mDNSResponder can handle expensive and constrained property change correctly", false),
-	Command( "dnsproxy",       DNSProxyTestCmd,      kDNSProxyTestOpts,       "Tests mDNSResponder's DNS proxy.", false ),
-	Command( "rcodes",         RCodeTestCmd,         kRCodeTestOpts,          "Tests handling of all DNS RCODEs.", false ),
-	Command( "dnsquery",       DNSQueryTestCmd,      kDNSQueryTestOpts,       "Tests mDNSResponder's DNS queries.", false ),
-	Command( "fastrecovery",   FastRecoveryTestCmd,  kFastRecoveryTestOpts,   "Tests mDNSResponder's fast querier recovery.", false ),
-    Command( "xctest",         XCTestCmd,            kXCTestOpts,			  "Run a XCTest from /AppleInternal/XCTests/com.apple.mDNSResponder/Tests.xctest.", true ),
-	Command( "multiconnect",   MultiConnectTestCmd,	 kMultiConnectTestOpts,	  "Tests multiple simultanious connections.", false ),
+	Command( "fallback",                      FallbackTestCmd,             kFallbackTestOpts,             "Tests DNS server fallback.", false ),
+	Command( "expensive_constrained_updates", ExpensiveConstrainedTestCmd, kExpensiveConstrainedTestOpts, "Tests if the mDNSResponder can handle expensive and constrained property change correctly", false ),
+	Command( "dnsproxy",                      DNSProxyTestCmd,             kDNSProxyTestOpts,             "Tests mDNSResponder's DNS proxy.", false ),
+	Command( "rcodes",                        RCodeTestCmd,                kRCodeTestOpts,                "Tests handling of all DNS RCODEs.", false ),
+	Command( "dnsquery",                      DNSQueryTestCmd,             kDNSQueryTestOpts,             "Tests mDNSResponder's DNS queries.", false ),
+	Command( "fastrecovery",                  FastRecoveryTestCmd,         kFastRecoveryTestOpts,         "Tests mDNSResponder's fast querier recovery.", false ),
+	Command( "xctest",                        XCTestCmd,                   kXCTestOpts,                   "Run a XCTest from /AppleInternal/XCTests/com.apple.mDNSResponder/Tests.xctest.", true ),
+	Command( "multiconnect",                  MultiConnectTestCmd,         kMultiConnectTestOpts,         "Tests multiple simultanious connections.", false ),
 #endif
 #if( TARGET_OS_DARWIN )
-	Command( "keepalive",      KeepAliveTestCmd,     kKeepAliveTestOpts,      "Tests keepalive record registrations.", false ),
+	Command( "keepalive",                     KeepAliveTestCmd,            kKeepAliveTestOpts,            "Tests keepalive record registrations.", false ),
 #endif
-	Command( "dnssec",         DNSSECTestCmd,        kDNSSECTestOpts,         "Tests mDNSResponder's DNSSEC validation", false),
+	Command( "dnssec",                        DNSSECTestCmd,               kDNSSECTestOpts,               "Tests mDNSResponder's DNSSEC validation", false),
+	Command( "optimisticDNS",                 OptimisticDNSTestCommand,    kOptimisticDNSTestOpts,        "Tests mDNSResponder's Optimistic DNS functionality.", false ),
 	CLI_OPTION_END()
 };
 
@@ -2675,6 +2684,20 @@ static CLIOption		kPrintOpts[] =
 };
 
 //===========================================================================================================================
+//	WiFi
+//===========================================================================================================================
+
+static void	WiFiOnCommand( void );
+static void	WiFiOffCommand( void );
+
+static CLIOption		kWiFiOpts[] =
+{
+	Command( "on",  WiFiOnCommand,  NULL, "Turn Wi-Fi power on.", true ),
+	Command( "off", WiFiOffCommand, NULL, "Turn Wi-Fi power off.", true ),
+	CLI_OPTION_END()
+};
+
+//===========================================================================================================================
 //	Command Table
 //===========================================================================================================================
 
@@ -2760,6 +2783,7 @@ static CLIOption		kGlobalOpts[] =
 	Command( "ipv4fwd",				NULL,					kIPv4FwdOpts,			"IPv4 forwarding commands.", true ),
 	Command( "ipv6fwd",				NULL,					kIPv6FwdOpts,			"IPv6 forwarding commands.", true ),
 	Command( "print",				PrintCommand,			kPrintOpts,				"Reads a DNS message in wire format and writes it to stdout in a human-readable form.", true ),
+	Command( "wifi",				NULL,					kWiFiOpts,				"Wi-Fi commands.", true ),
 	Command( "daemonVersion",		DaemonVersionCmd,		NULL,					"Prints the version of the DNS-SD daemon.", true ),
 	
 	CLI_COMMAND_HELP(),
@@ -26794,6 +26818,1025 @@ static void DNSSECTestCmd( void )
 #endif // #if ( ENABLE_DNSSDUTIL_DNSSEC_TEST == 1 )
 
 //===========================================================================================================================
+//	OptimisticDNSTestCommand
+//===========================================================================================================================
+
+typedef struct OptimisticDNSTest *		OptimisticDNSTestRef;
+struct OptimisticDNSTest
+{
+	dispatch_queue_t			queue;		// Serial queue for test events.
+	dispatch_semaphore_t		doneSem;	// Semaphore to signal when the test is done.
+	dnssd_getaddrinfo_t			gai;		// For GAI operations.
+	dispatch_source_t			timer;		// Timer for enforcing time limits.
+	mdns_domain_name_t			domain;		// High-level domain for test's hostnames.
+	char *						hostname;	// Hostname used in current GAI operation.
+	pid_t						serverPID;	// PID of spawned test DNS server.
+	int32_t						refCount;	// Test's reference count.
+	OSStatus					error;		// Test's error code.
+};
+
+static OptimisticDNSTestRef	_OptimisticDNSTestCreate( OSStatus *outError );
+static OSStatus				_OptimisticDNSTestRun( OptimisticDNSTestRef inTest );
+static void					_OptimisticDNSTestRelease( OptimisticDNSTestRef inTest );
+
+static void	OptimisticDNSTestCommand( void )
+{
+	OSStatus err;
+	OptimisticDNSTestRef test = _OptimisticDNSTestCreate( &err );
+	require_noerr( err, exit );
+	
+	err = _OptimisticDNSTestRun( test );
+	require_noerr( err, exit );
+	
+exit:
+	if( test ) _OptimisticDNSTestRelease( test );
+    gExitCode = err ? 1 : 0;
+}
+
+//===========================================================================================================================
+
+static OptimisticDNSTestRef	_OptimisticDNSTestCreate( OSStatus * const outError )
+{
+	OSStatus err;
+	OptimisticDNSTestRef test = NULL;
+	OptimisticDNSTestRef obj = (OptimisticDNSTestRef) calloc( 1, sizeof( *obj ) );
+	require_action( obj, exit, err = kNoMemoryErr );
+	
+	obj->refCount	= 1;
+	obj->error		= kInProgressErr;
+	obj->serverPID	= -1;
+	
+	obj->queue = dispatch_queue_create( "com.apple.dnssdutil.optimistic-dns-test", DISPATCH_QUEUE_SERIAL );
+	require_action( obj->queue, exit, err = kNoResourcesErr );
+	
+	obj->doneSem = dispatch_semaphore_create( 0 );
+	require_action( obj->doneSem, exit, err = kNoResourcesErr );
+	
+	test = obj;
+	obj = NULL;
+	err = kNoErr;
+	
+exit:
+	if( outError ) *outError = err;
+	if( obj ) _OptimisticDNSTestRelease( obj );
+	return( test );
+}
+
+//===========================================================================================================================
+
+static void	_OptimisticDNSTestRetain( const OptimisticDNSTestRef me )
+{
+	atomic_add_32( &me->refCount, 1 );
+}
+
+//===========================================================================================================================
+
+static void	_OptimisticDNSTestStop( const OptimisticDNSTestRef me, const OSStatus inError )
+{
+	me->error = inError;
+	if( !me->error )
+	{
+		FPrintF( stdout, "%{du:time} Test PASSED\n", NULL );
+	}
+	else
+	{
+		FPrintF( stdout, "%{du:time} Test FAILED: %#m\n", NULL, me->error );
+	}
+	dnssd_getaddrinfo_forget( &me->gai );
+	dispatch_source_forget( &me->timer );
+	mdns_forget( &me->domain );
+	ForgetMem( &me->hostname );
+	if( me->serverPID >= 0 )
+	{
+		OSStatus		killErr;
+		
+		killErr = kill( me->serverPID, SIGTERM );
+		killErr = map_global_noerr_errno( killErr );
+		check_noerr( killErr );
+		me->serverPID = -1;
+	}
+	dispatch_semaphore_signal( me->doneSem );
+}
+
+//===========================================================================================================================
+
+static dnssd_getaddrinfo_t
+	_OptimisticDNSTestCreateGAI(
+		const OptimisticDNSTestRef	me,
+		const char * const			inHostname,
+		const DNSServiceFlags		inFlags )
+{
+	const dnssd_getaddrinfo_t gai = dnssd_getaddrinfo_create();
+	require_quiet( gai, exit );
+	
+	dnssd_getaddrinfo_set_hostname( gai, inHostname );
+	dnssd_getaddrinfo_set_flags( gai, inFlags );
+	dnssd_getaddrinfo_set_interface_index( gai, kDNSServiceInterfaceIndexAny );
+	dnssd_getaddrinfo_set_protocols( gai, kDNSServiceProtocol_IPv4 );
+	dnssd_getaddrinfo_set_queue( gai, me->queue );
+	dnssd_retain( gai );
+	_OptimisticDNSTestRetain( me );
+	dnssd_getaddrinfo_set_event_handler( gai,
+	^( const dnssd_event_t inEvent, const DNSServiceErrorType inGAIError )
+	{
+		switch( inEvent )
+		{
+			case dnssd_event_invalidated:
+				dnssd_release( gai );
+				_OptimisticDNSTestRelease( me );
+				break;
+			
+			case dnssd_event_error:
+				require_return( me->gai == gai );
+				
+				FPrintF( stdout, "dnssd_getaddrinfo error: %#m\n", inGAIError );
+				_OptimisticDNSTestStop( me, inGAIError );
+				break;
+			
+			case dnssd_event_remove_all:
+				break;
+		}
+	} );
+	
+exit:
+	return( gai );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_OptimisticDNSTestStartSubtest4_2( const OptimisticDNSTestRef me )
+{
+	OSStatus err;
+	__block Boolean gotExpiredResult = false;
+	__block Boolean gotAddResult = false;
+	FPrintF( stdout,
+		"%{du:time} Subtest 4.2: Second single-label GAI for hostname with one CNAME record (tests search domain case)\n",
+		NULL );
+	check( me->hostname );
+	const unsigned int timeLimitSecs = 5;
+	FPrintF( stdout, "%{du:time} * Starting GAI for single label '%s' with %u second time limit\n",
+		NULL, me->hostname, timeLimitSecs );
+	const DNSServiceFlags flags = kDNSServiceFlagsReturnIntermediates | kDNSServiceFlagsAllowExpiredAnswers;
+	me->gai = _OptimisticDNSTestCreateGAI( me, me->hostname, flags );
+	require_action( me->gai, exit, err = kNoResourcesErr );
+	
+	const dnssd_getaddrinfo_t gai = me->gai;
+	dnssd_getaddrinfo_set_result_handler( me->gai,
+	^( dnssd_getaddrinfo_result_t * const inResults, const size_t inCount )
+	{
+		require_return( me->gai == gai );
+		
+		size_t unexpectedResultCount = 0;
+		for( size_t i = 0; i < inCount; ++i )
+		{
+			Boolean resultIsExpected = false;
+			const dnssd_getaddrinfo_result_t result = inResults[ i ];
+			const dnssd_getaddrinfo_result_type_t resultType = dnssd_getaddrinfo_result_get_type( result );
+			const char * const actualHostnameStr = dnssd_getaddrinfo_result_get_actual_hostname( result );
+			const bool fromCache = dnssd_getaddrinfo_result_is_from_cache( result );
+			sockaddr_ip expectedAddr;
+			StringToSockAddr( "203.0.113.1", &expectedAddr, sizeof( expectedAddr ), NULL );
+			if( SockAddrCompareAddr( dnssd_getaddrinfo_result_get_address( result ), &expectedAddr.sa ) == 0 )
+			{
+				// Since this is a GAI for a single-label instead of a FQDN, to make sure that appropriate search domain
+				// was appended, check the actual hostname, which should be equal to the domain that we used for the
+				// test DNS server: alias-ttl-1.<domain> → <domain> → 203.0.113.1
+				//
+				// Note: We don't want results from another of the DNS server's search domains, such as dnssec.test. The
+				// domain specified with --domain should come first in the list of search domains.
+				
+				mdns_domain_name_t actualHostname = mdns_domain_name_create( actualHostnameStr,
+					mdns_domain_name_create_opts_none, NULL );
+				if( actualHostname && mdns_domain_name_equal( actualHostname, me->domain ) )
+				{
+					if( !gotExpiredResult )
+					{
+						if( ( resultType == dnssd_getaddrinfo_result_type_expired ) && fromCache )
+						{
+							gotExpiredResult = true;
+							resultIsExpected = true;
+						}
+					}
+					else if ( !gotAddResult )
+					{
+						if( ( resultType == dnssd_getaddrinfo_result_type_add ) && !fromCache )
+						{
+							gotAddResult     = true;
+							resultIsExpected = true;
+						}
+					}
+				}
+				mdns_forget( &actualHostname );
+			}
+			if( !resultIsExpected ) ++unexpectedResultCount;
+			FPrintF( stdout,
+				"%{du:time} %s Got %sexpected result -- type: %s, hostname: %s, address: %##a, actual hostname: %s, "
+				"from cache: %s\n",
+				NULL, resultIsExpected ? "✓" : "x", resultIsExpected ? "" : "un",
+				dnssd_getaddrinfo_result_type_to_string( resultType ), dnssd_getaddrinfo_result_get_hostname( result ),
+				dnssd_getaddrinfo_result_get_address( result ), actualHostnameStr, YesNoStr( fromCache ) );
+		}
+		if( unexpectedResultCount > 0 ) _OptimisticDNSTestStop( me, kUnexpectedErr );
+	} );
+	dnssd_getaddrinfo_activate( me->gai );
+	
+	check( !me->timer );
+	me->timer = dispatch_source_create( DISPATCH_SOURCE_TYPE_TIMER, 0, 0, me->queue );
+	require_action_quiet( me->timer, exit, err = kNoResourcesErr );
+	
+	dispatch_source_set_timer( me->timer, dispatch_time_seconds( timeLimitSecs ), DISPATCH_TIME_FOREVER, 0 );
+	dispatch_source_set_event_handler( me->timer,
+	^{
+		dispatch_source_forget( &me->timer );
+		dnssd_getaddrinfo_forget( &me->gai );
+		OSStatus finalErr;
+		if( !gotExpiredResult || !gotAddResult )
+		{
+			if( !gotExpiredResult )
+			{
+				FPrintF( stdout, "%{du:time} Failed to get EXPIRED GAI result for '%s' after %u seconds.\n",
+					NULL, me->hostname, timeLimitSecs );
+			}
+			if( !gotAddResult )
+			{
+				FPrintF( stdout, "%{du:time} Failed to get ADD GAI result for '%s' after %u seconds.\n",
+					NULL, me->hostname, timeLimitSecs );
+			}
+			finalErr = kTimeoutErr;
+		}
+		else
+		{
+			finalErr = kNoErr;
+		}
+		_OptimisticDNSTestStop( me, finalErr );
+	} );
+	dispatch_activate( me->timer );
+	err = kNoErr;
+	
+exit:
+	return( err );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_OptimisticDNSTestStartSubtest4_1( const OptimisticDNSTestRef me )
+{
+	OSStatus err;
+	__block Boolean gotAddResult = false;
+	FPrintF( stdout,
+		"%{du:time} Subtest 4.1: First single-label GAI for hostname with one CNAME record (tests search domain case)\n",
+		NULL );
+	ForgetMem( &me->hostname );
+	ASPrintF( &me->hostname, "%s", "alias-ttl-1" );
+	require_action( me->hostname, exit, err = kNoMemoryErr );
+	
+	const unsigned int timeLimitSecs = 5;
+	FPrintF( stdout,
+		"%{du:time} * Starting GAI for single label '%s' with %u second time limit\n", NULL, me->hostname, timeLimitSecs );
+	const DNSServiceFlags flags = kDNSServiceFlagsReturnIntermediates | kDNSServiceFlagsAllowExpiredAnswers;
+	me->gai = _OptimisticDNSTestCreateGAI( me, me->hostname, flags );
+	require_action( me->gai, exit, err = kNoResourcesErr );
+	
+	const dnssd_getaddrinfo_t gai = me->gai;
+	dnssd_getaddrinfo_set_result_handler( me->gai,
+	^( dnssd_getaddrinfo_result_t * const inResults, const size_t inCount )
+	{
+		require_return( me->gai == gai );
+		
+		size_t unexpectedResultCount = 0;
+		for( size_t i = 0; i < inCount; ++i )
+		{
+			Boolean resultIsExpected = false;
+			const dnssd_getaddrinfo_result_t result = inResults[ i ];
+			const dnssd_getaddrinfo_result_type_t resultType = dnssd_getaddrinfo_result_get_type( result );
+			const char * const actualHostnameStr = dnssd_getaddrinfo_result_get_actual_hostname( result );
+			const bool fromCache = dnssd_getaddrinfo_result_is_from_cache( result );
+			sockaddr_ip expectedAddr;
+			StringToSockAddr( "203.0.113.1", &expectedAddr, sizeof( expectedAddr ), NULL );
+			if( SockAddrCompareAddr( dnssd_getaddrinfo_result_get_address( result ), &expectedAddr.sa ) == 0 )
+			{
+				// Since this is a GAI for a single-label instead of a FQDN, to make sure that appropriate search domain
+				// was appended, check the actual hostname, which should be equal to the domain that we used for the
+				// test DNS server: alias-ttl-1.<domain> → <domain> → 203.0.113.1
+				//
+				// Note: We don't want results from another of the DNS server's search domains, such as dnssec.test. The
+				// domain specified with --domain should come first in the list of search domains.
+				
+				mdns_domain_name_t actualHostname = mdns_domain_name_create( actualHostnameStr,
+					mdns_domain_name_create_opts_none, NULL );
+				if( actualHostname && mdns_domain_name_equal( actualHostname, me->domain ) )
+				{
+					if( !gotAddResult )
+					{
+						if( ( resultType == dnssd_getaddrinfo_result_type_add ) && !fromCache )
+						{
+							gotAddResult     = true;
+							resultIsExpected = true;
+						}
+					}
+				}
+				mdns_forget( &actualHostname );
+			}
+			if( !resultIsExpected ) ++unexpectedResultCount;
+			FPrintF( stdout,
+				"%{du:time} %s Got %sexpected result -- type: %s, hostname: %s, address: %##a, actual hostname: %s, "
+				"from cache: %s\n",
+				NULL, resultIsExpected ? "✓" : "x", resultIsExpected ? "" : "un",
+				dnssd_getaddrinfo_result_type_to_string( resultType ), dnssd_getaddrinfo_result_get_hostname( result ),
+				dnssd_getaddrinfo_result_get_address( result ), actualHostnameStr, YesNoStr( fromCache ) );
+		}
+		if( unexpectedResultCount > 0 ) _OptimisticDNSTestStop( me, kUnexpectedErr );
+	} );
+	dnssd_getaddrinfo_activate( me->gai );
+	
+	check( !me->timer );
+	me->timer = dispatch_source_create( DISPATCH_SOURCE_TYPE_TIMER, 0, 0, me->queue );
+	require_action_quiet( me->timer, exit, err = kNoResourcesErr );
+	
+	dispatch_source_set_timer( me->timer, dispatch_time_seconds( timeLimitSecs ), DISPATCH_TIME_FOREVER, 0 );
+	dispatch_source_set_event_handler( me->timer,
+	^{
+		dispatch_source_forget( &me->timer );
+		dnssd_getaddrinfo_forget( &me->gai );
+		if( !gotAddResult )
+		{
+			FPrintF( stdout, "%{du:time} Failed to get ADD GAI result for '%s' after %u seconds.\n",
+				NULL, me->hostname, timeLimitSecs );
+			_OptimisticDNSTestStop( me, kTimeoutErr );
+		}
+		else
+		{
+			const unsigned int waitSecs = 15;
+			FPrintF( stdout, "%{du:time} ⧖ Waiting %u seconds for CNAME record to expire\n", NULL, waitSecs );
+			usleep( waitSecs * kMicrosecondsPerSecond );
+			const OSStatus startErr = _OptimisticDNSTestStartSubtest4_2( me );
+			if( startErr ) _OptimisticDNSTestStop( me, startErr );
+		}
+	} );
+	dispatch_activate( me->timer );
+	err = kNoErr;
+	
+exit:
+	return( err );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_OptimisticDNSTestStartSubtest3_2( const OptimisticDNSTestRef me )
+{
+	OSStatus err;
+	__block Boolean gotExpiredResult = false;
+	__block Boolean gotAddResult = false;
+	FPrintF( stdout, "%{du:time} Subtest 3.2: Second GAI for hostname with one CNAME record (expired A record)\n", NULL );
+	check( me->hostname );
+	const unsigned int timeLimitSecs = 5;
+	FPrintF( stdout, "%{du:time} * Starting GAI for '%s' with %u second time limit\n", NULL, me->hostname, timeLimitSecs );
+	const DNSServiceFlags flags = kDNSServiceFlagsReturnIntermediates | kDNSServiceFlagsAllowExpiredAnswers;
+	me->gai = _OptimisticDNSTestCreateGAI( me, me->hostname, flags );
+	require_action( me->gai, exit, err = kNoResourcesErr );
+	
+	const dnssd_getaddrinfo_t gai = me->gai;
+	dnssd_getaddrinfo_set_result_handler( me->gai,
+	^( dnssd_getaddrinfo_result_t * const inResults, const size_t inCount )
+	{
+		require_return( me->gai == gai );
+		
+		size_t unexpectedResultCount = 0;
+		for( size_t i = 0; i < inCount; ++i )
+		{
+			Boolean resultIsExpected = false;
+			const dnssd_getaddrinfo_result_t result = inResults[ i ];
+			const dnssd_getaddrinfo_result_type_t resultType = dnssd_getaddrinfo_result_get_type( result );
+			const bool fromCache = dnssd_getaddrinfo_result_is_from_cache( result );
+			sockaddr_ip expectedAddr;
+			StringToSockAddr( "203.0.113.31", &expectedAddr, sizeof( expectedAddr ), NULL );
+			if( SockAddrCompareAddr( dnssd_getaddrinfo_result_get_address( result ), &expectedAddr.sa ) == 0 )
+			{
+				if( !gotExpiredResult )
+				{
+					if( ( resultType == dnssd_getaddrinfo_result_type_expired ) && fromCache )
+					{
+						gotExpiredResult = true;
+						resultIsExpected = true;
+					}
+				}
+				else if ( !gotAddResult )
+				{
+					if( ( resultType == dnssd_getaddrinfo_result_type_add ) && !fromCache )
+					{
+						gotAddResult     = true;
+						resultIsExpected = true;
+					}
+				}
+			}
+			if( !resultIsExpected ) ++unexpectedResultCount;
+			FPrintF( stdout,
+				"%{du:time} %s Got %sexpected result -- type: %s, hostname: %s, address: %##a, from cache: %s\n",
+				NULL, resultIsExpected ? "✓" : "x", resultIsExpected ? "" : "un",
+				dnssd_getaddrinfo_result_type_to_string( resultType ), dnssd_getaddrinfo_result_get_hostname( result ),
+				dnssd_getaddrinfo_result_get_address( result ), YesNoStr( fromCache ) );
+		}
+		if( unexpectedResultCount > 0 ) _OptimisticDNSTestStop( me, kUnexpectedErr );
+	} );
+	dnssd_getaddrinfo_activate( me->gai );
+	
+	check( !me->timer );
+	me->timer = dispatch_source_create( DISPATCH_SOURCE_TYPE_TIMER, 0, 0, me->queue );
+	require_action_quiet( me->timer, exit, err = kNoResourcesErr );
+	
+	dispatch_source_set_timer( me->timer, dispatch_time_seconds( timeLimitSecs ), DISPATCH_TIME_FOREVER, 0 );
+	dispatch_source_set_event_handler( me->timer,
+	^{
+		dispatch_source_forget( &me->timer );
+		dnssd_getaddrinfo_forget( &me->gai );
+		if( !gotExpiredResult || !gotAddResult )
+		{
+			if( !gotExpiredResult )
+			{
+				FPrintF( stdout, "%{du:time} Failed to get EXPIRED GAI result for '%s' after %u seconds.\n",
+					NULL, me->hostname, timeLimitSecs );
+			}
+			if( !gotAddResult )
+			{
+				FPrintF( stdout, "%{du:time} Failed to get ADD GAI result for '%s' after %u seconds.\n",
+					NULL, me->hostname, timeLimitSecs );
+			}
+			_OptimisticDNSTestStop( me, kTimeoutErr );
+		}
+		else
+		{
+			const OSStatus startErr = _OptimisticDNSTestStartSubtest4_1( me );
+			if( startErr ) _OptimisticDNSTestStop( me, startErr );
+		}
+	} );
+	dispatch_activate( me->timer );
+	err = kNoErr;
+	
+exit:
+	return( err );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_OptimisticDNSTestStartSubtest3_1( const OptimisticDNSTestRef me )
+{
+	OSStatus err;
+	__block Boolean gotAddResult = false;
+	FPrintF( stdout, "%{du:time} Subtest 3.1: First GAI for hostname with one CNAME record\n", NULL );
+	ForgetMem( &me->hostname );
+	ASPrintF( &me->hostname,
+		"alias-ttl-600.tag-address-record-expires-first.ttl-1.offset-30.%s",
+		mdns_domain_name_get_presentation( me->domain ) );
+	require_action( me->hostname, exit, err = kNoMemoryErr );
+	
+	const unsigned int timeLimitSecs = 5;
+	FPrintF( stdout, "%{du:time} * Starting GAI for '%s' with %u second time limit\n", NULL, me->hostname, timeLimitSecs );
+	const DNSServiceFlags flags = kDNSServiceFlagsReturnIntermediates | kDNSServiceFlagsAllowExpiredAnswers;
+	me->gai = _OptimisticDNSTestCreateGAI( me, me->hostname, flags );
+	require_action( me->gai, exit, err = kNoResourcesErr );
+	
+	const dnssd_getaddrinfo_t gai = me->gai;
+	dnssd_getaddrinfo_set_result_handler( me->gai,
+	^( dnssd_getaddrinfo_result_t * const inResults, const size_t inCount )
+	{
+		require_return( me->gai == gai );
+		
+		size_t unexpectedResultCount = 0;
+		for( size_t i = 0; i < inCount; ++i )
+		{
+			Boolean resultIsExpected = false;
+			const dnssd_getaddrinfo_result_t result = inResults[ i ];
+			const dnssd_getaddrinfo_result_type_t resultType = dnssd_getaddrinfo_result_get_type( result );
+			const bool fromCache = dnssd_getaddrinfo_result_is_from_cache( result );
+			sockaddr_ip expectedAddr;
+			StringToSockAddr( "203.0.113.31", &expectedAddr, sizeof( expectedAddr ), NULL );
+			if( SockAddrCompareAddr( dnssd_getaddrinfo_result_get_address( result ), &expectedAddr.sa ) == 0 )
+			{
+				if( !gotAddResult )
+				{
+					if( ( resultType == dnssd_getaddrinfo_result_type_add ) && !fromCache )
+					{
+						gotAddResult     = true;
+						resultIsExpected = true;
+					}
+				}
+			}
+			if( !resultIsExpected ) ++unexpectedResultCount;
+			FPrintF( stdout,
+				"%{du:time} %s Got %sexpected result -- type: %s, hostname: %s, address: %##a, from cache: %s\n",
+				NULL, resultIsExpected ? "✓" : "x", resultIsExpected ? "" : "un",
+				dnssd_getaddrinfo_result_type_to_string( resultType ), dnssd_getaddrinfo_result_get_hostname( result ),
+				dnssd_getaddrinfo_result_get_address( result ), YesNoStr( fromCache ) );
+		}
+		if( unexpectedResultCount > 0 ) _OptimisticDNSTestStop( me, kUnexpectedErr );
+	} );
+	dnssd_getaddrinfo_activate( me->gai );
+	
+	check( !me->timer );
+	me->timer = dispatch_source_create( DISPATCH_SOURCE_TYPE_TIMER, 0, 0, me->queue );
+	require_action_quiet( me->timer, exit, err = kNoResourcesErr );
+	
+	dispatch_source_set_timer( me->timer, dispatch_time_seconds( timeLimitSecs ), DISPATCH_TIME_FOREVER, 0 );
+	dispatch_source_set_event_handler( me->timer,
+	^{
+		dispatch_source_forget( &me->timer );
+		dnssd_getaddrinfo_forget( &me->gai );
+		if( !gotAddResult )
+		{
+			FPrintF( stdout, "%{du:time} Failed to get ADD GAI result for '%s' after %u seconds.\n",
+				NULL, me->hostname, timeLimitSecs );
+			_OptimisticDNSTestStop( me, kTimeoutErr );
+		}
+		else
+		{
+			const unsigned int waitSecs = 15;
+			FPrintF( stdout, "%{du:time} ⧖ Waiting %u seconds for A record to expire\n", NULL, waitSecs );
+			usleep( waitSecs * kMicrosecondsPerSecond );
+			const OSStatus startErr = _OptimisticDNSTestStartSubtest3_2( me );
+			if( startErr ) _OptimisticDNSTestStop( me, startErr );
+		}
+	} );
+	dispatch_activate( me->timer );
+	err = kNoErr;
+	
+exit:
+	return( err );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_OptimisticDNSTestStartSubtest2_2( const OptimisticDNSTestRef me )
+{
+	OSStatus err;
+	__block Boolean gotExpiredResult = false;
+	__block Boolean gotAddResult = false;
+	FPrintF( stdout,
+		"%{du:time} Subtest 2.2: Second GAI for hostname with one CNAME record (expired CNAME record)\n", NULL );
+	check( me->hostname );
+	const unsigned int timeLimitSecs = 5;
+	FPrintF( stdout, "%{du:time} * Starting GAI for '%s' with %u second time limit\n", NULL, me->hostname, timeLimitSecs );
+	const DNSServiceFlags flags = kDNSServiceFlagsReturnIntermediates | kDNSServiceFlagsAllowExpiredAnswers;
+	me->gai = _OptimisticDNSTestCreateGAI( me, me->hostname, flags );
+	require_action( me->gai, exit, err = kNoResourcesErr );
+	
+	const dnssd_getaddrinfo_t gai = me->gai;
+	dnssd_getaddrinfo_set_result_handler( me->gai,
+	^( dnssd_getaddrinfo_result_t * const inResults, const size_t inCount )
+	{
+		require_return( me->gai == gai );
+		
+		size_t unexpectedResultCount = 0;
+		for( size_t i = 0; i < inCount; ++i )
+		{
+			Boolean resultIsExpected = false;
+			const dnssd_getaddrinfo_result_t result = inResults[ i ];
+			const dnssd_getaddrinfo_result_type_t resultType = dnssd_getaddrinfo_result_get_type( result );
+			const bool fromCache = dnssd_getaddrinfo_result_is_from_cache( result );
+			sockaddr_ip expectedAddr;
+			StringToSockAddr( "203.0.113.21", &expectedAddr, sizeof( expectedAddr ), NULL );
+			if( SockAddrCompareAddr( dnssd_getaddrinfo_result_get_address( result ), &expectedAddr.sa ) == 0 )
+			{
+				if( !gotExpiredResult )
+				{
+					if( ( resultType == dnssd_getaddrinfo_result_type_expired ) && fromCache )
+					{
+						gotExpiredResult = true;
+						resultIsExpected = true;
+					}
+				}
+				else if ( !gotAddResult )
+				{
+					if( ( resultType == dnssd_getaddrinfo_result_type_add ) && !fromCache )
+					{
+						gotAddResult     = true;
+						resultIsExpected = true;
+					}
+				}
+			}
+			if( !resultIsExpected ) ++unexpectedResultCount;
+			FPrintF( stdout,
+				"%{du:time} %s Got %sexpected result -- type: %s, hostname: %s, address: %##a, from cache: %s\n",
+				NULL, resultIsExpected ? "✓" : "x", resultIsExpected ? "" : "un",
+				dnssd_getaddrinfo_result_type_to_string( resultType ), dnssd_getaddrinfo_result_get_hostname( result ),
+				dnssd_getaddrinfo_result_get_address( result ), YesNoStr( fromCache ) );
+		}
+		if( unexpectedResultCount > 0 ) _OptimisticDNSTestStop( me, kUnexpectedErr );
+	} );
+	dnssd_getaddrinfo_activate( me->gai );
+	
+	check( !me->timer );
+	me->timer = dispatch_source_create( DISPATCH_SOURCE_TYPE_TIMER, 0, 0, me->queue );
+	require_action_quiet( me->timer, exit, err = kNoResourcesErr );
+	
+	dispatch_source_set_timer( me->timer, dispatch_time_seconds( timeLimitSecs ), DISPATCH_TIME_FOREVER, 0 );
+	dispatch_source_set_event_handler( me->timer,
+	^{
+		dispatch_source_forget( &me->timer );
+		dnssd_getaddrinfo_forget( &me->gai );
+		if( !gotExpiredResult || !gotAddResult )
+		{
+			if( !gotExpiredResult )
+			{
+				FPrintF( stdout, "%{du:time} Failed to get EXPIRED GAI result for '%s' after %u seconds.\n",
+					NULL, me->hostname, timeLimitSecs );
+			}
+			if( !gotAddResult )
+			{
+				FPrintF( stdout, "%{du:time} Failed to get ADD GAI result for '%s' after %u seconds.\n",
+					NULL, me->hostname, timeLimitSecs );
+			}
+			_OptimisticDNSTestStop( me, kTimeoutErr );
+		}
+		else
+		{
+			const OSStatus startErr = _OptimisticDNSTestStartSubtest3_1( me );
+			if( startErr ) _OptimisticDNSTestStop( me, startErr );
+		}
+	} );
+	dispatch_activate( me->timer );
+	err = kNoErr;
+	
+exit:
+	return( err );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_OptimisticDNSTestStartSubtest2_1( const OptimisticDNSTestRef me )
+{
+	OSStatus err;
+	__block Boolean gotAddResult = false;
+	FPrintF( stdout, "%{du:time} Subtest 2.1: First GAI for hostname with one CNAME record\n", NULL );
+	ForgetMem( &me->hostname );
+	ASPrintF( &me->hostname,
+		"alias-ttl-1.tag-cname-expires-first.ttl-600.offset-20.%s", mdns_domain_name_get_presentation( me->domain ) );
+	require_action( me->hostname, exit, err = kNoMemoryErr );
+	
+	const unsigned int timeLimitSecs = 5;
+	FPrintF( stdout, "%{du:time} * Starting GAI for '%s' with %u second time limit\n", NULL, me->hostname, timeLimitSecs );
+	const DNSServiceFlags flags = kDNSServiceFlagsReturnIntermediates | kDNSServiceFlagsAllowExpiredAnswers;
+	me->gai = _OptimisticDNSTestCreateGAI( me, me->hostname, flags );
+	require_action( me->gai, exit, err = kNoResourcesErr );
+	
+	const dnssd_getaddrinfo_t gai = me->gai;
+	dnssd_getaddrinfo_set_result_handler( me->gai,
+	^( dnssd_getaddrinfo_result_t * const inResults, const size_t inCount )
+	{
+		require_return( me->gai == gai );
+		
+		size_t unexpectedResultCount = 0;
+		for( size_t i = 0; i < inCount; ++i )
+		{
+			Boolean resultIsExpected = false;
+			const dnssd_getaddrinfo_result_t result = inResults[ i ];
+			const dnssd_getaddrinfo_result_type_t resultType = dnssd_getaddrinfo_result_get_type( result );
+			const bool fromCache = dnssd_getaddrinfo_result_is_from_cache( result );
+			sockaddr_ip expectedAddr;
+			StringToSockAddr( "203.0.113.21", &expectedAddr, sizeof( expectedAddr ), NULL );
+			if( SockAddrCompareAddr( dnssd_getaddrinfo_result_get_address( result ), &expectedAddr.sa ) == 0 )
+			{
+				if( !gotAddResult )
+				{
+					if( ( resultType == dnssd_getaddrinfo_result_type_add ) && !fromCache )
+					{
+						gotAddResult     = true;
+						resultIsExpected = true;
+					}
+				}
+			}
+			if( !resultIsExpected ) ++unexpectedResultCount;
+			FPrintF( stdout,
+				"%{du:time} %s Got %sexpected result -- type: %s, hostname: %s, address: %##a, from cache: %s\n",
+				NULL, resultIsExpected ? "✓" : "x", resultIsExpected ? "" : "un",
+				dnssd_getaddrinfo_result_type_to_string( resultType ), dnssd_getaddrinfo_result_get_hostname( result ),
+				dnssd_getaddrinfo_result_get_address( result ), YesNoStr( fromCache ) );
+		}
+		if( unexpectedResultCount > 0 ) _OptimisticDNSTestStop( me, kUnexpectedErr );
+	} );
+	dnssd_getaddrinfo_activate( me->gai );
+	
+	check( !me->timer );
+	me->timer = dispatch_source_create( DISPATCH_SOURCE_TYPE_TIMER, 0, 0, me->queue );
+	require_action_quiet( me->timer, exit, err = kNoResourcesErr );
+	
+	dispatch_source_set_timer( me->timer, dispatch_time_seconds( timeLimitSecs ), DISPATCH_TIME_FOREVER, 0 );
+	dispatch_source_set_event_handler( me->timer,
+	^{
+		dispatch_source_forget( &me->timer );
+		dnssd_getaddrinfo_forget( &me->gai );
+		if( !gotAddResult )
+		{
+			FPrintF( stdout, "%{du:time} Failed to get ADD GAI result for '%s' after %u seconds.\n",
+				NULL, me->hostname, timeLimitSecs );
+			_OptimisticDNSTestStop( me, kTimeoutErr );
+		}
+		else
+		{
+			const unsigned int waitSecs = 15;
+			FPrintF( stdout, "%{du:time} ⧖ Waiting %u seconds for CNAME record to expire\n", NULL, waitSecs );
+			usleep( waitSecs * kMicrosecondsPerSecond );
+			const OSStatus startErr = _OptimisticDNSTestStartSubtest2_2( me );
+			if( startErr ) _OptimisticDNSTestStop( me, startErr );
+		}
+	} );
+	dispatch_activate( me->timer );
+	err = kNoErr;
+	
+exit:
+	return( err );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_OptimisticDNSTestStartSubtest1_2( const OptimisticDNSTestRef me )
+{
+	OSStatus err;
+	__block Boolean gotExpiredResult = false;
+	__block Boolean gotAddResult = false;
+	FPrintF( stdout, "%{du:time} Subtest 1.2: Second GAI for hostname without CNAME records (expired A record)\n", NULL );
+	check( me->hostname );
+	const unsigned int timeLimitSecs = 5;
+	FPrintF( stdout,
+		"%{du:time} * Starting GAI for '%s' with %u second time limit\n", NULL, me->hostname, timeLimitSecs );
+	const DNSServiceFlags flags = kDNSServiceFlagsReturnIntermediates | kDNSServiceFlagsAllowExpiredAnswers;
+	me->gai = _OptimisticDNSTestCreateGAI( me, me->hostname, flags );
+	require_action( me->gai, exit, err = kNoResourcesErr );
+	
+	const dnssd_getaddrinfo_t gai = me->gai;
+	dnssd_getaddrinfo_set_result_handler( me->gai,
+	^( dnssd_getaddrinfo_result_t * const inResults, const size_t inCount )
+	{
+		require_return( me->gai == gai );
+		
+		size_t unexpectedResultCount = 0;
+		for( size_t i = 0; i < inCount; ++i )
+		{
+			Boolean resultIsExpected = false;
+			const dnssd_getaddrinfo_result_t result = inResults[ i ];
+			const dnssd_getaddrinfo_result_type_t resultType = dnssd_getaddrinfo_result_get_type( result );
+			const bool fromCache = dnssd_getaddrinfo_result_is_from_cache( result );
+			sockaddr_ip expectedAddr;
+			StringToSockAddr( "203.0.113.11", &expectedAddr, sizeof( expectedAddr ), NULL );
+			if( SockAddrCompareAddr( dnssd_getaddrinfo_result_get_address( result ), &expectedAddr.sa ) == 0 )
+			{
+				if( !gotExpiredResult )
+				{
+					if( ( resultType == dnssd_getaddrinfo_result_type_expired ) && fromCache )
+					{
+						gotExpiredResult = true;
+						resultIsExpected = true;
+					}
+				}
+				else if ( !gotAddResult )
+				{
+					if( ( resultType == dnssd_getaddrinfo_result_type_add ) && !fromCache )
+					{
+						gotAddResult     = true;
+						resultIsExpected = true;
+					}
+				}
+			}
+			if( !resultIsExpected ) ++unexpectedResultCount;
+			FPrintF( stdout,
+				"%{du:time} %s Got %sexpected result -- type: %s, hostname: %s, address: %##a, from cache: %s\n",
+				NULL, resultIsExpected ? "✓" : "x", resultIsExpected ? "" : "un",
+				dnssd_getaddrinfo_result_type_to_string( resultType ), dnssd_getaddrinfo_result_get_hostname( result ),
+				dnssd_getaddrinfo_result_get_address( result ), YesNoStr( fromCache ) );
+		}
+		if( unexpectedResultCount > 0 ) _OptimisticDNSTestStop( me, kUnexpectedErr );
+	} );
+	dnssd_getaddrinfo_activate( me->gai );
+	
+	check( !me->timer );
+	me->timer = dispatch_source_create( DISPATCH_SOURCE_TYPE_TIMER, 0, 0, me->queue );
+	require_action_quiet( me->timer, exit, err = kNoResourcesErr );
+	
+	dispatch_source_set_timer( me->timer, dispatch_time_seconds( timeLimitSecs ), DISPATCH_TIME_FOREVER, 0 );
+	dispatch_source_set_event_handler( me->timer,
+	^{
+		dispatch_source_forget( &me->timer );
+		dnssd_getaddrinfo_forget( &me->gai );
+		if( !gotExpiredResult || !gotAddResult )
+		{
+			if( !gotExpiredResult )
+			{
+				FPrintF( stdout, "%{du:time} Failed to get EXPIRED GAI result for '%s' after %u seconds.\n",
+					NULL, me->hostname, timeLimitSecs );
+			}
+			if( !gotAddResult )
+			{
+				FPrintF( stdout, "%{du:time} Failed to get ADD GAI result for '%s' after %u seconds.\n",
+					NULL, me->hostname, timeLimitSecs );
+			}
+			_OptimisticDNSTestStop( me, kTimeoutErr );
+		}
+		else
+		{
+			const OSStatus startErr = _OptimisticDNSTestStartSubtest2_1( me );
+			if( startErr ) _OptimisticDNSTestStop( me, startErr );
+		}
+	} );
+	dispatch_activate( me->timer );
+	err = kNoErr;
+	
+exit:
+	return( err );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_OptimisticDNSTestStartSubtest1_1( const OptimisticDNSTestRef me )
+{
+	OSStatus err;
+	__block Boolean gotAddResult = false;
+	FPrintF( stdout, "%{du:time} Subtest 1.1: First GAI for hostname without CNAME records\n", NULL );
+	ForgetMem( &me->hostname );
+	ASPrintF( &me->hostname, "ttl-1.offset-10.%s", mdns_domain_name_get_presentation( me->domain ) );
+	require_action( me->hostname, exit, err = kNoMemoryErr );
+	
+	const unsigned int timeLimitSecs = 5;
+	FPrintF( stdout, "%{du:time} * Starting GAI for '%s' with %u second time limit\n",
+		NULL, me->hostname, timeLimitSecs );
+	const DNSServiceFlags flags = kDNSServiceFlagsReturnIntermediates | kDNSServiceFlagsAllowExpiredAnswers;
+	me->gai = _OptimisticDNSTestCreateGAI( me, me->hostname, flags );
+	require_action( me->gai, exit, err = kNoResourcesErr );
+	
+	const dnssd_getaddrinfo_t gai = me->gai;
+	dnssd_getaddrinfo_set_result_handler( me->gai,
+	^( dnssd_getaddrinfo_result_t * const inResults, const size_t inCount )
+	{
+		require_return( me->gai == gai );
+		
+		size_t unexpectedResultCount = 0;
+		for( size_t i = 0; i < inCount; ++i )
+		{
+			Boolean resultIsExpected = false;
+			const dnssd_getaddrinfo_result_t result = inResults[ i ];
+			const dnssd_getaddrinfo_result_type_t resultType = dnssd_getaddrinfo_result_get_type( result );
+			const bool fromCache = dnssd_getaddrinfo_result_is_from_cache( result );
+			if( !gotAddResult )
+			{
+				if( ( resultType == dnssd_getaddrinfo_result_type_add ) && !fromCache )
+				{
+					sockaddr_ip expectedAddr;
+					StringToSockAddr( "203.0.113.11", &expectedAddr, sizeof( expectedAddr ), NULL );
+					if( SockAddrCompareAddr( dnssd_getaddrinfo_result_get_address( result ), &expectedAddr.sa ) == 0 )
+					{
+						gotAddResult     = true;
+						resultIsExpected = true;
+					}
+				}
+			}
+			if( !resultIsExpected ) ++unexpectedResultCount;
+			FPrintF( stdout,
+				"%{du:time} %s Got %sexpected result -- type: %s, hostname: %s, address: %##a, from cache: %s\n",
+				NULL, resultIsExpected ? "✓" : "x", resultIsExpected ? "" : "un",
+				dnssd_getaddrinfo_result_type_to_string( resultType ), dnssd_getaddrinfo_result_get_hostname( result ),
+				dnssd_getaddrinfo_result_get_address( result ), YesNoStr( fromCache ) );
+		}
+		if( unexpectedResultCount > 0 ) _OptimisticDNSTestStop( me, kUnexpectedErr );
+	} );
+	dnssd_getaddrinfo_activate( me->gai );
+	
+	check( !me->timer );
+	me->timer = dispatch_source_create( DISPATCH_SOURCE_TYPE_TIMER, 0, 0, me->queue );
+	require_action_quiet( me->timer, exit, err = kNoResourcesErr );
+	
+	dispatch_source_set_timer( me->timer, dispatch_time_seconds( timeLimitSecs ), DISPATCH_TIME_FOREVER, 0 );
+	dispatch_source_set_event_handler( me->timer,
+	^{
+		dispatch_source_forget( &me->timer );
+		dnssd_getaddrinfo_forget( &me->gai );
+		if( !gotAddResult )
+		{
+			FPrintF( stdout, "%{du:time} Failed to get ADD GAI result for '%s' after %u seconds.\n",
+				NULL, me->hostname, timeLimitSecs );
+			_OptimisticDNSTestStop( me, kTimeoutErr );
+		}
+		else
+		{
+			const unsigned int waitSecs = 15;
+			FPrintF( stdout, "%{du:time} ⧖ Waiting %u seconds for A record to expire\n", NULL, waitSecs );
+			usleep( waitSecs * kMicrosecondsPerSecond );
+			const OSStatus startErr = _OptimisticDNSTestStartSubtest1_2( me );
+			if( startErr ) _OptimisticDNSTestStop( me, startErr );
+		}
+	} );
+	dispatch_activate( me->timer );
+	err = kNoErr;
+	
+exit:
+	return( err );
+}
+
+//===========================================================================================================================
+
+static void	_OptimisticDNSTestStart( void * const inCtx )
+{
+	OSStatus err;
+	char *domainStr = NULL;
+	char *serverCmd = NULL;
+	const OptimisticDNSTestRef me = (OptimisticDNSTestRef) inCtx;
+	char tag[ 6 + 1 ];
+	ASPrintF( &domainStr,
+		"optimistic-dns-test-%s.test.",
+		_RandomStringExact( kLowerAlphaNumericCharSet, kLowerAlphaNumericCharSetSize, sizeof( tag ) - 1, tag ) );
+	require_action( domainStr, exit, err = kNoMemoryErr );
+	
+	me->domain = mdns_domain_name_create( domainStr, mdns_domain_name_create_opts_none, &err );
+	require_noerr( err, exit );
+	
+	ASPrintF( &serverCmd,
+		"dnssdutil server --loopback --follow %lld --responseDelay 10 --domain %s",
+		(int64_t) getpid(), mdns_domain_name_get_presentation( me->domain ) );
+	require_action_quiet( serverCmd, exit, err = kNoMemoryErr );
+	
+	FPrintF( stdout, "%{du:time} Starting DNS server with command: %s\n", NULL, serverCmd );
+	err = _SpawnCommand( &me->serverPID, "/dev/null", "/dev/null", "%s", serverCmd );
+	require_noerr( err, exit );
+	
+	ASPrintF( &me->hostname, "tag-probe.offset-250.%s", mdns_domain_name_get_presentation( me->domain ) );
+	require_action( me->hostname, exit, err = kNoMemoryErr );
+	
+	me->gai = _OptimisticDNSTestCreateGAI( me, me->hostname, 0 );
+	require_action( me->gai, exit, err = kNoResourcesErr );
+	
+	const unsigned int timeoutSecs = 5;
+	FPrintF( stdout,
+		"%{du:time} Starting GAI to detect DNS server readiness with probe hostname '%s' and %u second timeout\n",
+			NULL, me->hostname, timeoutSecs );
+	const dnssd_getaddrinfo_t gai = me->gai;
+	dnssd_getaddrinfo_set_result_handler( me->gai,
+	^( dnssd_getaddrinfo_result_t * const inResults, const size_t inCount )
+	{
+		require_return( me->gai == gai );
+		
+		Boolean proceed = false;
+		for( size_t i = 0; i < inCount; ++i )
+		{
+			const dnssd_getaddrinfo_result_t result = inResults[ i ];
+			if( dnssd_getaddrinfo_result_get_type( result ) == dnssd_getaddrinfo_result_type_add )
+			{
+				proceed = true;
+				break;
+			}
+		}
+		if( proceed )
+		{
+			dispatch_source_forget( &me->timer );
+			dnssd_getaddrinfo_forget( &me->gai );
+			FPrintF( stdout, "%{du:time} Starting subtests...\n", NULL );
+			const OSStatus startErr = _OptimisticDNSTestStartSubtest1_1( me );
+			if( startErr ) _OptimisticDNSTestStop( me, startErr );
+		}
+	} );
+	dnssd_getaddrinfo_activate( me->gai );
+	
+	me->timer = dispatch_source_create( DISPATCH_SOURCE_TYPE_TIMER, 0, 0, me->queue );
+	require_action_quiet( me->timer, exit, err = kNoResourcesErr );
+	
+	dispatch_source_set_timer( me->timer, dispatch_time_seconds( timeoutSecs ), DISPATCH_TIME_FOREVER, 0 );
+	dispatch_source_set_event_handler( me->timer,
+	^{
+		FPrintF( stdout,
+			"%{du:time} Probe GAI request for '%s' timed out after %u seconds.\n", NULL, me->hostname, timeoutSecs );
+		_OptimisticDNSTestStop( me, kNotPreparedErr );
+	} );
+	dispatch_activate( me->timer );
+	
+exit:
+	ForgetMem( &domainStr );
+	ForgetMem( &serverCmd );
+	if( err ) _OptimisticDNSTestStop( me, err );
+}
+
+//===========================================================================================================================
+
+static OSStatus	_OptimisticDNSTestRun( const OptimisticDNSTestRef me )
+{
+	dispatch_async_f( me->queue, me, _OptimisticDNSTestStart );
+	dispatch_semaphore_wait( me->doneSem, DISPATCH_TIME_FOREVER );
+	return( me->error );
+}
+
+//===========================================================================================================================
+
+static void	_OptimisticDNSTestRelease( const OptimisticDNSTestRef me )
+{
+	if( atomic_add_and_fetch_32( &me->refCount, -1 ) == 0 )
+	{
+		check( !me->gai );
+		check( !me->timer );
+		check( !me->domain );
+		check( !me->hostname );
+		check( me->serverPID < 0 );
+		dispatch_forget( &me->queue );
+		dispatch_forget( &me->doneSem );
+		free( me );
+	}
+}
+
+//===========================================================================================================================
 //	SSDPDiscoverCmd
 //===========================================================================================================================
 
@@ -29925,6 +30968,38 @@ exit:
 	ForgetMem( &msgPtr );
 	ForgetMem( &msgStr );
 	gExitCode = err ? 1 : 0;
+}
+
+//===========================================================================================================================
+//	WiFiOnCommand
+//===========================================================================================================================
+
+static void	WiFiOnCommand( void )
+{
+	OSStatus		err;
+	
+#if( TARGET_OS_OSX )
+	err = systemf( NULL, "/usr/sbin/networksetup -setairportpower Wi-Fi on" );
+#else
+	err = systemf( NULL, "/usr/local/bin/mobilewifitool -- manager power 1" );
+#endif
+	cli_require_noerr_return( err, "error: %#m\n", err );
+}
+
+//===========================================================================================================================
+//	WiFiOffCommand
+//===========================================================================================================================
+
+static void	WiFiOffCommand( void )
+{
+	OSStatus		err;
+	
+#if( TARGET_OS_OSX )
+	err = systemf( NULL, "/usr/sbin/networksetup -setairportpower Wi-Fi off" );
+#else
+	err = systemf( NULL, "/usr/local/bin/mobilewifitool -- manager power 0" );
+#endif
+	cli_require_noerr_return( err, "error: %#m\n", err );
 }
 
 //===========================================================================================================================

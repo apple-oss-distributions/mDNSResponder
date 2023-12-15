@@ -469,7 +469,16 @@ mDNSlocal void QueryRecordOpEventHandler(DNSQuestion *const inQuestion, const mD
             #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
                 mDNSPlatformMemCopy(inQuestion->ResolverUUID, op->resolverUUID, UUID_SIZE);
             #endif
-                QueryRecordOpStartQuestion(op, inQuestion);
+                const domainname *domain = mDNSNULL;
+                if (inQuestion->AppendSearchDomains && (op->searchListIndex >= 0))
+                {
+                    // If we're appending search domains, the DNSQuestion needs to be retried without Optimistic DNS,
+                    // but with the search domain we just used, so restore the search list index to avoid skipping to
+                    // the next search domain.
+                    op->searchListIndex = op->searchListIndexLast;
+                    domain = NextSearchDomain(op);
+                }
+                QueryRecordOpRestartUnicastQuestion(op, inQuestion, domain);
             }
             break;
     }
@@ -798,6 +807,7 @@ mDNSlocal void QueryRecordOpCallback(mDNS *m, DNSQuestion *inQuestion, const Res
                 if (inQuestion->AppendSearchDomains)
                 {
                     op->searchListIndex = 0; // Reset search list usage
+                    op->searchListIndexLast = 0;
                     domain = NextSearchDomain(op);
                 }
                 QueryRecordOpRestartUnicastQuestion(op, inQuestion, domain);
@@ -894,6 +904,7 @@ mDNSlocal void QueryRecordOpResetHandler(DNSQuestion *inQuestion)
         inQuestion->InterfaceID = op->interfaceID;
     }
     op->searchListIndex = 0;
+    op->searchListIndexLast = 0;
 }
 
 mDNSlocal mStatus QueryRecordOpStartQuestion(QueryRecordOp *inOp, DNSQuestion *inQuestion)
@@ -1034,6 +1045,7 @@ mDNSlocal const domainname * NextSearchDomain(QueryRecordOp *inOp)
 {
     const domainname *      domain;
 
+    inOp->searchListIndexLast = inOp->searchListIndex;
     while ((domain = uDNS_GetNextSearchDomain(inOp->interfaceID, &inOp->searchListIndex, mDNSfalse)) != mDNSNULL)
     {
         if ((DomainNameLength(inOp->qname) - 1 + DomainNameLength(domain)) <= MAX_DOMAIN_NAME) break;

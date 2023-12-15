@@ -599,6 +599,9 @@ datagram_read(comm_t *connection, size_t length, dispatch_data_t content, nw_err
             return true;
         });
     if (ret == true) {
+        // Set the local address
+        message->local = connection->local;
+
         // Process the message.
         if (connection->listener_state != NULL) {
             connection->listener_state->datagram_callback(connection, message, connection->listener_state->context);
@@ -822,6 +825,30 @@ connection_state_changed(comm_t *connection, nw_connection_state_t state, nw_err
 }
 
 static void
+ioloop_connection_get_address_from_endpoint(addr_t *addr, nw_endpoint_t endpoint)
+{
+    nw_endpoint_type_t endpoint_type = nw_endpoint_get_type(endpoint);
+    if (endpoint_type == nw_endpoint_type_address) {
+        char *address_string = nw_endpoint_copy_address_string(endpoint);
+        if (address_string == NULL) {
+            ERROR("unable to get description of new connection.");
+        } else {
+            getipaddr(addr, address_string);
+            if (addr->sa.sa_family == AF_INET6) {
+                SEGMENTED_IPv6_ADDR_GEN_SRP(&addr->sin6.sin6_addr, rdata_buf);
+                INFO("parsed connection local IPv6 address is: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                     SEGMENTED_IPv6_ADDR_PARAM_SRP(&addr->sin6.sin6_addr, rdata_buf));
+            } else {
+                IPv4_ADDR_GEN_SRP(&addr->sin.sin_addr, rdata_buf);
+                INFO("parsed connection local IPv4 address is: " PRI_IPv4_ADDR_SRP,
+                     IPv4_ADDR_PARAM_SRP(&addr->sin.sin_addr, rdata_buf));
+            }
+        }
+        free(address_string);
+    }
+}
+
+static void
 ioloop_connection_set_name_from_endpoint(comm_t *listener, comm_t *connection, nw_endpoint_t endpoint)
 {
     nw_endpoint_type_t endpoint_type = nw_endpoint_get_type(endpoint);
@@ -835,11 +862,11 @@ ioloop_connection_set_name_from_endpoint(comm_t *listener, comm_t *connection, n
             getipaddr(&connection->address, address_string);
             if (connection->address.sa.sa_family == AF_INET6) {
                 SEGMENTED_IPv6_ADDR_GEN_SRP(&connection->address.sin6.sin6_addr, rdata_buf);
-                INFO("parsed connection IPv6 address is: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                INFO("parsed connection remote IPv6 address is: " PRI_SEGMENTED_IPv6_ADDR_SRP,
                      SEGMENTED_IPv6_ADDR_PARAM_SRP(&connection->address.sin6.sin6_addr, rdata_buf));
             } else {
                 IPv4_ADDR_GEN_SRP(&connection->address.sin.sin_addr, rdata_buf);
-                INFO("parsed connection IPv4 address is: " PRI_IPv4_ADDR_SRP,
+                INFO("parsed connection remote IPv4 address is: " PRI_IPv4_ADDR_SRP,
                      IPv4_ADDR_PARAM_SRP(&connection->address.sin.sin_addr, rdata_buf));
             }
         }
@@ -903,6 +930,13 @@ connection_callback(comm_t *listener, nw_connection_t new_connection)
     } else {
         ERROR("Unable to get description of new connection.");
         connection->name = strdup("unidentified");
+    }
+
+    // Best effort
+    nw_endpoint_t local_endpoint = nw_connection_copy_connected_local_endpoint(connection->connection);
+    if (local_endpoint != NULL) {
+        ioloop_connection_get_address_from_endpoint(&connection->local, endpoint);
+        nw_release(local_endpoint);
     }
 
     connection->datagram_callback = listener->datagram_callback;
@@ -975,10 +1009,27 @@ ioloop_listener_cancel(comm_t *connection)
         // connection->listener will be released in ioloop_listener_state_changed_handler: nw_listener_state_cancelled.
     }
 #if UDP_LISTENER_USES_CONNECTION_GROUPS
-    if (!connection->stream && connection->io.fd != -1) {
-        ioloop_close(&connection->io);
-        io->refcnt = 100; // Prevent read_cancel from finalizing the io object
-        ioloop_read_cancel(&connection->io);
+    if (connection->connection_group != NULL) {
+        INFO("%p %p", connection, connection->connection_group);
+        nw_connection_group_cancel(connection->connection_group);
+    }
+#else
+    if (!connection->tcp_stream && connection->connection == NULL) {
+        int fd = connection->io.fd;
+        if (fd != -1) {
+            ioloop_close(&connection->io);
+            close(fd);
+            ioloop_read_cancel(&connection->io);
+            if (connection->cancel != NULL) {
+                RETAIN_HERE(connection, listener);
+                dispatch_async(ioloop_main_queue, ^{
+                        if (connection->cancel != NULL) {
+                            connection->cancel(connection->context);
+                        }
+                        RELEASE_HERE(connection, listener);
+                    });
+            }
+        }
     }
 #endif
 }
@@ -1200,12 +1251,12 @@ ioloop_udp_listener_setup(comm_t *listener, const addr_t *ip_address, uint16_t p
         if (family == AF_INET) {
             IPv4_ADDR_GEN_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf);
             ERROR("Can't bind to " PRI_IPv4_ADDR_SRP "#%d: %s",
-                  IPv4_ADDR_PARAM_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf), ntohs(port),
+                  IPv4_ADDR_PARAM_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf), port,
                   strerror(errno));
         } else {
             SEGMENTED_IPv6_ADDR_GEN_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
             ERROR("Can't bind to " PRI_SEGMENTED_IPv6_ADDR_SRP "#%d: %s",
-                  SEGMENTED_IPv6_ADDR_PARAM_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf), ntohs(port),
+                  SEGMENTED_IPv6_ADDR_PARAM_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf), port,
                   strerror(errno));
         }
     out:

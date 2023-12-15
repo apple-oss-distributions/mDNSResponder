@@ -3091,7 +3091,7 @@ cti_get_xpanid_callback(void *context, uint64_t new_xpanid, cti_status_t status)
     in6addr_zero(&route_state->xpanid_prefix);
     route_state->xpanid_prefix.s6_addr[0] = 0xfd;
     for (int i = 1; i < 8; i++) {
-        route_state->xpanid_prefix.s6_addr[i] = ((route_state->srp_server->xpanid >> ((7 - i) * 8)) & 0xFFU);
+        route_state->xpanid_prefix.s6_addr[i] = ((route_state->srp_server->xpanid >> ((8 - i) * 8)) & 0xFFU);
     }
     route_state->have_xpanid_prefix = true;
 
@@ -3519,7 +3519,7 @@ partition_start_srp_listener(route_state_t *route_state)
 
     INFO("starting listener.");
     route_state->srp_listener = srp_proxy_listen(avoid_ports, num_avoid_ports, partition_proxy_listener_ready,
-                                                 partition_srp_listener_canceled, NULL, route_state->srp_server);
+                                                 partition_srp_listener_canceled, NULL, NULL, route_state->srp_server);
     if (route_state->srp_listener == NULL) {
         ERROR("partition_start_srp_listener: Unable to start SRP Proxy listener, so can't advertise it");
         return;

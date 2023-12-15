@@ -201,7 +201,7 @@ struct dso_transport {
     uint8_t *NULLABLE buf;
     dso_state_t *NULLABLE dso;
     tls_context_t *NULLABLE tls_context;
-    addr_t address, multicast;
+    addr_t address, multicast, local;
     size_t message_length_len;
     size_t message_length, message_cur;
     uint8_t message_length_bytes[2];
@@ -383,6 +383,7 @@ bool ioloop_udp_send_message(comm_t *NONNULL comm, addr_t *NULLABLE source, addr
                              struct iovec *NONNULL iov, int iov_len);
 void ioloop_udp_read_callback(io_t *NONNULL io, void *NULLABLE context);
 #endif
+int get_num_fds(void);
 
 // Local Variables:
 // mode: C

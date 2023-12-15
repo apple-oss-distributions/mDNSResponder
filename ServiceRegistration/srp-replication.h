@@ -259,6 +259,8 @@ struct srpl_connection {
     char *NONNULL name;
     char *NONNULL state_name;
     comm_t *NULLABLE connection;
+    const char *NULLABLE connection_null_reason; // for debugging, records why we NULLed connection.
+    struct timeval connection_null_time; // When connection was set to NULL
     addr_t connected_address;
     srpl_candidate_t *NULLABLE candidate;
     dso_state_t *NULLABLE dso;
@@ -327,6 +329,8 @@ struct srpl_instance {
     bool have_partner_id;
     bool have_dataset_id;
     bool sync_to_join;  // True if sync with the remote partner is required to join the replication
+    bool sync_fail;     // True if sync with the remote partner is declared fail
+    bool discovered_in_window; // True if the instance is discovered in partner discovery window
     bool is_me;
     bool discontinuing; // True if we are in the process of discontinuing this instance.
     bool unmatched; // True if this is an incoming connection that hasn't been associated with a real instance.
@@ -341,6 +345,7 @@ struct srpl_domain {
     uint64_t partner_id; // SRP replication partner ID
     uint64_t dataset_id;
     bool have_dataset_id;
+    bool dataset_id_committed;
     bool partner_discovery_pending;
     int ref_count;
     srpl_opstate_t srpl_opstate;
@@ -395,14 +400,19 @@ struct srpl_domain {
 #define LOWER56_BIT_MASK 0xFFFFFFFFFFFFFFULL
 
 // SRP Replication protocol versioning
-#define SRPL_VERSION_MULTI_HOST_MESSAGE     1
-#define SRPL_VERSION_ANYCAST                2
-#define SRPL_CURRENT_VERSION                SRPL_VERSION_ANYCAST
+// Protocol version number 1: outdated and no longer being used. This version was supposed to
+//                            support multi host messages but did not really work. After making
+//                            it work, we increment the version number to 3.
+// Protocol version number 2: to support anycast service
+// Protocol version number 3: to support multi host messages
+#define SRPL_VERSION_ANYCAST                    2
+#define SRPL_VERSION_MULTI_HOST_MESSAGE         3
+#define SRPL_CURRENT_VERSION                    SRPL_VERSION_MULTI_HOST_MESSAGE
 
 // Variation bits.
 #define SRPL_VARIATION_MULTI_HOST_MESSAGE   1
 #define SRPL_SUPPORTS(srpl_connection, variation) \
-    (((srpl_connection)->variation_mask & ~(variation)) != 0)
+    (((srpl_connection)->variation_mask & (variation)) != 0)
 
 // Exported functions...
 void srpl_startup(srp_server_t *NONNULL srp_server);
