@@ -368,11 +368,10 @@ omr_publisher_interface_configuration_changed(omr_publisher_t *publisher)
         if (publisher->dhcp_interface->inactive || publisher->dhcp_interface->ineligible) {
             // If we have a DHCPv6 client running, we need to discontinue it.
             if (publisher->dhcp_client != NULL) {
-                DHCPv6PDServiceRef NULLABLE dhcp_client = publisher->dhcp_client;
-                publisher->dhcp_client = NULL;
-                CFRelease(dhcp_client); // Release the publisher reference
-                omr_publisher_send_dhcp_event(publisher, NULL, 0, 0);
+                omr_publisher_dhcp_client_deactivate(publisher, (intptr_t)publisher->dhcp_client);
             }
+            interface_release(publisher->dhcp_interface);
+            publisher->dhcp_interface = NULL;
         }
     }
     if (publisher->dhcp_wanted && publisher->dhcp_client == NULL) {
@@ -385,11 +384,7 @@ static void
 omr_publisher_discontinue_dhcp(omr_publisher_t *publisher)
 {
     INFO("discontinuing DHCP PD client");
-    if (publisher->dhcp_client != NULL) {
-        DHCPv6PDServiceRef NULLABLE dhcp_client = publisher->dhcp_client;
-        publisher->dhcp_client = NULL;
-        CFRelease(dhcp_client); // Release the publisher reference
-    }
+    omr_publisher_dhcp_client_deactivate(publisher, (intptr_t)publisher->dhcp_client);
     publisher->dhcp_wanted = false;
 }
 

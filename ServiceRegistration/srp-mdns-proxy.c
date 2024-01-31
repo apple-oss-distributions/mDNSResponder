@@ -1093,6 +1093,7 @@ update_finished(adv_update_t *update)
     int num_add_instances = 0;
     message_t *message = NULL;
     client_update_t *remaining_updates = NULL;
+    srp_server_t *server_state = host->server_state;
 
     // Get the message that produced the update, if any
     if (client != NULL) {
@@ -1545,6 +1546,39 @@ update_finished(adv_update_t *update)
     // If we were processing an SRP update, we may have additional updates to do. Start the next one now if so.
     if (remaining_updates != NULL) {
         srp_update_start(remaining_updates);
+    } else {
+        // For testing, emit a count of how many hosts, services and address records there are
+        int host_count = 0;
+        int a_record_count = 0;
+        int aaaa_record_count = 0;
+        int instance_count = 0;
+        for (adv_host_t *hp = server_state->hosts; hp != NULL; hp = hp->next) {
+            if (hp->removed) {
+                continue;
+            }
+            host_count++;
+            if (hp->addresses != NULL) {
+                for (i = 0; i < hp->addresses->num; i++) {
+                    if (hp->addresses->vec[i] != NULL) {
+                        uint16_t rrtype = hp->addresses->vec[i]->rrtype;
+                        if (rrtype == dns_rrtype_a) {
+                            a_record_count++;
+                        } else if (rrtype == dns_rrtype_aaaa) {
+                            aaaa_record_count++;
+                        }
+                    }
+                }
+            }
+            if (hp->instances != NULL) {
+                for (i = 0; i < hp->instances->num; i++) {
+                    if (hp->instances->vec[i] != NULL && !hp->instances->vec[i]->removed) {
+                        instance_count++;
+                    }
+                }
+            }
+        }
+        INFO("after update, %d hosts, %d instances, %d a records, %d aaaa records",
+             host_count, instance_count, a_record_count, aaaa_record_count);
     }
 }
 
@@ -2286,15 +2320,13 @@ update_instance_tsr(adv_instance_t *instance, adv_instance_t *new_instance)
                                          NULL, 0, new_instance->txt_length, new_instance->txt_data, 0);
         }
         if (err != kDNSServiceErr_NoError) {
-            INFO("DNSServiceUpdateRecord for instance " PRI_S_SRP " TXT record failed: %d", instance->instance_name, err);
+            INFO("DNSServiceUpdateRecord for instance " PRI_S_SRP " TXT record failed: %d",
+                 instance->instance_name, err);
             goto out;
         } else {
-            INFO("updated TXT record for " PRI_S_SRP ".", instance->instance_name);
+            INFO("updated TXT record for " PRI_S_SRP " . " PRI_S_SRP ".",
+                 instance->instance_name, instance->service_type);
             success = true;
-            free(instance->txt_data);
-            instance->txt_data = new_instance->txt_data;
-            instance->txt_length = new_instance->txt_length;
-            new_instance->txt_data = NULL;
         }
     }
 
@@ -2324,7 +2356,7 @@ update_instance_tsr(adv_instance_t *instance, adv_instance_t *new_instance)
             err = DNSServiceUpdateRecordWithAttribute(instance->txn->sdref, NULL, 0, 0, NULL, 0, attr);
             DNSServiceAttributeDeallocate(attr);
             if (err == kDNSServiceErr_NoError) {
-                INFO("DNSServiceRegisterUpdateRecord TSR for " PRI_S_SRP " set to " PUB_S_SRP,
+                INFO("DNSServiceUpdateRecord TSR for " PRI_S_SRP " set to " PUB_S_SRP,
                      instance->host == NULL ? "<null>" : instance->host->name, time_buf);
                 success = true;
             } else {
@@ -2346,6 +2378,14 @@ out:
             ioloop_dnssd_txn_release(instance->txn);
             instance->txn = NULL;
         }
+    } else if (new_instance != NULL) {
+        // If we have new_instance, the caller is going to get rid of it, so we need to
+        // steal the (possibly changed) data from it and put it on instance.
+        free(instance->txt_data);
+        instance->txt_data = new_instance->txt_data;
+        instance->txt_length = new_instance->txt_length;
+        new_instance->txt_data = NULL;
+        new_instance->txt_length = 0;
     }
     return success;
 }
@@ -3471,8 +3511,6 @@ found_something:
     if (srpl_connection != NULL) {
         host->srpl_connection = srpl_connection;
         srpl_connection_retain(host->srpl_connection);
-        client_update->srpl_connection = srpl_connection;
-        srpl_connection_retain(client_update->srpl_connection);
     }
 #endif // SRP_FEATURE_REPLICATION
 

@@ -367,6 +367,7 @@ struct route_state {
     char *NULLABLE thread_interface_name;
     char *NULLABLE home_interface_name;
     bool have_non_thread_interface;
+    bool seen_legacy_service;
 #if SRP_FEATURE_NAT64
     nat64_t *NULLABLE nat64;
 #endif

@@ -803,13 +803,15 @@ service_publisher_listener_cancel_callback(void *context)
 {
     srp_server_t *server_state = context;
     service_publisher_t *publisher = server_state->service_publisher;
-    state_machine_event_t *event = state_machine_event_create(state_machine_event_type_listener_canceled, NULL);
-    if (event == NULL) {
-        ERROR("unable to allocate event to deliver");
-        return;
+    if (publisher != NULL) {
+        state_machine_event_t *event = state_machine_event_create(state_machine_event_type_listener_canceled, NULL);
+        if (event == NULL) {
+            ERROR("unable to allocate event to deliver");
+            return;
+        }
+        state_machine_event_deliver(&publisher->state_header, event);
+        RELEASE_HERE(event, state_machine_event);
     }
-    state_machine_event_deliver(&publisher->state_header, event);
-    RELEASE_HERE(event, state_machine_event);
 }
 
 static void
@@ -828,15 +830,17 @@ service_publisher_listener_ready(void *context, uint16_t port)
 {
     srp_server_t *server_state = context;
     service_publisher_t *publisher = server_state->service_publisher;
-    state_machine_event_t *event = state_machine_event_create(state_machine_event_type_listener_ready, NULL);
-    if (event == NULL) {
-        ERROR("unable to allocate event to deliver");
-        return;
+    if (publisher != NULL) {
+        state_machine_event_t *event = state_machine_event_create(state_machine_event_type_listener_ready, NULL);
+        if (event == NULL) {
+            ERROR("unable to allocate event to deliver");
+            return;
+        }
+        publisher->have_srp_listener = true;
+        publisher->srp_listener_port = port;
+        state_machine_event_deliver(&publisher->state_header, event);
+        RELEASE_HERE(event, state_machine_event);
     }
-    publisher->have_srp_listener = true;
-    publisher->srp_listener_port = port;
-    state_machine_event_deliver(&publisher->state_header, event);
-    RELEASE_HERE(event, state_machine_event);
 }
 
 static void
@@ -848,12 +852,10 @@ service_publisher_listener_start(service_publisher_t *publisher)
     }
     publisher->srp_listener = srp_proxy_listen(NULL, 0, service_publisher_listener_ready,
                                                service_publisher_listener_cancel_callback, NULL,
-                                               service_publisher_context_release, publisher->server_state);
+                                               NULL, publisher->server_state);
     if (publisher->srp_listener == NULL) {
         ERROR("failed to setup SRP listener");
     }
-    // The listener needs to hold a reference on the service publisher until its context release callback is called.
-    RETAIN_HERE(publisher, service_publisher);
 }
 
 // We go to this state when we have decided to publish, but perhaps do not currently have an SRP listener

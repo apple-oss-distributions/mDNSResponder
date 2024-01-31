@@ -3884,6 +3884,7 @@ partition_maybe_advertise_service(route_state_t *route_state)
     thread_service_t *service;
     int num_lower_services = 0;
     int num_other_services = 0;
+    int num_legacy_services = 0;
     int i;
     int64_t last_add_time;
     bool advertising_service = false;
@@ -3937,6 +3938,26 @@ partition_maybe_advertise_service(route_state_t *route_state)
             goto schedule_wakeup;
         }
 
+        // See if host advertising this unicast service is also advertising an anycast service; if not, then this
+        // unicast service doesn't count (much).
+        bool anycast_present = false;
+        for (thread_service_t *aservice = service_tracker_services_get(route_state->srp_server->service_tracker);
+             aservice != NULL; aservice = aservice->next)
+        {
+            if (aservice->ignore || aservice->service_type != anycast_service) {
+                continue;
+            }
+            if (service->rloc16 == aservice->rloc16) {
+                anycast_present = true;
+                break;
+            }
+        }
+        if (!anycast_present) {
+            num_legacy_services++;
+            route_state->seen_legacy_service = true;
+            continue;
+        }
+
         int cmp = in6addr_compare(&service->u.unicast.address, &route_state->srp_listener_ip_address);
         SEGMENTED_IPv6_ADDR_GEN_SRP(&service->u.unicast.address, addr_buf);
         INFO(PRI_SEGMENTED_IPv6_ADDR_SRP ": is " PUB_S_SRP " listener address.",
@@ -3953,8 +3974,9 @@ partition_maybe_advertise_service(route_state_t *route_state)
 
     // We only want to advertise our service if there are no services being advertised on addresses that are lower than
     // ours. Also, if we notice that a service is being advertised by our rloc16 with a different IP address than the
-    // listener address, it's a stale address, so remove it.
-    if (num_lower_services > 0) {
+    // listener address, it's a stale address, so remove it. If we have seen a legacy service, and there is only one
+    // other non-legacy service, continue to advertise a second service, since cooperating services are preferable.
+    if ((num_lower_services > 0  && !route_state->seen_legacy_service) || num_lower_services > 1) {
         if (advertising_service) {
             SEGMENTED_IPv6_ADDR_GEN_SRP(&route_state->srp_listener_ip_address, addr_buf);
             INFO(PRI_SEGMENTED_IPv6_ADDR_SRP ": stopping advertising unicast service.",
@@ -3965,9 +3987,13 @@ partition_maybe_advertise_service(route_state_t *route_state)
             INFO("not advertising unicast service.");
         }
     }
-    // If there is not some other service published, and we are not publishing, publish.
-    else if (num_other_services == 0) {
-        if (!advertising_service) {
+    // If there is not some other service published, and we are not publishing, publish.  If there is a legacy (no
+    // anycast) service published, publish a second service so as to encourage the legacy service to withdraw, because
+    // cooperating services are preferable to competing services.
+    else if (num_other_services < 1 || (num_other_services < 2 && route_state->seen_legacy_service)) {
+        if (num_legacy_services > 1 && num_other_services > 1) {
+            ERROR("%d legacy services present!", num_legacy_services);
+        } else if (!advertising_service) {
             SEGMENTED_IPv6_ADDR_GEN_SRP(&route_state->srp_listener_ip_address, addr_buf);
             INFO(PRI_SEGMENTED_IPv6_ADDR_SRP ": starting advertising unicast service.",
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(&route_state->srp_listener_ip_address, addr_buf));

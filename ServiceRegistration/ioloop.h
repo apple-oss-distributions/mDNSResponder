@@ -219,6 +219,7 @@ struct dso_transport {
     bool is_connected: 1;
     bool is_listener: 1;
     bool opportunistic: 1;
+    bool canceled: 1;
 };
 
 #define MAX_SUBPROC_ARGS 20

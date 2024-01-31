@@ -227,15 +227,18 @@ ioloop(void)
     return 0;
 }
 
-#define connection_cancel(conn) connection_cancel_(conn, __FILE__, __LINE__)
+#define connection_cancel(comm, conn) connection_cancel_(comm, conn, __FILE__, __LINE__)
 static void
-connection_cancel_(nw_connection_t connection, const char *file, int line)
+connection_cancel_(comm_t *comm, nw_connection_t connection, const char *file, int line)
 {
     if (connection == NULL) {
         INFO("null connection at " PUB_S_SRP ":%d", file, line);
     } else {
-        INFO("%p: " PUB_S_SRP ":%d", connection, file, line);
-        nw_connection_cancel(connection);
+        INFO("%p: " PUB_S_SRP " " PUB_S_SRP ":%d" , connection, comm->canceled ? " (already canceled)" : "", file, line);
+        if (!comm->canceled) {
+            nw_connection_cancel(connection);
+            comm->canceled = true;
+        }
     }
 }
 
@@ -314,7 +317,7 @@ ioloop_comm_cancel(comm_t *connection)
 {
     if (connection->connection != NULL) {
         INFO("%p %p", connection, connection->connection);
-        connection_cancel(connection->connection);
+        connection_cancel(connection, connection->connection);
 #if UDP_LISTENER_USES_CONNECTION_GROUPS
     } else if (connection->connection_group != NULL) {
         INFO("%p %p", connection, connection->connection_group);
@@ -548,7 +551,7 @@ connection_write_now(comm_t *connection)
                                if (error != NULL) {
                                    ERROR("ioloop_send_message: write failed: " PUB_S_SRP,
                                          strerror(nw_error_get_error_code(error)));
-                                   connection_cancel(connection->connection);
+                                   connection_cancel(connection, connection->connection);
                                }
                                if (connection->writes_pending > 0) {
                                    connection->writes_pending--;
@@ -615,7 +618,7 @@ datagram_read(comm_t *connection, size_t length, dispatch_data_t content, nw_err
         ioloop_message_release(message);
     }
     if (!ret && connection->connection != NULL) {
-        connection_cancel(connection->connection);
+        connection_cancel(connection, connection->connection);
     }
     return ret;
 }
@@ -663,7 +666,7 @@ check_fail(comm_t *connection, size_t length, dispatch_data_t content, nw_error_
     }
     if (fail) {
         if (connection->connection != NULL) {
-            connection_cancel(connection->connection);
+            connection_cancel(connection, connection->connection);
         }
     }
     return fail;
@@ -696,7 +699,7 @@ tcp_read_length(comm_t *connection, dispatch_data_t content, nw_error_t error)
     map = dispatch_data_create_map(content, (const void **)&lenbuf, &length);
     if (map == NULL) {
         ERROR("tcp_read_length: map create failed");
-        connection_cancel(connection->connection);
+        connection_cancel(connection, connection->connection);
         return;
     }
     dispatch_release(map);
@@ -730,13 +733,13 @@ ioloop_connection_input_badness_check(comm_t *connection, dispatch_data_t conten
     // For TCP connections, is_complete means the other end closed the connection.
     if (connection->tcp_stream && is_complete) {
         INFO("remote end closed connection.");
-        connection_cancel(connection->connection);
+        connection_cancel(connection, connection->connection);
         return true;
     }
 
     if (content == NULL) {
         INFO("remote end closed connection.");
-        connection_cancel(connection->connection);
+        connection_cancel(connection, connection->connection);
         return true;
     }
     return false;
@@ -783,8 +786,8 @@ connection_state_changed(comm_t *connection, nw_connection_state_t state, nw_err
     connection_error_to_string(error, errbuf, sizeof(errbuf));
 
     if (state == nw_connection_state_ready) {
-        INFO(PRI_S_SRP " state is ready; error = " PUB_S_SRP,
-             connection->name != NULL ? connection->name : "<no name>", errbuf);
+        INFO(PRI_S_SRP " (%p %p) state is ready; error = " PUB_S_SRP,
+             connection->name != NULL ? connection->name : "<no name>", connection, connection->connection, errbuf);
         // Set up a reader.
         if (connection->tcp_stream) {
             ioloop_tcp_input_start(connection);
@@ -802,13 +805,13 @@ connection_state_changed(comm_t *connection, nw_connection_state_t state, nw_err
     } else if (state == nw_connection_state_failed || state == nw_connection_state_waiting) {
         // Waiting is equivalent to failed because we are not giving libnetcore enough information to
         // actually succeed when there is a problem connecting (e.g. "EHOSTUNREACH").
-        INFO(PRI_S_SRP " state is " PUB_S_SRP "; error = " PUB_S_SRP,
-             state == nw_connection_state_failed ? "failed" : "waiting",
-             connection->name != NULL ? connection->name : "<no name>", errbuf);
-        connection_cancel(connection->connection);
+        INFO(PRI_S_SRP " (%p %p) state is " PUB_S_SRP "; error = " PUB_S_SRP,
+             connection->name != NULL ? connection->name : "<no name>", connection, connection->connection,
+             state == nw_connection_state_failed ? "failed" : "waiting", errbuf);
+        connection_cancel(connection, connection->connection);
     } else if (state == nw_connection_state_cancelled) {
-        INFO(PRI_S_SRP " state is canceled; error = " PUB_S_SRP,
-             connection->name != NULL ? connection->name : "<no name>", errbuf);
+        INFO(PRI_S_SRP " (%p %p) state is canceled; error = " PUB_S_SRP,
+             connection->name != NULL ? connection->name : "<no name>", connection, connection->connection, errbuf);
         if (connection->disconnected != NULL) {
             connection->disconnected(connection, connection->context, 0);
         }
@@ -817,10 +820,10 @@ connection_state_changed(comm_t *connection, nw_connection_state_t state, nw_err
     } else {
         if (error != NULL) {
             // We can get here if e.g. the TLS handshake fails.
-            nw_connection_cancel(connection->connection);
+            connection_cancel(connection, connection->connection);
         }
-        INFO(PRI_S_SRP " state is %d; error = " PUB_S_SRP,
-             connection->name != NULL ? connection->name : "<no name>", state, errbuf);
+        INFO(PRI_S_SRP " (%p %p) state is %d; error = " PUB_S_SRP,
+             connection->name != NULL ? connection->name : "<no name>", connection, connection->connection, state, errbuf);
     }
 }
 
@@ -1004,6 +1007,12 @@ static void ioloop_listener_context_release(void *context)
 void
 ioloop_listener_cancel(comm_t *connection)
 {
+    // Only need to do it once.
+    if (connection->canceled) {
+        FAULT("cancel on canceled connection " PRI_S_SRP, connection->name);
+        return;
+    }
+    connection->canceled = true;
     if (connection->listener != NULL) {
         nw_listener_cancel(connection->listener);
         // connection->listener will be released in ioloop_listener_state_changed_handler: nw_listener_state_cancelled.
@@ -1074,6 +1083,12 @@ ioloop_udp_listener_state_changed_handler(comm_t *listener, nw_connection_group_
             INFO("failed");
             nw_connection_group_cancel(listener->connection_group);
         } else if (state == nw_connection_group_state_ready) {
+            // It's possible that we might schedule the ready event but then before we return to the run loop
+            // the listener gets canceled, in which case we don't want to deliver the ready event.
+            if (listener->canceled) {
+                INFO("ready but canceled");
+                return;
+            }
             INFO("ready");
             if (listener->avoiding) {
                 listener->listen_port = nw_connection_group_get_port(listener->connection_group);
@@ -1294,8 +1309,14 @@ ioloop_udp_listener_setup(comm_t *listener, const addr_t *ip_address, uint16_t p
     if (listener->ready != NULL) {
         RETAIN_HERE(listener, listener); // For the ready callback
         dispatch_async(ioloop_main_queue, ^{
-                if (listener->ready != NULL) {
-                    listener->ready(listener->context, port);
+                // It's possible that we might schedule the ready event but then before we return to the run loop
+                // the listener gets canceled, in which case we don't want to deliver the ready event.
+                if (listener->canceled) {
+                    INFO("ready but canceled");
+                } else {
+                    if (listener->ready != NULL) {
+                        listener->ready(listener->context, listener->listen_port);
+                    }
                 }
                 RELEASE_HERE(listener, listener);
             });
@@ -1909,6 +1930,21 @@ ioloop_file_descriptor_create_(int fd, void *context, finalize_callback_t finali
 }
 
 static void
+ioloop_read_source_finalize(void *context)
+{
+    io_t *io = context;
+
+    // Release the reference count that dispatch was holding.
+    if (io->is_static) {
+        if (io->context_release != NULL) {
+            io->context_release(io->context);
+        }
+    } else {
+        RELEASE_HERE(io, file_descriptor);
+    }
+}
+
+static void
 ioloop_read_cancel(void *context)
 {
     io_t *io = context;
@@ -1916,14 +1952,6 @@ ioloop_read_cancel(void *context)
     if (io->read_source != NULL) {
         dispatch_release(io->read_source);
         io->read_source = NULL;
-        // Release the reference count that dispatch was holding.
-        if (io->is_static) {
-            if (io->context_release != NULL) {
-                io->context_release(io->context);
-            }
-        } else {
-            RELEASE_HERE(io, file_descriptor);
-        }
     }
 }
 
@@ -1962,6 +1990,7 @@ ioloop_add_reader(io_t *NONNULL io, io_callback_t NONNULL callback)
     }
     dispatch_source_set_event_handler_f(io->read_source, ioloop_read_event);
     dispatch_source_set_cancel_handler_f(io->read_source, ioloop_read_cancel);
+    dispatch_set_finalizer_f(io->read_source, ioloop_read_source_finalize);
     dispatch_set_context(io->read_source, io);
     RETAIN_HERE(io, io); // Dispatch will hold a reference.
     dispatch_resume(io->read_source);

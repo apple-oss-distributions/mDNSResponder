@@ -2521,19 +2521,30 @@ dnssd_hardwired_response(dnssd_query_t *query, DNSServiceQueryRecordReply UNUSED
     if ((question->type == dns_rrtype_a || question->type == dns_rrtype_aaaa) &&
         !strcmp(question->name, uuid_name))
     {
+        // If it's an IPv4 address we can respond with an A record.
         if (question->type == dns_rrtype_a && query->message->local.sa.sa_family == AF_INET) {
             dp_query_add_data_to_response(query, question->name, question->type, dns_qclass_in, 4,
                                           &query->message->local.sin.sin_addr, 300, true, true);
-        } else if (query->message->local.sa.sa_family == AF_INET6 && question->type == dns_rrtype_a &&
+            response_type = "local host IPv4 address";
+        }
+        // If it's an IPv4-mapped IPv6 address, we can respond with an AAAA record
+        else if (query->message->local.sa.sa_family == AF_INET6 && question->type == dns_rrtype_a &&
                    !memcmp(&query->message->local.sin6.sin6_addr, v4mapped, sizeof(v4mapped)))
         {
             dp_query_add_data_to_response(query, question->name, question->type, dns_qclass_in, 4,
                                           ((uint8_t *)&query->message->local.sin6.sin6_addr) + 12, 3600, true, true);
-        } else if (query->message->local.sa.sa_family == AF_INET6 && question->type == dns_rrtype_aaaa) {
+            response_type = "local host v4-mapped address";
+        }
+        // If it's an IPv6 address and NOT a v4-mapped address, we can respond with an AAAA record.
+        else if (query->message->local.sa.sa_family == AF_INET6 && question->type == dns_rrtype_aaaa &&
+                   memcmp(&query->message->local.sin6.sin6_addr, v4mapped, sizeof(v4mapped)))
+        {
             dp_query_add_data_to_response(query, question->name, question->type, dns_qclass_in, 16,
                                           &query->message->local.sin6.sin6_addr, 300, true, true);
+            response_type = "local host IPv6 address";
+        } else {
+            response_type = "local address type doesn't match query type";
         }
-        response_type = "local host address";
     } else {
         for (hp = query->question->served_domain->hardwired_responses; hp; hp = hp->next) {
             if ((query->question->type == hp->type || query->question->type == dns_rrtype_any) &&

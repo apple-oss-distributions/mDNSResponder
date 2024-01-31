@@ -1204,6 +1204,10 @@ srpl_disconnected_callback(comm_t *comm, void *context, int UNUSED error)
             (instance->have_partner_id && domain->server_state != NULL &&
             domain->partner_id > instance->partner_id))
         {
+            // cancel reconnect_timeout if there's one scheduled.
+            if (instance->reconnect_timeout != NULL) {
+                ioloop_cancel_wake_event(instance->reconnect_timeout);
+            }
             INFO(PRI_S_SRP ": disconnect received, reconnecting.", srpl_connection->name);
             srpl_connection_next_state(srpl_connection, srpl_state_next_address_get);
             goto out;

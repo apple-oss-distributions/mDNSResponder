@@ -83,6 +83,12 @@ srp_parse_client_updates_free(client_update_t *messages)
         if (message->message != NULL) {
             ioloop_message_release(message->message);
         }
+#if SRP_FEATURE_REPLICATION
+        if (message->srpl_connection != NULL) {
+            srpl_connection_release(message->srpl_connection);
+            message->srpl_connection = NULL;
+        }
+#endif
         free(message);
         message = next_message;
     }
@@ -944,6 +950,7 @@ srp_parse_host_messages_evaluate(srp_server_t *UNUSED server_state, srpl_connect
         }
 
         // We need the wire message to validate the signature...
+        INFO("evaluating message #%d from %s", i, srpl_connection->name);
         client_update_t *update = srp_evaluate(srpl_connection->name, NULL, message, i);
         if (update == NULL || update->rcode != dns_rcode_noerror) {
             goto out;
