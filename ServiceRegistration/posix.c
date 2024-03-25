@@ -465,6 +465,28 @@ time_t srp_time(void)
     return tm.tv_sec;
 }
 
+// Return continuous time, if provided by O.S., otherwise unadjusted time, in seconds, with six digits of
+// fractional accuracy.
+double
+srp_fractional_time(void)
+{
+#ifdef CLOCK_BOOTTIME
+    // CLOCK_BOOTTIME is a Linux-specific constant that indicates a monotonic time that includes time asleep
+    const int clockid = CLOCK_BOOTTIME;
+#elif defined(CLOCK_MONOTONIC_RAW)
+    // On MacOS, CLOCK_MONOTONIC_RAW is a monotonic time that includes time asleep and is not adjusted.
+    // According to the man page, CLOCK_MONOTONIC on MacOS violates the POSIX spec in that it can be adjusted.
+    const int clockid = CLOCK_MONOTONIC_RAW;
+#else
+    // On other Posix systems, CLOCK_MONOTONIC should be the right thing, at least according to the POSIX spec.
+    const int clockid = CLOCK_MONOTONIC;
+#endif
+    struct timespec tm;
+    clock_gettime(clockid, &tm);
+
+    return (double)tm.tv_sec + (double)tm.tv_nsec / 1.0e9;
+}
+
 int
 get_num_fds(void)
 {

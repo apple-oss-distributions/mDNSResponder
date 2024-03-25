@@ -35,8 +35,35 @@ dso_simple_response(comm_t *comm, message_t *message, const dns_wire_t *wire, in
     dns_qr_set(&response, dns_qr_response);
     dns_opcode_set(&response, dns_opcode_get(wire));
     dns_rcode_set(&response, rcode);
+
+    size_t length = DNS_HEADER_SIZE;
+    uint16_t wire_length = message != NULL ? message->length : (uint16_t)sizeof(*wire);
+    dns_rr_t question;
+    memset(&question, 0, sizeof(question));
+    unsigned offp = 0;
+    if (ntohs(wire->qdcount) == 1 &&
+        dns_rr_parse(&question, wire->data, wire_length - DNS_HEADER_SIZE, &offp, false, true))
+    {
+        dns_towire_state_t towire;
+        memset(&towire, 0, sizeof(towire));
+        towire.p = &response.data[0];
+        towire.lim = ((uint8_t *)&response) + sizeof(response);
+        towire.message = &response;
+
+        size_t namelen = dns_name_to_wire_canonical(towire.p, towire.lim - towire.p, question.name);
+        if (namelen != 0) {
+            towire.p += namelen;
+            dns_u16_to_wire(&towire, question.type);
+            dns_u16_to_wire(&towire, question.qclass);
+            if (!towire.truncated && !towire.error) {
+                response.qdcount = htons(1);
+                length += towire.p - (uint8_t *)&response.data[0];
+            }
+        }
+        dns_name_free(question.name);
+    }
     iov.iov_base = &response;
-    iov.iov_len = DNS_HEADER_SIZE; // No RRs
+    iov.iov_len = length; // No RRs
     ioloop_send_message(comm, message, &iov, 1);
 }
 

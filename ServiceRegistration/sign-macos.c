@@ -78,6 +78,7 @@ srp_randombytes(uint8_t *dest, size_t num)
     return true;
 }
 
+#if !TARGET_OS_OSX
 static void
 srp_sec_error_print(const char *reason, OSStatus status)
 {
@@ -95,13 +96,15 @@ srp_sec_error_print(const char *reason, OSStatus status)
         CFRelease(err);
     }
 }
+#endif
 
 // Function to generate a key
 static srp_key_t *
 srp_get_key_internal(const char *key_name, bool delete)
 {
-    long two56 = 256;
     srp_key_t *key = NULL;
+#if !TARGET_OS_OSX
+    long two56 = 256;
     OSStatus status;
 
     CFMutableDictionaryRef key_parameters = CFDictionaryCreateMutable(NULL, 8,
@@ -169,6 +172,14 @@ srp_get_key_internal(const char *key_name, bool delete)
             CFRelease(pubkey_parameters);
         }
     }
+#else
+    key = calloc(1, sizeof(*key));
+    if (key != NULL) {
+        srp_randombytes(key->pubkey, sizeof(key->pubkey));
+    }
+#endif
+    (void)key_name;
+    (void)delete;
     return key;
 }
 
@@ -212,8 +223,9 @@ srp_signature_length(srp_key_t *key)
 size_t
 srp_pubkey_copy(uint8_t *buf, size_t max, srp_key_t *key)
 {
-    CFErrorRef error = NULL;
     size_t ret = 0;
+#if !TARGET_OS_OSX
+    CFErrorRef error = NULL;
     CFDataRef pubkey = SecKeyCopyExternalRepresentation(key->public, &error);
     if (pubkey == NULL) {
         if (error != NULL) {
@@ -238,6 +250,13 @@ srp_pubkey_copy(uint8_t *buf, size_t max, srp_key_t *key)
         }
         CFRelease(pubkey);
     }
+#else
+    ret = ECDSA_KEY_SIZE;
+    if (max > ECDSA_KEY_SIZE) {
+        max = ECDSA_KEY_SIZE;
+    }
+    memcpy(buf, key->pubkey, max);
+#endif
     return ret;
 }
 
@@ -246,12 +265,13 @@ int
 srp_sign(uint8_t *output, size_t max, uint8_t *message, size_t msglen,
          uint8_t *rr, size_t rdlen, srp_key_t *key)
 {
+    int ret = 0;
+#if !TARGET_OS_OSX
     CFMutableDataRef payload = NULL;
     CFDataRef signature = NULL;
     CFErrorRef error = NULL;
     const uint8_t *bytes;
     unsigned long len;
-    int ret = 0;
 
     if (max < ECDSA_SHA256_SIG_SIZE) {
         ERROR("srp_sign: not enough space in output buffer (%lu) for signature (%d).",
@@ -354,6 +374,12 @@ out:
     if (signature != NULL) {
         CFRelease(signature);
     }
+#else
+    (void)output; (void)max; (void)message; (void)msglen;
+    (void)rr; (void)rdlen;
+    (void)key;
+    ret = ECDSA_SHA256_SIG_PART_SIZE * 2;
+#endif
     return ret;
 }
 

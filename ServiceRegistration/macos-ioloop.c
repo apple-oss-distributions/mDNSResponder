@@ -44,6 +44,7 @@
 #include "ioloop.h"
 #include "tls-macos.h"
 #include "tls-keychain.h"
+#include "srp-dnssd.h"
 
 dispatch_queue_t ioloop_main_queue;
 
@@ -51,7 +52,6 @@ dispatch_queue_t ioloop_main_queue;
 static void ioloop_tcp_input_start(comm_t *NONNULL connection);
 static void listener_finalize(comm_t *listener);
 static bool connection_write_now(comm_t *NONNULL connection);
-static void ioloop_read_cancel(void *context);
 
 int
 getipaddr(addr_t *addr, const char *p)
@@ -328,13 +328,11 @@ ioloop_comm_cancel(comm_t *connection)
         int fd = connection->io.fd;
         if (fd != -1) {
             ioloop_close(&connection->io);
-            close(fd);
-            ioloop_read_cancel(&connection->io);
             if (connection->cancel != NULL) {
                 RETAIN_HERE(connection, listener);
                 dispatch_async(ioloop_main_queue, ^{
                         if (connection->cancel != NULL) {
-                            connection->cancel(connection->context);
+                            connection->cancel(connection, connection->context);
                         }
                         RELEASE_HERE(connection, listener);
                     });
@@ -396,6 +394,12 @@ ioloop_send_message_inner(comm_t *connection, message_t *responding_to,
     dispatch_data_t data = NULL, new_data, combined;
     int i;
     uint16_t len = 0;
+
+#ifdef SRP_TEST_SERVER
+    if (connection->test_send_intercept != NULL) {
+        return connection->test_send_intercept(connection, responding_to, iov, iov_len, final, send_length);
+    }
+#endif
 
     // Not needed on OSX because UDP conversations are treated as "connections."
 #if UDP_LISTENER_USES_CONNECTION_GROUPS
@@ -1027,13 +1031,11 @@ ioloop_listener_cancel(comm_t *connection)
         int fd = connection->io.fd;
         if (fd != -1) {
             ioloop_close(&connection->io);
-            close(fd);
-            ioloop_read_cancel(&connection->io);
             if (connection->cancel != NULL) {
                 RETAIN_HERE(connection, listener);
                 dispatch_async(ioloop_main_queue, ^{
                         if (connection->cancel != NULL) {
-                            connection->cancel(connection->context);
+                            connection->cancel(connection, connection->context);
                         }
                         RELEASE_HERE(connection, listener);
                     });
@@ -1126,7 +1128,7 @@ ioloop_udp_listener_state_changed_handler(comm_t *listener, nw_connection_group_
                 ;
             cancel:
                 if (listener->cancel) {
-                    listener->cancel(listener->context);
+                    listener->cancel(listener, listener->context);
                 }
                 RELEASE_HERE(listener, listener);
             }
@@ -1171,11 +1173,19 @@ ioloop_listener_state_changed_handler(comm_t *listener, nw_listener_state_t stat
             nw_listener_cancel(listener->listener);
         } else if (state == nw_listener_state_ready) {
             INFO("ready");
+            if (listener->ready != NULL) {
+                listener->ready(listener->context, listener->listen_port);
+            }
         } else if (state == nw_listener_state_cancelled) {
             INFO("cancelled");
             nw_release(listener->listener);
             nw_listener_finalized++;
             listener->listener = NULL;
+            if (listener->cancel != NULL) {
+                listener->cancel(listener, listener->context);
+            }
+        } else {
+            INFO("something else");
         }
     }
 }
@@ -1441,7 +1451,11 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
                 snprintf(ip_address_str, sizeof(ip_address_str), "::");
             }
         } else {
-            inet_ntop(family, ip_address->sa.sa_data, ip_address_str, sizeof(ip_address_str));
+            if (family == AF_INET) {
+                inet_ntop(family, &ip_address->sin.sin_addr, ip_address_str, sizeof(ip_address_str));
+            } else {
+                inet_ntop(family, &ip_address->sin6.sin6_addr, ip_address_str, sizeof(ip_address_str));
+            }
         }
         endpoint = nw_endpoint_create_host(ip_address_str, portbuf);
         if (endpoint == NULL) {
@@ -1450,7 +1464,6 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
             return NULL;
         }
     }
-
     if (stream) {
         nw_parameters_configure_protocol_block_t configure_tls_block = NW_PARAMETERS_DISABLE_PROTOCOL;
         if (tls && tls_config != NULL) {
@@ -1800,6 +1813,24 @@ ioloop_subproc(const char *exepath, char *NULLABLE *argv, int argc,
     return subproc;
 }
 
+#ifdef SRP_TEST_SERVER
+void
+ioloop_dnssd_txn_cancel_srp(void *srp_server, dnssd_txn_t *txn)
+{
+    if (txn->sdref != NULL) {
+        INFO("txn %p serviceref %p", txn, txn->sdref);
+        if (srp_server != NULL) {
+            dns_service_ref_deallocate(srp_server, txn->sdref);
+        } else {
+            DNSServiceRefDeallocate(txn->sdref);
+        }
+        txn->sdref = NULL;
+    } else {
+        INFO("dead transaction.");
+    }
+}
+#endif
+
 void
 ioloop_dnssd_txn_cancel(dnssd_txn_t *txn)
 {
@@ -1934,6 +1965,8 @@ ioloop_read_source_finalize(void *context)
 {
     io_t *io = context;
 
+    INFO("io %p fd %d, read source %p, write_source %p", io, io->fd, io->read_source, io->write_source);
+
     // Release the reference count that dispatch was holding.
     if (io->is_static) {
         if (io->context_release != NULL) {
@@ -1945,13 +1978,20 @@ ioloop_read_source_finalize(void *context)
 }
 
 static void
-ioloop_read_cancel(void *context)
+ioloop_read_source_cancel_callback(void *context)
 {
     io_t *io = context;
 
+    INFO("io %p fd %d, read source %p, write_source %p", io, io->fd, io->read_source, io->write_source);
     if (io->read_source != NULL) {
         dispatch_release(io->read_source);
         io->read_source = NULL;
+        if (io->fd != -1) {
+            close(io->fd);
+            io->fd = -1;
+        } else {
+            FAULT("io->fd has been set to -1 too early");
+        }
     }
 }
 
@@ -1968,13 +2008,13 @@ ioloop_read_event(void *context)
 void
 ioloop_close(io_t *io)
 {
+    INFO("io %p fd %d, read source %p, write_source %p", io, io->fd, io->read_source, io->write_source);
     if (io->read_source != NULL) {
         dispatch_cancel(io->read_source);
     }
     if (io->write_source != NULL) {
         dispatch_cancel(io->write_source);
     }
-    io->fd = -1;
 }
 
 void
@@ -1989,11 +2029,12 @@ ioloop_add_reader(io_t *NONNULL io, io_callback_t NONNULL callback)
         return;
     }
     dispatch_source_set_event_handler_f(io->read_source, ioloop_read_event);
-    dispatch_source_set_cancel_handler_f(io->read_source, ioloop_read_cancel);
+    dispatch_source_set_cancel_handler_f(io->read_source, ioloop_read_source_cancel_callback);
     dispatch_set_finalizer_f(io->read_source, ioloop_read_source_finalize);
     dispatch_set_context(io->read_source, io);
     RETAIN_HERE(io, io); // Dispatch will hold a reference.
     dispatch_resume(io->read_source);
+    INFO("io %p fd %d, read source %p, write_source %p", io, io->fd, io->read_source, io->write_source);
 }
 
 void

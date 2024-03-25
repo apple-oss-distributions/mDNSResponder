@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,21 @@
  */
 
 #include "mrcs_object.h"
+#include "mrcs_object_internal.h"
 
 #include "mdns_obj.h"
 #include "mdns_strict.h"
 
 //======================================================================================================================
 // MARK: - Object Public Methods
+
+mdns_kind_t
+mrcs_get_kind(const mrcs_object_t me)
+{
+	return mdns_obj_get_kind(me);
+}
+
+//======================================================================================================================
 
 void
 mrcs_retain(const mrcs_object_t me)

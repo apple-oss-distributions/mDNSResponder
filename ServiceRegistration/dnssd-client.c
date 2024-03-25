@@ -59,7 +59,7 @@
 #include <network_information.h>
 
 #include <CoreUtils/CoreUtils.h>
-#import <NetworkExtension/NEPolicySession.h>
+#include <mrc/private.h>
 #endif // IOLOOP_MACOS
 
 #include "srp.h"
@@ -101,12 +101,7 @@ struct dnssd_client {
     srp_server_t *server_state;
     cti_connection_t active_data_set_connection;
     struct in6_addr mesh_local_prefix;
-#if PUBLISH_USING_DNSSERVICE_API
-    DNSRecordRef aaaa_record_ref, ns_record_ref;
-#else
-    nw_resolver_config_t resolver_config;
-    NEPolicySession *policy_session;
-#endif
+	mrc_dns_service_registration_t dns_service_registration;
     bool have_mesh_local_prefix;
     bool first_time;
     bool canceled;
@@ -161,7 +156,6 @@ dnssd_client_probe_callback(thread_service_t *UNUSED service, void *context, boo
     }
     state_machine_event_deliver(&client->state_header, event);
     RELEASE_HERE(event, state_machine_event);
-    RELEASE_HERE(client, dnssd_client);
 }
 
 static void
@@ -210,48 +204,19 @@ fail:
     return;
 }
 
-#if PUBLISH_USING_DNSSERVICE_API
-static void
+static state_machine_state_t
 dnssd_client_remove_published_service(dnssd_client_t *client)
 {
-    if (client->shared_txn != NULL) {
-        ioloop_dnssd_txn_cancel(client->shared_txn);
-        ioloop_dnssd_txn_release(client->shared_txn);
-        client->shared_txn = NULL;
+    if (client->dns_service_registration != NULL) {
+        mrc_dns_service_registration_forget(&client->dns_service_registration);
     }
-    client->aaaa_record_ref = NULL;
-    client->ns_record_ref = NULL;
-    if (client->published_service != NULL) {
-        thread_service_release(client->published_service);
-        client->published_service = NULL;
-    }
-}
-
-static void
-dnssd_client_publish_failed(dnssd_client_t *client)
-{
-    dnssd_client_remove_published_service(client);
-    state_machine_event_t *event = state_machine_event_create(state_machine_event_type_daemon_disconnect, NULL);
-    if (event == NULL) {
-        ERROR("unable to allocate event to deliver");
-        return;
-    }
-    state_machine_event_deliver(&client->state_header, event);
-    RELEASE_HERE(event, state_machine_event);
-}
-
-static void
-dnssd_client_shared_connection_failed_callback(void *context, int UNUSED status)
-{
-    dnssd_client_t *client = context;
-    ERROR("daemon connection failed");
-    dnssd_client_publish_failed(client);
+    return dnssd_client_state_not_client;
 }
 
 static state_machine_state_t
 dnssd_client_service_unpublish(dnssd_client_t *client)
 {
-    if (client->aaaa_record_ref != NULL) {
+    if (client->dns_service_registration != NULL) {
         thread_service_note(client->id, client->published_service, "unpublishing service");
     }
     dnssd_client_remove_published_service(client);
@@ -259,181 +224,110 @@ dnssd_client_service_unpublish(dnssd_client_t *client)
     return dnssd_client_state_not_client;
 }
 
-static void dnssd_client_record_callback(DNSServiceRef UNUSED sdref, DNSRecordRef UNUSED rref,
-                                         DNSServiceFlags UNUSED flags, DNSServiceErrorType error_code, void *context)
+static void
+dnssd_client_dns_service_event_handler(const mrc_dns_service_registration_event_t mrc_event, const OSStatus event_err,
+                                       dnssd_client_t *client)
 {
-    dnssd_client_t *client = context;
+    switch(mrc_event)
+    {
+    case mrc_dns_service_registration_event_started:
+        INFO("DNS service registration started");
+        break;
+    case mrc_dns_service_registration_event_interruption:
+        INFO("DNS service registration interrupted" );
+        break;
 
-    if (error_code != kDNSServiceErr_NoError) {
-        if (rref == client->aaaa_record_ref) {
-            ERROR("unable to register AAAA record: error code %d", error_code);
+    case mrc_dns_service_registration_event_invalidation:
+        if (event_err) {
+            ERROR("DNS service registration invalidated with error: %d", (int)event_err);
         } else {
-            ERROR("unable to register NS record: error code %d", error_code);
+            INFO("DNS service registration gracefully invalidated");
         }
-        dnssd_client_publish_failed(client);
-        return;
-    }
-    if (rref == client->aaaa_record_ref) {
-        ERROR("successfully registered AAAA record");
-    } else {
-        ERROR("successfully registered NS record");
+        state_machine_event_t *event =
+            state_machine_event_create(state_machine_event_type_dns_registration_invalidated, NULL);
+        if (event == NULL) {
+            ERROR("unable to allocate event to deliver");
+        } else {
+            state_machine_event_deliver(&client->state_header, event);
+            RELEASE_HERE(event, state_machine_event);
+        }
+        // The invalidation event should be the last event we get.
+        RELEASE_HERE(client, dnssd_client);
+        break;
     }
 }
 
-static state_machine_state_t
-dnssd_client_service_publish(dnssd_client_t *client)
-{
-    int err;
-    dns_towire_state_t towire;
-    dns_wire_t message;
-
-    thread_service_note(client->id, client->published_service, "publishing service");
-
-    // Set up advertisement for the DNSSD server:
-
-    // First we need a shared connection for DNSServiceRegisterRecord.
-    err = DNSServiceCreateConnection(&client->shared_connection);
-    if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceCreateConnection failed");
-        return dnssd_client_service_unpublish(client);
-    }
-    client->shared_txn = ioloop_dnssd_txn_add(client->shared_connection, client, dnssd_client_context_release,
-                                              dnssd_client_shared_connection_failed_callback);
-    if (client->shared_txn == NULL) {
-        return dnssd_client_service_unpublish(client);
-    }
-    RETAIN_HERE(client, dnssd_client); // For the shared transaction's callbacks
-
-    //   Set up AAAA record for dnssd-server.local
-    uint8_t *aaaa_rdata;
-    if (client->published_service->service_type == unicast_service) {
-        aaaa_rdata = &client->published_service->u.unicast.address.s6_addr[0];
-    } else if (client->published_service->service_type == anycast_service) {
-        aaaa_rdata = &client->published_service->u.anycast.address.s6_addr[0];
-    } else {
-        ERROR("invalid service type for published service: %d", client->published_service->service_type);
-        return dnssd_client_service_unpublish(client);
-    }
-    err = DNSServiceRegisterRecord(client->shared_connection, &client->aaaa_record_ref,
-                                   kDNSServiceFlagsKnownUnique, client->interface_index,
-                                   "dnssd-server.local", kDNSServiceType_AAAA, kDNSServiceClass_IN, 16, aaaa_rdata, 0,
-                                   dnssd_client_record_callback, client);
-    if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceRegisterRecord failed - record: dnssd-server.local AAAA ");
-        return dnssd_client_service_unpublish(client);
-    }
-
-    //   Set up default.service.arpa NS dnssd-server.local
-    memset(&towire, 0, sizeof(towire));
-    towire.message = &message;
-    towire.lim = &message.data[DNS_DATA_SIZE];
-    towire.p = message.data;
-
-    dns_full_name_to_wire(NULL, &towire, "dnssd-server.local.");
-    err = DNSServiceRegisterRecord(client->shared_connection, &client->ns_record_ref,
-                                   kDNSServiceFlagsKnownUnique | kDNSServiceFlagsForceMulticast,
-                                   client->interface_index,
-                                   "default.service.arpa", kDNSServiceType_NS, kDNSServiceClass_IN,
-                                   towire.p - message.data, message.data, 0, dnssd_client_record_callback, client);
-    if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceRegisterRecord failed - record: " "default.service.arpa" " NS " "dnssd-server.local");
-        return dnssd_client_service_unpublish(client);
-    }
-
-#if PUBLISH_LEGACY_BROWSING_DOMAIN_FOR_THREAD_DEVICE
-
-    memset(&towire, 0, sizeof(towire));
-    towire.message = &message;
-    towire.lim = &message.data[DNS_DATA_SIZE];
-    towire.p = message.data;
-
-    dns_full_name_to_wire(NULL, &towire, "default.service.arpa.");
-    err = DNSServiceRegisterRecord(client->service_ref, &client->ptr_record_ref,
-                                   kDNSServiceFlagsKnownUnique, server_state->advertise_interface, AUTOMATIC_BROWSING_DOMAIN,
-                                   kDNSServiceType_PTR, kDNSServiceClass_IN, towire.p - message.data, message.data, 0,
-                                   dnssd_client_record_callback, client);
-    if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceRegisterRecord failed - record: " AUTOMATIC_BROWSING_DOMAIN " PTR " "default.service.arpa");
-        return dnssd_client_service_unpublish(client);
-    }
-#endif
-
-    return dnssd_client_state_invalid;
-}
-#else
-static state_machine_state_t
-dnssd_client_remove_published_service(dnssd_client_t *client)
-{
-    if (client->resolver_config != NULL) {
-        nw_release(client->resolver_config);
-        client->resolver_config = NULL;
-    }
-    if (client->policy_session != NULL) {
-        [client->policy_session release];
-        client->policy_session = NULL;
-    }
-    return dnssd_client_state_not_client;
-}
-
-static state_machine_state_t
-dnssd_client_service_unpublish(dnssd_client_t *client)
-{
-    if (client->resolver_config != NULL) {
-        thread_service_note(client->id, client->published_service, "unpublishing service");
-    }
-    dnssd_client_remove_published_service(client);
-
-    return dnssd_client_state_not_client;
-}
 
 static state_machine_state_t
 dnssd_client_service_publish(dnssd_client_t *client)
 {
     dnssd_client_service_unpublish(client);
+    state_machine_state_t ret = dnssd_client_state_not_client;
 
-    nw_resolver_config_t config = nw_resolver_config_create();
-    nw_resolver_config_set_protocol(config, nw_resolver_protocol_dns53);
-    nw_resolver_config_set_class(config, nw_resolver_class_designated_direct);
+    mdns_dns_service_definition_t definition = mdns_dns_service_definition_create();
+    if (definition == NULL) {
+        ERROR("unable to allocate mdns_dns_service_definition object");
+        goto out;
+    }
+
+    OSStatus err;
+    mdns_domain_name_t domain_name = mdns_domain_name_create("default.service.arpa.",
+                                                             mdns_domain_name_create_opts_none, &err);
+    if (err != kNoErr) {
+        ERROR("failed to create domain name for default.service.arpa.: %d\n", (int)err);
+        goto out;
+    }
+
+    err = mdns_dns_service_definition_add_domain(definition, domain_name);
+    mdns_forget(&domain_name);
+
     uint8_t *aaaa_data;
+    uint16_t port = 0;
+    // Use the port we probed. We probe port 53 for anycast, and the advertised service port for unicast.
     if (client->published_service->service_type == unicast_service) {
         aaaa_data = &client->published_service->u.unicast.address.s6_addr[0];
+        // Only use the advertised port if there's no anycast service--pre-2024 Apple BRs only answer DNS queries on
+        // port 53.
+        if (client->published_service->u.unicast.anycast_also_present) {
+            port = 53;
+        } else {
+            port = (client->published_service->u.unicast.port[0] << 8) + client->published_service->u.unicast.port[1];
+        }
     } else if (client->published_service->service_type == anycast_service) {
         aaaa_data = &client->published_service->u.anycast.address.s6_addr[0];
+        port = 53;
     }
-    char name_server_address[INET6_ADDRSTRLEN];
-    inet_ntop(AF_INET6, aaaa_data, name_server_address, sizeof(name_server_address));
-    nw_resolver_config_add_name_server(config, name_server_address);
-
-    NSUUID *uuid = [[NSUUID alloc] init];
-
-    uuid_t uuid_bytes;
-    [uuid getUUIDBytes:uuid_bytes];
-    nw_resolver_config_set_identifier(config, uuid_bytes);
-
-    bool published = nw_resolver_config_publish(config);
-    if (published) {
-        INFO("Registered resolver at " PRI_S_SRP " uuid %{uuid_t}.16P", name_server_address, uuid_bytes);
-        client->resolver_config = config;
-    } else {
-        ERROR("Failed to register resolver");
-        nw_release(config);
-        return dnssd_client_state_not_client;
+    mdns_address_t mdns_server_address = mdns_address_create_ipv6(aaaa_data, port, 0);
+    if (mdns_server_address == NULL) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(aaaa_data, ipv6_addr_buf);
+        ERROR("failed to create address object");
+        goto out;
     }
 
-    client->policy_session = [[NEPolicySession alloc] init];
+    err = mdns_dns_service_definition_append_server_address(definition, mdns_server_address);
+    mdns_forget(&mdns_server_address);
+    if (err != kNoErr) {
+        ERROR("couldn't append server address to service definition");
+        goto out;
+    }
 
-    NEPolicy *policy = [[NEPolicy alloc] initWithOrder:1 result:[NEPolicyResult netAgentUUID:uuid]
-                        conditions:@[ [NEPolicyCondition domain:@"default.service.arpa"] ]];
-    [client->policy_session addPolicy: policy ];
-    [policy release];
-    [uuid release];
+    client->dns_service_registration = mrc_dns_service_registration_create(definition);
+    if (client->dns_service_registration == NULL) {
+        ERROR("unable to create client DNS service registration");
+        goto out;
+    }
+    mrc_dns_service_registration_set_queue(client->dns_service_registration, dispatch_get_main_queue());
 
-    client->policy_session.priority = NEPolicySessionPriorityHigh;
-    [client->policy_session apply];
-
-    return dnssd_client_state_invalid;
+    RETAIN_HERE(client, dnssd_client); // For the handler
+    mrc_dns_service_registration_set_event_handler(client->dns_service_registration,
+                                                   ^(const mrc_dns_service_registration_event_t event, const OSStatus event_err)
+                                                   { dnssd_client_dns_service_event_handler(event, event_err, client); });
+    mrc_dns_service_registration_activate( client->dns_service_registration );
+    ret = dnssd_client_state_invalid;
+out:
+    mdns_forget(&definition);
+    return ret;
 }
-#endif // PUBLISH_USING_DNSSERVICE_API
 
 static state_machine_state_t dnssd_client_action_startup(state_machine_header_t *state_header,
                                                          state_machine_event_t *event);
@@ -538,8 +432,8 @@ dnssd_client_action_not_client(state_machine_header_t *state_header, state_machi
                 service->u.anycast.address.s6_addr[14] = service->rloc16 >> 8;
                 service->u.anycast.address.s6_addr[15] = service->rloc16 & 255;
             }
-            probe_srp_service(service, client, dnssd_client_probe_callback);
-            RETAIN_HERE(client, dnssd_client); // For the callback
+            RETAIN_HERE(client, dnssd_client); // For the probe
+            probe_srp_service(service, client, dnssd_client_probe_callback, dnssd_client_context_release);
             return dnssd_client_state_invalid;
         }
 

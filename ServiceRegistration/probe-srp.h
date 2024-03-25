@@ -21,7 +21,9 @@
 #define __PROBE_SRP_H__ 1
 typedef struct probe_state probe_state_t;
 void probe_srp_service(thread_service_t *NONNULL service, void *NULLABLE context,
-                       void (*NONNULL callback)(thread_service_t *NONNULL service, void *NULLABLE context, bool succeeded));
+                       void (*NONNULL callback)(thread_service_t *NONNULL service,
+                                                void *NULLABLE context, bool succeeded),
+                       void (*NULLABLE context_release_callback)(void *NONNULL context));
 #endif // __PROBE_SRP_H__
 
 // Local Variables:

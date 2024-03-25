@@ -160,6 +160,9 @@ mDNSexport void QueryRecordClientRequestStop(QueryRecordClientRequest *inRequest
 mDNSexport const domainname * QueryRecordClientRequestGetQName(const QueryRecordClientRequest *inRequest);
 mDNSexport mDNSu16 QueryRecordClientRequestGetType(const QueryRecordClientRequest *inRequest);
 mDNSexport mDNSBool QueryRecordClientRequestIsMulticast(QueryRecordClientRequest *inRequest);
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+mDNSexport mDNSBool ClientRequestUsesAWDL(uint32_t ifindex, DNSServiceFlags flags);
+#endif
 
 #ifdef __cplusplus
 }

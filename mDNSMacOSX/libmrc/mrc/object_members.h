@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,10 +23,22 @@
 
 #define MRC_UNION_MEMBER(NAME)	struct mrc_ ## NAME ## _s *	_mrc_ ## NAME
 
-#define MRC_OBJECT_MEMBERS					\
-	MRC_UNION_MEMBER(object);				\
-	MRC_UNION_MEMBER(dns_proxy);			\
-	MRC_UNION_MEMBER(dns_proxy_parameters);	\
-	MRC_UNION_MEMBER(dns_proxy_state_inquiry);
+#define MRC_OBJECT_MEMBERS_EXTERNAL				\
+	MRC_UNION_MEMBER(object);					\
+	MRC_UNION_MEMBER(dns_proxy);				\
+	MRC_UNION_MEMBER(dns_proxy_parameters);		\
+	MRC_UNION_MEMBER(dns_proxy_state_inquiry);	\
+	MRC_UNION_MEMBER(dns_service_registration);	\
+	MRC_UNION_MEMBER(enabler);
+
+#if defined(MDNS_LIBMRC_BUILD) && MDNS_LIBMRC_BUILD
+	#include "mrc_object_members_internal.h"
+#else
+	#define MRC_OBJECT_MEMBERS_INTERNAL
+#endif
+
+#define MRC_OBJECT_MEMBERS		\
+	MRC_OBJECT_MEMBERS_EXTERNAL	\
+	MRC_OBJECT_MEMBERS_INTERNAL
 
 #endif	// MRC_OBJECT_MEMBERS_H

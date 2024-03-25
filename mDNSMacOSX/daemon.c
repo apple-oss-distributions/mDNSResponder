@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil -*-
  *
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1226,6 +1226,15 @@ mDNSlocal void SetLowWater(const KQSocketSet *const k, const int r)
         LogMsg("SO_RCVLOWAT IPv6 %d error %d errno %d (%s)", k->sktv6, r, errno, strerror(errno));
 }
 
+mDNSlocal void MRCSServerInit(void)
+{
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+    mrcs_server_set_dns_service_registration_handlers(&kMRCSServerDNSServiceRegistrationHandlers);
+#endif
+    mrcs_server_set_dns_proxy_handlers(&kMRCSServerDNSProxyHandlers);
+    mrcs_server_activate();
+}
+
 mDNSlocal void * KQueueLoop(void *m_param)
 {
     mDNS            *m = m_param;
@@ -1242,7 +1251,7 @@ mDNSlocal void * KQueueLoop(void *m_param)
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSD_XPC_SERVICE)
     dnssd_server_init();
 #endif
-    mrcs_server_init(&kMRCSServerHandlers);
+    MRCSServerInit();
     pthread_mutex_lock(&PlatformStorage.BigMutex);
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Starting time value 0x%08X (%d)", (mDNSu32)mDNSStorage.timenow_last, mDNSStorage.timenow_last);
 

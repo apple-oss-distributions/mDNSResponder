@@ -1,6 +1,6 @@
 /* srp-mdns-proxy.h
  *
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,8 +22,6 @@
 
 #include <stddef.h> // For ptrdiff_t
 #include "ioloop-common.h" // for service_connection_t
-
-#define PLATFORM_ADVERTISE_INTERFACE kDNSServiceInterfaceIndexAny
 
 typedef struct adv_instance adv_instance_t;
 typedef struct adv_record_registration adv_record_t;
@@ -50,6 +48,12 @@ typedef struct _cti_connection_t *cti_connection_t;
 typedef struct dnssd_proxy_advertisements dnssd_proxy_advertisements_t;
 typedef struct dnssd_client dnssd_client_t;
 typedef struct probe_state probe_state_t;
+#ifdef SRP_TEST_SERVER
+typedef struct dns_service_event dns_service_event_t;
+typedef struct test_state test_state_t;
+typedef struct srp_server_state srp_server_t;
+typedef struct srpl_connection srpl_connection_t;
+#endif
 
 // Server internal state
 struct srp_server_state {
@@ -57,6 +61,13 @@ struct srp_server_state {
     adv_host_t *NULLABLE hosts;
     dnssd_txn_t *NULLABLE shared_registration_txn;
     srpl_domain_t *NULLABLE srpl_domains;
+#ifdef SRP_TEST_SERVER
+    dns_service_event_t *NULLABLE dns_service_events;
+    test_state_t *NULLABLE test_state;
+    comm_t *NULLABLE srpl_listener;
+    srpl_connection_t *NULLABLE connections; // list of connections that other srp servers create to connect to us
+    int server_id;
+#endif
 #if STUB_ROUTER
     route_state_t *NULLABLE route_state;
 #endif
@@ -79,6 +90,7 @@ struct srp_server_state {
     uint32_t min_lease_time; // thirty seconds
     uint32_t key_max_lease_time;
     uint32_t key_min_lease_time; // thirty seconds
+    int full_dump_count;
 
     uint16_t rloc16;
 
@@ -103,7 +115,7 @@ struct adv_instance {
     char *NONNULL instance_name;         // Single label instance name (future: service instance FQDN)
     char *NONNULL service_type;          // Two label service type (e.g., _ipps._tcp)
     int port;                            // Port on which service can be found.
-    char *NULLABLE txt_data;             // Contents of txt record
+    uint8_t *NULLABLE txt_data;          // Contents of txt record
     uint16_t txt_length;                 // length of txt record contents
     message_t *NULLABLE message;         // Message that produces the current value of this instance
     ptrdiff_t recent_message;            // Most recent message (never dereference--this is for comparison only).
@@ -265,7 +277,7 @@ adv_host_t *NULLABLE srp_adv_host_copy_(srp_server_t *NONNULL server_state, dns_
 int srp_current_valid_host_count(srp_server_t *NONNULL server_state);
 int srp_hosts_to_array(srp_server_t *NONNULL server_state, adv_host_t *NONNULL *NULLABLE host_array, int max_hosts);
 bool srp_adv_host_valid(adv_host_t *NONNULL host);
-srp_server_t *NULLABLE server_state_create(const char *NONNULL name, int interface_index, int max_lease_time,
+srp_server_t *NULLABLE server_state_create(const char *NONNULL name, int max_lease_time,
                                            int min_lease_time, int key_max_lease_time, int key_min_lease_time);
 #endif // __SRP_MDNS_PROXY_H__
 

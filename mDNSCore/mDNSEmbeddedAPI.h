@@ -499,11 +499,12 @@ typedef struct { mDNSu8 c[256]; } UTF8str255;       // Null-terminated C string
 
 // Most records have a TTL of 75 minutes, so that their 80% cache-renewal query occurs once per hour.
 // For records containing a hostname (in the name on the left, or in the rdata on the right),
-// like A, AAAA, reverse-mapping PTR, and SRV, we use a two-minute TTL by default, because we don't want
-// them to hang around for too long in the cache if the host in question crashes or otherwise goes away.
+// like A, AAAA, reverse-mapping PTR, and SRV, we previously used a two-minute TTL by default, because we did't want
+// them to hang around for too long in the cache if the host in question crashes or otherwise goes away... but to reduce
+// the multicast traffic required to refresh these records, the same 75 minute TTL is now used for all record types.
 
 #define kStandardTTL (3600UL * 100 / 80)
-#define kHostNameTTL 120UL
+#define kHostNameTTL kStandardTTL           // Was 120UL
 
 // Multicast DNS uses announcements (gratuitous responses) to update peer caches.
 // This means it is feasible to use relatively larger TTL values than we might otherwise
@@ -3393,7 +3394,7 @@ extern mDNSBool   mDNSPlatformInterfaceIsAWDL(mDNSInterfaceID interfaceID);
 #endif
 extern mDNSBool   mDNSPlatformValidRecordForQuestion(const ResourceRecord *const rr, const DNSQuestion *const q);
 extern mDNSBool   mDNSPlatformValidRecordForInterface(const AuthRecord *rr, mDNSInterfaceID InterfaceID);
-extern mDNSBool   mDNSPlatformValidQuestionForInterface(DNSQuestion *q, const NetworkInterfaceInfo *intf);
+extern mDNSBool   mDNSPlatformValidQuestionForInterface(const DNSQuestion *q, const NetworkInterfaceInfo *intf);
 
 extern void mDNSPlatformFormatTime(unsigned long t, mDNSu8 *buf, int bufsize);
 

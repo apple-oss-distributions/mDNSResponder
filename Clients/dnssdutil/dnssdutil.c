@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2016-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1050,9 +1050,19 @@ static int			gDNSQuery_Verbose			= false;
 
 static CLIOption		kDNSQueryOpts[] =
 {
-	StringOption(  'n', "name",             &gDNSQuery_Name,             "name", "Question name (QNAME) to put in DNS query message.", true ),
-	StringOption(  't', "type",             &gDNSQuery_Type,             "type", "Question type (QTYPE) to put in DNS query message. (default: A)", false ),
-	StringOption(  's', "server",           &gDNSQuery_Server,           "IP address", "DNS server's IPv4 or IPv6 address.", kDNSQueryServerOptionIsRequired ),
+	StringOption(   'n', "name",             &gDNSQuery_Name,             "name", "Question name (QNAME) to put in DNS query message.", true ),
+	StringOption(   't', "type",             &gDNSQuery_Type,             "type", "Question type (QTYPE) to put in DNS query message. (default: A)", false ),
+	StringOptionEx( 's', "server",           &gDNSQuery_Server,           "IP address[+port]", "DNS server's IPv4 or IPv6 address and optional port.", kDNSQueryServerOptionIsRequired,
+		"The following exemplify the notations that are supported:\n"
+		"\n"
+		"    IPv4 address without port:     192.0.2.1\n"
+		"    IPv4 address with port 50001:  192.0.2.1:50001\n"
+		"    IPv6 address without port:     2001:db8::1\n"
+		"    IPv6 address with port 50001:  [2001:db8::1]:50001\n"
+		"\n"
+		"If no port is specified, then the default DNS port of 53 is assumed.\n"
+		"\n"
+	),
 	IntegerOption( 'l', "timeLimit",        &gDNSQuery_TimeLimitSecs,    "seconds", "Specifies query time limit. Use '-1' for no limit and '0' to exit immediately after sending.", false ),
 	BooleanOption(  0 , "tcp",              &gDNSQuery_UseTCP,           "Send the DNS query via TCP instead of UDP." ),
 	IntegerOption( 'f', "flags",            &gDNSQuery_Flags,            "flags", "16-bit value for DNS header flags/codes field. (default: 0x0100 [Recursion Desired])", false ),
@@ -1475,6 +1485,7 @@ static int				gDNSServer_BadUDPMode			= false;
 static const char *		gDNSServer_FollowPID			= NULL;
 static int				gDNSServer_ExtraV6Count			= 0;
 static const char *		gDNSServer_Protocol				= kDNSProtocolStr_Do53;
+static int				gDNSServer_RegisterWithSC		= false;
 
 static CLIOption		kDNSServerOpts[] =
 {
@@ -1497,6 +1508,7 @@ static CLIOption		kDNSServerOpts[] =
 		"Use '" kDNSProtocolStr_DoT  "' for DNS over TLS (DoT).\n"
 		"Use '" kDNSProtocolStr_DoH  "' for DNS over HTTPS (DoH).\n"
  	),
+	BooleanOption(     's', "registerSC",    &gDNSServer_RegisterWithSC,  "Register Do53 service with SystemConfiguration instead of mrc_dns_service_registration_*." ),
 #if( TARGET_OS_DARWIN )
 	CLI_OPTION_GROUP( "Loopback-Only Mode Options" ),
 	IntegerOptionEx( 0 , "extraIPv6",     &gDNSServer_ExtraV6Count,    "count", "The number of extra IPv6 addresses to listen on. (default: 0)", false,
@@ -8220,28 +8232,30 @@ exit:
 
 typedef struct
 {
-	DNSServerRef				server;				// Reference to the DNS server.
-	dispatch_queue_t			queue;				// Serial queue for server.
-	sockaddr_ip *				addrArray;			// Server's addresses.
-	size_t						addrCount;			// Count of server's addresses.
-	dispatch_source_t			sourceSigInt;		// Dispatch source for SIGINT.
-	dispatch_source_t			sourceSigTerm;		// Dispatch source for SIGTERM.
-	const char *				domainOverride;		// If non-NULL, server is to use this domain instead of "d.test.".
-	dispatch_group_t			group;				// Dispatch group to signal when command is done.
-	dispatch_source_t			processMonitor;		// Process monitor source for process being followed, if any.
-	nw_resolver_config_t		secureDNSConfig;	// Resolver configuration for DNS over TLS (DoT).
-	mdns_network_policy_t		domainPolicy;		// Networking policy for matching domains to DoT service.
-	SecIdentityRef				secIdentity;		// Security identity associated with a self-signed certificate for DoT.
-	nw_listener_t				tlsListener;		// TLS listener.
-	DNSProtocol					protocol;			// DNS protocol to use, e.g., Do53, DoT, or DoH.
-	pid_t						followPID;			// PID of process being followed, if any. If it exits, we exit.
-	int32_t						refCount;			// Object's reference count.
-	OSStatus					error;				// Error encounted while running server.
-	uint16_t					portRequested;		// The port that was requested by the user.
-	uint16_t					portActual;			// DNS server's actual port number.
-	Boolean						loopbackOnly;		// True if the server should be bound to the loopback interface.
-	Boolean						addedResolver;		// True if a resolver entry was added to the system DNS settings.
-	Boolean						stopped;			// True if the command has stopped.
+	DNSServerRef						server;				// Reference to the DNS server.
+	dispatch_queue_t					queue;				// Serial queue for server.
+	sockaddr_ip *						addrArray;			// Server's addresses.
+	size_t								addrCount;			// Count of server's addresses.
+	dispatch_source_t					sourceSigInt;		// Dispatch source for SIGINT.
+	dispatch_source_t					sourceSigTerm;		// Dispatch source for SIGTERM.
+	const char *						domainOverride;		// If non-NULL, server is to use this domain instead of d.test.
+	dispatch_group_t					group;				// Dispatch group to signal when command is done.
+	dispatch_source_t					processMonitor;		// Process monitor source for process being followed, if any.
+	nw_resolver_config_t				secureDNSConfig;	// Resolver configuration for DNS over TLS (DoT).
+	mdns_network_policy_t				domainPolicy;		// Networking policy for matching domains to DoT service.
+	SecIdentityRef						secIdentity;		// Security identity associated with self-signed DoT certificate.
+	nw_listener_t						tlsListener;		// TLS listener.
+	mrc_dns_service_registration_t		registration;		// DNS service registration for Do53.
+	DNSProtocol							protocol;			// DNS protocol to use, e.g., Do53, DoT, or DoH.
+	pid_t								followPID;			// PID of process being followed, if any. If it exits, we exit.
+	int32_t								refCount;			// Object's reference count.
+	OSStatus							error;				// Error encounted while running server.
+	uint16_t							portRequested;		// The port that was requested by the user.
+	uint16_t							portActual;			// DNS server's actual port number.
+	Boolean								loopbackOnly;		// True if the server should be bound to the loopback interface.
+	Boolean								addedResolver;		// True if a resolver entry was added to the system DNS settings.
+	Boolean								registerWithSC;		// True if Do53 is to be registered with SystemConfiguration.
+	Boolean								stopped;			// True if the command has stopped.
 	
 }	DNSServerCmd;
 
@@ -8351,6 +8365,8 @@ static void	DNSServerCommand( void )
 			goto exit;
 		}
 	}
+	cmd->registerWithSC = gDNSServer_RegisterWithSC ? true : false;
+	
 	// Set up IP addresses.
 	
 	if( listenOnV4 ) ++cmd->addrCount;
@@ -8743,14 +8759,15 @@ static void	_DNSServerCmdFollowedProcessHandler( void *inCtx )
 
 static OSStatus	_DNSServerCmdModifySystemSettings( DNSServerCmd * const inCmd )
 {
-	OSStatus					err;
-	mdns_dns_configurator_t		configurator	= NULL;
-	nw_resolver_config_t		secureDNSConfig	= NULL;
-	nw_endpoint_t				endpoint		= NULL;
-	const char *				primaryDomainStr;
-	CFArrayRef					domains			= NULL;
-	size_t						i;
-	char						dnssecDomainStr[ kDNSServiceMaxDomainName ];
+	OSStatus						err;
+	mdns_dns_configurator_t			configurator	= NULL;
+	mdns_dns_service_definition_t	definition		= NULL;
+	nw_resolver_config_t			secureDNSConfig	= NULL;
+	nw_endpoint_t					endpoint		= NULL;
+	const char *					primaryDomainStr;
+	CFArrayRef						domains			= NULL;
+	size_t							i;
+	char							dnssecDomainStr[ kDNSServiceMaxDomainName ];
 	
 	require_action_quiet( inCmd->addrCount > 0, exit, err = kCountErr );
 	
@@ -8758,20 +8775,18 @@ static OSStatus	_DNSServerCmdModifySystemSettings( DNSServerCmd * const inCmd )
 	require_noerr( err, exit );
 	
 	primaryDomainStr = inCmd->domainOverride ? inCmd->domainOverride : "d.test.";
+	const char * const domainStrings[] =
+	{
+		primaryDomainStr,
+		dnssecDomainStr,
+		kDNSServerReverseIPv4DomainStr,
+		kDNSServerReverseIPv6DomainStr
+	};
 	switch( inCmd->protocol )
 	{
 		case kDNSProtocol_DoT:
 		case kDNSProtocol_DoH:
 		{
-			bool					ok;
-			const char * const		domainStrings[] =
-			{
-				primaryDomainStr,
-				dnssecDomainStr,
-				kDNSServerReverseIPv4DomainStr,
-				kDNSServerReverseIPv6DomainStr
-			};
-			
 			// Try to clean up a stale Do53 resolver entry for a previous server from the system's DNS configuration in case
 			// one happens to still be present. Such an entry may interfere with the system settings for the DoT server if
 			// they're for the same domain, i.e., queries may be incorrectly sent to the Do53 server which no longer exists.
@@ -8830,7 +8845,7 @@ static OSStatus	_DNSServerCmdModifySystemSettings( DNSServerCmd * const inCmd )
 				nw_forget( &endpoint );
 			}
 			nw_resolver_config_set_interface_name( secureDNSConfig, "lo0" );
-			ok = nw_resolver_config_publish( secureDNSConfig );
+			const bool ok = nw_resolver_config_publish( secureDNSConfig );
 			require_action( ok, exit, err = kUnknownErr );
 			
 			if( domains )
@@ -8848,42 +8863,115 @@ static OSStatus	_DNSServerCmdModifySystemSettings( DNSServerCmd * const inCmd )
 		}
 		case kDNSProtocol_Do53:
 		{
-			configurator = mdns_dns_configurator_create_with_cfstring_id( kDNSServerServiceID, &err );
-			require_noerr( err, exit );
-			
-			err = mdns_dns_configurator_add_domain( configurator, primaryDomainStr, 0 );
-			require_noerr( err, exit );
-			
-			err = mdns_dns_configurator_add_domain( configurator, dnssecDomainStr, 0 );
-			require_noerr( err, exit );
-			
-			err = mdns_dns_configurator_add_domain( configurator, kDNSServerReverseIPv4DomainStr, 0 );
-			require_noerr( err, exit );
-			
-			err = mdns_dns_configurator_add_domain( configurator, kDNSServerReverseIPv6DomainStr, 0 );
-			require_noerr( err, exit );
-			
-			for( i = 0; i < inCmd->addrCount; ++i )
+			if( inCmd->registerWithSC )
 			{
-				const sockaddr_ip * const		sip = &inCmd->addrArray[ i ];
-				char							addrStr[ kSockAddrStringMaxSize ];
-				
-				err = SockAddrToString( &sip->sa, kSockAddrStringFlagsNoPort, addrStr );
+				configurator = mdns_dns_configurator_create_with_cfstring_id( kDNSServerServiceID, &err );
 				require_noerr( err, exit );
 				
-				err = mdns_dns_configurator_add_server_address_string( configurator, addrStr );
+				err = mdns_dns_configurator_add_domain( configurator, primaryDomainStr, 0 );
 				require_noerr( err, exit );
+				
+				err = mdns_dns_configurator_add_domain( configurator, dnssecDomainStr, 0 );
+				require_noerr( err, exit );
+				
+				err = mdns_dns_configurator_add_domain( configurator, kDNSServerReverseIPv4DomainStr, 0 );
+				require_noerr( err, exit );
+				
+				err = mdns_dns_configurator_add_domain( configurator, kDNSServerReverseIPv6DomainStr, 0 );
+				require_noerr( err, exit );
+				
+				for( i = 0; i < inCmd->addrCount; ++i )
+				{
+					const sockaddr_ip * const		sip = &inCmd->addrArray[ i ];
+					char							addrStr[ kSockAddrStringMaxSize ];
+					
+					err = SockAddrToString( &sip->sa, kSockAddrStringFlagsNoPort, addrStr );
+					require_noerr( err, exit );
+					
+					err = mdns_dns_configurator_add_server_address_string( configurator, addrStr );
+					require_noerr( err, exit );
+				}
+				err = mdns_dns_configurator_set_port( configurator, inCmd->portActual );
+				require_noerr( err, exit );
+				
+				err = mdns_dns_configurator_set_interface( configurator, "lo0" );
+				require_noerr( err, exit );
+				
+				err = mdns_dns_configurator_register( configurator, CFSTR( kDNSSDUtilIdentifier ) );
+				require_noerr( err, exit );
+				
+				inCmd->addedResolver = true;
 			}
-			err = mdns_dns_configurator_set_port( configurator, inCmd->portActual );
-			require_noerr( err, exit );
-			
-			err = mdns_dns_configurator_set_interface( configurator, "lo0" );
-			require_noerr( err, exit );
-			
-			err = mdns_dns_configurator_register( configurator, CFSTR( kDNSSDUtilIdentifier ) );
-			require_noerr( err, exit );
-			
-			inCmd->addedResolver = true;
+			else
+			{
+				definition = mdns_dns_service_definition_create();
+				require_action( definition, exit, err = kNoResourcesErr );
+				
+				for( i = 0; i < countof( domainStrings ); ++i )
+				{
+					const char * const domainStr = domainStrings[ i ];
+					mdns_domain_name_t domain = mdns_domain_name_create( domainStr, mdns_domain_name_create_opts_none,
+						&err );
+					require_noerr_action( err, exit, ds_ulog( kLogLevelError,
+						"error: Failed to create domain name for '%s': %#m\n", domainStr, err ) );
+					
+					mdns_dns_service_definition_add_domain( definition, domain );
+					mdns_forget( &domain );
+				}
+				for( i = 0; i < inCmd->addrCount; ++i )
+				{
+					sockaddr_ip sip = inCmd->addrArray[ i ];
+					SockAddrSetPort( &sip, inCmd->portActual );
+					char addrStr[ kSockAddrStringMaxSize ];
+					err = SockAddrToString( &sip.sa, kSockAddrStringFlagsNone, addrStr );
+					require_noerr( err, exit );
+					
+					mdns_address_t serverAddr = mdns_address_create_from_ip_address_string( addrStr );
+					require_action( serverAddr, exit, err = kNoResourcesErr; ds_ulog( kLogLevelError,
+						"error: Failed to create address for '%s'\n", addrStr ) );
+					
+					err = mdns_dns_service_definition_append_server_address( definition, serverAddr );
+					mdns_forget( &serverAddr );
+					require_noerr( err, exit );
+				}
+				const uint32_t ifIndex = if_nametoindex( "lo0" );
+				err = map_global_value_errno( ifIndex != 0, ifIndex );
+				require_noerr_action_quiet( err, exit, ds_ulog( kLogLevelError,
+					"Failed to get interface index for lo0: %#m", err ) );
+				
+				mdns_dns_service_definition_set_interface_index( definition, ifIndex, false );
+				inCmd->registration = mrc_dns_service_registration_create( definition );
+				mdns_forget( &definition );
+				require_action_quiet( inCmd->registration, exit, err = kNoResourcesErr );
+				
+				mrc_dns_service_registration_set_queue( inCmd->registration, inCmd->queue );
+				mrc_dns_service_registration_set_event_handler( inCmd->registration,
+				^( const mrc_dns_service_registration_event_t inEvent, const OSStatus inError )
+				{
+					switch( inEvent )
+					{
+						case mrc_dns_service_registration_event_started:
+							ds_ulog( kLogLevelInfo, "DNS service registration started\n" );
+							break;
+						
+						case mrc_dns_service_registration_event_interruption:
+							ds_ulog( kLogLevelInfo, "DNS service registration interrupted\n" );
+							break;
+						
+						case mrc_dns_service_registration_event_invalidation:
+							if( inError )
+							{
+								ds_ulog( kLogLevelError, "DNS service registration invalidated with error: %#m\n", inError );
+							}
+							else
+							{
+								ds_ulog( kLogLevelInfo, "DNS service registration gracefully invalidated\n" );
+							}
+							break;
+					}
+				} );
+				mrc_dns_service_registration_activate( inCmd->registration );
+			}
 			break;
 		}
 		default:
@@ -8893,6 +8981,7 @@ static OSStatus	_DNSServerCmdModifySystemSettings( DNSServerCmd * const inCmd )
 	
 exit:
 	mdns_forget( &configurator );
+	mdns_forget( &definition );
 	nw_forget( &secureDNSConfig );
 	nw_forget( &endpoint );
 	CFForget( &domains );
@@ -8922,6 +9011,7 @@ static OSStatus	_DNSServerCmdUndoSystemSettings( DNSServerCmd * const inCmd )
 		
 		inCmd->addedResolver = false;
 	}
+	mrc_dns_service_registration_forget( &inCmd->registration );
 	err = kNoErr;
 	
 exit:
@@ -17223,10 +17313,12 @@ static void	DotLocalTestCmd( void )
 	err = _SpawnCommand( &context->replierPID, NULL, NULL, "%s", context->replierCmd );
 	require_noerr( err, exit );
 	
-	// Spawn a test DNS server
+	// Spawn a test DNS server.
+	// Use the --registerSC option because this test depends on a GAI operation for a domain name that matches a *.local
+	// seach domain. SystemConfiguration will set up a search domain for each of the DNS service's match domains.
 	
 	ASPrintF( &context->serverCmd,
-		"dnssdutil server --loopback --follow %lld --port 0 --defaultTTL 300 --domain %s.local.",
+		"dnssdutil server --loopback --registerSC --follow %lld --port 0 --defaultTTL 300 --domain %s.local.",
 		(int64_t) getpid(), context->labelStr );
 	require_action_quiet( context->serverCmd, exit, err = kUnknownErr );
 	
@@ -27746,8 +27838,12 @@ static void	_OptimisticDNSTestStart( void * const inCtx )
 	me->domain = mdns_domain_name_create( domainStr, mdns_domain_name_create_opts_none, &err );
 	require_noerr( err, exit );
 	
+	// Use the --registerSC option because this test uses GAI operations that only specify a single label as the
+	// hostname. The test depends on the single label being appended to a search domain equal to a match domain for the
+	// test DNS server. SystemConfiguration will set up a search domain for each of the DNS service's match domains.
+	
 	ASPrintF( &serverCmd,
-		"dnssdutil server --loopback --follow %lld --responseDelay 10 --domain %s",
+		"dnssdutil server --loopback --registerSC --follow %lld --responseDelay 10 --domain %s",
 		(int64_t) getpid(), mdns_domain_name_get_presentation( me->domain ) );
 	require_action_quiet( serverCmd, exit, err = kNoMemoryErr );
 	

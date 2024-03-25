@@ -64,7 +64,7 @@ struct thread_tracker {
     srp_server_t *server_state;
     cti_connection_t NULLABLE thread_context;
 	thread_tracker_callback_t *callbacks;
-	time_t last_thread_network_state_change;
+	uint64_t last_thread_network_state_change;
 	thread_network_state_t current_state, previous_state;
 	bool associated, previous_associated;
 };

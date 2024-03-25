@@ -62,6 +62,21 @@ typedef enum {
 #include "omr-publisher.h"
 #include "route-tracker.h"
 
+#ifdef BUILD_TEST_ENTRY_POINTS
+#undef cti_remove_route
+#undef cti_add_route
+#define cti_remove_route cti_remove_route_test
+#define cti_add_route cti_add_route_test
+
+static int cti_add_route_test(srp_server_t *NULLABLE UNUSED server, void *NULLABLE context, cti_reply_t NONNULL callback,
+                              run_context_t NULLABLE UNUSED client_queue, struct in6_addr *NONNULL prefix,
+                              int UNUSED prefix_length, int UNUSED priority, int UNUSED domain_id, bool UNUSED stable,
+                              bool UNUSED nat64);
+static int cti_remove_route_test(srp_server_t *NULLABLE UNUSED server, void *NULLABLE context, cti_reply_t NONNULL callback,
+                                 run_context_t NULLABLE UNUSED client_queue, struct in6_addr *NONNULL prefix,
+                                 int UNUSED prefix_length, int UNUSED priority);
+#endif
+
 typedef struct prefix_tracker prefix_tracker_t;
 struct prefix_tracker {
     int ref_count;
@@ -641,18 +656,19 @@ route_tracker_test_route_update(void *context, struct in6_addr *prefix, cti_repl
 }
 
 int
-cti_add_route_(srp_server_t *NULLABLE UNUSED server, void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE UNUSED client_queue,
-               struct in6_addr *NONNULL prefix, int UNUSED prefix_length, int UNUSED priority, int UNUSED domain_id, bool UNUSED stable,
-               bool UNUSED nat64, const char *NONNULL UNUSED file, int UNUSED line)
+cti_add_route_test(srp_server_t *NULLABLE UNUSED server, void *NULLABLE context, cti_reply_t NONNULL callback,
+                   run_context_t NULLABLE UNUSED client_queue, struct in6_addr *NONNULL prefix,
+                   int UNUSED prefix_length, int UNUSED priority, int UNUSED domain_id, bool UNUSED stable,
+                   bool UNUSED nat64)
 {
     route_tracker_test_route_update(context, prefix, callback, false);
     return 0;
 }
 
 int
-cti_remove_route_(srp_server_t *NULLABLE UNUSED server, void *NULLABLE context, cti_reply_t NONNULL callback, run_context_t NULLABLE UNUSED client_queue,
-                  struct in6_addr *NONNULL prefix, int UNUSED prefix_length, int UNUSED priority,
-                  const char *NONNULL UNUSED file, int UNUSED line)
+cti_remove_route_test(srp_server_t *NULLABLE UNUSED server, void *NULLABLE context, cti_reply_t NONNULL callback,
+                      run_context_t NULLABLE UNUSED client_queue, struct in6_addr *NONNULL prefix,
+                      int UNUSED prefix_length, int UNUSED priority)
 {
     route_tracker_test_route_update(context, prefix, callback, true);
     return 0;

@@ -35,15 +35,18 @@
 
 //======================================================================================================================
 
+#if !TARGET_OS_OSX
 static SecKeyRef
 create_public_sec_key(const dns_rr_t *const key_record);
 
 static CFDataRef
 create_data_to_verify(dns_wire_t *const message, const dns_rr_t *const signature);
+#endif // !TARGET_OS_OSX
 
 bool
 srp_sig0_verify(dns_wire_t *message, dns_rr_t *key, dns_rr_t *signature)
 {
+#if !TARGET_OS_OSX
     bool valid = false;
     CFErrorRef cf_error = NULL;
     SecKeyRef public_key = NULL;
@@ -96,8 +99,10 @@ srp_sig0_verify(dns_wire_t *message, dns_rr_t *key, dns_rr_t *signature)
     // Validate the signature.
     valid = SecKeyVerifySignature(public_key, verify_algorithm, data_to_verify_cfdata, sig_to_match_cfdata, &cf_error);
     if (!valid) {
+        char errbuf[200];
         CFStringRef error_cfstring = CFErrorCopyDescription(cf_error);
-        ERROR("SecKeyVerifySignature failed to validate - Error Description: %@", error_cfstring);
+        CFStringGetCString(error_cfstring, errbuf, sizeof(errbuf), kCFStringEncodingUTF8);
+        ERROR("SecKeyVerifySignature failed to validate - Error Description: %s", errbuf);
         CFRelease(error_cfstring);
         CFRelease(cf_error);
         cf_error = NULL;
@@ -115,8 +120,16 @@ exit:
     }
 
     return valid;
+#else
+    (void)message;
+    (void)key;
+    (void)signature;
+
+    return true;
+#endif // !TARGET_OS_OSX
 }
 
+#if !TARGET_OS_OSX
 static SecKeyRef
 create_public_sec_key(const dns_rr_t *const key_record)
 {
@@ -232,6 +245,7 @@ exit:
     }
     return data_to_verify_cfdata;
 }
+#endif // !TARGET_OS_OSX
 
 //======================================================================================================================
 

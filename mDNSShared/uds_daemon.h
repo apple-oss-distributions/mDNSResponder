@@ -51,6 +51,9 @@ typedef void (*req_termination_fn)(request_state *request);
 
 typedef struct registered_record_entry
 {
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    uint64_t powerlog_start_time;
+#endif
     struct registered_record_entry *next;
     mDNSu32 key;
     client_context_t regrec_client_context;
@@ -174,6 +177,9 @@ struct request_state
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     mdns_dns_service_id_t custom_service_id;
 #endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    uint64_t powerlog_start_time;
+#endif
     request_state *next;            // For a shared connection, the next element in the list of subordinate
                                     // requests on that connection. Otherwise null.
     request_state *primary;         // For a subordinate request, the request that represents the shared
@@ -233,7 +239,7 @@ struct request_state
 MDNS_CLANG_TREAT_WARNING_AS_ERROR_END()
 MDNS_GENERAL_STRUCT_PAD_CHECK(struct request_state);
 #endif
-mdns_compile_time_max_size_check(struct request_state, 272);
+mdns_compile_time_max_size_check(struct request_state, 280);
 
 // Notes:
 // 1. On a shared connection these fields in the primary structure, including hdr, are re-used
@@ -267,6 +273,7 @@ extern int udsserver_init(dnssd_sock_t skts[], size_t count);
 extern mDNSs32 udsserver_idle(mDNSs32 nextevent);
 extern void udsserver_info_dump_to_fd(int fd);
 extern void udsserver_handle_configchange(mDNS *const m);
+extern void udsserver_report_request_progress_to_powerlog(void);
 extern int udsserver_exit(void);    // should be called prior to app exit
 extern void LogMcastStateInfo(mDNSBool mflag, mDNSBool start, mDNSBool mstatelog);
 #define LogMcastQ       (mDNS_McastLoggingEnabled == 0) ? ((void)0) : LogMcastQuestion

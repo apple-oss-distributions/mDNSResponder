@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 #define __QUERIER_SUPPORT_H__
 
 #include "mDNSEmbeddedAPI.h"
+#include "mrcs_server.h"
 #include <mdns/private.h>
 
 // Threshold value for problematic QTYPE workaround.
@@ -44,5 +45,7 @@ extern void Querier_HandlePostCNAMERestart(DNSQuestion *q, mdns_client_t client)
 extern void Querier_HandleSleep(void);
 extern void Querier_HandleWake(void);
 extern void Querier_HandleMDNSQuestion(DNSQuestion *const q);
+
+extern const struct mrcs_server_dns_service_registration_handlers_s kMRCSServerDNSServiceRegistrationHandlers;
 
 #endif  // __QUERIER_SUPPORT_H__

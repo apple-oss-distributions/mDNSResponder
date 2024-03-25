@@ -554,6 +554,20 @@ ioloop(void)
 }
 #endif // !defined(IOLOOP_MACOS)
 
+static void
+ioloop_normalize_address(addr_t *normalized, addr_t *original)
+{
+    uint16_t *sinp = (uint16_t *)&original->sin6.sin6_addr;
+    // Check for ::ffff:xxxx:xxxx, which is an ipv4mapped address
+    if (sinp[0] == 0 && sinp[1] == 0 && sinp[2] == 0 && sinp[3] == 0 && sinp[4] == 0 && sinp[5] == 0xffff) {
+        normalized->sin.sin_family = AF_INET;
+        memcpy(&normalized->sin.sin_addr, &sinp[6], sizeof(struct in_addr));
+        normalized->sin.sin_port = original->sin6.sin6_port;
+    } else {
+        *normalized = *original;
+    }
+}
+
 void
 ioloop_udp_read_callback(io_t *io, void *context)
 {
@@ -598,6 +612,9 @@ ioloop_udp_read_callback(io_t *io, void *context)
     // For UDP, we use the interface index as part of the validation strategy, so go get
     // the interface index.
     for (cmh = CMSG_FIRSTHDR(&msg); cmh; cmh = CMSG_NXTHDR(&msg, cmh)) {
+        bool print_addresses = false;
+        addr_t source_address, local_address;
+
         if (cmh->cmsg_level == IPPROTO_IPV6 && cmh->cmsg_type == IPV6_PKTINFO) {
             struct in6_pktinfo pktinfo;
 
@@ -611,14 +628,7 @@ ioloop_udp_read_callback(io_t *io, void *context)
 #ifndef NOT_HAVE_SA_LEN
             message->local.sin6.sin6_len = sizeof message->local;
 #endif
-            SEGMENTED_IPv6_ADDR_GEN_SRP(&src.sin6.sin6_addr, src_addr_buf);
-            SEGMENTED_IPv6_ADDR_GEN_SRP(&message->local.sin6.sin6_addr, dest_addr_buf);
-                INFO("received %zd byte UDP message on index %d to " PRI_SEGMENTED_IPv6_ADDR_SRP "#%d from "
-                     PRI_SEGMENTED_IPv6_ADDR_SRP "#%d", rv, message->ifindex,
-                     SEGMENTED_IPv6_ADDR_PARAM_SRP(&message->local.sin6.sin6_addr,  dest_addr_buf),
-                     ntohs(message->local.sin6.sin6_port),
-                     SEGMENTED_IPv6_ADDR_PARAM_SRP(&src.sin6.sin6_addr, src_addr_buf),
-                     ntohs(src.sin6.sin6_port));
+            print_addresses = true;
         } else if (cmh->cmsg_level == IPPROTO_IP && cmh->cmsg_type == IP_PKTINFO) {
             struct in_pktinfo pktinfo;
 
@@ -631,13 +641,29 @@ ioloop_udp_read_callback(io_t *io, void *context)
             message->local.sin.sin_len = sizeof message->local;
 #endif
             message->local.sin.sin_port = htons(connection->listen_port);
-            IPv4_ADDR_GEN_SRP(&src.sin.sin_addr.s_addr, src_addr_buf);
-            IPv4_ADDR_GEN_SRP(&message->local.sin.sin_addr.s_addr, dest_addr_buf);
-            INFO("received %zd byte UDP message on index %d to " PRI_IPv4_ADDR_SRP "#%d from " PRI_IPv4_ADDR_SRP "#%d", rv,
-                 message->ifindex, IPv4_ADDR_PARAM_SRP(&message->local.sin.sin_addr.s_addr, dest_addr_buf),
-                 ntohs(message->local.sin.sin_port),
-                 IPv4_ADDR_PARAM_SRP(&src.sin.sin_addr.s_addr, src_addr_buf),
-                 ntohs(src.sin.sin_port));
+            print_addresses = true;
+        }
+        if (print_addresses) {
+            ioloop_normalize_address(&source_address, &src);
+            ioloop_normalize_address(&local_address, &message->local);
+            if (source_address.sa.sa_family == AF_INET6) {
+                SEGMENTED_IPv6_ADDR_GEN_SRP(&source_address.sin6.sin6_addr, src_addr_buf);
+                SEGMENTED_IPv6_ADDR_GEN_SRP(&local_address.sin6.sin6_addr, dest_addr_buf);
+                INFO("received %zd byte UDP message on index %d to " PRI_SEGMENTED_IPv6_ADDR_SRP "#%d from "
+                     PRI_SEGMENTED_IPv6_ADDR_SRP "#%d", rv, message->ifindex,
+                     SEGMENTED_IPv6_ADDR_PARAM_SRP(&local_address.sin6.sin6_addr,  dest_addr_buf),
+                     ntohs(local_address.sin6.sin6_port),
+                     SEGMENTED_IPv6_ADDR_PARAM_SRP(&source_address.sin6.sin6_addr, src_addr_buf),
+                     ntohs(source_address.sin6.sin6_port));
+            } else {
+                IPv4_ADDR_GEN_SRP(&source_address.sin.sin_addr.s_addr, src_addr_buf);
+                IPv4_ADDR_GEN_SRP(&local_address.sin.sin_addr.s_addr, dest_addr_buf);
+                INFO("received %zd byte UDP message on index %d to " PRI_IPv4_ADDR_SRP "#%d from " PRI_IPv4_ADDR_SRP "#%d", rv,
+                     message->ifindex, IPv4_ADDR_PARAM_SRP(&local_address.sin.sin_addr.s_addr, dest_addr_buf),
+                     ntohs(local_address.sin.sin_port),
+                     IPv4_ADDR_PARAM_SRP(&local_address.sin.sin_addr.s_addr, src_addr_buf),
+                     ntohs(source_address.sin.sin_port));
+            }
         }
     }
     connection->datagram_callback(connection, message, connection->context);
@@ -820,7 +846,7 @@ ioloop_udp_send_message(comm_t *comm, addr_t *source, addr_t *dest, int ifindex,
     mh.msg_iovlen = iov_len;
     mh.msg_name = dest;
     mh.msg_control = cmsg_buf;
-    if (source == NULL && ifindex == 0) {
+    if (source == NULL) {
         mh.msg_controllen = 0;
     } else {
         mh.msg_controllen = sizeof cmsg_buf;
@@ -836,13 +862,8 @@ ioloop_udp_send_message(comm_t *comm, addr_t *source, addr_t *dest, int ifindex,
             inp = (struct in_pktinfo *)CMSG_DATA(cmsg);
             memset(inp, 0, sizeof *inp);
             inp->ipi_ifindex = ifindex;
-            if (source) {
-                IPv4_ADDR_GEN_SRP(&source->sin.sin_addr.s_addr, ipv4_addr_buf);
-                INFO("sending UDP response from " PRI_IPv4_ADDR_SRP "#%d",
-                     IPv4_ADDR_PARAM_SRP(&source->sin.sin_addr.s_addr, ipv4_addr_buf), ntohs(source->sin.sin_port));
-                inp->ipi_spec_dst = source->sin.sin_addr;
-                inp->ipi_addr = source->sin.sin_addr;
-            }
+            inp->ipi_spec_dst = source->sin.sin_addr;
+            inp->ipi_addr = source->sin.sin_addr;
         } else if (source->sa.sa_family == AF_INET6) {
             struct in6_pktinfo *inp;
             mh.msg_namelen = sizeof (struct sockaddr_in6);
@@ -853,13 +874,7 @@ ioloop_udp_send_message(comm_t *comm, addr_t *source, addr_t *dest, int ifindex,
             inp = (struct in6_pktinfo *)CMSG_DATA(cmsg);
             memset(inp, 0, sizeof *inp);
             inp->ipi6_ifindex = ifindex;
-            if (source) {
-                SEGMENTED_IPv6_ADDR_GEN_SRP(&source->sin6.sin6_addr.s6_addr, ipv6_addr_buf);
-                INFO("sending UDP response from " PRI_SEGMENTED_IPv6_ADDR_SRP "#%d",
-                     SEGMENTED_IPv6_ADDR_PARAM_SRP(&source->sin6.sin6_addr.s6_addr, ipv6_addr_buf),
-                     ntohs(source->sin6.sin6_port));
-                inp->ipi6_addr = source->sin6.sin6_addr;
-            }
+            inp->ipi6_addr = source->sin6.sin6_addr;
         } else {
             ERROR("unknown family %d", source->sa.sa_family);
             abort();
@@ -869,16 +884,30 @@ ioloop_udp_send_message(comm_t *comm, addr_t *source, addr_t *dest, int ifindex,
     for (int i = 0; i < iov_len; i++) {
         len += iov[i].iov_len;
     }
-    if (dest->sa.sa_family == AF_INET) {
-        IPv4_ADDR_GEN_SRP(&dest->sin.sin_addr.s_addr, ipv4_addr_buf);
-            INFO("sending %zd byte UDP response to " PRI_IPv4_ADDR_SRP "#%d", len,
-                 IPv4_ADDR_PARAM_SRP(&dest->sin.sin_addr.s_addr, ipv4_addr_buf),
-                 ntohs(dest->sin.sin_port));
+    addr_t dest_addr, source_addr;
+    ioloop_normalize_address(&dest_addr, dest);
+    if (source != NULL) {
+        ioloop_normalize_address(&source_addr, source);
     } else {
-        SEGMENTED_IPv6_ADDR_GEN_SRP(&dest->sin6.sin6_addr.s6_addr, ipv6_addr_buf);
-        INFO("sending %zd byte UDP response to " PRI_SEGMENTED_IPv6_ADDR_SRP "#%d", len,
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(&dest->sin6.sin6_addr.s6_addr, ipv6_addr_buf),
-             ntohs(dest->sin6.sin6_port));
+        memset(&source_addr, 0, sizeof(source_addr));
+        source_addr.sa.sa_family = dest_addr.sa.sa_family;
+    }
+    if (dest_addr.sa.sa_family == AF_INET) {
+        IPv4_ADDR_GEN_SRP(&source_addr.sin.sin_addr.s_addr, ipv4_src_buf);
+        IPv4_ADDR_GEN_SRP(&dest_addr.sin.sin_addr.s_addr, ipv4_dest_buf);
+        INFO("sending %zd byte UDP response from " PRI_IPv4_ADDR_SRP " port %d index %d to " PRI_IPv4_ADDR_SRP "#%d",
+             len, IPv4_ADDR_PARAM_SRP(&source_addr.sin.sin_addr.s_addr, ipv4_src_buf),
+             ifindex, ntohs(source_addr.sin.sin_port),
+             IPv4_ADDR_PARAM_SRP(&dest_addr.sin.sin_addr.s_addr, ipv4_dest_buf), ntohs(dest_addr.sin.sin_port));
+    } else {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(&source_addr.sin6.sin6_addr.s6_addr, ipv6_src_buf);
+        SEGMENTED_IPv6_ADDR_GEN_SRP(&dest_addr.sin6.sin6_addr.s6_addr, ipv6_dest_buf);
+        INFO("sending %zd byte UDP response from "
+             PRI_SEGMENTED_IPv6_ADDR_SRP " port %d index %d to " PRI_SEGMENTED_IPv6_ADDR_SRP "#%d",
+             len, SEGMENTED_IPv6_ADDR_PARAM_SRP(&source_addr.sin6.sin6_addr.s6_addr, ipv6_src_buf),
+             ntohs(source_addr.sin6.sin6_port), ifindex,
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(&dest_addr.sin6.sin6_addr.s6_addr, ipv6_dest_buf),
+             ntohs(dest_addr.sin6.sin6_port));
     }
     status = sendmsg(comm->io.fd, &mh, 0);
     if (status < 0) {

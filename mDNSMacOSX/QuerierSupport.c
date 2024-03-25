@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -959,9 +959,36 @@ mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
                 mdns_querier_set_checking_disabled(querier, true);
             }
         #endif
-            if (q->pid != 0)
+            // Set the identifier for the delegator relative to mDNSResponder, i.e., the identifier of the effective
+            // client.
+            //
+            // Order of preference:
+            //  1. q->DelegatorToken if available. This is the audit token of the immediate client's delegator, and
+            //     therefore the audit token of the effective client.
+            //  2. q->PeerToken if available and its PID is equal to a non-zero q->pid, which is the PID of the
+            //     effective client. In this case, the immediate client is the effective client, so use its audit token,
+            //     which is generally more informative than just a PID.
+            //  3. q->pid if it's non-zero. This is the PID of the effective client.
+            //  4. q->uuid. This is the UUID of the effective client.
+            if (0) {}
+        #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
+            else if (q->DelegatorToken)
             {
-                mdns_querier_set_delegator_pid(querier, q->pid);
+                mdns_querier_set_delegator_audit_token(querier, q->DelegatorToken);
+            }
+        #endif
+            else if (q->pid != 0)
+            {
+            #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
+                if (mdns_audit_token_get_pid_null_safe(q->PeerToken, 0) == q->pid)
+                {
+                    mdns_querier_set_delegator_audit_token(querier, q->PeerToken);
+                }
+                else
+            #endif
+                {
+                    mdns_querier_set_delegator_pid(querier, q->pid);
+                }
             }
             else
             {
@@ -1577,4 +1604,28 @@ exit:
     mdns_forget(&subscriber);
     mdns_forget(&qname);
 }
+
+mDNSlocal mdns_dns_service_id_t
+_Querier_DNSServiceRegistrationStartHandler(const mdns_dns_service_definition_t definition)
+{
+    KQueueLock();
+    const mdns_dns_service_id_t ident = Querier_RegisterNativeDNSService(definition);
+    KQueueUnlock("DNS service registration start handler");
+    return ident;
+}
+
+mDNSlocal void
+_Querier_DNSServiceRegistrationStopHandler(const mdns_dns_service_id_t ident)
+{
+    KQueueLock();
+    Querier_DeregisterNativeDNSService(ident);
+    KQueueUnlock("DNS service registration stop handler");
+}
+
+const struct mrcs_server_dns_service_registration_handlers_s kMRCSServerDNSServiceRegistrationHandlers =
+{
+    .start = _Querier_DNSServiceRegistrationStartHandler,
+    .stop = _Querier_DNSServiceRegistrationStopHandler,
+};
+
 #endif // MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)

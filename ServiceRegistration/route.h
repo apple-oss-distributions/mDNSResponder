@@ -416,6 +416,7 @@ struct route_state {
 };
 
 extern srp_server_t *NONNULL srp_server; // temporary static srp server pointer
+extern route_state_t *NONNULL route_states; // same
 
 route_state_t *NULLABLE route_state_create(srp_server_t *NONNULL server_state, const char *NONNULL name);
 void route_ula_setup(route_state_t *NULLABLE route_state);
@@ -439,6 +440,11 @@ void interface_retain_(interface_t *NONNULL interface, const char *NONNULL file,
 #define interface_release(interface) interface_release_(interface, __FILE__, __LINE__)
 void interface_release_(interface_t *NONNULL interface, const char *NONNULL file, int line);
 void route_refresh_interface_list(route_state_t *NONNULL route_state);
+
+void router_solicit(icmp_message_t *NONNULL message);
+void router_advertisement(icmp_message_t *NONNULL message);
+void neighbor_advertisement(icmp_message_t *NONNULL message);
+
 #endif // __SERVICE_REGISTRATION_ROUTE_H
 
 // Local Variables:

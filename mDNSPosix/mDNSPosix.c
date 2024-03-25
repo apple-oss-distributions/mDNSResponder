@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2087,7 +2087,7 @@ mDNSexport mDNSBool mDNSPlatformValidRecordForInterface(const AuthRecord *rr, mD
     return 1;
 }
 
-mDNSexport mDNSBool mDNSPlatformValidQuestionForInterface(DNSQuestion *q, const NetworkInterfaceInfo *intf)
+mDNSexport mDNSBool mDNSPlatformValidQuestionForInterface(const DNSQuestion *const q, const NetworkInterfaceInfo *const intf)
 {
     (void) q;
     (void) intf;

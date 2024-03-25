@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,14 @@
 
 #ifndef MDNS_GENERAL_H
 #define MDNS_GENERAL_H
+
+// Time conversion constants
+
+#define MDNS_MILLISECONDS_PER_SECOND	1000
+#define MDNS_MILLISECONDS_PER_HOUR		(MDNS_MILLISECONDS_PER_SECOND * MDNS_SECONDS_PER_HOUR)
+#define MDNS_SECONDS_PER_MINUTE			60
+#define MDNS_SECONDS_PER_HOUR			(MDNS_SECONDS_PER_MINUTE * MDNS_MINUTES_PER_HOUR)
+#define MDNS_MINUTES_PER_HOUR			60
 
 // Clang's __has_*() builtin macros are defined as zero if not defined.
 
@@ -496,6 +504,29 @@
 		if (!(EXPRESSION)) {			\
 			return;						\
 		}								\
+	} while (0)
+
+/*!
+ *	@brief
+ *		If an expression evaluates to false, executes an action, then returns.
+ *
+ *	@param EXPRESSION
+ *		The expression.
+ *
+ *	@param ACTION
+ *		The code to execute.
+ *
+ *	@discussion
+ *		No debugging information is logged.
+ */
+#define mdns_require_return_action(EXPRESSION, ACTION)	\
+	do {												\
+		if (!(EXPRESSION)) {							\
+			{											\
+				ACTION;									\
+			}											\
+			return;										\
+		}												\
 	} while (0)
 
 /*!

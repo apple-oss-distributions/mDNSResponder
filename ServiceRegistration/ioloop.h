@@ -98,7 +98,7 @@ typedef void (*dnssd_txn_finalize_callback_t)(void *NONNULL context);
 typedef void (*dnssd_txn_failure_callback_t)(void *NONNULL context, int status);
 typedef void (*wakeup_callback_t)(void *NONNULL context);
 typedef void (*finalize_callback_t)(void *NONNULL context);
-typedef void (*cancel_callback_t)(void *NONNULL context);
+typedef void (*cancel_callback_t)(comm_t *NONNULL comm, void *NONNULL context);
 typedef void (*ready_callback_t)(void *NONNULL context, uint16_t port);
 typedef void (*io_callback_t)(io_t *NONNULL io, void *NONNULL context);
 typedef void (*comm_callback_t)(comm_t *NONNULL comm);
@@ -191,6 +191,12 @@ struct dso_transport {
     bool avoiding;
     char *NONNULL name;
     void *NULLABLE context;
+#ifdef SRP_TEST_SERVER
+    void *NULLABLE test_context;
+    bool (*NULLABLE test_send_intercept)(comm_t *NONNULL connection, message_t *NULLABLE responding_to,
+                                         struct iovec *NONNULL iov, int iov_len, bool final, bool send_length);
+    void *NULLABLE srp_server;
+#endif
     datagram_callback_t NULLABLE datagram_callback;
     comm_callback_t NULLABLE close_callback;
     connect_callback_t NULLABLE connected;
@@ -375,6 +381,7 @@ bool srp_load_file_data(void *NULLABLE host_context, const char *NONNULL filenam
 bool srp_store_file_data(void *NULLABLE host_context, const char *NONNULL filename, uint8_t *NONNULL buffer,
                          uint16_t length);
 time_t srp_time(void);
+double srp_fractional_time(void);
 void srp_format_time_offset(char *NONNULL buf, size_t buf_len, time_t offset);
 
 const struct sockaddr *NULLABLE connection_get_local_address(message_t *NULLABLE message);

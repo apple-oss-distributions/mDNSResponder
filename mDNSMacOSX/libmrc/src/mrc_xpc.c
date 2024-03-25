@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 #include "memory.h"
 
 #include <CoreUtils/CoreUtils.h>
+#include <mdns/dns_service.h>
 #include "mdns_strict.h"
 
 //======================================================================================================================
@@ -49,13 +50,6 @@ _mrc_xpc_message_set_result(xpc_object_t msg, mdns_xpc_dictionary_t result);
 const char * const g_mrc_mach_service_name = "com.apple.mDNSResponder.control";
 
 //======================================================================================================================
-// MARK: - Commands
-
-const char * const g_mrc_command_dns_proxy_start		= "dns_proxy.start";
-const char * const g_mrc_command_dns_proxy_stop			= "dns_proxy.stop";
-const char * const g_mrc_command_dns_proxy_get_state	= "dns_proxy.get_state";
-
-//======================================================================================================================
 // MARK: - Top-Level Dictionary Keys
 
 static const char * const g_mrc_message_key_command	= "command";
@@ -65,8 +59,19 @@ static const char * const g_mrc_message_key_params	= "params";
 static const char * const g_mrc_message_key_result	= "result";
 
 //======================================================================================================================
-// MARK: - DNS Proxy Keys
+// MARK: - Result Keys
 
+static const char * const g_mrc_result_key_description = "description";
+
+//======================================================================================================================
+// MARK: - DNS Proxy Commands and Keys
+
+// Commands
+const char * const g_mrc_command_dns_proxy_start		= "dns_proxy.start";
+const char * const g_mrc_command_dns_proxy_stop			= "dns_proxy.stop";
+const char * const g_mrc_command_dns_proxy_get_state	= "dns_proxy.get_state";
+
+// Keys
 static const char * const g_mrc_dns_proxy_key_input_interfaces		= "input_interfaces";
 static const char * const g_mrc_dns_proxy_key_nat64_prefix_bit_len	= "nat64_prefix.bit_len";
 static const char * const g_mrc_dns_proxy_key_nat64_prefix_bits		= "nat64_prefix.bits";
@@ -74,9 +79,14 @@ static const char * const g_mrc_dns_proxy_key_output_interface		= "output_interf
 static const char * const g_mrc_dns_proxy_key_force_aaaa_synthesis	= "force_aaaa_synth";
 
 //======================================================================================================================
-// MARK: - Result Keys
+// MARK: - DNS Service Registration Commands and Keys
 
-static const char * const g_mrc_result_key_description = "description";
+// Commands
+const char * const g_mrc_command_dns_service_registration_start	= "dns_service_registration.start";
+const char * const g_mrc_command_dns_service_registration_stop	= "dns_service_registration.stop";
+
+// Keys
+static const char * const g_mrc_dns_service_registration_key_definition	= "definition";
 
 //======================================================================================================================
 // MARK: - External Message Functions
@@ -314,6 +324,40 @@ mdns_xpc_string_t
 mrc_xpc_dns_proxy_state_result_get_description(const mdns_xpc_dictionary_t result)
 {
 	return mdns_xpc_dictionary_get_string(result, g_mrc_result_key_description);
+}
+
+//======================================================================================================================
+// MARK: - External DNS Service Registration Functions
+
+xpc_object_t
+mrc_xpc_create_dns_service_registration_start_command_message(const uint64_t ident, const xpc_object_t params)
+{
+	return _mrc_xpc_create_command_message(ident, g_mrc_command_dns_service_registration_start, params);
+}
+
+//======================================================================================================================
+
+xpc_object_t
+mrc_xpc_create_dns_service_registration_stop_command_message(const uint64_t ident)
+{
+	return _mrc_xpc_create_command_message(ident, g_mrc_command_dns_service_registration_stop, NULL);
+}
+
+//======================================================================================================================
+
+void
+mrc_xpc_dns_service_registration_params_set_defintion_dictionary(const xpc_object_t params,
+	const xpc_object_t dict)
+{
+	xpc_dictionary_set_value(params, g_mrc_dns_service_registration_key_definition, dict);
+}
+
+//======================================================================================================================
+
+mdns_xpc_dictionary_t
+mrc_xpc_dns_service_registration_params_get_defintion_dictionary(const xpc_object_t params)
+{
+	return mdns_xpc_dictionary_get_dictionary(params, g_mrc_dns_service_registration_key_definition);
 }
 
 //======================================================================================================================

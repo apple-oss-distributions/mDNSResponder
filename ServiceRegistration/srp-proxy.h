@@ -34,7 +34,8 @@ client_update_t *NULLABLE srp_evaluate(const char *NULLABLE remote_name,
                                        dns_message_t *NONNULL *NULLABLE in_parsed_message,
                                        message_t *NONNULL raw_message, int index);
 bool srp_update_start(client_update_t *NONNULL client_update);
-void srp_parse_client_updates_free(client_update_t *NULLABLE messages);
+#define srp_parse_client_updates_free(messages) srp_parse_client_updates_free_(messages, __FILE__, __LINE__);
+void srp_parse_client_updates_free_(client_update_t *NULLABLE messages, const char *NONNULL file, int line);
 
 // Provided
 void dns_input(comm_t *NONNULL comm, message_t *NONNULL message, void *NULLABLE context);

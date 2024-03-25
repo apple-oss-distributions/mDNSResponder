@@ -82,6 +82,15 @@ service_tracker_finalize(service_tracker_t *tracker)
     free(tracker);
 }
 
+static void
+service_tracker_context_release(void *context)
+{
+    service_tracker_t *tracker = context;
+    if (tracker != NULL) {
+        RELEASE_HERE(tracker, service_tracker);
+    }
+}
+
 RELEASE_RETAIN_FUNCS(service_tracker);
 
 void
@@ -272,6 +281,16 @@ service_tracker_callback(void *context, cti_service_vec_t *services, cti_status_
 
         accumulator_t accumulator;
         for (service = tracker->thread_services; service != NULL; service = service->next) {
+            // For unicast services, see if there's also an anycast service on the same RLOC16.
+            if (service->service_type == unicast_service) {
+                service->u.unicast.anycast_also_present = false;
+                for (thread_service_t *aservice = tracker->thread_services; aservice != NULL; aservice = aservice->next)
+                {
+                    if (aservice->service_type == anycast_service && aservice->rloc16 == service->rloc16) {
+                        service->u.unicast.anycast_also_present = true;
+                    }
+                }
+            }
             service_tracker_flags_accumulator_init(&accumulator);
             service_tracker_flags_accumulate(&accumulator, service->previous_ncp, service->ncp, "ncp");
             service_tracker_flags_accumulate(&accumulator, service->previous_stable, service->ncp, "stable");
@@ -286,7 +305,9 @@ service_tracker_callback(void *context, cti_service_vec_t *services, cti_status_
         for (service_tracker_callback_t *callback = tracker->callbacks; callback != NULL; callback = callback->next) {
             callback->callback(callback->context);
         }
-        if (!tracker->user_service_seen && tracker->server_state->awaiting_service_removal) {
+        if (!tracker->user_service_seen && tracker->server_state != NULL &&
+            tracker->server_state->awaiting_service_removal)
+        {
             tracker->server_state->awaiting_service_removal = false;
             adv_ctl_thread_shutdown_status_check(tracker->server_state);
         }
@@ -573,7 +594,8 @@ service_tracker_verify_next_service(service_tracker_t *NULLABLE tracker)
             continue;
         }
         // If we didn't continue, yet, it's because we found a service we can probe, so probe it.
-        probe_srp_service(service, tracker, service_tracker_probe_callback);
+        RETAIN_HERE(tracker, service_tracker); // For the srp probe
+        probe_srp_service(service, tracker, service_tracker_probe_callback, service_tracker_context_release);
         return;
     }
 }

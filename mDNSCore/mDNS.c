@@ -15796,6 +15796,18 @@ mDNSexport void mDNS_DeactivateNetWake_internal(mDNS *const m, NetworkInterfaceI
     }
 }
 
+mDNSlocal mDNSBool IsInterfaceValidForQuestion(const DNSQuestion *const q, const NetworkInterfaceInfo *const intf)
+{
+    if (q->InterfaceID == mDNSInterface_Any)
+    {
+        return mDNSPlatformValidQuestionForInterface(q, intf);
+    }
+    else
+    {
+        return (q->InterfaceID == intf->InterfaceID);
+    }
+}
+
 mDNSexport mStatus mDNS_RegisterInterface(mDNS *const m, NetworkInterfaceInfo *set, InterfaceActivationSpeed activationSpeed)
 {
     AuthRecord *rr;
@@ -15953,8 +15965,9 @@ mDNSexport mStatus mDNS_RegisterInterface(mDNS *const m, NetworkInterfaceInfo *s
         {
             if (mDNSOpaque16IsZero(q->TargetQID))
             {
-                if (!q->InterfaceID || q->InterfaceID == set->InterfaceID)      // If non-specific Q, or Q on this specific interface,
-                {                                                               // then reactivate this question
+                // If the DNSQuestion's mDNS queries are supposed to be sent over the interface, then reactivate it.
+                if (IsInterfaceValidForQuestion(q, set))
+                {
 #if MDNSRESPONDER_SUPPORTS(APPLE, SLOW_ACTIVATION)
                     // If flapping, delay between first and second queries is nine seconds instead of one second
                     mDNSBool dodelay = (activationSpeed == SlowActivation) && (q->FlappingInterface1 == set->InterfaceID || q->FlappingInterface2 == set->InterfaceID);
@@ -15986,7 +15999,7 @@ mDNSexport mStatus mDNS_RegisterInterface(mDNS *const m, NetworkInterfaceInfo *s
         // we now need them to re-probe if necessary, and then re-announce.
         for (rr = m->ResourceRecords; rr; rr=rr->next)
         {
-            if (!rr->resrec.InterfaceID || rr->resrec.InterfaceID == set->InterfaceID)
+            if (IsInterfaceValidForAuthRecord(rr, set->InterfaceID))
             {
                 mDNSCoreRestartRegistration(m, rr, numannounce);
             }

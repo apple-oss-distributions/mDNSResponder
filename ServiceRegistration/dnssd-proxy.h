@@ -50,9 +50,22 @@
 #if (SRP_FEATURE_COMBINED_SRP_DNSSD_PROXY) && !defined(RA_TESTER)
 bool init_dnssd_proxy(srp_server_t *NONNULL server_state);
 bool delete_served_domain_by_interface_name(const char *const NONNULL interface_name);
+void dns_proxy_input(comm_t *NONNULL comm, message_t *NONNULL message, void *NULLABLE context);
 #endif // #if (SRP_FEATURE_COMBINED_SRP_DNSSD_PROXY)
 
 void dnssd_proxy_ifaddr_callback(void *NULLABLE context, const char *NONNULL name, const addr_t *NONNULL address,
-								 const addr_t *NONNULL mask, uint32_t UNUSED flags, enum interface_address_change event_type);
+                                 const addr_t *NONNULL mask, uint32_t UNUSED flags,
+                                 enum interface_address_change event_type);
 void dp_start_dropping(void);
+void dns_proxy_input_for_server(comm_t *NONNULL comm,
+                                srp_server_t *NONNULL server_state, message_t *NONNULL message, void *NULLABLE context);
 #endif // #ifndef __DNSSD_PROXY_H__
+
+// Local Variables:
+// mode: C
+// tab-width: 4
+// c-file-style: "bsd"
+// c-basic-offset: 4
+// fill-column: 108
+// indent-tabs-mode: nil
+// End:

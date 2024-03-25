@@ -1155,3 +1155,17 @@ mDNSlocal void NotifyWebContentFilter(const ResourceRecord *inAnswer, uid_t inUI
     }
 }
 #endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+mDNSexport mDNSBool ClientRequestUsesAWDL(const uint32_t ifindex, const DNSServiceFlags flags)
+{
+    if (ifindex == kDNSServiceInterfaceIndexAny)
+    {
+        return ((flags & kDNSServiceFlagsIncludeAWDL) != 0);
+    }
+    else
+    {
+        return mDNSPlatformInterfaceIsAWDL((mDNSInterfaceID)((uintptr_t)ifindex));
+    }
+}
+#endif

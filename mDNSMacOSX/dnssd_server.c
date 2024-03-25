@@ -58,6 +58,12 @@
 #include <mdns/signed_result.h>
 #endif
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+#include "uds_daemon.h"
+#include <mdns/dispatch.h>
+#include <mdns/powerlog.h>
+#endif
+
 #include "mdns_strict.h"
 
 //======================================================================================================================
@@ -255,6 +261,9 @@ MDNS_CLANG_TREAT_WARNING_AS_ERROR_BEGIN(-Wpadded)
 struct dx_gai_request_s {
 	struct dx_request_s				base;					// Request object base.
 	mdns_dns_service_id_t			custom_service_id;		// ID for this request's custom DNS service.
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+	uint64_t						powerlog_start_time;	// If non-zero, time when mDNS client request started.
+#endif
 	GetAddrInfoClientRequest *		gai;					// Underlying GAI request.
 	QueryRecordClientRequest *		query;					// Underlying SVCB/HTTPS query request.
 	dx_gai_result_t					results;				// List of pending results.
@@ -292,7 +301,7 @@ struct dx_gai_request_s {
 	MDNS_STRUCT_PAD_64_32(1, 1);
 };
 MDNS_CLANG_TREAT_WARNING_AS_ERROR_END()
-mdns_compile_time_max_size_check(struct dx_gai_request_s, 248);
+mdns_compile_time_max_size_check(struct dx_gai_request_s, 256);
 
 // Notes:
 // 1. If a client request specifies that DNS services that allow failover be avoided if they're unable to provide
@@ -340,10 +349,14 @@ mdns_compile_time_max_size_check(struct dx_gai_request_s, 248);
 typedef xpc_object_t
 (*dx_request_take_results_f)(dx_any_request_t request);
 
+typedef void
+(*dx_request_report_powerlog_progress_f)(dx_any_request_t request);
+
 typedef const struct dx_request_kind_s * dx_request_kind_t;
 struct dx_request_kind_s {
-	struct dx_kind_s			base;
-	dx_request_take_results_f	take_results;
+	struct dx_kind_s						base;
+	dx_request_take_results_f				take_results;
+	dx_request_report_powerlog_progress_f	report_powerlog_progress;
 };
 
 #define DX_REQUEST_SUBKIND_DEFINE(NAME, ...)														\
@@ -376,8 +389,20 @@ struct dx_request_kind_s {
 static xpc_object_t
 _dx_gai_request_take_results(dx_gai_request_t request);
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+static void
+_dx_gai_request_report_powerlog_progress(dx_gai_request_t request);
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+	#define DX_GAI_REQUEST_REPORT_POWERLOG_PROGRESS_FUNCTION	_dx_gai_request_report_powerlog_progress
+#else
+	#define DX_GAI_REQUEST_REPORT_POWERLOG_PROGRESS_FUNCTION	NULL
+#endif
+
 DX_REQUEST_SUBKIND_DEFINE(gai,
-	.take_results	= _dx_gai_request_take_results
+	.take_results				= _dx_gai_request_take_results,
+	.report_powerlog_progress	= DX_GAI_REQUEST_REPORT_POWERLOG_PROGRESS_FUNCTION,
 );
 
 //======================================================================================================================
@@ -435,6 +460,11 @@ _dx_server_deregister_session(dx_session_t session);
 static void
 _dx_server_check_sessions(void);
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+static void
+_dx_server_report_request_progress_to_powerlog(void);
+#endif
+
 static dx_session_t
 _dx_session_create(xpc_connection_t connection);
 
@@ -479,6 +509,11 @@ _dx_session_log_termination(dx_session_t session, mdns_termination_reason_t reas
 
 static xpc_object_t
 _dx_request_take_results(dx_request_t request);
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+static void
+_dx_request_report_powerlog_progress(dx_request_t request);
+#endif
 
 typedef void (^dx_block_t)(void);
 
@@ -609,9 +644,11 @@ static dx_session_t	g_session_list = NULL;
 mDNSexport void
 dnssd_server_init(void)
 {
-	static dispatch_once_t	s_once = 0;
-	static xpc_connection_t	s_listener = NULL;
-
+	static dispatch_once_t s_once = 0;
+	static xpc_connection_t s_listener = NULL;
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+	static dispatch_source_t s_powerlog_progress_timer = NULL;
+#endif
 	dispatch_once(&s_once,
 	^{
 		s_listener = xpc_connection_create_mach_service(DNSSD_MACH_SERVICE_NAME, _dx_server_queue(),
@@ -624,6 +661,20 @@ dnssd_server_init(void)
 			}
 		});
 		xpc_connection_activate(s_listener);
+	#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+		const uint32_t interval_ms = MDNS_MILLISECONDS_PER_HOUR;
+		s_powerlog_progress_timer = mdns_dispatch_create_periodic_monotonic_timer(interval_ms, 5, _dx_server_queue());
+		if (s_powerlog_progress_timer) {
+			dispatch_source_set_event_handler(s_powerlog_progress_timer,
+			^{
+				os_log_debug(_mdns_server_log(), "periodic powerlog report timer fired");
+				_dx_server_report_request_progress_to_powerlog();
+			});
+			dispatch_activate(s_powerlog_progress_timer);
+		} else {
+			os_log_fault(_mdns_server_log(), "Failed to create periodic powerlog report timer");
+		}
+	#endif
 	});
 }
 
@@ -735,6 +786,24 @@ _dx_server_check_sessions(void)
 		}
 	}
 }
+
+//======================================================================================================================
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+static void
+_dx_server_report_request_progress_to_powerlog(void)
+{
+	_dx_kqueue_locked("dnssd_server: report client request progress to powerlog", true,
+	^{
+		for (dx_session_t session = g_session_list; session; session = session->next) {
+			for (dx_request_t req = session->request_list; req; req = req->next) {
+				_dx_request_report_powerlog_progress(req);
+			}
+		}
+		udsserver_report_request_progress_to_powerlog();
+	});
+}
+#endif
 
 //======================================================================================================================
 // MARK: - Object Methods
@@ -1278,6 +1347,19 @@ _dx_request_take_results(const dx_request_t me)
 
 //======================================================================================================================
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+static void
+_dx_request_report_powerlog_progress(const dx_request_t me)
+{
+	const dx_request_kind_t kind = (dx_request_kind_t)me->base.kind;
+	if (kind->report_powerlog_progress) {
+		kind->report_powerlog_progress(me);
+	}
+}
+#endif
+
+//======================================================================================================================
+
 static void
 _dx_request_locked(const dx_any_request_t any, const dx_block_t block)
 {
@@ -1716,6 +1798,19 @@ _dx_gai_request_take_expired_results(const dx_gai_request_t me)
 
 //======================================================================================================================
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+static void
+_dx_gai_request_report_powerlog_progress(const dx_gai_request_t me)
+{
+	if (me->powerlog_start_time != 0) {
+		const mDNSBool uses_awdl = ClientRequestUsesAWDL(me->ifindex, me->flags);
+		mdns_powerlog_getaddrinfo_progress(me->effective_pid, me->base.request_id, me->powerlog_start_time, uses_awdl);
+	}
+}
+#endif
+
+//======================================================================================================================
+
 static DNSServiceErrorType
 _dx_gai_request_start_client_requests_internal(const dx_gai_request_t me,
 	GetAddrInfoClientRequestParams * const gai_params, QueryRecordClientRequestParams * const query_params,
@@ -1750,6 +1845,16 @@ _dx_gai_request_start_client_requests_internal(const dx_gai_request_t me,
 		if (gai_params && !me->gai) {
 			me->gai = _dx_get_addr_info_client_request_start(gai_params, _dx_gai_request_gai_result_handler, me, &err);
 			require_noerr_return(err);
+		#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+			if (me->gai) {
+				const domainname *const qname = GetAddrInfoClientRequestGetQName(me->gai);
+				if ((me->ifindex != kDNSServiceInterfaceIndexLocalOnly) && IsLocalDomain(qname)) {
+					const mDNSBool uses_awdl = ClientRequestUsesAWDL(me->ifindex, me->flags);
+					me->powerlog_start_time = mdns_powerlog_getaddrinfo_start(me->effective_pid, me->base.request_id,
+						uses_awdl);
+				}
+			}
+		#endif
 		}
 	});
 	if (err) {
@@ -1766,6 +1871,13 @@ _dx_gai_request_stop_client_requests(const dx_gai_request_t me, const bool need_
 	_dx_kqueue_locked("dx_gai_request: stopping client requests", need_lock,
 	^{
 		_dx_get_addr_info_client_request_forget(&me->gai);
+	#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+		if (me->powerlog_start_time != 0) {
+			const mDNSBool uses_awdl = ClientRequestUsesAWDL(me->ifindex, me->flags);
+			mdns_powerlog_getaddrinfo_stop(me->effective_pid, me->base.request_id, me->powerlog_start_time, uses_awdl);
+			me->powerlog_start_time = 0;
+		}
+	#endif
 		_dx_query_record_client_request_forget(&me->query);
 	});
 }

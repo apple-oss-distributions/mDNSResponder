@@ -43,6 +43,12 @@ void *main_queue = NULL;
 #include "ioloop.h"
 #include "advertising_proxy_services.h"
 #include "route-tracker.h"
+#include "state-machine.h"
+#include "thread-service.h"
+#include "service-tracker.h"
+#include "probe-srp.h"
+#include "cti-services.h"
+#include "adv-ctl-server.h"
 
 
 static void
@@ -398,6 +404,89 @@ bool do_tcp_zero_test = false;
 bool do_tcp_fin_length = false;
 bool do_tcp_fin_payload = false;
 
+service_tracker_t *tracker;
+
+// Dummy functions required to use service tracker here
+void
+adv_ctl_thread_shutdown_status_check(srp_server_t *UNUSED server_state) {
+}
+
+static void
+service_done_callback(void *context, cti_status_t status)
+{
+    const char *action = context;
+    if (status != kCTIStatus_NoError) {
+        fprintf(stderr, PUB_S_SRP " failed, status %d", action, status);
+        exit(1);
+    } else {
+        fprintf(stderr, PUB_S_SRP " done", action);
+        exit(0);
+    }
+}
+
+static void
+service_set_changed(bool unicast)
+{
+    thread_service_t *winner = NULL;
+    for (thread_service_t *service = service_tracker_services_get(tracker); service != NULL; service = service->next) {
+        if (service->ignore) {
+            continue;
+        }
+        if (unicast && service->service_type == unicast_service) {
+            if (winner == NULL || in6addr_compare(&service->u.unicast.address, &winner->u.unicast.address) < 0) {
+                winner = service;
+            }
+        }
+    }
+    if (winner == NULL) {
+        fprintf(stderr, "no services present!");
+        exit(1);
+    }
+    winner->u.unicast.address.s6_addr[15] = 0;
+    uint8_t service_data[1] = { THREAD_SRP_SERVER_OPTION };
+    uint8_t server_data[18];
+    memcpy(server_data, &winner->u.unicast.address, 15);
+    server_data[15] = 0;
+    server_data[16] = winner->u.unicast.port[0];
+    server_data[17] = winner->u.unicast.port[1];
+    int ret = cti_add_service(NULL, "add", service_done_callback, NULL,
+                              THREAD_ENTERPRISE_NUMBER, service_data, 1, server_data, 18);
+    if (ret != kCTIStatus_NoError) {
+        fprintf(stderr, "add_service failed: %d", ret);
+        exit(1);
+    }
+}
+
+static void
+unicast_service_set_changed(void *UNUSED context)
+{
+    service_set_changed(true);
+}
+
+static void
+start_advertising_winning_unicast_service(void)
+{
+    tracker = service_tracker_create(NULL);
+    if (tracker != NULL) {
+        service_tracker_callback_add(tracker, unicast_service_set_changed, NULL, NULL);
+        service_tracker_start(tracker);
+    } else {
+        fprintf(stderr, "unable to allocate tracker");
+        exit(1);
+    }
+}
+
+static void
+start_removing_unicast_service(void)
+{
+    uint8_t service_data[1] = { THREAD_SRP_SERVER_OPTION };
+    int ret = cti_remove_service(NULL, "remove", service_done_callback, NULL, THREAD_ENTERPRISE_NUMBER, service_data, 1);
+    if (ret != kCTIStatus_NoError) {
+        fprintf(stderr, "remove_service failed: %d", ret);
+        exit(1);
+    }
+}
+
 static void
 tcp_datagram_callback(comm_t *NONNULL comm, message_t *NONNULL message, void *NULLABLE context)
 {
@@ -471,38 +560,40 @@ start_tcp_test(void)
 static void
 usage(void)
 {
-    fprintf(stderr, "srputil start                     -- start the SRP MDNS Proxy through launchd\n");
+    fprintf(stderr, "srputil start                        -- start the SRP MDNS Proxy through launchd\n");
     fprintf(stderr,
-            "        tcp-zero                  -- connect to port 53, send a DNS message that's got a zero-length payload\n");
+            "  tcp-zero                           -- connect to port 53, send a DNS message that's got a zero-length payload\n");
     fprintf(stderr,
-            "        tcp-fin-length            -- connect to port 53, send a DNS message that ends before length is complete\n");
+            "  tcp-fin-length                     -- connect to port 53, send a DNS message that ends before length is complete\n");
     fprintf(stderr,
-            "        tcp-fin-payload           -- connect to port 53, send a DNS message that ends before payload is complete\n");
-    fprintf(stderr, "        services                  -- get the list of services currently being advertised\n");
-    fprintf(stderr, "        block                     -- block the SRP listener\n");
-    fprintf(stderr, "        unblock                   -- unblock the SRP listener\n");
-    fprintf(stderr, "        regenerate-ula            -- generate a new ULA and restart the network\n");
-    fprintf(stderr, "        adv-prefix-high           -- advertise high-priority prefix to thread network\n");
-    fprintf(stderr, "        adv-prefix                -- advertise prefix to thread network\n");
-    fprintf(stderr, "        stop                      -- stop advertising as SRP server\n");
-    fprintf(stderr, "        get-ula                   -- fetch the current ULA prefix configured on the SRP server\n");
-    fprintf(stderr, "        disable-srpl              -- disable SRP replication\n");
-    fprintf(stderr, "        add-prefix <ipv6 prefix>     -- add an OMR prefix\n");
-    fprintf(stderr, "        remove-prefix <ipv6 prefix>  -- remove an OMR prefix\n");
-    fprintf(stderr, "        add-nat64-prefix <nat64 ipv6 prefix>     -- add an nat64 prefix\n");
-    fprintf(stderr, "        remove-nat64-prefix <nat64 ipv6 prefix>  -- remove an nat64 prefix\n");
-    fprintf(stderr, "        drop-srpl-connection      -- drop existing srp replication connections\n");
-    fprintf(stderr, "        undrop-srpl-connection    -- restart srp replication connections that were dropped \n");
-    fprintf(stderr, "        drop-srpl-advertisement   -- stop advertising srpl service (but keep it around)\n");
-    fprintf(stderr, "        undrop-srpl-advertisement -- resume advertising srpl service\n");
-    fprintf(stderr, "        start-dropping-push       -- start repeatedly dropping any active push connections after 90 seconds\n");
-    fprintf(stderr, "        start-breaking-time       -- start breaking time validation on replicated SRP registrations\n");
-    fprintf(stderr, "        set [variable] [value]    -- set the value of variable to value (e.g. set min-lease-time 100)\n");
-    fprintf(stderr, "        block-anycast-service     -- block advertising anycast service\n");
-    fprintf(stderr, "        unblock-anycast-service   -- unblock advertising anycast service\n");
-    fprintf(stderr, "        start-thread-shutdown     -- start thread network shutdown\n");
+            "  tcp-fin-payload                    -- connect to port 53, send a DNS message that ends before payload is complete\n");
+    fprintf(stderr, "  services                           -- get the list of services currently being advertised\n");
+    fprintf(stderr, "  block                              -- block the SRP listener\n");
+    fprintf(stderr, "  unblock                            -- unblock the SRP listener\n");
+    fprintf(stderr, "  regenerate-ula                     -- generate a new ULA and restart the network\n");
+    fprintf(stderr, "  adv-prefix-high                    -- advertise high-priority prefix to thread network\n");
+    fprintf(stderr, "  adv-prefix                         -- advertise prefix to thread network\n");
+    fprintf(stderr, "  stop                               -- stop advertising as SRP server\n");
+    fprintf(stderr, "  get-ula                            -- fetch the current ULA prefix configured on the SRP server\n");
+    fprintf(stderr, "  disable-srpl                       -- disable SRP replication\n");
+    fprintf(stderr, "  add-prefix <ipv6 prefix>           -- add an OMR prefix\n");
+    fprintf(stderr, "  remove-prefix <ipv6 prefix         -- remove an OMR prefix\n");
+    fprintf(stderr, "  add-nat64-prefix <nat64 prefix>    -- add an nat64 prefix\n");
+    fprintf(stderr, "  remove-nat64-prefix <nat64 prefix> -- remove an nat64 prefix\n");
+    fprintf(stderr, "  drop-srpl-connection               -- drop existing srp replication connections\n");
+    fprintf(stderr, "  undrop-srpl-connection             -- restart srp replication connections that were dropped \n");
+    fprintf(stderr, "  drop-srpl-advertisement            -- stop advertising srpl service (but keep it around)\n");
+    fprintf(stderr, "  undrop-srpl-advertisement          -- resume advertising srpl service\n");
+    fprintf(stderr, "  start-dropping-push                -- start repeatedly dropping any active push connections after 90 seconds\n");
+    fprintf(stderr, "  start-breaking-time                -- start breaking time validation on replicated SRP registrations\n");
+    fprintf(stderr, "  set [variable] [value]             -- set the value of variable to value (e.g. set min-lease-time 100)\n");
+    fprintf(stderr, "  block-anycast-service              -- block advertising anycast service\n");
+    fprintf(stderr, "  unblock-anycast-service            -- unblock advertising anycast service\n");
+    fprintf(stderr, "  start-thread-shutdown              -- start thread network shutdown\n");
+    fprintf(stderr, "  advertise-winning-unicast-service  -- advertise a unicast service that wins over the current service\n");
+    fprintf(stderr, "  remove-unicast-service             -- remove our unicast service\n");
 #ifdef NOTYET
-    fprintf(stderr, "        flush                     -- flush all entries from the SRP proxy (for testing only)\n");
+    fprintf(stderr, "  flush                              -- flush all entries from the SRP proxy (for testing only)\n");
 #endif
 }
 
@@ -533,6 +624,8 @@ bool test_route_tracker = false;
 bool block_anycast_service = false;
 bool unblock_anycast_service = false;
 bool start_thread_shutdown = false;
+bool advertise_winning_unicast_service = false;
+bool remove_unicast_service = false;
 uint8_t prefix_buf[16];
 #ifdef NOTYET
 bool watch = false;
@@ -619,6 +712,12 @@ start_activities(void *context)
     }
     if (err == kDNSSDAdvertisingProxyStatus_NoError && test_route_tracker) {
         route_tracker_test_start(1000);
+    }
+    if (err == kDNSSDAdvertisingProxyStatus_NoError && advertise_winning_unicast_service) {
+        start_advertising_winning_unicast_service();
+    }
+    if (err == kDNSSDAdvertisingProxyStatus_NoError && remove_unicast_service) {
+        start_removing_unicast_service();
     }
     if (err == kDNSSDAdvertisingProxyStatus_NoError && variables != NULL) {
         for (variable_t *variable = variables; variable != NULL; variable = variable->next) {
@@ -770,6 +869,12 @@ main(int argc, char **argv)
             something = true;
         } else if (!strcmp(argv[i], "start-thread-shutdown")) {
             start_thread_shutdown = true;
+            something = true;
+        } else if (!strcmp(argv[i], "advertise-winning-unicast-service")) {
+            advertise_winning_unicast_service = true;
+            something = true;
+        } else if (!strcmp(argv[i], "remove-unicast-service")) {
+            remove_unicast_service = true;
             something = true;
         } else if (!strcmp(argv[i], "set")) {
             if (i + 2 >= argc) {

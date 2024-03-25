@@ -799,7 +799,7 @@ service_publisher_action_not_publishing(state_machine_header_t *state_header, st
 }
 
 static void
-service_publisher_listener_cancel_callback(void *context)
+service_publisher_listener_cancel_callback(comm_t *UNUSED listener, void *context)
 {
     srp_server_t *server_state = context;
     service_publisher_t *publisher = server_state->service_publisher;
@@ -822,6 +822,7 @@ service_publisher_listener_cancel(service_publisher_t *publisher)
         ioloop_comm_release(publisher->srp_listener);
         publisher->srp_listener = NULL;
     }
+    publisher->have_srp_listener = false;
     srp_mdns_flush(publisher->server_state);
 }
 
@@ -868,7 +869,11 @@ service_publisher_action_start_listeners(state_machine_header_t *state_header, s
 
     if (event == NULL) {
         if (publisher->have_srp_listener) {
-            return service_publisher_state_publishing;
+            if (publisher->srp_listener != NULL) {
+                return service_publisher_state_publishing;
+            }
+            FAULT("have_srp_listener is true but there's no listener!");
+            publisher->have_srp_listener = false;
         }
         service_publisher_listener_start(publisher);
         return service_publisher_state_invalid;
@@ -1051,8 +1056,10 @@ service_publisher_get_mesh_local_address_callback(void *context, const char *add
     }
     state_machine_event_deliver(&publisher->state_header, event);
     RELEASE_HERE(event, state_machine_event);
+    RELEASE_HERE(publisher, service_publisher); // callback held a reference.
     return;
 fail:
+    RELEASE_HERE(publisher, service_publisher); // callback held a reference.
     publisher->have_ml_eid = false;
     return;
 }
@@ -1071,7 +1078,7 @@ service_publisher_active_data_set_changed_callback(void *context, cti_status_t s
     }
 
     status = cti_get_mesh_local_address(publisher->server_state, publisher,
-                                                     service_publisher_get_mesh_local_address_callback, NULL);
+                                        service_publisher_get_mesh_local_address_callback, NULL);
     if (status != kCTIStatus_NoError) {
         ERROR("cti_get_mesh_local_address failed with status %d", status);
     } else {

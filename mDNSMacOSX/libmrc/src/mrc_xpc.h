@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,6 +48,18 @@ extern const char * const g_mrc_command_dns_proxy_stop;
  *		DNS proxy get state command string.
  */
 extern const char * const g_mrc_command_dns_proxy_get_state;
+
+/*!
+ *	@brief
+ *		DNS service registration start command string.
+ */
+extern const char * const g_mrc_command_dns_service_registration_start;
+
+/*!
+ *	@brief
+ *		DNS service registration stop command string.
+ */
+extern const char * const g_mrc_command_dns_service_registration_stop;
 
 __BEGIN_DECLS
 
@@ -336,6 +348,71 @@ mrc_xpc_dns_proxy_state_result_set_description(mdns_xpc_dictionary_t result, con
  */
 mdns_xpc_string_t _Nullable
 mrc_xpc_dns_proxy_state_result_get_description(mdns_xpc_dictionary_t result);
+
+/*!
+ *	@brief
+ *		Creates an XPC message for the DNS service registration start command.
+ *
+ *	@param ident
+ *		An ID number that uniquely identifies the new DNS service registration to start.
+ *
+ *	@param params
+ *		The DNS service registration start command's parameters dictionary.
+ *
+ *	@result
+ *		A reference to the message.
+ */
+XPC_RETURNS_RETAINED
+xpc_object_t
+mrc_xpc_create_dns_service_registration_start_command_message(uint64_t ident, xpc_object_t params);
+
+/*!
+ *	@brief
+ *		Creates an XPC message for the DNS service registration stop command.
+ *
+ *	@param ident
+ *		An ID number that identifies the DNS service registration to stop.
+ *
+ *	@result
+ *		A reference to the message.
+ *
+ *	@discussion
+ *		The ID number should match the ID number used in the DNS service registration start command message.
+ */
+XPC_RETURNS_RETAINED
+xpc_object_t
+mrc_xpc_create_dns_service_registration_stop_command_message(uint64_t ident);
+
+/*!
+ *	@brief
+ *		Sets the DNS service definition dictionary in a DNS service registration parameters dictionary.
+ *
+ *	@param params
+ *		The parameters dictionary.
+ *
+ *	@param dict
+ *		The DNS service definition dictionary which should be created with
+ *		mdns_dns_service_definition_create_xpc_dictionary().
+ */
+void
+mrc_xpc_dns_service_registration_params_set_defintion_dictionary(xpc_object_t params, xpc_object_t dict);
+
+/*!
+ *	@brief
+ *		Gets the DNS service definition dictionary from a DNS service registration parameters dictionary.
+ *
+ *	@param params
+ *		The parameters dictionary.
+ *
+ *	@result
+ *		The DNS service definition dictionary, if present. Otherwise, NULL.
+ *
+ *	@discussion
+ *		The resulting DNS service definition dictionary is meant to be passed to
+ *		mdns_dns_service_definition_create_from_xpc_dictionary() to create a DNS service definition.
+ */
+mdns_xpc_dictionary_t _Nullable
+mrc_xpc_dns_service_registration_params_get_defintion_dictionary(xpc_object_t params);
 
 __END_DECLS
 

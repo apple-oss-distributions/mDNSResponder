@@ -22,6 +22,7 @@
 #define __THREAD_SERVICE_H__ 1
 
 typedef struct thread_service thread_service_t;
+typedef struct probe_state probe_state_t;
 
 typedef enum {
     add_complete,
@@ -40,8 +41,9 @@ struct thread_pref_id {
 };
 
 struct thread_unicast_service {
-    struct in6_addr address; // IPv6 address on which service is offered
-    uint8_t port[2];         // Port (network byte order)
+    struct in6_addr address;   // IPv6 address on which service is offered
+    uint8_t port[2];           // Port (network byte order)
+    bool anycast_also_present; // True if the RLOC16 advertising this service is also advertising anycast
 };
 
 struct thread_anycast_service {

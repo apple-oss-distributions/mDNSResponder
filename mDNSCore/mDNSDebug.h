@@ -439,14 +439,16 @@ extern void freeL(const char *msg, void *x);
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
-    #define PUB_DM_NAME "%{public, mdnsresponder:domain_name}.*P"
-    #define PRI_DM_NAME "%{sensitive, mask.hash, mdnsresponder:domain_name}.*P"
+    #define PUB_DM_NAME                 "%{public, mdnsresponder:domain_name}.*P"
+    #define PRI_DM_NAME                 "%{sensitive, mask.hash, mdnsresponder:domain_name}.*P"
     // When DM_NAME_PARAM is used, the file where the function is defined must include DNSEmbeddedAPI.h
-    #define DM_NAME_PARAM(name) ((name) ? ((int)DomainNameLength((name))) : 0), (name)
+    #define DM_NAME_PARAM(name)         ((name) ? ((int)DomainNameLength((name))) : 0), (name)
+    #define DM_NAME_PARAM_NONNULL(name) (int)DomainNameLength(name), (name)
 #else
-    #define PUB_DM_NAME "%##s"
-    #define PRI_DM_NAME PUB_DM_NAME
-    #define DM_NAME_PARAM(name) (name)
+    #define PUB_DM_NAME                 "%##s"
+    #define PRI_DM_NAME                 PUB_DM_NAME
+    #define DM_NAME_PARAM(name)         (name)
+    #define DM_NAME_PARAM_NONNULL(name) (name)
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)

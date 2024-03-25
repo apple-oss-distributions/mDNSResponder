@@ -578,6 +578,7 @@ omr_publisher_queue_run(omr_publisher_t *publisher)
         cti_status_t status = cti_remove_prefix(publisher->route_state->srp_server, publisher,
                                                 omr_publisher_prefix_update_callback, NULL, &prefix->prefix,
                                                 prefix->prefix_length);
+        SEGMENTED_IPv6_ADDR_GEN_SRP(prefix, prefix_buf);
         INFO("removing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
              SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length);
         if (status != kCTIStatus_NoError) {
@@ -588,6 +589,7 @@ omr_publisher_queue_run(omr_publisher_t *publisher)
             RETAIN_HERE(publisher, omr_publisher); // for the callback
         }
     } else if (prefix->publication_state == want_add) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(prefix, prefix_buf);
         INFO("adding prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
              SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length);
         cti_status_t status = cti_add_prefix(publisher->route_state->srp_server, publisher,
@@ -603,6 +605,7 @@ omr_publisher_queue_run(omr_publisher_t *publisher)
             RETAIN_HERE(publisher, omr_publisher); // for the callback
         }
     } else {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(prefix, prefix_buf);
         INFO("prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d is in unexpected state " PUB_S_SRP " on the publication queue",
              SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length,
              thread_service_publication_state_name_get(prefix->publication_state));
@@ -668,6 +671,7 @@ omr_publisher_unpublish_prefix(omr_publisher_t *publisher)
         ERROR("request to unpublished prefix that's not present");
         return;
     }
+    SEGMENTED_IPv6_ADDR_GEN_SRP(prefix, prefix_buf);
     INFO("unpublishing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
          SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length);
     omr_publisher_queue_prefix_update(publisher, &prefix->prefix, prefix->priority, false, want_delete);

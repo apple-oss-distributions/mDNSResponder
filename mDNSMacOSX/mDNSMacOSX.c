@@ -2243,6 +2243,24 @@ mDNSlocal mStatus SetupSocket(KQSocketSet *cp, const mDNSIPPort port, u_short sa
             LogInfo("SetupSocket: SO_NOWAKEFROMSLEEP failed %s", strerror(errno));
     }
 
+    // Attribute mDNS traffic to the com.apple.datausage.dns.multicast pseduo-identifier to distinguish it from
+    // other network traffic attributed to mDNSResponder.
+    if (mDNSSameIPPort(port, MulticastDNSPort))
+    {
+        // The UUID for com.apple.datausage.dns.multicast is 979C0A62-49FE-4739-BDCB-CAC584AC832D.
+        const mDNSu8 mDNSMulticastDataUsageUUID[UUID_SIZE] = {
+            0x97, 0x9C, 0x0A, 0x62, 0x49, 0xFE, 0x47, 0x39, 0xBD, 0xCB, 0xCA, 0xC5, 0x84, 0xAC, 0x83, 0x2D
+        };
+        err = setsockopt(skt, SOL_SOCKET, SO_DELEGATED_UUID, mDNSMulticastDataUsageUUID, sizeof(mDNSMulticastDataUsageUUID));
+        if (err != 0)
+        {
+            saved_errno = errno;
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
+                "SetupSocket: Attributing mDNS traffic to com.apple.datausage.dns.multicast failed: " PUB_S,
+                strerror(saved_errno));
+        }
+    }
+
     if (sa_family == AF_INET)
     {
         // We want to receive destination addresses
@@ -7046,7 +7064,7 @@ mDNSexport mDNSBool mDNSPlatformValidRecordForInterface(const AuthRecord *rr, mD
 }
 
 // Filter questions send over P2P (D2D) type interfaces.
-mDNSexport mDNSBool mDNSPlatformValidQuestionForInterface(DNSQuestion *q, const NetworkInterfaceInfo *intf)
+mDNSexport mDNSBool mDNSPlatformValidQuestionForInterface(const DNSQuestion *const q, const NetworkInterfaceInfo *const intf)
 {
     // For an explicit match to a valid interface ID, return true.
     if (q->InterfaceID == intf->InterfaceID)

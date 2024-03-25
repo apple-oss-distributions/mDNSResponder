@@ -53,6 +53,10 @@
 
 #if SRP_FEATURE_REPLICATION
 #include "srp-replication.h"
+#ifdef SRP_TEST_SERVER
+#include "test-packet.h"
+#include "test-srpl.h"
+#endif
 
 #define SRPL_CONNECTION_IS_CONNECTED(connection) ((connection)->state > srpl_state_connecting)
 
@@ -86,9 +90,11 @@ static void srpl_instance_services_discontinue(srpl_instance_t *instance);
 static void srpl_instance_service_discontinue_timeout(void *context);
 static void srpl_maybe_sync_or_transition(srpl_domain_t *domain);
 static int srpl_dataset_id_compare(uint64_t id1, uint64_t id2);
+static void srpl_state_transition_by_dataset_id(srpl_domain_t *domain, srpl_instance_t *instance);
 
 #define EQUI_DISTANCE64 (int64_t)0x8000000000000000
 #define MAX_ADDITIONAL_HOST_MESSAGES 32
+#define SRPL_STATE_TIMEOUT 30 * 1000 // state timeout in milliseconds
 
 #ifdef DEBUG
 #define STATE_DEBUGGING_ABORT() abort();
@@ -710,6 +716,11 @@ srpl_connection_finalize(srpl_connection_t *srpl_connection)
         ioloop_wakeup_release(srpl_connection->reconnect_wakeup);
         srpl_connection->reconnect_wakeup = NULL;
     }
+    if (srpl_connection->state_timeout != NULL) {
+        ioloop_cancel_wake_event(srpl_connection->state_timeout);
+        ioloop_wakeup_release(srpl_connection->state_timeout);
+        srpl_connection->state_timeout = NULL;
+    }
     if (srpl_connection->keepalive_send_wakeup != NULL) {
         ioloop_cancel_wake_event(srpl_connection->keepalive_send_wakeup);
         ioloop_wakeup_release(srpl_connection->keepalive_send_wakeup);
@@ -720,6 +731,7 @@ srpl_connection_finalize(srpl_connection_t *srpl_connection)
         ioloop_wakeup_release(srpl_connection->keepalive_receive_wakeup);
         srpl_connection->keepalive_receive_wakeup = NULL;
     }
+    srpl_host_update_parts_free(&srpl_connection->stashed_host);
     free(srpl_connection->name);
     srpl_connection_reset(srpl_connection);
     free(srpl_connection);
@@ -737,7 +749,7 @@ srpl_connection_retain_(srpl_connection_t *srpl_connection, const char *file, in
     RETAIN(srpl_connection, srpl_connection);
 }
 
-static srpl_connection_t *
+srpl_connection_t *
 srpl_connection_create(srpl_instance_t *instance, bool outgoing)
 {
     srpl_connection_t *srpl_connection = calloc(1, sizeof (*srpl_connection)), *ret = NULL;
@@ -764,6 +776,9 @@ srpl_connection_create(srpl_instance_t *instance, bool outgoing)
     srpl_connection->is_server = !outgoing;
     srpl_connection->instance = instance;
     RETAIN_HERE(instance, srpl_instance);
+#ifdef SRP_TEST_SERVER
+    srpl_connection->state = srpl_state_test_event_intercept;
+#endif
     ret = srpl_connection;
     srpl_connection = NULL;
 out:
@@ -1271,7 +1286,7 @@ static srpl_domain_t *
 srpl_connection_domain(srpl_connection_t *srpl_connection)
 {
     if (srpl_connection->instance == NULL) {
-        INFO("connection has no instance %p.", srpl_connection);
+        INFO("connection " PRI_S_SRP " (%p) has no instance.", srpl_connection->name, srpl_connection);
         return NULL;
     }
     return srpl_connection->instance->domain;
@@ -1362,7 +1377,6 @@ srpl_session_message_send(srpl_connection_t *srpl_connection, bool response)
     if (domain == NULL) {
         return false;
     }
-
 #ifdef TEST_DSO_MESSAGE_SETUP_CONNECTION_NULL_FAULT
     comm_t *connection = srpl_connection->connection;
     const char *old_null_reason = srpl_connection->connection_null_reason;
@@ -1883,6 +1897,12 @@ srpl_connection_discontinue(srpl_connection_t *srpl_connection)
         // have go away.
         ioloop_wakeup_release(srpl_connection->reconnect_wakeup);
         srpl_connection->reconnect_wakeup = NULL;
+    }
+    // Cancel any outstanding state timeout event.
+    if (srpl_connection->state_timeout != NULL) {
+        ioloop_cancel_wake_event(srpl_connection->state_timeout);
+        ioloop_wakeup_release(srpl_connection->state_timeout);
+        srpl_connection->state_timeout = NULL;
     }
     srpl_connection_reset(srpl_connection);
     srpl_connection_next_state(srpl_connection, srpl_state_disconnect);
@@ -2778,6 +2798,10 @@ srpl_match_unidentified_with_instance(srpl_connection_t *connection,
         goto out;
     }
 
+    if (connection->database_synchronized) {
+        srpl_state_transition_by_dataset_id(instance->domain, instance);
+    }
+
     // Release any older connection we might have.
     if (instance->connection) {
         srpl_disconnect(instance->connection);
@@ -2848,7 +2872,7 @@ srpl_connected(comm_t *connection, void *context)
     srpl_event_deliver(srpl_connection, &event);
 }
 
-static bool
+bool
 srpl_connection_connect(srpl_connection_t *srpl_connection)
 {
     if (srpl_connection->instance == NULL) {
@@ -2877,15 +2901,17 @@ srpl_connection_connect(srpl_connection_t *srpl_connection)
 }
 
 static void
-srpl_instance_is_me(srpl_instance_t *instance, srpl_instance_service_t *service, const char *ifname, const addr_t *address)
+srpl_instance_is_me(srpl_instance_t *instance, srpl_instance_service_t *service, const char *ifname, const addr_t *address, bool pid_match)
 {
     instance->is_me = true;
     if (ifname != NULL) {
         INFO(PUB_S_SRP "/" PUB_S_SRP ": name server for service " PRI_S_SRP " is me.", service->host_name, ifname, service->full_service_name);
     } else if (address != NULL) {
         ADDR_NAME_LOGGER(INFO, address, "", " service ", " is me. ", service->host_name, 0);
+    } else if (pid_match) {
+        INFO(PUB_S_SRP ": partner id %" PRIx64 "match.", instance->instance_name, instance->partner_id);
     } else {
-        ERROR("srpl_instance_is_me with null ifname and address!");
+        ERROR("null ifname and address, partner id doesn't match!");
         return;
     }
 
@@ -2985,7 +3011,7 @@ srpl_instance_address_callback(void *context, addr_t *address, bool added, int e
         }
 
         if (srpl_my_address_check(address)) {
-            srpl_instance_is_me(instance, service, NULL, address);
+            srpl_instance_is_me(instance, service, NULL, address, false);
         }
 
         // Generate an event indicating that we have a new address.
@@ -3222,6 +3248,12 @@ srpl_instance_add(const char *hostname, const char *service_name,
         }
     }
 
+    if (instance->have_partner_id &&
+        domain->partner_id  == instance->partner_id)
+    {
+        srpl_instance_is_me(instance, service, NULL, NULL, true);
+    }
+
     // If there's no existing connection, the partner initiates an outgoing connection if
     // it is in the startup state or its partner id is greater than the remote partner id.
     if (!instance->is_me && ((instance->connection == NULL || some_id_updated) &&
@@ -3249,6 +3281,15 @@ srpl_instance_add(const char *hostname, const char *service_name,
              "some_id_updated, local partner_id %" PRIx64 ", remote partner_id %" PRIx64,
              instance->instance_name, instance->is_me ? "" : "!", instance->connection, some_id_updated ? "" : "!",
              domain->partner_id, advertised_partner_id);
+        // it's not our job to connect, but since there's some id change, we'd disconnect
+        // the current connection and trigger the peer to reconnect.
+        if (some_id_updated && instance->connection != NULL &&
+            instance->connection->connection != NULL)
+        {
+            INFO("some id updated, disconnect the current connection.");
+            srpl_trigger_disconnect(instance->connection);
+            srpl_connection_next_state(instance->connection, srpl_state_idle);
+        }
     }
 }
 
@@ -3752,8 +3793,8 @@ srpl_domain_browse_start(srpl_domain_t *domain)
     return true;
 }
 
-static void
-srpl_domain_add(srp_server_t *server_state, const char *domain_name)
+srpl_domain_t *
+srpl_domain_create_or_copy(srp_server_t *server_state, const char *domain_name)
 {
     srpl_domain_t **dp, *domain;
 
@@ -3771,7 +3812,7 @@ srpl_domain_add(srp_server_t *server_state, const char *domain_name)
         if (domain == NULL || (domain->name = strdup(domain_name)) == NULL) {
             ERROR("Unable to allocate replication structure for domain " PRI_S_SRP, domain_name);
             free(domain);
-            return;
+            return NULL;
         }
         *dp = domain;
         // Hold a reference for the domain list
@@ -3779,24 +3820,35 @@ srpl_domain_add(srp_server_t *server_state, const char *domain_name)
         INFO("New service replication browsing domain: " PRI_S_SRP, domain->name);
 
         domain->srpl_opstate = SRPL_OPSTATE_STARTUP;
-        domain->partner_discovery_timeout = ioloop_wakeup_create();
         domain->server_state = server_state;
-        if (domain->partner_discovery_timeout) {
-            ioloop_add_wake_event(domain->partner_discovery_timeout, domain,
-                                  srpl_partner_discovery_timeout, srpl_domain_context_release,
-                                  MIN_PARTNER_DISCOVERY_INTERVAL + srp_random16() % PARTNER_DISCOVERY_INTERVAL_RANGE);
-            RETAIN_HERE(domain, srpl_domain);
-        } else {
-            ERROR("unable to add wakeup event for partner discovery for domain " PRI_S_SRP, domain->name);
-            return;
-        }
-        domain->partner_discovery_pending = true;
         domain->partner_id = srp_random64();
         INFO("generate partner id %" PRIx64 " for domain " PRI_S_SRP, domain->partner_id, domain->name);
     } else {
         ERROR("Unexpected duplicate replication domain: " PRI_S_SRP, domain_name);
+        return NULL;
+    }
+    return domain;
+}
+
+static void
+srpl_domain_add(srp_server_t *server_state, const char *domain_name)
+{
+    srpl_domain_t *domain = srpl_domain_create_or_copy(server_state, domain_name);
+    if (domain == NULL) {
         return;
     }
+
+    domain->partner_discovery_timeout = ioloop_wakeup_create();
+    if (domain->partner_discovery_timeout) {
+        ioloop_add_wake_event(domain->partner_discovery_timeout, domain,
+                              srpl_partner_discovery_timeout, srpl_domain_context_release,
+                              MIN_PARTNER_DISCOVERY_INTERVAL + srp_random16() % PARTNER_DISCOVERY_INTERVAL_RANGE);
+        RETAIN_HERE(domain, srpl_domain);
+    } else {
+        ERROR("unable to add wakeup event for partner discovery for domain " PRI_S_SRP, domain->name);
+        return;
+    }
+    domain->partner_discovery_pending = true;
 
     // Start a browse on the domain.
     if (!srpl_domain_browse_start(domain)) {
@@ -4036,6 +4088,51 @@ srpl_disconnect(srpl_connection_t *srpl_connection)
     srpl_connection_discontinue(srpl_connection);
 }
 
+static void
+srpl_connection_state_timeout(void *context)
+{
+    srpl_connection_t *srpl_connection = context;
+    srpl_instance_t *instance = srpl_connection->instance;
+    srpl_domain_t *domain = srpl_connection_domain(srpl_connection);
+
+    // Connection might have been discontinued before we came back.
+    if (instance == NULL) {
+        return;
+    }
+
+    // If the srpl connection has been in the current state for timeout and not received any
+    // event to get out of the current state, we assume the peer is gone or unavailable and
+    // can exclude this instance when we make a decision to enter the routine state.
+    instance->sync_fail = true;
+    INFO("connection for instance " PRI_S_SRP " timed out in state " PUB_S_SRP,
+         instance->instance_name, srpl_connection->state_name);
+    if (instance != NULL && instance->sync_to_join &&
+        domain != NULL && domain->srpl_opstate != SRPL_OPSTATE_ROUTINE)
+    {
+        instance->sync_to_join = false;
+        srpl_maybe_sync_or_transition(domain);
+    }
+}
+
+static void
+srpl_connection_schedule_state_timeout(srpl_connection_t *srpl_connection, uint32_t when)
+{
+    // Create a state timer on the srpl_connection_t
+    if (srpl_connection->state_timeout == NULL) {
+        srpl_connection->state_timeout = ioloop_wakeup_create();
+        if (srpl_connection->state_timeout == NULL) {
+            ERROR("no memory for state_timeout for service instance " PRI_S_SRP, srpl_connection->name);
+            return;
+        }
+    } else {
+        ioloop_cancel_wake_event(srpl_connection->state_timeout);
+    }
+    ioloop_add_wake_event(srpl_connection->state_timeout, srpl_connection, srpl_connection_state_timeout,
+                          srpl_connection_context_release, when);
+    RETAIN_HERE(srpl_connection, srpl_connection); // the timer has a reference.
+    return;
+}
+
 // We arrive at the disconnected state when there is no connection to make, or no need to make a connection.
 // This state takes no action, but waits for events. If we get an add event and we don't have a viable incoming
 // connection, we go to the next_address_get event.
@@ -4045,8 +4142,10 @@ srpl_disconnected_action(srpl_connection_t *srpl_connection, srpl_event_t *event
     STATE_ANNOUNCE(srpl_connection, event);
 
     if (event == NULL) {
+        srpl_connection_schedule_state_timeout(srpl_connection, SRPL_STATE_TIMEOUT);
         return srpl_state_invalid;
     } else if (event->event_type == srpl_event_address_add) {
+        ioloop_cancel_wake_event(srpl_connection->state_timeout);
         return srpl_state_next_address_get;
     } else {
         UNEXPECTED_EVENT(srpl_connection, event);
@@ -4143,10 +4242,12 @@ srpl_idle_action(srpl_connection_t *srpl_connection, srpl_event_t *event)
     REQUIRE_SRPL_INSTANCE(srpl_connection);
     STATE_ANNOUNCE_NO_EVENTS(srpl_connection);
     if (event == NULL) {
-        return srpl_state_invalid; // Wait for events
+        srpl_connection_schedule_state_timeout(srpl_connection, SRPL_STATE_TIMEOUT);
+        return srpl_state_invalid;
     } else if (event->event_type == srpl_event_server_disconnect ||
                event->event_type == srpl_event_reconnect_timer_expiry)
     {
+        ioloop_cancel_wake_event(srpl_connection->state_timeout);
         INFO(PRI_S_SRP ": event " PUB_S_SRP " received in state " PUB_S_SRP,
              srpl_connection->name, event->name, srpl_connection->state_name);
         return srpl_state_next_address_get;
@@ -4299,13 +4400,16 @@ srpl_connecting_action(srpl_connection_t *srpl_connection, srpl_event_t *event)
 {
     STATE_ANNOUNCE(srpl_connection, event);
     if (event == NULL) {
+        srpl_connection_schedule_state_timeout(srpl_connection, SRPL_STATE_TIMEOUT);
         return srpl_state_invalid;
     } else if (event->event_type == srpl_event_disconnected) {
+        ioloop_cancel_wake_event(srpl_connection->state_timeout);
         // We tried to connect and the connection failed. This may mean that the information we see in the _srpl-tls.tcp
         // advertisement is wrong, or that the address records are wrong. Reconfirm the records.
         srpl_reconfirm(srpl_connection);
         return srpl_state_next_address_get;
     } else if (event->event_type == srpl_event_connected) {
+        ioloop_cancel_wake_event(srpl_connection->state_timeout);
         return srpl_state_session_send;
     } else {
         UNEXPECTED_EVENT_NO_ERROR(srpl_connection, event);
@@ -4657,6 +4761,22 @@ srpl_keep_current_dataset_id(srpl_domain_t *domain, srpl_instance_t *instance)
     return keep;
 }
 
+static void
+srpl_state_transition_by_dataset_id(srpl_domain_t *domain, srpl_instance_t *instance)
+{
+    if (!srpl_keep_current_dataset_id(domain, instance)) {
+        // DNS-SD SRP Replication Spec: if at any time (regardless of "startup" or "routine
+        // operation" state) an SRPL partner discovers that it is synchronizing with a
+        // non-preferred dataset ID, it MUST abandon that dataset, re-enter the "startup"
+        // state, and attempt to synchronize with the (newly discovered) preferred dataset id.
+        INFO("more preferred dataset id %" PRIx64 ", reenter startup state", domain->dataset_id);
+        srpl_abandon_nonpreferred_dataset(domain);
+        srpl_transition_to_startup_state(domain);
+    } else {
+        srpl_maybe_sync_or_transition(domain);
+    }
+}
+
 // Used by srpl_send_candidates_wait_action and srpl_host_wait_action
 static srpl_state_t
 srpl_send_candidates_wait_event_process(srpl_connection_t *srpl_connection, srpl_event_t *event)
@@ -4667,17 +4787,7 @@ srpl_send_candidates_wait_event_process(srpl_connection_t *srpl_connection, srpl
             srpl_connection->database_synchronized = true;
             srpl_instance_t *instance = srpl_connection->instance;
             instance->sync_fail = false;
-            if (!srpl_keep_current_dataset_id(domain, instance)) {
-                // DNS-SD SRP Replication Spec: if at any time (regardless of "startup" or "routine
-                // operation" state) an SRPL partner discovers that it is synchronizing with a
-                // non-preferred dataset ID, it MUST abandon that dataset, re-enter the "startup"
-                // state, and attempt to synchronize with the (newly discovered) preferred dataset id.
-                INFO("more preferred dataset id %" PRIx64 ", reenter startup state", domain->dataset_id);
-                srpl_abandon_nonpreferred_dataset(domain);
-                srpl_transition_to_startup_state(domain);
-            } else {
-                srpl_maybe_sync_or_transition(domain);
-            }
+            srpl_state_transition_by_dataset_id(domain, instance);
             return srpl_state_ready;
         } else {
             return srpl_state_send_candidates_message_wait;
@@ -4966,7 +5076,6 @@ srpl_deferred_advertise_finished_event_deliver(void *context)
 {
     srpl_event_t *event = context;
     srp_server_t *server_state = event->content.advertise_finished.server_state;
-
     for (srpl_domain_t *domain = server_state->srpl_domains; domain != NULL; domain = domain->next) {
         for (srpl_instance_t *instance = domain->instances; instance != NULL; instance = instance->next) {
             if (instance->connection != NULL) {
@@ -5191,13 +5300,7 @@ srpl_send_candidates_response_send_action(srpl_connection_t *srpl_connection, sr
         srpl_connection->database_synchronized = true;
         srpl_instance_t *instance = srpl_connection->instance;
         instance->sync_fail = false;
-        if (!srpl_keep_current_dataset_id(domain, instance)) {
-            INFO("more preferred dataset id %" PRIx64 ", reenter startup state", domain->dataset_id);
-            srpl_abandon_nonpreferred_dataset(domain);
-            srpl_transition_to_startup_state(domain);
-        } else {
-            srpl_maybe_sync_or_transition(domain);
-        }
+        srpl_state_transition_by_dataset_id(domain, instance);
         return srpl_state_ready;
     }
 }
@@ -5319,6 +5422,9 @@ srpl_srp_client_ack_evaluate_action(srpl_connection_t *srpl_connection, srpl_eve
         srp_adv_host_release(finished_update->host);
     }
     free(finished_update);
+#ifdef SRP_TEST_SERVER
+    test_srpl_finished_evaluate(srpl_connection);
+#endif
     return srpl_state_ready;
 }
 
@@ -5439,6 +5545,18 @@ srpl_send_candidates_message_wait_action(srpl_connection_t *srpl_connection, srp
         UNEXPECTED_EVENT(srpl_connection, event);
     }
 }
+
+#ifdef SRP_TEST_SERVER
+// When testing, we may want an srpl_connection_t that just calls back to the test system when an event
+// is delivered and otherwise does nothing.
+static srpl_state_t
+srpl_test_event_intercept_action(srpl_connection_t *srpl_connection, srpl_event_t *event)
+{
+    STATE_ANNOUNCE(srpl_connection, event);
+
+    return test_packet_srpl_intercept(srpl_connection, event);
+}
+#endif
 
 // Check to see if host is on the list of remaining candidates to send. If so, no need to do anything--it'll go out soon.
 static bool
@@ -5638,6 +5756,10 @@ static srpl_connection_state_t srpl_connection_states[] = {
     { STATE_NAME_DECL(session_response_send),                srpl_session_response_send },
     // Wait for a "send candidates" message.
     { STATE_NAME_DECL(send_candidates_message_wait),         srpl_send_candidates_message_wait_action },
+
+#ifdef SRP_TEST_SERVER
+    { STATE_NAME_DECL(test_event_intercept),                 srpl_test_event_intercept_action },
+#endif
 };
 #define SRPL_NUM_CONNECTION_STATES (sizeof(srpl_connection_states) / sizeof(srpl_connection_state_t))
 
@@ -5989,7 +6111,7 @@ srpl_maybe_sync_or_transition(srpl_domain_t *domain)
             // we sync with the instances with the same dataset id
             if (instance->connection != NULL &&
                 instance->connection->state == srpl_state_sync_wait &&
-                instance->dataset_id >= domain->dataset_id)
+                srpl_dataset_id_compare(instance->dataset_id, domain->dataset_id) >= 0)
             {
                 srpl_sync_with_instance(instance);
             }

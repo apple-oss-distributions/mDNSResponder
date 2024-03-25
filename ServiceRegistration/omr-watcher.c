@@ -384,6 +384,7 @@ omr_watcher_prefix_list_callback(void *context, cti_prefix_vec_t *prefixes, cti_
     }
     INFO("omw->prefixes = %p", omw->prefixes);
     for (prefix = omw->prefixes; prefix != NULL; prefix = prefix->next) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
         INFO("prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d is currently in the list " PUB_S_SRP PUB_S_SRP PUB_S_SRP,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length,
              prefix->user ? " (user)" : "", prefix->ncp ? " (ncp)": "", prefix->stable ? " (stable)" : "");
@@ -627,10 +628,10 @@ omr_watcher_prefix_present(omr_watcher_t *watcher, omr_prefix_priority_t priorit
                            struct in6_addr *ignore_prefix, int ignore_prefix_length)
 {
     static struct in6_addr in6addr_zero;
-    SEGMENTED_IPv6_ADDR_GEN_SRP(ignore_prefix->prefix.s6_addr, prefix_buf);
+    SEGMENTED_IPv6_ADDR_GEN_SRP(ignore_prefix, ignore_buf);
     if (in6addr_compare(ignore_prefix, &in6addr_zero)) {
         INFO("prefix to ignore: " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(ignore_prefix->s6_addr, prefix_buf), ignore_prefix_length);
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(ignore_prefix->s6_addr, ignore_buf), ignore_prefix_length);
     }
     for (omr_prefix_t *prefix = watcher->prefixes; prefix != NULL; prefix = prefix->next) {
         if (prefix->prefix_length == ignore_prefix_length && !in6addr_compare(&prefix->prefix, ignore_prefix)) {
@@ -656,7 +657,7 @@ omr_watcher_prefix_present(omr_watcher_t *watcher, omr_prefix_priority_t priorit
 bool
 omr_watcher_prefix_exists(omr_watcher_t *watcher, const struct in6_addr *address, int prefix_length)
 {
-    SEGMENTED_IPv6_ADDR_GEN_SRP(address->prefix.s6_addr, target_buf);
+    SEGMENTED_IPv6_ADDR_GEN_SRP(address, target_buf);
     INFO("address: " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
          SEGMENTED_IPv6_ADDR_PARAM_SRP(address->s6_addr, target_buf), prefix_length);
     for (omr_prefix_t *prefix = watcher->prefixes; prefix != NULL; prefix = prefix->next) {

@@ -82,6 +82,10 @@
 #include "system_utilities.h"
 #endif
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+#include <mdns/powerlog.h>
+#endif
+
 #include "mdns_strict.h"
 
 // User IDs 0-500 are system-wide processes, not actual users in the usual sense
@@ -1429,6 +1433,15 @@ mDNSlocal void connection_termination(request_state *request)
 #endif
         }
         LogMcastS(ptr->rr, request, reg_stop);
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+        if (ptr->powerlog_start_time != 0)
+        {
+            const AuthRecord *const ar = ptr->rr;
+            const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+            mdns_powerlog_register_record_stop(ar->resrec.name->c, ar->resrec.rrtype, request->process_id,
+                request->request_id, ptr->powerlog_start_time, usesAWDL);
+        }
+#endif
         mDNS_Deregister(&mDNSStorage, ptr->rr);     // Will free ptr->rr for us
         freeL("registered_record_entry/connection_termination", ptr);
     }
@@ -1506,6 +1519,14 @@ mDNSlocal mStatus _handle_regrecord_request_start(request_state *request, AuthRe
     }
     else
     {
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+        if ((rr->resrec.InterfaceID != mDNSInterface_LocalOnly) && IsLocalDomain(rr->resrec.name))
+        {
+            const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+            re->powerlog_start_time = mdns_powerlog_register_record_start(rr->resrec.name->c, rr->resrec.rrtype,
+                request->process_id, request->request_id, usesAWDL);
+        }
+#endif
         LogMcastS(rr, request, reg_start);
         re->next = request->reg_recs;
         request->reg_recs = re;
@@ -1842,6 +1863,15 @@ mDNSlocal void regservice_termination_callback(request_state *const request)
             unlink_and_free_service_instance(p);
             // Don't touch service_instance *p after this -- it's likely to have been freed already
         }
+    #if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+        if (request->powerlog_start_time != 0)
+        {
+            const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+            mdns_powerlog_service_register_stop(servicereg->type.c, request->process_id, request->request_id,
+                request->powerlog_start_time, usesAWDL);
+            request->powerlog_start_time = 0;
+        }
+    #endif
     }
     if (servicereg->txtdata)
     {
@@ -2212,6 +2242,15 @@ mDNSlocal mStatus remove_record(request_state *request)
         e->external_advertise = mDNSfalse;
     }
     LogMcastS(e->rr, request, reg_stop);
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    if (e->powerlog_start_time != 0)
+    {
+        const AuthRecord *const ar = e->rr;
+        const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+        mdns_powerlog_register_record_stop(ar->resrec.name->c, ar->resrec.rrtype, request->process_id, request->request_id,
+            e->powerlog_start_time, usesAWDL);
+    }
+#endif
     err = mDNS_Deregister(&mDNSStorage, e->rr);     // Will free e->rr for us; we're responsible for freeing e
     if (err)
     {
@@ -2448,6 +2487,14 @@ mDNSlocal mStatus register_service_instance(request_state *const request, const 
                                   mDNSNULL, servicereg->txtdata, servicereg->txtlen,
                                   instance->subtypes, servicereg->num_subtypes,
                                   interfaceID, regservice_callback, instance, request->flags);
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    if (!result && (request->interfaceIndex != kDNSServiceInterfaceIndexLocalOnly) && DomainIsLocal)
+    {
+        const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+        request->powerlog_start_time = mdns_powerlog_service_register_start(servicereg->type.c, request->process_id,
+            request->request_id, usesAWDL);
+    }
+#endif
     if (!result && foundTimestampTLV)
     {
         AuthRecord *currentTSR = mDNSGetTSRRecord(&mDNSStorage, &instance->srs.RR_SRV);
@@ -3123,6 +3170,14 @@ mDNSlocal mStatus add_domain_to_browser(request_state *info, const domainname *d
         b->next = browse->browsers;
         browse->browsers = b;
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+        if ((info->interfaceIndex != kDNSServiceInterfaceIndexLocalOnly) && SameDomainName(d, &localdomain))
+        {
+            const mDNSBool usesAWDL = ClientRequestUsesAWDL(info->interfaceIndex, info->flags);
+            info->powerlog_start_time = mdns_powerlog_browse_start(browse->regtype.c, info->process_id, info->request_id,
+                usesAWDL);
+        }
+#endif
         LogMcastQ(&b->q, info, q_start);
 #if MDNSRESPONDER_SUPPORTS(APPLE, D2D)
         if (callExternalHelpers(browse->interface_id, &b->domain, info->flags))
@@ -3177,6 +3232,15 @@ mDNSlocal void browse_termination_callback(request_state *info)
         LogMcastQ(&ptr->q, info, q_stop);
         freeL("browser_t/browse_termination_callback", ptr);
     }
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    if (info->powerlog_start_time != 0)
+    {
+        const mDNSBool usesAWDL = ClientRequestUsesAWDL(info->interfaceIndex, info->flags);
+        mdns_powerlog_browse_stop(browse->regtype.c, info->process_id, info->request_id, info->powerlog_start_time,
+            usesAWDL);
+        info->powerlog_start_time = 0;
+    }
+#endif
 }
 
 mDNSlocal void udsserver_automatic_browse_domain_changed(const DNameListElem *const d, const mDNSBool add)
@@ -3876,6 +3940,15 @@ mDNSlocal void resolve_termination_callback(request_state *request)
         external_stop_resolving_service(resolve->qsrv.InterfaceID, &resolve->qsrv.qname, request->flags, request->process_id);
     }
 #endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    if (request->powerlog_start_time != 0)
+    {
+        const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+        mdns_powerlog_resolve_stop(resolve->qsrv.qname.c, request->process_id, request->request_id,
+            request->powerlog_start_time, usesAWDL);
+        request->powerlog_start_time = 0;
+    }
+#endif
 }
 
 typedef struct {
@@ -3901,17 +3974,25 @@ mDNSlocal mStatus _handle_resolve_request_start(request_state *const request, co
         else
         {
             request->terminate = resolve_termination_callback;
+        #if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+            if ((request->interfaceIndex != kDNSServiceInterfaceIndexLocalOnly) && IsLocalDomain(&params->fqdn))
+            {
+                const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+                request->powerlog_start_time = mdns_powerlog_resolve_start(params->fqdn.c, request->process_id,
+                    request->request_id, usesAWDL);
+            }
+        #endif
             LogMcastQ(&resolve->qsrv, request, q_start);
-#if MDNSRESPONDER_SUPPORTS(APPLE, D2D)
+        #if MDNSRESPONDER_SUPPORTS(APPLE, D2D)
             if (callExternalHelpers(params->InterfaceID, &params->fqdn, request->flags))
             {
                 resolve->external_advertise    = mDNStrue;
                 LogInfo("handle_resolve_request: calling external_start_resolving_service()");
                 external_start_resolving_service(params->InterfaceID, &params->fqdn, request->flags, request->process_id);
             }
-#else
+        #else
             (void)params;
-#endif
+        #endif
         }
     }
     return err;
@@ -4678,12 +4759,21 @@ mDNSlocal void queryrecord_termination_callback(request_state *request)
     const mDNSBool localDomain = IsLocalDomain(qname);
 
     LogRedact(localDomain ? MDNS_LOG_CATEGORY_MDNS : MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-        "[R%u] DNSServiceQueryRecord(%X, %d, " PRI_DM_NAME "(%x), " PUB_S ") STOP PID[%d](" PUB_S ")",
-        request->request_id, request->flags, request->interfaceIndex,
-        DM_NAME_PARAM(qname), mDNS_NonCryptoHash(mDNSNonCryptoHash_FNV1a, qname->c, DomainNameLength(qname)),
-        DNSTypeName(QueryRecordClientRequestGetType(request->queryrecord)), request->process_id, request->pid_name);
+        "[R%u] DNSServiceQueryRecord(%X, %d, " PRI_DM_NAME "(%x), " PUB_DNS_TYPE ") STOP PID[%d](" PUB_S ")",
+        request->request_id, request->flags, request->interfaceIndex, DM_NAME_PARAM_NONNULL(qname),
+        mDNS_NonCryptoHash(mDNSNonCryptoHash_FNV1a, qname->c, DomainNameLength(qname)),
+        DNS_TYPE_PARAM(QueryRecordClientRequestGetType(request->queryrecord)), request->process_id, request->pid_name);
 
     QueryRecordClientRequestStop(request->queryrecord);
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    if (request->powerlog_start_time != 0)
+    {
+        const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+        mdns_powerlog_query_record_stop(qname->c, QueryRecordClientRequestGetType(request->queryrecord), request->process_id,
+            request->request_id, request->powerlog_start_time, usesAWDL);
+        request->powerlog_start_time = 0;
+    }
+#endif
 }
 
 typedef struct
@@ -4710,7 +4800,21 @@ static void _uds_queryrecord_params_copy(uds_queryrecord_params_t *const dst, co
 mDNSlocal mStatus _handle_queryrecord_request_start(request_state *request, const uds_queryrecord_params_t *const params)
 {
     request->terminate = queryrecord_termination_callback;
-    return QueryRecordClientRequestStart(request->queryrecord, &params->cr, queryrecord_result_reply, request);
+    QueryRecordClientRequest *queryrecord = request->queryrecord;
+    const mStatus err = QueryRecordClientRequestStart(queryrecord, &params->cr, queryrecord_result_reply, request);
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    if (!err)
+    {
+        const domainname *const qname = QueryRecordClientRequestGetQName(queryrecord);
+        if ((request->interfaceIndex != kDNSServiceInterfaceIndexLocalOnly) && IsLocalDomain(qname))
+        {
+            const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+            request->powerlog_start_time = mdns_powerlog_query_record_start(qname->c,
+                QueryRecordClientRequestGetType(queryrecord), request->process_id, request->request_id, usesAWDL);
+        }
+    }
+#endif
+    return err;
 }
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
@@ -5373,6 +5477,14 @@ mDNSlocal void addrinfo_termination_callback(request_state *request)
            request->process_id, request->pid_name);
 
     GetAddrInfoClientRequestStop(addrinfo);
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    if (request->powerlog_start_time != 0)
+    {
+        const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+        mdns_powerlog_getaddrinfo_stop(request->process_id, request->request_id, request->powerlog_start_time, usesAWDL);
+        request->powerlog_start_time = 0;
+    }
+#endif
 }
 
 typedef struct {
@@ -5410,7 +5522,18 @@ mDNSlocal mStatus _handle_addrinfo_request_start(request_state *request, const _
     get_tracker_info_tlvs(request);
 #endif
     err = GetAddrInfoClientRequestStart(request->addrinfo, &gaiParams, queryrecord_result_reply, request);
-
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    if (!err)
+    {
+        const domainname *const qname = GetAddrInfoClientRequestGetQName(request->addrinfo);
+        if ((request->interfaceIndex != kDNSServiceInterfaceIndexLocalOnly) && IsLocalDomain(qname))
+        {
+            const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+            request->powerlog_start_time = mdns_powerlog_getaddrinfo_start(request->process_id, request->request_id,
+                usesAWDL);
+        }
+    }
+#endif
     return err;
 }
 
@@ -7472,6 +7595,66 @@ mDNSlocal transfer_state send_msg(request_state *const req)
     return (rep->nwritten == rep->totallen) ? t_complete : t_morecoming;
 }
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+mDNSexport void udsserver_report_request_progress_to_powerlog(void)
+{
+    for (const request_state *req = all_requests; req; req = req->next)
+    {
+        const pid_t pid = req->process_id;
+        const uint32_t request_id = req->request_id;
+        if (req->terminate == connection_termination)
+        {
+            for (const registered_record_entry *re = req->reg_recs; re; re = re->next)
+            {
+                const uint64_t start_time = re->powerlog_start_time;
+                if (start_time == 0)
+                {
+                    continue;
+                }
+                const AuthRecord *const ar = re->rr;
+                const mDNSBool usesAWDL = ClientRequestUsesAWDL(req->interfaceIndex, req->flags);
+                mdns_powerlog_register_record_progress(ar->resrec.name->c, ar->resrec.rrtype, pid, request_id, start_time,
+                    usesAWDL);
+            }
+        }
+        else
+        {
+            const uint64_t start_time = req->powerlog_start_time;
+            if (start_time == 0)
+            {
+                continue;
+            }
+            const mDNSBool usesAWDL = ClientRequestUsesAWDL(req->interfaceIndex, req->flags);
+            if (req->terminate == browse_termination_callback)
+            {
+                const request_browse *const browse = req->browse;
+                mdns_powerlog_browse_progress(browse->regtype.c, pid, request_id, start_time, usesAWDL);
+            }
+            else if (req->terminate == addrinfo_termination_callback)
+            {
+                mdns_powerlog_getaddrinfo_progress(pid, request_id, start_time, usesAWDL);
+            }
+            else if (req->terminate == queryrecord_termination_callback)
+            {
+                const domainname *const qname = QueryRecordClientRequestGetQName(req->queryrecord);
+                const uint16_t qtype = QueryRecordClientRequestGetType(req->queryrecord);
+                mdns_powerlog_query_record_progress(qname->c, qtype, pid, request_id, start_time, usesAWDL);
+            }
+            else if (req->terminate == resolve_termination_callback)
+            {
+                const request_resolve *const resolve = req->resolve;
+                mdns_powerlog_resolve_progress(resolve->qsrv.qname.c, pid, request_id, start_time, usesAWDL);
+            }
+            else if (req->terminate == regservice_termination_callback)
+            {
+                const request_servicereg *const servicereg = req->servicereg;
+                mdns_powerlog_service_register_progress(servicereg->type.c, pid, request_id, start_time, usesAWDL);
+            }
+        }
+    }
+}
+#endif
+
 mDNSexport mDNSs32 udsserver_idle(mDNSs32 nextevent)
 {
     mDNSs32 now = mDNS_TimeNow(&mDNSStorage);
@@ -7573,7 +7756,7 @@ struct CompileTimeAssertionChecks_uds_daemon
     // other overly-large structures instead of having a pointer to them, can inadvertently
     // cause structure sizes (and therefore memory usage) to balloon unreasonably.
     char sizecheck_request_state          [(sizeof(request_state)           <= 1072) ? 1 : -1];
-    char sizecheck_registered_record_entry[(sizeof(registered_record_entry) <=   60) ? 1 : -1];
+    char sizecheck_registered_record_entry[(sizeof(registered_record_entry) <=   64) ? 1 : -1];
     char sizecheck_service_instance       [(sizeof(service_instance)        <= 6552) ? 1 : -1];
     char sizecheck_browser_t              [(sizeof(browser_t)               <=  984) ? 1 : -1];
     char sizecheck_reply_hdr              [(sizeof(reply_hdr)               <=   12) ? 1 : -1];

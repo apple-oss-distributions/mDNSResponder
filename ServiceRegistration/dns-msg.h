@@ -453,6 +453,7 @@ bool dns_u8_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL of
 bool dns_u16_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp, uint16_t *NONNULL ret);
 bool dns_u32_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp, uint32_t *NONNULL ret);
 bool dns_u64_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp, uint64_t *NONNULL ret);
+size_t dns_rdata_dump_to_buf(dns_rr_t *NONNULL rr, char *NONNULL buf, size_t bufsize);
 #define dns_rdata_parse_data(rr, buf, offp, target, rdlen, rrstart) \
     dns_rdata_parse_data_(rr, buf, offp, target, rdlen, rrstart, __FILE__, __LINE__)
 bool dns_rdata_parse_data_(dns_rr_t *NONNULL rr, const uint8_t *NONNULL buf, unsigned *NONNULL offp,

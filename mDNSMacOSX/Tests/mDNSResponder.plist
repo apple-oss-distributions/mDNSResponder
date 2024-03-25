@@ -3725,6 +3725,314 @@
 				<string>UTF8ValidatorTest</string>
 			</array>
 		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Change Text Record</string>
+			<key>Description</key>
+			<string>SRP Client Changes Text Record, SRP Server Does DNSServiceUpdateRecord.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>15</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>change-text-record</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Lease Expiry</string>
+			<key>Description</key>
+			<string>Verify service and host entries are removed when the lease provided by the SRP client expires.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>lease-expiry</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Lease Renewal</string>
+			<key>Description</key>
+			<string>Verify service is renewed upon request from the client when the current lease is about to expire.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>30</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>lease-renewal</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Single SRPL Update test</string>
+			<key>Description</key>
+			<string>
+			  Test that when we generate a DNS Update message and deliver it through the SRP replication
+			  input path, it is successfully registered.
+			</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>single-srpl-update</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Two-instance SRPL registration test</string>
+			<key>Description</key>
+			<string>
+			  Test that when we generate two DNS Update message, each of which adds a single instance,
+			  and deliver them together through the SRP replication input path, both are successfully registered,
+			  and the host registration is only done once and not renewed.
+			</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>srpl-two-instances</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Two-instance SRPL registration + remove test</string>
+			<key>Description</key>
+			<string>
+			  Test that when we generate two DNS Update message, the first of which adds two instances, and the
+			  second of which removes the first instance, and then we deliver them together through the SRP replication
+			  input path, the second is successfully registered, but the first is never registered, and the host registration
+			  and second instance registration are done exactly once and not renewed.
+			</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>srpl-two-instances-one-remove</string>
+			</array>
+		</dict>
+		<dict>
+		  <key>TestName</key>
+			<string>Zero-instance SRPL registration test</string>
+			<key>Description</key>
+			<string> test that an SRP client registers a host with no instances through the primary SRP server, and the update message is delivered to the other SRP server through SRPL connection and then the host is registered on that SRP server.</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>srpl-zero-instances-two-servers</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Two-instance SRPL registration + remove test with duplicate</string>
+			<key>Description</key>
+			<string>
+			  The goal of this test is to generate two DNS Update messages, both for the
+			  same host, each containing a new registration for a different instance, and
+			  deliver it through the SRP replication input path. Having passed the update set once
+			  we then deliver it a second time to see that it is correctly ignored.
+			  VARIANT: test that if the two updates contain the same messages, the second set are ignored.
+			</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>srpl-two-instances-dup</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Two-instance SRPL registration + remove test with duplicate of first message only</string>
+			<key>Description</key>
+			<string>
+			  The goal of this test is to generate two DNS Update messages, both for the
+			  same host, each containing a new registration for a different instance, and
+			  deliver it through the SRP replication input path. Having passed the update set once
+			  we then deliver it a second time to see that it is correctly ignored.
+			  VARIANT: test that if the second updates contain only the first message, it is ignored.
+			</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>srpl-two-instances-dup-first</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Two-instance SRPL registration + remove test with duplicate of last message only</string>
+			<key>Description</key>
+			<string>
+			  The goal of this test is to generate two DNS Update messages, both for the
+			  same host, each containing a new registration for a different instance, and
+			  deliver it through the SRP replication input path. Having passed the update set once
+			  we then deliver it a second time to see that it is correctly ignored.
+			  VARIANT: test that if the second updates contain only the last message, it is ignored.
+			</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>srpl-two-instances-dup-last</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Two-instance SRPL registration + remove, then add a new instance plus dupes of the original messages</string>
+			<key>Description</key>
+			<string>
+			  The goal of this test is to generate two DNS Update messages, both for the
+			  same host, each containing a new registration for a different instance, and
+			  deliver it through the SRP replication input path. Having passed the update set once
+			  we then deliver it a second time to see that it is correctly ignored.
+			  VARIANT: test that if the second update starts with a new third instance, it is added.
+			</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>srpl-two-instances-dup-add-first</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Two-instance SRPL registration + remove plus duplicates of these messages and a new instance add</string>
+			<key>Description</key>
+			<string>
+			  The goal of this test is to generate two DNS Update messages, both for the
+			  same host, each containing a new registration for a different instance, and
+			  deliver it through the SRP replication input path. Having passed the update set once
+			  we then deliver it a second time to see that it is correctly ignored.
+			  VARIANT: test that if the second update ends with a new third instance, it is added.
+			</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>srpl-two-instances-dup-add-last</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Two-instance SRPL registration + remove with different keys</string>
+			<key>Description</key>
+			<string>
+			  The goal of this test is to generate two DNS Update messages, both for the
+			  same host, each containing a new registration for a different instance, and
+			  deliver it through the SRP replication input path. Having passed the update set once
+			  we then deliver it a second time to see that it is correctly ignored.
+			  VARIANT: test that if the two updates are signed with different keys, they are rejected.
+			</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>srpl-two-instances-dup-2keys</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

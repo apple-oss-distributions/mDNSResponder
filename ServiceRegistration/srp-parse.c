@@ -48,10 +48,11 @@ static dns_name_t *service_update_zone; // The zone to update when we receive an
 // Free the data structures into which the SRP update was parsed.   The pointers to the various DNS objects that these
 // structures point to are owned by the parsed DNS message, and so these do not need to be freed here.
 void
-srp_parse_client_updates_free(client_update_t *messages)
+srp_parse_client_updates_free_(client_update_t *messages, const char *file, int line)
 {
     client_update_t *message = messages;
     while (message) {
+        INFO("%p at " PUB_S_SRP ":%d", message, file, line);
         client_update_t *next_message = message->next;
 
         for (service_instance_t *sip = message->instances; sip; ) {
@@ -89,6 +90,10 @@ srp_parse_client_updates_free(client_update_t *messages)
             message->srpl_connection = NULL;
         }
 #endif
+        if (message->connection != NULL) {
+            ioloop_comm_release(message->connection);
+            message->connection = NULL;
+        }
         free(message);
         message = next_message;
     }
@@ -263,7 +268,9 @@ srp_evaluate(const char *remote_name, dns_message_t **in_parsed_message, message
     unsigned num_keys = 0;
     unsigned max_keys = 1;
     bool found_key = false;
+#if SRP_PARSE_DEBUG_VERBOSE
     char namebuf2[DNS_MAX_NAME_SIZE];
+#endif
     dns_message_t *message;
 
 
@@ -329,8 +336,10 @@ srp_evaluate(const char *remote_name, dns_message_t **in_parsed_message, message
 #endif
         replacement_zone = service_update_zone;
     } else {
+#if SRP_PARSE_DEBUG_VERBOSE
         INFO(PRI_S_SRP " is not in default.service.arpa, or no replacement zone (%p)",
              dns_name_print(update_zone, namebuf2, sizeof(namebuf2)), service_update_zone);
+#endif
         replacement_zone = NULL;
     }
 
@@ -823,9 +832,9 @@ srp_evaluate(const char *remote_name, dns_message_t **in_parsed_message, message
     }
 
     INFO("update for " PRI_DNS_NAME_SRP " #%d, xid %x validates, lease time %d, receive_time "
-         PUB_S_SRP ", remote " PRI_S_SRP ".",
+         PUB_S_SRP ", remote " PRI_S_SRP " -> %p.",
          DNS_NAME_PARAM_SRP(host_description->name, host_description_name_buf), index, raw_message->wire.id,
-         ret->host_lease, time_buf, remote_name == NULL ? "(none)" : remote_name);
+         ret->host_lease, time_buf, remote_name == NULL ? "(none)" : remote_name, ret);
     ret->rcode = dns_rcode_noerror;
     goto out;
 
@@ -862,8 +871,13 @@ srp_dns_evaluate(comm_t *connection, srp_server_t *server_state, message_t *mess
         goto out;
     }
 
-    // Forward incoming messages that are queries but not updates.
-    // XXX do this later--for now we operate only as a translator, not a proxy.
+    // Forward incoming messages that are queries to the dnssd-proxy code.
+    if (dns_opcode_get(&message->wire) == dns_opcode_query)
+    {
+        dns_proxy_input_for_server(connection, server_state, message, NULL);
+        goto out;
+    }
+
     if (dns_opcode_get(&message->wire) != dns_opcode_update) {
         // dns_forward(connection)
         send_fail_response(connection, message, dns_rcode_refused);
@@ -952,10 +966,14 @@ srp_parse_host_messages_evaluate(srp_server_t *UNUSED server_state, srpl_connect
         // We need the wire message to validate the signature...
         INFO("evaluating message #%d from %s", i, srpl_connection->name);
         client_update_t *update = srp_evaluate(srpl_connection->name, NULL, message, i);
-        if (update == NULL || update->rcode != dns_rcode_noerror) {
+        if (update == NULL) {
             goto out;
         }
-
+        if (update->rcode != dns_rcode_noerror) {
+            update->next = client_updates;
+            client_updates = update;
+            goto out;
+        }
         update->srpl_connection = srpl_connection;
         srpl_connection_retain(update->srpl_connection);
         update->server_state = server_state;

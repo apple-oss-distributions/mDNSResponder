@@ -57,8 +57,12 @@ struct hmac_key {
 #include <CoreServices/CoreServices.h>
 
 struct srp_key {
+#if !TARGET_OS_OSX
     SecKeyRef NONNULL public;
     SecKeyRef NONNULL private;
+#else
+    uint8_t pubkey[ECDSA_KEY_SIZE];
+#endif
 };
 
 // An ECDSASHA256 signature in ASN.1 DER format is 0x30 | x | 0x02 | y | r | 0x02 | z | s, where x is the

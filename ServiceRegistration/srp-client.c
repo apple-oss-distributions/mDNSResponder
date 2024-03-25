@@ -1,6 +1,6 @@
 /* srp-client.c
  *
- * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2023 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,13 +26,21 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <errno.h>
+#include "srp.h"
+#ifdef SRP_TEST_SERVER
+#undef DNSServiceRegister
+#define DNSServiceRegister      srp_client_register
+#undef DNSServiceUpdateRecord
+#define DNSServiceUpdateRecord  srp_client_update_record
+#undef DNSServiceRefDeallocate
+#define DNSServiceRefDeallocate srp_client_ref_deallocate
+#endif
 #ifdef THREAD_DEVKIT_ADK
 #include "../mDNSShared/dns_sd.h"
 #else
 #include <dns_sd.h>
 #include <arpa/inet.h>
 #endif
-#include "srp.h"
 #include "srp-api.h"
 #include "dns-msg.h"
 #include "srp-crypto.h"
@@ -51,7 +59,6 @@
 // When we fail to get through to any server, we will initially re-attempt contacting that server after
 // this amount of time
 #define INITIAL_NEXT_ATTEMPT_TIME          1000 * 2 * 60
-
 
 typedef struct client_state client_state_t;
 
@@ -140,9 +147,7 @@ bool zero_addresses = false; // for testing, used by srp-ioloop.c.
 // Forward references
 static int do_srp_update(client_state_t *client, bool definite, bool *did_something);
 static void udp_response(void *v_update_context, void *v_message, size_t message_length);
-static dns_wire_t *NULLABLE generate_srp_update(client_state_t *client, uint32_t update_lease_time,
-                                                uint32_t update_key_lease_time, size_t *NONNULL p_length,
-                                                service_addr_t *NONNULL server, uint32_t serial, bool remove);
+
 static bool srp_is_network_active(void);
 
 #define VALIDATE_IP_ADDR                                         \
@@ -151,6 +156,19 @@ static bool srp_is_network_active(void);
         (rrtype == dns_rrtype_aaaa && rdlen != 16)) {            \
         return kDNSServiceErr_Invalid;                           \
     }
+
+
+client_state_t *
+srp_client_get_current(void)
+{
+    return current_client;
+}
+
+void
+srp_client_set_current(client_state_t *new_client)
+{
+    current_client = new_client;
+}
 
 // Call this before calling anything else.   Context will be passed back whenever the srp code
 // calls any of the host functions.
@@ -175,13 +193,19 @@ srp_host_init(void *context)
 }
 
 int
+srp_host_key_reset_for_client(client_state_t *client)
+{
+    if (client->key != NULL) {
+        srp_keypair_free(client->key);
+        client->key = NULL;
+    }
+    return srp_reset_key("com.apple.srp-client.host-key", client->os_context);
+}
+
+int
 srp_host_key_reset(void)
 {
-    if (current_client->key != NULL) {
-        srp_keypair_free(current_client->key);
-        current_client->key = NULL;
-    }
-    return srp_reset_key("com.apple.srp-client.host-key", current_client->os_context);
+    return srp_host_key_reset_for_client(current_client);
 }
 
 int
@@ -845,7 +869,7 @@ udp_retransmit(void *v_update_context)
             // In principle if it fails here, it might succeed later, so we just don't send a packet and let
             // the timeout take care of it.
             if (err != kDNSServiceErr_NoError) {
-                ERROR("udp_retransmit: error %d creating udp context.", err);
+                ERROR("udp_retransmit: error %d connecting udp context.", err);
             } else {
                 if (context->server->rr.type == dns_rrtype_a) {
 #ifdef THREAD_DEVKIT_ADK
@@ -880,8 +904,9 @@ udp_retransmit(void *v_update_context)
         }
 
         if (context->message == NULL) {
-            context->message = generate_srp_update(client, client->lease_time, client->key_lease_time, &context->message_length,
-                                                   context->server, context->serial, context->removing);
+            context->message = srp_client_generate_update(client, client->lease_time, client->key_lease_time,
+                                                          &context->message_length, NULL, context->serial,
+                                                          context->removing);
             if (context->message == NULL) {
                 ERROR("No memory for message.");
                 return;
@@ -1163,9 +1188,9 @@ out:
 }
 
 // Generate a new SRP update message
-static dns_wire_t *
-generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t update_key_lease_time,
-                    size_t *NONNULL p_length, service_addr_t * UNUSED server, uint32_t serial, bool removing)
+dns_wire_t *
+srp_client_generate_update(client_state_t *client, uint32_t update_lease_time, uint32_t update_key_lease_time,
+                           size_t *NONNULL p_length, dns_wire_t *in_wire, uint32_t serial, bool removing)
 {
     dns_wire_t *message;
     const char *zone_name = "default.service.arpa";
@@ -1197,18 +1222,26 @@ generate_srp_update(client_state_t *client, uint32_t update_lease_time, uint32_t
 #define CH if (towire.error) { line = __LINE__; goto fail; }
 
     if (client->hostname == NULL) {
-        ERROR("generate_srp_update called with NULL hostname.");
+        ERROR("called with NULL hostname.");
         return NULL;
     }
 
-    // Allocate a message buffer.
-    message = calloc(1, sizeof *message);
-    if (message == NULL) {
-        return NULL;
+    // If we were given a message buffer, use it, otherwise allocate one.
+    if (in_wire != NULL) {
+        message = in_wire;
+        towire.p = &message->data[0];
+        towire.lim = towire.p + *p_length;
+        towire.message = in_wire;
+    } else {
+        // Allocate a message buffer.
+        message = calloc(1, sizeof *message);
+        if (message == NULL) {
+            return NULL;
+        }
+        towire.p = &message->data[0];               // We start storing RR data here.
+        towire.lim = &message->data[DNS_DATA_SIZE]; // This is the limit to how much we can store.
+        towire.message = message;
     }
-    towire.p = &message->data[0];               // We start storing RR data here.
-    towire.lim = &message->data[DNS_DATA_SIZE]; // This is the limit to how much we can store.
-    towire.message = message;
 
     // Generate a random UUID.
     message->id = srp_random16();
@@ -1482,7 +1515,7 @@ fail:
         update_finalize(client->active_update);
         client->active_update = NULL;
     }
-    if (message != NULL) {
+    if (in_wire == NULL && message != NULL) {
         free(message);
     }
     return NULL;
@@ -1612,13 +1645,15 @@ srp_deregister_instance(DNSServiceRef sdRef)
     return kDNSServiceErr_NoSuchRecord;
 found:
     rp->removing = true;
-    if (client->active_update->message) {
-        free(client->active_update->message);
-        client->active_update->message = NULL;
+    if (client->active_update != NULL) {
+        if (client->active_update->message) {
+            free(client->active_update->message);
+            client->active_update->message = NULL;
+        }
+        client->active_update->next_retransmission_time = INITIAL_NEXT_RETRANSMISSION_TIME;
+        client->active_update->next_attempt_time = INITIAL_NEXT_ATTEMPT_TIME;
+        udp_retransmit(client->active_update);
     }
-    client->active_update->next_retransmission_time = INITIAL_NEXT_RETRANSMISSION_TIME;
-    client->active_update->next_attempt_time = INITIAL_NEXT_ATTEMPT_TIME;
-    udp_retransmit(client->active_update);
     return kDNSServiceErr_NoError;
 }
 

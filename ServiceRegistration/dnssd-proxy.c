@@ -264,12 +264,10 @@ wakeup_t *discovery_restart_wakeup;
 
 #if SRP_FEATURE_DYNAMIC_CONFIGURATION
 static char uuid_name[DNS_MAX_NAME_SIZE + 1];
-#if STUB_ROUTER
 static char my_name_buf[DNS_MAX_NAME_SIZE + 1];
 static CFStringRef sc_dynamic_store_key_host_name;
 static char local_host_name[DNS_MAX_NAME_SIZE + 1];
 static char local_host_name_dot_local[DNS_MAX_NAME_SIZE + 1];
-#endif // STUB_ROUTER
 #endif // #if (SRP_FEATURE_COMBINED_SRP_DNSSD_PROXY)
 
 #if THREAD_BORDER_ROUTER && SRP_FEATURE_SRP_COMBINED_DNSSD_PROXY
@@ -1934,7 +1932,7 @@ dnssd_hardwired_deny_service_existence_for_served_domain(served_domain_t *const 
 static bool
 dnssd_hardwired_setup_for_served_domain(served_domain_t *const NONNULL served_domain)
 {
-    bool succeeded;
+    bool succeeded = false;
     dns_wire_t wire;
     dns_towire_state_t towire;
 
@@ -1985,9 +1983,15 @@ dnssd_hardwired_setup_for_served_domain(served_domain_t *const NONNULL served_do
     dnssd_hardwired_add(served_domain, "", served_domain->domain, towire.p - wire.data, wire.data, dns_rrtype_soa);
 
     // Setup DNS push
-    succeeded = dnssd_hardwired_setup_dns_push_for_domain(served_domain);
-    require_action_quiet(succeeded, exit,
-        ERROR("failed to setup DNS push service for hardwired response - domain: " PRI_S_SRP, served_domain->domain));
+    if (served_domain->interface == NULL || !served_domain->interface->no_push) {
+        succeeded = dnssd_hardwired_setup_dns_push_for_domain(served_domain);
+        if (!succeeded) {
+            ERROR("failed to setup DNS push service for hardwired response - domain: " PRI_S_SRP,
+                  served_domain->domain);
+            goto exit;
+        }
+    }
+    succeeded = true;
 
 exit:
     return succeeded;
@@ -3430,7 +3434,11 @@ static void dso_message(dp_tracker_t *tracker, message_t *message, dso_state_t *
                   tracker->connection->name);
             return;
         }
+#ifdef SRP_TEST_SERVER
+        srpl_dso_server_message(tracker->connection, message, dso, (srp_server_t*)tracker->connection->srp_server);
+#else
         srpl_dso_server_message(tracker->connection, message, dso, srp_servers);
+#endif
         break;
 #endif
 
@@ -3730,24 +3738,29 @@ out:
     }
 }
 
-static void
-dns_proxy_input(comm_t *comm, message_t *message, void *context)
+void
+dns_proxy_input_for_server(comm_t *comm, srp_server_t *server_state, message_t *message, void *context)
 {
     char buf[INET6_ADDRSTRLEN];
-    IOLOOP_NTOP(&comm->address, buf);
+    const char *remote_name = buf;
+    if (comm->tcp_stream) {
+        remote_name = comm->name;
+    } else {
+        IOLOOP_NTOP(&message->src, buf);
+    }
     INFO("[QID %x] Received a new DNS message - src: " PRI_S_SRP ", message length: %u bytes.",
-         ntohs(message->wire.id), buf, message->length);
+         ntohs(message->wire.id), remote_name, message->length);
 #if THREAD_DEVICE
     if (0
 #  if STUB_ROUTER
-        || !srp_servers->stub_router_enabled
+        || !server_state->stub_router_enabled
 #  else
         || true
 #  endif
         )
     {
-        if (srp_servers->service_publisher == NULL ||
-            !service_publisher_is_address_mesh_local(srp_servers->service_publisher,
+        if (server_state->service_publisher == NULL ||
+            !service_publisher_is_address_mesh_local(server_state->service_publisher,
                                                      comm->tcp_stream ? &comm->address : &message->src))
         {
             dso_simple_response(comm, message, &message->wire, dns_rcode_refused);
@@ -3758,6 +3771,12 @@ dns_proxy_input(comm_t *comm, message_t *message, void *context)
 #endif // THREAD_DEVICE
 
     dnssd_proxy_dns_evaluate(comm, message, context);
+}
+
+void
+dns_proxy_input(comm_t *comm, message_t *message, void *context)
+{
+    dns_proxy_input_for_server(comm, srp_servers, message, context);
 }
 
 // usage is only called when we are building standalone dnssd-proxy, not the combined one.
@@ -4191,7 +4210,7 @@ config_file_verb_t dp_verbs[] = {
 
 static wakeup_t *tls_listener_wakeup;
 static int tls_listener_index;
-static void dnssd_tls_listener_restart(void *NULLABLE context);
+static void dnssd_tls_listener_restart(comm_t *NONNULL listener, void *NULLABLE context);
 
 static void dnssd_tls_listener_listen(void *UNUSED context)
 {
@@ -4224,7 +4243,7 @@ exit:
 }
 
 static void
-dnssd_tls_listener_restart(void *UNUSED context)
+dnssd_tls_listener_restart(comm_t *UNUSED in_listener, void *UNUSED context)
 {
     const bool doing_rotation = listener[tls_listener_index]->tls_rotation_ready;
     ioloop_listener_release(listener[tls_listener_index]);
@@ -4425,8 +4444,8 @@ add_new_served_domain_with_interface(const char *const NONNULL name,
         new_interface->ifindex = if_nametoindex(name);
     }
 
-    // Enable DNS push by default.
-    new_interface->no_push = false;
+    // Disable DNS push by default.
+    new_interface->no_push = true;
 
     if (address != NULL) {
         require_action_quiet(mask != NULL, exit, succeeded = false);
@@ -4619,7 +4638,6 @@ exit:
     return succeeded;
 }
 
-#if STUB_ROUTER
 static void
 towire_init(dns_wire_t * const NONNULL wire_ptr, dns_towire_state_t * const NONNULL towire_ptr)
 {
@@ -4630,6 +4648,7 @@ towire_init(dns_wire_t * const NONNULL wire_ptr, dns_towire_state_t * const NONN
     towire_ptr->p = wire_ptr->data;
 }
 
+#if STUB_ROUTER
 static bool
 string_ends_with(const char *const NONNULL str, const char *const NONNULL suffix)
 {
@@ -4651,7 +4670,7 @@ string_ends_with(const char *const NONNULL str, const char *const NONNULL suffix
 exit:
     return ret;
 }
-#endif // STUB_ROUTER
+#endif
 
 #if SRP_FEATURE_DYNAMIC_CONFIGURATION
 #if STUB_ROUTER
@@ -4722,7 +4741,7 @@ served_domain_change_domain_name(void)
 exit:
     return succeeded;
 }
-#endif
+#endif // STUB_ROUTER
 
 static bool
 served_domain_process_name_change(void)
@@ -4768,7 +4787,6 @@ initialize_uuid_name(srp_server_t *UNUSED server_state)
     return true;
 }
 
-#if STUB_ROUTER
 static bool
 update_my_name(CFStringRef local_host_name_cfstr)
 {
@@ -4945,7 +4963,6 @@ exit:
     }
     return succeeded;
 }
-#endif
 
 static bool
 configure_dnssd_proxy(void)
@@ -4965,8 +4982,8 @@ static bool
 start_dnssd_proxy_listener(void)
 {
     bool succeeded;
-    addr_t addr;
 
+#if STUB_ROUTER
 #ifndef NOT_HAVE_SA_LEN
 #  define SA_LEN_INIT addr.sa.sa_len = sizeof(addr.sin6)
 #else
@@ -4979,6 +4996,8 @@ start_dnssd_proxy_listener(void)
             addr.sin6.sin6_port = htons(PORT);  \
             SA_LEN_INIT;                        \
         } while (false)
+
+    addr_t addr;
 
     INIT_ADDR_T(udp_port);
     listener[num_listeners] = ioloop_listener_create(false, false, NULL, 0, &addr, NULL, "DNS UDP Listener",
@@ -4993,14 +5012,17 @@ start_dnssd_proxy_listener(void)
     require_action_quiet(listener[num_listeners] != NULL, exit, succeeded = false;
         ERROR("failed to start TCP listener - listener index: %d", num_listeners));
     num_listeners++;
+#endif // STUB_ROUTER
+
+    dnssd_push_setup();
 
     for (int i = 0; i < num_listeners; i++) {
         INFO("listener started - name: " PUB_S_SRP, listener[i]->name);
     }
 
-    dnssd_push_setup();
-
     succeeded = true;
+    goto exit;
+
 exit:
     return succeeded;
 }
@@ -5289,11 +5311,8 @@ init_dnssd_proxy(srp_server_t *server_state)
     require_action_quiet(succeeded, exit, ERROR("configure_dnssd_proxy failed"));
 
 
-#if STUB_ROUTER
-    if (server_state->stub_router_enabled) {
-        succeeded = initialize_my_name_and_monitoring(server_state);
-    }
-#endif
+    succeeded = initialize_my_name_and_monitoring(server_state);
+
     require_action_quiet(succeeded, exit, ERROR("initialize_my_name_and_monitoring failed"));
     succeeded = initialize_uuid_name(server_state);
     require_action_quiet(succeeded, exit, ERROR("initialize_uuid_name failed"));
@@ -5345,7 +5364,7 @@ init_dnssd_proxy(srp_server_t *server_state)
     require_action_quiet(succeeded, exit, ERROR("start_dnssd_proxy_listener failed"));
 
 #if STUB_ROUTER
-    if (srp_servers->stub_router_enabled) {
+    if (server_state->stub_router_enabled) {
         succeeded = advertise_dnssd_proxy(server_state, THREAD_BROWSING_DOMAIN);
         require_action_quiet(succeeded, exit, ERROR("advertise_dnssd_proxy failed"));
     }

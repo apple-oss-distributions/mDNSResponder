@@ -23,6 +23,7 @@
 
 typedef struct service_tracker_callback service_tracker_callback_t;
 typedef struct service_tracker service_tracker_t;
+typedef struct srp_server_state srp_server_t;
 
 RELEASE_RETAIN_DECLS(service_tracker);
 void service_tracker_stop(service_tracker_t *NONNULL tracker);

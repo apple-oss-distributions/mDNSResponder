@@ -103,6 +103,11 @@ enum srpl_state {
     srpl_state_session_message_wait,
     srpl_state_session_response_send,
     srpl_state_send_candidates_message_wait,
+
+#ifdef SRP_TEST_SERVER
+    // States for testing
+    srpl_state_test_event_intercept,
+#endif
 };
 
 enum srpl_event_type {
@@ -143,6 +148,9 @@ typedef struct srpl_srp_client_update_result srpl_srp_client_update_result_t;
 typedef struct srpl_host_update srpl_host_update_t;
 typedef struct srpl_advertise_finished_result srpl_advertise_finished_result_t;
 typedef struct srpl_session srpl_session_t;
+#ifdef SRP_TEST_SERVER
+typedef struct test_packet_state test_packet_state_t;
+#endif
 
 typedef void (*address_change_callback_t)(void *NULLABLE context, addr_t *NULLABLE address, bool added, int err);
 typedef void (*address_query_cancel_callback_t)(void *NULLABLE context);
@@ -266,12 +274,20 @@ struct srpl_connection {
     dso_state_t *NULLABLE dso;
     srpl_instance_t *NULLABLE instance;
     wakeup_t *NULLABLE reconnect_wakeup;
+    wakeup_t *NULLABLE state_timeout; // how long the srpl connecton could stay in a state before we assume it's gone.
     message_t *NULLABLE message;
     adv_host_t *NULLABLE *NULLABLE candidates;
     srpl_host_update_t stashed_host;
     srpl_srp_client_queue_entry_t *NULLABLE client_update_queue;
     wakeup_t *NULLABLE keepalive_send_wakeup;
     wakeup_t *NULLABLE keepalive_receive_wakeup;
+#ifdef SRP_TEST_SERVER
+    void (*NULLABLE advertise_finished_callback)(test_state_t *NONNULL state);
+    void (*NULLABLE test_finished_callback)(test_state_t *NONNULL state, srp_server_t *NONNULL server);
+    test_state_t *NULLABLE test_state;
+    srpl_state_t finished_state;
+    srpl_connection_t *NULLABLE next;
+#endif
     time_t last_message_sent;
     time_t last_message_received;
     int num_candidates;
@@ -415,6 +431,8 @@ struct srpl_domain {
     (((srpl_connection)->variation_mask & (variation)) != 0)
 
 // Exported functions...
+srpl_connection_t *NULLABLE srpl_connection_create(srpl_instance_t *NONNULL instance, bool outgoing);
+bool srpl_connection_connect(srpl_connection_t *NONNULL srpl_connection);
 void srpl_startup(srp_server_t *NONNULL srp_server);
 void srpl_shutdown(srp_server_t *NONNULL server_state);
 void srpl_disable(srp_server_t *NONNULL srp_server);
@@ -430,6 +448,7 @@ void srpl_srp_client_update_finished_event_send(adv_host_t *NONNULL host, int rc
 void srpl_connection_release_(srpl_connection_t *NONNULL srpl_connection, const char *NONNULL file, int line);
 #define srpl_connection_retain(connection) srpl_connection_retain_(connection, __FILE__, __LINE__)
 void srpl_connection_retain_(srpl_connection_t *NONNULL srpl_connection, const char *NONNULL file, int line);
+srpl_domain_t *NULLABLE srpl_domain_create_or_copy(srp_server_t *NONNULL server_state, const char *NONNULL domain_name);
 #endif // __SRP_REPLICATION_H__
 
 // Local Variables:

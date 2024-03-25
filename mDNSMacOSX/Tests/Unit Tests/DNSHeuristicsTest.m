@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2023 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,17 +24,17 @@
 
 @implementation DNSHeuristicsTest
 
-#if (TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST)
+#if (TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST && !TARGET_OS_XR)
 - (void)testEmptyStateFailure {
     id mockHeuristics = OCMClassMock([DNSHeuristics class]);
-    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(@{});
-    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg anyPointer] network:[OCMArg anyPointer] value:[OCMArg any]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg any]])).andReturn(@{});
+    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg any] value:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
 
     NSURL *url = [NSURL URLWithString:@"https://example.com"];
     XCTAssertTrue([DNSHeuristics reportResolutionFailure:url isTimeout:NO]);
-    OCMVerify(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]]));
+    OCMVerify(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]]));
 }
 
 - (void)testStateFailureUnderThreshold {
@@ -47,13 +47,13 @@
         DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(NO),
     };
-    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);
-    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg anyPointer] network:[OCMArg anyPointer] value:[OCMArg any]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg any]])).andReturn(existingState);
+    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg any] value:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
 
     XCTAssertTrue([DNSHeuristics reportResolutionFailure:url isTimeout:NO]);
-    OCMVerify(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]]));
+    OCMVerify(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]]));
 }
 
 - (void)testStateFailureOverThreshold {
@@ -66,13 +66,13 @@
         DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(NO),
     };
-    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);
-    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg anyPointer] network:[OCMArg anyPointer] value:[OCMArg any]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg any]])).andReturn(existingState);
+    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg any] value:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
 
     XCTAssertTrue([DNSHeuristics reportResolutionFailure:url isTimeout:NO]);
-    OCMVerify(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]]));
+    OCMVerify(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]]));
 }
 
 - (void)testStateFailureUnderThreshold_StickAfterFailure {
@@ -85,15 +85,15 @@
         DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(YES),
     };
-    OCMStub(ClassMethod([mockHeuristics getNetworkFilteredFlag:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);
-    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg anyPointer] network:[OCMArg anyPointer] value:[OCMArg any]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics getNetworkFilteredFlag:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg any]])).andReturn(existingState);
+    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg any] value:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
     OCMStub(ClassMethod([mockHeuristics currentTimeMs])).andReturn(now + DNSHeuristicDefaultLongCounterTimeWindow * 2); // two days pass, we should reset
 
     XCTAssertTrue([DNSHeuristics reportResolutionFailure:url isTimeout:NO]);
-    OCMReject(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]]));
+    OCMReject(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]]));
 }
 
 - (void)testStateFailureUnderThreshold_ResetAfterSuccess {
@@ -105,15 +105,15 @@
         DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(YES),
     };
-    OCMStub(ClassMethod([mockHeuristics getNetworkFilteredFlag:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);
-    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg anyPointer] network:[OCMArg anyPointer] value:[OCMArg any]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics getNetworkFilteredFlag:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg any]])).andReturn(existingState);
+    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg any] value:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
     OCMStub(ClassMethod([mockHeuristics currentTimeMs])).andReturn(now + DNSHeuristicDefaultLongCounterTimeWindow * 2); // two days pass, we should reset
 
     XCTAssertTrue([DNSHeuristics updateHeuristicState:YES isTimeout:NO]);
-    OCMVerify(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]]));
+    OCMVerify(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]]));
 }
 
 - (void)testStateFailureDrainTokenBucket_NoReset {
@@ -126,14 +126,14 @@
         DNSHeuristicsBurstCounterKey: [NSNumber numberWithInt:1],
         DNSHeuristicsFilterFlagKey: @(NO),
     };
-    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);
-    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg anyPointer] network:[OCMArg anyPointer] value:[OCMArg any]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg any]])).andReturn(existingState);
+    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg any] value:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
     OCMStub(ClassMethod([mockHeuristics currentTimeMs])).andReturn(now + 1); // within the same epoch -- overflow
 
     XCTAssertTrue([DNSHeuristics reportResolutionFailure:url isTimeout:NO]);
-    OCMReject(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]]));
+    OCMReject(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]]));
 }
 
 - (void)testStateFailureDrainTokenBucket_Reset {
@@ -146,14 +146,14 @@
         DNSHeuristicsBurstCounterKey: [NSNumber numberWithInt:1],
         DNSHeuristicsFilterFlagKey: @(NO),
     };
-    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);
-    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg anyPointer] network:[OCMArg anyPointer] value:[OCMArg any]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg any]])).andReturn(existingState);
+    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg any] value:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
     OCMStub(ClassMethod([mockHeuristics currentTimeMs])).andReturn(now + DNSHeuristicsDefaultBurstTokenBucketRefillTime + 1); // allow the bucket to replenish
 
     XCTAssertTrue([DNSHeuristics reportResolutionFailure:url isTimeout:NO]);
-    OCMReject(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]]));
+    OCMReject(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]]));
 }
 
 - (void)testStateFailureFilteredThenSuccessBeforeWindow {
@@ -165,15 +165,15 @@
 		DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(YES),
     };
-    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);
-    OCMStub(ClassMethod([mockHeuristics getNetworkFilteredFlag:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg anyPointer] network:[OCMArg anyPointer] value:[OCMArg any]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg any]])).andReturn(existingState);
+    OCMStub(ClassMethod([mockHeuristics getNetworkFilteredFlag:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg any] value:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
     OCMStub(ClassMethod([mockHeuristics currentTimeMs])).andReturn(now + DNSHeuristicsDefaultBurstTokenBucketRefillTime + 1); // allow the bucket to replenish
 
     XCTAssertTrue([DNSHeuristics updateHeuristicState:YES isTimeout:NO]);
-    OCMReject(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]]));
+    OCMReject(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]]));
 }
 
 - (void)testStateFailureFilteredThenSuccessAfterWindow {
@@ -185,17 +185,17 @@
         DNSHeuristicsBurstCounterKey: [NSNumber numberWithUnsignedInteger:DNSHeuristicsDefaultBurstTokenBucketCapacity],
         DNSHeuristicsFilterFlagKey: @(YES),
     };
-    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg anyPointer]])).andReturn(existingState);
-    OCMStub(ClassMethod([mockHeuristics getNetworkFilteredFlag:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg anyPointer] network:[OCMArg anyPointer] value:[OCMArg any]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
-    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics copyNetworkSettings:[OCMArg any]])).andReturn(existingState);
+    OCMStub(ClassMethod([mockHeuristics getNetworkFilteredFlag:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics setNetworkSettings:[OCMArg any] value:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
+    OCMStub(ClassMethod([mockHeuristics clearNetworkAsFiltered:[OCMArg any]])).andReturn(YES);
     OCMStub(ClassMethod([mockHeuristics currentTimeMs])).andReturn(now + DNSHeuristicsDefaultBurstTokenBucketRefillTime + 1); // allow the bucket to replenish
 
     XCTAssertTrue([DNSHeuristics updateHeuristicState:YES isTimeout:NO]);
-    OCMReject(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg anyPointer] network:[OCMArg anyPointer]]));
+    OCMReject(ClassMethod([mockHeuristics setNetworkAsFiltered:[OCMArg any]]));
 }
 
-#endif // TARGET_OS_IPHONE
+#endif // (TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST && !TARGET_OS_XR)
 
 @end

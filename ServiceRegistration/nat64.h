@@ -128,6 +128,7 @@ typedef struct {
     DNSServiceRef NULLABLE sdRef;    // LLQ sdRef
     nat64_prefix_t *NULLABLE infra_nat64_prefixes;
     nat64_t *NONNULL nat64;
+    bool canceled;
 } nat64_infra_prefix_monitor_t;
 
 
@@ -264,3 +265,12 @@ void nat64_stop(route_state_t *NONNULL route_state);
 void nat64_start(route_state_t *NONNULL route_state);
 void nat64_thread_shutdown(route_state_t *NONNULL route_state);
 #endif /* NAT64_H */
+
+// Local Variables:
+// mode: C
+// tab-width: 4
+// c-file-style: "bsd"
+// c-basic-offset: 4
+// fill-column: 120
+// indent-tabs-mode: nil
+// End:

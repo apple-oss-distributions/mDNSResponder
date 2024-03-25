@@ -64,7 +64,7 @@ struct node_type_tracker {
     srp_server_t *server_state;
     cti_connection_t NULLABLE thread_context;
 	node_type_tracker_callback_t *callbacks;
-	time_t last_thread_network_node_type_change;
+	uint64_t last_thread_network_node_type_change;
 	thread_node_type_t current_node_type, previous_node_type;
 };
 

@@ -118,6 +118,7 @@ nat64_infra_prefix_monitor_cancel(nat64_infra_prefix_monitor_t *monitor)
             RELEASE_HERE(monitor->nat64, nat64);
             monitor->nat64 = NULL;
         }
+        monitor->canceled = true;
     }
 }
 
@@ -577,12 +578,15 @@ typedef struct {
 } nat64_infra_prefix_monitor_state_t;
 
 static void
-nat64_query_infra_callback(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex, DNSServiceErrorType errorCode, const char *fullname, uint16_t rrtype, uint16_t rrclass, uint16_t rdlen, const void *rdata, uint32_t ttl, void *context)
+nat64_query_infra_callback(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfaceIndex,
+                           DNSServiceErrorType errorCode, const char *fullname, uint16_t rrtype, uint16_t rrclass,
+                           uint16_t rdlen, const void *rdata, uint32_t ttl, void *context)
 {
     (void)(sdRef);
     (void)(interfaceIndex);
 
     nat64_infra_prefix_monitor_t *state_machine = context;
+
     if (errorCode == kDNSServiceErr_NoError) {
         SEGMENTED_IPv6_ADDR_GEN_SRP(rdata, ipv6_rdata_buf);
         INFO("LLQ " PRI_S_SRP PRI_SEGMENTED_IPv6_ADDR_SRP
@@ -606,10 +610,18 @@ nat64_query_infra_callback(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t 
         }
         DNSServiceRefDeallocate(state_machine->sdRef);
         state_machine->sdRef = NULL;
-        RELEASE_HERE(state_machine, nat64_infra_prefix_monitor);
+
+        // We enter with a reference held on the state machine object. If there is no error, that means we got some kind
+        // of result, and so we don't release the reference because we can still get more results.  If, on the other hand,
+        // we get an error, we will restart the query after a delay. This means that the reference we were passed is
+        // still needed for the duration of the dispatch_after call. When that timer expires, if the state machine hasn't
+        // been canceled in the meantime, we restart the query.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
                        dispatch_get_main_queue(), ^(void) {
-                           nat64_query_prefix_on_infra(state_machine);
+                           if (!state_machine->canceled) {
+                               nat64_query_prefix_on_infra(state_machine);
+                           }
+                           RELEASE_HERE(state_machine, nat64_infra_prefix_monitor);
                        });
     }
 }
@@ -621,13 +633,13 @@ nat64_query_prefix_on_infra(nat64_infra_prefix_monitor_t *state_machine)
 
     err = DNSServiceQueryRecord(&state_machine->sdRef, kDNSServiceFlagsLongLivedQuery, kDNSServiceInterfaceIndexAny, NAT64_PREFIX_LLQ_QUERY_DOMAIN, kDNSServiceType_AAAA, kDNSServiceClass_IN, nat64_query_infra_callback, state_machine);
     if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceQueryRecord failed for " PRI_S_SRP ": %d", NAT64_PREFIX_LLQ_QUERY_DOMAIN, err);
+        ERROR("DNSServiceQueryRecord failed for " PRI_S_SRP ": %d", NAT64_PREFIX_LLQ_QUERY_DOMAIN, (int)err);
         return false;
     }
-    RETAIN_HERE(state_machine, nat64_infra_prefix_monitor);
+    RETAIN_HERE(state_machine, nat64_infra_prefix_monitor); // For the callback.
     err = DNSServiceSetDispatchQueue(state_machine->sdRef, dispatch_get_main_queue());
     if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceSetDispatchQueue failed for " PRI_S_SRP ": %d", NAT64_PREFIX_LLQ_QUERY_DOMAIN, err);
+        ERROR("DNSServiceSetDispatchQueue failed for " PRI_S_SRP ": %d", NAT64_PREFIX_LLQ_QUERY_DOMAIN, (int)err);
         return false;
     }
     return true;

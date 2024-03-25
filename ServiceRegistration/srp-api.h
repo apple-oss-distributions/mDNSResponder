@@ -29,8 +29,19 @@ extern "C" {
 typedef void (*srp_hostname_conflict_callback_t)(const char *NONNULL hostname);
 typedef void (*srp_wakeup_callback_t)(void *NONNULL state);
 typedef void (*srp_datagram_callback_t)(void *NONNULL state, void *NONNULL message, size_t message_length);
+typedef struct client_state client_state_t;
+typedef struct dns_wire dns_wire_t;
 
 // The below functions provide a way for the host to inform the SRP service of the state of the network.
+
+// For testing
+client_state_t *NULLABLE srp_client_get_current(void);
+void srp_client_set_current(client_state_t *NONNULL new_client);
+dns_wire_t *NULLABLE srp_client_generate_update(client_state_t *NONNULL client,
+                                                uint32_t update_lease_time, uint32_t update_key_lease_time,
+                                                size_t *NONNULL p_length, dns_wire_t *NULLABLE in_wire,
+                                                uint32_t serial, bool removing);
+int srp_host_key_reset_for_client(client_state_t *NONNULL client);
 
 // Call this before calling anything else.   Context will be passed back whenever the srp code
 // calls any of the host functions.
