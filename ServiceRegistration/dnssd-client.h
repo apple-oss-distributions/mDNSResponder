@@ -20,6 +20,8 @@
 #ifndef __DNSSD_CLIENT_H__
 typedef struct dnssd_client dnssd_client_t;
 RELEASE_RETAIN_DECLS(dnssd_client);
+#define dnssd_client_retain(watcher) dnssd_client_retain_(watcher, __FILE__, __LINE__)
+#define dnssd_client_release(watcher) dnssd_client_release_(watcher, __FILE__, __LINE__)
 void dnssd_client_cancel(dnssd_client_t *NONNULL client);
 dnssd_client_t *NULLABLE dnssd_client_create(srp_server_t *NONNULL server_state);
 void dnssd_client_start(dnssd_client_t *NONNULL client);

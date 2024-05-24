@@ -305,7 +305,7 @@ probe_srp_connected(comm_t *connection, void *context)
 }
 
 static probe_state_t *
-probe_state_create(addr_t *address, thread_service_t *service, void *context,
+probe_srp_create(addr_t *address, thread_service_t *service, void *context,
                    void (*callback)(thread_service_t *service, void *context, bool succeeded),
                    void (*context_release)(void *context))
 {
@@ -366,7 +366,7 @@ probe_srp_anycast_service(thread_service_t *service, void *context,
     memcpy(&address.sin6.sin6_addr, &service->u.anycast.address, sizeof(service->u.anycast.address));
     address.sin6.sin6_port = htons(53);
     address.sa.sa_family = AF_INET6;
-    return probe_state_create(&address, service, context, callback, context_release);
+    return probe_srp_create(&address, service, context, callback, context_release);
 }
 
 static probe_state_t *
@@ -381,7 +381,7 @@ probe_srp_unicast_service(thread_service_t *service, void *context,
     address.sa.sa_family = AF_INET6;
     memcpy(&address.sin6.sin6_addr, &service->u.unicast.address, sizeof(address.sin6.sin6_addr));
     memcpy(&address.sin6.sin6_port, service->u.unicast.port, sizeof(address.sin6.sin6_port));
-    return probe_state_create(&address, service, context, callback, context_release);
+    return probe_srp_create(&address, service, context, callback, context_release);
 }
 
 void
@@ -407,7 +407,7 @@ probe_srp_service(thread_service_t *service, void *context,
         return;
     }
 
-    // probe_state_create returns this retained, but we don't store the pointer.
+    // probe_srp_create returns this retained, but we don't store the pointer.
     RELEASE_HERE(probe_state, probe_state);
 }
 

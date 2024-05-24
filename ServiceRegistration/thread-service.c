@@ -144,6 +144,9 @@ void
 thread_service_note(const char *owner_id, thread_service_t *tservice, const char *event_description)
 {
     switch(tservice->service_type) {
+    default:
+        INFO("invalid service type %d on service %p", tservice->service_type, tservice);
+        break;
     case unicast_service:
         {
             struct thread_unicast_service *service = &tservice->u.unicast;
@@ -191,6 +194,8 @@ thread_service_equal(thread_service_t *a, thread_service_t *b)
         return false;
     }
     switch(a->service_type) {
+    default:
+        return false;
     case unicast_service:
         {
             return (!in6addr_compare(&a->u.unicast.address, &b->u.unicast.address) &&

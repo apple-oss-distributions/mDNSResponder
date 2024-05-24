@@ -30,6 +30,8 @@ typedef struct omr_publisher omr_publisher_t;
 #define OMR_PUBLISHER_MIN_START              3000 // three seconds (minimum, for new router coming to existing network)
 
 RELEASE_RETAIN_DECLS(omr_publisher);
+#define omr_publisher_retain(publisher) omr_publisher_retain_(publisher, __FILE__, __LINE__)
+#define omr_publisher_release(publisher) omr_publisher_release_(publisher, __FILE__, __LINE__)
 void omr_publisher_cancel(omr_publisher_t *NONNULL publisher);
 omr_publisher_t *NULLABLE omr_publisher_create(route_state_t *NONNULL route_state, const char *NONNULL name);
 void omr_publisher_set_omr_watcher(omr_publisher_t *NONNULL omr_publisher, omr_watcher_t *NONNULL omr_watcher);

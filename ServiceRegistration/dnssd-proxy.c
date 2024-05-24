@@ -78,7 +78,8 @@
 #include "nat64-macos.h"
 #endif
 
-#define RESPONSE_WINDOW 6 // in seconds.
+#define RESPONSE_WINDOW_MSECS 800
+#define RESPONSE_WINDOW_USECS (RESPONSE_WINDOW_MSECS * 1000) // 800ms in microseconds.
 
 extern srp_server_t *srp_servers;
 
@@ -319,6 +320,10 @@ bool tls_fail = false; // Command line argument, for testing.
     } while (false)
 
 // Forward references
+
+#if SRP_FEATURE_DYNAMIC_CONFIGURATION
+static void served_domain_free(served_domain_t *const served_domain);
+#endif
 
 static served_domain_t *NULLABLE
 new_served_domain(dp_interface_t *const NULLABLE interface, const char * NONNULL domain);
@@ -657,6 +662,19 @@ dp_question_cancel(question_t *question)
             questions = &q_cur->next;
         }
     }
+    // If this was the last question, see if the served domain is still on the served domain list; if not,
+    // this is the last reference, so free it.
+    if (question->served_domain != NULL && question->served_domain->questions == NULL) {
+        served_domain_t *served_domain;
+        for (served_domain = served_domains; served_domain; served_domain = served_domain->next) {
+            if (served_domain == question->served_domain) {
+                break;
+            }
+        }
+        if (served_domain == NULL) {
+            served_domain_free(question->served_domain);
+        }
+    }
     RELEASE_HERE(question, question); // Release from the list.
 }
 
@@ -777,7 +795,8 @@ dp_tracker_idle_after(dp_tracker_t *tracker, int seconds, dnssd_query_t *query)
         if (tracker->idle_timeout == NULL) {
             ERROR("no memory for idle timeout");
         } else {
-            ioloop_add_wake_event(tracker->idle_timeout, tracker, dp_tracker_idle, NULL, seconds * MSEC_PER_SEC);
+            ioloop_add_wake_event(tracker->idle_timeout, tracker, dp_tracker_idle, dp_tracker_context_release, seconds * MSEC_PER_SEC);
+            RETAIN_HERE(tracker, dp_tracker);
         }
     }
 }
@@ -935,6 +954,7 @@ dp_tracker_disconnected(comm_t *UNUSED connection, void *context, int UNUSED err
     // in turn finalize the tracker.
     if (tracker_connection != NULL) {
         ioloop_comm_release(tracker_connection);
+        tracker->connection = NULL;
     }
 
     // If dns_queries is non-null, tracker still exists, but it might go away when we cancel the last
@@ -2914,7 +2934,7 @@ dp_query_question_cache_copy(dns_rr_t *search_term, bool *new)
                              ERROR("unable to allocate memory for question name on " PRI_S_SRP, name));
         new_question->type = search_term->type;
         new_question->qclass = search_term->qclass;
-        new_question->start_time = (int64_t)time(NULL);
+        new_question->start_time = srp_utime();
         new_question->answers = NULL;
         new_question->served_domain = sdt;
         new_question->queries = NULL;
@@ -2955,10 +2975,11 @@ dp_query_reply_from_cache(question_t *question, dnssd_query_t *query)
     // For dns query, if no_data is flagged or it's been six seconds since the question
     // was started and there is still no answer yet, we should also respond immediately.
     // [DNS Discovery Proxy RFC, RFC 8766, Section 5.6]
+    // Note that six seconds as stated in RFC8766 is probably too long, currently we're using 800ms.
     if (query->dso == NULL &&
         (question->no_data == true ||
          (question->answers == NULL &&
-          time(NULL) - question->start_time > RESPONSE_WINDOW)))
+          srp_utime() - question->start_time > RESPONSE_WINDOW_USECS)))
     {
         INFO("no data for question - type %d class %d " PRI_S_SRP,
              question->type, question->qclass, question->name);
@@ -2993,6 +3014,13 @@ dp_query_reply_from_cache(question_t *question, dnssd_query_t *query)
         }
         dp_question_cache_remove_queries(question);
     }
+}
+
+static void
+dp_query_context_release(void *context)
+{
+    dnssd_query_t *query = context;
+    RELEASE_HERE(query, dnssd_query);
 }
 
 static bool
@@ -3048,6 +3076,11 @@ dp_query_start(dnssd_query_t *query, int *rcode, bool dns64)
     // millisecond, so we'll wait 100ms.
     if (query->dso == NULL && local) {
         // [DNS Discovery Proxy RFC, RFC 8766, Section 5.6, Answer Aggregation]
+
+        // RFC8766 asks us to wait six seconds, but this is probably too long. Most likely we will have all
+        // our answers much sooner than that, and waiting this long means that we have to keep state for
+        // this long; when there are a lot of queries coming in, that can amount to too much state, causing
+        // us to drop requests we could easily have answered.
         if (query->wakeup == NULL) {
             query->wakeup = ioloop_wakeup_create();
             if (query->wakeup == NULL) {
@@ -3055,7 +3088,8 @@ dp_query_start(dnssd_query_t *query, int *rcode, bool dns64)
                 return false;
             }
         }
-        ioloop_add_wake_event(query->wakeup, query, dp_query_wakeup, NULL, 6 * IOLOOP_SECOND);
+        ioloop_add_wake_event(query->wakeup, query, dp_query_wakeup, dp_query_context_release, RESPONSE_WINDOW_MSECS /* ms */);
+        RETAIN_HERE(query, dnssd_query);
     }
 
     INFO("waiting for wakeup or response");
@@ -3247,8 +3281,18 @@ dns_push_subscribe(dp_tracker_t *tracker, const dns_wire_t *header, dso_state_t 
         dnssd_query_cancel(query);
     } else {
         dso_simple_response(tracker->connection, NULL, header, dns_rcode_noerror);
-        dp_query_reply_from_cache(query->question, query);
+        char nbuf[DNS_MAX_NAME_SIZE + 1];
+        dns_name_print(question->name, nbuf, sizeof(nbuf));
+        if (query->question != NULL) {
+            INFO("[DSO%d] replying from cache for " PRI_S_SRP " %d %d",
+                 dso->serial, nbuf, question->type, question->qclass);
+            dp_query_reply_from_cache(query->question, query);
+        } else {
+            INFO("[DSO%d] not replying from cache for " PRI_S_SRP " %d %d",
+                 dso->serial, nbuf, question->type, question->qclass);
+        }
     }
+
     // dp_query_create() returned the query retained; when we added the query to the activity, we retained it again;
     // if something went wrong, the second retain was released, but whether or not something went wrong, we can now
     // safely release the initial retain.
@@ -3351,11 +3395,12 @@ dns_push_subscription_change(const char *opcode_name, dp_tracker_t *tracker, con
     if (activity == NULL) {
         // Unsubscribe with no activity means no work to do; just return noerror.
         if (dso->primary.opcode != kDSOType_DNSPushSubscribe) {
-            ERROR("dso_message: %s for %s when no subscription exists.", opcode_name, activity_name);
+            ERROR("%s for %s when no subscription exists.", opcode_name, activity_name);
             if (dso->primary.opcode == kDSOType_DNSPushReconfirm) {
                 dso_simple_response(tracker->connection, NULL, header, dns_rcode_noerror);
             }
         } else {
+            INFO(PUB_S_SRP " for " PUB_S_SRP ".", opcode_name, activity_name);
             // In this case we have a push subscribe for which no subscription exists, which means we can do it.
             dns_push_subscribe(tracker, header, dso, &question, activity_name, opcode_name);
         }
@@ -3363,9 +3408,11 @@ dns_push_subscription_change(const char *opcode_name, dp_tracker_t *tracker, con
         // Subscribe with a matching activity means no work to do; just return noerror.
         if (dso->primary.opcode == kDSOType_DNSPushSubscribe) {
             dso_simple_response(tracker->connection, NULL, header, dns_rcode_noerror);
+            INFO("%s for %s when subscription already exists.", opcode_name, activity_name);
         }
         // Otherwise cancel the subscription.
         else {
+            INFO(PUB_S_SRP " for " PUB_S_SRP ".", opcode_name, activity_name);
             dns_push_unsubscribe(activity);
         }
     }
@@ -3852,7 +3899,7 @@ find_served_domain(const char *const NONNULL domain)
 // served domain can only go away when combined with srp-mdns-proxy and interface going up and down.
 #if SRP_FEATURE_DYNAMIC_CONFIGURATION
 static void
-delete_served_domain(served_domain_t *const served_domain)
+served_domain_free(served_domain_t *const served_domain)
 {
     INFO("served domain removed - domain name: " PRI_S_SRP, served_domain->domain);
 
@@ -3890,6 +3937,14 @@ delete_served_domain(served_domain_t *const served_domain)
 
     // free served_domain_t *
     free(served_domain);
+}
+
+static void
+delete_served_domain(served_domain_t *const served_domain)
+{
+    if (served_domain->questions == NULL) {
+        served_domain_free(served_domain);
+    }
 }
 
 #if STUB_ROUTER
@@ -4503,8 +4558,6 @@ exit:
             if (new_interface->name != NULL) {
                 free(new_interface->name);
             }
-        }
-        if (new_interface != NULL) {
             free(new_interface);
         }
     }

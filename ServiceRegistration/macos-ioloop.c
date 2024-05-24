@@ -578,18 +578,18 @@ datagram_read(comm_t *connection, size_t length, dispatch_data_t content, nw_err
     bool ret = true, *retp = &ret;
 
     if (error != NULL) {
-        ERROR("datagram_read: " PUB_S_SRP, strerror(nw_error_get_error_code(error)));
+        ERROR(PUB_S_SRP, strerror(nw_error_get_error_code(error)));
         ret = false;
         goto out;
     }
     if (length > UINT16_MAX) {
-        ERROR("datagram_read: oversized datagram length %zd", length);
+        ERROR("oversized datagram length %zd", length);
         ret = false;
         goto out;
     }
     message = ioloop_message_create(length);
     if (message == NULL) {
-        ERROR("datagram_read: unable to allocate message.");
+        ERROR("unable to allocate message.");
         ret = false;
         goto out;
     }
@@ -597,7 +597,7 @@ datagram_read(comm_t *connection, size_t length, dispatch_data_t content, nw_err
     dispatch_data_apply(content,
                         ^bool (dispatch_data_t __unused region, size_t offset, const void *buffer, size_t size) {
             if (message->length < offset + size) {
-                ERROR("datagram_read: data region %zd:%zd is out of range for message length %d",
+                ERROR("data region %zd:%zd is out of range for message length %d",
                       offset, size, message->length);
                 *retp = false;
                 return false;
@@ -609,6 +609,34 @@ datagram_read(comm_t *connection, size_t length, dispatch_data_t content, nw_err
         // Set the local address
         message->local = connection->local;
 
+#ifdef HEXDUMP_INCOMING_DATAGRAMS
+        uint16_t length = message->length > 8192 ? 8192 : message->length; // Don't dump really big messages
+        for (uint16_t i = 0; i < length; i += 32) {
+            char obuf[256];
+            char *obp = obuf;
+            int left = sizeof(obp) - 1;
+            uint16_t max = message->length - i;
+            if (max > 32) {
+                max = 32;
+            }
+            for (uint16_t j = 0; j < max && left > 0; j += 8) {
+                uint16_t submax = max - j;
+                if (submax > 8) {
+                    submax = 8;
+                }
+                for (uint16_t k = 0; k < submax; k++) {
+                    snprintf(obp, left, "%02x", ((uint8_t *)&message->wire)[i + j + k]);
+                    obp += 2;
+                    *obp++ = ' ';
+                    left -= 3;
+                }
+                *obp++ = ' ';
+                left--;
+            }
+            *obp = 0;
+            INFO("%03d " PUB_S_SRP, i, obuf);
+        }
+#endif
         // Process the message.
         if (connection->listener_state != NULL) {
             connection->listener_state->datagram_callback(connection, message, connection->listener_state->context);
@@ -1184,6 +1212,7 @@ ioloop_listener_state_changed_handler(comm_t *listener, nw_listener_state_t stat
             if (listener->cancel != NULL) {
                 listener->cancel(listener, listener->context);
             }
+            RELEASE_HERE(listener, listener); // Release the nw_listener handler function's reference to the ioloop listener object.
         } else {
             INFO("something else");
         }
@@ -1415,6 +1444,7 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
     listener->ready = ready;
     listener->context = context;
     listener->tcp_stream = stream;
+    listener->is_listener = true;
 
 #if !UDP_LISTENER_USES_CONNECTION_GROUPS
     if (stream == FALSE) {
@@ -1514,10 +1544,10 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
                                                ^(nw_connection_t connection) { connection_callback(listener, connection); }
                                                );
 
-        RETAIN_HERE(listener, listener); // for the nw_listener_t
         nw_listener_set_state_changed_handler(listener->listener, ^(nw_listener_state_t state, nw_error_t error) {
             ioloop_listener_state_changed_handler(listener, state, error);
         });
+        RETAIN_HERE(listener, listener); // for the nw_listener_t state change handler callback
         nw_listener_set_queue(listener->listener, ioloop_main_queue);
         nw_listener_start(listener->listener);
 #if UDP_LISTENER_USES_CONNECTION_GROUPS

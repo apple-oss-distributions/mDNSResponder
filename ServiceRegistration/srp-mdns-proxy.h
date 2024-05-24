@@ -161,6 +161,7 @@ struct adv_host {
     int retry_interval;                    // Interval to wait before attempting to re-register after the daemon has
                                            // died.
     time_t update_time;                    // Time when the update completed.
+    time_t remove_received_time;           // Time when the remove is received
     uint64_t update_server_id;             // Server ID from server that sent the update
     uint64_t server_stable_id;             // Stable ID of server that got update from client (we're using server ULA).
     uint16_t key_rdlen;                    // Length of key

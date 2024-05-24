@@ -26,6 +26,8 @@ typedef struct service_tracker service_tracker_t;
 typedef struct srp_server_state srp_server_t;
 
 RELEASE_RETAIN_DECLS(service_tracker);
+#define service_tracker_retain(watcher) service_tracker_retain_(watcher, __FILE__, __LINE__)
+#define service_tracker_release(watcher) service_tracker_release_(watcher, __FILE__, __LINE__)
 void service_tracker_stop(service_tracker_t *NONNULL tracker);
 void service_tracker_cancel(service_tracker_t *NONNULL tracker);
 bool service_tracker_local_service_seen(service_tracker_t *NONNULL tracker);
@@ -43,7 +45,8 @@ void service_tracker_thread_service_note(service_tracker_t *NONNULL tracker,
 bool service_tracker_verified_service_still_exists(service_tracker_t *NULLABLE tracker,
                                                    thread_service_t *NULLABLE old_service);
 thread_service_t *NULLABLE service_tracker_verified_service_get(service_tracker_t *NULLABLE tracker);
-thread_service_t *NULLABLE service_tracker_unverified_service_get(service_tracker_t *NULLABLE tracker);
+thread_service_t *NULLABLE service_tracker_unverified_service_get(service_tracker_t *NULLABLE tracker,
+                                                                  thread_service_type_t service_type);
 void service_tracker_verify_next_service(service_tracker_t *NULLABLE tracker);
 #endif // __SERVICE_TRACKER_H__
 

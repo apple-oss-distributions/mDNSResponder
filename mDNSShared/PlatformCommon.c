@@ -32,7 +32,7 @@
 #include <time.h>
 #include <sys/time.h>           // Needed for #include <sys/time.h>().
 #include <assert.h>
-
+#include <limits.h>
 
 #include "mDNSEmbeddedAPI.h"    // Defines the interface provided to the client layer above
 #include "DNSCommon.h"

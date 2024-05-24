@@ -424,8 +424,13 @@ dnssd_client_action_not_client(state_machine_header_t *state_header, state_machi
         }
 
         // Check to see if we can start a new probe
-        service = service_tracker_unverified_service_get(client->server_state->service_tracker);
+        service = service_tracker_unverified_service_get(client->server_state->service_tracker, unicast_service);
         if (service != NULL) {
+            if (service->checking) {
+                service_tracker_thread_service_note(client->server_state->service_tracker, service,
+                                                    " is still being probed");
+                return dnssd_client_state_invalid;
+            }
             if (service->service_type == anycast_service) {
                 memcpy(&service->u.anycast.address, &client->mesh_local_prefix, 8);
                 memcpy(&service->u.anycast.address.s6_addr[8], thread_rloc_preamble, 6);

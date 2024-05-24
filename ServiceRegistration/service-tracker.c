@@ -534,22 +534,33 @@ service_tracker_verified_service_get(service_tracker_t *NULLABLE tracker)
     return false;
 }
 
-// If true, there is a service on the list that we can still try to verify
+// Check for an unverified service on the list. If we are currently checking a service, return that service.
 thread_service_t *
-service_tracker_unverified_service_get(service_tracker_t *NULLABLE tracker)
+service_tracker_unverified_service_get(service_tracker_t *NULLABLE tracker, thread_service_type_t service_type)
 {
-    if (tracker == NULL) {
-        return NULL;
-    }
-    for (thread_service_t *service = tracker->thread_services; service != NULL; service = service->next) {
-        if (service->ignore) {
-            continue;
+    thread_service_t *ret = NULL;
+    if (tracker != NULL) {
+        for (thread_service_t *service = tracker->thread_services; service != NULL; service = service->next) {
+            if (service_type != any_service && service_type != service->service_type) {
+                continue;
+            }
+            if (service->ignore) {
+                continue;
+            }
+            if (service->checking) {
+                return service;
+            }
+            if (ret == NULL && !service->checked && !service->probe_state && !service->user) {
+                ret = service;
+            }
         }
-        if (!service->checked && !service->probe_state && !service->user) {
-            return service;
-        }
     }
-    return NULL;
+    if (tracker != NULL && ret != NULL) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "service_tracker_unverified_service_get returning %p", ret);
+        service_tracker_thread_service_note(tracker, ret, buf);
+    }
+    return ret;
 }
 
 static void

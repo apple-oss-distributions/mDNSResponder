@@ -283,9 +283,8 @@ struct srpl_connection {
     wakeup_t *NULLABLE keepalive_receive_wakeup;
 #ifdef SRP_TEST_SERVER
     void (*NULLABLE advertise_finished_callback)(test_state_t *NONNULL state);
-    void (*NULLABLE test_finished_callback)(test_state_t *NONNULL state, srp_server_t *NONNULL server);
+    void (*NULLABLE srpl_advertise_finished_callback)(test_state_t *NONNULL state, srp_server_t *NONNULL server);
     test_state_t *NULLABLE test_state;
-    srpl_state_t finished_state;
     srpl_connection_t *NULLABLE next;
 #endif
     time_t last_message_sent;

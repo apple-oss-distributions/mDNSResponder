@@ -382,6 +382,7 @@ bool srp_store_file_data(void *NULLABLE host_context, const char *NONNULL filena
                          uint16_t length);
 time_t srp_time(void);
 double srp_fractional_time(void);
+int64_t srp_utime(void);
 void srp_format_time_offset(char *NONNULL buf, size_t buf_len, time_t offset);
 
 const struct sockaddr *NULLABLE connection_get_local_address(message_t *NULLABLE message);

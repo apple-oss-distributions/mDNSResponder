@@ -40,6 +40,7 @@ void test_single_srpl_update(test_state_t *NULLABLE next_test);
 void test_srpl_host_2i(test_state_t *NULLABLE next_test, int variant);
 void test_srpl_host_2ir(test_state_t *NULLABLE next_test);
 void test_srpl_host_0i2s(test_state_t *NULLABLE next_test);
+void test_srpl_lease_time(test_state_t *NULLABLE next_state);
 
 // Local Variables:
 // mode: C

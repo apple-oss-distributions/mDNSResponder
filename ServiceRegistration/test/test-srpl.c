@@ -47,25 +47,6 @@ struct test_packet_state {
 
 static bool tls_init = false;
 
-void test_srpl_finished_evaluate(srpl_connection_t *srpl_connection)
-{
-    if (srpl_connection->finished_state == srpl_connection->state &&
-        srpl_connection->test_finished_callback != NULL)
-    {
-        srpl_connection->test_finished_callback(srpl_connection->test_state,
-                                                srpl_connection->instance->domain->server_state);
-    }
-}
-
-void
-test_srpl_set_finished_checkpoint(srpl_connection_t *srpl_connection,
-                                  srpl_state_t srpl_state,
-                                  void (*test_finished_callback)(test_state_t *state, srp_server_t *server))
-{
-    srpl_connection->finished_state = srpl_state;
-    srpl_connection->test_finished_callback = test_finished_callback;
-}
-
 static void
 test_srpl_input(comm_t *comm, message_t *message, void *context)
 {
@@ -138,7 +119,7 @@ test_srpl_instance_connection_create(test_state_t *state, srp_server_t *server)
     srpl_instance_t *instance = test_srpl_instance_create(state, server);
     TEST_FAIL_CHECK(state, instance != NULL, "no memory for instance");
 
-    srpl_connection_t *srpl_connection = srpl_connection_create(instance, false);
+    srpl_connection_t *srpl_connection = srpl_connection_create(instance, true);
     TEST_FAIL_CHECK(state, srpl_connection != NULL, "srpl_connection_create failed");
     srpl_connection->state = srpl_state_connecting;
     instance->connection = srpl_connection;

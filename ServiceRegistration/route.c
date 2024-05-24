@@ -1,6 +1,6 @@
 /* route.c
  *
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2053,6 +2053,7 @@ route_refresh_interface_list(route_state_t *route_state)
     } else if (!have_active && route_state->have_non_thread_interface) {
         INFO("we no longer have an active interface");
         route_state->have_non_thread_interface = false;
+        route_state->partition_can_advertise_service = false;
         // Stop advertising the service, if we are doing so.
         partition_discontinue_all_srp_service(route_state);
     }
@@ -2196,7 +2197,7 @@ re_evaluate_interfaces(route_state_t *route_state)
 }
 
 static void
-cti_get_xpanid_callback(void *context, uint64_t new_xpanid, cti_status_t status)
+route_get_xpanid_callback(void *context, uint64_t new_xpanid, cti_status_t status)
 {
     route_state_t *route_state = context;
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
@@ -2221,7 +2222,7 @@ cti_get_xpanid_callback(void *context, uint64_t new_xpanid, cti_status_t status)
     route_state->partition_has_xpanid = true;
     in6addr_zero(&route_state->xpanid_prefix);
     route_state->xpanid_prefix.s6_addr[0] = 0xfd;
-    for (int i = 1; i < 9; i++) {
+    for (int i = 1; i < 8; i++) {
         route_state->xpanid_prefix.s6_addr[i] = ((route_state->srp_server->xpanid >> ((8 - i) * 8)) & 0xFFU);
     }
     route_state->have_xpanid_prefix = true;
@@ -2365,7 +2366,7 @@ thread_network_startup(route_state_t *route_state)
     }
     if (status == kCTIStatus_NoError) {
         status = cti_get_extended_pan_id(route_state->srp_server, &route_state->thread_xpanid_context, route_state,
-                                         cti_get_xpanid_callback, NULL);
+                                         route_get_xpanid_callback, NULL);
     }
     if (status == kCTIStatus_NoError) {
         status = cti_get_rloc16(route_state->srp_server, &route_state->thread_rloc16_context, route_state,
@@ -2681,7 +2682,6 @@ partition_discontinue_srp_service(route_state_t *route_state)
     // Won't match
     in6addr_zero(&route_state->srp_listener_ip_address);
     route_state->srp_service_listen_port = 0;
-    route_state->partition_can_advertise_service = false;
 
     // Stop advertising the service, if we are doing so.
     partition_stop_advertising_service(route_state);
@@ -2739,7 +2739,7 @@ partition_utun0_address_changed(route_state_t *route_state, const struct in6_add
     if (change != interface_address_deleted) {
         // If this address isn't an address we're already listening on, check if it's an anycast address; if so,
         // skip it as a candidate to listen on.
-        if (is_thread_mesh_anycast_address(addr)) {
+        if (is_thread_mesh_synthetic_address(addr)) {
             INFO(PRI_SEGMENTED_IPv6_ADDR_SRP ": thread anycast address.",
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(addr, addr_buf));
         }
@@ -3102,7 +3102,8 @@ partition_maybe_advertise_service(route_state_t *route_state)
 
         int cmp = in6addr_compare(&service->u.unicast.address, &route_state->srp_listener_ip_address);
         SEGMENTED_IPv6_ADDR_GEN_SRP(&service->u.unicast.address, addr_buf);
-        INFO(PRI_SEGMENTED_IPv6_ADDR_SRP ": is " PUB_S_SRP " listener address.",
+        INFO(PUB_S_SRP PRI_SEGMENTED_IPv6_ADDR_SRP ": is " PUB_S_SRP " listener address.",
+             anycast_present ? "legacy service " : "service ",
              SEGMENTED_IPv6_ADDR_PARAM_SRP(&service->u.unicast.address, addr_buf),
              cmp < 0 ? "less than" : cmp > 0 ? "greater than" : "equal to");
         if (cmp < 0) {

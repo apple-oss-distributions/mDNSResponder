@@ -1,6 +1,6 @@
 /* state-machine.h
  *
- * Copyright (c) 2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,22 +21,22 @@
 #ifndef __STATE_MACHINE_H__
 #define __STATE_MACHINE_H__ 1
 
-#define RELEASE_RETAIN_FUNCS(type)                                            \
-void                                                                          \
-type##_retain(type##_t *NONNULL omw)                                          \
-{                                                                             \
-    RETAIN_HERE(omw, type);                                                   \
-}                                                                             \
-                                                                              \
-void                                                                          \
-type##_release(type##_t *NONNULL omw)                                         \
-{                                                                             \
-    RELEASE_HERE(omw, type);                                                  \
+#define RELEASE_RETAIN_FUNCS(type)                                              \
+void                                                                            \
+type##_retain_(type##_t * omw, const char *file, int line)                      \
+{                                                                               \
+    RETAIN(omw, type);                                                          \
+}                                                                               \
+                                                                                \
+void                                                                            \
+type##_release_(type##_t *NONNULL omw, const char *file, int line)              \
+{                                                                               \
+    RELEASE(omw, type);                                                         \
 }
 
-#define RELEASE_RETAIN_DECLS(type)                                            \
-void type##_retain(type##_t *NONNULL omw);                                    \
-void type##_release(type##_t *NONNULL omw)
+#define RELEASE_RETAIN_DECLS(type)                                              \
+void type##_retain_(type##_t *NONNULL omw, const char *NONNULL file, int line); \
+void type##_release_(type##_t *NONNULL omw, const char *NONNULL file, int line);
 
 // The assumptions below are that every object that holds a state that these macros can operate on has
 // the following elements:

@@ -60,7 +60,11 @@ typedef void (*omr_watcher_context_release_callback_t)(route_state_t *NONNULL ro
 
 // Release/retain functions for omr_watcher_t:
 RELEASE_RETAIN_DECLS(omr_watcher);
+#define omr_watcher_retain(watcher) omr_watcher_retain_(watcher, __FILE__, __LINE__)
+#define omr_watcher_release(watcher) omr_watcher_release_(watcher, __FILE__, __LINE__)
 RELEASE_RETAIN_DECLS(omr_prefix);
+#define omr_prefix_retain(prefix) omr_prefix_retain_(prefix, __FILE__, __LINE__)
+#define omr_prefix_release(prefix) omr_prefix_release_(prefix, __FILE__, __LINE__)
 
 // omr_prefix_create
 //

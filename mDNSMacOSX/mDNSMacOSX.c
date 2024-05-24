@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -97,7 +97,6 @@
 #include <SystemConfiguration/SCPrivate.h>
 
 #include <Security/oidsalg.h> // To include the deprecated symbol `CSSMOID_APPLE_X509_BASIC`.
-#include "system_utilities.h"
 
 // Include definition of opaque_presence_indication for KEV_DL_NODE_PRESENCE handling logic.
 #include <Kernel/IOKit/apple80211/apple80211_var.h>
@@ -192,7 +191,6 @@ static CFArrayRef privateDnsArray = NULL;
 // Typically point-to-point interfaces are modems (including mobile-phone pseudo-modems), and we don't want
 // to run up the user's bill sending multicast traffic over a link where there's only a single device at the
 // other end, and that device (e.g. a modem bank) is probably not answering Multicast DNS queries anyway.
-
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, BONJOUR_ON_DEMAND)
 #define MulticastInterface(i) ((i)->m->BonjourEnabled               && \
@@ -6708,7 +6706,6 @@ mDNSlocal mStatus mDNSPlatformInit_setup(mDNS *const m)
         mdns_trust_init();
    }
 #endif
-
 
     return(mStatus_NoError);
 }

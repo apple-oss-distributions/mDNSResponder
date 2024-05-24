@@ -39,6 +39,8 @@ typedef enum thread_thread {
 } thread_network_state_t;
 
 RELEASE_RETAIN_DECLS(thread_tracker);
+#define thread_tracker_retain(watcher) thread_tracker_retain_(watcher, __FILE__, __LINE__)
+#define thread_tracker_release(watcher) thread_tracker_release_(watcher, __FILE__, __LINE__)
 const char *NONNULL thread_tracker_network_state_to_string(thread_network_state_t state);
 void thread_tracker_cancel(thread_tracker_t *NONNULL publisher);
 thread_tracker_t *NULLABLE thread_tracker_create(srp_server_t *NONNULL route_state);

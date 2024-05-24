@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2010-2015, 2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2010-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <os/log.h>
 #include <xpc/xpc.h>
+#include <mdns/general.h>
 
 
 #pragma mark -
@@ -332,7 +333,7 @@ static void Install(void *instance)
 * This is invoked when launchd loads a event dictionary and needs to inform
 * us what a daemon / agent is looking for.
 *****************************************************************************/
-static void ManageEventsCallback(UserEventAgentLaunchdAction action, CFNumberRef token, CFTypeRef eventMatchDict, void* vContext)
+static void LaunchdActionHandler(UserEventAgentLaunchdAction action, CFNumberRef token, CFTypeRef eventMatchDict, void* vContext)
 {
     if (action == kUserEventAgentLaunchdAdd)
     {
@@ -363,6 +364,33 @@ static void ManageEventsCallback(UserEventAgentLaunchdAction action, CFNumberRef
     }
 }
 
+static void ManageEventsCallback(const UserEventAgentLaunchdAction action, const CFNumberRef token,
+    const CFTypeRef eventMatchDict, void* const vContext)
+{
+    // It used to be the case that the callback passed to UserEventAgentRegisterForLaunchEvents(), i.e.,
+    // ManageEventsCallback(), would be guaranteed to be invoked on the main queue. However, that hasn't been true since
+    // 2011. See source changes for <rdar://9179704>.
+    //
+    // The UserEventAgent* API, which has been deprecated since 2011, doesn't provide a way to specify a dispatch queue,
+    // for the callback. Since LaunchdActionHandler() deals with the same plugin data structures as
+    // ServiceBrowserCallback(), which runs on the main queue, LaunchdActionHandler() must run on the same queue.
+    //
+    // The lowest-risk short-term solution is to simply schedule LaunchdActionHandler() to run on the main queue. In the
+    // long term, the UserEventAgent* API should be replaced with the xpc_event_provider_* API, which is the official
+    // replacement API, along with moving away from the main queue. Note that the UserEventAgent* API hasn't been
+    // decorated with any deprecation attributes, which normally trigger build warnings, which is probably why the
+    // deprecation went unnoticed for so long.
+    mdns_cf_retain_null_safe(token);
+    mdns_cf_retain_null_safe(eventMatchDict);
+    dispatch_async(dispatch_get_main_queue(),
+    ^{
+        LaunchdActionHandler(action, token, eventMatchDict, vContext);
+        CFNumberRef tokenTmp = token;
+        mdns_cf_forget(&tokenTmp);
+        CFTypeRef eventMatchDictTmp = eventMatchDict;
+        mdns_cf_forget(&eventMatchDictTmp);
+    });
+}
 
 #pragma mark -
 #pragma mark Plugin Guts

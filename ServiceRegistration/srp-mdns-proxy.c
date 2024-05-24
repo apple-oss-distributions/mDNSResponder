@@ -69,8 +69,8 @@
 #include "srp-test-runner.h"
 #endif
 
-#define ADDRESS_RECORD_TTL   120        // Address records have TTL of 120s to avoid advertising stale data for too long.
-#define OTHER_RECORD_TTL    3600        // Other records we're not so worried about.
+#define ADDRESS_RECORD_TTL  4500
+#define OTHER_RECORD_TTL    4500
 
 static const char local_suffix_ld[] = ".local";
 static const char *local_suffix = &local_suffix_ld[1];
@@ -364,6 +364,12 @@ srp_replication_advertise_finished(adv_host_t *host, char *hostname, srp_server_
             if (srpl_connection != NULL) {
                 if (last) {
                     srpl_advertise_finished_event_send(hostname, rcode, server_state);
+#ifdef SRP_TEST_SERVER
+                    if (srpl_connection->srpl_advertise_finished_callback != NULL) {
+                        srpl_connection->srpl_advertise_finished_callback(srpl_connection->test_state,
+                                                                          srpl_connection->instance->domain->server_state);
+                    }
+#endif
                 }
 
                 if (host != NULL && host->srpl_connection != NULL) {
@@ -495,6 +501,13 @@ retry_callback(void *context)
 }
 
 static void
+srp_adv_host_context_release(void *context)
+{
+    adv_host_t *host = context;
+    RELEASE_HERE(host, adv_host);
+}
+
+static void
 wait_retry(adv_host_t *host)
 {
     int64_t now = ioloop_timenow();
@@ -513,7 +526,8 @@ wait_retry(adv_host_t *host)
         host->retry_interval *= 2;
     }
     INFO("waiting %d seconds...", host->retry_interval);
-    ioloop_add_wake_event(host->retry_wakeup, host, retry_callback, NULL, host->retry_interval * 1000);
+    ioloop_add_wake_event(host->retry_wakeup, host, retry_callback, srp_adv_host_context_release, host->retry_interval * 1000);
+    RETAIN_HERE(host, adv_host);
 }
 
 static bool
@@ -1055,7 +1069,8 @@ host_ready(adv_host_t *host)
     // update fails.  So postpone the removal for a bit.
     if (host->update != NULL) {
         INFO("reached with pending updates on host " PRI_S_SRP ".", host->registered_name);
-        ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, NULL, 10 * 1000);
+        ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, srp_adv_host_context_release, 10 * 1000);
+        RETAIN_HERE(host, adv_host);
         host->lease_expiry = ioloop_timenow() + 10 * 1000; // ten seconds
         return NULL;
     }
@@ -1139,7 +1154,8 @@ lease_callback(void *context)
         when = INT32_MAX;
     }
 
-    ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, NULL, (uint32_t)when);
+    ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, srp_adv_host_context_release, (uint32_t)when);
+    RETAIN_HERE(host, adv_host);
 }
 
 // Called when we definitely want to make all the advertisements associated with a host go away.
@@ -1638,7 +1654,8 @@ update_finished(adv_update_t *update)
     } else {
         INFO("scheduling wakeup to lease_callback in %" PRIu64 " for host " PRI_S_SRP,
              when / 1000, host->name);
-        ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, NULL, (uint32_t)when);
+        ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, srp_adv_host_context_release, (uint32_t)when);
+        RETAIN_HERE(host, adv_host);
     }
 
     // Instance vectors can hold circular references to the update object, which won't get freed until we call
@@ -3449,6 +3466,15 @@ found_something:
                     if (remove) {
                         break;
                     }
+                    // if remove is more recent than this message (for example, we firt receive remove
+                    // from the actual client and then receive a stale update message from a replication
+                    // peer), we don't apply this message and end processing here.
+                    if (host->remove_received_time > client_update->message->received_time) {
+                        INFO("update for host " PRI_S_SRP " which has been deleted.", host->name);
+                        advertise_finished(NULL, host->name, server_state, srpl_connection,
+                                           connection, raw_message, dns_rcode_servfail, NULL, true, true);
+                        goto cleanup;
+                    }
                     *p_hosts = host->next;
                     host_invalidate(host);
                     RELEASE_HERE(host, adv_host);
@@ -3614,6 +3640,8 @@ found_something:
             ioloop_message_release(host->message);
         }
         host->message = raw_message;
+        // remember the time when the message that removes the host was received
+        host->remove_received_time = host->message->received_time;
         ioloop_message_retain(host->message);
         advertise_finished(host, new_host_name, server_state, srpl_connection,
                            connection, raw_message, dns_rcode_noerror, NULL, true, true);

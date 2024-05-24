@@ -3592,6 +3592,13 @@ srpl_service_instance_query_start(srpl_instance_service_t *service, dnssd_txn_t 
 }
 
 static void
+srpl_domain_context_release(void *context)
+{
+    srpl_domain_t *domain = context;
+    RELEASE_HERE(domain, srpl_domain);
+}
+
+static void
 srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t interfaceIndex,
                      DNSServiceErrorType errorCode, const char *serviceName, const char *regtype,
                      const char *replyDomain, void *context)
@@ -3628,7 +3635,8 @@ srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t
         }
         if (domain->server_state->srpl_browse_wakeup != NULL) {
             ioloop_add_wake_event(domain->server_state->srpl_browse_wakeup,
-                                  domain, srpl_browse_restart, NULL, 1000);
+                                  domain, srpl_browse_restart, srpl_domain_context_release, 1000);
+            RETAIN_HERE(domain, srpl_domain);
         }
         return;
     }
@@ -3757,13 +3765,6 @@ srpl_browse_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags flags, uint32_t
 }
 
 static void
-srpl_domain_context_release(void *context)
-{
-    srpl_domain_t *domain = context;
-    RELEASE_HERE(domain, srpl_domain);
-}
-
-static void
 srpl_dnssd_txn_fail(void *context, int err)
 {
     srpl_domain_t *domain = context;
@@ -3784,12 +3785,13 @@ srpl_domain_browse_start(srpl_domain_t *domain)
         ERROR("Unable to query for NS records for " PRI_S_SRP, domain->name);
         return false;
     }
-    domain->query = ioloop_dnssd_txn_add(sdref, srpl_domain_context_release, NULL, srpl_dnssd_txn_fail);
+    domain->query = ioloop_dnssd_txn_add(sdref, domain, srpl_domain_context_release, srpl_dnssd_txn_fail);
     if (domain->query == NULL) {
         ERROR("Unable to set up ioloop transaction for NS query on " PRI_S_SRP, domain->name);
         DNSServiceRefDeallocate(sdref);
         return false;
     }
+    RETAIN_HERE(domain, srpl_domain); // For the browse
     return true;
 }
 
@@ -3854,7 +3856,6 @@ srpl_domain_add(srp_server_t *server_state, const char *domain_name)
     if (!srpl_domain_browse_start(domain)) {
         return;
     }
-    RETAIN_HERE(domain, srpl_domain);
 }
 
 static void
@@ -5422,9 +5423,6 @@ srpl_srp_client_ack_evaluate_action(srpl_connection_t *srpl_connection, srpl_eve
         srp_adv_host_release(finished_update->host);
     }
     free(finished_update);
-#ifdef SRP_TEST_SERVER
-    test_srpl_finished_evaluate(srpl_connection);
-#endif
     return srpl_state_ready;
 }
 
@@ -5926,7 +5924,8 @@ srpl_register_completion(DNSServiceRef UNUSED sdref, DNSServiceFlags UNUSED flag
         }
         if (srpl_domain->srpl_register_wakeup != NULL) {
             // Try registering again in one second.
-            ioloop_add_wake_event(srpl_domain->srpl_register_wakeup, srpl_domain, srpl_re_register, NULL, 1000);
+            ioloop_add_wake_event(srpl_domain->srpl_register_wakeup, srpl_domain, srpl_re_register, srpl_domain_context_release, 1000);
+            RETAIN_HERE(srpl_domain, srpl_domain);
         }
         return;
     }

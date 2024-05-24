@@ -64,6 +64,8 @@ srp_test_server_run_test(void *context)
             test_srpl_host_2ir(NULL);
         } else if (!strcmp(test_to_run, "srpl-zero-instances-two-servers")) {
             test_srpl_host_0i2s(NULL);
+        } else if (!strcmp(test_to_run, "srpl-lease-time")) {
+            test_srpl_lease_time(NULL);
         } else {
             INFO("test to run: %s", test_to_run);
             exit(1);

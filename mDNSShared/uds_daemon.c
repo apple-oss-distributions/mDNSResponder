@@ -4217,6 +4217,9 @@ mDNSlocal void resolve_result_callback(mDNS *const m, DNSQuestion *question, con
             }
         }
     }
+#else
+    // To suppress the unused variable warning when `MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)` is disabled.
+    (void)srv_target_data;
 #endif
 
     // allocate/init reply header

@@ -5685,10 +5685,22 @@ mDNSexport domainname  *uDNS_GetNextSearchDomain(mDNSInterfaceID InterfaceID, in
     while (p)
     {
         int labels = CountLabels(&p->domain);
-        if (labels > 0)
+        if (labels > 1)
+        {
+            const domainname *d = SkipLeadingLabels(&p->domain, labels - 2);
+            if (SameDomainName(d, (const domainname *)"\x7" "in-addr" "\x4" "arpa") ||
+                SameDomainName(d, (const domainname *)"\x3" "ip6"     "\x4" "arpa"))
+            {
+                LogInfo("uDNS_GetNextSearchDomain: skipping search domain %##s, InterfaceID %p", p->domain.c, p->InterfaceID);
+                (*searchIndex)++;
+                p = p->next;
+                continue;
+            }
+        }
+        if (ignoreDotLocal && labels > 0)
         {
             const domainname *d = SkipLeadingLabels(&p->domain, labels - 1);
-            if (ignoreDotLocal && SameDomainLabel(d->c, (const mDNSu8 *)"\x5" "local"))
+            if (SameDomainLabel(d->c, (const mDNSu8 *)"\x5" "local"))
             {
                 LogInfo("uDNS_GetNextSearchDomain: skipping local domain %##s, InterfaceID %p", p->domain.c, p->InterfaceID);
                 (*searchIndex)++;

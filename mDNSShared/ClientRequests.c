@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -470,11 +470,17 @@ mDNSlocal void QueryRecordOpEventHandler(DNSQuestion *const inQuestion, const mD
                 mDNSPlatformMemCopy(inQuestion->ResolverUUID, op->resolverUUID, UUID_SIZE);
             #endif
                 const domainname *domain = mDNSNULL;
-                if (inQuestion->AppendSearchDomains && (op->searchListIndex >= 0))
+                // If we're appending search domains, the DNSQuestion needs to be retried without Optimistic DNS,
+                // but with the search domain we just used, so restore the search list index to avoid skipping to
+                // the next search domain.
+                //
+                // Note that when AppendSearchDomains is true, searchListIndex is the index of the next search
+                // domain to try. So if searchListIndex is 0 or negative, that means that we are not currently in
+                // the middle of iterating the search domain list, so no search domain needs to be restored. If
+                // searchListIndex is greater than 0, then we're currently in the middle of iterating through the
+                // search domain list, so the search domain that's currently in effect needs to be restored.
+                if (inQuestion->AppendSearchDomains && (op->searchListIndex > 0))
                 {
-                    // If we're appending search domains, the DNSQuestion needs to be retried without Optimistic DNS,
-                    // but with the search domain we just used, so restore the search list index to avoid skipping to
-                    // the next search domain.
                     op->searchListIndex = op->searchListIndexLast;
                     domain = NextSearchDomain(op);
                 }

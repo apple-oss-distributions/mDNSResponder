@@ -253,6 +253,8 @@ service_publisher_service_update(service_publisher_t *publisher, thread_service_
     uint8_t server_data[20];
     size_t service_data_length, server_data_length;
     switch(service->service_type) {
+    default:
+        return kCTIStatus_Invalid;
     case unicast_service:
         service_data[0] = THREAD_SRP_SERVER_OPTION;
         service_data_length = 1;
@@ -364,8 +366,9 @@ service_publisher_create_service_for_queue(thread_service_t *service)
     case pref_id:
         return thread_service_pref_id_create(service->rloc16, service->u.pref_id.partition_id,
                                              service->u.pref_id.prefix, service->service_id);
+    default:
+        return NULL;
     }
-    return NULL;
 }
 
 static void UNUSED

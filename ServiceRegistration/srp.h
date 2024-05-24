@@ -1,6 +1,6 @@
 /* srp.h
  *
- * Copyright (c) 2018-2023 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2024 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -295,11 +295,34 @@ extern const uint8_t thread_rloc_preamble[6];
 static inline bool
 is_thread_mesh_anycast_address(const struct in6_addr *addr)
 {
-    // Thread 1.3.0RC3 section 5.2.2.2 Anycast Locator (ALOC)
+    // Thread 1.3.0 section 5.2.2.2 Anycast Locator (ALOC)
     if (!memcmp(&addr->s6_addr[8], thread_anycast_preamble, sizeof(thread_anycast_preamble))) {
         return true;
     }
     return false;
+}
+
+static inline bool
+is_thread_mesh_rloc_address(const struct in6_addr *addr)
+{
+    // Thread 1.3.0 section 5.2.2.1 Routing Locator (RLOC)
+    if (!memcmp(&addr->s6_addr[8], thread_rloc_preamble, sizeof(thread_rloc_preamble))) {
+        return true;
+    }
+    return false;
+}
+
+static inline bool
+is_thread_mesh_synthetic_address(const struct in6_addr *addr)
+{
+    return is_thread_mesh_anycast_address(addr) || is_thread_mesh_rloc_address(addr);
+}
+
+static inline bool
+is_thread_mesh_synthetic_or_link_local(const struct in6_addr *addr)
+{
+    return (is_thread_mesh_anycast_address(addr) || is_thread_mesh_rloc_address(addr) ||
+            (addr->s6_addr[0] == 0xfe && (addr->s6_addr[1] & 0xc0) == 0x80));
 }
 
 /*!

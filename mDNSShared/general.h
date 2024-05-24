@@ -632,4 +632,46 @@
 	mdns_compile_time_check(mdns_sizeof_member(STRUCT_TYPE, _mdns_unused_padding) < _Alignof(STRUCT_TYPE),	\
 		"Padding exceeds alignment of '" # STRUCT_TYPE "', so the amount of padding is excessive.")
 
+/*!
+ *	@brief
+ *		Retains a Core Foundation object if the specified object reference is non-NULL.
+ *
+ *	@param OBJ
+ *		A reference to the object to retain.
+ *
+ *	@discussion
+ *		The object reference is explicitly compared against NULL to avoid a warning from the Clang analyzer's
+ *		osx.NumberObjectConversion checker. See
+ *		<https://clang.llvm.org/docs/analyzer/checkers.html#osx-numberobjectconversion-c-c-objc>.
+ */
+#define mdns_cf_retain_null_safe(OBJ)	\
+	do {								\
+		if ((OBJ) != NULL) {			\
+			CFRetain((OBJ));			\
+		}								\
+	} while (0)
+
+/*!
+ *	@brief
+ *		Releases the Core Foundation object referenced by a pointer.
+ *
+ *	@param OBJ_PTR
+ *		The address of the pointer that either references a Core Foundation object or references NULL.
+ *
+ *	@discussion
+ *		If the pointer contains a non-NULL reference, then the pointer will be set to NULL after releasing the
+ *		object.
+ *
+ *		The object reference is explicitly compared against NULL to avoid a warning from the Clang analyzer's
+ *		osx.NumberObjectConversion checker. See
+ *		<https://clang.llvm.org/docs/analyzer/checkers.html#osx-numberobjectconversion-c-c-objc>.
+ */
+#define mdns_cf_forget(OBJ_PTR)		\
+	do {							\
+		if (*(OBJ_PTR) != NULL) {	\
+			CFRelease(*(OBJ_PTR));	\
+			*(OBJ_PTR) = NULL;		\
+		}							\
+	} while (0)
+
 #endif	// MDNS_GENERAL_H

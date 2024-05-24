@@ -51,7 +51,7 @@ struct thread_anycast_service {
     uint8_t sequence_number;
 };
 
-typedef enum { pref_id, unicast_service, anycast_service } thread_service_type_t;
+typedef enum { any_service, pref_id, unicast_service, anycast_service } thread_service_type_t;
 
 struct thread_service {
     int ref_count;
@@ -74,6 +74,8 @@ struct thread_service {
 };
 
 RELEASE_RETAIN_DECLS(thread_service);
+#define thread_service_retain(watcher) thread_service_retain_(watcher, __FILE__, __LINE__)
+#define thread_service_release(watcher) thread_service_release_(watcher, __FILE__, __LINE__)
 void thread_service_list_release(thread_service_t *NONNULL *NULLABLE list_pointer);
 #define thread_service_unicast_create(rloc16, address, port, service_id) \
 	thread_service_unicast_create_(rloc16, address, port, service_id, __FILE__, __LINE__)

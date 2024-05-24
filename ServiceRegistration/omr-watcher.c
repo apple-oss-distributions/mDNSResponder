@@ -221,6 +221,19 @@ omr_prefix_finalize(omr_prefix_t *prefix)
 static void
 omr_watcher_finalize(omr_watcher_t *omw)
 {
+    omr_prefix_t *next;
+
+    if (omw->prefix_recheck_wakeup != NULL) {
+        ioloop_cancel_wake_event(omw->prefix_recheck_wakeup);
+        ioloop_wakeup_release(omw->prefix_recheck_wakeup);
+        omw->prefix_recheck_wakeup = NULL;
+    }
+
+    for (omr_prefix_t *prefix = omw->prefixes; prefix != NULL; prefix = next) {
+        next = prefix->next;
+        RELEASE_HERE(prefix, omr_prefix);
+    }
+
     // The omr_watcher_t can have a route_connection and a prefix_connection, but each of these will retain
     // a reference to the omr_watcher, so we can't get here while these connections are still alive. Hence,
     // we do not need to free them here.
@@ -251,6 +264,7 @@ omr_watcher_purge_canceled_callbacks(void *context)
             pcb = &((*pcb)->next);
         }
     }
+    RELEASE_HERE(omw, omr_watcher);
 }
 
 static void

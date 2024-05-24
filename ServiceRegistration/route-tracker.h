@@ -25,6 +25,8 @@ typedef struct route_tracker route_tracker_t;
 
 #ifndef BUILD_TEST_ENTRY_POINTS
 RELEASE_RETAIN_DECLS(route_tracker);
+#define route_tracker_retain(watcher) route_tracker_retain_(watcher, __FILE__, __LINE__)
+#define route_tracker_release(watcher) route_tracker_release_(watcher, __FILE__, __LINE__)
 #else
 typedef struct route_state route_state_t;
 typedef struct interface interface_t;

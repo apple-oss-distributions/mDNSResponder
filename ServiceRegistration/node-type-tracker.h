@@ -33,6 +33,8 @@ typedef enum thread_node_type {
 } thread_node_type_t;
 
 RELEASE_RETAIN_DECLS(node_type_tracker);
+#define node_type_tracker_retain(watcher) node_type_tracker_retain_(watcher, __FILE__, __LINE__)
+#define node_type_tracker_release(watcher) node_type_tracker_release_(watcher, __FILE__, __LINE__)
 const char *NONNULL node_type_tracker_thread_node_type_to_string(thread_node_type_t node_type);
 void node_type_tracker_cancel(node_type_tracker_t *NONNULL publisher);
 node_type_tracker_t *NULLABLE node_type_tracker_create(srp_server_t *NONNULL route_state);

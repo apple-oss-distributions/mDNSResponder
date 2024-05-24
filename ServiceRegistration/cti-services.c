@@ -972,7 +972,7 @@ cti_get_mesh_local_address_(srp_server_t *UNUSED server, void *NULLABLE context,
 
     errx = setup_for_command(NULL, client_queue, "get_mesh_local_address", NULL,
                              "IPv6:MeshLocalAddress", dict, "WpanctlCmd", context, app_callback,
-                             cti_internal_string_event_reply, false, file, line);
+                             cti_internal_string_property_reply, false, file, line);
     xpc_release(dict);
 
     return errx;

@@ -1,0 +1,146 @@
+#! /bin/bash
+#
+#	Copyright (c) 2024 Apple Inc. All rights reserved.
+#
+#	This script is for Apple Internal use only.
+#
+
+declare -r version=1.0
+declare -r script=${BASH_SOURCE[0]}
+
+#============================================================================================================================
+#	PrintUsage
+#============================================================================================================================
+
+PrintUsage()
+{
+	echo ""
+	echo "Attempts to disable Wi-Fi and Ethernet interfaces so that tests from mDNSResponder's presubmission test suite"
+	echo "that are sensitive to network state changes and/or network activity can run without potential disruptions."
+	echo ""
+	echo "Usage: $( basename "${script}" ) [options]"
+	echo ""
+	echo "Options:"
+	echo "    -V    Display version of this script and exit."
+	echo ""
+}
+
+#============================================================================================================================
+#	LogOut
+#============================================================================================================================
+
+LogOut()
+{
+	echo "$( date '+%Y-%m-%d %H:%M:%S%z' ): $*"
+}
+
+#============================================================================================================================
+#	ErrQuit
+#============================================================================================================================
+
+ErrQuit()
+{
+	LogOut "error: $*"
+	exit 1
+}
+
+#============================================================================================================================
+#	main
+#============================================================================================================================
+
+main()
+{
+	while getopts ":hV" option; do
+		case "${option}" in
+			h)
+				PrintUsage
+				exit 0
+				;;
+			V)
+				echo "$( basename "${script}" ) version ${version}"
+				exit 0
+				;;
+			:)
+				ErrQuit "option '${OPTARG}' requires an argument."
+				;;
+			*)
+				ErrQuit "unknown option '${OPTARG}'."
+				;;
+		esac
+	done
+	# Check if the networksetup command, which is a macOS-only command, is available.
+	if command -v networksetup &> /dev/null ; then
+		# Turn off Wi-Fi.
+		networksetup -setairportpower Wi-Fi off
+		# Attempt to disable Ethernet network services if we're running in BATS, which sets BATS=1 in the environment,
+		# and the Mac under test is connected to an NCM host, which means that the BATS test host is controlling the Mac
+		# under test via NCM as opposed to Ethernet. If the BATS test host is controlling the Mac under test via
+		# Ethernet, then disabling Ethernet would cause the BATS test host to lose control of the Mac under test.
+		local disable_ethernet=false
+		local -r ethernet_services=( 'Ethernet' 'Thunderbolt Ethernet' )
+		if [ "${BATS}" == "1" ]; then
+			local connected_to_ncm_host=false
+			remotectl show ncm-host | grep -F -q 'State: connected'
+			if [ $? -eq 0 ]; then
+				connected_to_ncm_host=true
+			fi
+			if "${connected_to_ncm_host}"; then
+				LogOut "Connected ncm-host was detected"
+				networksetup -listallnetworkservices | grep -F -x -q -f <( printf '%s\n' "${ethernet_services[@]}" )
+				if [ $? -eq 0 ]; then
+					LogOut "Found Ethernet network services, will attempt to disable them"
+					disable_ethernet=true
+				else
+					LogOut "No Ethernet network services were found"
+				fi
+			else
+				LogOut "No connected ncm-host was detected, will not attempt to disable any Ethernet network services"
+			fi
+		fi
+		if "${disable_ethernet}"; then
+			local -r network_location=mDNSResponderTesting
+			networksetup -listlocations | grep -F -x -q "${network_location}"
+			if [ $? -eq 0 ]; then
+				LogOut "Network location '${network_location}' already exists"
+			else
+				LogOut "Network location '${network_location}' doesn't exist, will attempt to create it"
+				networksetup -createlocation "${network_location}" populate
+				if [ $? -eq 0 ]; then
+					LogOut "Created network location '${network_location}'"
+				else
+					ErrQuit "Failed to create network location"
+				fi
+			fi
+			networksetup -switchtolocation "${network_location}" > /dev/null
+			if [ $? -eq 0 ]; then
+				LogOut "Switched to network location '${network_location}'"
+			else
+				ErrQuit "Failed to switch network location to '${network_location}'"
+			fi
+			for network_service in "${ethernet_services[@]}"; do
+				networksetup -listallnetworkservices | grep -F -x -q "${network_service}"
+				if [ $? -eq 0 ]; then
+					networksetup -setnetworkserviceenabled "${network_service}" off
+					if [ $? -eq 0 ]; then
+						LogOut "Disabled network service '${network_service}'"
+					else
+						LogOut "Failed to disable network service '${network_service}'"
+					fi
+				fi
+			done
+		fi
+	# Otherwise, check if the mobilewifitool command is available.
+	elif command -v mobilewifitool &> /dev/null; then
+		# Turn off Wi-Fi.
+		mobilewifitool -- manager power 0
+		if [ $? -eq 0 ]; then
+			LogOut "Turned off Wi-Fi"
+		else
+			ErrQuit "Failed to turn off Wi-Fi"
+		fi
+	else
+		LogOut "Neither networksetup nor mobilewifitool were available"
+	fi
+}
+
+main "$@"

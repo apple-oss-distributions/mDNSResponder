@@ -120,8 +120,9 @@ test_srpl_host_0i2s_ready(void *context, uint16_t UNUSED port)
     srp_set_hostname(TEST_HOST_NAME, NULL);
     srp_test_network_localhost_start(state->test_state);
     // Allow time for the client to register
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC * 3), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC * 2), dispatch_get_main_queue(), ^{
         test_srpl_host_0i2s_primary_evaluate(state->test_state);
+        test_srpl_start_replication(state, 12345);
     });
 }
 
@@ -142,13 +143,9 @@ test_srpl_host_0i2s(test_state_t *next_test)
     state->next = next_test;
     srp_servers->server_id = 0;
     srp_server_t *second = test_srpl_add_server(state);
-    // create an outgoing connection from primary to secondary
-    srpl_connection_t *connection = test_srpl_connection_create(state, second, srp_servers);
-    test_srpl_set_finished_checkpoint(connection,
-                                      srpl_state_srp_client_ack_evaluate,
-                                      test_host_0i2s_test_finished);
-
-    test_srpl_start_replication(second, 12345);
+    // create an outgoing connection from secondary to primary
+    srpl_connection_t *connection = test_srpl_connection_create(state, state->primary, second);
+    connection->srpl_advertise_finished_callback = test_host_0i2s_test_finished;
 
     state->srp_listener = srp_proxy_listen(NULL, 0, test_srpl_host_0i2s_ready, NULL, NULL, NULL, state->primary);
     TEST_FAIL_CHECK(state, state->srp_listener != NULL, "listener create failed");

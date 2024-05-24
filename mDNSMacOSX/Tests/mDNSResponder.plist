@@ -47,6 +47,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>gaiperf</string>
@@ -93,6 +95,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>gaiperf</string>
@@ -140,6 +144,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>gaiperf</string>
@@ -187,6 +193,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>dnsquery</string>
@@ -228,6 +236,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>fastrecovery</string>
@@ -269,6 +279,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>rcodes</string>
@@ -310,6 +322,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>gaiperf</string>
@@ -321,45 +335,6 @@
 				<string>json</string>
 				<string>--skipPathEval</string>
 				<string>--badUDPMode</string>
-			</array>
-		</dict>
-		<dict>
-			<key>TestName</key>
-			<string>mDNSResponder Leaks</string>
-			<key>Description</key>
-			<string>Checks mDNSResponder for memory leaks.</string>
-			<key>AsRoot</key>
-			<true/>
-			<key>RequiresWiFi</key>
-			<false/>
-			<key>Timeout</key>
-			<integer>60</integer>
-			<key>IgnoreOutput</key>
-			<true/>
-			<key>Command</key>
-			<array>
-				<string>/usr/bin/leaks</string>
-				<string>mDNSResponder</string>
-			</array>
-		</dict>
-		<dict>
-			<key>TestName</key>
-			<string>Optimistic DNS</string>
-			<key>Description</key>
-			<string>Tests mDNSResponder&apos;s Optimistic DNS functionality.</string>
-			<key>AsRoot</key>
-			<false/>
-			<key>RequiresWiFi</key>
-			<false/>
-			<key>Timeout</key>
-			<integer>300</integer>
-			<key>IgnoreOutput</key>
-			<true/>
-			<key>Command</key>
-			<array>
-				<string>/usr/local/bin/dnssdutil</string>
-				<string>test</string>
-				<string>optimisticDNS</string>
 			</array>
 		</dict>
 		<dict>
@@ -396,6 +371,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -452,6 +429,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -509,6 +488,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -565,6 +546,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -622,6 +605,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -678,6 +663,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -735,6 +722,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -790,6 +779,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -846,6 +837,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -901,6 +894,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -957,6 +952,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1012,6 +1009,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1068,6 +1067,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1129,6 +1130,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1190,6 +1193,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1251,6 +1256,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1312,6 +1319,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1369,6 +1378,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1427,6 +1438,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1484,6 +1497,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1542,6 +1557,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1599,6 +1616,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1657,6 +1676,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1713,6 +1734,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1770,6 +1793,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1826,6 +1851,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1883,6 +1910,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1939,6 +1968,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -1996,6 +2027,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -2058,6 +2091,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -2120,6 +2155,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -2182,6 +2219,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -2244,6 +2283,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -2300,6 +2341,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>mdnsdiscovery</string>
@@ -2358,6 +2401,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>dotlocal</string>
@@ -2443,6 +2488,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>keepalive</string>
@@ -2484,6 +2531,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>probeconflicts</string>
@@ -2529,6 +2578,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>probeconflicts</string>
@@ -2574,10 +2625,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
-				<string>/usr/local/bin/dnssdutil</string>
-				<string>wifi</string>
-				<string>off</string>
-				<string>&amp;&amp;</string>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>probeconflicts</string>
@@ -2624,10 +2673,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
-				<string>/usr/local/bin/dnssdutil</string>
-				<string>wifi</string>
-				<string>off</string>
-				<string>&amp;&amp;</string>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>probeconflicts</string>
@@ -2718,6 +2765,8 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>dnsproxy</string>
@@ -2759,12 +2808,56 @@
 			<true/>
 			<key>Command</key>
 			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
 				<string>/usr/local/bin/dnssdutil</string>
 				<string>test</string>
 				<string>dnsproxy</string>
 				<string>--legacy</string>
 				<string>--format</string>
 				<string>json</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>mDNSResponder Leaks</string>
+			<key>Description</key>
+			<string>Checks mDNSResponder for memory leaks.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>60</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/usr/bin/leaks</string>
+				<string>mDNSResponder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>Optimistic DNS</string>
+			<key>Description</key>
+			<string>Tests mDNSResponder&apos;s Optimistic DNS functionality, including its interoperability with search domains.</string>
+			<key>AsRoot</key>
+			<true/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>300</integer>
+			<key>IgnoreOutput</key>
+			<true/>
+			<key>Command</key>
+			<array>
+				<string>/AppleInternal/Tests/mDNSResponder/network-isolate-device</string>
+				<string>;</string>
+				<string>/usr/local/bin/dnssdutil</string>
+				<string>test</string>
+				<string>optimisticDNS</string>
+				<string>--full</string>
 			</array>
 		</dict>
 		<dict>

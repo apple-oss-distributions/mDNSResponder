@@ -26,6 +26,8 @@
 typedef struct service_publisher service_publisher_t;
 
 RELEASE_RETAIN_DECLS(service_publisher);
+#define service_publisher_retain(watcher) service_publisher_retain_(watcher, __FILE__, __LINE__)
+#define service_publisher_release(watcher) service_publisher_release_(watcher, __FILE__, __LINE__)
 
 bool service_publisher_is_address_mesh_local(service_publisher_t *NONNULL publisher, addr_t *NONNULL address);
 bool service_publisher_could_publish(service_publisher_t *NULLABLE publisher);

@@ -42,7 +42,7 @@ dso_simple_response(comm_t *comm, message_t *message, const dns_wire_t *wire, in
     memset(&question, 0, sizeof(question));
     unsigned offp = 0;
     if (ntohs(wire->qdcount) == 1 &&
-        dns_rr_parse(&question, wire->data, wire_length - DNS_HEADER_SIZE, &offp, false, true))
+        dns_rr_parse(&question, wire->data, wire_length - DNS_HEADER_SIZE, &offp, false, false))
     {
         dns_towire_state_t towire;
         memset(&towire, 0, sizeof(towire));

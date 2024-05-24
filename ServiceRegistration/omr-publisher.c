@@ -643,7 +643,8 @@ omr_publisher_queue_prefix_update(omr_publisher_t *publisher, struct in6_addr *p
     *ppref = prefix;
     // The prefix on the queue is retained by relying on the create/copy rule. When adding a prefix we also retain the
     // prefix as publisher->published_prefix, so that retain is always explicit and this retain is always implicit.
-    omr_prefix_retain(*ppref);
+    // omr_prefix_retain(*ppref);
+
     // If there is anything in the queue, the queue holds a reference to the publisher, so that it will continue to
     // run until it's complete.
     if (old_queue == NULL && publisher->publication_queue != NULL) {
@@ -656,6 +657,9 @@ static void
 omr_publisher_publish_prefix(omr_publisher_t *publisher,
                              struct in6_addr *prefix_address, omr_prefix_priority_t priority, bool preferred)
 {
+    SEGMENTED_IPv6_ADDR_GEN_SRP(prefix_address, prefix_buf);
+    INFO("publishing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/64",
+         SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix_address, prefix_buf));
     omr_publisher_queue_prefix_update(publisher, prefix_address, priority, preferred, want_add);
     publisher->omr_priority = priority;
 }

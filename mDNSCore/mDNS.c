@@ -3948,7 +3948,11 @@ mDNSlocal void SendQueries(mDNS *const m)
         {
             if (m->timenow + TicksTTL(cr)/50 - cr->NextRequiredQuery >= 0)
             {
+#if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
                 debugf("Sending %d%% cache expiration query for %s", (!cr->unicastAssistSent ? 75 : 80) + 5 * cr->UnansweredQueries, CRDisplayString(m, cr));
+#else
+                debugf("Sending %d%% cache expiration query for %s", 80 + 5 * cr->UnansweredQueries, CRDisplayString(m, cr));
+#endif
                 q = cr->CRActiveQuestion;
                 ExpireDupSuppressInfoOnInterface(q->DupSuppress, m->timenow - TicksTTL(cr)/20, cr->resrec.InterfaceID);
                 // For uDNS queries (TargetQID non-zero) we adjust LastQTime,
