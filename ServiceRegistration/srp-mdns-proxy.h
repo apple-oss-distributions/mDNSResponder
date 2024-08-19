@@ -112,6 +112,7 @@ struct adv_instance {
     intptr_t shared_txn;                 // The shared txn on which the txn for this instance's registration was created
     adv_host_t *NULLABLE host;           // Host to which this service instance belongs
     adv_update_t *NULLABLE update;       // Ongoing update that currently owns this instance, if any.
+    wakeup_t *NULLABLE retry_wakeup;     // In case we get a spurious name conflict.
     char *NONNULL instance_name;         // Single label instance name (future: service instance FQDN)
     char *NONNULL service_type;          // Two label service type (e.g., _ipps._tcp)
     int port;                            // Port on which service can be found.
@@ -120,6 +121,7 @@ struct adv_instance {
     message_t *NULLABLE message;         // Message that produces the current value of this instance
     ptrdiff_t recent_message;            // Most recent message (never dereference--this is for comparison only).
     int64_t lease_expiry;                // Time when lease expires, relative to ioloop_timenow().
+    unsigned wakeup_interval;            // Exponential backoff interval
     bool removed;                        // True if this instance is being kept around for replication.
     bool update_pending;                 // True if we got a conflict while updating and are waiting to try again
     bool anycast;                        // True if service registration is through anycast service.
@@ -142,6 +144,7 @@ struct adv_record_registration {
 struct adv_host {
     int ref_count;
     srp_server_t *NULLABLE server_state;   // Server state to which this host belongs.
+    wakeup_t *NONNULL re_register_wakeup;  // Wakeup for retry when we run into a name conflict
     wakeup_t *NONNULL retry_wakeup;        // Wakeup for retry when we run into a temporary failure
     wakeup_t *NONNULL lease_wakeup;        // Wakeup at least expiry time
     adv_host_t *NULLABLE next;             // Hosts are maintained in a linked list.
@@ -158,6 +161,7 @@ struct adv_host {
     dns_rr_t key;                          // The key data represented as an RR; key->name is NULL.
     uint32_t key_id;                       // A possibly-unique id that is computed across the key for brevity in
                                            // debugging
+    unsigned wakeup_interval;              // Exponential backoff interval for re-registration
     int retry_interval;                    // Interval to wait before attempting to re-register after the daemon has
                                            // died.
     time_t update_time;                    // Time when the update completed.
@@ -175,6 +179,7 @@ struct adv_host {
     // host registration has expired, and there happens to be another update in progress, then we want
     // to defer the host registration.
     bool update_pending;
+    bool re_register_pending;
 };
 
 struct adv_update {

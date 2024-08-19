@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -668,10 +668,9 @@ resolver_discovery_perform_periodic_tasks(void)
 bool
 dns_question_requires_resolver_discovery(const DNSQuestion * NONNULL q, const domainname ** const out_domain)
 {
-	// Currently, we only support discovering local resolvers for "openthread.thread.home.arpa."
-	// We only do the discovery when the question is not forced to use multicast DNS, because mDNS does not use resolver.
-	if (!q->ForceMCast && IsSubdomain(&q->qname, THREAD_DOMAIN_NAME)) {
-		*out_domain = THREAD_DOMAIN_NAME;
+	if (!q->ForceMCast && !IsRootDomain(Do53_UNICAST_DISCOVERY_DOMAIN)
+		&& IsSubdomain(&q->qname, Do53_UNICAST_DISCOVERY_DOMAIN)) {
+		*out_domain = Do53_UNICAST_DISCOVERY_DOMAIN;
 		return true;
 	} else {
 		*out_domain = NULL;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -3640,15 +3640,17 @@ mDNSlocal void AutomaticBrowseDomainChange(mDNS *const m, DNSQuestion *q, const 
     else RmvAutoBrowseDomain(0, &answer->rdata->u.name);
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
-    // We also start the local DNS resolver discovery if the automatic browsing domain discovered is the Thread domain.
-    if (SameDomainName(&answer->rdata->u.name, THREAD_DOMAIN_NAME))
+    // We also start the local DNS resolver discovery if the automatic browsing domain discovered is a unicast domain
+    // where we can do discovery via Do53.
+    if (!IsRootDomain(Do53_UNICAST_DISCOVERY_DOMAIN) &&
+        SameDomainName(&answer->rdata->u.name, Do53_UNICAST_DISCOVERY_DOMAIN))
     {
         // AutomaticBrowseDomainChange() is called as a callback function where the mDNS_Lock is dropped, to start the
         // resolver discovery process, we need to grab the mDNS_Lock again.
         if (AddRecord == QC_add) {
-            resolver_discovery_add(THREAD_DOMAIN_NAME, mDNStrue);
+            resolver_discovery_add(Do53_UNICAST_DISCOVERY_DOMAIN, mDNStrue);
         } else {
-            resolver_discovery_remove(THREAD_DOMAIN_NAME, mDNStrue);
+            resolver_discovery_remove(Do53_UNICAST_DISCOVERY_DOMAIN, mDNStrue);
         }
     }
 #endif

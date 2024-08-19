@@ -707,6 +707,13 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
     dns_u8_to_wire(&towire, 0); // Five bytes of zero flag bits
     dns_u32_to_wire(&towire, 0);
 
+    // Send Source link-layer address option
+    if (interface->have_link_layer_address) {
+        dns_u8_to_wire(&towire, ND_OPT_SOURCE_LINKADDR);
+        dns_u8_to_wire(&towire, 1); // length / 8
+        dns_rdata_raw_data_to_wire(&towire, &interface->link_layer, sizeof(interface->link_layer));
+    }
+
     if (towire.error) {
         ERROR("No space in ICMP output buffer for " PUB_S_SRP " at route.c:%d", interface->name, towire.line);
         towire.error = 0;

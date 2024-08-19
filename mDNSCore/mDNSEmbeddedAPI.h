@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2638,7 +2638,8 @@ extern mDNSBool StrictUnicastOrdering;
 #define SleepProxyServiceType (*(const domainname *)"\xC" "_sleep-proxy" "\x4" "_udp")
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
-    #define THREAD_DOMAIN_NAME ((const domainname *) "\xA" "openthread" "\x6" "thread" "\x4" "home" "\x4" "arpa")
+    // Change `Do53_UNICAST_DISCOVERY_DOMAIN` to a non-root domain to do Do53 service discovery under this domain.
+    #define Do53_UNICAST_DISCOVERY_DOMAIN ((const domainname *) "")
 #endif // MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
 
 // ***************************************************************************

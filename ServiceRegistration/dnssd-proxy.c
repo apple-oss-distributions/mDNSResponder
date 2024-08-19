@@ -2545,23 +2545,30 @@ dnssd_hardwired_response(dnssd_query_t *query, DNSServiceQueryRecordReply UNUSED
     if ((question->type == dns_rrtype_a || question->type == dns_rrtype_aaaa) &&
         !strcmp(question->name, uuid_name))
     {
+        addr_t *local = NULL;
+        if (query->message != NULL) {
+            local = &query->message->local;
+        } else {
+            local = &query->dso->transport->local;
+        }
+
         // If it's an IPv4 address we can respond with an A record.
-        if (question->type == dns_rrtype_a && query->message->local.sa.sa_family == AF_INET) {
+        if (question->type == dns_rrtype_a && local->sa.sa_family == AF_INET) {
             dp_query_add_data_to_response(query, question->name, question->type, dns_qclass_in, 4,
-                                          &query->message->local.sin.sin_addr, 300, true, true);
+                                          &local->sin.sin_addr, 300, true, true);
             response_type = "local host IPv4 address";
         }
         // If it's an IPv4-mapped IPv6 address, we can respond with an AAAA record
-        else if (query->message->local.sa.sa_family == AF_INET6 && question->type == dns_rrtype_a &&
-                   !memcmp(&query->message->local.sin6.sin6_addr, v4mapped, sizeof(v4mapped)))
+        else if (local->sa.sa_family == AF_INET6 && question->type == dns_rrtype_a &&
+                 !memcmp(&local->sin6.sin6_addr, v4mapped, sizeof(v4mapped)))
         {
             dp_query_add_data_to_response(query, question->name, question->type, dns_qclass_in, 4,
-                                          ((uint8_t *)&query->message->local.sin6.sin6_addr) + 12, 3600, true, true);
+                                          ((uint8_t *)&local->sin6.sin6_addr) + 12, 3600, true, true);
             response_type = "local host v4-mapped address";
         }
         // If it's an IPv6 address and NOT a v4-mapped address, we can respond with an AAAA record.
-        else if (query->message->local.sa.sa_family == AF_INET6 && question->type == dns_rrtype_aaaa &&
-                   memcmp(&query->message->local.sin6.sin6_addr, v4mapped, sizeof(v4mapped)))
+        else if (local->sa.sa_family == AF_INET6 && question->type == dns_rrtype_aaaa &&
+                 memcmp(&local->sin6.sin6_addr, v4mapped, sizeof(v4mapped)))
         {
             dp_query_add_data_to_response(query, question->name, question->type, dns_qclass_in, 16,
                                           &query->message->local.sin6.sin6_addr, 300, true, true);
@@ -4079,7 +4086,7 @@ dnssd_proxy_ifaddr_callback(void *UNUSED context, const char *name, const addr_t
 #if SRP_FEATURE_DYNAMIC_CONFIGURATION
     if (event_type == interface_address_added && is_new_interface) {
         served_domain_t *const new_served_domain = add_new_served_domain_with_interface(name, address, mask);
-        verify_action(new_served_domain != NULL,
+        require_action_quiet(new_served_domain != NULL, exit,
             ERROR("failed to add new served domain ""- interface name: " PUB_S_SRP, name));
 
         bool hardwired_set = dnssd_hardwired_setup_for_served_domain(new_served_domain);

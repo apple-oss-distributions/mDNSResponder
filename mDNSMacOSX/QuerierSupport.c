@@ -361,10 +361,9 @@ mDNSlocal mDNSBool _Querier_QuestionIsEligibleForNonNativeDNSService(const DNSQu
     mDNSBool eligible = mDNStrue;
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
-    if (IsSubdomain(&q->qname, THREAD_DOMAIN_NAME))
+    if (!IsRootDomain(Do53_UNICAST_DISCOVERY_DOMAIN)
+        && IsSubdomain(&q->qname, Do53_UNICAST_DISCOVERY_DOMAIN))
     {
-        // We do not want the query ends with "openthread.thread.home.arpa." to choose a non-native DNS service to go
-        // outside of the home network.
         eligible = mDNSfalse;
     }
 #endif

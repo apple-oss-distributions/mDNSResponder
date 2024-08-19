@@ -192,6 +192,7 @@ static CFArrayRef privateDnsArray = NULL;
 // to run up the user's bill sending multicast traffic over a link where there's only a single device at the
 // other end, and that device (e.g. a modem bank) is probably not answering Multicast DNS queries anyway.
 
+
 #if MDNSRESPONDER_SUPPORTS(APPLE, BONJOUR_ON_DEMAND)
 #define MulticastInterface(i) ((i)->m->BonjourEnabled               && \
                               ((i)->ifa_flags & IFF_MULTICAST)      && \
@@ -6706,6 +6707,7 @@ mDNSlocal mStatus mDNSPlatformInit_setup(mDNS *const m)
         mdns_trust_init();
    }
 #endif
+
 
     return(mStatus_NoError);
 }

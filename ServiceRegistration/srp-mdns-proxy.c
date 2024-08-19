@@ -84,8 +84,10 @@ const uint8_t thread_rloc_preamble[6] = { 0, 0, 0, 0xff, 0xfe, 0 };
 //======================================================================================================================
 // MARK: - Forward references
 
+static bool register_host_record(adv_host_t *host, adv_record_t *record, const bool skipping);
 static void register_host_record_completion(DNSServiceRef sdref, DNSRecordRef rref,
                                             DNSServiceFlags flags, DNSServiceErrorType error_code, void *context);
+static bool register_instance(adv_instance_t *instance);
 static void register_instance_completion(DNSServiceRef sdref, DNSServiceFlags flags, DNSServiceErrorType error_code,
                                          const char *name, const char *regtype, const char *domain, void *context);
 static void update_from_host(adv_host_t *host);
@@ -139,6 +141,7 @@ adv_record_finalize(adv_record_t *record)
     if (record->host != NULL) {
         RELEASE_HERE(record->host, adv_host);
     }
+
     free(record->rdata);
     free(record);
 }
@@ -170,6 +173,10 @@ adv_instance_finalize(adv_instance_t *instance)
     if (instance->update != NULL) {
         RELEASE_HERE(instance->update, adv_update);
         instance->update = NULL;
+    }
+    if (instance->retry_wakeup != NULL) {
+        ioloop_wakeup_release(instance->retry_wakeup);
+        instance->retry_wakeup = NULL;
     }
     free(instance);
 }
@@ -671,10 +678,16 @@ adv_instances_cancel(adv_instance_vec_t *instances)
 {
     for (int i = 0; i < instances->num; i++) {
         adv_instance_t *instance = instances->vec[i];
-        if (instance != NULL && instance->txn != NULL) {
-            ioloop_dnssd_txn_cancel_srp(instance->host->server_state, instance->txn);
-            ioloop_dnssd_txn_release(instance->txn);
-            instance->txn = NULL;
+        if (instance != NULL) {
+            if (instance->txn != NULL) {
+                ioloop_dnssd_txn_cancel_srp(instance->host->server_state, instance->txn);
+                ioloop_dnssd_txn_release(instance->txn);
+                instance->txn = NULL;
+            }
+            if (instance->retry_wakeup != NULL) {
+                ioloop_cancel_wake_event(instance->retry_wakeup);
+                instance->retry_wakeup = NULL;
+            }
         }
     }
 }
@@ -878,11 +891,12 @@ host_addr_free(adv_host_t *host)
 static void
 host_invalidate(adv_host_t *host)
 {
-    int i;
-
     // Get rid of the retry wake event.
     if (host->retry_wakeup != NULL) {
         ioloop_cancel_wake_event(host->retry_wakeup);
+    }
+    if (host->re_register_wakeup != NULL) {
+        ioloop_cancel_wake_event(host->re_register_wakeup);
     }
 
     // Remove the address records.
@@ -890,15 +904,7 @@ host_invalidate(adv_host_t *host)
 
     // Remove the services.
     if (host->instances != NULL) {
-        for (i = 0; i < host->instances->num; i++) {
-            if (host->instances->vec[i] != NULL) {
-                if (host->instances->vec[i] != NULL && host->instances->vec[i]->txn != NULL) {
-                    ioloop_dnssd_txn_cancel_srp(host->server_state, host->instances->vec[i]->txn);
-                    ioloop_dnssd_txn_release(host->instances->vec[i]->txn);
-                    host->instances->vec[i]->txn = NULL;
-                }
-            }
-        }
+        adv_instances_cancel(host->instances);
         RELEASE_HERE(host->instances, adv_instance_vec);
         host->instances = NULL;
     }
@@ -929,7 +935,6 @@ adv_host_finalize(adv_host_t *host)
         host->addresses = NULL;
     }
 
-
     if (host->key_rdata != NULL) {
         free(host->key_rdata);
         host->key_rdata = NULL;
@@ -955,7 +960,10 @@ adv_host_finalize(adv_host_t *host)
         ioloop_wakeup_release(host->retry_wakeup);
     }
 
-
+    if (host->re_register_wakeup != NULL) {
+        ioloop_wakeup_release(host->re_register_wakeup);
+        host->re_register_wakeup = NULL;
+    }
     INFO("removed " PRI_S_SRP ", key_id %x", host->name ? host->name : "<null>", host->key_id);
 
     // In the default case, host->name and host->registered_name point to the same memory: we don't want a double free.
@@ -1696,6 +1704,98 @@ process_dnsservice_error(adv_update_t *update, int err)
 }
 #endif // USE_DNSSERVICE_QUEUING
 
+#define GENERATE_WAKEUP(ptr)                  \
+    if ((*ptr) == NULL) {                     \
+        (*ptr) = ioloop_wakeup_create();      \
+    }                                         \
+    if ((*ptr) == NULL) {                     \
+        ERROR("unable to make wakeup " #ptr); \
+    } else
+
+static void
+srp_instance_retry_callback(void *context)
+{
+    adv_instance_t *instance = context;
+    adv_host_t *host = instance->host;
+    if (host == NULL || host->removed) {
+        INFO("no longer updating instance %p because host is no longer valid.", instance);
+        return;
+    }
+    INFO("re-registering updating instance %p.", instance);
+    register_instance(instance);
+}
+
+static void
+srp_schedule_instance_retry(adv_instance_t *instance)
+{
+    GENERATE_WAKEUP(&instance->retry_wakeup) {
+        if (instance->wakeup_interval == 0) {
+            instance->wakeup_interval = 5 * 1000;
+        } else {
+            instance->wakeup_interval *= 2;
+        }
+        unsigned interval = instance->wakeup_interval * 1.5 - (srp_random32() % instance->wakeup_interval);
+        RETAIN_HERE(instance, adv_instance);
+        ioloop_add_wake_event(instance->retry_wakeup, instance, srp_instance_retry_callback, adv_instance_context_release, interval);
+        INFO("will attempt to reregister instance %p in %.3lf seconds", instance, ((double)interval) / 1000.0);
+    }
+}
+
+static void
+srp_host_record_retry_callback(void *context)
+{
+    adv_host_t *host = context;
+    if (host != NULL) {
+        host->re_register_pending = false;
+    }
+    if (host == NULL || host->removed) {
+        INFO("no longer updating host %p because host is no longer valid.", host);
+        return;
+    }
+
+    if (host->addresses != NULL) {
+        for (int i = 0; i < host->addresses->num; i++) {
+            adv_record_t *record = host->addresses->vec[i];
+            if (record != NULL) {
+                INFO("re-registering host record %p.", record);
+                register_host_record(host, record, false);
+            }
+        }
+    }
+    if (host->key_record != NULL) {
+        INFO("re-registering host record %p.", host->key_record);
+        register_host_record(host, host->key_record, false);
+    }
+}
+
+static void
+srp_schedule_host_record_retry(adv_record_t *record)
+{
+    // If the host isn't valid or we're already re-registering, don't schedule a retry.
+    if (record->host == NULL || record->host->removed) {
+        INFO("will not attempt to reregister record %p", record);
+        return;
+    }
+    if (record->host->re_register_pending) {
+        INFO("already scheduled attempt to reregister record %p", record);
+        return;
+    }
+
+    adv_host_t *host = record->host;
+    GENERATE_WAKEUP(&host->re_register_wakeup) {
+        if (host->wakeup_interval == 0) {
+            host->wakeup_interval = 5 * 1000;
+        } else {
+            host->wakeup_interval *= 2;
+        }
+        unsigned interval = host->wakeup_interval * 1.5 - (srp_random32() % host->wakeup_interval);
+        RETAIN_HERE(host, adv_host);
+        ioloop_add_wake_event(host->re_register_wakeup, host, srp_host_record_retry_callback, srp_adv_host_context_release, interval);
+        INFO("will attempt to reregister record %p in %.3lf seconds", record, ((double)interval) / 1000.0);
+    }
+}
+
+
 // When the host registration has completed, we get this callback.   Completion either means that we succeeded in
 // registering the record, or that something went wrong and the registration has failed.
 static void
@@ -1731,12 +1831,23 @@ register_instance_completion(DNSServiceRef sdref, DNSServiceFlags flags, DNSServ
         instance->update = NULL;
     }
 
-    if (error_code == kDNSServiceErr_NoError) {
+    if (error_code == kDNSServiceErr_NoError || error_code == kDNSServiceErr_NameConflict) {
         INFO("registration for service " PRI_S_SRP "." PRI_S_SRP "." PRI_S_SRP " -> "
-             PRI_S_SRP " has completed.", instance->instance_name, instance->service_type, domain,
-             host->registered_name);
+             PRI_S_SRP " has completed" PUB_S_SRP ".", instance->instance_name, instance->service_type, domain,
+             host->registered_name, error_code == kDNSServiceErr_NoError ? ":" : " with a conflict");
         INFO("registration is under " PRI_S_SRP "." PRI_S_SRP PRI_S_SRP, name, regtype,
              domain);
+
+        if (error_code != kDNSServiceErr_NoError) {
+            if (instance->txn == NULL) {
+                FAULT("instance->txn is NULL for instance %p!", instance);
+            } else {
+                ioloop_dnssd_txn_cancel_srp(host->server_state, instance->txn);
+                ioloop_dnssd_txn_release(instance->txn);
+                instance->txn = NULL;
+            }
+            srp_schedule_instance_retry(instance);
+        }
 
         // In principle update->instance should always be non-NULL here because a no-error response should
         // only happen once or not at all. But just to be safe...
@@ -1756,7 +1867,7 @@ register_instance_completion(DNSServiceRef sdref, DNSServiceFlags flags, DNSServ
                 update = NULL;
             }
         } else {
-            ERROR("no error, but update is NULL for instance " PRI_S_SRP " (" PRI_S_SRP
+            INFO("re-update succeeded for instance " PRI_S_SRP " (" PRI_S_SRP
                   " " PRI_S_SRP " " PRI_S_SRP ")", instance->instance_name, name, regtype, domain);
         }
     } else {
@@ -1877,10 +1988,14 @@ register_instance(adv_instance_t *instance)
             uint32_t offset = 0;
             char time_buf[28];
 
-            if (instance->update->client != NULL && instance->update->client->message != NULL &&
-                instance->update->client->message->received_time != 0)
-            {
-                offset = (uint32_t)(srp_time() - instance->update->client->message->received_time);
+            message_t *message = NULL;
+            if (instance->update != NULL && instance->update->client != NULL && instance->update->client->message != NULL) {
+                message = instance->update->client->message;
+            } else if (instance->update == NULL && instance->message != NULL) {
+                message = instance->message;
+            }
+            if (message != NULL && message->received_time != 0) {
+                offset = (uint32_t)(srp_time() - message->received_time);
                 srp_format_time_offset(time_buf, sizeof(time_buf), offset);
             } else {
                 static char msg[] = "now";
@@ -2082,17 +2197,11 @@ register_host_record_completion(DNSServiceRef sdref, DNSRecordRef rref,
 
     }
     update = record->update;
-    if (update == NULL) {
-        // We shouldn't ever get a callback with update==NULL (which means that the update completed successfully) that's not an
-        // error.
-        if (error_code == kDNSServiceErr_NoError) {
-            FAULT("update is NULL, registration for host record completed with invalid state.");
-        }
-    } else {
+    if (update != NULL) {
         RETAIN_HERE(update, adv_update);
     }
 
-    if (error_code == kDNSServiceErr_NoError) {
+    if (error_code == kDNSServiceErr_NoError || error_code == kDNSServiceErr_NameConflict) {
         // If the update is pending, it means that we just finished registering this record for the first time,
         // so we can count it as complete and check to see if there is any work left to do; if not, we call
         // update_finished to apply the update to the host object.
@@ -2109,6 +2218,13 @@ register_host_record_completion(DNSServiceRef sdref, DNSRecordRef rref,
             }
         } else {
             note = " got spurious success callback after completion.";
+        }
+
+        if (error_code != kDNSServiceErr_NoError) {
+            // Shared record is no longer good.
+            remove_shared_record(host->server_state, record);
+            note = " completed with conflict.";
+            srp_schedule_host_record_retry(record);
         }
 
         if (record->rrtype == dns_rrtype_a) {
@@ -2340,10 +2456,15 @@ register_host_record(adv_host_t *host, adv_record_t *record, bool skipping)
         } else {
             uint32_t offset = 0;
             char time_buf[28];
-            if (host->update != NULL && host->update->client != NULL && host->update->client->message != NULL &&
-                host->update->client->message->received_time != 0)
+            message_t *message = NULL;
+            if (host->update != NULL && host->update->client != NULL && host->update->client->message != NULL) {
+                message = host->update->client->message;
+            } else if (host->update == NULL && host->message != NULL) {
+                message = host->message;
+            }
+            if (message != NULL && message->received_time != 0)
             {
-                offset = (uint32_t)(srp_time() - host->update->client->message->received_time);
+                offset = (uint32_t)(srp_time() - message->received_time);
                 srp_format_time_offset(time_buf, sizeof(time_buf), offset);
             } else {
                 static char msg[] = "now";
@@ -2385,7 +2506,9 @@ register_host_record(adv_host_t *host, adv_record_t *record, bool skipping)
     }
     record->shared_txn = (intptr_t)host->server_state->shared_registration_txn;
     RETAIN_HERE(record, adv_record); // for the callback
-    record->update_pending = true;
+    if (host->update != NULL) {
+        record->update_pending = true;
+    }
     return true;
 }
 
@@ -2832,6 +2955,10 @@ prepare_update(adv_host_t *host, client_update_t *client_update)
     }
     RETAIN_HERE(update, adv_update); // For the lifetime of this function
 
+    if (host->re_register_wakeup != NULL) {
+        ioloop_cancel_wake_event(host->re_register_wakeup);
+    }
+    host->re_register_pending = false;
     update->start_time = srp_time();
 
     // The maximum number of addresses we could be deleting is all the ones the host currently has.
