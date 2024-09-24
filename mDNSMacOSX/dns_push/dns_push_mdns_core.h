@@ -37,14 +37,68 @@ NULLABILITY_ASSUME_NONNULL_BEGIN
 
 __BEGIN_DECLS
 
+/*!
+ *	@brief
+ *		Checks if the DNS question has requested DNS push and is allowed to use DNS push.
+ *
+ *	@param question
+ *		The newly created DNS question.
+ *
+ *	@return
+ *		True if the DNS question has requested DNS push and is allowed to use DNS push.
+ *		Otherwise, false.
+ *
+ *	@discussion
+ *		This function is different from the `dns_question_uses_dns_push` below, which checks if the DNS question is actively doing DNS push.
+ *		This function is used to determine if the caller should start DNS push for the question.
+ */
 bool
 dns_question_enables_dns_push(const DNSQuestion *question);
+
+/*!
+ *	@brief
+ *		Checks if the DNS question is in the progress of doing DNS push.
+ *
+ *	@param question
+ *		The DNS question.
+ *
+ *	@return
+ *		True, if the DNS question is actively doing DNS push. Otherwise, false.
+ */
+bool
+dns_question_uses_dns_push(const DNSQuestion *question);
+
+/*!
+ *	@brief
+ *		Checks if the DNS question tries DNS push but eventually falls back to DNS polling.
+ *
+ *	@param question
+ *		The DNS question.
+ *
+ *	@return
+ *		True, if the DNS question falls back to DNS polling due to no DNS push service availability. Otherwise, false.
+ */
+bool
+dns_question_uses_dns_polling(const DNSQuestion *question);
 
 dns_push_obj_context_t NULLABLE
 dns_question_get_dns_push_context(const DNSQuestion *question);
 
 dns_obj_domain_name_t NULLABLE
 dns_question_get_authoritative_zone(const DNSQuestion *question);
+
+/*!
+ *	@brief
+ *		Check if the current DNS push question has finished the discovery process.
+ *
+ *	@param question
+ *		The DNS question.
+ *
+ *	@result
+ *		True if the discovery process has been finished, otherwise, false.
+ */
+bool
+dns_question_finished_push_discovery(const DNSQuestion *question);
 
 __END_DECLS
 

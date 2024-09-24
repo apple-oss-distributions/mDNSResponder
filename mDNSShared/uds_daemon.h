@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,6 +51,9 @@ typedef void (*req_termination_fn)(request_state *request);
 
 typedef struct registered_record_entry
 {
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    uint64_t powerlog_start_time;
+#endif
     struct registered_record_entry *next;
     mDNSu32 key;
     client_context_t regrec_client_context;
@@ -105,7 +108,7 @@ typedef struct
     DNSQuestion q_default;
     DNSQuestion q_autoall;
 } request_enumeration;
-mdns_compile_time_max_size_check(request_enumeration, 2096);
+mdns_compile_time_max_size_check(request_enumeration, 2144);
 
 typedef struct
 {
@@ -130,12 +133,21 @@ typedef struct
 {
     DNSQuestion qtxt;
     DNSQuestion qsrv;
-    const ResourceRecord *txt;
-    const ResourceRecord *srv;
+
+    domainname *srv_target_name;    // Dynamically allocated SRV rdata(target name)
+    mDNSu8 *txt_rdata;              // Dynamically allocated TXT rdata.
+    mDNSIPPort srv_port;            // The port number specified in the SRV rdata.
+    mDNSu16 txt_rdlength;           // The length of the TXT record rdata.
+
     mDNSs32 ReportTime;
     mDNSBool external_advertise;
+    mDNSBool srv_negative;          // Whether we have received a negative SRV record. If true, srv_target_name is
+                                    // always NULL and srv_port's value has no meaning. When srv_target_name is
+                                    // non-NULL, srv_negative is always false;
+    mDNSBool txt_negative;          // Whether we have received a negative TXT record. If true, txt_rdata is always NULL
+                                    // and txt_rdlength is 0. When txt_rdata is non-NULL, txt_negative is always false.
 } request_resolve;
-mdns_compile_time_max_size_check(request_resolve, 1416);
+mdns_compile_time_max_size_check(request_resolve, 1456);
 
 typedef struct
 {
@@ -165,6 +177,9 @@ struct request_state
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     mdns_dns_service_id_t custom_service_id;
 #endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+    uint64_t powerlog_start_time;
+#endif
     request_state *next;            // For a shared connection, the next element in the list of subordinate
                                     // requests on that connection. Otherwise null.
     request_state *primary;         // For a subordinate request, the request that represents the shared
@@ -175,7 +190,7 @@ struct request_state
 #endif
     void * platform_data;
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
-    mdns_trust_t trust;
+    CFMutableArrayRef trusts;
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
     mdns_signed_result_t signed_obj;
@@ -199,6 +214,8 @@ struct request_state
     dnssd_sock_t errsd;
     mDNSu32 uid;
     mDNSu32 request_id;
+    mDNSs32 request_start_time_secs; // The time when the request is started in continuous time seconds.
+    mDNSs32 last_full_log_time_secs; // The time when we print full log information in continuous time seconds.
     mDNSu32 hdr_bytes;              // bytes of header already read [1]
     ipc_msg_hdr hdr;                // [1]
     mDNSs32 time_blocked;           // record time of a blocked client
@@ -224,7 +241,7 @@ struct request_state
 MDNS_CLANG_TREAT_WARNING_AS_ERROR_END()
 MDNS_GENERAL_STRUCT_PAD_CHECK(struct request_state);
 #endif
-mdns_compile_time_max_size_check(struct request_state, 272);
+mdns_compile_time_max_size_check(struct request_state, 288);
 
 // Notes:
 // 1. On a shared connection these fields in the primary structure, including hdr, are re-used

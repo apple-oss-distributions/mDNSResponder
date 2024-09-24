@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
 #include <os/log.h>
+#include "mDNSDebugShared.h"
 #endif
 
 // Set MDNS_DEBUGMSGS to 0 to optimize debugf() calls out of the compiled code
@@ -72,6 +73,7 @@ typedef enum
         extern os_log_t mDNSLogCategory_ ## NAME ## _redacted
 
     MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(Default);
+    MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(State);
     MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(mDNS);
     MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(uDNS);
     MDNS_OS_LOG_CATEGORY_DECLARE_EXTERN(SPS);
@@ -87,6 +89,7 @@ typedef enum
 #endif
 
 #define MDNS_LOG_CATEGORY_DEFAULT   MDNS_LOG_CATEGORY_DEFINITION(Default)
+#define MDNS_LOG_CATEGORY_STATE     MDNS_LOG_CATEGORY_DEFINITION(State)
 #define MDNS_LOG_CATEGORY_MDNS      MDNS_LOG_CATEGORY_DEFINITION(mDNS)
 #define MDNS_LOG_CATEGORY_UDNS      MDNS_LOG_CATEGORY_DEFINITION(uDNS)
 #define MDNS_LOG_CATEGORY_SPS       MDNS_LOG_CATEGORY_DEFINITION(SPS)
@@ -212,6 +215,7 @@ extern void verbosedebugf_(const char *format, ...) IS_A_PRINTF_STYLE_FUNCTION(1
 #endif
 
 extern int mDNS_LoggingEnabled;
+extern int mDNS_DebugLoggingEnabled;
 extern int mDNS_PacketLoggingEnabled;
 extern int mDNS_McastLoggingEnabled;
 extern int mDNS_McastTracingEnabled;
@@ -304,7 +308,7 @@ extern void freeL(const char *msg, void *x);
     #define LogRedact(CATEGORY, LEVEL, FORMAT, ...)                                         \
         do                                                                                  \
         {                                                                                   \
-            if (!gSensitiveLoggingEnabled)                                               \
+            if (!gSensitiveLoggingEnabled || ((CATEGORY) == (MDNS_LOG_CATEGORY_STATE)))     \
             {                                                                               \
                 os_log_with_type(CATEGORY, LEVEL, FORMAT, ## __VA_ARGS__);                  \
             }                                                                               \
@@ -330,6 +334,84 @@ extern void freeL(const char *msg, void *x);
     #endif
 #endif // MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
 
+//======================================================================================================================
+// MARK: - RData Log Helper
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define MDNS_CORE_LOG_RDATA_WITH_BUFFER(CATEGORY, LEVEL, RR_PTR, RDATA_BUF, RDATA_BUF_LEN, FORMAT, ...)     \
+        do                                                                                                      \
+        {                                                                                                       \
+            mStatus _get_rdata_err;                                                                             \
+            mDNSu16 _rdataLen;                                                                                  \
+            const mDNSu8 *const _rdataBytes = ResourceRecordGetRDataBytesPointer((RR_PTR), (RDATA_BUF),         \
+                (RDATA_BUF_LEN), &_rdataLen, &_get_rdata_err);                                                  \
+            if (!_get_rdata_err)                                                                                \
+            {                                                                                                   \
+                mDNSu8 *_typeRDataBuf = mDNSNULL;                                                               \
+                mDNSu32 _typeRDataLen = 0;                                                                      \
+                mDNSu8 *_typeRDataBufHeap = mDNSNULL;                                                           \
+                if (sizeof(mDNSStorage.MsgBuffer) >= 2 + _rdataLen)                                             \
+                {                                                                                               \
+                    _typeRDataBuf = (mDNSu8 *)mDNSStorage.MsgBuffer;                                            \
+                    _typeRDataLen = sizeof(mDNSStorage.MsgBuffer);                                              \
+                }                                                                                               \
+                else                                                                                            \
+                {                                                                                               \
+                    _typeRDataLen = 2 + _rdataLen;                                                              \
+                    _typeRDataBufHeap = mDNSPlatformMemAllocate(_typeRDataLen);                                 \
+                    _typeRDataBuf = _typeRDataBufHeap;                                                          \
+                }                                                                                               \
+                LogRedact(CATEGORY, LEVEL,                                                                      \
+                    FORMAT "type: " PUB_DNS_TYPE ", rdata: " PRI_RDATA,                                         \
+                    ##__VA_ARGS__, DNS_TYPE_PARAM((RR_PTR)->rrtype), RDATA_PARAM(_typeRDataBuf, _typeRDataLen,  \
+                    (RR_PTR)->rrtype, _rdataBytes, _rdataLen));                                                 \
+                mDNSPlatformMemFree(_typeRDataBufHeap);                                                         \
+            }                                                                                                   \
+        } while (0)
+#else
+    #define MDNS_CORE_LOG_RDATA_WITH_BUFFER(CATEGORY, LEVEL, RR_PTR, RDATA_BUF, RDATA_BUF_LEN, FORMAT, ...)         \
+        do                                                                                                          \
+        {                                                                                                           \
+            (void)(RDATA_BUF);                                                                                      \
+            (void)(RDATA_BUF_LEN);                                                                                  \
+            LogRedact(CATEGORY, LEVEL, FORMAT " " PRI_S, ##__VA_ARGS__, RRDisplayString(&mDNSStorage, (RR_PTR)));   \
+        } while (0)
+#endif
+
+#define MDNS_CORE_LOG_RDATA(CATEGORY, LEVEL, RR_PTR, FORMAT, ...)                                                   \
+    do                                                                                                              \
+    {                                                                                                               \
+        mDNSu8 *_rdataBuffer = NULL;                                                                                \
+        mDNSu8 *_rdataBufferHeap = NULL;                                                                            \
+        mDNSu16 _rdataBufferLen;                                                                                    \
+        if ((RR_PTR)->rdlength <= sizeof(mDNSStorage.RDataBuffer))                                                  \
+        {                                                                                                           \
+            _rdataBuffer = mDNSStorage.RDataBuffer;                                                                 \
+            _rdataBufferLen = sizeof(mDNSStorage.RDataBuffer);                                                      \
+        }                                                                                                           \
+        else                                                                                                        \
+        {                                                                                                           \
+            _rdataBufferHeap = mDNSPlatformMemAllocate((RR_PTR)->rdlength);                                         \
+            _rdataBuffer = _rdataBufferHeap;                                                                        \
+            _rdataBufferLen = (RR_PTR)->rdlength;                                                                   \
+        }                                                                                                           \
+        if ((RR_PTR)->rdlength == 0)                                                                                \
+        {                                                                                                           \
+            LogRedact(CATEGORY, LEVEL,                                                                              \
+                FORMAT "type: " PUB_DNS_TYPE ", rdata: <none>", ##__VA_ARGS__, DNS_TYPE_PARAM((RR_PTR)->rrtype));   \
+        }                                                                                                           \
+        else                                                                                                        \
+        {                                                                                                           \
+            MDNS_CORE_LOG_RDATA_WITH_BUFFER(CATEGORY, LEVEL, RR_PTR, _rdataBuffer, _rdataBufferLen, FORMAT,         \
+                ##__VA_ARGS__);                                                                                     \
+        }                                                                                                           \
+        mDNSPlatformMemFree(_rdataBufferHeap);                                                                      \
+    }                                                                                                               \
+    while(0)
+
+//======================================================================================================================
+// MARK: - Customized Log Specifier
+
 // The followings are the customized log specifier defined in os_log. For compatibility, we have to define it when it is
 // not on the Apple platform, for example, the Posix platform. The keyword "public" or "private" is used to control whether
 // the content would be redacted when the redaction is turned on: "public" means the content will always be printed;
@@ -353,11 +435,19 @@ extern void freeL(const char *msg, void *x);
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
-    #define PUB_BOOL                    "%{BOOL}d"
+    #define PUB_BOOL                    "%{mdns:yesno}d"
     #define BOOL_PARAM(boolean_value)   (boolean_value)
 #else
     #define PUB_BOOL                    PUB_S
-    #define BOOL_PARAM(boolean_value)   ((boolean_value) ? "YES" : "NO")
+    #define BOOL_PARAM(boolean_value)   ((boolean_value) ? "yes" : "no")
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_TIMEV                   "%{public, timeval}.*P"
+    #define TIMEV_PARAM(time_val_ptr)   ((int)sizeof(*time_val_ptr)), time_val_ptr
+#else
+    #define PUB_TIMEV                   "%ld"
+    #define TIMEV_PARAM(time_val_ptr)   ((time_val_ptr)->tv_sec)
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
@@ -439,24 +529,28 @@ extern void freeL(const char *msg, void *x);
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
-    #define PUB_DM_NAME "%{public, mdnsresponder:domain_name}.*P"
-    #define PRI_DM_NAME "%{sensitive, mask.hash, mdnsresponder:domain_name}.*P"
+    #define PUB_DM_NAME                 "%{public, mdnsresponder:domain_name}.*P"
+    #define PRI_DM_NAME                 "%{sensitive, mask.hash, mdnsresponder:domain_name}.*P"
     // When DM_NAME_PARAM is used, the file where the function is defined must include DNSEmbeddedAPI.h
-    #define DM_NAME_PARAM(name) ((name) ? ((int)DomainNameLength((name))) : 0), (name)
+    #define DM_NAME_PARAM(name)         ((name) ? ((int)DomainNameLength((name))) : 0), (name)
+    #define DM_NAME_PARAM_NONNULL(name) (int)DomainNameLength(name), (name)
 #else
-    #define PUB_DM_NAME "%##s"
-    #define PRI_DM_NAME PUB_DM_NAME
-    #define DM_NAME_PARAM(name) (name)
+    #define PUB_DM_NAME                 "%##s"
+    #define PRI_DM_NAME                 PUB_DM_NAME
+    #define DM_NAME_PARAM(name)         (name)
+    #define DM_NAME_PARAM_NONNULL(name) (name)
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
-    #define PUB_DM_LABEL "%{public, mdnsresponder:domain_label}.*P"
-    #define PRI_DM_LABEL "%{sensitive, mask.hash, mdnsresponder:domain_label}.*P"
-    #define DM_LABEL_PARAM(label) 1 + ((label)->c[0]), ((label)->c)
+    #define PUB_DM_LABEL                "%{public, mdnsresponder:domain_label}.*P"
+    #define PRI_DM_LABEL                "%{sensitive, mask.hash, mdnsresponder:domain_label}.*P"
+    #define DM_LABEL_PARAM(label)       1 + ((label)->c[0]), ((label)->c)
+    #define DM_LABEL_PARAM_SAFE(label)  (label ? 1 + ((label)->c[0]) : 0), ((label)->c)
 #else
-    #define PUB_DM_LABEL "%#s"
-    #define PRI_DM_LABEL PUB_DM_LABEL
-    #define DM_LABEL_PARAM(label) (label)
+    #define PUB_DM_LABEL                "%#s"
+    #define PRI_DM_LABEL                PUB_DM_LABEL
+    #define DM_LABEL_PARAM(label)       (label)
+    #define DM_LABEL_PARAM_SAFE(label)  (label)
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
@@ -581,6 +675,50 @@ extern void freeL(const char *msg, void *x);
 #else
         #define PUB_DNSSEC_INVAL_STATE                  "%s"
         #define DNSSEC_INVAL_STATE_PARAM(state_value)   ("<DNSSEC Unsupported>")
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_TIME_DUR    "%{mdns:time_duration}u"
+#else
+    #define PUB_TIME_DUR    "%us"
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_OS_ERR    "%{mdns:err}ld"
+#else
+    #define PUB_OS_ERR    "%ld"
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_RDATA       "%{public, mdns:rdata}.*P"
+    #define PRI_RDATA       "%{sensitive, mask.hash, mdns:rdata}.*P"
+    #define RDATA_PARAM(buf, buf_len, rrtype, rdata, rdata_len) \
+                            (rdata_len + 2), GetPrintableRDataBytes(buf, buf_len, rrtype, rdata, rdata_len)
+
+    #define PUB_TYPE_RDATA  "%{public, mdns:rrtype+rdata}.*P"
+    #define PRI_TYPE_RDATA  "%{sensitive, mask.hash, mdns:rrtype+rdata}.*P"
+    #define TYPE_RDATA_PARAM(buf, buf_len, rrtype, rdata, rdata_len) RDATA_PARAM(buf, buf_len, rrtype, rdata, rdata_len)
+#else
+    #define PUB_RDATA       "%p"
+    #define PRI_RDATA       PUB_RDATA
+    #define RDATA_PARAM(buf, buf_len, rrtype, rdata, rdata_len) (rdata)
+
+    #define PUB_TYPE_RDATA  PUB_S " %p"
+    #define PRI_TYPE_RDATA  PUB_TYPE_RDATA
+    #define TYPE_RDATA_PARAM(buf, buf_len, rrtype, rdata, rdata_len) \
+                            DNSTypeName(rrtype), RDATA_PARAM(buf, buf_len, rrtype, rdata, rdata_len)
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_D2D_SRV_EVENT   "%{public, mdnsresponder:d2d_service_event}d"
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+    #define PUB_DNS_SCOPE_TYPE          "%{public, mdnsresponder:dns_scope_type}d"
+    #define DNS_SCOPE_TYPE_PARAM(type)  (type)
+#else
+    #define PUB_DNS_SCOPE_TYPE          "%s"
+    #define DNS_SCOPE_TYPE_PARAM(type)  DNSScopeToString(type)
 #endif
 
 extern void LogToFD(int fd, const char *format, ...);

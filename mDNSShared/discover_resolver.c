@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -668,10 +668,9 @@ resolver_discovery_perform_periodic_tasks(void)
 bool
 dns_question_requires_resolver_discovery(const DNSQuestion * NONNULL q, const domainname ** const out_domain)
 {
-	// Currently, we only support discovering local resolvers for "openthread.thread.home.arpa."
-	// We only do the discovery when the question is not forced to use multicast DNS, because mDNS does not use resolver.
-	if (!q->ForceMCast && IsSubdomain(&q->qname, THREAD_DOMAIN_NAME)) {
-		*out_domain = THREAD_DOMAIN_NAME;
+	if (!q->ForceMCast && !IsRootDomain(Do53_UNICAST_DISCOVERY_DOMAIN)
+		&& IsSubdomain(&q->qname, Do53_UNICAST_DISCOVERY_DOMAIN)) {
+		*out_domain = Do53_UNICAST_DISCOVERY_DOMAIN;
 		return true;
 	} else {
 		*out_domain = NULL;
@@ -807,12 +806,20 @@ _schedule_dns_service_update(discover_resolver_name_t * const resolver_name)
 
 //======================================================================================================================
 
-static bool
-_native_dns_service_register(const domainname * const domain, discover_resolver_name_t * const resolver_name)
+MDNS_CLOSED_ENUM(_resolver_dns_service_update_result_t, int8_t,
+	_resolver_dns_service_update_result_error				= -1,
+	_resolver_dns_service_update_result_no_change			= 0,
+	_resolver_dns_service_update_result_newly_registered	= 1,
+	_resolver_dns_service_update_result_updated				= 2,
+	_resolver_dns_service_update_result_deregistered		= 3
+);
+
+static _resolver_dns_service_update_result_t
+_native_dns_service_update(const domainname * const domain, discover_resolver_name_t * const resolver_name)
 {
 	(void)domain;
 	(void)resolver_name;
-	return false;
+	return _resolver_dns_service_update_result_no_change;
 }
 
 //======================================================================================================================
@@ -837,7 +844,7 @@ discover_resolver_addr_query_callback(mDNS * const NONNULL m, DNSQuestion * cons
 
 	mDNS_Lock(m);
 	char if_name[64]; // The same size as the ((NetworkInterfaceInfo *)0)->ifname).
-	check_compile_time_code(sizeof(if_name) == sizeof(((NetworkInterfaceInfo *)0)->ifname));
+	mdns_compile_time_check_local(sizeof(if_name) == sizeof(((NetworkInterfaceInfo *)0)->ifname));
 
 	const char * const if_name_ptr = InterfaceNameForID(m, answer->InterfaceID);
 	if (if_name_ptr) {
@@ -847,7 +854,7 @@ discover_resolver_addr_query_callback(mDNS * const NONNULL m, DNSQuestion * cons
 	}
 	mDNS_Unlock(m);
 
-	const char * action = NULL;
+	bool address_add;
 	mDNSAddr addr_changed;
 
 	mdns_require_quiet(change_event == QC_add ||change_event == QC_rmv, exit);
@@ -865,17 +872,12 @@ discover_resolver_addr_query_callback(mDNS * const NONNULL m, DNSQuestion * cons
 		// Should have no duplicate addresses for the QC_add event.
 		mdns_require_quiet(resolver_addr == NULL, exit);
 
-		if (resolver_name->addresses == NULL) {
-			action = "newly added";
-		} else {
-			action = "added into the existing one";
-		}
-
 		// Add the address into list.
 		resolver_addr = resolver_addresses_add(addr_data, addr_type, &resolver_name->addresses);
 		mdns_require_quiet(resolver_addr != NULL, exit);
 		memcpy(&addr_changed, &resolver_addr->addr, sizeof(addr_changed));
 
+		address_add = true;
 	} else {
 		// Should be the added address in the list and should not be removed twice.
 		mdns_require_quiet(resolver_addr != NULL, exit);
@@ -885,14 +887,16 @@ discover_resolver_addr_query_callback(mDNS * const NONNULL m, DNSQuestion * cons
 
 		// Remove the address from the list.
 		resolver_addresses_remove(addr_data, addr_type, &resolver_name->addresses);
+
+		address_add = false;
 	}
 
 	// Schedule new DNS configuration update.
 	_schedule_dns_service_update(resolver_name);
 
-	LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[Q%u] Resolver " PUB_S " - "
+	LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "[Q%u] Resolver " PUB_ADD_RMV " - "
 		"browsing domain: " PRI_DM_NAME ", resolver name: " PRI_DM_NAME ", address: " PRI_IP_ADDR
-		", interface: " PUB_S ".", mDNSVal16(q->TargetQID), action,
+		", interface: " PUB_S ".", mDNSVal16(q->TargetQID), ADD_RMV_PARAM(address_add),
 		DM_NAME_PARAM(&context->ns_question.qname), DM_NAME_PARAM(&q->qname), &addr_changed, if_name);
 
 exit:
@@ -1148,15 +1152,11 @@ _discover_resolver_update_dns_service(void)
 			continue;
 		}
 
-		LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Updating discovered local resolver - name: "
-			PRI_DM_NAME, DM_NAME_PARAM(&discover_resolver->domain));
+		const _resolver_dns_service_update_result_t err = _native_dns_service_update(&discover_resolver->domain,
+			resolver_name);
 
-		const mDNSBool updated = _native_dns_service_register(&discover_resolver->domain, resolver_name);
-		if (!updated) {
-			LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
-				"Failed to update the DNS service for the locally-discovered resolver - domain: " PRI_DM_NAME,
-				DM_NAME_PARAM(&resolver_name->resolver_name));
-		}
+		LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Discovered local resolver configuration updated"
+			" - name: " PRI_DM_NAME ", result: %d", DM_NAME_PARAM(&discover_resolver->domain), err);
 
 		resolver_name->next_update_time = 0;
 	}

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@
 #include "mdns_strict.h"
 
 mDNSexport int mDNS_LoggingEnabled       = 0;
+mDNSexport int mDNS_DebugLoggingEnabled  = 0;
 mDNSexport int mDNS_PacketLoggingEnabled = 0;
 mDNSexport int mDNS_McastLoggingEnabled  = 0;
 mDNSexport int mDNS_McastTracingEnabled  = 0;

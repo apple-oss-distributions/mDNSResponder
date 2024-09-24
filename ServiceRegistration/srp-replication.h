@@ -103,6 +103,11 @@ enum srpl_state {
     srpl_state_session_message_wait,
     srpl_state_session_response_send,
     srpl_state_send_candidates_message_wait,
+
+#ifdef SRP_TEST_SERVER
+    // States for testing
+    srpl_state_test_event_intercept,
+#endif
 };
 
 enum srpl_event_type {
@@ -143,8 +148,11 @@ typedef struct srpl_srp_client_update_result srpl_srp_client_update_result_t;
 typedef struct srpl_host_update srpl_host_update_t;
 typedef struct srpl_advertise_finished_result srpl_advertise_finished_result_t;
 typedef struct srpl_session srpl_session_t;
+#ifdef SRP_TEST_SERVER
+typedef struct test_packet_state test_packet_state_t;
+#endif
 
-typedef void (*address_change_callback_t)(void *NULLABLE context, addr_t *NULLABLE address, bool added, int err);
+typedef void (*address_change_callback_t)(void *NULLABLE context, addr_t *NULLABLE address, bool added, bool more, int err);
 typedef void (*address_query_cancel_callback_t)(void *NULLABLE context);
 typedef enum {
     address_query_next_address_gotten, // success
@@ -259,19 +267,30 @@ struct srpl_connection {
     char *NONNULL name;
     char *NONNULL state_name;
     comm_t *NULLABLE connection;
+    const char *NULLABLE connection_null_reason; // for debugging, records why we NULLed connection.
+    struct timeval connection_null_time; // When connection was set to NULL
     addr_t connected_address;
     srpl_candidate_t *NULLABLE candidate;
     dso_state_t *NULLABLE dso;
     srpl_instance_t *NULLABLE instance;
     wakeup_t *NULLABLE reconnect_wakeup;
+    wakeup_t *NULLABLE state_timeout; // how long the srpl connecton could stay in a state before we assume it's gone.
     message_t *NULLABLE message;
     adv_host_t *NULLABLE *NULLABLE candidates;
     srpl_host_update_t stashed_host;
     srpl_srp_client_queue_entry_t *NULLABLE client_update_queue;
     wakeup_t *NULLABLE keepalive_send_wakeup;
     wakeup_t *NULLABLE keepalive_receive_wakeup;
+#ifdef SRP_TEST_SERVER
+    void (*NULLABLE advertise_finished_callback)(test_state_t *NONNULL state);
+    void (*NULLABLE srpl_advertise_finished_callback)(srpl_connection_t *NONNULL connection);
+    test_state_t *NULLABLE test_state;
+    srpl_connection_t *NULLABLE next;
+    srp_server_t *NONNULL server;
+#endif
     time_t last_message_sent;
     time_t last_message_received;
+    time_t state_start_time;
     int num_candidates;
     int current_candidate;
     int retry_delay; // How long to send when we send a retry_delay message
@@ -324,12 +343,19 @@ struct srpl_instance {
     srpl_instance_service_t *NONNULL services;
     uint64_t partner_id;
     uint64_t dataset_id;
+    uint32_t priority;
     bool have_partner_id;
     bool have_dataset_id;
+    bool have_priority;
     bool sync_to_join;  // True if sync with the remote partner is required to join the replication
+    bool sync_fail;     // True if sync with the remote partner is declared fail
+    bool discovered_in_window; // True if the instance is discovered in partner discovery window
     bool is_me;
     bool discontinuing; // True if we are in the process of discontinuing this instance.
     bool unmatched; // True if this is an incoming connection that hasn't been associated with a real instance.
+    bool matched_unidentified; // True if an address from address callback matches an unidentified connection
+    bool added_address; // True if address callback adds an address to the instance
+    bool version_mismatch; // True if the version mismatches
 };
 
 typedef enum {
@@ -341,6 +367,7 @@ struct srpl_domain {
     uint64_t partner_id; // SRP replication partner ID
     uint64_t dataset_id;
     bool have_dataset_id;
+    bool dataset_id_committed;
     bool partner_discovery_pending;
     int ref_count;
     srpl_opstate_t srpl_opstate;
@@ -395,16 +422,24 @@ struct srpl_domain {
 #define LOWER56_BIT_MASK 0xFFFFFFFFFFFFFFULL
 
 // SRP Replication protocol versioning
-#define SRPL_VERSION_MULTI_HOST_MESSAGE     1
-#define SRPL_VERSION_ANYCAST                2
-#define SRPL_CURRENT_VERSION                SRPL_VERSION_ANYCAST
+// Protocol version number 1: outdated and no longer being used. This version was supposed to
+//                            support multi host messages but did not really work. After making
+//                            it work, we increment the version number to 3.
+// Protocol version number 2: to support anycast service
+// Protocol version number 3: to support multi host messages
+#define SRPL_VERSION_ANYCAST                    2
+#define SRPL_VERSION_MULTI_HOST_MESSAGE         3
+#define SRPL_VERSION_EDNS0_TSR                  4
+#define SRPL_CURRENT_VERSION                    SRPL_VERSION_EDNS0_TSR
 
 // Variation bits.
 #define SRPL_VARIATION_MULTI_HOST_MESSAGE   1
 #define SRPL_SUPPORTS(srpl_connection, variation) \
-    (((srpl_connection)->variation_mask & ~(variation)) != 0)
+    (((srpl_connection)->variation_mask & (variation)) != 0)
 
 // Exported functions...
+srpl_connection_t *NULLABLE srpl_connection_create(srpl_instance_t *NONNULL instance, bool outgoing);
+void srpl_connection_next_state(srpl_connection_t *NONNULL srpl_connection, srpl_state_t state);
 void srpl_startup(srp_server_t *NONNULL srp_server);
 void srpl_shutdown(srp_server_t *NONNULL server_state);
 void srpl_disable(srp_server_t *NONNULL srp_server);
@@ -420,6 +455,9 @@ void srpl_srp_client_update_finished_event_send(adv_host_t *NONNULL host, int rc
 void srpl_connection_release_(srpl_connection_t *NONNULL srpl_connection, const char *NONNULL file, int line);
 #define srpl_connection_retain(connection) srpl_connection_retain_(connection, __FILE__, __LINE__)
 void srpl_connection_retain_(srpl_connection_t *NONNULL srpl_connection, const char *NONNULL file, int line);
+srpl_domain_t *NULLABLE srpl_domain_create_or_copy(srp_server_t *NONNULL server_state, const char *NONNULL domain_name);
+void srpl_dump_connection_states(srp_server_t *NONNULL server_state);
+void srpl_change_server_priority(srp_server_t *NONNULL server_state, uint32_t new);
 #endif // __SRP_REPLICATION_H__
 
 // Local Variables:

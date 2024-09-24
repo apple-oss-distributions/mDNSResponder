@@ -74,6 +74,7 @@ struct service_instance {
     service_t *NONNULL service;
     int num_instances;
     dns_rr_t *NULLABLE srv, *NULLABLE txt;
+    bool skip_update;
 };
 
 // The update_t structure is used to maintain the ongoing state of a particular DNS Update.

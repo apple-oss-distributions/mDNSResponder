@@ -54,139 +54,139 @@
 // We parse the verb first, then that tells us how many hunks of text to expect.
 // Each hunk is space-delineated; the last hunk can contain spaces.
 static bool config_parse_line(void *context, const char *filename, char *line, int lineno,
-							  config_file_verb_t *verbs, int num_verbs)
+                              config_file_verb_t *verbs, int num_verbs)
 {
-	char *sp;
+    char *sp;
 #define MAXCFHUNKS 10
-	char *hunks[MAXCFHUNKS];
-	int num_hunks = 0;
-	config_file_verb_t *config_file_verb = NULL;
-	int i;
+    char *hunks[MAXCFHUNKS];
+    int num_hunks = 0;
+    config_file_verb_t *config_file_verb = NULL;
+    int i;
 
-	sp = line;
-	do {
-		// Skip leading spaces.
-		while (*sp && (*sp == ' ' || *sp == '\t'))
-			sp++;
-		if (num_hunks == 0) {
-			// If this is a blank line with spaces on it or a comment line, we ignore it.
-			if (!*sp || *sp == '#')
-				return true;
-		}
-		hunks[num_hunks++] = sp;
-		// Find EOL or hunk
-		while (*sp && (*sp != ' ' && *sp != '\t')) {
-			sp++;
-		}
-		if (*sp) {
-			*sp++ = 0;
-		}
-		if (num_hunks == 1) {
-			for (i = 0; i < num_verbs; i++) {
-				// If the verb name matches, or the verb name is NULL (meaning whatever doesn't
-				// match a preceding verb), we've found our verb.
-				if (verbs[i].name == NULL || !strcmp(verbs[i].name, hunks[0])) {
-					config_file_verb = &verbs[i];
-					break;
-				}
-			}
-			if (config_file_verb == NULL) {
-				INFO("unknown verb %s at line %d", hunks[0], lineno);
-				return false;
-			}
-		}				
-	} while (*sp && num_hunks < MAXCFHUNKS && config_file_verb->max_hunks > num_hunks);
-	
-	// If we didn't get the hunks we needed, bail.
-	if (config_file_verb->min_hunks > num_hunks) {
-		INFO("error: verb %s requires between %d and %d modifiers; %d given at line %d",
-			 hunks[0], config_file_verb->min_hunks, config_file_verb->max_hunks, num_hunks, lineno);
-		return false;
-	}
+    sp = line;
+    do {
+        // Skip leading spaces.
+        while (*sp && (*sp == ' ' || *sp == '\t'))
+            sp++;
+        if (num_hunks == 0) {
+            // If this is a blank line with spaces on it or a comment line, we ignore it.
+            if (!*sp || *sp == '#')
+                return true;
+        }
+        hunks[num_hunks++] = sp;
+        // Find EOL or hunk
+        while (*sp && (*sp != ' ' && *sp != '\t')) {
+            sp++;
+        }
+        if (*sp) {
+            *sp++ = 0;
+        }
+        if (num_hunks == 1) {
+            for (i = 0; i < num_verbs; i++) {
+                // If the verb name matches, or the verb name is NULL (meaning whatever doesn't
+                // match a preceding verb), we've found our verb.
+                if (verbs[i].name == NULL || !strcmp(verbs[i].name, hunks[0])) {
+                    config_file_verb = &verbs[i];
+                    break;
+                }
+            }
+            if (config_file_verb == NULL) {
+                INFO("unknown verb %s at line %d", hunks[0], lineno);
+                return false;
+            }
+        }
+    } while (*sp && num_hunks < MAXCFHUNKS && config_file_verb->max_hunks > num_hunks);
 
-	return config_file_verb->handler(context, filename, hunks, num_hunks, lineno);
+    // If we didn't get the hunks we needed, bail.
+    if (config_file_verb->min_hunks > num_hunks) {
+        INFO("error: verb %s requires between %d and %d modifiers; %d given at line %d",
+             hunks[0], config_file_verb->min_hunks, config_file_verb->max_hunks, num_hunks, lineno);
+        return false;
+    }
+
+    return config_file_verb->handler(context, filename, hunks, num_hunks, lineno);
 }
 
 // Parse a configuration file
 bool config_parse(void *context, const char *filename, config_file_verb_t *verbs, int num_verbs)
 {
-	int file;
-	char *buf, *line, *eof, *eol, *nextCR, *nextNL;
-	off_t flen, have;
+    int file;
+    char *buf, *line, *eof, *eol, *nextCR, *nextNL;
+    off_t flen;
     ssize_t len;
+    size_t have;
     int lineno;
-	bool success = true;
+    bool success = true;
 
-	file = open(filename, O_RDONLY);
-	if (file < 0) {
-		INFO("fatal: %s: %s", filename, strerror(errno));
-		return false;
-	}
+    file = open(filename, O_RDONLY);
+    if (file < 0) {
+        INFO("fatal: %s: %s", filename, strerror(errno));
+        return false;
+    }
 
-	// Get the length of the file.
-	flen = lseek(file, 0, SEEK_END);
-	lseek(file, 0, SEEK_SET);
-	buf = malloc(flen + 1);
-	if (buf == NULL) {
-		INFO("fatal: not enough memory for %s", filename);
-		goto outclose;
-	}
-	
-	// Just in case we have a read() syscall that doesn't always read the whole file at once
-	have = 0;
-	while (have < flen) {
-		len = read(file, &buf[have], flen - have);
-		if (len < 0) {
-			INFO("fatal: read of %s at %lld len %lld: %s",
-				 filename, (long long)have, (long long)(flen - have), strerror(errno));
-			goto outfree;
-		}
-		if (len == 0) {
-			INFO("fatal: read of %s at %lld len %lld: zero bytes read",
-				 filename, (long long)have, (long long)(flen - have));
-		outfree:
-			free(buf);
-		outclose:
-			close(file);
-			return false;
-		}
-		have += len;
-	}
-	close(file);
-	buf[flen] = 0; // NUL terminate.
-	eof = buf + flen;
-	
-	// Parse through the file line by line.
-	line = buf;
-	lineno = 1;
-	while (line < eof) { // < because NUL at eof could be last eol.
-		nextCR = strchr(line, '\r');
-		nextNL = strchr(line, '\n');
+    // Get the length of the file.
+    flen = lseek(file, 0, SEEK_END);
+    lseek(file, 0, SEEK_SET);
+    if (flen > 500 * 1024 || (buf = malloc((size_t)flen + 1)) == NULL) {
+        INFO("fatal: not enough memory for %s", filename);
+        goto outclose;
+    }
+    size_t fsize = (size_t)flen;
 
-		// Added complexity for CR/LF agnostic line endings.   Necessary?
-		if (nextNL != NULL) {
-			if (nextCR != NULL && nextCR < nextNL)
-				eol = nextCR;
-			else
-				eol = nextNL;
-		} else {
-			if (nextCR != NULL)
-				eol = nextCR;
-			else
-				eol = buf + flen;
-		}
+    // Just in case we have a read() syscall that doesn't always read the whole file at once
+    have = 0;
+    while (have < fsize) {
+        len = read(file, &buf[have], fsize - have);
+        if (len < 0) {
+            INFO("fatal: read of %s at %lld len %lld: %s",
+                 filename, (long long)have, (long long)(fsize - have), strerror(errno));
+            goto outfree;
+        }
+        if (len == 0) {
+            INFO("fatal: read of %s at %lld len %lld: zero bytes read",
+                 filename, (long long)have, (long long)(fsize - have));
+        outfree:
+            free(buf);
+        outclose:
+            close(file);
+            return false;
+        }
+        have += len;
+    }
+    close(file);
+    buf[flen] = 0; // NUL terminate.
+    eof = buf + flen;
 
-		// If this isn't a blank line or a comment line, parse it.
-		if (eol - line != 1 && line[0] != '#') {
-			*eol = 0;
-			// If we get a bad config line, we're going to return failure later, but continue parsing now.
-			if (!config_parse_line(context, filename, line, lineno, verbs, num_verbs))
-				success = false;
+    // Parse through the file line by line.
+    line = buf;
+    lineno = 1;
+    while (line < eof) { // < because NUL at eof could be last eol.
+        nextCR = strchr(line, '\r');
+        nextNL = strchr(line, '\n');
+
+        // Added complexity for CR/LF agnostic line endings.   Necessary?
+        if (nextNL != NULL) {
+            if (nextCR != NULL && nextCR < nextNL)
+                eol = nextCR;
+            else
+                eol = nextNL;
+        } else {
+            if (nextCR != NULL)
+                eol = nextCR;
+            else
+                eol = buf + flen;
+        }
+
+        // If this isn't a blank line or a comment line, parse it.
+        if (eol - line != 1 && line[0] != '#') {
+            *eol = 0;
+            // If we get a bad config line, we're going to return failure later, but continue parsing now.
+            if (!config_parse_line(context, filename, line, lineno, verbs, num_verbs))
+                success = false;
         }
         line = eol + 1;
         lineno++;
-	}		
-	free(buf);
-	return success;
+    }
+    free(buf);
+    return success;
 }
-

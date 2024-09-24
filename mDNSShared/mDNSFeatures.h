@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 
 #ifndef __mDNSFeatures_h
 #define __mDNSFeatures_h
+
+#include "general.h"
 
 #define HAS_FEATURE_CAT(A, B)       A ## B
 #define HAS_FEATURE_CHECK_0         1
@@ -40,15 +42,11 @@
 #define MDNSRESPONDER_PLATFORM_COMMON       1
 
 // Feature: DNS Push
-// Radar:   <rdar://problem/23226275>
-// Enabled: Yes, for Apple.
+// Radar:   <rdar://119684505>
+// Enabled: No.
 
 #if !defined(MDNSRESPONDER_SUPPORTS_COMMON_DNS_PUSH)
-    #if MDNSRESPONDER_PLATFORM_APPLE
-        #define MDNSRESPONDER_SUPPORTS_COMMON_DNS_PUSH      1
-    #else
-        #define MDNSRESPONDER_SUPPORTS_COMMON_DNS_PUSH      0
-    #endif
+    #define MDNSRESPONDER_SUPPORTS_COMMON_DNS_PUSH 0
 #endif
 
 // Feature: DNS LLQ
@@ -72,6 +70,24 @@
         #define MDNSRESPONDER_SUPPORTS_COMMON_LOCAL_DNS_RESOLVER_DISCOVERY 1
     #else
         #define MDNSRESPONDER_SUPPORTS_COMMON_LOCAL_DNS_RESOLVER_DISCOVERY 0
+    #endif
+#endif
+
+// Feature: DNS-SD Sleep Proxy Service (SPS) client support
+// Radar:   No known radar.
+// Enabled: Compiled for all platforms, except iOS and watchOS (rdar://112912605), and macOS (rdar://118002582).
+
+#if !defined(MDNSRESPONDER_SUPPORTS_COMMON_SPS_CLIENT)
+    #if MDNS_OS(iOS) || MDNS_OS(watchOS) || MDNS_OS(macOS)
+        #define MDNSRESPONDER_SUPPORTS_COMMON_SPS_CLIENT 0
+    #else
+        #define MDNSRESPONDER_SUPPORTS_COMMON_SPS_CLIENT 1
+    #endif
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
+    #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
+        #error "MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH) and MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH) shouldn't be enabled at the same time."
     #endif
 #endif
 

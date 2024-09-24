@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,6 +90,8 @@ base_x_encode(const base_encoding_type_t type, const uint8_t * const data, const
 		case base_encoding_type_base32_hex_without_padding:
 			base_32_hex_encode(data, data_len, true, encoded_str);
 			break;
+		MDNS_COVERED_SWITCH_DEFAULT:
+			break;
 	}
 
 	return encoded_str;
@@ -114,6 +116,9 @@ base_x_get_encoded_string_length(const base_encoding_type_t type, const size_t d
 			require_action(data_len < MAX_LENGTH_B32_HEX_ENCODING_DATA, exit, encoded_str_len = 0);
 			encoded_str_len = data_len / 5 * 8;
 			switch (data_len % 5) {
+				case 0:
+					// encoded_str_len += 0;
+					break;
 				case 1:
 					encoded_str_len += 2;
 					break;
@@ -126,7 +131,13 @@ base_x_get_encoded_string_length(const base_encoding_type_t type, const size_t d
 				case 4:
 					encoded_str_len += 7;
 					break;
+				MDNS_COVERED_SWITCH_DEFAULT:
+					encoded_str_len = 0;
+					break;
 			}
+			break;
+		MDNS_COVERED_SWITCH_DEFAULT:
+			encoded_str_len = 0;
 			break;
 	}
 

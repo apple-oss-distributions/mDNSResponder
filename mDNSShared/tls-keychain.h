@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ struct tls_keychain_context_t {
 #if __APPLE__
 	sec_protocol_metadata_t _Nonnull metadata;
 	sec_trust_t _Nonnull trust_ref;
+	bool trusts_alternative_server_certificates;
 #else // __APPLE__
 	uint8_t not_a_real_member;
 #endif // __APPLE__
@@ -66,6 +67,24 @@ struct tls_keychain_context_t {
  */
 bool
 tls_cert_init(void);
+
+/*!
+ *	@brief
+ *		Specify alternative trusted TLS certificates that can be used to perform trust evaluation.
+ *
+ *	@param certs
+ *		An array of TLS certificates as CFDataRef objects.
+ *
+ *	@result
+ *		kNoErr if the trusted server certificates were successfully updated. Otherwise, a non-zero error code to indicate why
+ *		the operation failed.
+ *
+ *	@discussion
+ *		Calling this function for the second time after the first call overrides the previously configured certificates.
+ *		Calling this function with NULL clears any alternative certificate that we have trusted before.
+ */
+OSStatus
+tls_cert_set_alternative_trusted_certificates(CFArrayRef _Nullable certs);
 
 /*!
  *	@brief
@@ -159,16 +178,12 @@ keychain_identity_remove(void);
  *	@param out_certificates
  *		A pointer to a CFArrayRef variable that can be used to return the retrieved SecCertificateRef array.
  *
- *	@param return_attributes
- *		A boolean value that determines whether it should return the attributes dictionary for the certificates or not.
- *
  *	@result
  *		errSecSuccess if the certificates on the iCloud keychain are found, errSecItemNotFound if the certificates are not found, otherwise an error code to indicate
  *		the error.
  */
 OSStatus
-keychain_certificates_copy(CF_RETURNS_RETAINED CFArrayRef * const _Nonnull out_certificates,
-						   bool return_attributes);
+keychain_certificates_copy(CF_RETURNS_RETAINED CFArrayRef * const _Nonnull out_certificates);
 
 /*!
  *	@brief

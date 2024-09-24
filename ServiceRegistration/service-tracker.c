@@ -1,6 +1,6 @@
 /* service-tracker.c
  *
- * Copyright (c) 2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,6 +48,7 @@
 #include "thread-service.h"
 #include "service-tracker.h"
 #include "probe-srp.h"
+#include "adv-ctl-server.h"
 
 struct service_tracker_callback {
 	service_tracker_callback_t *next;
@@ -65,6 +66,7 @@ struct service_tracker {
 	service_tracker_callback_t *callbacks;
     thread_service_t *NULLABLE thread_services;
     uint16_t rloc16;
+    bool user_service_seen;
 };
 
 static uint64_t service_tracker_serial_number = 0;
@@ -78,6 +80,15 @@ service_tracker_finalize(service_tracker_t *tracker)
         thread_service_release(service);
     }
     free(tracker);
+}
+
+static void
+service_tracker_context_release(void *context)
+{
+    service_tracker_t *tracker = context;
+    if (tracker != NULL) {
+        RELEASE_HERE(tracker, service_tracker);
+    }
 }
 
 RELEASE_RETAIN_FUNCS(service_tracker);
@@ -125,6 +136,7 @@ service_tracker_callback(void *context, cti_service_vec_t *services, cti_status_
     service_tracker_t *tracker = context;
     size_t i;
     thread_service_t **pservice = &tracker->thread_services, *service = NULL;
+    tracker->user_service_seen = false;
 
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
         INFO("[ST%lld] disconnected", tracker->id);
@@ -259,15 +271,25 @@ service_tracker_callback(void *context, cti_service_vec_t *services, cti_status_
                     service->ncp = true;
                 } else {
                     service->user = true;
+                    tracker->user_service_seen = true;
                 }
                 if (cti_service->flags & kCTIFlag_Stable) {
                     service->stable = true;
                 }
             }
         }
-
         accumulator_t accumulator;
         for (service = tracker->thread_services; service != NULL; service = service->next) {
+            // For unicast services, see if there's also an anycast service on the same RLOC16.
+            if (service->service_type == unicast_service) {
+                service->u.unicast.anycast_also_present = false;
+                for (thread_service_t *aservice = tracker->thread_services; aservice != NULL; aservice = aservice->next)
+                {
+                    if (aservice->service_type == anycast_service && aservice->rloc16 == service->rloc16) {
+                        service->u.unicast.anycast_also_present = true;
+                    }
+                }
+            }
             service_tracker_flags_accumulator_init(&accumulator);
             service_tracker_flags_accumulate(&accumulator, service->previous_ncp, service->ncp, "ncp");
             service_tracker_flags_accumulate(&accumulator, service->previous_stable, service->ncp, "stable");
@@ -282,7 +304,19 @@ service_tracker_callback(void *context, cti_service_vec_t *services, cti_status_
         for (service_tracker_callback_t *callback = tracker->callbacks; callback != NULL; callback = callback->next) {
             callback->callback(callback->context);
         }
+        if (!tracker->user_service_seen && tracker->server_state != NULL &&
+            tracker->server_state->awaiting_service_removal)
+        {
+            tracker->server_state->awaiting_service_removal = false;
+            adv_ctl_thread_shutdown_status_check(tracker->server_state);
+        }
     }
+}
+
+bool
+service_tracker_local_service_seen(service_tracker_t *tracker)
+{
+    return tracker->user_service_seen;
 }
 
 service_tracker_t *
@@ -310,18 +344,24 @@ exit:
 void
 service_tracker_start(service_tracker_t *tracker)
 {
-    if (tracker->thread_service_context == NULL) {
-        int status = cti_get_service_list(tracker->server_state, &tracker->thread_service_context,
-                                          tracker, service_tracker_callback, NULL);
-        if (status != kCTIStatus_NoError) {
-            INFO("[ST%lld] service list get failed: %d", tracker->id, status);
-            return;
+    if (tracker->thread_service_context != NULL) {
+        cti_events_discontinue(tracker->thread_service_context);
+        tracker->thread_service_context = NULL;
+        INFO("[ST%lld] restarting", tracker->id);
+        if (tracker->ref_count != 1) {
+            RELEASE_HERE(tracker, service_tracker); // Release the old retain for the callback.
+        } else {
+            FAULT("service tracker reference count should not be 1 here!");
         }
-        INFO("[ST%lld] service list get started", tracker->id);
-        RETAIN_HERE(tracker, service_tracker); // for the callback.
-    } else {
-        INFO("[ST%lld] already started", tracker->id);
     }
+    int status = cti_get_service_list(tracker->server_state, &tracker->thread_service_context,
+                                      tracker, service_tracker_callback, NULL);
+    if (status != kCTIStatus_NoError) {
+        INFO("[ST%lld] service list get failed: %d", tracker->id, status);
+        return;
+    }
+    INFO("[ST%lld] service list get started", tracker->id);
+    RETAIN_HERE(tracker, service_tracker); // for the callback.
 }
 
 bool
@@ -499,22 +539,33 @@ service_tracker_verified_service_get(service_tracker_t *NULLABLE tracker)
     return false;
 }
 
-// If true, there is a service on the list that we can still try to verify
+// Check for an unverified service on the list. If we are currently checking a service, return that service.
 thread_service_t *
-service_tracker_unverified_service_get(service_tracker_t *NULLABLE tracker)
+service_tracker_unverified_service_get(service_tracker_t *NULLABLE tracker, thread_service_type_t service_type)
 {
-    if (tracker == NULL) {
-        return NULL;
-    }
-    for (thread_service_t *service = tracker->thread_services; service != NULL; service = service->next) {
-        if (service->ignore) {
-            continue;
+    thread_service_t *ret = NULL;
+    if (tracker != NULL) {
+        for (thread_service_t *service = tracker->thread_services; service != NULL; service = service->next) {
+            if (service_type != any_service && service_type != service->service_type) {
+                continue;
+            }
+            if (service->ignore) {
+                continue;
+            }
+            if (service->checking) {
+                return service;
+            }
+            if (ret == NULL && !service->checked && !service->probe_state && !service->user) {
+                ret = service;
+            }
         }
-        if (!service->checked && !service->probe_state && !service->user) {
-            return service;
-        }
     }
-    return NULL;
+    if (tracker != NULL && ret != NULL) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "service_tracker_unverified_service_get returning %p", ret);
+        service_tracker_thread_service_note(tracker, ret, buf);
+    }
+    return ret;
 }
 
 static void
@@ -559,8 +610,22 @@ service_tracker_verify_next_service(service_tracker_t *NULLABLE tracker)
             continue;
         }
         // If we didn't continue, yet, it's because we found a service we can probe, so probe it.
-        probe_srp_service(service, tracker, service_tracker_probe_callback);
+        RETAIN_HERE(tracker, service_tracker); // For the srp probe
+        probe_srp_service(service, tracker, service_tracker_probe_callback, service_tracker_context_release);
         return;
+    }
+}
+
+void
+service_tracker_cancel_probes(service_tracker_t *NULLABLE tracker)
+{
+    if (tracker == NULL) {
+        return;
+    }
+    for (thread_service_t *service = tracker->thread_services; service != NULL; service = service->next) {
+        if (service->probe_state) {
+            probe_srp_service_probe_cancel(service);
+        }
     }
 }
 

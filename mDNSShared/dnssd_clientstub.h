@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -60,9 +60,3 @@ DNSServiceRegisterRecordInternal(DNSServiceRef sdRef, DNSRecordRef *recordRef, D
 
 DNSServiceErrorType
 DNSServiceSendQueuedRequestsInternal(DNSServiceRef sdr);
-
-size_t
-get_required_tlv_length_for_service_attr(const DNSServiceAttribute *attr);
-
-void
-put_tlvs_for_service_attr(const DNSServiceAttribute *attr, ipc_msg_hdr *hdr, uint8_t **ptr, const uint8_t *limit);

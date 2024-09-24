@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,10 @@
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
 #include "discover_resolver.h"
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
+#include "dns_push_discovery.h"
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
@@ -191,6 +195,46 @@ mDNSexport mDNSBool mDNSAddrIPv4FromMappedIPv6(mDNSv6Addr *in, mDNSv4Addr* out)
 
     out->NotAnInteger = in->l[3];
     return mDNStrue;
+}
+
+NetworkInterfaceInfo *FirstInterfaceForID(mDNS *const m, const mDNSInterfaceID InterfaceID)
+{
+    NetworkInterfaceInfo *intf = m->HostInterfaces;
+    while (intf && intf->InterfaceID != InterfaceID) intf = intf->next;
+    return(intf);
+}
+
+NetworkInterfaceInfo *FirstIPv4LLInterfaceForID(mDNS *const m, const mDNSInterfaceID InterfaceID)
+{
+    NetworkInterfaceInfo *intf;
+
+    if (!InterfaceID)
+        return mDNSNULL;
+
+    // Note: We don't check for InterfaceActive, as the active interface could be IPv6 and
+    // we still want to find the first IPv4 Link-Local interface
+    for (intf = m->HostInterfaces; intf; intf = intf->next)
+    {
+        if (intf->InterfaceID == InterfaceID &&
+            intf->ip.type == mDNSAddrType_IPv4 && mDNSv4AddressIsLinkLocal(&intf->ip.ip.v4))
+        {
+            debugf("FirstIPv4LLInterfaceForID: found LL interface with address %.4a", &intf->ip.ip.v4);
+            return intf;
+        }
+    }
+    return (mDNSNULL);
+}
+
+mDNSexport char *InterfaceNameForID(mDNS *const m, const mDNSInterfaceID InterfaceID)
+{
+    NetworkInterfaceInfo *intf = FirstInterfaceForID(m, InterfaceID);
+    return(intf ? intf->ifname : mDNSNULL);
+}
+
+mDNSexport const char *InterfaceNameForIDOrEmptyString(const mDNSInterfaceID InterfaceID)
+{
+    const char *const ifName = InterfaceNameForID(&mDNSStorage, InterfaceID);
+    return (ifName ? ifName : "");
 }
 
 mDNSexport NetworkInterfaceInfo *GetFirstActiveInterface(NetworkInterfaceInfo *intf)
@@ -516,6 +560,12 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
                 length += mDNS_snprintf(buffer+length, RemSpc, " Platform %d",    opt->u.tracer.platf);
                 length += mDNS_snprintf(buffer+length, RemSpc, " mDNSVers %d",    opt->u.tracer.mDNSv);
                 break;
+            case kDNSOpt_TSR:
+                length += mDNS_snprintf(buffer+length, RemSpc, " TSR");
+                length += mDNS_snprintf(buffer+length, RemSpc, " Tm %d", opt->u.tsr.timeStamp);
+                length += mDNS_snprintf(buffer+length, RemSpc, " Hk %x", opt->u.tsr.hostkeyHash);
+                length += mDNS_snprintf(buffer+length, RemSpc, " Ix %u", opt->u.tsr.recIndex);
+                break;
             default:
                 length += mDNS_snprintf(buffer+length, RemSpc, " Unknown %d",  opt->opt);
                 break;
@@ -630,6 +680,23 @@ mDNSexport char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RD
     return(buffer);
 }
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+
+mDNSexport const mDNSu8 *GetPrintableRDataBytes(mDNSu8 *const outBuffer, const mDNSu32 bufferLen,
+	const mDNSu16 recordType, const mDNSu8 * const rdata, const mDNSu32 rdataLen)
+{
+	const mDNSu32 totalLen = rdataLen + 2;
+	mdns_require_return_value(bufferLen >= totalLen, mDNSNULL);
+
+	outBuffer[0] = (mDNSu8)((recordType >> 8) & 0xFF);
+	outBuffer[1] = (mDNSu8)((recordType     ) & 0xFF);
+	mDNSPlatformMemCopy(&outBuffer[2], rdata, (mDNSu32)rdataLen);
+
+	return outBuffer;
+}
+
+#endif
+
 // See comments in mDNSEmbeddedAPI.h
 #if _PLATFORM_HAS_STRONG_PRNG_
 #define mDNSRandomNumber mDNSPlatformRandomNumber
@@ -698,6 +765,8 @@ mDNSexport mDNSu32 mDNS_NonCryptoHashUpdateBytes(const mDNSNonCryptoHash algorit
             }
         }
             break;
+        MDNS_COVERED_SWITCH_DEFAULT:
+            break;
     }
 
     return hash;
@@ -711,8 +780,27 @@ mDNSexport mDNSu32 mDNS_NonCryptoHash(const mDNSNonCryptoHash algorithm, const m
                 len);
         case mDNSNonCryptoHash_SDBM:
             return mDNS_NonCryptoHashUpdateBytes(mDNSNonCryptoHash_SDBM, 0, bytes, len);
+        MDNS_COVERED_SWITCH_DEFAULT:
+            return 0;
     }
-    return 0;
+}
+
+mDNSexport mDNSu32 mDNS_DomainNameFNV1aHash(const domainname *const name)
+{
+    mDNSu32 hash = MDNSRESPONDER_FNV_32_BIT_OFFSET_BASIS;
+    const mDNSu32 len = DomainNameLength(name);
+    const mDNSu8 *const data = name->c;
+    for (mDNSu32 i = 0; i < len; ++i)
+    {
+        hash ^= mDNSASCIITolower(data[i]);
+        hash *= MDNSRESPONDER_FNV_32_BIT_PRIME;
+    }
+    return hash;
+}
+
+mDNSexport mDNSs32 mDNSGetTimeOfDay(struct timeval *const tv, struct timezone *const tz)
+{
+    return gettimeofday(tv, tz);
 }
 
 mDNSexport mDNSBool mDNSSameAddress(const mDNSAddr *ip1, const mDNSAddr *ip2)
@@ -724,6 +812,8 @@ mDNSexport mDNSBool mDNSSameAddress(const mDNSAddr *ip1, const mDNSAddr *ip2)
         case mDNSAddrType_None: return(mDNStrue);      // Empty addresses have no data and are therefore always equal
         case mDNSAddrType_IPv4: return (mDNSBool)(mDNSSameIPv4Address(ip1->ip.v4, ip2->ip.v4));
         case mDNSAddrType_IPv6: return (mDNSBool)(mDNSSameIPv6Address(ip1->ip.v6, ip2->ip.v6));
+        default:
+            break;
         }
     }
     return(mDNSfalse);
@@ -1996,8 +2086,8 @@ mDNSexport mDNSBool RRTypeAnswersQuestionType(const ResourceRecord *const rr, co
     (void) flags;
 #endif
 
-    // TSR should not answer any questions.
-    if (rr->rrtype == kDNSType_TSR)
+    // OPT should not answer any questions.
+    if (rr->rrtype == kDNSType_OPT)
     {
         return mDNSfalse;
     }
@@ -2039,6 +2129,24 @@ mDNSexport mDNSBool RRTypeAnswersQuestionType(const ResourceRecord *const rr, co
     return mDNSfalse;
 }
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+mDNSlocal mDNSBool RRMatchesQuestionService(const ResourceRecord *const rr, const DNSQuestion *const q)
+{
+    return mdns_cache_metadata_get_dns_service(rr->metadata) == q->dnsservice;
+}
+#endif
+
+mDNSlocal mDNSBool RRIsResolvedBymDNS(const ResourceRecord *const rr)
+{
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+    if (mdns_cache_metadata_get_dns_service(rr->metadata))
+    {
+        return mDNSfalse;
+    }
+#endif
+    return (rr->InterfaceID != 0);
+}
+
 // ResourceRecordAnswersQuestion returns mDNStrue if the given resource record is a valid answer to the given question.
 // SameNameRecordAnswersQuestion is the same, except it skips the expensive SameDomainName() call.
 // SameDomainName() is generally cheap when the names don't match, but expensive when they do match,
@@ -2062,21 +2170,42 @@ mDNSlocal mDNSBool SameNameRecordAnswersQuestion(const ResourceRecord *const rr,
         q->InterfaceID && q->InterfaceID != mDNSInterface_LocalOnly &&
         rr->InterfaceID != q->InterfaceID) return(mDNSfalse);
 
-    // Resource record received via unicast, the resolver group ID should match ?
-    if (!isAuthRecord && !rr->InterfaceID)
+#if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+    if (DNSQuestionUsesMDNSAlternativeService(q))
     {
-        if (mDNSOpaque16IsZero(q->TargetQID)) return(mDNSfalse);
-#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
-        if (mdns_cache_metadata_get_dns_service(rr->metadata) != q->dnsservice) return(mDNSfalse);
-#else
-        const mDNSu32 idr = rr->rDNSServer ? rr->rDNSServer->resGroupID : 0;
-        const mDNSu32 idq = q->qDNSServer ? q->qDNSServer->resGroupID : 0;
-        if (idr != idq) return(mDNSfalse);
-#endif
+        if (!RRMatchesQuestionService(rr, q))
+        {
+            return mDNSfalse;
+        }
     }
+    else
+#endif
+    {
+        const mDNSBool resolvedBymDNS = RRIsResolvedBymDNS(rr);
+        mDNSBool ismDNSQuestion = mDNSOpaque16IsZero(q->TargetQID);
 
-    // If ResourceRecord received via multicast, but question was unicast, then shouldn't use record to answer this question
-    if (rr->InterfaceID && !mDNSOpaque16IsZero(q->TargetQID)) return(mDNSfalse);
+        // If the record is resolved via the non-mDNS channel, the server or service used should match.
+        if (!isAuthRecord && !resolvedBymDNS)
+        {
+            if (ismDNSQuestion)
+            {
+                return mDNSfalse;
+            }
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+            if (!RRMatchesQuestionService(rr, q)) return(mDNSfalse);
+#else
+            const mDNSu32 idr = rr->rDNSServer ? rr->rDNSServer->resGroupID : 0;
+            const mDNSu32 idq = q->qDNSServer ? q->qDNSServer->resGroupID : 0;
+            if (idr != idq) return(mDNSfalse);
+#endif
+        }
+
+        // mDNS records can only be used to answer mDNS questions.
+        if (resolvedBymDNS && !ismDNSQuestion)
+        {
+            return mDNSfalse;
+        }
+    }
 
     // CNAME answers question of any type and a negative cache record should not prevent us from querying other
     // valid types at the same name.
@@ -2242,25 +2371,42 @@ mDNSexport mDNSBool AnyTypeRecordAnswersQuestion(const AuthRecord *const ar, con
         q->InterfaceID && q->InterfaceID != mDNSInterface_LocalOnly &&
         rr->InterfaceID != q->InterfaceID) return(mDNSfalse);
 
-    // Resource record received via unicast, the resolver group ID should match ?
-    // Note that Auth Records are normally setup with NULL InterfaceID and
-    // both the DNSServers are assumed to be NULL in that case
-    if (!rr->InterfaceID)
+#if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+    if (DNSQuestionUsesMDNSAlternativeService(q))
     {
+        if (!RRMatchesQuestionService(rr, q))
+        {
+            return mDNSfalse;
+        }
+    }
+    else
+#endif
+    {
+        const mDNSBool resolvedByMDNS = RRIsResolvedBymDNS(rr);
+        // Resource record received via non-mDNS channel, the server or service should match.
+        // Note that Auth Records are normally setup with NULL InterfaceID and
+        // both the DNSServers are assumed to be NULL in that case
+        if (!resolvedByMDNS)
+        {
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
-        if (mdns_cache_metadata_get_dns_service(rr->metadata) != q->dnsservice) return(mDNSfalse);
+            if (!RRMatchesQuestionService(rr, q)) return(mDNSfalse);
 #else
-        const mDNSu32 idr = rr->rDNSServer ? rr->rDNSServer->resGroupID : 0;
-        const mDNSu32 idq = q->qDNSServer ? q->qDNSServer->resGroupID : 0;
-        if (idr != idq) return(mDNSfalse);
+            const mDNSu32 idr = rr->rDNSServer ? rr->rDNSServer->resGroupID : 0;
+            const mDNSu32 idq = q->qDNSServer ? q->qDNSServer->resGroupID : 0;
+            if (idr != idq) return(mDNSfalse);
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, RANDOM_AWDL_HOSTNAME)
-        if (!mDNSPlatformValidRecordForInterface(ar, q->InterfaceID)) return(mDNSfalse);
+            if (!mDNSPlatformValidRecordForInterface(ar, q->InterfaceID)) return(mDNSfalse);
 #endif
-    }
+        }
 
-    // If ResourceRecord received via multicast, but question was unicast, then shouldn't use record to answer this question
-    if (rr->InterfaceID && !mDNSOpaque16IsZero(q->TargetQID)) return(mDNSfalse);
+        // mDNS records can only be used to answer mDNS questions.
+        const mDNSBool isMDNSQuestion = mDNSOpaque16IsZero(q->TargetQID);
+        if (resolvedByMDNS && !isMDNSQuestion)
+        {
+            return mDNSfalse;
+        }
+    }
 
     if (rr->rrclass != q->qclass && q->qclass != kDNSQClass_ANY) return(mDNSfalse);
 
@@ -2277,12 +2423,17 @@ mDNSexport mDNSBool ResourceRecordAnswersUnicastResponse(const ResourceRecord *c
     if (q->Suppressed)
         return mDNSfalse;
 
-    // For resource records created using multicast, the InterfaceIDs have to match
+    // For resource records created using multicast or DNS push, the InterfaceIDs have to match.
     if (rr->InterfaceID &&
         q->InterfaceID && rr->InterfaceID != q->InterfaceID) return(mDNSfalse);
 
-    // If ResourceRecord received via multicast, but question was unicast, then shouldn't use record to answer this question.
-    if (rr->InterfaceID && !mDNSOpaque16IsZero(q->TargetQID)) return(mDNSfalse);
+    // If record is resolved by mDNS, but question is non-mDNS, then should not use it to answer this question.
+    const mDNSBool resolvedByMDNS = RRIsResolvedBymDNS(rr);
+    const mDNSBool isMDNSQuestion = mDNSOpaque16IsZero(q->TargetQID);
+    if (resolvedByMDNS && !isMDNSQuestion)
+    {
+        return mDNSfalse;
+    }
 
     // RR type CNAME matches any query type. QTYPE ANY matches any RR type. QCLASS ANY matches any RR class.
     RRTypeAnswersQuestionTypeFlags flags = kRRTypeAnswersQuestionTypeFlagsNone;
@@ -2425,6 +2576,46 @@ mDNSexport mDNSBool ValidateRData(const mDNSu16 rrtype, const mDNSu16 rdlength, 
 
     default:            return(mDNStrue);       // Allow all other types without checking
     }
+}
+
+mDNSexport const mDNSu8 * ResourceRecordGetRDataBytesPointer(const ResourceRecord *const rr,
+    mDNSu8 * const bytesBuffer, const mDNSu16 bufferSize, mDNSu16 *const outRDataLen, mStatus *const outError)
+{
+    mStatus err;
+    const mDNSu8 *rdataBytes = mDNSNULL;
+    mDNSu16 rdataLen = 0;
+    switch (rr->rrtype)
+    {
+        case kDNSType_SOA:
+        case kDNSType_MX:
+        case kDNSType_AFSDB:
+        case kDNSType_RT:
+        case kDNSType_RP:
+        case kDNSType_SRV:
+        case kDNSType_PX:
+        case kDNSType_KX:
+        case kDNSType_OPT:
+        case kDNSType_NSEC:
+        case kDNSType_TSR:
+        {
+            const mDNSu8 *const rdataBytesEnd = putRData(mDNSNULL, bytesBuffer, bytesBuffer + bufferSize, rr);
+            mdns_require_action_quiet(rdataBytesEnd && (rdataBytesEnd > bytesBuffer), exit, err = mStatus_BadParamErr);
+
+            rdataBytes = bytesBuffer;
+            rdataLen = (rdataBytesEnd - bytesBuffer);
+            break;
+        }
+        default:
+            rdataBytes = rr->rdata->u.data;
+            rdataLen = rr->rdlength;
+            break;
+    }
+    err = mStatus_NoError;
+
+exit:
+    mdns_assign(outRDataLen, rdataLen);
+    mdns_assign(outError, err);
+    return rdataBytes;
 }
 
 // ***************************************************************************
@@ -2655,12 +2846,12 @@ mDNSexport mDNSu8 *putRData(const DNSMessage *const msg, mDNSu8 *ptr, const mDNS
         int len = 0;
         const rdataOPT *opt;
         const rdataOPT *const end = (const rdataOPT *)&rr->rdata->u.data[rr->rdlength];
-        for (opt = &rr->rdata->u.opt[0]; opt < end; opt++) 
+        for (opt = &rr->rdata->u.opt[0]; opt < end; opt++)
             len += DNSOpt_Data_Space(opt);
-        if (ptr + len > limit) 
-        { 
-            LogMsg("ERROR: putOptRData - out of space"); 
-            return mDNSNULL; 
+        if (ptr + len > limit)
+        {
+            LogMsg("ERROR: putOptRData - out of space");
+            return mDNSNULL;
         }
         for (opt = &rr->rdata->u.opt[0]; opt < end; opt++)
         {
@@ -2699,6 +2890,16 @@ mDNSexport mDNSu8 *putRData(const DNSMessage *const msg, mDNSu8 *ptr, const mDNS
             case kDNSOpt_Trace:
                 *ptr++ = opt->u.tracer.platf;
                 ptr    = putVal32(ptr, opt->u.tracer.mDNSv);
+                break;
+            case kDNSOpt_TSR:
+                {
+                    mDNSs32 tsr_relative = mDNSPlatformContinuousTimeSeconds() - opt->u.tsr.timeStamp;
+                    ptr = putVal32(ptr, tsr_relative);
+                    ptr = putVal32(ptr, opt->u.tsr.hostkeyHash);
+                    ptr = putVal16(ptr, opt->u.tsr.recIndex);
+                }
+                break;
+            default:
                 break;
             }
         }
@@ -3070,6 +3271,8 @@ mDNSexport const mDNSu8 *skipDomainName(const DNSMessage *const msg, const mDNSu
         case 0xC0:  if (ptr + 1 > end)                          // Skip the two-byte name compression pointer.
             { debugf("skipDomainName: Malformed compression pointer (overruns packet end)"); return(mDNSNULL); }
             return(ptr + 1);
+        default:
+            break;
         }
     }
 }
@@ -3119,6 +3322,9 @@ mDNSexport const mDNSu8 *getDomainName(const DNSMessage *const msg, const mDNSu8
             { debugf("getDomainName: Illegal compression pointer not within packet boundaries"); return(mDNSNULL); }
             if (*ptr & 0xC0)
             { debugf("getDomainName: Compression pointer must point to real label"); return(mDNSNULL); }
+            break;
+
+        default:
             break;
         }
     }
@@ -3629,6 +3835,17 @@ mDNSexport mDNSBool SetRData(const DNSMessage *const msg, const mDNSu8 *ptr, con
                     opt->u.tracer.mDNSv   = 0xFFFFFFFF;
                     opt++;
                 }
+                break;
+            case kDNSOpt_TSR:
+                if (opt->optlen == DNSOpt_TSRData_Space - 4)
+                {
+                    opt->u.tsr.timeStamp    = (mDNSs32) ((mDNSu32)ptr[0] << 24 | (mDNSu32)ptr[1] << 16 | (mDNSu32)ptr[2] << 8 | ptr[3]);
+                    opt->u.tsr.hostkeyHash  = (mDNSu32) ((mDNSu32)ptr[4] << 24 | (mDNSu32)ptr[5] << 16 | (mDNSu32)ptr[6] << 8 | ptr[7]);
+                    opt->u.tsr.recIndex     = (mDNSu16) ((mDNSu16)ptr[8] << 8 | ptr[9]);
+                    opt++;
+                }
+                break;
+            default:
                 break;
             }
             ptr += currentopt->optlen;
@@ -4218,7 +4435,7 @@ mDNSlocal void DumpMDNSPacket_CalculateAndCheckIfMsgAppearsBefore(const DNSMessa
     static mDNSu32 previousMsg2ndHashes[NUM_OF_SAVED_HASH_COUNT] = {0};
     static mDNSu32 nextMsgHashSlot = 0;
     static mDNSu32 nextMsgHashUninitializedSlot = 0;
-    check_compile_time_code(mdns_countof(previousMsgHashes) == mdns_countof(previousMsg2ndHashes));
+    mdns_compile_time_check_local(mdns_countof(previousMsgHashes) == mdns_countof(previousMsg2ndHashes));
 
     mDNSBool msgHashSame = mDNSfalse;
     count = Min(mdns_countof(previousMsgHashes), nextMsgHashUninitializedSlot);
@@ -4247,7 +4464,7 @@ mDNSlocal void DumpMDNSPacket_CalculateAndCheckIfMsgAppearsBefore(const DNSMessa
     static mDNSu32 previousComplete2ndHashes[NUM_OF_SAVED_HASH_COUNT] = {0};
     static mDNSu32 nextCompleteHashSlot = 0;
     static mDNSu32 nextCompleteHashUninitializedSlot = 0;
-    check_compile_time_code(mdns_countof(previousCompleteHashes) == mdns_countof(previousComplete2ndHashes));
+    mdns_compile_time_check_local(mdns_countof(previousCompleteHashes) == mdns_countof(previousComplete2ndHashes));
 
     mDNSBool completeHashSame = mDNSfalse;
     count = Min(mdns_countof(previousCompleteHashes), nextCompleteHashUninitializedSlot);
@@ -5058,6 +5275,40 @@ mDNSBool DNSQuestionCollectsMDNSMetric(const DNSQuestion *const q)
 }
 #endif
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+
+mDNSlocal mDNSBool DNSQuestionUsesAWDL(const DNSQuestion *const q)
+{
+    if (q->InterfaceID == mDNSInterface_Any)
+    {
+        return ((q->flags & kDNSServiceFlagsIncludeAWDL) != 0);
+    }
+    else
+    {
+        return mDNSPlatformInterfaceIsAWDL(q->InterfaceID);
+    }
+}
+
+mDNSBool DNSQuestionIsEligibleForMDNSAlternativeService(const DNSQuestion *const q)
+{
+    // 0. The system is not in a demo mode where mDNS traffic is ensured to be lossless in a wired connection.
+    // 1. The question must be an mDNS question.
+    // 2. The question cannot enable resolution over AWDL.
+    //    (because the resolution over mDNS alternative service is mutual exclusive with the resolution over AWDL)
+    return (!is_airplay_demo_mode_enabled() && mDNSOpaque16IsZero(q->TargetQID) && !DNSQuestionUsesAWDL(q));
+}
+
+mDNSBool DNSQuestionRequestsMDNSAlternativeService(const DNSQuestion *const q)
+{
+    return (!mDNSOpaque16IsZero(q->TargetQID) && !Question_uDNS(q));
+}
+
+mDNSBool DNSQuestionUsesMDNSAlternativeService(const DNSQuestion *const q)
+{
+    return q->dnsservice && mdns_dns_service_is_mdns_alternative(q->dnsservice);
+}
+#endif
+
 // ***************************************************************************
 // MARK: - RR List Management & Task Management
 
@@ -5763,6 +6014,8 @@ hexadecimal: if (F.lSize) n = va_arg(arg, unsigned long);
                         s = mDNS_VACB;                  // Reset s back to the start of the buffer
                         break;
                     }
+                    default:
+                        break;
                     }
                 // Make sure we don't truncate in the middle of a UTF-8 character (see similar comment below)
                 if (F.havePrecision && i > F.precision)

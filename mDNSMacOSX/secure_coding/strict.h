@@ -410,16 +410,16 @@ void *strict_malloc_zone_memalign(malloc_zone_t *zone, size_t alignment, size_t 
 __END_DECLS
 
 #if defined(__cplusplus)
-template<class T>
+template<class T, typename... Params>
 __attribute__((__warn_unused_result__))
 inline __attribute__((always_inline))
-T * _Nonnull strict_new()
+T * _Nonnull strict_new(Params && ...params)
 {
 	// Strictly speaking, we neither need to make sure new doesn't throw,
 	// nor check if new returned nullptr because strict_calloc is supplying
 	// the memory and it is guaranteed to either return the bytes requested
 	// or abort. But we'll check for nullptr to be extra defensive.
-	T *buffer = new (strict_calloc(1, sizeof(T))) T;
+	T *buffer = new (strict_calloc(1, sizeof(T))) T(std::forward<Params>(params)...);
 	if (_STRICT_UNLIKELY_IS_NULL(buffer)) {
 		STRICT_ABORT("strict_new(%s) failed", __PRETTY_FUNCTION__);
 		// Not reached
@@ -447,8 +447,8 @@ T * _Nonnull strict_placement_new(void * _Nonnull _buffer)
 	return buffer;
 }
 
-#define STRICT_NEW_TYPE(TYPE)									\
-	strict_new<TYPE>()
+#define STRICT_NEW_TYPE(TYPE, ...)								\
+	strict_new<TYPE>(__VA_ARGS__)
 
 #define STRICT_PLACEMENT_NEW_TYPE(TYPE, MEMORY)					\
 	strict_placement_new<TYPE>(MEMORY)

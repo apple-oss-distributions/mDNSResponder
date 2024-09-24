@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,12 @@
 
 #define MRCS_UNION_MEMBER(NAME)	struct mrcs_ ## NAME ## _s *	_mrcs_ ## NAME
 
-#define MRCS_OBJECT_MEMBERS					\
-	MRCS_UNION_MEMBER(object);				\
-	MRCS_UNION_MEMBER(dns_proxy);			\
-	MRCS_UNION_MEMBER(dns_proxy_manager);	\
-	MRCS_UNION_MEMBER(dns_proxy_request);	\
+#define MRCS_OBJECT_MEMBERS									\
+	MRCS_UNION_MEMBER(object);								\
+	MRCS_UNION_MEMBER(dns_proxy);							\
+	MRCS_UNION_MEMBER(dns_proxy_manager);					\
+	MRCS_UNION_MEMBER(dns_proxy_request);					\
+	MRCS_UNION_MEMBER(dns_service_registration_request);	\
 	MRCS_UNION_MEMBER(session);
 
 #endif	// MRCS_OBJECT_MEMBERS_H

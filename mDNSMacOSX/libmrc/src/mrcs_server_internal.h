@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,5 +23,6 @@
 
 MRCS_DECL(session);
 MRCS_DECL(dns_proxy_request);
+MRCS_DECL(dns_service_registration_request);
 
 #endif	// MRCS_SERVER_INTERNAL_H

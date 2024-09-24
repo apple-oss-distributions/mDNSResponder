@@ -1,6 +1,18 @@
 /*
-	Copyright (c) 2020 Apple Inc. All rights reserved.
-*/
+ * Copyright (c) 2020-2023 Apple Inc. All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include "DNSServerDNSSEC.h"
 
@@ -3453,7 +3465,7 @@ Boolean
 			require_quiet( digestToSignRef != NULL, ecdsa_sign_exit);
 
 			// Sign the data
-			sigDataRef = SecKeyCreateSignature( secKeyRef, kSecKeyAlgorithmECDSASignatureRFC4754, digestToSignRef, &cfError );
+			sigDataRef = SecKeyCreateSignature( secKeyRef, kSecKeyAlgorithmECDSASignatureDigestRFC4754, digestToSignRef, &cfError );
 			require_quiet( sigDataRef != NULL, ecdsa_sign_exit );
 
 			// copy the result
@@ -3571,7 +3583,7 @@ Boolean
 			{
 				memcpy( pubKeyDataWithPrefix + 1, inKeyInfo->ECDSAP384SHA384.pubKey, sizeof( inKeyInfo->ECDSAP384SHA384.pubKey ) );
 			}
-			verifyAlgorithm = kSecKeyAlgorithmECDSASignatureRFC4754;
+			verifyAlgorithm = kSecKeyAlgorithmECDSASignatureDigestRFC4754;
 
 			pubKeyDic = CFDictionaryCreate( kCFAllocatorDefault, pubKeyRefOpts, pubKeyRefVals,
 				sizeof( pubKeyRefOpts ) / sizeof( void * ), &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks );

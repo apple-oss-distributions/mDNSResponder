@@ -1,6 +1,6 @@
 /* route.h
  *
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -345,6 +345,7 @@ struct route_state {
     bool have_mesh_local_prefix;
     bool have_mesh_local_address;
     bool advertising_srp_anycast_service;
+    bool advertising_srp_unicast_service;
     bool have_proposed_srp_listener_address;
     bool seen_listener_address;
     struct in6_addr thread_mesh_local_prefix;
@@ -358,6 +359,8 @@ struct route_state {
     int num_thread_interfaces; // Should be zero or one.
     int ula_serial;
     int num_thread_prefixes;
+    int times_advertised_unicast, times_advertised_anycast;
+    int times_unadvertised_unicast, times_unadvertised_anycast;
     subproc_t *NULLABLE thread_interface_enumerator_process;
     subproc_t *NULLABLE thread_prefix_adder_process;
     subproc_t *NULLABLE thread_rti_setter_process;
@@ -366,6 +369,7 @@ struct route_state {
     char *NULLABLE thread_interface_name;
     char *NULLABLE home_interface_name;
     bool have_non_thread_interface;
+    bool seen_legacy_service;
 #if SRP_FEATURE_NAT64
     nat64_t *NULLABLE nat64;
 #endif
@@ -413,7 +417,7 @@ struct route_state {
 #endif // RA_TESTER
 };
 
-extern srp_server_t *NONNULL srp_server; // temporary static srp server pointer
+extern route_state_t *NONNULL route_states; // same
 
 route_state_t *NULLABLE route_state_create(srp_server_t *NONNULL server_state, const char *NONNULL name);
 void route_ula_setup(route_state_t *NULLABLE route_state);
@@ -437,6 +441,12 @@ void interface_retain_(interface_t *NONNULL interface, const char *NONNULL file,
 #define interface_release(interface) interface_release_(interface, __FILE__, __LINE__)
 void interface_release_(interface_t *NONNULL interface, const char *NONNULL file, int line);
 void route_refresh_interface_list(route_state_t *NONNULL route_state);
+
+void router_solicit(icmp_message_t *NONNULL message);
+void router_advertisement(icmp_message_t *NONNULL message);
+void neighbor_advertisement(icmp_message_t *NONNULL message);
+
+int route_get_current_infra_interface_index(void);
 #endif // __SERVICE_REGISTRATION_ROUTE_H
 
 // Local Variables:

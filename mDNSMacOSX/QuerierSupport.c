@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,8 +61,6 @@ mDNSlocal void _Querier_ApplyUpdate(mdns_subscriber_t subscriber);
 
 mDNSlocal void _Querier_HandleSubscriberInvalidation(mdns_subscriber_t subscriber);
 
-mDNSlocal mDNSBool _Querier_QuestionBelongsToSelf(const DNSQuestion *q);
-
 mDNSlocal void _Querier_LogDNSServices(const mdns_dns_service_manager_t manager)
 {
     __block mDNSu32 count = 0;
@@ -106,7 +104,7 @@ mDNSlocal void _Querier_StartNEDNSProxyStateWatch(void)
             mDNS_Lock(m);
             // Check if outstanding DNSQuestions need to switch to a different DNS service now that an NEDNSProxy is
             // running or no longer running.
-            Querier_ProcessDNSServiceChanges();
+            Querier_ProcessDNSServiceChanges(mDNSfalse);
             // When a NetworkExtension DNS proxy is running, all Do53 queries are diverted to the DNS proxy by the
             // kernel. Therefore, when there's a state change, we flush all records marked as having come from a Do53
             // service because of either of the following reasons:
@@ -188,13 +186,16 @@ mDNSexport mdns_dns_service_manager_t Querier_GetDNSServiceManager(void)
             case mdns_event_update:
                 mdns_dns_service_manager_apply_pending_updates(manager);
                 mDNS_Lock(m);
-                Querier_ProcessDNSServiceChanges();
+                Querier_ProcessDNSServiceChanges(mDNSfalse);
                 _Querier_LogDNSServices(manager);
                 mDNS_Unlock(m);
                 break;
 
             case mdns_event_invalidated:
                 mdns_release(manager);
+                break;
+
+            MDNS_COVERED_SWITCH_DEFAULT:
                 break;
         }
         KQueueUnlock("DNS Service Manager event handler");
@@ -205,47 +206,61 @@ mDNSexport mdns_dns_service_manager_t Querier_GetDNSServiceManager(void)
     return sDNSServiceManager;
 }
 
-mDNSlocal mdns_dns_service_t _Querier_GetDNSPushDNSService(const mdns_dns_service_manager_t manager,
-    const domainname *const zone, const uint32_t ifIndex)
+#if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+
+mDNSlocal mdns_dns_service_t _Querier_GetMDNSAlternativeService(const mdns_dns_service_manager_t manager,
+    const DNSQuestion * const q)
 {
-    mdns_dns_service_t service = NULL;
-
-    static mdns_domain_name_t dnsPushSRVDotLocal = NULL;
-    mdns_domain_name_t dnsPushSRV = NULL;
-
-    const bool isLocalDomain = SameDomainName(zone, &localdomain);
-    if (isLocalDomain)
+    mdns_dns_service_t service;
+    if (q->InterfaceID)
     {
-        if (!dnsPushSRVDotLocal)
-        {
-            dnsPushSRVDotLocal = mdns_domain_name_create("_dns‑push‑tls._tcp.local", mdns_domain_name_create_opts_none,
-                NULL);
-            require_quiet(dnsPushSRVDotLocal, exit);
-        }
-        dnsPushSRV = dnsPushSRVDotLocal;
-        mdns_retain(dnsPushSRV);
+        const uint32_t ifIndex = (uint32_t)((uintptr_t)q->InterfaceID);
+        service = mdns_dns_service_manager_get_interface_scoped_mdns_alternative_service(manager, q->qname.c,
+            ifIndex);
     }
     else
     {
-        // "_dns-push-tls._tcp"
-        domainname dnsPushSRVToConstruct = {
-            .c = {13, '_', 'd', 'n', 's', '-', 'p', 'u', 's', 'h', '-', 't', 'l', 's', 4, '_', 't', 'c', 'p', 0}
-        };
-        AppendDomainName(&dnsPushSRVToConstruct, zone);
-        dnsPushSRV = mdns_domain_name_create_with_labels(dnsPushSRVToConstruct.c, NULL);
-        require_quiet(dnsPushSRV, exit);
+        service = mdns_dns_service_manager_get_unscoped_mdns_alternative_service(manager, q->qname.c);
     }
+    return service;
+}
 
-    service = mdns_dns_service_manager_get_push_service(manager, dnsPushSRV, ifIndex);
-    if (!service && isLocalDomain)
-    {
-        mdns_dns_service_manager_register_push_service(manager, dnsPushSRV, ifIndex, NULL);
-        service = mdns_dns_service_manager_get_push_service(manager, dnsPushSRV, ifIndex);
-    }
-    // We don't register the DNS push service if it is not for local domain.
+#endif
+
+mDNSlocal mdns_dns_service_t _Querier_GetDiscoveredPushDNSService(const mdns_dns_service_manager_t manager,
+    const domainname *const zone, const uint32_t ifIndex)
+{
+    mdns_dns_service_t service = mDNSNULL;
+    mdns_domain_name_t dnsPushSRV = mDNSNULL;
+
+    // "_dns-push-tls._tcp"
+    domainname dnsPushSRVToConstruct = {
+        .c = {13, '_', 'd', 'n', 's', '-', 'p', 'u', 's', 'h', '-', 't', 'l', 's', 4, '_', 't', 'c', 'p', 0}
+    };
+    AppendDomainName(&dnsPushSRVToConstruct, zone);
+    dnsPushSRV = mdns_domain_name_create_with_labels(dnsPushSRVToConstruct.c, NULL);
+    mdns_require_quiet(dnsPushSRV, exit);
+
+    service = mdns_dns_service_manager_get_discovered_push_service(manager, dnsPushSRV, ifIndex);
 
 exit:
     mdns_forget(&dnsPushSRV);
+    return service;
+}
+
+mDNSlocal mdns_dns_service_t _Querier_GetCustomPushService(const mdns_dns_service_manager_t manager,
+    const DNSQuestion * const q)
+{
+    mdns_dns_service_t service;
+    if (q->InterfaceID)
+    {
+        const uint32_t ifIndex = (uint32_t)((uintptr_t)q->InterfaceID);
+        service = mdns_dns_service_manager_get_interface_scoped_custom_push_service(manager, q->qname.c, ifIndex);
+    }
+    else
+    {
+        service = mdns_dns_service_manager_get_unscoped_custom_push_service(manager, q->qname.c);
+    }
     return service;
 }
 
@@ -361,10 +376,9 @@ mDNSlocal mDNSBool _Querier_QuestionIsEligibleForNonNativeDNSService(const DNSQu
     mDNSBool eligible = mDNStrue;
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
-    if (IsSubdomain(&q->qname, THREAD_DOMAIN_NAME))
+    if (!IsRootDomain(Do53_UNICAST_DISCOVERY_DOMAIN)
+        && IsSubdomain(&q->qname, Do53_UNICAST_DISCOVERY_DOMAIN))
     {
-        // We do not want the query ends with "openthread.thread.home.arpa." to choose a non-native DNS service to go
-        // outside of the home network.
         eligible = mDNSfalse;
     }
 #endif
@@ -376,32 +390,53 @@ mDNSlocal mdns_dns_service_t _Querier_GetDNSService(const DNSQuestion *q, const 
 {
     mdns_dns_service_t service = mDNSNULL;
     const mdns_dns_service_manager_t manager = Querier_GetDNSServiceManager();
-    if (!manager)
-    {
-        return NULL;
-    }
+    mdns_require_quiet(manager, exit);
 
+    if (q->OverrideDNSService)
+    {
+        const uint32_t ifIndex = (uint32_t)((uintptr_t)q->InterfaceID);
+        service = mdns_dns_service_manager_get_uuid_scoped_service(manager, q->ResolverUUID, ifIndex);
+    }
+#if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+    else if (DNSQuestionRequestsMDNSAlternativeService(q) && !Querier_QuestionBelongsToSelf(q))
+    {
+        service = _Querier_GetMDNSAlternativeService(manager, q);
+    }
+#endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
-    if (dns_question_enables_dns_push(q))
+    // If DNS question uses DNS Push but it falls back to DNS polling, then we should skip DNS push and use Do53 instead
+    // for DNS polling.
+    else if (dns_question_uses_dns_push(q) && (!dns_question_uses_dns_polling(q)))
     {
         // Only get DNS push DNS service when the DNS push enabled question has finished discovery process.
-        const dns_obj_domain_name_t zone = dns_question_get_authoritative_zone(q);
-        if (zone)
+        if (!dns_question_finished_push_discovery(q))
         {
-            const domainname *const zoneInDomainName = (const domainname *)(dns_obj_domain_name_get_labels(zone));
-            // Always use interface index 0 for the normal DNS push operation.
-            service = _Querier_GetDNSPushDNSService(manager, zoneInDomainName, 0);
+            // Otherwise, the service should be NULL so that the question can be suppressed before it finishes the
+            // discovery.
+            goto exit;
         }
+        const dns_obj_domain_name_t zone = dns_question_get_authoritative_zone(q);
+        mdns_require_quiet(zone, exit);
+
+        const domainname *const zoneInDomainName = (const domainname *)(dns_obj_domain_name_get_labels(zone));
+        const uint32_t ifIndex = (uint32_t)((uintptr_t)q->InterfaceID);
+        service = _Querier_GetDiscoveredPushDNSService(manager, zoneInDomainName, ifIndex);
     }
-    else
 #endif
+    else
     {
-        service = _Querier_GetNativeDNSService(manager, q);
+        service = _Querier_GetCustomPushService(manager, q);
+        if (!service)
+        {
+            service = _Querier_GetNativeDNSService(manager, q);
+        }
         if (!service && _Querier_QuestionIsEligibleForNonNativeDNSService(q))
         {
             service = _Querier_GetNonNativeDNSService(manager, q, excludeEncryptedDNS);
         }
     }
+
+exit:
     return service;
 }
 
@@ -425,22 +460,6 @@ mDNSlocal const mDNSu8 *_Querier_GetMyUUID(void)
         mdns_system_pid_to_uuid(_Querier_GetMyPID(), sUUID);
     });
     return sUUID;
-}
-
-mDNSlocal mDNSBool _Querier_QuestionBelongsToSelf(const DNSQuestion *q)
-{
-    if (q->ProxyQuestion)
-    {
-        return mDNSfalse;
-    }
-    if (q->pid != 0)
-    {
-        return ((q->pid == _Querier_GetMyPID()) ? mDNStrue : mDNSfalse);
-    }
-    else
-    {
-        return ((uuid_compare(q->uuid, _Querier_GetMyUUID()) == 0) ? mDNStrue : mDNSfalse);
-    }
 }
 
 mDNSlocal mDNSBool _Querier_DNSServiceIsUnscopedAndLacksPrivacy(const mdns_dns_service_t service)
@@ -512,7 +531,7 @@ mDNSlocal mDNSBool _Querier_VPNDNSServiceExistsForQName(const domainname *const 
 // e.g., those specified via DHCP.
 mDNSlocal mDNSBool _Querier_ExcludeEncryptedDNSServices(const DNSQuestion *const q)
 {
-    return (_Querier_QuestionBelongsToSelf(q) || q->ProhibitEncryptedDNS || IsLocalDomain(&q->qname));
+    return (Querier_QuestionBelongsToSelf(q) || q->ProhibitEncryptedDNS || IsLocalDomain(&q->qname));
 }
 
 mDNSexport void Querier_SetDNSServiceForQuestion(DNSQuestion *q)
@@ -591,10 +610,37 @@ mDNSexport void Querier_SetDNSServiceForQuestion(DNSQuestion *q)
     else
     {
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-            "[R%u->Q%u] Question for " PRI_DM_NAME " (" PUB_S PUB_S ") assigned DNS service %llu",
-            q->request_id, mDNSVal16(q->TargetQID), DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype),
-            enablesDNSSEC ? ", DNSSEC" : "", mdns_dns_service_get_id(q->dnsservice));
+            "[R%u->Q%u] Question assigned DNS service %llu",
+            q->request_id, mDNSVal16(q->TargetQID), mdns_dns_service_get_id(q->dnsservice));
     }
+}
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+
+mDNSexport mDNSBool Querier_IsMDNSAlternativeServiceAvailableForQuestion(const DNSQuestion * const q)
+{
+    mdns_dns_service_t mdns_exclusive_service = mDNSNULL;
+
+    const mdns_dns_service_manager_t manager = Querier_GetDNSServiceManager();
+    if (manager)
+    {
+        mdns_exclusive_service = _Querier_GetMDNSAlternativeService(manager, q);
+    }
+    return (mdns_exclusive_service != mDNSNULL);
+}
+
+#endif
+
+mDNSexport mDNSBool Querier_IsCustomPushServiceAvailableForQuestion(const DNSQuestion * const q)
+{
+    mdns_dns_service_t custom_push_service = mDNSNULL;
+
+    const mdns_dns_service_manager_t manager = Querier_GetDNSServiceManager();
+    if (manager)
+    {
+        custom_push_service = _Querier_GetCustomPushService(manager, q);
+    }
+    return (custom_push_service != mDNSNULL);
 }
 
 mDNSexport void Querier_RegisterPathResolver(const uuid_t resolverUUID)
@@ -668,6 +714,41 @@ mDNSexport void Querier_DeregisterNativeDNSService(const mdns_dns_service_id_t i
     }
 }
 
+mDNSexport mdns_dns_service_id_t Querier_RegisterCustomPushDNSService(
+    const mdns_dns_push_service_definition_t push_service_definition)
+{
+    return Querier_RegisterCustomPushDNSServiceWithConnectionErrorHandler(push_service_definition, NULL, NULL);
+}
+
+mDNSexport mdns_dns_service_id_t Querier_RegisterCustomPushDNSServiceWithConnectionErrorHandler(
+    const mdns_dns_push_service_definition_t push_service_definition, const dispatch_queue_t connection_error_queue,
+    const mdns_event_handler_t connection_error_handler)
+{
+    mdns_dns_service_id_t ident = MDNS_DNS_SERVICE_INVALID_ID;
+    const mdns_dns_service_manager_t manager = Querier_GetDNSServiceManager();
+    if (manager)
+    {
+        OSStatus err = kNoErr;
+        ident = mdns_dns_service_manager_register_custom_push_service(manager, push_service_definition, 0,
+            connection_error_queue, connection_error_handler, &err);
+        if (err != kNoErr)
+        {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
+                      "Failed to register custom push service - error: " PUB_OS_ERR, (long)err);
+        }
+    }
+    return ident;
+}
+
+mDNSexport void Querier_DeregisterCustomPushDNSService(const mdns_dns_service_id_t ident)
+{
+    const mdns_dns_service_manager_t manager = Querier_GetDNSServiceManager();
+    if (manager)
+    {
+        mdns_dns_service_manager_deregister_custom_push_service(manager, ident);
+    }
+}
+
 mDNSexport void Querier_RegisterDoHURI(const char *doh_uri, const char *domain)
 {
     const mdns_dns_service_manager_t manager = Querier_GetDNSServiceManager();
@@ -723,19 +804,20 @@ mDNSlocal void _Querier_UpdateDNSMessageSizeAnalytics(const mdns_querier_t queri
 
 #define kOrphanedQuerierMaxCount 10
 
+static const CFSetCallBacks gMDNSObjectSetCallbacks =
+{
+    .version         = 0,
+    .retain          = mdns_cf_callback_retain,
+    .release         = mdns_cf_callback_release,
+    .copyDescription = mdns_cf_callback_copy_description
+};
+
 mDNSlocal CFMutableSetRef _Querier_GetOrphanedQuerierSet(void)
 {
     static CFMutableSetRef sOrphanedQuerierSet = NULL;
     if (!sOrphanedQuerierSet)
     {
-        static const CFSetCallBacks sSetCallbacks =
-        {
-            .version         = 0,
-            .retain          = mdns_cf_callback_retain,
-            .release         = mdns_cf_callback_release,
-            .copyDescription = mdns_cf_callback_copy_description
-        };
-        sOrphanedQuerierSet = CFSetCreateMutable(kCFAllocatorDefault, 0, &sSetCallbacks);
+        sOrphanedQuerierSet = CFSetCreateMutable(kCFAllocatorDefault, 0, &gMDNSObjectSetCallbacks);
     }
     return sOrphanedQuerierSet;
 }
@@ -784,7 +866,13 @@ mDNSlocal void _Querier_HandleQuerierResponse(const mdns_querier_t querier)
             }
             memcpy(&m->imsg.m, mdns_querier_get_response_ptr(querier), copyLen);
             const mDNSu8 *const end = ((mDNSu8 *)&m->imsg.m) + copyLen;
-            mDNSCoreReceiveForQuerier(m, &m->imsg.m, end, mdns_client_upcast(querier), dnsservice, mDNSInterface_Any);
+
+            mDNSInterfaceID interface = mDNSInterface_Any;
+            if (mdns_dns_service_has_local_purview(dnsservice))
+            {
+                interface = (mDNSInterfaceID)(uintptr_t)mdns_dns_service_get_interface_index(dnsservice);
+            }
+            mDNSCoreReceiveForQuerier(m, &m->imsg.m, end, mdns_client_upcast(querier), dnsservice, interface);
         }
     }
     const CFMutableSetRef set = _Querier_GetOrphanedQuerierSet();
@@ -873,6 +961,7 @@ mDNSlocal void _Querier_HandleQuerierResponse(const mdns_querier_t querier)
                 case mdns_querier_result_type_null:
                 case mdns_querier_result_type_invalidation:
                 case mdns_querier_result_type_resolver_invalidation:
+                MDNS_COVERED_SWITCH_DEFAULT:
                     break;
             }
             if (startNewQuerier)
@@ -939,11 +1028,16 @@ mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
     {
         mdns_client_t client;
     #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
-        if (dns_question_enables_dns_push(q))
+        if (mdns_dns_service_uses_subscriber(q->dnsservice))
         {
             // We still need querier to discover the resolver if we are still in the discovery process.
             subscriber = mdns_dns_service_create_subscriber(q->dnsservice, NULL);
             mdns_require_quiet(subscriber, exit);
+
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                "[Q%u->Sub%llu] Created a subscriber for question", mDNSVal16(q->TargetQID),
+                mdns_subscriber_get_id(subscriber));
+
             client = mdns_client_upcast(subscriber);
         }
         else
@@ -959,9 +1053,36 @@ mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
                 mdns_querier_set_checking_disabled(querier, true);
             }
         #endif
-            if (q->pid != 0)
+            // Set the identifier for the delegator relative to mDNSResponder, i.e., the identifier of the effective
+            // client.
+            //
+            // Order of preference:
+            //  1. q->DelegatorToken if available. This is the audit token of the immediate client's delegator, and
+            //     therefore the audit token of the effective client.
+            //  2. q->PeerToken if available and its PID is equal to a non-zero q->pid, which is the PID of the
+            //     effective client. In this case, the immediate client is the effective client, so use its audit token,
+            //     which is generally more informative than just a PID.
+            //  3. q->pid if it's non-zero. This is the PID of the effective client.
+            //  4. q->uuid. This is the UUID of the effective client.
+            if (0) {}
+        #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
+            else if (q->DelegatorToken)
             {
-                mdns_querier_set_delegator_pid(querier, q->pid);
+                mdns_querier_set_delegator_audit_token(querier, q->DelegatorToken);
+            }
+        #endif
+            else if (q->pid != 0)
+            {
+            #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
+                if (mdns_audit_token_get_pid_null_safe(q->PeerToken, 0) == q->pid)
+                {
+                    mdns_querier_set_delegator_audit_token(querier, q->PeerToken);
+                }
+                else
+            #endif
+                {
+                    mdns_querier_set_delegator_pid(querier, q->pid);
+                }
             }
             else
             {
@@ -1013,6 +1134,9 @@ mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
                         _Querier_HandleSubscriberInvalidation(subscriber);
                         mdns_release(subscriber);
                         break;
+
+                    MDNS_COVERED_SWITCH_DEFAULT:
+                        break;
                 }
                 KQueueUnlock("Subscriber event handler");
             });
@@ -1041,7 +1165,16 @@ mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
 #endif
 
 exit:
-    q->ThisQInterval = (!q->dnsservice || q->client) ? FutureTime : mDNSPlatformOneSecond;
+#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
+    if (dns_question_uses_dns_polling(q))
+    {
+        // No need to change ThisQInterval because DNS polling uses constant interval value.
+    }
+    else
+#endif
+    {
+        q->ThisQInterval = (!q->dnsservice || q->client) ? FutureTime : mDNSPlatformOneSecond;
+    }
     q->LastQTime = m->timenow;
     SetNextQueryTime(m, q);
     mdns_forget(&querier);
@@ -1059,7 +1192,7 @@ mDNSlocal mDNSu32 _Querier_GetQuestionCount(void)
     return count;
 }
 
-mDNSexport void Querier_ProcessDNSServiceChanges(void)
+mDNSexport void Querier_ProcessDNSServiceChanges(const mDNSBool updatePushQuestionServiceOnly)
 {
     mDNS *const m = &mDNSStorage;
     mDNSu32 slot;
@@ -1074,7 +1207,33 @@ mDNSexport void Querier_ProcessDNSServiceChanges(void)
     for (mDNSu32 i = 0; (i < count) && m->RestartQuestion; i++)
     {
         DNSQuestion *const q = m->RestartQuestion;
+        mDNSBool skipQuestion = mDNSfalse;
+#if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+        mDNSBool MDNSAlternativeModeOn = mDNSfalse;
+#endif
         if (mDNSOpaque16IsZero(q->TargetQID))
+        {
+        #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+            // Handles the case where mDNS query has a new discovery proxy service to use.
+            if (DNSQuestionIsEligibleForMDNSAlternativeService(q) &&
+                Querier_IsMDNSAlternativeServiceAvailableForQuestion(q))
+            {
+                q->TargetQID = mDNS_NewMessageID(m);
+                MDNSAlternativeModeOn = mDNStrue;
+            }
+            else
+        #endif
+            {
+                skipQuestion = mDNStrue;
+            }
+        }
+    #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
+        else if (updatePushQuestionServiceOnly && !dns_question_uses_dns_push(q))
+        {
+            skipQuestion = mDNStrue;
+        }
+    #endif
+        if (skipQuestion)
         {
             m->RestartQuestion = q->next;
             continue;
@@ -1123,6 +1282,13 @@ mDNSexport void Querier_ProcessDNSServiceChanges(void)
                 }
             }
 #endif
+        #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+            // Handles the case where a non-mDNS query loses its discovery proxy service (No new code needed to support
+            // this).
+            // If a .local unicast discovery query loses its preferred discovery service:
+            // DNS service changes from non-NULL to NULL, it will also be restarted here so that it can be downgrade to
+            // a normal mDNS query with TargetQID equal to 0.
+        #endif
             restart = mDNStrue;
         }
         else
@@ -1134,8 +1300,27 @@ mDNSexport void Querier_ProcessDNSServiceChanges(void)
         {
             if (!q->Suppressed)
             {
+            #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+                // If we have decided to change the mDNS question to a non-mDNS question that uses mDNS alternative
+                // exclusive service for resolution, we need to deliver remove event for the records that get added
+                // as mDNS response, because we are switching to a different service.
+                // To ensure that the mDNS record matches the question, we need to change the question back to an mDNS
+                // question by making its QID zero.
+                const mDNSOpaque16 newQID = q->TargetQID;
+                if (MDNSAlternativeModeOn)
+                {
+                    q->TargetQID = zeroID;
+                }
+            #endif
                 CacheRecordRmvEventsForQuestion(m, q);
                 if (m->RestartQuestion == q) LocalRecordRmvEventsForQuestion(m, q);
+            #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+                // After the function call, restore the original QID.
+                if (MDNSAlternativeModeOn)
+                {
+                    q->TargetQID = newQID;
+                }
+            #endif
             }
             if (m->RestartQuestion == q)
             {
@@ -1180,16 +1365,33 @@ mDNSexport void Querier_ProcessDNSServiceChanges(void)
         }
     }
 #endif
-    FORALL_CACHERECORDS(slot, cg, cr)
+    if (!updatePushQuestionServiceOnly)
     {
-        if (cr->resrec.InterfaceID) continue;
-        const mdns_dns_service_t dnsservice = mdns_cache_metadata_get_dns_service(cr->resrec.metadata);
-        if (!dnsservice || mdns_dns_service_is_defunct(dnsservice))
+        // If Querier_ProcessDNSServiceChanges is called with updatePushQuestionServiceOnly setting to true, then we
+        // skip scanning through all the resource records below by exiting early to avoid the unnecessary overhead.
+        FORALL_CACHERECORDS(slot, cg, cr)
         {
-            mdns_forget(&cr->resrec.metadata);
-            mDNS_PurgeCacheResourceRecord(m, cr);
+            if (cr->resrec.InterfaceID) continue;
+            const mdns_dns_service_t dnsservice = mdns_cache_metadata_get_dns_service(cr->resrec.metadata);
+            if (!dnsservice || mdns_dns_service_is_defunct(dnsservice))
+            {
+                mdns_forget(&cr->resrec.metadata);
+                mDNS_PurgeCacheResourceRecord(m, cr);
+            }
         }
     }
+}
+
+mDNSexport void Querier_ProcessDNSServiceChangesAsync(const mDNSBool updatePushQuestionServiceOnly)
+{
+    dispatch_async(_Querier_InternalQueue(),
+    ^{
+        KQueueLock();
+        mDNS_Lock(&mDNSStorage);
+        Querier_ProcessDNSServiceChanges(updatePushQuestionServiceOnly);
+        mDNS_Unlock(&mDNSStorage);
+        KQueueUnlock("Querier_ProcessDNSServiceChangesAsync");
+    });
 }
 
 mDNSexport DNSQuestion *Querier_GetDNSQuestion(const mdns_querier_t querier, mDNSBool *const outIsNew)
@@ -1215,19 +1417,14 @@ mDNSexport DNSQuestion *Querier_GetDNSQuestion(const mdns_querier_t querier, mDN
     return q;
 }
 
-mDNSexport mDNSBool Querier_ResourceRecordIsAnswer(const ResourceRecord * const rr, const mdns_querier_t querier)
+mDNSexport mDNSBool Client_ResourceRecordIsAnswer(const ResourceRecord * const rr, const mdns_client_t client)
 {
     mDNSBool isAnswer;
-    const mDNSu16 qtype = mdns_querier_get_qtype(querier);
-    const mDNSu8 *const qname = mdns_querier_get_qname(querier);
+    const mDNSu16 type = mdns_client_get_type(client);
+    const mdns_domain_name_t name = mdns_client_get_name(client);
+    mdns_require_action_quiet(name, exit, isAnswer = mDNSfalse);
 
-    if (qname == mDNSNULL)
-    {
-        isAnswer = mDNSfalse;
-        goto exit;
-    }
-
-    if (rr->rrclass != mdns_querier_get_qclass(querier))
+    if (rr->rrclass != mdns_client_get_class(client))
     {
         isAnswer = mDNSfalse;
         goto exit;
@@ -1235,32 +1432,37 @@ mDNSexport mDNSBool Querier_ResourceRecordIsAnswer(const ResourceRecord * const 
 
     RRTypeAnswersQuestionTypeFlags flags = kRRTypeAnswersQuestionTypeFlagsNone;
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
-    const mDNSBool requiresRRToValidate = mdns_querier_get_dnssec_ok(querier) && mdns_querier_get_checking_disabled(querier);
-    if (requiresRRToValidate)
+    const mdns_querier_t querier = mdns_querier_downcast(client);
+    if (querier)
     {
-        flags |= kRRTypeAnswersQuestionTypeFlagsRequiresDNSSECRRToValidate;
+        const mDNSBool requiresRRToValidate = mdns_querier_get_dnssec_ok(querier) &&
+            mdns_querier_get_checking_disabled(querier);
+        if (requiresRRToValidate)
+        {
+            flags |= kRRTypeAnswersQuestionTypeFlagsRequiresDNSSECRRToValidate;
+        }
     }
 #endif
 
-    isAnswer = RRTypeAnswersQuestionType(rr, qtype, flags);
+    isAnswer = RRTypeAnswersQuestionType(rr, type, flags);
     if (!isAnswer)
     {
         goto exit;
     }
 
-    isAnswer = SameDomainName(rr->name, (const domainname *)qname);
+    isAnswer = SameDomainName(rr->name, (const domainname *)mdns_domain_name_get_labels(name));
 
 exit:
     return isAnswer;
 }
 
-mDNSexport mDNSBool Querier_SameNameCacheRecordIsAnswer(const CacheRecord *const cr, const mdns_querier_t querier)
+mDNSexport mDNSBool Client_SameNameCacheRecordIsAnswer(const CacheRecord *const cr, const mdns_client_t client)
 {
     mDNSBool isAnswer;
     const ResourceRecord *const rr = &cr->resrec;
-    const mDNSu16 qtype = mdns_querier_get_qtype(querier);
+    const mDNSu16 qtype = mdns_client_get_type(client);
 
-    if (rr->rrclass != mdns_querier_get_qclass(querier))
+    if (rr->rrclass != mdns_client_get_class(client))
     {
         isAnswer = mDNSfalse;
         goto exit;
@@ -1268,12 +1470,18 @@ mDNSexport mDNSBool Querier_SameNameCacheRecordIsAnswer(const CacheRecord *const
 
     RRTypeAnswersQuestionTypeFlags flags = kRRTypeAnswersQuestionTypeFlagsNone;
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
-    const mDNSBool requiresRRToValidate = mdns_querier_get_dnssec_ok(querier) && mdns_querier_get_checking_disabled(querier);
-    if (requiresRRToValidate)
+    const mdns_querier_t querier = mdns_querier_downcast(client);
+    if (querier)
     {
-        flags |= kRRTypeAnswersQuestionTypeFlagsRequiresDNSSECRRToValidate;
+        const mDNSBool requiresRRToValidate = mdns_querier_get_dnssec_ok(querier) &&
+            mdns_querier_get_checking_disabled(querier);
+        if (requiresRRToValidate)
+        {
+            flags |= kRRTypeAnswersQuestionTypeFlagsRequiresDNSSECRRToValidate;
+        }
     }
 #endif
+
     isAnswer = RRTypeAnswersQuestionType(rr, qtype, flags);
 
 exit:
@@ -1293,7 +1501,7 @@ mDNSexport void Querier_HandleStoppedDNSQuestion(DNSQuestion *q)
             const CFMutableSetRef set = _Querier_GetOrphanedQuerierSet();
             if (set && (CFSetGetCount(set) < kOrphanedQuerierMaxCount))
             {
-				CFSetAddValue(set, querier);
+                CFSetAddValue(set, querier);
                 LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                     "[Q%u] Keeping orphaned querier for up to " StringifyExpansion(kOrphanedQuerierTimeLimitSecs) " seconds",
                     mdns_querier_get_user_id(querier));
@@ -1360,20 +1568,8 @@ mDNSexport void Querier_HandleWake(void)
     }
 }
 
-mDNSlocal mdns_dns_service_t _Querier_GetDotLocalPushService(const uint32_t ifIndex)
-{
-    mdns_dns_service_t service = NULL;
-    const mdns_dns_service_manager_t manager = Querier_GetDNSServiceManager();
-    if (manager)
-    {
-        service = _Querier_GetDNSPushDNSService(manager, &localdomain, ifIndex);
-    }
-
-    return service;
-}
-
-mDNSlocal void _Querier_RemoveRecord(const mdns_resource_record_t record, const mDNSInterfaceID interface,
-    const mDNSBool collective)
+mDNSlocal void _Querier_RemoveRecord(const mdns_resource_record_t record, const mdns_dns_service_t dnsService,
+    const mDNSInterfaceID interface, const mDNSBool collective)
 {
     const uint16_t rdlen = mdns_resource_record_get_rdata_length(record);
     require_quiet(rdlen <= MaximumRDSize, exit);
@@ -1381,16 +1577,26 @@ mDNSlocal void _Querier_RemoveRecord(const mdns_resource_record_t record, const 
     mDNS *const m = &mDNSStorage;
     const mdns_domain_name_t name = mdns_resource_record_get_name(record);
     const domainname *const dname = (const domainname *)mdns_domain_name_get_labels(name);
+    mDNS_Lock(m);
     const CacheGroup *const cg = CacheGroupForName(m, DomainNameHashValue(dname), dname);
     if (cg)
     {
         const uint16_t type = mdns_resource_record_get_type(record);
         const uint16_t class = mdns_resource_record_get_class(record);
         const uint8_t *const rdata = mdns_resource_record_get_rdata_bytes_ptr(record);
+        const bool MDNSAlternative = mdns_dns_service_is_mdns_alternative(dnsService);
         for (CacheRecord *cr = cg->members; cr; cr = cr->next)
         {
             const ResourceRecord *const rr = &cr->resrec;
             if (rr->InterfaceID != interface)
+            {
+                continue;
+            }
+            // If the service is an mDNS alternative service, then it is for unicast discovery, in which case,
+            // we do not care about the service match, because we treat it as an mDNS response.
+            // Otherwise, it is for general DNS push, in which case we treat it as a non-mDNS response so the
+            // service has to match.
+            if (!MDNSAlternative && mdns_cache_metadata_get_dns_service(rr->metadata) != dnsService)
             {
                 continue;
             }
@@ -1436,19 +1642,22 @@ mDNSlocal void _Querier_RemoveRecord(const mdns_resource_record_t record, const 
             }
         }
     }
+    mDNS_Unlock(m);
 
 exit:
     return;
 }
 
-mDNSlocal void _Querier_RemoveRecordSingle(const mdns_resource_record_t record, const mDNSInterfaceID interface)
+mDNSlocal void _Querier_RemoveRecordSingle(const mdns_resource_record_t record, const mdns_dns_service_t dnsService,
+    const mDNSInterfaceID interface)
 {
-	_Querier_RemoveRecord(record, interface, mDNSfalse);
+    _Querier_RemoveRecord(record, dnsService, interface, mDNSfalse);
 }
 
-mDNSlocal void _Querier_RemoveRecordCollective(const mdns_resource_record_t record, const mDNSInterfaceID interface)
+mDNSlocal void _Querier_RemoveRecordCollective(const mdns_resource_record_t record, const mdns_dns_service_t dnsService,
+    const mDNSInterfaceID interface)
 {
-	_Querier_RemoveRecord(record, interface, mDNStrue);
+    _Querier_RemoveRecord(record, dnsService, interface, mDNStrue);
 }
 
 #if !defined(kDNSPushChangeNotificationTTL_RemoveSingle)
@@ -1464,25 +1673,40 @@ mDNSlocal void _Querier_ApplyUpdate(mdns_subscriber_t subscriber)
     require_quiet(changeNotifications, exit);
 
     const mdns_dns_service_t dnsservice = (mdns_dns_service_t)mdns_client_get_context(subscriber);
-    const mDNSInterfaceID interface = (mDNSInterfaceID)(uintptr_t)mdns_dns_service_get_interface_index(dnsservice);
+    const mDNSInterfaceID interface = (mDNSInterfaceID)(uintptr_t)mdns_subscriber_get_interface_index(subscriber);
     mdns_cfarray_enumerate(changeNotifications,
     ^ bool (const mdns_resource_record_t record)
     {
         const uint32_t ttl = mdns_resource_record_get_ttl(record);
         if (ttl == kDNSPushChangeNotificationTTL_RemoveSingle)
         {
-            _Querier_RemoveRecordSingle(record, interface);
+            _Querier_RemoveRecordSingle(record, dnsservice, interface);
         }
         else if (ttl == kDNSPushChangeNotificationTTL_RemoveCollective)
         {
-            _Querier_RemoveRecordCollective(record, interface);
+            _Querier_RemoveRecordCollective(record, dnsservice, interface);
         }
         else
         {
+            if (!gMessageBuilder)
+            {
+                gMessageBuilder = mdns_message_builder_create();
+                mdns_require_return_value(gMessageBuilder, false);
+            }
             mdns_message_builder_reset(gMessageBuilder);
             mdns_message_builder_set_message_id(gMessageBuilder, 0);
             mdns_message_builder_set_qr_bit(gMessageBuilder, true);
             mdns_message_builder_set_aa_bit(gMessageBuilder, true);
+            if (dnsservice && !mdns_dns_service_is_mdns_alternative(dnsservice))
+            {
+                // If the subscriber is created for the non-mDNS unicast discovery, then the response should be
+                // processed by the uDNS code path of mDNSCoreReceiveResponse.
+                // If the subscriber is created for the mDNS-alternative unicast discovery, then the response should be
+                // process by the mDNS code path of mDNSCoreReceiveResponse. In which case, there is no need to add
+                // question section.
+                mdns_message_builder_set_question(gMessageBuilder, mdns_client_get_name(subscriber),
+                    mdns_client_get_type(subscriber), mdns_client_get_class(subscriber));
+            }
             mdns_message_builder_append_answer_record(gMessageBuilder, record);
             mDNS *const m = &mDNSStorage;
             uint8_t *const msgBuf = (uint8_t *)&m->imsg.m;
@@ -1504,6 +1728,7 @@ exit:
 mDNSlocal void _Querier_HandleSubscriberInvalidation(const mdns_subscriber_t subscriber)
 {
     mDNS *const m = &mDNSStorage;
+    mDNS_Lock(m);
     const mdns_domain_name_t name = mdns_client_get_name(subscriber);
     const domainname *const dname = (const domainname *)mdns_domain_name_get_labels(name);
     const CacheGroup *const cg = CacheGroupForName(m, DomainNameHashValue(dname), dname);
@@ -1514,42 +1739,234 @@ mDNSlocal void _Querier_HandleSubscriberInvalidation(const mdns_subscriber_t sub
         {
             if (cr->DNSPushSubscribed && (mdns_cache_metadata_get_subscriber_id(cr->resrec.metadata) == ident))
             {
+                const ResourceRecord *const rr = &cr->resrec;
+
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG,
+                    "[Sub%llu] Removing record from the cache due to subscriber invalidation -- "
+                    "name: " PRI_DM_NAME ", type: " PUB_DNS_TYPE ", TTL: %us", ident, DM_NAME_PARAM(rr->name),
+                    DNS_TYPE_PARAM(rr->rrtype), rr->rroriginalttl);
+
+                mdns_cache_metadata_set_subscriber_id(rr->metadata, 0);
                 cr->DNSPushSubscribed = mDNSfalse;
-                SetNextCacheCheckTimeForRecord(m, cr);
+                mDNS_PurgeCacheResourceRecord(m, cr);
             }
         }
     }
+    mDNS_Unlock(m);
 }
 
-mDNSexport void Querier_HandleMDNSQuestion(DNSQuestion *const q)
+mDNSexport mDNSBool Querier_QuestionBelongsToSelf(const DNSQuestion *const q)
 {
-    mdns_subscriber_t subscriber = NULL;
-    mdns_domain_name_t qname = NULL;
-    const mDNSBool enabled = os_feature_enabled(mDNSResponder, dot_local_push);
-    require_quiet(enabled, exit);
-
-    if (mDNSOpaque16IsZero(q->TargetQID) && q->InterfaceID && !q->client)
+    if (q->ProxyQuestion)
     {
-        if (!q->dnsservice)
-        {
-            const uint32_t ifIndex = (uint32_t)((uintptr_t)q->InterfaceID);
-            q->dnsservice = _Querier_GetDotLocalPushService(ifIndex);
-            require_quiet(q->dnsservice, exit);
-        }
-        if (!gMessageBuilder)
-        {
-            gMessageBuilder = mdns_message_builder_create();
-            require_quiet(gMessageBuilder, exit);
-        }
-        subscriber = mdns_dns_service_create_subscriber(q->dnsservice, NULL);
-        require_quiet(subscriber, exit);
+        return mDNSfalse;
+    }
+    if (q->pid != 0)
+    {
+        return ((q->pid == _Querier_GetMyPID()) ? mDNStrue : mDNSfalse);
+    }
+    else
+    {
+        return ((uuid_compare(q->uuid, _Querier_GetMyUUID()) == 0) ? mDNStrue : mDNSfalse);
+    }
+}
 
-        qname = mdns_domain_name_create_with_labels(q->qname.c, NULL);
-        require_quiet(qname, exit);
+mDNSlocal mdns_dns_service_id_t
+_Querier_DNSServiceRegistrationStartHandler(const mdns_any_dns_service_definition_t definition,
+    const dispatch_queue_t connection_error_queue, const mdns_event_handler_t connection_error_handler)
+{
+    KQueueLock();
+    mdns_dns_service_id_t ident = MDNS_DNS_SERVICE_INVALID_ID;
+    mdns_dns_service_definition_t do53Definition = NULL;
+    mdns_dns_push_service_definition_t pushDefinition = NULL;
+
+    if ((do53Definition = mdns_dns_service_definition_downcast(definition)) != NULL) {
+        ident = Querier_RegisterNativeDNSService(do53Definition);
+    } else if ((pushDefinition = mdns_dns_push_service_definition_downcast(definition)) != NULL) {
+        ident = Querier_RegisterCustomPushDNSServiceWithConnectionErrorHandler(pushDefinition, connection_error_queue,
+            connection_error_handler);
+    }
+
+    KQueueUnlock("DNS service registration start handler");
+    return ident;
+}
+
+mDNSlocal void
+_Querier_DNSServiceRegistrationStopHandler(const mdns_dns_service_id_t ident)
+{
+    KQueueLock();
+    Querier_DeregisterNativeDNSService(ident);
+    Querier_DeregisterCustomPushDNSService(ident);
+    KQueueUnlock("DNS service registration stop handler");
+}
+
+const struct mrcs_server_dns_service_registration_handlers_s kMRCSServerDNSServiceRegistrationHandlers =
+{
+    .start = _Querier_DNSServiceRegistrationStartHandler,
+    .stop = _Querier_DNSServiceRegistrationStopHandler,
+};
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, DISCOVERY_PROXY_CLIENT)
+DNSQuestion DPCBrowse;
+
+mDNSexport mDNSBool DPCFeatureEnabled(void)
+{
+    static dispatch_once_t sOnce = 0;
+    static mDNSBool sEnabled = mDNSfalse;
+    dispatch_once(&sOnce,
+    ^{
+        sEnabled = os_feature_enabled(mDNSResponder, discovery_proxy_client);
+    });
+    return sEnabled;
+}
+
+mDNSlocal mDNSBool _DPCQuestionIsEligible(const DNSQuestion *const q)
+{
+    return (mDNSOpaque16IsZero(q->TargetQID) && ActiveQuestion(q));
+}
+
+static CFMutableDictionaryRef gDPCPushServers = mDNSNULL;
+
+mDNSlocal mdns_push_server_t _DPCGetPushServer(const mDNSInterfaceID interface)
+{
+    mdns_push_server_t server = mDNSNULL;
+    mdns_require_quiet(gDPCPushServers, exit);
+
+    server = (mdns_push_server_t)CFDictionaryGetValue(gDPCPushServers, interface);
+
+exit:
+    return server;
+}
+
+mDNSlocal mdns_subscriber_t _DPCQuestionGetSubscriber(const DNSQuestion *const q, const mDNSInterfaceID interface)
+{
+    __block mdns_subscriber_t subscriber = mDNSNULL;
+    mdns_require_quiet(q->DPSubscribers, exit);
+
+    mdns_cfset_enumerate(q->DPSubscribers,
+    ^ bool (const mdns_subscriber_t candidate)
+    {
+        const uintptr_t ifIndex = mdns_subscriber_get_interface_index(candidate);
+        if (((mDNSInterfaceID)ifIndex) == interface)
+        {
+            subscriber = candidate;
+        }
+        const bool proceed = !subscriber;
+        return proceed;
+    });
+
+exit:
+    return subscriber;
+}
+
+static CFMutableDictionaryRef gDPCSubscriberRegistries = mDNSNULL;
+
+// CFDictionary key callbacks for using mDNSInterfaceIDs as keys. Since these aren't references to objects, there are no
+// retains, releases, or other special functions. Note that a NULL equals function means that the dictionary will use
+// plain pointer equality to compare keys, which is appropriate for mDNSInterfaceIDs.
+static const CFDictionaryKeyCallBacks gInterfaceIDDictionaryKeyCallbacks =
+{
+    .version         = 0,
+    .retain          = mDNSNULL,
+    .release         = mDNSNULL,
+    .copyDescription = mDNSNULL,
+    .equal           = mDNSNULL,
+    .hash            = mDNSNULL
+};
+
+static const CFBagCallBacks gMDNSObjectBagCallbacks =
+{
+    .version         = 0,
+    .retain          = mdns_cf_callback_retain,
+    .release         = mdns_cf_callback_release,
+    .copyDescription = mdns_cf_callback_copy_description
+};
+
+mDNSlocal CFMutableBagRef _DPCGetSubscriberRegistryEx(const mDNSInterfaceID interface, const mDNSBool createIfAbsent)
+{
+    CFMutableBagRef registry = mDNSNULL;
+    if (!gDPCSubscriberRegistries && createIfAbsent)
+    {
+        gDPCSubscriberRegistries = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+            &gInterfaceIDDictionaryKeyCallbacks, &kCFTypeDictionaryValueCallBacks);
+    }
+    mdns_require_quiet(gDPCSubscriberRegistries, exit);
+
+    registry = (CFMutableBagRef)CFDictionaryGetValue(gDPCSubscriberRegistries, interface);
+    if (!registry && createIfAbsent)
+    {
+        CFMutableBagRef newRegistry = CFBagCreateMutable(kCFAllocatorDefault, 0, &gMDNSObjectBagCallbacks);
+        mdns_require_quiet(newRegistry, exit);
+
+        CFDictionarySetValue(gDPCSubscriberRegistries, interface, newRegistry);
+        registry = newRegistry;
+        CFForget(&newRegistry);
+    }
+
+exit:
+    return registry;
+}
+
+mDNSlocal CFMutableBagRef _DPCGetSubscriberRegistryCreateIfAbsent(const mDNSInterfaceID interface)
+{
+    return _DPCGetSubscriberRegistryEx(interface, mDNStrue);
+}
+
+mDNSlocal CFMutableBagRef _DPCGetSubscriberRegistry(const mDNSInterfaceID interface)
+{
+    return _DPCGetSubscriberRegistryEx(interface, mDNSfalse);
+}
+
+mDNSlocal mdns_subscriber_t _DPCGetRegisteredSubscriber(const mDNSInterfaceID interface, const mDNSu8 *const name,
+    const mDNSu16 type, const mDNSu16 class)
+{
+    __block mdns_subscriber_t subscriber = mDNSNULL;
+    const CFBagRef registry = _DPCGetSubscriberRegistry(interface);
+    mdns_require_quiet(registry, exit);
+
+    mdns_cfbag_enumerate(registry,
+    ^ bool (const mdns_subscriber_t candidate)
+    {
+        if (mdns_subscriber_match(candidate, name, type, class))
+        {
+            subscriber = candidate;
+        }
+        const bool proceed = !subscriber;
+        return proceed;
+    });
+
+exit:
+    return subscriber;
+}
+
+mDNSlocal mDNSBool _DPCSubscribe(DNSQuestion *const q, const mDNSInterfaceID interface)
+{
+    __block mdns_subscriber_t subscriber = mDNSNULL;
+    mdns_domain_name_t qname = mDNSNULL;
+    const mdns_push_server_t server = _DPCGetPushServer(interface);
+    mdns_require_quiet(server, exit);
+
+    subscriber = _DPCQuestionGetSubscriber(q, interface);
+    mdns_require_quiet(!subscriber, exit);
+
+    if (!q->DPSubscribers)
+    {
+        q->DPSubscribers = CFSetCreateMutable(kCFAllocatorDefault, 0, &gMDNSObjectSetCallbacks);
+        mdns_require_quiet(q->DPSubscribers, exit);
+    }
+    const CFMutableBagRef registry = _DPCGetSubscriberRegistryCreateIfAbsent(interface);
+    mdns_require_quiet(registry, exit);
+
+    subscriber = _DPCGetRegisteredSubscriber(interface, q->qname.c, q->qtype, q->qclass);
+    if (!subscriber)
+    {
+        qname = mdns_domain_name_create_with_labels(q->qname.c, mDNSNULL);
+        mdns_require_quiet(qname, exit);
+
+        subscriber = mdns_push_server_create_subscriber(server, mDNSNULL);
+        mdns_require_quiet(subscriber, exit);
 
         mdns_client_set_query(subscriber, qname, q->qtype, q->qclass);
-        mdns_client_set_context(subscriber, q->dnsservice);
-        mdns_client_set_context_finalizer(subscriber, mdns_object_context_finalizer);
         mdns_client_set_queue(subscriber, _Querier_InternalQueue());
         mdns_retain(subscriber);
         mdns_subscriber_set_event_handler(subscriber,
@@ -1566,15 +1983,242 @@ mDNSexport void Querier_HandleMDNSQuestion(DNSQuestion *const q)
                     _Querier_HandleSubscriberInvalidation(subscriber);
                     mdns_release(subscriber);
                     break;
+
+                MDNS_COVERED_SWITCH_DEFAULT:
+                    break;
             }
             KQueueUnlock("Subscriber event handler");
         });
-        mdns_client_replace(&q->client, subscriber);
-        mdns_client_activate(q->client);
+        mdns_client_activate(subscriber);
+    }
+    CFSetAddValue(q->DPSubscribers, subscriber);
+    CFBagAddValue(registry, subscriber);
+
+exit:
+    mdns_forget(&qname);
+    return (subscriber != mDNSNULL);
+}
+
+mDNSexport void DPCHandleNewQuestion(DNSQuestion *const q)
+{
+    const mDNSBool enabled = DPCFeatureEnabled();
+    mdns_require_quiet(enabled, exit);
+
+    const mDNSBool eligible = _DPCQuestionIsEligible(q);
+    mdns_require_quiet(eligible, exit);
+
+    if (q->InterfaceID == mDNSInterface_Any)
+    {
+        if (gDPCPushServers)
+        {
+            mdns_cfdictionary_apply(gDPCPushServers,
+            ^ bool (const void *const key, __unused const void *const value)
+            {
+                const mDNSInterfaceID interface = key;
+                _DPCSubscribe(q, interface);
+                return true;
+            });
+        }
+    }
+    else
+    {
+        _DPCSubscribe(q, q->InterfaceID);
     }
 
 exit:
-    mdns_forget(&subscriber);
-    mdns_forget(&qname);
+    return;
 }
+
+mDNSlocal mDNSBool _DPCQuestionHasSubscriber(const DNSQuestion *const q, const mDNSInterfaceID interface)
+{
+    const mdns_subscriber_t subscriber = _DPCQuestionGetSubscriber(q, interface);
+    return (subscriber != mDNSNULL);
+}
+
+mDNSexport mDNSBool DPCSuppressMDNSQuery(const DNSQuestion *const q, const mDNSInterfaceID interface)
+{
+    mDNSBool suppress = mDNSfalse;
+    const mDNSBool enabled = DPCFeatureEnabled();
+    mdns_require_quiet(enabled, exit);
+
+   	if (_DPCQuestionHasSubscriber(q, interface))
+    {
+        suppress = mDNStrue;
+    }
+
+exit:
+    return suppress;
+}
+
+mDNSexport mDNSBool DPCHaveSubscriberForRecord(const mDNSInterfaceID interface, const domainname *const name,
+    const mDNSu16 type, const mDNSu16 class)
+{
+    mDNSBool result = mDNSfalse;
+    const mDNSBool enabled = DPCFeatureEnabled();
+    mdns_require_quiet(enabled, exit);
+
+    const mdns_subscriber_t subscriber = _DPCGetRegisteredSubscriber(interface, name->c, type, class);
+    result = (subscriber != mDNSNULL);
+
+exit:
+    return result;
+}
+
+mDNSlocal void _DPDeregisterSubscriber(const mdns_subscriber_t subscriber)
+{
+    const uintptr_t ifIndex = mdns_subscriber_get_interface_index(subscriber);
+    const CFMutableBagRef registry = _DPCGetSubscriberRegistry((mDNSInterfaceID)ifIndex);
+    mdns_require_quiet(registry, exit);
+
+    const CFIndex count = CFBagGetCountOfValue(registry, subscriber);
+    mdns_require_quiet(count > 0, exit);
+
+    // Remove a subscriber instance from the registry. If the subscriber instance being removed was the last instance
+    // of the subscriber, then invalidate the subscriber since it's no longer being used.
+    CFBagRemoveValue(registry, subscriber);
+    if (count == 1)
+    {
+        mdns_client_invalidate(subscriber);
+    }
+
+exit:
+    return;
+}
+
+mDNSexport void DPCHandleStoppedDNSQuestion(DNSQuestion *const q)
+{
+    const mDNSBool enabled = DPCFeatureEnabled();
+    mdns_require_quiet(enabled, exit);
+    mdns_require_quiet(q->DPSubscribers, exit);
+
+    mdns_cfset_enumerate(q->DPSubscribers,
+    ^ bool (const mdns_subscriber_t subscriber)
+    {
+        _DPDeregisterSubscriber(subscriber);
+        return true;
+    });
+    CFSetRemoveAllValues(q->DPSubscribers);
+    CFForget(&q->DPSubscribers);
+
+exit:
+    return;
+}
+
+mDNSlocal void _DPCDisposeSubscriberRegistry(const mDNSInterfaceID interface)
+{
+    mdns_require_quiet(gDPCSubscriberRegistries, exit);
+
+    const CFMutableBagRef registry = (CFMutableBagRef)CFDictionaryGetValue(gDPCSubscriberRegistries, interface);
+    mdns_require_quiet(registry, exit);
+
+    mdns_cfbag_enumerate(registry,
+    ^ bool (const mdns_subscriber_t subscriber)
+    {
+        mdns_client_invalidate(subscriber);
+        return true;
+    });
+    CFBagRemoveAllValues(registry);
+    CFDictionaryRemoveValue(gDPCSubscriberRegistries, interface);
+
+exit:
+    return;
+}
+
+mDNSlocal void _DPCRemovePushServer(const mDNSInterfaceID interface)
+{
+    const mDNS *const m = &mDNSStorage;
+    for (DNSQuestion *q = m->Questions; q && (q != m->NewQuestions); q = q->next)
+    {
+        mdns_subscriber_t subscriber = _DPCQuestionGetSubscriber(q, interface);
+        if (subscriber)
+        {
+            CFSetRemoveValue(q->DPSubscribers, subscriber);
+        }
+    }
+    _DPCDisposeSubscriberRegistry(interface);
+    mdns_require_quiet(gDPCPushServers, exit);
+
+    const mdns_push_server_t server = (mdns_push_server_t)CFDictionaryGetValue(gDPCPushServers, interface);
+    if (server)
+    {
+        mdns_push_server_invalidate(server);
+        CFDictionaryRemoveValue(gDPCPushServers, interface);
+    }
+
+exit:
+    return;
+}
+
+static const CFDictionaryValueCallBacks gMDNSObjectDictionaryValueCallbacks =
+{
+    .version         = 0,
+    .retain          = mdns_cf_callback_retain,
+    .release         = mdns_cf_callback_release,
+    .copyDescription = mdns_cf_callback_copy_description
+};
+
+mDNSlocal void _DPCSetNewPushServer(const mDNSInterfaceID interface, mdns_domain_name_t srvName)
+{
+    mdns_push_server_t server = mDNSNULL;
+    _DPCRemovePushServer(interface);
+    if (!gDPCPushServers)
+    {
+        gDPCPushServers = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &gInterfaceIDDictionaryKeyCallbacks,
+            &gMDNSObjectDictionaryValueCallbacks);
+        mdns_require_quiet(gDPCPushServers, exit);
+    }
+    server = mdns_push_server_create();
+    mdns_require_quiet(server, exit);
+
+    mdns_push_server_set_srv_name(server, srvName);
+    mdns_push_server_activate(server);
+    CFDictionarySetValue(gDPCPushServers, interface, server);
+    const mDNS *const m = &mDNSStorage;
+    for (DNSQuestion *q = m->Questions; q && (q != m->NewQuestions); q = q->next)
+    {
+        if (_DPCQuestionIsEligible(q))
+        {
+            if ((q->InterfaceID == mDNSInterface_Any) || (q->InterfaceID == interface))
+            {
+                _DPCSubscribe(q, interface);
+            }
+        }
+    }
+
+exit:
+    mdns_forget(&server);
+}
+
+mDNSexport void DPCBrowseHandler(__unused mDNS *const m, __unused DNSQuestion *const q, const ResourceRecord *const answer,
+    const QC_result AddRecord)
+{
+    mdns_domain_name_t srvName = mDNSNULL;
+    const mDNSBool enabled = DPCFeatureEnabled();
+    mdns_require_quiet(enabled, exit);
+
+    if (AddRecord == QC_add)
+    {
+        const mDNSInterfaceID interface = answer->InterfaceID;
+        const mdns_push_server_t server = _DPCGetPushServer(interface);
+        if (!server)
+        {
+            srvName = mdns_domain_name_create_with_labels(answer->name->c, mDNSNULL);
+            mdns_require_quiet(srvName, exit);
+
+            _DPCSetNewPushServer(interface, srvName);
+        }
+    }
+
+exit:
+    mdns_forget(&srvName);
+}
+
+mDNSexport void DPCHandleInterfaceDown(const mDNSInterfaceID interface)
+{
+    const mDNSBool enabled = DPCFeatureEnabled();
+    mdns_require_return(enabled);
+
+    _DPCRemovePushServer(interface);
+}
+#endif // MDNSRESPONDER_SUPPORTS(APPLE, DISCOVERY_PROXY_CLIENT)
 #endif // MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)

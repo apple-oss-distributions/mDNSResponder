@@ -1,6 +1,6 @@
 /* thread-device.c
  *
- * Copyright (c) 2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@
 #include <inttypes.h>
 #include <sys/resource.h>
 #include <netinet/icmp6.h>
+#include <os/feature_private.h>
 #include "srp.h"
 #include "dns-msg.h"
 #include "srp-crypto.h"
@@ -65,11 +66,14 @@ thread_device_rloc16_callback(void *context, uint16_t rloc16, cti_status_t statu
         server_state->rloc16 = rloc16;
         INFO("server_state->rloc16 updated to %d", server_state->rloc16);
 
+        server_state->srp_on_demand = os_feature_enabled(mDNSResponder, srp_on_demand);
+        INFO("srp on demand is " PUB_S_SRP, server_state->srp_on_demand ? "enabled" : "disabled");
+
         // Now we can start.
         if (server_state->service_tracker == NULL) {
             server_state->service_tracker = service_tracker_create(server_state);
             if (server_state->service_tracker == NULL) {
-                FAULT("can't start service tracker.");
+                FAULT("can't create service tracker.");
                 return;
             }
             start = true;
@@ -77,7 +81,7 @@ thread_device_rloc16_callback(void *context, uint16_t rloc16, cti_status_t statu
         if (server_state->thread_tracker == NULL) {
             server_state->thread_tracker = thread_tracker_create(server_state);
             if (server_state->thread_tracker == NULL) {
-                FAULT("can't start thread tracker.");
+                FAULT("can't create thread tracker.");
                 return;
             }
             start = true;
@@ -85,7 +89,7 @@ thread_device_rloc16_callback(void *context, uint16_t rloc16, cti_status_t statu
         if (server_state->node_type_tracker == NULL) {
             server_state->node_type_tracker = node_type_tracker_create(server_state);
             if (server_state->node_type_tracker == NULL) {
-                FAULT("can't start node type tracker.");
+                FAULT("can't create node type tracker.");
                 return;
             }
             start = true;
@@ -93,7 +97,7 @@ thread_device_rloc16_callback(void *context, uint16_t rloc16, cti_status_t statu
         if (server_state->service_publisher == NULL) {
             server_state->service_publisher = service_publisher_create(server_state);
             if (server_state->service_publisher == NULL) {
-                FAULT("can't start service publisher.");
+                FAULT("can't create service publisher.");
                 return;
             }
             start = true;
@@ -101,9 +105,10 @@ thread_device_rloc16_callback(void *context, uint16_t rloc16, cti_status_t statu
         if (server_state->dnssd_client == NULL) {
             server_state->dnssd_client = dnssd_client_create(server_state);
             if (server_state->dnssd_client == NULL) {
-                FAULT("can't start dnssd client");
+                FAULT("can't create dnssd client");
                 return;
             }
+            start = true;
         }
         if (start) {
             thread_tracker_start(server_state->thread_tracker);
@@ -113,10 +118,18 @@ thread_device_rloc16_callback(void *context, uint16_t rloc16, cti_status_t statu
         }
     }
 }
+
 // Start browsing for SRP service, and, if it makes sense, advertise as an SRP server.
 void
 thread_device_startup(srp_server_t *NONNULL server_state)
 {
+    // Just in case we get called without a shutdown having happened, before starting up again, do the
+    // shutdown. This will be a no-op if it has already been done. Don't flush missing services, since we might
+    // get a request for a missing service before we get the thread startup command.
+    thread_device_shutdown(server_state);
+
+    INFO("starting up");
+
     // Before we can actually do anything, we need our RLOC16.
     int status = cti_get_rloc16(server_state, &server_state->thread_rloc16_context, server_state,
                                 thread_device_rloc16_callback, NULL);
@@ -128,7 +141,9 @@ thread_device_startup(srp_server_t *NONNULL server_state)
 void
 thread_device_stop(srp_server_t *NONNULL server_state)
 {
+    INFO("stopping");
     if (server_state->service_tracker != NULL) {
+        service_tracker_cancel_probes(server_state->service_tracker);
         service_tracker_cancel(server_state->service_tracker);
         service_tracker_release(server_state->service_tracker);
         server_state->service_tracker = NULL;
@@ -158,9 +173,14 @@ thread_device_stop(srp_server_t *NONNULL server_state)
 void
 thread_device_shutdown(srp_server_t *NONNULL server_state)
 {
+    INFO("shutting down");
     if (server_state->thread_rloc16_context != NULL) {
         cti_events_discontinue(server_state->thread_rloc16_context);
         server_state->thread_rloc16_context = NULL;
+    }
+    if (server_state->wed_tracker != NULL) {
+        cti_events_discontinue(server_state->wed_tracker);
+        server_state->wed_tracker = NULL;
     }
     thread_device_stop(server_state);
 }

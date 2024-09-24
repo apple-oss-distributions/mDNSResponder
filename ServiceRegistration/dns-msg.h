@@ -1,6 +1,6 @@
 /* dns-msg.h
  *
- * Copyright (c) 2018-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2023 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -140,6 +140,17 @@ struct dns_rdata_key {
     uint8_t *NONNULL key;
 };
 
+typedef struct dns_rdata_soa dns_rdata_soa_t;
+struct dns_rdata_soa {
+    dns_label_t *NONNULL mname;
+    dns_label_t *NONNULL rname;
+    uint32_t serial;
+    uint32_t refresh;
+    uint32_t retry;
+    uint32_t expire;
+    uint32_t minimum;
+};
+
 typedef struct dns_rr dns_rr_t;
 struct dns_rr {
     dns_label_t *NONNULL name;
@@ -157,6 +168,7 @@ struct dns_rr {
         dns_rdata_txt_t txt;
         dns_rdata_sig_t sig;
         dns_rdata_key_t key;
+        dns_rdata_soa_t soa;
     } data;
 };
 
@@ -235,7 +247,7 @@ struct dns_message {
 #define dns_rcode_nxrrset      8 // [RFC2136] RR Set that should exist does not
 #define dns_rcode_notauth      9 // [RFC2136] Server Not Authoritative for zone, or [RFC2845] Not Authorized
 #define dns_rcode_notzone     10 // [RFC2136] Name not contained in zone
-#define dns_rcode_dsotypeni   11 // [RFCTBD draft-ietf-dnsop-session-signal] DSO-Type Not Implemented
+#define dns_rcode_dsotypeni   11 // [RFC8490] DSO-Type Not Implemented
 #define dns_rcode_badvers     16 // [RFC6891] Bad OPT Version, or [RFC2845] TSIG Signature Failure
 #define dns_rcode_badkey      17 // [RFC2845] Key not recognized
 #define dns_rcode_badtime     18 // [RFC2845] Signature out of time window
@@ -315,8 +327,8 @@ struct dns_message {
 #define dns_rrtype_openpgpkey 61 // [RFC7929]   OpenPGP Key
 #define dns_rrtype_csync      62 // [RFC7477] Child-To-Parent Synchronization
 #define dns_rrtype_zonemd     63 // [RFC8976]
-#define dns_rrtype_svcb       64 // [draft-ietf-dnsop-svcb-https-10]
-#define dns_rrtype_https      65 // [draft-ietf-dnsop-svcb-https-10]
+#define dns_rrtype_svcb       64 // [RFC9460]
+#define dns_rrtype_https      65 // [RFC9460]
 #define dns_rrtype_spf        99 // [RFC7208]
 #define dns_rrtype_uinfo     100 // [IANA-Reserved]
 #define dns_rrtype_uid       101 // [IANA-Reserved]
@@ -453,6 +465,7 @@ bool dns_u8_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL of
 bool dns_u16_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp, uint16_t *NONNULL ret);
 bool dns_u32_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp, uint32_t *NONNULL ret);
 bool dns_u64_parse(const uint8_t *NONNULL buf, unsigned len, unsigned *NONNULL offp, uint64_t *NONNULL ret);
+size_t dns_rdata_dump_to_buf(dns_rr_t *NONNULL rr, char *NONNULL buf, size_t bufsize);
 #define dns_rdata_parse_data(rr, buf, offp, target, rdlen, rrstart) \
     dns_rdata_parse_data_(rr, buf, offp, target, rdlen, rrstart, __FILE__, __LINE__)
 bool dns_rdata_parse_data_(dns_rr_t *NONNULL rr, const uint8_t *NONNULL buf, unsigned *NONNULL offp,

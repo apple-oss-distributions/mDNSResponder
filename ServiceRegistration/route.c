@@ -1,6 +1,6 @@
 /* route.c
  *
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,11 +74,12 @@
 #include "srp.h"
 #include "dns-msg.h"
 #include "ioloop.h"
-#include "adv-ctl-server.h"
 #include "srp-crypto.h"
 #include "srp-gw.h"
 #include "srp-mdns-proxy.h"
+#include "adv-ctl-server.h"
 #include "srp-replication.h"
+
 
 # define THREAD_DATA_DIR "/var/lib/openthread"
 # define THREAD_ULA_FILE THREAD_DATA_DIR "/thread-mesh-ula"
@@ -104,16 +105,12 @@
 #include "omr-watcher.h"
 #include "omr-publisher.h"
 #include "route-tracker.h"
+#include "icmp.h"
+
 
 #ifdef LINUX
 #define CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IFCONFIG 1
 #endif
-
-struct icmp_listener {
-    io_t *io_state;
-    int sock;
-    uint32_t unsolicited_interval;
-};
 
 #ifdef LINUX
 struct in6_addr in6addr_linklocal_allnodes = {{{ 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -122,7 +119,6 @@ struct in6_addr in6addr_linklocal_allrouters = {{{ 0xff, 0x02, 0x00, 0x00, 0x00,
                                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02 }}};
 #endif
 
-icmp_listener_t icmp_listener;
 route_state_t *route_states;
 
 #define CONFIGURE_STATIC_INTERFACE_ADDRESSES 1
@@ -131,10 +127,6 @@ route_state_t *route_states;
 interface_t *NULLABLE interface_create_(route_state_t *NONNULL route_state, const char *NONNULL name, int ifindex,
                                         const char *NONNULL file, int line);
 
-static void router_advertisement_send(interface_t *NONNULL interface, const struct in6_addr *destination);
-static void neighbor_solicit_send(interface_t *interface, struct in6_addr *destination);
-static void icmp_send(uint8_t *NONNULL message, size_t length,
-                      interface_t *NONNULL interface, const struct in6_addr *NONNULL destination);
 static void interface_beacon_schedule(interface_t *NONNULL interface, unsigned when);
 static void interface_prefix_configure(struct in6_addr prefix, interface_t *NONNULL interface);
 static void interface_prefix_evaluate(interface_t *interface);
@@ -276,255 +268,6 @@ void interface_release_(interface_t *NONNULL interface, const char *file, int li
 
 #ifndef RA_TESTER
 #endif // RA_TESTER
-
-static void
-icmp_message_free(icmp_message_t *message)
-{
-    if (message->options != NULL) {
-        free(message->options);
-    }
-    if (message->wakeup != NULL) {
-        ioloop_cancel_wake_event(message->wakeup);
-        ioloop_wakeup_release(message->wakeup);
-    }
-    free(message);
-}
-
-static void
-icmp_message_dump(icmp_message_t *message,
-                  const struct in6_addr * const source_address, const struct in6_addr * const destination_address)
-{
-    link_layer_address_t *lladdr;
-    prefix_information_t *prefix_info;
-    route_information_t *route_info;
-    uint8_t *flags;
-    int i;
-    char retransmission_timer_buf[11]; // Maximum size of a uint32_t printed as decimal.
-    char *retransmission_timer = "infinite";
-
-    if (message->retransmission_timer != ND6_INFINITE_LIFETIME) {
-        snprintf(retransmission_timer_buf, sizeof(retransmission_timer_buf), "%" PRIu32, message->retransmission_timer);
-        retransmission_timer = retransmission_timer_buf;
-    }
-
-    SEGMENTED_IPv6_ADDR_GEN_SRP(source_address->s6_addr, src_addr_buf);
-    SEGMENTED_IPv6_ADDR_GEN_SRP(destination_address->s6_addr, dst_addr_buf);
-    if (message->type == icmp_type_router_advertisement) {
-        INFO("router advertisement from " PRI_SEGMENTED_IPv6_ADDR_SRP " to " PRI_SEGMENTED_IPv6_ADDR_SRP
-             " hop_limit %d on " PUB_S_SRP ": checksum = %x "
-             "cur_hop_limit = %d flags = %x router_lifetime = %d reachable_time = %" PRIu32
-             " retransmission_timer = " PUB_S_SRP,
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(source_address->s6_addr, src_addr_buf),
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(destination_address->s6_addr, dst_addr_buf),
-             message->hop_limit, message->interface->name, message->checksum, message->cur_hop_limit, message->flags,
-             message->router_lifetime, message->reachable_time, retransmission_timer);
-    } else if (message->type == icmp_type_router_solicitation) {
-        INFO("router solicitation from " PRI_SEGMENTED_IPv6_ADDR_SRP " to " PRI_SEGMENTED_IPv6_ADDR_SRP
-             " hop_limit %d on " PUB_S_SRP ": code = %d checksum = %x",
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(source_address->s6_addr, src_addr_buf),
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(destination_address->s6_addr, dst_addr_buf),
-             message->hop_limit, message->interface->name,
-             message->code, message->checksum);
-    } else {
-        INFO("icmp message from " PRI_SEGMENTED_IPv6_ADDR_SRP " to " PRI_SEGMENTED_IPv6_ADDR_SRP " hop_limit %d on "
-             PUB_S_SRP ": type = %d code = %d checksum = %x",
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(source_address->s6_addr, src_addr_buf),
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(destination_address->s6_addr, dst_addr_buf),
-             message->hop_limit, message->interface->name, message->type,
-             message->code, message->checksum);
-    }
-
-    for (i = 0; i < message->num_options; i++) {
-        icmp_option_t *option = &message->options[i];
-        switch(option->type) {
-        case icmp_option_source_link_layer_address:
-            lladdr = &option->option.link_layer_address;
-            INFO("  source link layer address " PRI_MAC_ADDR_SRP, MAC_ADDR_PARAM_SRP(lladdr->address));
-            break;
-        case icmp_option_target_link_layer_address:
-            lladdr = &option->option.link_layer_address;
-            INFO("  destination link layer address " PRI_MAC_ADDR_SRP, MAC_ADDR_PARAM_SRP(lladdr->address));
-            break;
-        case icmp_option_prefix_information:
-            prefix_info = &option->option.prefix_information;
-            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix_info->prefix.s6_addr, prefix_buf);
-            INFO("  prefix info: " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d %x %" PRIu32 " %" PRIu32,
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix_info->prefix.s6_addr, prefix_buf), prefix_info->length,
-                 prefix_info->flags, prefix_info->valid_lifetime, prefix_info->preferred_lifetime);
-            break;
-        case icmp_option_route_information:
-            route_info = &option->option.route_information;
-                SEGMENTED_IPv6_ADDR_GEN_SRP(route_info->prefix.s6_addr, router_prefix_buf);
-            INFO("  route info: " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d %x %d",
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(route_info->prefix.s6_addr, router_prefix_buf), route_info->length,
-                 route_info->flags, route_info->route_lifetime);
-            break;
-        case icmp_option_ra_flags_extension:
-            flags = option->option.ra_flags_extension;
-            INFO("  ra flags extension: %x %x %x %x %x %x", flags[0], flags[1], flags[2], flags[3], flags[4], flags[5]);
-            break;
-        default:
-            INFO("  option type %d", option->type);
-            break;
-        }
-    }
-}
-
-static bool
-icmp_message_parse_options(icmp_message_t *message, uint8_t *icmp_buf, unsigned length, unsigned *offset)
-{
-    uint8_t option_type, option_length_8;
-    unsigned option_length;
-    unsigned scan_offset = *offset;
-    icmp_option_t *option;
-    uint32_t reserved32;
-    prefix_information_t *prefix_information;
-    route_information_t *route_information;
-
-    int prefix_bytes;
-
-    // Count the options and validate the lengths
-    message->num_options = 0;
-    while (scan_offset < length) {
-        if (!dns_u8_parse(icmp_buf, length, &scan_offset, &option_type)) {
-            return false;
-        }
-        if (!dns_u8_parse(icmp_buf, length, &scan_offset, &option_length_8)) {
-            return false;
-        }
-        if (option_length_8 == 0) { // RFC4191 section 4.6: The value 0 is invalid.
-            ERROR("icmp_option_parse: option type %d length 0 is invalid.", option_type);
-            return false;
-        }
-        if (scan_offset + option_length_8 * 8 - 2 > length) {
-            ERROR("icmp_option_parse: option type %d length %d is longer than remaining available space %u",
-                  option_type, option_length_8 * 8, length - scan_offset + 2);
-            return false;
-        }
-        scan_offset += option_length_8 * 8 - 2;
-        message->num_options++;
-    }
-    // If there are no options, we're done. No options is valid, so return true.
-    if (message->num_options == 0) {
-        return true;
-    }
-    message->options = calloc(message->num_options, sizeof(*message->options));
-    if (message->options == NULL) {
-        ERROR("No memory for icmp options.");
-        return false;
-    }
-    option = message->options;
-    while (*offset < length) {
-        scan_offset = *offset;
-        if (!dns_u8_parse(icmp_buf, length, &scan_offset, &option_type)) {
-            return false;
-        }
-        if (!dns_u8_parse(icmp_buf, length, &scan_offset, &option_length_8)) {
-            return false;
-        }
-        // We already validated the length in the previous pass.
-        option->type = option_type;
-        option_length = option_length_8 * 8;
-
-        switch(option_type) {
-        case icmp_option_source_link_layer_address:
-        case icmp_option_target_link_layer_address:
-            // At this juncture we are assuming that everything we care about looks like an
-            // ethernet interface.  So for this case, length should be 8.
-            if (option_length != 8) {
-                INFO("Ignoring unexpectedly long link layer address: %d", option_length);
-                // Don't store the option.
-                message->num_options--;
-                *offset += option_length;
-                continue;
-            }
-            option->option.link_layer_address.length = 6;
-            memcpy(option->option.link_layer_address.address, &icmp_buf[scan_offset], 6);
-            break;
-        case icmp_option_prefix_information:
-            prefix_information = &option->option.prefix_information;
-            // Only a length of 32 is valid.  This is an invalid ICMP packet, not just misunderunderstood
-            if (option_length != 32) {
-                return false;
-            }
-            // prefix length 8
-            if (!dns_u8_parse(icmp_buf, length, &scan_offset, &prefix_information->length)) {
-                return false;
-            }
-            // flags 8a
-            if (!dns_u8_parse(icmp_buf, length, &scan_offset, &prefix_information->flags)) {
-                return false;
-            }
-            // valid lifetime 32
-            if (!dns_u32_parse(icmp_buf, length, &scan_offset,
-                               &prefix_information->valid_lifetime)) {
-                return false;
-            }
-            // preferred lifetime 32
-            if (!dns_u32_parse(icmp_buf, length, &scan_offset,
-                               &prefix_information->preferred_lifetime)) {
-                return false;
-            }
-            // reserved2 32
-            if (!dns_u32_parse(icmp_buf, length, &scan_offset, &reserved32)) {
-                return false;
-            }
-            // prefix 128
-            in6prefix_copy_from_data(&prefix_information->prefix, &icmp_buf[scan_offset], 16);
-            break;
-        case icmp_option_route_information:
-            route_information = &option->option.route_information;
-
-            // route length 8
-            if (!dns_u8_parse(icmp_buf, length, &scan_offset, &route_information->length)) {
-                return false;
-            }
-            switch(option_length) {
-            case 8:
-                prefix_bytes = 0;
-                break;
-            case 16:
-                prefix_bytes = 8;
-                break;
-            case 24:
-                prefix_bytes = 16;
-                break;
-            default:
-                ERROR("invalid route information option length %d for route length %d",
-                      option_length, route_information->length);
-                return false;
-            }
-            // flags 8
-            if (!dns_u8_parse(icmp_buf, length, &scan_offset, &route_information->flags)) {
-                return false;
-            }
-            // route lifetime 32
-            if (!dns_u32_parse(icmp_buf, length, &scan_offset, &route_information->route_lifetime)) {
-                return false;
-            }
-            // route (64, 96 or 128)
-            in6prefix_copy_from_data(&route_information->prefix, &icmp_buf[scan_offset], prefix_bytes);
-            break;
-        case icmp_option_ra_flags_extension:
-            // The RA Flags extension as defined in RFC 5175 must have a length of 1 (meaning 8 bytes).
-            // It's possible that a later spec will define a length > 1, but since we are implementing
-            // RFC5175, we are required to silently ignore anything after the first 8 bytes. Since
-            // we've already checked for length=0 (invalid), we can just take our six bytes of flags
-            // and not bounds-check further.
-            memcpy(option->option.ra_flags_extension, &icmp_buf[scan_offset], sizeof(option->option.ra_flags_extension));
-            break;
-        default:
-        case icmp_option_mtu:
-        case icmp_option_redirected_header:
-            // don't care
-            break;
-        }
-        *offset += option_length;
-        option++;
-    }
-    return true;
-}
-
 
 static void
 interface_prefix_deconfigure(void *context)
@@ -938,6 +681,9 @@ routing_policy_evaluate(interface_t *interface, bool assume_changed)
             for (i = 0; i < router->num_options; i++, option++) {
                 if (option->type == icmp_option_prefix_information) {
                     prefix_information_t *prefix = &option->option.prefix_information;
+#ifndef RA_TESTER
+                    omr_publisher_check_prefix(route_state->omr_publisher, &prefix->prefix, prefix->length);
+#endif
                     if (prefix_usable(interface, route_state, router, prefix)) {
                         // We don't consider the prefix we would advertise to be infrastructure-provided if we see it
                         // advertised by another router, because that router is also a Thread BR, and we don't want
@@ -1290,6 +1036,10 @@ send_router_probes(void *context)
         // Mark routers from which we received neighbor advertises during the probe as reachable. Routers
         // that did not respond are no longer reachable.
         for (icmp_message_t *router = interface->routers; router != NULL; router = router->next) {
+            SEGMENTED_IPv6_ADDR_GEN_SRP(router->source.s6_addr, router_src_addr_buf);
+            INFO("router (%p) " PRI_SEGMENTED_IPv6_ADDR_SRP " was " PUB_S_SRP "reached during probing.", router,
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP(router->source.s6_addr, router_src_addr_buf),
+                 router->reached ? "" : "not ");
             router->reachable = router->reached;
         }
         routing_policy_evaluate(interface, false);
@@ -1345,11 +1095,12 @@ schedule_next_router_probe(interface_t *interface)
     }
 }
 
-static void
+void
 router_solicit(icmp_message_t *message)
 {
     interface_t *iface, *interface;
     bool is_retransmission = false;
+
 
     // Further validate the message
     if (message->hop_limit != 255 || message->code != 0) {
@@ -1440,7 +1191,7 @@ out:
     }
 }
 
-static void
+void
 router_advertisement(icmp_message_t *message)
 {
     interface_t *iface;
@@ -1490,6 +1241,7 @@ router_advertisement(icmp_message_t *message)
     // neighbor solicit.
     message->latest_na = message->received_time;
     message->reachable = true;
+    message->reached = true;
 
     // Check for the stub router flag here so that we have it when scanning PIOs for usability.
     for (int i = 0; i < message->num_options; i++) {
@@ -1504,7 +1256,7 @@ router_advertisement(icmp_message_t *message)
     routing_policy_evaluate(message->interface, false);
 }
 
-static void
+void
 neighbor_advertisement(icmp_message_t *message)
 {
     if (message->hop_limit != 255 || message->code != 0) {
@@ -1517,157 +1269,19 @@ neighbor_advertisement(icmp_message_t *message)
     // prefix.
     for (icmp_message_t *router = message->interface->routers; router != NULL; router = router->next) {
         if (!in6addr_compare(&message->source, &router->source)) {
+            // Only log for usable routers, to avoid a lot of extra noise. However, we don't actually probe routers that
+            // aren't usable, so generally speaking this test will always be true.
             if (router->usable) {
                 SEGMENTED_IPv6_ADDR_GEN_SRP(message->source.s6_addr, source_buf);
                 INFO("usable neighbor advertisement recieved on " PUB_S_SRP " from " PRI_SEGMENTED_IPv6_ADDR_SRP,
                      message->interface->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(message->source.s6_addr, source_buf));
-                router->latest_na = ioloop_timenow();
-                router->reached = true;
-                return;
-            } else {
-                router->latest_na = ioloop_timenow();
-                router->reached = true;
-                return;
             }
+            router->latest_na = ioloop_timenow();
+            router->reached = true;
+            router->reachable = true;
         }
     }
     return;
-}
-
-static void
-icmp_message(route_state_t *route_state, uint8_t *icmp_buf, unsigned length, int ifindex, int hop_limit, addr_t *src, addr_t *dest)
-{
-    unsigned offset = 0;
-    uint32_t reserved32;
-    interface_t *interface;
-    icmp_message_t *message = calloc(1, sizeof(*message));
-    if (message == NULL) {
-        ERROR("Unable to allocate icmp_message_t for parsing");
-        return;
-    }
-
-    message->source = src->sin6.sin6_addr;
-    message->destination = dest->sin6.sin6_addr;
-    message->hop_limit = hop_limit;
-    for (interface = route_state->interfaces; interface; interface = interface->next) {
-        if (interface->index == ifindex) {
-            message->interface = interface;
-            break;
-        }
-    }
-    message->received_time = ioloop_timenow();
-    message->received_time_already_adjusted = false;
-    message->new_router = true;
-    message->route_state = route_state;
-
-    if (message->interface == NULL) {
-        SEGMENTED_IPv6_ADDR_GEN_SRP(message->source.s6_addr, src_buf);
-        SEGMENTED_IPv6_ADDR_GEN_SRP(message->destination.s6_addr, dst_buf);
-        INFO("ICMP message type %d from " PRI_SEGMENTED_IPv6_ADDR_SRP " to " PRI_SEGMENTED_IPv6_ADDR_SRP
-             " on interface index %d, which isn't listed.",
-             icmp_buf[0], SEGMENTED_IPv6_ADDR_PARAM_SRP(message->source.s6_addr, src_buf),
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(message->destination.s6_addr, dst_buf), ifindex);
-        icmp_message_free(message);
-        return;
-    }
-
-    if (length < sizeof (struct icmp6_hdr)) {
-        ERROR("Short ICMP message: length %d is shorter than ICMP header length %zd", length, sizeof(struct icmp6_hdr));
-        icmp_message_free(message);
-        return;
-    }
-    INFO("length %d", length);
-
-    // The increasingly innaccurately named dns parse functions will work fine for this.
-    if (!dns_u8_parse(icmp_buf, length, &offset, &message->type)) {
-        goto out;
-    }
-    if (!dns_u8_parse(icmp_buf, length, &offset, &message->code)) {
-        goto out;
-    }
-    // XXX check the checksum
-    if (!dns_u16_parse(icmp_buf, length, &offset, &message->checksum)) {
-        goto out;
-    }
-    switch(message->type) {
-    case icmp_type_router_advertisement:
-        if (!dns_u8_parse(icmp_buf, length, &offset, &message->cur_hop_limit)) {
-            goto out;
-        }
-        if (!dns_u8_parse(icmp_buf, length, &offset, &message->flags)) {
-            goto out;
-        }
-        if (!dns_u16_parse(icmp_buf, length, &offset, &message->router_lifetime)) {
-            goto out;
-        }
-        if (!dns_u32_parse(icmp_buf, length, &offset, &message->reachable_time)) {
-            goto out;
-        }
-        if (!dns_u32_parse(icmp_buf, length, &offset, &message->retransmission_timer)) {
-            goto out;
-        }
-
-        if (!icmp_message_parse_options(message, icmp_buf, length, &offset)) {
-            goto out;
-        }
-        icmp_message_dump(message, &message->source, &message->destination);
-        router_advertisement(message);
-        // router_advertisement() is given ownership of the message
-        return;
-
-    case icmp_type_router_solicitation:
-        if (!dns_u32_parse(icmp_buf, length, &offset, &reserved32)) {
-            goto out;
-        }
-        if (!icmp_message_parse_options(message, icmp_buf, length, &offset)) {
-            goto out;
-        }
-        icmp_message_dump(message, &message->source, &message->destination);
-        router_solicit(message);
-        // router_solicit() is given ownership of the message.
-        return;
-
-    case icmp_type_neighbor_advertisement:
-        icmp_message_dump(message, &message->source, &message->destination);
-        neighbor_advertisement(message);
-        break;
-
-    case icmp_type_neighbor_solicitation:
-    case icmp_type_echo_request:
-    case icmp_type_echo_reply:
-    case icmp_type_redirect:
-        break;
-    }
-
-out:
-    icmp_message_free(message);
-    return;
-}
-
-#ifndef FUZZING
-static
-#endif
-void
-icmp_callback(io_t *NONNULL io, void *UNUSED context)
-{
-    ssize_t rv;
-    uint8_t icmp_buf[1500];
-    int ifindex = 0;
-    addr_t src, dest;
-    int hop_limit = 0;
-
-#ifndef FUZZING
-    rv = ioloop_recvmsg(io->fd, &icmp_buf[0], sizeof(icmp_buf), &ifindex, &hop_limit, &src, &dest);
-#else
-    rv = read(io->fd, &icmp_buf, sizeof(icmp_buf));
-#endif
-    if (rv < 0) {
-        ERROR("icmp_callback: can't read ICMP message: " PUB_S_SRP, strerror(errno));
-        return;
-    }
-    for (route_state_t *route_state = route_states; route_state != NULL; route_state = route_state->next) {
-        icmp_message(route_state, icmp_buf, (unsigned)rv, ifindex, hop_limit, &src, &dest); // rv will never be > sizeof(icmp_buf)
-    }
 }
 
 #if   defined(CONFIGURE_STATIC_INTERFACE_ADDRESSES_WITH_IPCONFIG) || \
@@ -1860,366 +1474,6 @@ thread_prefix_done(void *context, int status, const char *error)
 #endif // THREAD_BORDER_ROUTRER && !RA_TESTER
 
 static void
-route_information_to_wire(dns_towire_state_t *towire, void *prefix_data,
-                          const char *source_interface, const char *dest_interface)
-{
-    uint8_t *prefix = prefix_data;
-
-#ifndef ND_OPT_ROUTE_INFORMATION
-#define ND_OPT_ROUTE_INFORMATION 24
-#endif
-    dns_u8_to_wire(towire, ND_OPT_ROUTE_INFORMATION);
-    dns_u8_to_wire(towire, 2); // length / 8
-    dns_u8_to_wire(towire, 64); // Interface prefixes are always 64 bits
-    dns_u8_to_wire(towire, 0); // There's no reason at present to prefer one Thread BR over another
-    dns_u32_to_wire(towire, BR_PREFIX_LIFETIME); // Route lifetime 1800 seconds (30 minutes)
-    dns_rdata_raw_data_to_wire(towire, prefix, 8); // /64 requires 8 bytes.
-    SEGMENTED_IPv6_ADDR_GEN_SRP(prefix, thread_prefix_buf);
-    INFO("Sending route to " PRI_SEGMENTED_IPv6_ADDR_SRP "%%" PUB_S_SRP " on " PUB_S_SRP,
-         SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix, thread_prefix_buf), source_interface, dest_interface);
-}
-
-static void
-router_advertisement_send(interface_t *interface, const struct in6_addr *destination)
-{
-    uint8_t *message;
-    dns_towire_state_t towire;
-    route_state_t *route_state = interface->route_state;
-
-    // Thread blocks RAs so no point sending them.
-    if (interface->inactive
-#ifndef RA_TESTER
-        || interface->is_thread
-#endif
-        ) {
-        return;
-    }
-
-#define MAX_ICMP_MESSAGE 1280
-    message = malloc(MAX_ICMP_MESSAGE);
-    if (message == NULL) {
-        ERROR("router_advertisement_send: unable to construct ICMP Router Advertisement: no memory");
-        return;
-    }
-
-    // Construct the ICMP header and options for each interface.
-    memset(&towire, 0, sizeof towire);
-    towire.p = message;
-    towire.lim = message + MAX_ICMP_MESSAGE;
-
-    // Construct the ICMP header.
-    // We use the DNS message construction functions because it's easy; probably should just make
-    // the towire functions more generic.
-    dns_u8_to_wire(&towire, ND_ROUTER_ADVERT);  // icmp6_type
-    dns_u8_to_wire(&towire, 0);                 // icmp6_code
-    dns_u16_to_wire(&towire, 0);                // The kernel computes the checksum (we don't technically have it).
-    dns_u8_to_wire(&towire, 0);                 // Hop limit, we don't set.
-    dns_u8_to_wire(&towire, 0);                 // Flags.  We don't offer DHCP, so We set neither the M nor the O bit.
-    // We are not a home agent, so no H bit.  Lifetime is 0, so Prf is 0.
-#ifdef ROUTER_LIFETIME_HACK
-    dns_u16_to_wire(&towire, BR_PREFIX_LIFETIME); // Router lifetime, hacked.  This shouldn't ever be enabled.
-#else
-#ifdef RA_TESTER
-    // Advertise a default route on the simulated thread network
-    if (!strcmp(interface->name, route_state->thread_interface_name)) {
-        dns_u16_to_wire(&towire, BR_PREFIX_LIFETIME); // Router lifetime for default route
-    } else {
-#endif
-        dns_u16_to_wire(&towire, 0);            // Router lifetime for non-default default route(s).
-#ifdef RA_TESTER
-    }
-#endif // RA_TESTER
-#endif // ROUTER_LIFETIME_HACK
-    dns_u32_to_wire(&towire, 0);                // Reachable time for NUD, we have no opinion on this.
-    dns_u32_to_wire(&towire, 0);                // Retransmission timer, again we have no opinion.
-
-    // Send Source link-layer address option
-    if (interface->have_link_layer_address) {
-        dns_u8_to_wire(&towire, ND_OPT_SOURCE_LINKADDR);
-        dns_u8_to_wire(&towire, 1); // length / 8
-        dns_rdata_raw_data_to_wire(&towire, &interface->link_layer, sizeof(interface->link_layer));
-        INFO("advertising source lladdr " PRI_MAC_ADDR_SRP
-             " on " PUB_S_SRP, MAC_ADDR_PARAM_SRP(interface->link_layer), interface->name);
-    }
-
-#ifndef RA_TESTER
-    // Send MTU of 1280 for Thread?
-    if (interface->is_thread) {
-        dns_u8_to_wire(&towire, ND_OPT_MTU);
-        dns_u8_to_wire(&towire, 1); // length / 8
-        dns_u32_to_wire(&towire, 1280);
-        INFO("advertising MTU of 1280 on " PUB_S_SRP, interface->name);
-    }
-#endif
-
-    // Send Prefix Information option if there's no IPv6 on the link.
-    if (interface->our_prefix_advertised && !interface->suppress_ipv6_prefix && route_state->have_xpanid_prefix) {
-        dns_u8_to_wire(&towire, ND_OPT_PREFIX_INFORMATION);
-        dns_u8_to_wire(&towire, 4); // length / 8
-        dns_u8_to_wire(&towire, 64); // On-link prefix is always 64 bits
-        dns_u8_to_wire(&towire, ND_OPT_PI_FLAG_ONLINK | ND_OPT_PI_FLAG_AUTO); // On link, autoconfig
-        dns_u32_to_wire(&towire, interface->valid_lifetime);
-        dns_u32_to_wire(&towire, interface->preferred_lifetime);
-        dns_u32_to_wire(&towire, 0); // Reserved
-        dns_rdata_raw_data_to_wire(&towire, &interface->ipv6_prefix, sizeof interface->ipv6_prefix);
-        SEGMENTED_IPv6_ADDR_GEN_SRP(interface->ipv6_prefix.s6_addr, ipv6_prefix_buf);
-        INFO("advertising on-link prefix " PRI_SEGMENTED_IPv6_ADDR_SRP " on " PUB_S_SRP,
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(interface->ipv6_prefix.s6_addr, ipv6_prefix_buf), interface->name);
-
-    }
-
-    // In principle we can either send routes to links that are reachable by this router,
-    // or just advertise a router to the entire ULA /48.   In theory it doesn't matter
-    // which we do; if we support HNCP at some point we probably need to be specific, but
-    // for now being general is fine because we have no way to share a ULA.
-    // Unfortunately, some RIO implementations do not work with specific routes, so for now
-    // We are doing it the easy way and just advertising the /48.
-#define SEND_INTERFACE_SPECIFIC_RIOS 1
-#ifdef SEND_INTERFACE_SPECIFIC_RIOS
-
-    // If neither ROUTE_BETWEEN_NON_THREAD_LINKS nor RA_TESTER are defined, then we never want to
-    // send an RIO other than for the thread network prefix.
-#if defined (ROUTE_BETWEEN_NON_THREAD_LINKS) || defined(RA_TESTER)
-    interface_t *ifroute;
-    // Send Route Information option for other interfaces.
-    for (ifroute = route_state->interfaces; ifroute; ifroute = ifroute->next) {
-        if (ifroute->inactive) {
-            continue;
-        }
-        if (want_routing(route_state) &&
-            ifroute->our_prefix_advertised &&
-#ifdef SEND_ON_LINK_ROUTE
-            // In theory we don't want to send RIO for the on-link prefix, but there's this bug, see.
-            true &&
-#else
-            ifroute != interface &&
-#endif
-#ifdef RA_TESTER
-            // For the RA tester, we don't need to send an RIO to the thread network because we're the
-            // default router for that network.
-            strcmp(interface->name, route_state->thread_interface_name)
-#else
-            true
-#endif
-            )
-        {
-            route_information_to_wire(&towire, &ifroute->ipv6_prefix, ifroute->name, interface->name);
-        }
-    }
-#endif // ROUTE_BETWEEN_NON_THREAD_LINKS || RA_TESTER
-
-#ifndef RA_TESTER
-    // Send route information option for thread prefix
-    if (route_state->omr_watcher != NULL) {
-        omr_prefix_t *thread_prefixes = omr_watcher_prefixes_get(route_state->omr_watcher);
-
-        // Send RIOs for any other prefixes that appear on the Thread network
-        for (struct omr_prefix *prefix = thread_prefixes; prefix != NULL; prefix = prefix->next) {
-            route_information_to_wire(&towire, &prefix->prefix, route_state->thread_interface_name, interface->name);
-        }
-    }
-#endif
-#else
-#ifndef SKIP_SLASH_48
-    dns_u8_to_wire(&towire, ND_OPT_ROUTE_INFORMATION);
-    dns_u8_to_wire(&towire, 3); // length / 8
-    dns_u8_to_wire(&towire, 48); // ULA prefixes are always 48 bits
-    dns_u8_to_wire(&towire, 0); // There's no reason at present to prefer one Thread BR over another
-    dns_u32_to_wire(&towire, BR_PREFIX_LIFETIME); // Route lifetime 1800 seconds (30 minutes)
-    dns_rdata_raw_data_to_wire(&towire, &route_state->srp_server->ula_prefix, 16); // /48 requires 16 bytes
-#endif // SKIP_SLASH_48
-#endif // SEND_INTERFACE_SPECIFIC_RIOS
-
-    // Send the stub router flag
-    dns_u8_to_wire(&towire, ND_OPT_RA_FLAGS_EXTENSION);
-    dns_u8_to_wire(&towire, 1); // length / 8
-    dns_u8_to_wire(&towire, RA_FLAGS1_STUB_ROUTER);
-    dns_u8_to_wire(&towire, 0); // Five bytes of zero flag bits
-    dns_u32_to_wire(&towire, 0);
-
-    if (towire.error) {
-        ERROR("No space in ICMP output buffer for " PUB_S_SRP " at route.c:%d", interface->name, towire.line);
-        towire.error = 0;
-    } else {
-        SEGMENTED_IPv6_ADDR_GEN_SRP(destination->s6_addr, destination_buf);
-        INFO("sending advertisement to " PRI_SEGMENTED_IPv6_ADDR_SRP " on " PUB_S_SRP,
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(destination->s6_addr, destination_buf),
-             interface->name);
-        icmp_send(message, towire.p - message, interface, destination);
-    }
-    free(message);
-}
-
-static void
-router_solicit_send(interface_t *interface)
-{
-    uint8_t *message;
-    dns_towire_state_t towire;
-
-    // Thread blocks RSs so no point sending them.
-    if (interface->inactive
-#ifndef RA_TESTER
-        || interface->is_thread
-#endif
-        ) {
-        return;
-    }
-
-#define MAX_ICMP_MESSAGE 1280
-    message = malloc(MAX_ICMP_MESSAGE);
-    if (message == NULL) {
-        ERROR("Unable to construct ICMP Router Advertisement: no memory");
-        return;
-    }
-
-    // Construct the ICMP header and options for each interface.
-    memset(&towire, 0, sizeof towire);
-    towire.p = message;
-    towire.lim = message + MAX_ICMP_MESSAGE;
-
-    // Construct the ICMP header.
-    // We use the DNS message construction functions because it's easy; probably should just make
-    // the towire functions more generic.
-    dns_u8_to_wire(&towire, ND_ROUTER_SOLICIT);  // icmp6_type
-    dns_u8_to_wire(&towire, 0);                  // icmp6_code
-    dns_u16_to_wire(&towire, 0);                 // The kernel computes the checksum (we don't technically have it).
-    dns_u32_to_wire(&towire, 0);                 // Reserved32
-
-    // Send Source link-layer address option
-    if (interface->have_link_layer_address) {
-        dns_u8_to_wire(&towire, ND_OPT_SOURCE_LINKADDR);
-        dns_u8_to_wire(&towire, 1); // length / 8
-        dns_rdata_raw_data_to_wire(&towire, &interface->link_layer, sizeof(interface->link_layer));
-    }
-
-    if (towire.error) {
-        ERROR("No space in ICMP output buffer for " PUB_S_SRP " at route.c:%d", interface->name, towire.line);
-    } else {
-        icmp_send(message, towire.p - message, interface, &in6addr_linklocal_allrouters);
-    }
-    free(message);
-}
-
-static void
-neighbor_solicit_send(interface_t *interface, struct in6_addr *destination)
-{
-    uint8_t *message;
-    dns_towire_state_t towire;
-
-#define MAX_ICMP_MESSAGE 1280
-    message = malloc(MAX_ICMP_MESSAGE);
-    if (message == NULL) {
-        ERROR("Unable to construct ICMP Router Advertisement: no memory");
-        return;
-    }
-
-    // Construct the ICMP header and options for each interface.
-    memset(&towire, 0, sizeof towire);
-    towire.p = message;
-    towire.lim = message + MAX_ICMP_MESSAGE;
-
-    // Construct the ICMP header.
-    // We use the DNS message construction functions because it's easy; probably should just make
-    // the towire functions more generic.
-    dns_u8_to_wire(&towire, ND_NEIGHBOR_SOLICIT);  // icmp6_type
-    dns_u8_to_wire(&towire, 0);                    // icmp6_code
-    dns_u16_to_wire(&towire, 0);                   // The kernel computes the checksum (we don't technically have it).
-    dns_u32_to_wire(&towire, 0);                   // Reserved32
-    dns_rdata_raw_data_to_wire(&towire, destination, sizeof(*destination)); // Target address of solicit
-
-    // Send Source link-layer address option
-    if (interface->have_link_layer_address) {
-        dns_u8_to_wire(&towire, ND_OPT_SOURCE_LINKADDR);
-        dns_u8_to_wire(&towire, 1); // length / 8
-        dns_rdata_raw_data_to_wire(&towire, &interface->link_layer, sizeof(interface->link_layer));
-    }
-
-    if (towire.error) {
-        ERROR("No space in ICMP output buffer for " PUB_S_SRP " at route.c:%d", interface->name, towire.line);
-    } else {
-        SEGMENTED_IPv6_ADDR_GEN_SRP(destination, dest_buf);
-        INFO("sending neighbor solicit on " PUB_S_SRP " to " PRI_SEGMENTED_IPv6_ADDR_SRP,
-             interface->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(destination, dest_buf));
-        icmp_send(message, towire.p - message, interface, destination);
-    }
-    free(message);
-}
-
-static void
-icmp_send(uint8_t *message, size_t length, interface_t *interface, const struct in6_addr *destination)
-{
-#ifdef FUZZING
-    char buffer[length];
-    memcpy(buffer, message, length);
-    return;
-#endif
-    struct iovec iov;
-    struct in6_pktinfo *packet_info;
-    socklen_t cmsg_length = CMSG_SPACE(sizeof(*packet_info)) + CMSG_SPACE(sizeof (int));
-    uint8_t *cmsg_buffer;
-    struct msghdr msg_header;
-    struct cmsghdr *cmsg_pointer;
-    int hop_limit = 255;
-    ssize_t rv;
-    struct sockaddr_in6 dest;
-
-    // Make space for the control message buffer.
-    cmsg_buffer = calloc(1, cmsg_length);
-    if (cmsg_buffer == NULL) {
-        ERROR("Unable to construct ICMP Router Advertisement: no memory");
-        return;
-    }
-
-    // Send the message
-    memset(&dest, 0, sizeof(dest));
-    dest.sin6_family = AF_INET6;
-    dest.sin6_scope_id = interface->index;
-#ifndef NOT_HAVE_SA_LEN
-    dest.sin6_len = sizeof(dest);
-#endif
-    msg_header.msg_namelen = sizeof(dest);
-    dest.sin6_addr = *destination;
-
-    msg_header.msg_name = &dest;
-    iov.iov_base = message;
-    iov.iov_len = length;
-    msg_header.msg_iov = &iov;
-    msg_header.msg_iovlen = 1;
-    msg_header.msg_control = cmsg_buffer;
-    msg_header.msg_controllen = cmsg_length;
-
-    // Specify the interface
-    cmsg_pointer = CMSG_FIRSTHDR(&msg_header);
-    cmsg_pointer->cmsg_level = IPPROTO_IPV6;
-    cmsg_pointer->cmsg_type = IPV6_PKTINFO;
-    cmsg_pointer->cmsg_len = CMSG_LEN(sizeof(*packet_info));
-    packet_info = (struct in6_pktinfo *)CMSG_DATA(cmsg_pointer);
-    memset(packet_info, 0, sizeof(*packet_info));
-    packet_info->ipi6_ifindex = interface->index;
-
-    // Router advertisements and solicitations have a hop limit of 255
-    cmsg_pointer = CMSG_NXTHDR(&msg_header, cmsg_pointer);
-    cmsg_pointer->cmsg_level = IPPROTO_IPV6;
-    cmsg_pointer->cmsg_type = IPV6_HOPLIMIT;
-    cmsg_pointer->cmsg_len = CMSG_LEN(sizeof(int));
-    memcpy(CMSG_DATA(cmsg_pointer), &hop_limit, sizeof(hop_limit));
-
-    // Send it
-    rv = sendmsg(icmp_listener.io_state->fd, &msg_header, 0);
-    if (rv < 0) {
-        uint8_t *in6_addr_bytes = ((struct sockaddr_in6 *)(msg_header.msg_name))->sin6_addr.s6_addr;
-        SEGMENTED_IPv6_ADDR_GEN_SRP(in6_addr_bytes, in6_addr_buf);
-        ERROR("icmp_send: sending " PUB_S_SRP " to " PRI_SEGMENTED_IPv6_ADDR_SRP " on interface " PUB_S_SRP
-              " index %d: " PUB_S_SRP, message[0] == ND_ROUTER_SOLICIT ? "solicit" : "advertise",
-              SEGMENTED_IPv6_ADDR_PARAM_SRP(in6_addr_bytes, in6_addr_buf),
-              interface->name, interface->index, strerror(errno));
-    } else if ((size_t)rv != iov.iov_len) {
-        ERROR("icmp_send: short send to interface " PUB_S_SRP ": %zd < %zd", interface->name, rv, iov.iov_len);
-    }
-    free(cmsg_buffer);
-}
-
-static void
 post_solicit_policy_evaluate(void *context)
 {
     interface_t *interface = context;
@@ -2329,75 +1583,6 @@ route_ula_setup(route_state_t *route_state)
     }
 }
 
-bool
-start_icmp_listener(void)
-{
-    int sock = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6);
-    int true_flag = 1;
-#ifdef CONFIGURE_STATIC_INTERFACE_ADDRESSES
-    int false_flag = 0;
-#endif
-    struct icmp6_filter filter;
-    ssize_t rv;
-
-    if (sock < 0) {
-        ERROR("Unable to listen for icmp messages: " PUB_S_SRP, strerror(errno));
-        close(sock);
-        return false;
-    }
-
-    // Only accept router advertisements and router solicits.
-    ICMP6_FILTER_SETBLOCKALL(&filter);
-    ICMP6_FILTER_SETPASS(ND_ROUTER_SOLICIT, &filter);
-    ICMP6_FILTER_SETPASS(ND_ROUTER_ADVERT, &filter);
-    ICMP6_FILTER_SETPASS(ND_NEIGHBOR_ADVERT, &filter);
-    rv = setsockopt(sock, IPPROTO_ICMPV6, ICMP6_FILTER, &filter, sizeof(filter));
-    if (rv < 0) {
-        ERROR("Can't set IPV6_RECVHOPLIMIT: " PUB_S_SRP ".", strerror(errno));
-        close(sock);
-        return false;
-    }
-
-    // We want a source address and interface index
-    rv = setsockopt(sock, IPPROTO_IPV6, IPV6_RECVPKTINFO, &true_flag, sizeof(true_flag));
-    if (rv < 0) {
-        ERROR("Can't set IPV6_RECVPKTINFO: " PUB_S_SRP ".", strerror(errno));
-        close(sock);
-        return false;
-    }
-
-    // We need to be able to reject RAs arriving from off-link.
-    rv = setsockopt(sock, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &true_flag, sizeof(true_flag));
-    if (rv < 0) {
-        ERROR("Can't set IPV6_RECVHOPLIMIT: " PUB_S_SRP ".", strerror(errno));
-        close(sock);
-        return false;
-    }
-
-#ifdef CONFIGURE_STATIC_INTERFACE_ADDRESSES
-    // Prevent our router advertisements from updating our routing table.
-    rv = setsockopt(sock, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &false_flag, sizeof(false_flag));
-    if (rv < 0) {
-        ERROR("Can't set IPV6_RECVHOPLIMIT: " PUB_S_SRP ".", strerror(errno));
-        close(sock);
-        return false;
-    }
-#endif
-
-    icmp_listener.io_state = ioloop_file_descriptor_create(sock, NULL, NULL);
-    if (icmp_listener.io_state == NULL) {
-        ERROR("No memory for ICMP I/O structure.");
-        close(sock);
-        return false;
-    }
-
-    // Beacon out a router advertisement every three minutes.
-    icmp_listener.unsolicited_interval = 3 * 60 * 1000;
-    ioloop_add_reader(icmp_listener.io_state, icmp_callback);
-
-    return true;
-}
-
 static void
 router_solicit_callback(void *context)
 {
@@ -2434,51 +1619,6 @@ start_router_solicit(interface_t *interface)
     interface->num_solicits_sent = 0;
     ioloop_add_wake_event(interface->router_solicit_wakeup, interface, router_solicit_callback,
                           NULL, 128 + srp_random16() % 896);
-}
-
-static void
-icmp_interface_subscribe(interface_t *interface, bool added)
-{
-    struct ipv6_mreq req;
-    int rv;
-
-    if (icmp_listener.io_state == NULL) {
-        ERROR("Interface subscribe without ICMP listener.");
-        return;
-    }
-
-    memset(&req, 0, sizeof req);
-    if (interface->index == -1) {
-        ERROR("icmp_interface_subscribe called before interface index fetch for " PUB_S_SRP, interface->name);
-        return;
-    }
-
-    req.ipv6mr_multiaddr = in6addr_linklocal_allrouters;
-    req.ipv6mr_interface = interface->index;
-    rv = setsockopt(icmp_listener.io_state->fd, IPPROTO_IPV6, added ? IPV6_JOIN_GROUP : IPV6_LEAVE_GROUP, &req,
-                    sizeof req);
-    if (rv < 0) {
-        ERROR("Unable to " PUB_S_SRP " all-routers multicast group on " PUB_S_SRP ": " PUB_S_SRP,
-              added ? "join" : "leave", interface->name, strerror(errno));
-        return;
-    } else {
-        INFO(PUB_S_SRP "subscribed on interface " PUB_S_SRP, added ? "" : "un",
-             interface->name);
-    }
-
-    req.ipv6mr_multiaddr = in6addr_linklocal_allnodes;
-    req.ipv6mr_interface = interface->index;
-    rv = setsockopt(icmp_listener.io_state->fd, IPPROTO_IPV6, added ? IPV6_JOIN_GROUP : IPV6_LEAVE_GROUP, &req,
-                    sizeof req);
-    if (rv < 0) {
-        ERROR("Unable to " PUB_S_SRP " all-nodes multicast group on " PUB_S_SRP ": " PUB_S_SRP,
-              added ? "join" : "leave", interface->name, strerror(errno));
-        return;
-    } else {
-        INFO(PUB_S_SRP "subscribed on interface " PUB_S_SRP, added ? "" : "un",
-             interface->name);
-    }
-
 }
 
 static interface_t *
@@ -2611,7 +1751,7 @@ route_remove_routers_advertising_prefix(interface_t *interface, const struct in6
         if (router_is_advertising(router, prefix, preflen)) {
             *rp = router->next;
             router->next = NULL;
-            free(router);
+            icmp_message_free(router);
         } else {
             rp = &router->next;
         }
@@ -2620,8 +1760,8 @@ route_remove_routers_advertising_prefix(interface_t *interface, const struct in6
 #endif // RA_TESTER
 
 static void
-ifaddr_callback(void *context, const char *name, const addr_t *address, const addr_t *mask,
-                unsigned flags, enum interface_address_change change)
+ifaddr_callback(srp_server_t *server_state, void *context, const char *name, const addr_t *address,
+                const addr_t *mask, unsigned flags, enum interface_address_change change)
 {
     char addrbuf[INET6_ADDRSTRLEN];
     const uint8_t *addrbytes, *maskbytes, *prefp;
@@ -2743,10 +1883,10 @@ ifaddr_callback(void *context, const char *name, const addr_t *address, const ad
                 if (!is_thread_interface) {
                     if (change == interface_address_added) {
                         if (!interface->inactive) {
-                            dnssd_proxy_ifaddr_callback(context, name, address, mask, flags, change);
+                            dnssd_proxy_ifaddr_callback(server_state, context, name, address, mask, flags, change);
                         }
                     } else { // change == interface_address_removed
-                        dnssd_proxy_ifaddr_callback(context, name, address, mask, flags, change);
+                        dnssd_proxy_ifaddr_callback(server_state, context, name, address, mask, flags, change);
                     }
                 }
 #endif // #if !defined(RA_TESTER) && (SRP_FEATURE_COMBINED_SRP_DNSSD_PROXY)
@@ -2759,9 +1899,13 @@ ifaddr_callback(void *context, const char *name, const addr_t *address, const ad
                 // that all the stale router information will be updated during the discovery, or flushed away. If all
                 // routers are flushed, then srp-mdns-proxy will advertise its own prefix and configure the new IPv6
                 // address.
-                if ((address->sa.sa_family == AF_INET || address->sa.sa_family == AF_INET6) &&
-                    change == interface_address_deleted)
+                if (address->sa.sa_family == AF_INET6 &&                                       // An IPv6 address
+                    change == interface_address_deleted &&                                     // went away
+                    in6prefix_compare(&address->sin6.sin6_addr, &interface->ipv6_prefix, 8) && // not one of ours
+                    !is_thread_mesh_synthetic_or_link_local(&address->sin6.sin6_addr))         // not link-local
                 {
+
+                    INFO("clearing router discovery complete flag because address deleted.");
 #ifdef VICARIOUS_ROUTER_DISCOVERY
                     INFO("making all routers stale and start router discovery due to removed address");
                     adjust_router_received_time(interface, ioloop_timenow(),
@@ -2814,8 +1958,17 @@ ifaddr_callback(void *context, const char *name, const addr_t *address, const ad
 #ifndef LINUX
     } else if (address->sa.sa_family == AF_LINK) {
         if (address->ether_addr.len == 6) {
-            memcpy(interface->link_layer, address->ether_addr.addr, 6);
-            interface->have_link_layer_address = true;
+            if (change != interface_address_deleted) {
+                memcpy(interface->link_layer, address->ether_addr.addr, 6);
+                INFO("setting link layer address for " PUB_S_SRP " to " PRI_MAC_ADDR_SRP, interface->name,
+                     MAC_ADDR_PARAM_SRP(interface->link_layer));
+                interface->have_link_layer_address = true;
+            } else {
+                INFO("resetting link layer address for " PUB_S_SRP " (was " PRI_MAC_ADDR_SRP ")", interface->name,
+                     MAC_ADDR_PARAM_SRP(interface->link_layer));
+                memset(interface->link_layer, 0, 6);
+                interface->have_link_layer_address = false;
+            }
         }
 #endif
     }
@@ -2868,9 +2021,9 @@ route_get_mesh_local_prefix_callback(void *context, const char *prefix_string, c
         ERROR("prefix syntax incorrect: " PRI_S_SRP, prefix_addr_string);
         goto fail;
     }
-    SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
+    SEGMENTED_IPv6_ADDR_GEN_SRP(route_state->thread_mesh_local_prefix.s6_addr, ml_prefix_buf);
     INFO(PRI_SEGMENTED_IPv6_ADDR_SRP PUB_S_SRP,
-         SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->thread_mesh_local_prefix.s6_addr, prefix_buf),
+         SEGMENTED_IPv6_ADDR_PARAM_SRP(route_state->thread_mesh_local_prefix.s6_addr, ml_prefix_buf),
          slash ? slash : "");
     route_state->have_mesh_local_prefix = true;
     return;
@@ -2890,7 +2043,7 @@ route_refresh_interface_list(route_state_t *route_state)
     for (interface = route_state->interfaces; interface != NULL; interface = interface->next) {
         interface->old_num_ipv6_addresses = interface->num_ipv6_addresses;
     }
-    ioloop_map_interface_addresses_here(&route_state->interface_addresses, NULL, route_state, ifaddr_callback);
+    ioloop_map_interface_addresses_here(route_state->srp_server, &route_state->interface_addresses, NULL, route_state, ifaddr_callback);
 
     for (interface = route_state->interfaces; interface; interface = interface->next) {
 #if defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
@@ -2919,6 +2072,7 @@ route_refresh_interface_list(route_state_t *route_state)
     } else if (!have_active && route_state->have_non_thread_interface) {
         INFO("we no longer have an active interface");
         route_state->have_non_thread_interface = false;
+        route_state->partition_can_advertise_service = false;
         // Stop advertising the service, if we are doing so.
         partition_discontinue_all_srp_service(route_state);
     }
@@ -3062,7 +2216,7 @@ re_evaluate_interfaces(route_state_t *route_state)
 }
 
 static void
-cti_get_xpanid_callback(void *context, uint64_t new_xpanid, cti_status_t status)
+route_get_xpanid_callback(void *context, uint64_t new_xpanid, cti_status_t status)
 {
     route_state_t *route_state = context;
     if (status == kCTIStatus_Disconnected || status == kCTIStatus_DaemonNotRunning) {
@@ -3088,7 +2242,7 @@ cti_get_xpanid_callback(void *context, uint64_t new_xpanid, cti_status_t status)
     in6addr_zero(&route_state->xpanid_prefix);
     route_state->xpanid_prefix.s6_addr[0] = 0xfd;
     for (int i = 1; i < 8; i++) {
-        route_state->xpanid_prefix.s6_addr[i] = ((route_state->srp_server->xpanid >> ((7 - i) * 8)) & 0xFFU);
+        route_state->xpanid_prefix.s6_addr[i] = ((route_state->srp_server->xpanid >> ((8 - i) * 8)) & 0xFFU);
     }
     route_state->have_xpanid_prefix = true;
 
@@ -3197,9 +2351,18 @@ route_omr_watcher_event(route_state_t *route_state, void *UNUSED context, omr_wa
             num_prefixes++;
         }
         if (num_prefixes != route_state->num_thread_prefixes) {
+            int old_num_prefixes = route_state->num_thread_prefixes;
             INFO("%d prefixes instead of %d, evaluating policy", num_prefixes, route_state->num_thread_prefixes);
             routing_policy_evaluate_all_interfaces(route_state, true);
             route_state->num_thread_prefixes = num_prefixes;
+            if (old_num_prefixes == 0 && num_prefixes > 0) {
+                INFO("thread prefix available, may advertise anycast");
+                partition_maybe_advertise_anycast_service(route_state);
+            }
+            if (old_num_prefixes > 0 && num_prefixes == 0) {
+                INFO("all thread prefixes are gone, stop advertising anycast service");
+                partition_stop_advertising_anycast_service(route_state, route_state->thread_sequence_number);
+            }
         }
     }
 }
@@ -3231,15 +2394,14 @@ thread_network_startup(route_state_t *route_state)
     }
     if (status == kCTIStatus_NoError) {
         status = cti_get_extended_pan_id(route_state->srp_server, &route_state->thread_xpanid_context, route_state,
-                                         cti_get_xpanid_callback, NULL);
+                                         route_get_xpanid_callback, NULL);
     }
     if (status == kCTIStatus_NoError) {
         status = cti_get_rloc16(route_state->srp_server, &route_state->thread_rloc16_context, route_state,
                                 route_rloc16_callback, NULL);
     }
     if (status == kCTIStatus_NoError) {
-        status = cti_get_mesh_local_prefix(route_state->srp_server,
-                                           &route_state->thread_ml_prefix_connection, route_state,
+        status = cti_get_mesh_local_prefix(route_state->srp_server, route_state,
                                            route_get_mesh_local_prefix_callback, NULL);
     }
     if (status != kCTIStatus_NoError) {
@@ -3273,13 +2435,6 @@ thread_network_startup(route_state_t *route_state)
     omr_publisher_set_reconnect_callback(route_state->omr_publisher, attempt_wpan_reconnect);
     omr_publisher_start(route_state->omr_publisher);
     omr_watcher_start(route_state->omr_watcher);
-    route_state->route_tracker = route_tracker_create(route_state, "main");
-    if (route_state->route_tracker == NULL) {
-        ERROR("route_tracker create failed");
-        return;
-    }
-    route_tracker_set_reconnect_callback(route_state->route_tracker, attempt_wpan_reconnect);
-    route_tracker_start(route_state->route_tracker);
     route_state->thread_network_running = true;
 }
 #endif //  defined(THREAD_BORDER_ROUTER) && !defined(RA_TESTER)
@@ -3349,6 +2504,7 @@ thread_network_shutdown(route_state_t *route_state)
         cti_events_discontinue(route_state->thread_ml_prefix_connection);
         route_state->thread_ml_prefix_connection = NULL;
     }
+    srp_mdns_flush(route_state->srp_server);
 #if SRP_FEATURE_REPLICATION
     INFO("stop srp replication.");
     srpl_shutdown(route_state->srp_server);
@@ -3358,6 +2514,7 @@ thread_network_shutdown(route_state_t *route_state)
     nat64_stop(route_state);
 #endif
     partition_state_reset(route_state);
+    route_state->thread_network_running = false;
 }
 #endif // RA_TESTER
 
@@ -3460,8 +2617,6 @@ partition_state_reset(route_state_t *route_state)
     if (route_state->service_set_changed_wakeup != NULL) {
         ioloop_cancel_wake_event(route_state->service_set_changed_wakeup);
     }
-
-    route_state->thread_network_running = false;
 }
 
 static void
@@ -3469,6 +2624,7 @@ partition_proxy_listener_ready(void *context, uint16_t port)
 {
     srp_server_t *server_state = context;
     route_state_t *route_state = server_state->route_state;
+
     INFO("listening on port %d", port);
     route_state->srp_service_listen_port = port;
     if (route_state->have_non_thread_interface) {
@@ -3480,18 +2636,30 @@ partition_proxy_listener_ready(void *context, uint16_t port)
 }
 
 static void
-partition_srp_listener_canceled(void *context)
+partition_srp_listener_canceled(comm_t *listener, void *context)
 {
     srp_server_t *server_state = context;
     route_state_t *route_state = server_state->route_state;
 
-    if (route_state->srp_listener != NULL) {
+    INFO("listener is %p", listener);
+    if (route_state->srp_listener == listener) {
         ioloop_comm_release(route_state->srp_listener);
         route_state->srp_listener = NULL;
-    }
 
-    if (!server_state->srp_unicast_service_blocked) {
-        partition_discontinue_srp_service(route_state);
+        if (!server_state->srp_unicast_service_blocked) {
+            partition_discontinue_srp_service(route_state);
+        }
+    }
+}
+
+static void
+partition_stop_srp_listener(route_state_t *route_state)
+{
+    if (route_state->srp_listener != NULL) {
+        INFO("discontinuing SRP service on port %d", route_state->srp_service_listen_port);
+        ioloop_listener_cancel(route_state->srp_listener);
+        ioloop_comm_release(route_state->srp_listener);
+        route_state->srp_listener = NULL;
     }
 }
 
@@ -3515,11 +2683,14 @@ partition_start_srp_listener(route_state_t *route_state)
         }
     }
 
+    // Make sure we don't overwrite the listener without stopping it.
+    partition_stop_srp_listener(route_state);
+
     INFO("starting listener.");
-    route_state->srp_listener = srp_proxy_listen(avoid_ports, num_avoid_ports, partition_proxy_listener_ready,
-                                                 partition_srp_listener_canceled, route_state->srp_server);
+    route_state->srp_listener = srp_proxy_listen(avoid_ports, num_avoid_ports, NULL, partition_proxy_listener_ready,
+                                                 partition_srp_listener_canceled, NULL, NULL, route_state->srp_server);
     if (route_state->srp_listener == NULL) {
-        ERROR("partition_start_srp_listener: Unable to start SRP Proxy listener, so can't advertise it");
+        ERROR("Unable to start SRP listener, so can't advertise it");
         return;
     }
 }
@@ -3527,17 +2698,11 @@ partition_start_srp_listener(route_state_t *route_state)
 void
 partition_discontinue_srp_service(route_state_t *route_state)
 {
-    if (route_state->srp_listener != NULL) {
-        INFO("discontinuing proxy service on port %d", route_state->srp_service_listen_port);
-        ioloop_listener_cancel(route_state->srp_listener);
-        ioloop_comm_release(route_state->srp_listener);
-        route_state->srp_listener = NULL;
-    }
+    partition_stop_srp_listener(route_state);
 
     // Won't match
     in6addr_zero(&route_state->srp_listener_ip_address);
     route_state->srp_service_listen_port = 0;
-    route_state->partition_can_advertise_service = false;
 
     // Stop advertising the service, if we are doing so.
     partition_stop_advertising_service(route_state);
@@ -3595,7 +2760,7 @@ partition_utun0_address_changed(route_state_t *route_state, const struct in6_add
     if (change != interface_address_deleted) {
         // If this address isn't an address we're already listening on, check if it's an anycast address; if so,
         // skip it as a candidate to listen on.
-        if (is_thread_mesh_anycast_address(addr)) {
+        if (is_thread_mesh_synthetic_address(addr)) {
             INFO(PRI_SEGMENTED_IPv6_ADDR_SRP ": thread anycast address.",
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(addr, addr_buf));
         }
@@ -3728,6 +2893,23 @@ partition_remove_service_done(void *context, cti_status_t status)
 #endif
 }
 
+static bool
+route_maybe_restart_service_tracker(route_state_t *route_state, int *reset, int *increment)
+{
+    *reset = 0;
+    (*increment)++;
+    if (*increment > 5) {
+        if (route_state->srp_server->service_tracker != NULL) {
+            service_tracker_start(route_state->srp_server->service_tracker);
+        } else {
+            FAULT("service tracker not present when restarting.");
+        }
+        *increment = 0;
+        return true;
+    }
+    return false;
+}
+
 static void
 partition_stop_advertising_service(route_state_t *route_state)
 {
@@ -3736,12 +2918,16 @@ partition_stop_advertising_service(route_state_t *route_state)
     uint8_t service_info[] = { 0, 0, 0, 1 };
     int status;
 
+    if (route_maybe_restart_service_tracker(route_state, &route_state->times_advertised_unicast, &route_state->times_unadvertised_unicast)) {
+        INFO("restarted service tracker.");
+    }
     service_info[0] = THREAD_SRP_SERVER_OPTION & 255;
     status = cti_remove_service(route_state->srp_server, route_state, partition_remove_service_done, NULL,
                                 THREAD_ENTERPRISE_NUMBER, service_info, 1);
     if (status != kCTIStatus_NoError) {
         INFO("status %d", status);
     }
+    route_state->advertising_srp_unicast_service = false;
 }
 
 void
@@ -3752,6 +2938,9 @@ partition_stop_advertising_anycast_service(route_state_t *route_state, uint8_t s
     uint8_t service_info[] = { 0, 0, 0, 1 };
     int status;
 
+    if (route_maybe_restart_service_tracker(route_state, &route_state->times_advertised_anycast, &route_state->times_unadvertised_anycast)) {
+        INFO("restarted service tracker.");
+    }
     service_info[0] = THREAD_SRP_SERVER_ANYCAST_OPTION & 255;
     service_info[1] = sequence_number;
     status = cti_remove_service(route_state->srp_server, route_state, partition_remove_service_done, NULL,
@@ -3760,6 +2949,12 @@ partition_stop_advertising_anycast_service(route_state_t *route_state, uint8_t s
         INFO("status %d", status);
     }
     route_state->advertising_srp_anycast_service = false;
+    if (route_state->route_tracker != NULL) {
+        INFO("discontinuing route tracker");
+        route_tracker_cancel(route_state->route_tracker);
+        route_tracker_release(route_state->route_tracker);
+        route_state->route_tracker = NULL;
+    }
     route_refresh_interface_list(route_state);
 }
 
@@ -3781,6 +2976,9 @@ partition_start_advertising_service(route_state_t *route_state)
     uint8_t server_info[18];
     int ret;
 
+    if (route_maybe_restart_service_tracker(route_state, &route_state->times_unadvertised_unicast, &route_state->times_advertised_unicast)) {
+        INFO("restarted service tracker.");
+    }
     memcpy(&server_info, &route_state->srp_listener_ip_address, 16);
     server_info[16] = (route_state->srp_service_listen_port >> 8) & 255;
     server_info[17] = route_state->srp_service_listen_port & 255;
@@ -3800,6 +2998,7 @@ partition_start_advertising_service(route_state_t *route_state)
 
     // Wait a while for the service add to be reflected in an event.
     partition_schedule_service_add_wakeup(route_state);
+    route_state->advertising_srp_unicast_service = true;
 }
 
 static void
@@ -3808,6 +3007,9 @@ partition_start_advertising_anycast_service(route_state_t *route_state)
     uint8_t service_info[] = {0, 0, 0, 1};
     int ret;
 
+    if (route_maybe_restart_service_tracker(route_state, &route_state->times_unadvertised_anycast, &route_state->times_advertised_anycast)) {
+        INFO("restarted service tracker.");
+    }
     service_info[0] = THREAD_SRP_SERVER_ANYCAST_OPTION & 255;
     service_info[1] = route_state->thread_sequence_number;
     INFO("%" PRIu64 "/%02x/ %x", THREAD_ENTERPRISE_NUMBER, service_info[0], route_state->thread_sequence_number);
@@ -3822,6 +3024,18 @@ partition_start_advertising_anycast_service(route_state_t *route_state)
     partition_schedule_anycast_service_add_wakeup(route_state);
     route_state->advertising_srp_anycast_service = true;
     route_refresh_interface_list(route_state);
+
+    if (route_state->route_tracker == NULL) {
+        route_state->route_tracker = route_tracker_create(route_state, "main");
+        if (route_state->route_tracker == NULL) {
+            ERROR("route_tracker create failed");
+            return;
+        }
+        route_tracker_set_reconnect_callback(route_state->route_tracker, attempt_wpan_reconnect);
+        route_tracker_start(route_state->route_tracker);
+    } else {
+        INFO("route tracker already running.");
+    }
 }
 
 static void
@@ -3880,6 +3094,7 @@ partition_maybe_advertise_service(route_state_t *route_state)
     thread_service_t *service;
     int num_lower_services = 0;
     int num_other_services = 0;
+    int num_legacy_services = 0;
     int i;
     int64_t last_add_time;
     bool advertising_service = false;
@@ -3933,9 +3148,30 @@ partition_maybe_advertise_service(route_state_t *route_state)
             goto schedule_wakeup;
         }
 
+        // See if host advertising this unicast service is also advertising an anycast service; if not, then this
+        // unicast service doesn't count (much).
+        bool anycast_present = false;
+        for (thread_service_t *aservice = service_tracker_services_get(route_state->srp_server->service_tracker);
+             aservice != NULL; aservice = aservice->next)
+        {
+            if (aservice->ignore || aservice->service_type != anycast_service) {
+                continue;
+            }
+            if (service->rloc16 == aservice->rloc16) {
+                anycast_present = true;
+                break;
+            }
+        }
+        if (!anycast_present) {
+            num_legacy_services++;
+            route_state->seen_legacy_service = true;
+            continue;
+        }
+
         int cmp = in6addr_compare(&service->u.unicast.address, &route_state->srp_listener_ip_address);
         SEGMENTED_IPv6_ADDR_GEN_SRP(&service->u.unicast.address, addr_buf);
-        INFO(PRI_SEGMENTED_IPv6_ADDR_SRP ": is " PUB_S_SRP " listener address.",
+        INFO(PUB_S_SRP PRI_SEGMENTED_IPv6_ADDR_SRP ": is " PUB_S_SRP " listener address.",
+             anycast_present ? "legacy service " : "service ",
              SEGMENTED_IPv6_ADDR_PARAM_SRP(&service->u.unicast.address, addr_buf),
              cmp < 0 ? "less than" : cmp > 0 ? "greater than" : "equal to");
         if (cmp < 0) {
@@ -3949,8 +3185,9 @@ partition_maybe_advertise_service(route_state_t *route_state)
 
     // We only want to advertise our service if there are no services being advertised on addresses that are lower than
     // ours. Also, if we notice that a service is being advertised by our rloc16 with a different IP address than the
-    // listener address, it's a stale address, so remove it.
-    if (num_lower_services > 0) {
+    // listener address, it's a stale address, so remove it. If we have seen a legacy service, and there is only one
+    // other non-legacy service, continue to advertise a second service, since cooperating services are preferable.
+    if ((num_lower_services > 0  && !route_state->seen_legacy_service) || num_lower_services > 1) {
         if (advertising_service) {
             SEGMENTED_IPv6_ADDR_GEN_SRP(&route_state->srp_listener_ip_address, addr_buf);
             INFO(PRI_SEGMENTED_IPv6_ADDR_SRP ": stopping advertising unicast service.",
@@ -3961,9 +3198,13 @@ partition_maybe_advertise_service(route_state_t *route_state)
             INFO("not advertising unicast service.");
         }
     }
-    // If there is not some other service published, and we are not publishing, publish.
-    else if (num_other_services == 0) {
-        if (!advertising_service) {
+    // If there is not some other service published, and we are not publishing, publish.  If there is a legacy (no
+    // anycast) service published, publish a second service so as to encourage the legacy service to withdraw, because
+    // cooperating services are preferable to competing services.
+    else if (num_other_services < 1 || (num_other_services < 2 && route_state->seen_legacy_service)) {
+        if (num_legacy_services > 1 && num_other_services > 1) {
+            ERROR("%d legacy services present!", num_legacy_services);
+        } else if (!advertising_service) {
             SEGMENTED_IPv6_ADDR_GEN_SRP(&route_state->srp_listener_ip_address, addr_buf);
             INFO(PRI_SEGMENTED_IPv6_ADDR_SRP ": starting advertising unicast service.",
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(&route_state->srp_listener_ip_address, addr_buf));
@@ -3991,6 +3232,11 @@ partition_maybe_advertise_anycast_service(route_state_t *route_state)
         return;
     }
 
+    if (!route_state->partition_can_advertise_service) {
+        INFO("service advertisements are blocked.");
+        return;
+    }
+
     if (!route_state->partition_can_advertise_anycast_service) {
         INFO("no service to advertise yet.");
         return;
@@ -3998,6 +3244,11 @@ partition_maybe_advertise_anycast_service(route_state_t *route_state)
 
     if (route_state->srp_server->srp_anycast_service_blocked) {
         INFO("service advertising is disabled.");
+        return;
+    }
+
+    if (route_state->num_thread_prefixes == 0) {
+        INFO("OMR prefix is not yet advertised.");
         return;
     }
 
@@ -4201,15 +3452,6 @@ static void partition_maybe_enable_services(route_state_t *route_state)
             omr_publisher_start(route_state->omr_publisher);
             omr_watcher_start(route_state->omr_watcher);
         }
-        if (route_state->route_tracker == NULL) {
-            route_state->route_tracker = route_tracker_create(route_state, "main");
-            if (route_state->route_tracker == NULL) {
-                ERROR("route_tracker create failed");
-                return;
-            }
-            route_tracker_set_reconnect_callback(route_state->route_tracker, attempt_wpan_reconnect);
-            route_tracker_start(route_state->route_tracker);
-        }
     } else {
         INFO("Not enabling service: " PUB_S_SRP,
              am_associated ? "associated" : "!associated");
@@ -4268,6 +3510,29 @@ void partition_block_anycast_service(route_state_t *route_state, bool block)
 }
 
 #endif // RA_TESTER
+
+#if SRP_FEATURE_LOCAL_DISCOVERY
+int
+route_get_current_infra_interface_index(void)
+{
+    extern srp_server_t *srp_servers;
+    if (srp_servers == NULL) {
+        INFO("no SRP servers");
+        return -1;
+    }
+    route_state_t *route_state = srp_servers->route_state;
+    if (route_state == NULL) {
+        INFO("no route state");
+        return -1;
+    }
+    for (interface_t *interface = route_state->interfaces; interface != NULL; interface = interface->next) {
+        if (!interface->inactive && !interface->is_thread) {
+            return (int)interface->index; // real interface indexes are always positive integers
+        }
+    }
+    return -1;
+}
+#endif // SRP_FEATURE_LOCAL_DISCOVERY
 #endif // STUB_ROUTER
 
 // Local Variables:

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -73,6 +73,7 @@ dns_obj_data_compute_digest_init(dns_obj_digest_ctx_t * const context, const dig
 			algorithm = kCCDigestSHA512;
 			break;
 		case DIGEST_UNSUPPORTED:
+		MDNS_COVERED_SWITCH_DEFAULT:
 			err = DNSSEC_ERROR_UNSUPPORTED_ERR;
 			algorithm = kCCDigestNone;
 			break;
@@ -149,6 +150,7 @@ dns_obj_data_compute_digest_get_output_size(const digest_type_t digest_type)
 			algorithm = kCCDigestSHA512;
 			break;
 		case DIGEST_UNSUPPORTED:
+		MDNS_COVERED_SWITCH_DEFAULT:
 			err = DNSSEC_ERROR_UNSUPPORTED_ERR;
 			algorithm = kCCDigestNone;
 			break;
@@ -205,6 +207,7 @@ dns_obj_data_compute_digest(const digest_type_t digest_type, const uint8_t * con
 			algorithm = kCCDigestSHA512;
 			break;
 		case DIGEST_UNSUPPORTED:
+		MDNS_COVERED_SWITCH_DEFAULT:
 			err = DNSSEC_ERROR_UNSUPPORTED_ERR;
 			algorithm = kCCDigestNone;
 			break;
@@ -386,7 +389,7 @@ sec_key_create_ecdsa(const uint8_t * const key, const size_t key_size, dns_obj_e
 	SecKeyRef ecdsa_key = NULL;
 
 	const uint8_t const_four = 4;
-	check_compile_time_code(sizeof(const_four) == 1);
+	mdns_compile_time_check_local(sizeof(const_four) == 1);
 	key_cfdata = CFDataCreateMutable(kCFAllocatorDefault, (CFIndex)(sizeof(const_four) + key_size));
 	require_action(key_cfdata != NULL, exit, err = DNSSEC_ERROR_NO_MEMORY);
 
@@ -396,7 +399,7 @@ sec_key_create_ecdsa(const uint8_t * const key, const size_t key_size, dns_obj_e
 
 	const void *key_options_keys[]		= {kSecAttrKeyType,					kSecAttrKeyClass};
 	const void *key_options_values[]	= {kSecAttrKeyTypeECSECPrimeRandom,	kSecAttrKeyClassPublic};
-	check_compile_time_code(countof(key_options_keys) == countof(key_options_values));
+	mdns_compile_time_check_local(countof(key_options_keys) == countof(key_options_values));
 	key_options_cfdictionary = CFDictionaryCreate(kCFAllocatorDefault, key_options_keys, key_options_values,
 		countof(key_options_keys), &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 	require_action(key_options_cfdictionary != NULL, exit, err = DNSSEC_ERROR_NO_MEMORY);
@@ -516,7 +519,7 @@ dnskey_algorithm_to_sec_key_algorithm(const uint8_t dnskey_algorithm, SecKeyAlgo
 			break;
 		case DNSKEY_ALGORITHM_ECDSAP256SHA256:
 		case DNSKEY_ALGORITHM_ECDSAP384SHA384:
-			*out_sec_key_algorithm = kSecKeyAlgorithmECDSASignatureRFC4754;
+			*out_sec_key_algorithm = kSecKeyAlgorithmECDSASignatureDigestRFC4754;
 			break;
 		default:
 			err = DNSSEC_ERROR_UNSUPPORTED_ERR;

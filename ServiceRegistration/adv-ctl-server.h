@@ -21,7 +21,11 @@
 
 #ifndef __ADV_CTL_SERVER_H__
 #define __ADV_CTL_SERVER_H__
+typedef struct missing_service missing_service_t;
+
+void adv_ctl_thread_shutdown_status_check(srp_server_t *NONNULL server_state);
 bool adv_ctl_init(void *NULLABLE context);
+bool adv_ctl_service_types_compare(const char *NONNULL service_type, const char *NONNULL registered_type);
 #endif /* __ADV_CTL_SERVER_H__ */
 
 // Local Variables:

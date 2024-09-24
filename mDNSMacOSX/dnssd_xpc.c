@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -365,16 +365,18 @@ dnssd_xpc_parameters_get_log_privacy_level(const xpc_object_t params)
 {
 	bool valid;
 	// Make sure that dnssd_log_privacy_level_t is indeed an 8-bit signed integer.
-	check_compile_time_code(sizeof(dnssd_log_privacy_level_t) == sizeof(int8_t));
-	check_compile_time_code(((dnssd_log_privacy_level_t)-1) < 0);
+	mdns_compile_time_check_local(sizeof(dnssd_log_privacy_level_t) == sizeof(int8_t));
+	mdns_compile_time_check_local(((dnssd_log_privacy_level_t)-1) < 0);
 	const dnssd_log_privacy_level_t level = mdns_xpc_dictionary_get_int8(params,
 		DNSSD_XPC_PARAMETERS_KEY_LOG_PRIVACY_LEVEL, &valid);
 	if (valid) {
-		// A default case isn't used to allow the compiler to catch missing dnssd_log_privacy_level_t enum values.
 		switch (level) {
 			case dnssd_log_privacy_level_default:
 			case dnssd_log_privacy_level_private:
 				return level;
+
+			MDNS_COVERED_SWITCH_DEFAULT:
+				break;
 		}
 	}
 	return dnssd_log_privacy_level_default;
@@ -679,12 +681,11 @@ dnssd_xpc_result_get_negative_reason(const xpc_object_t result)
 {
 	bool valid;
 	// Make sure that dnssd_negative_reason_t is indeed a 32-bit signed integer.
-	check_compile_time_code(sizeof(dnssd_negative_reason_t) == sizeof(int32_t));
-	check_compile_time_code(((dnssd_negative_reason_t)-1) < 0);
+	mdns_compile_time_check_local(sizeof(dnssd_negative_reason_t) == sizeof(int32_t));
+	mdns_compile_time_check_local(((dnssd_negative_reason_t)-1) < 0);
 	const dnssd_negative_reason_t reason = mdns_xpc_dictionary_get_int32(result,
 		DNSSD_XPC_RESULT_KEY_NEGATIVE_REASON, &valid);
 	if (valid) {
-		// A default case isn't used to allow the compiler to catch missing dnssd_negative_reason_t enum values.
 		switch (reason) {
 			case dnssd_negative_reason_none:
 			case dnssd_negative_reason_no_data:
@@ -693,6 +694,9 @@ dnssd_xpc_result_get_negative_reason(const xpc_object_t result)
 			case dnssd_negative_reason_no_dns_service:
 			case dnssd_negative_reason_server_error:
 				return reason;
+
+			MDNS_COVERED_SWITCH_DEFAULT:
+				break;
 		}
 	}
 	return dnssd_negative_reason_none;

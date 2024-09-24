@@ -144,12 +144,15 @@ void
 thread_service_note(const char *owner_id, thread_service_t *tservice, const char *event_description)
 {
     switch(tservice->service_type) {
+    default:
+        INFO("invalid service type %d on service %p", tservice->service_type, tservice);
+        break;
     case unicast_service:
         {
             struct thread_unicast_service *service = &tservice->u.unicast;
             uint16_t port;
 
-            port = (service->port[0] << 8) | service->port[1];
+            port = (uint16_t)(service->port[0] << 8) | service->port[1];
             SEGMENTED_IPv6_ADDR_GEN_SRP(&service->address, service_add_buf);
             INFO(PUB_S_SRP " SRP service " PRI_SEGMENTED_IPv6_ADDR_SRP "%%%d, rloc16 %x " PUB_S_SRP, owner_id,
                  SEGMENTED_IPv6_ADDR_PARAM_SRP(&service->address, service_add_buf),
@@ -191,6 +194,8 @@ thread_service_equal(thread_service_t *a, thread_service_t *b)
         return false;
     }
     switch(a->service_type) {
+    default:
+        return false;
     case unicast_service:
         {
             return (!in6addr_compare(&a->u.unicast.address, &b->u.unicast.address) &&

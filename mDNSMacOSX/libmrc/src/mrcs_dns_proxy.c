@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -270,7 +270,7 @@ _mrcs_dns_proxy_print_description(const mrcs_dns_proxy_t me, const bool debug, _
 	const nw_nat64_prefix_t * const prefix = mrcs_dns_proxy_get_nat64_prefix(me);
 	if (prefix) {
 		uint8_t ipv6_addr[16] = {0};
-		check_compile_time_code(sizeof(prefix->data) <= sizeof(ipv6_addr));
+		mdns_compile_time_check_local(sizeof(prefix->data) <= sizeof(ipv6_addr));
 		memcpy(ipv6_addr, prefix->data, sizeof(prefix->data));
 
 		char addr_buf[INET6_ADDRSTRLEN];
@@ -589,11 +589,11 @@ _mrcs_nat64_prefix_to_byte_length(const nw_nat64_prefix_t * const prefix)
 {
 	int len;
 	switch (prefix->length) {
-#define _nat64_prefix_length_case(BITLEN)					\
-		case nw_nat64_prefix_length_ ## BITLEN: {			\
-			check_compile_time_code(((BITLEN) % 8) == 0);	\
-			len = (BITLEN) / 8;								\
-			break;											\
+#define _nat64_prefix_length_case(BITLEN)						\
+		case nw_nat64_prefix_length_ ## BITLEN: {				\
+			mdns_compile_time_check_local(((BITLEN) % 8) == 0);	\
+			len = (BITLEN) / 8;									\
+			break;												\
 		}
 		_nat64_prefix_length_case(32)
 		_nat64_prefix_length_case(40)
@@ -602,9 +602,7 @@ _mrcs_nat64_prefix_to_byte_length(const nw_nat64_prefix_t * const prefix)
 		_nat64_prefix_length_case(64)
 		_nat64_prefix_length_case(96)
 #undef _nat64_prefix_length_case
-		CUClangWarningIgnoreBegin(-Wcovered-switch-default);
-		default:
-		CUClangWarningIgnoreEnd();
+		MDNS_COVERED_SWITCH_DEFAULT:
 			len = -1;
 			break;
 	}

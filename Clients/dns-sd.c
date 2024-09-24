@@ -2255,7 +2255,11 @@ int main(int argc, char **argv)
     case 'Q':
     case 'C':   {
         uint16_t rrtype, rrclass;
-        flags |= kDNSServiceFlagsReturnIntermediates;
+        // For the exitWhenNoMoreComing test case, we do not want intermediates, since this would result in
+        // a premature exit.
+        if (!exitWhenNoMoreComing) {
+            flags |= kDNSServiceFlagsReturnIntermediates;
+        }
         if (operation == 'q')
             flags |= kDNSServiceFlagsSuppressUnusable;
         if (enable_dnssec)

@@ -259,11 +259,27 @@ dns_u64_parse(const uint8_t *buf, unsigned len, unsigned *NONNULL offp, uint64_t
 static void
 dns_rrdata_dump(dns_rr_t *rr, bool dump_to_stderr)
 {
+    char outbuf[2048];
+
+    dns_rdata_dump_to_buf(rr, outbuf, sizeof(outbuf));
+
+    if (dump_to_stderr) {
+        fprintf(stderr, "%s\n", outbuf);
+    } else {
+        DEBUG(PUB_S_SRP, outbuf);
+    }
+}
+
+size_t
+dns_rdata_dump_to_buf(dns_rr_t *rr, char *outbuf, size_t bufsize)
+{
     char nbuf[INET6_ADDRSTRLEN];
     char buf[DNS_MAX_NAME_SIZE_ESCAPED + 1];
-    char outbuf[2048];
+    size_t output_len, avail = bufsize;
     char *obp;
-    size_t output_len, avail = 2048;
+
+    obp = outbuf;
+    avail = bufsize;
 
 #define ADVANCE(result, start, remaining) \
     output_len = strlen(start);           \
@@ -278,16 +294,15 @@ dns_rrdata_dump(dns_rr_t *rr, bool dump_to_stderr)
         }                    \
     } while (0)
 
-
     switch(rr->type) {
     case dns_rrtype_key:
-        snprintf(outbuf, sizeof(outbuf),
+        snprintf(outbuf, bufsize,
                  "KEY <AC %d> <Z %d> <XT %d> <ZZ %d> <NAMTYPE %d> <ZZZZ %d> <ORY %d> %d %d ",
                  ((rr->data.key.flags & 0xC000) >> 14 & 3), ((rr->data.key.flags & 0x2000) >> 13) & 1,
                  ((rr->data.key.flags & 0x1000) >> 12) & 1, ((rr->data.key.flags & 0xC00) >> 10) & 3,
                  ((rr->data.key.flags & 0x300) >> 8) & 3, ((rr->data.key.flags & 0xF0) >> 4) & 15,
                  rr->data.key.flags & 15, rr->data.key.protocol, rr->data.key.algorithm);
-        ADVANCE(obp, outbuf, sizeof outbuf);
+        ADVANCE(obp, outbuf, bufsize);
 
         for (unsigned i = 0; i < rr->data.key.len; i++) {
             if (i == 0) {
@@ -303,11 +318,11 @@ dns_rrdata_dump(dns_rr_t *rr, bool dump_to_stderr)
 
     case dns_rrtype_sig:
         dns_name_print(rr->data.sig.signer, buf, sizeof(buf));
-        snprintf(outbuf, sizeof(outbuf), "SIG %d %d %d %lu %lu %lu %d %s",
+        snprintf(outbuf, bufsize, "SIG %d %d %d %lu %lu %lu %d %s",
                  rr->data.sig.type, rr->data.sig.algorithm, rr->data.sig.label,
                  (unsigned long)rr->data.sig.rrttl, (unsigned long)rr->data.sig.expiry,
                  (unsigned long)rr->data.sig.inception, rr->data.sig.key_tag, buf);
-        ADVANCE(obp, outbuf, sizeof outbuf);
+        ADVANCE(obp, outbuf, bufsize);
         for (unsigned i = 0; i < rr->data.sig.len; i++) {
             if (i == 0) {
                 snprintf(obp, avail, "%d [%02x", rr->data.sig.len, rr->data.sig.signature[i]);
@@ -322,38 +337,48 @@ dns_rrdata_dump(dns_rr_t *rr, bool dump_to_stderr)
 
     case dns_rrtype_srv:
         dns_name_print(rr->data.srv.name, buf, sizeof(buf));
-        snprintf(outbuf, sizeof(outbuf), "SRV %d %d %d %s", rr->data.srv.priority, rr->data.srv.weight,
+        snprintf(outbuf, bufsize, "SRV %d %d %d %s", rr->data.srv.priority, rr->data.srv.weight,
                  rr->data.srv.port, buf);
-        ADVANCE(obp, outbuf, sizeof(outbuf));
+        ADVANCE(obp, outbuf, bufsize);
         break;
 
     case dns_rrtype_ptr:
         dns_name_print(rr->data.ptr.name, buf, sizeof(buf));
-        snprintf(outbuf, sizeof(outbuf), "PTR %s", buf);
-        ADVANCE(obp, outbuf, sizeof(outbuf));
+        snprintf(outbuf, bufsize, "PTR %s", buf);
+        ADVANCE(obp, outbuf, bufsize);
         break;
 
     case dns_rrtype_cname:
         dns_name_print(rr->data.cname.name, buf, sizeof(buf));
-        snprintf(outbuf, sizeof(outbuf), "CNAME %s", buf);
-        ADVANCE(obp, outbuf, sizeof(outbuf));
+        snprintf(outbuf, bufsize, "CNAME %s", buf);
+        ADVANCE(obp, outbuf, bufsize);
+        break;
+
+    case dns_rrtype_soa:
+        dns_name_print(rr->data.soa.mname, buf, sizeof(buf));
+        snprintf(outbuf, bufsize, "SOA %s", buf);
+        ADVANCE(obp, outbuf, bufsize);
+        dns_name_print(rr->data.soa.rname, buf, sizeof(buf));
+        snprintf(outbuf, bufsize, "%s %u %d %d %d %d", buf, rr->data.soa.serial, rr->data.soa.refresh,
+                 rr->data.soa.retry, rr->data.soa.expire, rr->data.soa.minimum);
+        ADVANCE(obp, outbuf, bufsize);
         break;
 
     case dns_rrtype_a:
         inet_ntop(AF_INET, &rr->data.a, nbuf, sizeof(nbuf));
-        snprintf(outbuf, sizeof(outbuf), "A %s", nbuf);
-        ADVANCE(obp, outbuf, sizeof(outbuf));
+        snprintf(outbuf, bufsize, "A %s", nbuf);
+        ADVANCE(obp, outbuf, bufsize);
         break;
 
     case dns_rrtype_aaaa:
         inet_ntop(AF_INET6, &rr->data.aaaa, nbuf, sizeof(nbuf));
-        snprintf(outbuf, sizeof(outbuf), "AAAA %s", nbuf);
-        ADVANCE(obp, outbuf, sizeof(outbuf));
+        snprintf(outbuf, bufsize, "AAAA %s", nbuf);
+        ADVANCE(obp, outbuf, bufsize);
         break;
 
     case dns_rrtype_txt:
         strcpy(outbuf, "TXT ");
-        ADVANCE(obp, outbuf, sizeof(outbuf));
+        ADVANCE(obp, outbuf, bufsize);
         for (unsigned i = 0; i < rr->data.txt.len; i++) {
             if (isascii(rr->data.txt.data[i]) && isprint(rr->data.txt.data[i])) {
                 DEPCHAR(rr->data.txt.data[i]);
@@ -366,8 +391,8 @@ dns_rrdata_dump(dns_rr_t *rr, bool dump_to_stderr)
         break;
 
     default:
-        snprintf(outbuf, sizeof(outbuf), "<rrtype %d>:", rr->type);
-        ADVANCE(obp, outbuf, sizeof(outbuf));
+        snprintf(outbuf, bufsize, "<rrtype %d>:", rr->type);
+        ADVANCE(obp, outbuf, bufsize);
         if (rr->data.unparsed.len == 0) {
             snprintf(obp, avail, " <none>");
             ADVANCE(obp, obp, avail);
@@ -379,11 +404,8 @@ dns_rrdata_dump(dns_rr_t *rr, bool dump_to_stderr)
         }
         break;
     }
-    if (dump_to_stderr) {
-        fprintf(stderr, "%s\n", outbuf);
-    } else {
-        DEBUG(PUB_S_SRP, outbuf);
-    }
+    *obp = 0;
+    return obp - buf;
 }
 
 bool
@@ -444,7 +466,8 @@ dns_rdata_parse_data_(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNUL
     case dns_rrtype_srv:
         if (!dns_u16_parse(buf, target, offp, &rr->data.srv.priority) ||
             !dns_u16_parse(buf, target, offp, &rr->data.srv.weight) ||
-            !dns_u16_parse(buf, target, offp, &rr->data.srv.port)) {
+            !dns_u16_parse(buf, target, offp, &rr->data.srv.port))
+        {
             return false;
         }
         // This fallthrough assumes that the first element in the srv, ptr and cname structs is
@@ -454,6 +477,23 @@ dns_rdata_parse_data_(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNUL
     case dns_rrtype_ptr:
     case dns_rrtype_cname:
         if (!dns_name_parse_(&rr->data.ptr.name, buf, target, offp, *offp, file, line)) {
+            return false;
+        }
+        break;
+
+    case dns_rrtype_soa:
+        if (!dns_name_parse_(&rr->data.soa.mname, buf, target, offp, *offp, file, line)) {
+            return false;
+        }
+        if (!dns_name_parse_(&rr->data.soa.rname, buf, target, offp, *offp, file, line)) {
+            return false;
+        }
+        if (!dns_u32_parse(buf, target, offp, &rr->data.soa.serial) ||
+            !dns_u32_parse(buf, target, offp, &rr->data.soa.refresh) ||
+            !dns_u32_parse(buf, target, offp, &rr->data.soa.retry) ||
+            !dns_u32_parse(buf, target, offp, &rr->data.soa.expire) ||
+            !dns_u32_parse(buf, target, offp, &rr->data.soa.minimum))
+        {
             return false;
         }
         break;
@@ -611,6 +651,15 @@ dns_rrdata_free(dns_rr_t *rr)
         rr->data.ptr.name = NULL;
 #endif
             break;
+
+    case dns_rrtype_soa:
+        if (rr->data.soa.mname != NULL) {
+            dns_name_free(rr->data.soa.mname);
+        }
+        if (rr->data.soa.rname != NULL) {
+            dns_name_free(rr->data.soa.rname);
+        }
+        break;
 
     case dns_rrtype_txt:
         free(rr->data.txt.data);

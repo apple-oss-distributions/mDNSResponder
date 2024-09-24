@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2013-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -215,7 +215,9 @@ mDNSexport void mDNSPlatformGetDNSRoutePolicy(DNSQuestion *q)
         isBlocked = mDNStrue;
     }
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
-    if (!isBlocked)
+    // Only set the ResolverUUID if the DNSQuestion isn't blocked and the DNS service selection algorithm isn't being
+    // overriden with the DNS service specified by ResolverUUID.
+    if (!isBlocked && !q->OverrideDNSService)
     {
         uuid_clear(q->ResolverUUID);
         if (path != NULL)

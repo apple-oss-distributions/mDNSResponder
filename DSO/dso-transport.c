@@ -55,6 +55,7 @@
 #include "mDNSMacOSX.h"
 #endif
 
+#include "mDNSFeatures.h"
 #include "mdns_strict.h"
 
 extern mDNS mDNSStorage;
@@ -1104,13 +1105,13 @@ dso_connection_succeeded(dso_connect_state_t *cs)
 }
 
 static bool tls_cert_verify(const sec_protocol_metadata_t metadata, const sec_trust_t trust_ref,
-                            const uint32_t cs_serial)
+    const bool trusts_alternative_trusted_server_certificates, const uint32_t cs_serial)
 {
     bool valid;
 
     // When iCloud keychain is enabled, it is possible that the TLS certificate that DNS push server
     // uses has been synced to the client device, so we do the evaluation here.
-    const tls_keychain_context_t context = {metadata, trust_ref};
+    const tls_keychain_context_t context = {metadata, trust_ref, trusts_alternative_trusted_server_certificates};
     valid = tls_cert_evaluate(&context);
     if (valid) {
         // If the evaluation succeeds, it means that the DNS push server that mDNSResponder is
@@ -1131,16 +1132,6 @@ static bool tls_cert_verify(const sec_protocol_metadata_t metadata, const sec_tr
                   "[DSOC%u] TLS certificate evaluation FAILS, the DNS push server is not trustworthy.",
                   cs_serial);
     }
-
-    // Ideally, We should support case 1 and case 2, case 4, but avoid case 3.
-    // However, given that:
-    // 1. mDNSResponder only connects to the DNS push server on the same local subnet, which
-    //    means the malicious DNS push server has to be present in the local network (at home,
-    //    , at office), the probability of this scenario is relatively small.
-    // 2. Service discovery via multicast DNS or unicast DNS has no security protection.
-    // It is OK for now to blindly trust the TLS certificate from the DNS push server, which means we
-    // will not avoid case 3, just like service discovery via multicast DNS or unicast DNS.
-    valid = true;
 
     return valid;
 }
@@ -1202,12 +1193,17 @@ static void dso_connect_internal(dso_connect_state_t *cs, mDNSBool reconnecting)
     nw_parameters_configure_protocol_block_t configure_tls = NW_PARAMETERS_DISABLE_PROTOCOL;
     if (cs->tls_enabled) {
         const uint32_t cs_serial = cs->serial;
+        bool trusts_alternative_server_certificates = false;
+    #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+        trusts_alternative_server_certificates = cs->trusts_alternative_server_certificates;
+    #endif
         configure_tls = ^(nw_protocol_options_t tls_options) {
             sec_protocol_options_t sec_options = nw_tls_copy_sec_protocol_options(tls_options);
             sec_protocol_options_set_verify_block(sec_options,
                 ^(sec_protocol_metadata_t metadata, sec_trust_t trust_ref, sec_protocol_verify_complete_t complete)
                 {
-                    const bool valid = tls_cert_verify(metadata, trust_ref, cs_serial);
+                    const bool valid = tls_cert_verify(metadata, trust_ref, trusts_alternative_server_certificates,
+                        cs_serial);
                     complete(valid);
                 },
                 dso_dispatch_queue);
@@ -1272,6 +1268,14 @@ static void dso_connect_internal(dso_connect_state_t *cs, mDNSBool reconnecting)
                     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                         "[DSOC%u->C%" PRIu64 "] Connection to server: " PRI_IP_ADDR ":%u ready.",
                         serial, nw_connection_id, &addr, mDNSVal16(port));
+
+                    // Get the interface index from the path.
+                    nw_path_t curr_path = nw_connection_copy_current_path(connection);
+                    if (curr_path) {
+                        ncs->if_idx = nw_path_get_interface_index(curr_path);
+                    }
+                    MDNS_DISPOSE_NW(curr_path);
+
                     ncs->connecting = mDNSfalse;
                     mDNS_Lock(&mDNSStorage);
                     dso_connection_succeeded(ncs);
@@ -1493,7 +1497,7 @@ static void dso_connect_state_process_address_port_change(const mDNSAddr *addr_c
             // will notice that and terminate the connection by itself.
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
                 "[DSOC%u] The address being removed has been tried for the connection or is being used right now - "
-                "address: " PRI_IP_ADDR ":%u.", cs->serial, &addr_changed, mDNSVal16(cs->config_port));
+                "address: " PRI_IP_ADDR ":%u.", cs->serial, addr_changed, mDNSVal16(cs->config_port));
         }
     }
 
@@ -1575,13 +1579,6 @@ static void dso_inaddr_callback(DNSServiceRef sdRef, DNSServiceFlags flags, uint
         ", addr: " PRI_IP_ADDR ":%u, ttl: %u, on the local subnet: " PUB_BOOL ".", cs->serial, ADD_RMV_PARAM(addr_add),
         fullname, flags, if_name, interfaceIndex, errorCode, fullname, &addr_changed, mDNSVal16(cs->config_port), ttl,
         BOOL_PARAM(on_the_local_subnet));
-
-    // Currently, mDNSResponder only trusts DNS push server on the local subnet.
-    if (!on_the_local_subnet) {
-        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-            "[DSOC%u] Ignoring the DNS push server address that is not on the local subnet.", cs->serial);
-         goto exit;
-    }
 
     dso_connect_state_process_address_change(&addr_changed, addr_add, cs);
 

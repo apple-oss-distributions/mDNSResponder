@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2004-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2004-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@
 #include <time.h>
 #include <sys/time.h>           // Needed for #include <sys/time.h>().
 #include <assert.h>
+#include <limits.h>
 
 
 #include "mDNSEmbeddedAPI.h"    // Defines the interface provided to the client layer above
@@ -300,8 +301,12 @@ mDNSexport void mDNSPlatformWriteLogMsg(const char *ident, const char *buffer, m
             case MDNS_LOG_ERROR:     syslog_level = LOG_ERR;     break;
             case MDNS_LOG_WARNING:   syslog_level = LOG_WARNING; break;
             case MDNS_LOG_DEFAULT:   syslog_level = LOG_NOTICE;  break;
-            case MDNS_LOG_INFO:      syslog_level = LOG_INFO;    break;
-            case MDNS_LOG_DEBUG:     syslog_level = LOG_DEBUG;   break;
+            case MDNS_LOG_INFO:      syslog_level = LOG_NOTICE;  break;
+            case MDNS_LOG_DEBUG:
+            {
+                syslog_level = (mDNS_DebugLoggingEnabled ? LOG_NOTICE : LOG_DEBUG);
+                break;
+            }
             default:                 syslog_level = LOG_NOTICE;  break;
         }
 

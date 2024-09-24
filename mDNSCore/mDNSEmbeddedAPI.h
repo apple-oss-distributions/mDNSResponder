@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -192,8 +192,8 @@ extern "C" {
 
 #ifndef fallthrough
  #if MDNS_COMPILER_IS_CLANG()
-  #if __has_c_attribute(fallthrough)
-   #define fallthrough() [[fallthrough]]
+  #if __has_attribute(fallthrough)
+   #define fallthrough() __attribute__((fallthrough))
   #else
    #define fallthrough()
   #endif
@@ -438,7 +438,9 @@ enum
     mStatus_Timeout                   = -65568,
     mStatus_DefunctConnection         = -65569,
     mStatus_PolicyDenied              = -65570,
-    // -65571 to -65785 currently unused; available for allocation
+    mStatus_NotPermitted              = -65571,     // From kDNSSDAdvertisingProxyStatus_NotPermitted
+    mStatus_StaleData                 = -65572,
+    // -65573 to -65785 currently unused; available for allocation
 
     // udp connection status
     mStatus_HostUnreachErr    = -65786,
@@ -499,11 +501,12 @@ typedef struct { mDNSu8 c[256]; } UTF8str255;       // Null-terminated C string
 
 // Most records have a TTL of 75 minutes, so that their 80% cache-renewal query occurs once per hour.
 // For records containing a hostname (in the name on the left, or in the rdata on the right),
-// like A, AAAA, reverse-mapping PTR, and SRV, we use a two-minute TTL by default, because we don't want
-// them to hang around for too long in the cache if the host in question crashes or otherwise goes away.
+// like A, AAAA, reverse-mapping PTR, and SRV, we previously used a two-minute TTL by default, because we did't want
+// them to hang around for too long in the cache if the host in question crashes or otherwise goes away... but to reduce
+// the multicast traffic required to refresh these records, the same 75 minute TTL is now used for all record types.
 
 #define kStandardTTL (3600UL * 100 / 80)
-#define kHostNameTTL 120UL
+#define kHostNameTTL kStandardTTL           // Was 120UL
 
 // Multicast DNS uses announcements (gratuitous responses) to update peer caches.
 // This means it is feasible to use relatively larger TTL values than we might otherwise
@@ -866,6 +869,7 @@ typedef enum
 #define kDNSOpt_NSID  3
 #define kDNSOpt_Owner 4
 #define kDNSOpt_Trace 65001  // 65001-65534 Reserved for Local/Experimental Use
+#define kDNSOpt_TSR   65002
 
 typedef struct
 {
@@ -892,12 +896,19 @@ typedef struct
     mDNSu32   mDNSv;      // mDNSResponder Version (DNS_SD_H defined in dns_sd.h)
 } TracerOptData;
 
+typedef struct
+{
+    mDNSs32 timeStamp;      // TSR record timestamp
+    mDNSu32 hostkeyHash;    // 32-bit Hostkey Hash value
+    mDNSu16 recIndex;       // Index into the DNS packet of the first answer (1-based)
+} TSROptData;
+
 // Note: rdataOPT format may be repeated an arbitrary number of times in a single resource record
 typedef struct
 {
     mDNSu16 opt;
     mDNSu16 optlen;
-    union { LLQOptData llq; mDNSu32 updatelease; OwnerOptData owner; TracerOptData tracer; } u;
+    union { LLQOptData llq; mDNSu32 updatelease; OwnerOptData owner; TracerOptData tracer; TSROptData tsr; } u;
 } rdataOPT;
 
 // Space needed to put OPT records into a packet:
@@ -906,7 +917,7 @@ typedef struct
 // Lease rdata     8  bytes (opt 2, len 2, lease 4)
 // Owner rdata 12-24  bytes (opt 2, len 2, owner 8-20)
 // Trace rdata     9  bytes (opt 2, len 2, platf 1, mDNSv 4)
-
+// TSR rdata      14  bytes (opt 2, len 2, time 4, hash 4, index 2)
 
 #define DNSOpt_Header_Space                 11
 #define DNSOpt_LLQData_Space               (4 + 2 + 2 + 2 + 8 + 4)
@@ -916,6 +927,7 @@ typedef struct
 #define DNSOpt_OwnerData_ID_Wake_PW4_Space (4 + 2 + 6 + 6 + 4)
 #define DNSOpt_OwnerData_ID_Wake_PW6_Space (4 + 2 + 6 + 6 + 6)
 #define DNSOpt_TraceData_Space             (4 + 1 + 4)
+#define DNSOpt_TSRData_Space               (4 + 4 + 4 + 2)
 
 #define ValidOwnerLength(X) (   (X) == DNSOpt_OwnerData_ID_Space          - 4 || \
                                 (X) == DNSOpt_OwnerData_ID_Wake_Space     - 4 || \
@@ -928,6 +940,7 @@ typedef struct
         (O)->opt == kDNSOpt_LLQ   ? DNSOpt_LLQData_Space   :        \
         (O)->opt == kDNSOpt_Lease ? DNSOpt_LeaseData_Space :        \
         (O)->opt == kDNSOpt_Trace ? DNSOpt_TraceData_Space :        \
+        (O)->opt == kDNSOpt_TSR   ? DNSOpt_TSRData_Space   :        \
         (O)->opt == kDNSOpt_Owner ? DNSOpt_Owner_Space(&(O)->u.owner.HMAC, &(O)->u.owner.IMAC) : 0x10000)
 
 // NSEC record is defined in RFC 4034.
@@ -1494,7 +1507,6 @@ struct AuthRecord_struct
     mDNSInterfaceID LastMCInterface;    // Interface this record was multicast on at the time LastMCTime was recorded
     RData          *NewRData;           // Set if we are updating this record with new rdata
     mDNSu16 newrdlength;                // ... and the length of the new RData
-    mDNSBool Tentative;                 // Set if there is more recent TSR value is in probe, records with Tentative set to true will be deregistered when announcement received and conflict happen
     mDNSRecordUpdateCallback *UpdateCallback;
     mDNSu32 UpdateCredits;              // Token-bucket rate limiting of excessive updates
     mDNSs32 NextUpdateCredit;           // Time next token is added to bucket
@@ -1612,7 +1624,7 @@ struct CacheRecord_struct
     mDNSs32 LastUnansweredTime;         // In platform time units; last time we incremented UnansweredQueries
     mDNSu8  UnansweredQueries;          // Number of times we've issued a query for this record without getting an answer
 
-#if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
+#if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH) || MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
     mDNSBool DNSPushSubscribed;         // Indicate whether the cached record has an active DNS push subscription. If
                                         // true, the record never expires.
 #endif
@@ -1976,6 +1988,9 @@ struct DNSQuestion_struct
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
     dns_push_obj_dns_question_member_t dns_push;
 #endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, DISCOVERY_PROXY_CLIENT)
+    CFMutableSetRef DPSubscribers;          // Current set of local domain Discovery Proxy subscribers.
+#endif
     mDNSu32 qnamehash;
     mDNSs32 DelayAnswering;                 // Set if we want to defer answering this question until the cache settles
     mDNSs32 LastQTime;                      // Last scheduled transmission of this Q on *all* applicable interfaces
@@ -2062,6 +2077,7 @@ struct DNSQuestion_struct
     mDNSBool NeedUpdatedQuerier;            // True if new querier is needed for DNSQuestion's updated qname/qtype/qclass.
     mDNSBool UsedAsFailFastProbe;           // True if used as a probe for fail-fast service with connection problems.
     mDNSBool ProhibitEncryptedDNS;          // True if use of encrypted DNS protocols is prohibited.
+    mDNSBool OverrideDNSService;            // True if resolver UUID overrides normal DNS service selection.
 #endif
     mDNSu8 ProxyQuestion;                   // Proxy Question
 #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
@@ -2080,15 +2096,18 @@ struct DNSQuestion_struct
     mDNSu8 unansweredQueries;               // The number of unanswered queries to this server
     mDNSBool Restart;                       // This question should be restarted soon.
 #endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
+    mDNSBool initialAssistPerformed;        // Initial quetion unicast assist logic was performed
+#endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
     dnssd_log_privacy_level_t logPrivacyLevel; // The log privacy level that the client wishes to have when the question
                                                // is started.
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, PADDING_CHECKS)
     #if TARGET_OS_OSX || TARGET_OS_TV
-        MDNS_STRUCT_PAD(4);
+        MDNS_STRUCT_PAD(2);
     #else
-        MDNS_STRUCT_PAD_64_32(0, 0);
+        MDNS_STRUCT_PAD_64_32(6, 2);
     #endif
 #endif
 };
@@ -2161,12 +2180,14 @@ struct NetworkInterfaceInfo_struct
     mDNSu8 IPv4Available;               // If InterfaceActive, set if v4 available on this InterfaceID
     mDNSu8 IPv6Available;               // If InterfaceActive, set if v6 available on this InterfaceID
 
+#if MDNSRESPONDER_SUPPORTS(COMMON, SPS_CLIENT)
     DNSQuestion NetWakeBrowse;
     DNSQuestion NetWakeResolve[3];      // For fault-tolerance, we try up to three Sleep Proxies
     mDNSAddr SPSAddr[3];
     mDNSIPPort SPSPort[3];
     mDNSs32 NextSPSAttempt;             // -1 if we're not currently attempting to register with any Sleep Proxy
     mDNSs32 NextSPSAttemptTime;
+#endif
 
     // Standard AuthRecords that every Responder host should have (one per active IP address)
     AuthRecord RR_A;                    // 'A' or 'AAAA' (address) record for our ".local" name
@@ -2374,9 +2395,13 @@ struct mDNS_struct
     mDNSu8 SleepState;                  // Set if we're sleeping
     mDNSu8 SleepSeqNum;                 // "Epoch number" of our current period of wakefulness
     mDNSu8 SystemWakeOnLANEnabled;      // Set if we want to register with a Sleep Proxy before going to sleep
+#if MDNSRESPONDER_SUPPORTS(COMMON, SPS_CLIENT)
     mDNSu8 SentSleepProxyRegistration;  // Set if we registered (or tried to register) with a Sleep Proxy
+#endif
     mDNSu8 SystemSleepOnlyIfWakeOnLAN;  // Set if we may only sleep if we managed to register with a Sleep Proxy
+#if MDNSRESPONDER_SUPPORTS(COMMON, SPS_CLIENT)
     mDNSs32 AnnounceOwner;              // After waking from sleep, include OWNER option in packets until this time
+#endif
     mDNSs32 DelaySleep;                 // To inhibit re-sleeping too quickly right after wake
     mDNSs32 SleepLimit;                 // Time window to allow deregistrations, etc.,
                                         // during which underying platform layer should inhibit system sleep
@@ -2524,7 +2549,9 @@ struct mDNS_struct
 #ifndef SPC_DISABLED
     ServiceRecordSet SPSRecords;
 #endif
+#if MDNSRESPONDER_SUPPORTS(COMMON, SPS_CLIENT)
     mDNSQuestionCallback *SPSBrowseCallback;    // So the platform layer can do something useful with SPS browse results
+#endif
     int ProxyRecords;                           // Total number of records we're holding as proxy
     #define           MAX_PROXY_RECORDS 10000   /* DOS protection: 400 machines at 25 records each */
 
@@ -2556,13 +2583,17 @@ struct mDNS_struct
 #ifndef MaxMsg
     #define MaxMsg 512
 #endif
+    mDNSu8 RDataBuffer[MaxMsg];             // Temp storage used to construct rrtype + rdata bytes for logging.
     char MsgBuffer[MaxMsg];                 // Temp storage used while building error log messages (keep at end of struct)
 };
 
-#define FORALL_CACHERECORDS(SLOT,CG,CR)                           \
+#define FORALL_CACHEGROUPS(SLOT,CG)                               \
     for ((SLOT) = 0; (SLOT) < CACHE_HASH_SLOTS; (SLOT)++)         \
-        for ((CG)=m->rrcache_hash[(SLOT)]; (CG); (CG)=(CG)->next) \
-            for ((CR) = (CG)->members; (CR); (CR)=(CR)->next)
+        for ((CG)=m->rrcache_hash[(SLOT)]; (CG); (CG)=(CG)->next)
+
+#define FORALL_CACHERECORDS(SLOT,CG,CR)                           \
+    FORALL_CACHEGROUPS(SLOT,CG)                                   \
+        for ((CR) = (CG)->members; (CR); (CR)=(CR)->next)
 
 // ***************************************************************************
 #if 0
@@ -2633,7 +2664,8 @@ extern mDNSBool StrictUnicastOrdering;
 #define SleepProxyServiceType (*(const domainname *)"\xC" "_sleep-proxy" "\x4" "_udp")
 
 #if MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
-    #define THREAD_DOMAIN_NAME ((const domainname *) "\xA" "openthread" "\x6" "thread" "\x4" "home" "\x4" "arpa")
+    // Change `Do53_UNICAST_DISCOVERY_DOMAIN` to a non-root domain to do Do53 service discovery under this domain.
+    #define Do53_UNICAST_DISCOVERY_DOMAIN ((const domainname *) "")
 #endif // MDNSRESPONDER_SUPPORTS(COMMON, LOCAL_DNS_RESOLVER_DISCOVERY)
 
 // ***************************************************************************
@@ -2813,7 +2845,8 @@ extern mDNSs32 mDNSPlatformOneSecond;
 // mDNS_Dereg_rapid is used to send one goodbye instead of three, when we want the memory available for reuse sooner
 // mDNS_Dereg_conflict is used to indicate that this record is being forcibly deregistered because of a conflict
 // mDNS_Dereg_repeat is used when cleaning up, for records that may have already been forcibly deregistered
-typedef enum { mDNS_Dereg_normal, mDNS_Dereg_rapid, mDNS_Dereg_conflict, mDNS_Dereg_repeat } mDNS_Dereg_type;
+// mDNS_Dereg_stale is used when the registered record has been superseded by another host
+typedef enum { mDNS_Dereg_normal, mDNS_Dereg_rapid, mDNS_Dereg_conflict, mDNS_Dereg_repeat, mDNS_Dereg_stale } mDNS_Dereg_type;
 
 // mDNS_RegisterService is a single call to register the set of resource records associated with a given named service.
 //
@@ -3016,6 +3049,10 @@ extern char *GetRRDisplayString_rdb(const ResourceRecord *const rr, const RDataB
 #define RRDisplayString(m, rr) GetRRDisplayString_rdb(rr, &(rr)->rdata->u, (m)->MsgBuffer)
 #define ARDisplayString(m, rr) GetRRDisplayString_rdb(&(rr)->resrec, &(rr)->resrec.rdata->u, (m)->MsgBuffer)
 #define CRDisplayString(m, rr) GetRRDisplayString_rdb(&(rr)->resrec, &(rr)->resrec.rdata->u, (m)->MsgBuffer)
+#if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+extern const mDNSu8 *GetPrintableRDataBytes(mDNSu8 *outBuffer, mDNSu32 bufferLen, mDNSu16 recordType,
+    const mDNSu8 *rdata, mDNSu32 rdataLen);
+#endif
 #define MortalityDisplayString(M) (M == Mortality_Mortal ? "mortal" : (M == Mortality_Immortal ? "immortal" : "ghost"))
 extern mDNSBool mDNSSameAddress(const mDNSAddr *ip1, const mDNSAddr *ip2);
 extern void IncrementLabelSuffix(domainlabel *name, mDNSBool RichText);
@@ -3246,6 +3283,16 @@ extern void *   mDNSPlatformMemAllocateClear(mDNSu32 len);
 extern void     mDNSPlatformMemFree(void *mem);
 #endif // MDNS_MALLOC_DEBUGGING
 
+#define mDNSPlatformMemForget(PTR)          \
+    do                                      \
+    {                                       \
+        if (*(PTR))                         \
+        {                                   \
+            mDNSPlatformMemFree(*(PTR));    \
+            *(PTR) = NULL;                  \
+        }                                   \
+    } while(0)
+
 // If the platform doesn't have a strong PRNG, we define a naive multiply-and-add based on a seed
 // from the platform layer.  Long-term, we should embed an arc4 implementation, but the strength
 // will still depend on the randomness of the seed.
@@ -3379,7 +3426,7 @@ extern mDNSBool   mDNSPlatformInterfaceIsAWDL(mDNSInterfaceID interfaceID);
 #endif
 extern mDNSBool   mDNSPlatformValidRecordForQuestion(const ResourceRecord *const rr, const DNSQuestion *const q);
 extern mDNSBool   mDNSPlatformValidRecordForInterface(const AuthRecord *rr, mDNSInterfaceID InterfaceID);
-extern mDNSBool   mDNSPlatformValidQuestionForInterface(DNSQuestion *q, const NetworkInterfaceInfo *intf);
+extern mDNSBool   mDNSPlatformValidQuestionForInterface(const DNSQuestion *q, const NetworkInterfaceInfo *intf);
 
 extern void mDNSPlatformFormatTime(unsigned long t, mDNSu8 *buf, int bufsize);
 
@@ -3486,7 +3533,7 @@ extern mDNSBool mDNSAddrIsDNSMulticast(const mDNSAddr *ip);
 
 typedef mDNSu32 CreateNewCacheEntryFlags;
 #define kCreateNewCacheEntryFlagsNone 0
-#if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
+#if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH) || MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
 #define kCreateNewCacheEntryFlagsDNSPushSubscribed (1U << 0)
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
@@ -3510,10 +3557,17 @@ extern void MakeNegativeCacheRecordForQuestion(mDNS *m, CacheRecord *cr, const D
 extern void CompleteDeregistration(mDNS *const m, AuthRecord *rr);
 extern void AnswerCurrentQuestionWithResourceRecord(mDNS *const m, CacheRecord *const rr, const QC_result AddRecord);
 extern void AnswerQuestionByFollowingCNAME(mDNS *const m, DNSQuestion *q, ResourceRecord *rr);
+extern NetworkInterfaceInfo *FirstInterfaceForID(mDNS *const m, const mDNSInterfaceID InterfaceID);
+extern NetworkInterfaceInfo *FirstIPv4LLInterfaceForID(mDNS *const m, const mDNSInterfaceID InterfaceID);
 extern char *InterfaceNameForID(mDNS *const m, const mDNSInterfaceID InterfaceID);
+extern const char *InterfaceNameForIDOrEmptyString(mDNSInterfaceID InterfaceID);
 extern void CacheRecordSetResponseFlags(CacheRecord *const cr, const mDNSOpaque16 responseFlags);
 extern void mDNSCoreResetRecord(mDNS *const m);
-extern AuthRecord *mDNSGetTSRRecord(mDNS *m, const AuthRecord *rr);
+extern mDNSBool getValidContinousTSRTime(mDNSs32 *timestampContinuous, mDNSu32 tsrTimestamp);
+extern AuthRecord *mDNSGetTSRForAuthRecord(mDNS *m, const AuthRecord *rr);
+extern CacheRecord *mDNSGetTSRForCacheGroup(const CacheGroup *const cg);
+typedef enum { eTSRCheckLose = -1, eTSRCheckNoKeyMatch = 0, eTSRCheckKeyMatch, eTSRCheckWin } eTSRCheckResult;
+extern eTSRCheckResult CheckTSRForResourceRecord(const TSROptData *curTSROpt, const ResourceRecord *ourTSRRec);
 #if !MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 extern void DNSServerChangeForQuestion(mDNS *const m, DNSQuestion *q, DNSServer *newServer);
 #endif
@@ -3699,7 +3753,9 @@ extern void mDNSCoreBeSleepProxyServer_internal(mDNS *const m, mDNSu8 sps, mDNSu
 #define mDNSCoreBeSleepProxyServer(M,S,P,MP,TP,F)                       \
     do { mDNS_Lock(m); mDNSCoreBeSleepProxyServer_internal((M),(S),(P),(MP),(TP),(F)); mDNS_Unlock(m); } while(0)
 
+#if MDNSRESPONDER_SUPPORTS(COMMON, SPS_CLIENT)
 extern void FindSPSInCache(mDNS *const m, const DNSQuestion *const q, const CacheRecord *sps[3]);
+#endif
 #define PrototypeSPSName(X) ((X)[0] >= 11 && (X)[3] == '-' && (X)[ 4] == '9' && (X)[ 5] == '9' && \
                              (X)[6] == '-' && (X)[ 7] == '9' && (X)[ 8] == '9' && \
                              (X)[9] == '-' && (X)[10] == '9' && (X)[11] == '9'    )
@@ -3777,14 +3833,14 @@ struct CompileTimeAssertionChecks_mDNS
     char sizecheck_AuthRecord          [(sizeof(AuthRecord)           <=  1176) ? 1 : -1];
     char sizecheck_CacheRecord         [(sizeof(CacheRecord)          <=   224) ? 1 : -1];
     char sizecheck_CacheGroup          [(sizeof(CacheGroup)           <=   224) ? 1 : -1];
-    char sizecheck_DNSQuestion         [(sizeof(DNSQuestion)          <=   696) ? 1 : -1];
-    char sizecheck_ZoneData            [(sizeof(ZoneData)             <=  1528) ? 1 : -1];
+    char sizecheck_DNSQuestion         [(sizeof(DNSQuestion)          <=   712) ? 1 : -1];
+    char sizecheck_ZoneData            [(sizeof(ZoneData)             <=  1544) ? 1 : -1];
     char sizecheck_NATTraversalInfo    [(sizeof(NATTraversalInfo)     <=   200) ? 1 : -1];
     char sizecheck_HostnameInfo        [(sizeof(HostnameInfo)         <=  3050) ? 1 : -1];
 #if !MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     char sizecheck_DNSServer           [(sizeof(DNSServer)            <=   328) ? 1 : -1];
 #endif
-    char sizecheck_NetworkInterfaceInfo[(sizeof(NetworkInterfaceInfo) <=  6544) ? 1 : -1];
+    char sizecheck_NetworkInterfaceInfo[(sizeof(NetworkInterfaceInfo) <=  6576) ? 1 : -1];
     char sizecheck_ServiceRecordSet    [(sizeof(ServiceRecordSet)     <=  4792) ? 1 : -1];
     char sizecheck_DomainAuthInfo      [(sizeof(DomainAuthInfo)       <=   944) ? 1 : -1];
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)

@@ -200,10 +200,11 @@ dns_name_print_to_limit(dns_name_t *NONNULL name, dns_name_t *NULLABLE limit, ch
                 if (ix + 5 >= bufmax) {
                     break;
                 }
+                uint8_t unsigned_char = lp->data[i];
                 buf[ix++] = '\\';
-                buf[ix++] = '0' + (lp->data[i] / 100);
-                buf[ix++] = '0' + (lp->data[i] /  10) % 10;
-                buf[ix++] = '0' + lp->data[i]         % 10;
+                buf[ix++] = '0' + (unsigned_char / 100);
+                buf[ix++] = '0' + (unsigned_char /  10) % 10;
+                buf[ix++] = '0' + unsigned_char         % 10;
             }
         }
         if (i != lp->len) {
@@ -662,6 +663,16 @@ dns_rr_to_wire(dns_towire_state_t *towire, dns_rr_t *rr, bool question)
             // Anything we don't have a specific format for we store as binary data.
         default:
             dns_rdata_raw_data_to_wire(towire, rr->data.unparsed.data, rr->data.unparsed.len);
+            break;
+
+        case dns_rrtype_soa:
+            dns_concatenate_name_to_wire(towire, rr->data.soa.mname, NULL, NULL);
+            dns_concatenate_name_to_wire(towire, rr->data.soa.rname, NULL, NULL);
+            dns_u32_to_wire(towire, rr->data.soa.serial);
+            dns_u32_to_wire(towire, rr->data.soa.refresh);
+            dns_u32_to_wire(towire, rr->data.soa.retry);
+            dns_u32_to_wire(towire, rr->data.soa.expire);
+            dns_u32_to_wire(towire, rr->data.soa.minimum);
             break;
 
             // All have a single name as the data

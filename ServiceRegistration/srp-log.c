@@ -147,6 +147,35 @@ dns_rrtype_to_string(const uint16_t rrtype)
     return "<INVALID dns_rrtype>";
 }
 
+#ifdef LOG_FPRINTF_STDERR
+bool srp_log_timestamp_relative = false;
+
+void
+srp_log_timestamp(char *buf, size_t bufsize)
+{
+    if (srp_log_timestamp_relative) {
+        double srp_fractional_time(void);
+        static bool have_initial_timestamp = false;
+        static double initial_timestamp = 0.0;
+        if (!have_initial_timestamp) {
+            have_initial_timestamp = true;
+            initial_timestamp = srp_fractional_time();
+        }
+        snprintf(buf, bufsize, "%6.6lf", srp_fractional_time() - initial_timestamp);
+    } else {
+        char timebuf[20]; // YYYY-MM-DD HH:MM:SS
+        char zonebuf[6]; // [-+]HMM
+        struct timeval tv;
+        struct tm tm;
+        gettimeofday(&tv, NULL);
+        localtime_r(&tv.tv_sec, &tm);
+        strftime(timebuf, sizeof(timebuf), "%F %T", &tm);
+        strftime(zonebuf, sizeof(zonebuf), "%z", &tm);
+        snprintf(buf, bufsize, "%s.%06d%s", timebuf, tv.tv_usec, zonebuf);
+    }
+}
+#endif
+
 // Local Variables:
 // mode: C
 // tab-width: 4

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,26 +50,28 @@
 	check_compile_time(sizeof_field(DNSSD_STRUCT(NAME), base) == sizeof(DNSSD_STRUCT(SUPER)));			\
 	extern int _dnssd_base_type_check[sizeof(&(((DNSSD_TYPE(NAME))0)->base) == ((DNSSD_TYPE(SUPER))0))]
 
-#define DNSSD_KIND_DEFINE(NAME, SUPER) 											\
-	static const struct dnssd_kind_s _dnssd_ ## NAME ## _kind = {				\
-		&_dnssd_ ## SUPER ## _kind,												\
-		# NAME,																	\
-		_dnssd_ ## NAME ## _copy_description,									\
-		_dnssd_ ## NAME ## _finalize,											\
-	};																			\
-																				\
-	static DNSSD_TYPE(NAME)														\
-	_dnssd_ ## NAME ## _alloc(void)												\
-	{																			\
-		DNSSD_TYPE(NAME) obj = dnssd_object_ ## NAME ## _alloc(sizeof(*obj));	\
-		require_quiet(obj, exit);												\
-																				\
-		const dnssd_object_t base = (dnssd_object_t)obj;						\
-		base->kind = &_dnssd_ ## NAME ## _kind;									\
-																				\
-	exit:																		\
-		return obj;																\
-	}																			\
+#define DNSSD_KIND_DEFINE(NAME, SUPER) 													\
+	static const struct dnssd_kind_s _dnssd_ ## NAME ## _kind = {						\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_BEGIN()	\
+		&_dnssd_ ## SUPER ## _kind,														\
+		# NAME,																			\
+		_dnssd_ ## NAME ## _copy_description,											\
+		_dnssd_ ## NAME ## _finalize,													\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_END()		\
+	};																					\
+																						\
+	static DNSSD_TYPE(NAME)																\
+	_dnssd_ ## NAME ## _alloc(void)														\
+	{																					\
+		DNSSD_TYPE(NAME) obj = dnssd_object_ ## NAME ## _alloc(sizeof(*obj));			\
+		require_quiet(obj, exit);														\
+																						\
+		const dnssd_object_t base = (dnssd_object_t)obj;								\
+		base->kind = &_dnssd_ ## NAME ## _kind;											\
+																						\
+	exit:																				\
+		return obj;																		\
+	}																					\
 	DNSSD_BASE_CHECK(NAME, SUPER)
 
 DNSSD_KIND_DECLARE(getaddrinfo);
@@ -1034,7 +1036,7 @@ _dnssd_getaddrinfo_result_copy_description(dnssd_getaddrinfo_result_t me, const 
 		if (privacy) {
 			addr_str = DNSSD_REDACTED_IPv4_ADDRESS_STR;
 		} else {
-			check_compile_time_code(sizeof(addr_buf) >= INET_ADDRSTRLEN);
+			mdns_compile_time_check_local(sizeof(addr_buf) >= INET_ADDRSTRLEN);
 			addr_str = inet_ntop(AF_INET, &me->addr.v4.sin_addr.s_addr, addr_buf, (socklen_t)sizeof(addr_buf));
 		}
 	} else if (me->addr.sa.sa_family == AF_INET6) {
@@ -1042,7 +1044,7 @@ _dnssd_getaddrinfo_result_copy_description(dnssd_getaddrinfo_result_t me, const 
 			addr_str = DNSSD_REDACTED_IPv6_ADDRESS_STR;
 		} else {
 			const struct sockaddr_in6 * const sin6 = &me->addr.v6;
-			check_compile_time_code(sizeof(addr_buf) >= INET6_ADDRSTRLEN);
+			mdns_compile_time_check_local(sizeof(addr_buf) >= INET6_ADDRSTRLEN);
 			addr_str = inet_ntop(AF_INET6, sin6->sin6_addr.s6_addr, addr_buf, (socklen_t)sizeof(addr_buf));
 			if (addr_str && (sin6->sin6_scope_id > 0)) {
 				char * const		dst = &addr_buf[strlen(addr_buf)];
@@ -1851,10 +1853,8 @@ _dnssd_getaddrinfo_result_create(const dnssd_getaddrinfo_result_type_t type, con
 		case dnssd_getaddrinfo_result_type_expired:
 			break;
 
-		CUClangWarningIgnoreBegin(-Wcovered-switch-default);
-		case dnssd_getaddrinfo_result_type_service_binding: CU_ATTRIBUTE_FALLTHROUGH;
-		default:
-		CUClangWarningIgnoreEnd();
+		case dnssd_getaddrinfo_result_type_service_binding:
+		MDNS_COVERED_SWITCH_DEFAULT:
 			err = kTypeErr;
 			goto exit;
 	}

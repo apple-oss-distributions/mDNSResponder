@@ -1,6 +1,6 @@
 /* state-machine.h
  *
- * Copyright (c) 2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -130,6 +130,13 @@ state_machine_event_configuration_t state_machine_event_configurations[] = {
     EVENT_NAME_DECL(probe_completed),
     EVENT_NAME_DECL(got_mesh_local_prefix),
     EVENT_NAME_DECL(daemon_disconnect),
+    EVENT_NAME_DECL(stop),
+    EVENT_NAME_DECL(dns_registration_invalidated),
+    EVENT_NAME_DECL(thread_interface_changed),
+    EVENT_NAME_DECL(wed_ml_eid_changed),
+    EVENT_NAME_DECL(neighbor_ml_eid_changed),
+    EVENT_NAME_DECL(srp_needed),
+    EVENT_NAME_DECL(dns_registration_bad_service),
 };
 #define STATE_MACHINE_NUM_EVENT_TYPES (sizeof(state_machine_event_configurations) / sizeof(state_machine_event_configuration_t))
 
@@ -243,6 +250,12 @@ state_machine_header_setup(state_machine_header_t *state_header, void *state_obj
 	state_header->states = states;
 	state_header->num_states = num_states;
 	return true;
+}
+
+void state_machine_cancel(state_machine_header_t *NONNULL state_header)
+{
+    INFO("canceling " PUB_S_SRP, state_header->name);
+    state_header->state = state_machine_state_invalid;
 }
 
 // Local Variables:

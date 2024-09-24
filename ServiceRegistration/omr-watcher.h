@@ -1,6 +1,6 @@
 /* omr-watcher.h
  *
- * Copyright (c) 2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,7 +60,11 @@ typedef void (*omr_watcher_context_release_callback_t)(route_state_t *NONNULL ro
 
 // Release/retain functions for omr_watcher_t:
 RELEASE_RETAIN_DECLS(omr_watcher);
+#define omr_watcher_retain(watcher) omr_watcher_retain_(watcher, __FILE__, __LINE__)
+#define omr_watcher_release(watcher) omr_watcher_release_(watcher, __FILE__, __LINE__)
 RELEASE_RETAIN_DECLS(omr_prefix);
+#define omr_prefix_retain(prefix) omr_prefix_retain_(prefix, __FILE__, __LINE__)
+#define omr_prefix_release(prefix) omr_prefix_release_(prefix, __FILE__, __LINE__)
 
 // omr_prefix_create
 //
@@ -198,6 +202,16 @@ omr_watcher_prefix_add(omr_watcher_t *NONNULL watcher, const void *NONNULL data,
 
 bool
 omr_watcher_prefix_remove(omr_watcher_t *NONNULL watcher, const void *NONNULL data, int prefix_length);
+
+// omw_watcher_non_ula_prefix_present
+//
+// Returns true if there is an on-mesh prefix in the thread network data that is not a ULA prefix (implicitly a global prefix)
+//
+
+bool omr_watcher_non_ula_prefix_present(omr_watcher_t *NONNULL watcher);
+
+
+#define omr_watcher_prefix_is_non_ula_prefix(omr_prefix) ((((uint8_t *)&(omr_prefix)->prefix)[0] & 0xfc) != 0xfc)
 
 #endif // _OMR_WATCHER_H__
 

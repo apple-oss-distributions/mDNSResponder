@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2003-2020 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -144,6 +144,7 @@ mDNSlocal mStatus MainLoop(mDNS *m) // Loop until we quit.
     mDNSPosixListenForSignalInEventLoop(SIGINT);
     mDNSPosixListenForSignalInEventLoop(SIGTERM);
     mDNSPosixListenForSignalInEventLoop(SIGUSR1);
+    mDNSPosixListenForSignalInEventLoop(SIGUSR2);
     mDNSPosixListenForSignalInEventLoop(SIGPIPE);
     mDNSPosixListenForSignalInEventLoop(SIGHUP) ;
 
@@ -171,6 +172,11 @@ mDNSlocal mStatus MainLoop(mDNS *m) // Loop until we quit.
 
         if (sigismember(&signals, SIGHUP )) Reconfigure(m);
         if (sigismember(&signals, SIGUSR1)) DumpStateLog();
+        if (sigismember(&signals, SIGUSR2))
+        {
+            mDNS_DebugLoggingEnabled = !mDNS_DebugLoggingEnabled;
+            LogMsg("Received SIGUSR2 - %s debug level logging.", mDNS_DebugLoggingEnabled ? "Enable" : "Disable");
+        }
         // SIGPIPE happens when we try to write to a dead client; death should be detected soon in request_callback() and cleaned up.
         if (sigismember(&signals, SIGPIPE)) LogMsg("Received SIGPIPE - ignoring");
         if (sigismember(&signals, SIGINT) || sigismember(&signals, SIGTERM)) break;
@@ -183,6 +189,9 @@ int main(int argc, char **argv)
     mStatus err;
 
     ParseCmdLineArgs(argc, argv);
+
+    // Enable mDNSResponder logging by default.
+    mDNS_LoggingEnabled = mDNStrue;
 
     LogMsg("%s starting", mDNSResponderVersionString);
 

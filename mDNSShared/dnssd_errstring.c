@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,8 +57,9 @@ DNSServiceErrorCodeToString(DNSServiceErrorType error_code)
 		CASE_TO_STR(DefunctConnection)
 		CASE_TO_STR(PolicyDenied)
 		CASE_TO_STR(NotPermitted)
+		default:
+			return "<INVALID ERROR CODE>";
 	}
-	return "<INVALID ERROR CODE>";
 #undef CASE_TO_STR
 }
 

@@ -1,6 +1,6 @@
 /* dnssd-client.c
  *
- * Copyright (c) 2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,18 +59,19 @@
 #include <network_information.h>
 
 #include <CoreUtils/CoreUtils.h>
+#include <mrc/private.h>
 #endif // IOLOOP_MACOS
 
 #include "srp.h"
 #include "dns-msg.h"
 #include "ioloop.h"
-#include "adv-ctl-server.h"
 #include "srp-crypto.h"
 
 #include "cti-services.h"
 #include "srp-gw.h"
 #include "srp-proxy.h"
 #include "srp-mdns-proxy.h"
+#include "adv-ctl-server.h"
 #include "dnssd-proxy.h"
 #include "srp-proxy.h"
 #include "route.h"
@@ -80,6 +81,7 @@ typedef enum {
     dnssd_client_state_invalid,
     dnssd_client_state_startup,
     dnssd_client_state_not_client,
+    dnssd_client_state_probing,
     dnssd_client_state_client,
 } state_machine_state_t;
 #define state_machine_state_invalid dnssd_client_state_invalid
@@ -93,21 +95,30 @@ typedef enum {
 #include "thread-tracker.h"
 #include "probe-srp.h"
 
+typedef enum {
+    dnssd_client_dns_service_type_invalid   = 0,
+    dnssd_client_dns_service_type_do53      = 1,
+    dnssd_client_dns_service_type_push      = 2,
+} dnssd_client_dns_service_type_t;
+
 struct dnssd_client {
     int ref_count;
     state_machine_header_t state_header;
     char *id;
     srp_server_t *server_state;
-    cti_connection_t ml_prefix_connection;
+    wakeup_t *wakeup_timer;
+    cti_connection_t active_data_set_connection;
     struct in6_addr mesh_local_prefix;
     bool have_mesh_local_prefix;
     bool first_time;
     bool canceled;
-    DNSRecordRef aaaa_record_ref, ns_record_ref;
     dnssd_txn_t *shared_txn;
     thread_service_t *published_service;
     DNSServiceRef shared_connection;
+    mrc_dns_service_registration_t dns_service_registration;        // DNS service registration handler.
+    dnssd_client_dns_service_type_t dns_service_registration_type;  // The type of the registered DNS service.
     int interface_index;
+    uint16_t dns_service_registration_port;                         // The port of the registered DNS service used.
 };
 
 static uint64_t dnssd_client_serial_number;
@@ -116,7 +127,8 @@ static void
 dnssd_client_finalize(dnssd_client_t *client)
 {
     thread_service_release(client->published_service);
-
+    ioloop_wakeup_release(client->wakeup_timer);
+    free(client->state_header.name);
     free(client->id);
     free(client);
 }
@@ -128,6 +140,19 @@ dnssd_client_context_release(void *context)
 {
     dnssd_client_t *client = context;
     RELEASE_HERE(client, dnssd_client);
+}
+
+static void
+dnssd_client_wait_expired(void *context)
+{
+    dnssd_client_t *client = context;
+    state_machine_event_t *event = state_machine_event_create(state_machine_event_type_timeout, NULL);
+    if (event == NULL) {
+        ERROR("unable to allocate event to deliver");
+        return;
+    }
+    state_machine_event_deliver(&client->state_header, event);
+    RELEASE_HERE(event, state_machine_event);
 }
 
 static void
@@ -199,50 +224,23 @@ dnssd_client_get_mesh_local_prefix_callback(void *context, const char *prefix_st
     state_machine_event_deliver(&client->state_header, event);
     RELEASE_HERE(event, state_machine_event);
 fail:
+    RELEASE_HERE(client, dnssd_client); // was retained for callback, can only get one callback
     return;
 }
 
-static void
+static state_machine_state_t
 dnssd_client_remove_published_service(dnssd_client_t *client)
 {
-    if (client->shared_txn != NULL) {
-        ioloop_dnssd_txn_cancel(client->shared_txn);
-        ioloop_dnssd_txn_release(client->shared_txn);
-        client->shared_txn = NULL;
+    if (client->dns_service_registration != NULL) {
+        mrc_dns_service_registration_forget(&client->dns_service_registration);
     }
-    client->aaaa_record_ref = NULL;
-    client->ns_record_ref = NULL;
-    if (client->published_service != NULL) {
-        thread_service_release(client->published_service);
-        client->published_service = NULL;
-    }
-}
-
-static void
-dnssd_client_publish_failed(dnssd_client_t *client)
-{
-    dnssd_client_remove_published_service(client);
-    state_machine_event_t *event = state_machine_event_create(state_machine_event_type_daemon_disconnect, NULL);
-    if (event == NULL) {
-        ERROR("unable to allocate event to deliver");
-        return;
-    }
-    state_machine_event_deliver(&client->state_header, event);
-    RELEASE_HERE(event, state_machine_event);
-}
-
-static void
-dnssd_client_shared_connection_failed_callback(void *context, int UNUSED status)
-{
-    dnssd_client_t *client = context;
-    ERROR("daemon connection failed");
-    dnssd_client_publish_failed(client);
+    return dnssd_client_state_not_client;
 }
 
 static state_machine_state_t
 dnssd_client_service_unpublish(dnssd_client_t *client)
 {
-    if (client->aaaa_record_ref != NULL) {
+    if (client->dns_service_registration != NULL) {
         thread_service_note(client->id, client->published_service, "unpublishing service");
     }
     dnssd_client_remove_published_service(client);
@@ -250,111 +248,140 @@ dnssd_client_service_unpublish(dnssd_client_t *client)
     return dnssd_client_state_not_client;
 }
 
-static void dnssd_client_record_callback(DNSServiceRef UNUSED sdref, DNSRecordRef UNUSED rref,
-                                         DNSServiceFlags UNUSED flags, DNSServiceErrorType error_code, void *context)
+static void
+dnssd_client_dns_service_event_handler(const mrc_dns_service_registration_event_t mrc_event, const OSStatus event_err,
+                                       dnssd_client_t *client)
 {
-    dnssd_client_t *client = context;
+    state_machine_event_t *event = NULL;
+    bool want_event = false;
+    switch(mrc_event)
+    {
+    case mrc_dns_service_registration_event_started:
+        INFO("DNS service registration started");
+        break;
+    case mrc_dns_service_registration_event_interruption:
+        INFO("DNS service registration interrupted" );
+        break;
 
-    if (error_code != kDNSServiceErr_NoError) {
-        if (rref == client->aaaa_record_ref) {
-            ERROR("unable to register AAAA record: error code %d", error_code);
+    case mrc_dns_service_registration_event_invalidation:
+        want_event = true;
+        if (event_err) {
+            ERROR("DNS service registration invalidated with error: %d", (int)event_err);
         } else {
-            ERROR("unable to register NS record: error code %d", error_code);
+            INFO("DNS service registration gracefully invalidated");
         }
-        dnssd_client_publish_failed(client);
-        return;
+        event = state_machine_event_create(state_machine_event_type_dns_registration_invalidated, NULL);
+        break;
+    case mrc_dns_service_registration_event_connection_error:
+        want_event = true;
+        ERROR("Registered DNS Push connection failed on server with error: %d", (int)event_err);
+        event = state_machine_event_create(state_machine_event_type_dns_registration_bad_service, NULL);
+        break;
     }
-    if (rref == client->aaaa_record_ref) {
-        ERROR("successfully registered AAAA record");
-    } else {
-        ERROR("successfully registered NS record");
+
+    if (want_event) {
+        if (event == NULL) {
+            ERROR("unable to allocate event to deliver");
+        } else {
+            state_machine_event_deliver(&client->state_header, event);
+            RELEASE_HERE(event, state_machine_event);
+        }
+        // Either event should be the last event we get.
+        RELEASE_HERE(client, dnssd_client);
     }
 }
+
 
 static state_machine_state_t
 dnssd_client_service_publish(dnssd_client_t *client)
 {
-    int err;
-    dns_towire_state_t towire;
-    dns_wire_t message;
+    dnssd_client_service_unpublish(client);
+    state_machine_state_t ret = dnssd_client_state_not_client;
 
-    thread_service_note(client->id, client->published_service, "publishing service");
+    OSStatus err;
+    mdns_dns_service_definition_t do53_definition = NULL;
+    mdns_dns_push_service_definition_t push_definition = NULL;
+    mdns_domain_name_t domain_name = NULL;
+    mdns_address_t server_address = NULL;
 
-    // Set up advertisement for the DNSSD server:
+    domain_name = mdns_domain_name_create("default.service.arpa.", mdns_domain_name_create_opts_none, &err);
+    require_noerr_action(err, out, ERROR("failed to create default.service.arpa.: %{darwin.errno}d", (int)err));
 
-    // First we need a shared connection for DNSServiceRegisterRecord.
-    err = DNSServiceCreateConnection(&client->shared_connection);
-    if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceCreateConnection failed");
-        return dnssd_client_service_unpublish(client);
-    }
-    client->shared_txn = ioloop_dnssd_txn_add(client->shared_connection, client, dnssd_client_context_release,
-                                              dnssd_client_shared_connection_failed_callback);
-    if (client->shared_txn == NULL) {
-        return dnssd_client_service_unpublish(client);
-    }
-
-    //   Set up AAAA record for dnssd-server.local
-    uint8_t *aaaa_rdata;
+    const uint8_t *aaaa_data = NULL;
+    uint16_t port = 0;
+    // @TODO: Adds SRV service probing to determine the DoT port instead the default dns_service_registration_port.
     if (client->published_service->service_type == unicast_service) {
-        aaaa_rdata = &client->published_service->u.unicast.address.s6_addr[0];
+        aaaa_data = &client->published_service->u.unicast.address.s6_addr[0];
     } else if (client->published_service->service_type == anycast_service) {
-        aaaa_rdata = &client->published_service->u.anycast.address.s6_addr[0];
+        aaaa_data = &client->published_service->u.anycast.address.s6_addr[0];
+    }
+    port = client->dns_service_registration_port;
+    require_action(aaaa_data != NULL, out, ERROR("failed to get service address"));
+
+    SEGMENTED_IPv6_ADDR_GEN_SRP(aaaa_data, ipv6_addr_buf);
+    server_address = mdns_address_create_ipv6(aaaa_data, port, 0);
+    if (server_address == NULL) {
+        ERROR("failed to create address object -- address: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+              SEGMENTED_IPv6_ADDR_PARAM_SRP(aaaa_data, ipv6_addr_buf));
+        goto out;
+    }
+    if (client->dns_service_registration_type == dnssd_client_dns_service_type_push) {
+        push_definition = mdns_dns_push_service_definition_create();
+        require_action(push_definition, out, ERROR("unable to allocate mdns_dns_push_service_definition object"));
+
+        err = mdns_dns_push_service_definition_add_domain(push_definition, domain_name);
+        require_noerr(err, out);
+
+        mdns_dns_push_service_definition_append_server_address(push_definition, server_address);
+
+        client->dns_service_registration = mrc_dns_service_registration_create_push(push_definition);
+        if (client->dns_service_registration) {
+            mrc_dns_service_registration_set_reports_connection_errors(client->dns_service_registration,
+                true);
+        }
+    } else if (client->dns_service_registration_type == dnssd_client_dns_service_type_do53) {
+        do53_definition = mdns_dns_service_definition_create();
+        require_action(do53_definition, out, ERROR("unable to allocate mdns_dns_service_definition object"));
+
+        err = mdns_dns_service_definition_add_domain(do53_definition, domain_name);
+        require_noerr(err, out);
+
+        err = mdns_dns_service_definition_append_server_address(do53_definition, server_address);
+        require_noerr(err, out);
+
+        client->dns_service_registration = mrc_dns_service_registration_create(do53_definition);
     } else {
-        ERROR("invalid service type for published service: %d", client->published_service->service_type);
-        return dnssd_client_service_unpublish(client);
+        ERROR("Unknown DNS service registration type: %d", client->dns_service_registration_type);
+        goto out;
     }
-    err = DNSServiceRegisterRecord(client->shared_connection, &client->aaaa_record_ref,
-                                   kDNSServiceFlagsKnownUnique, client->interface_index,
-                                   "dnssd-server.local", kDNSServiceType_AAAA, kDNSServiceClass_IN, 16, aaaa_rdata, 0,
-                                   dnssd_client_record_callback, client);
-    if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceRegisterRecord failed - record: dnssd-server.local AAAA ");
-        return dnssd_client_service_unpublish(client);
-    }
+    require_action(client->dns_service_registration != NULL, out, ERROR("failed to create DNS service registration"));
+    mrc_dns_service_registration_set_queue(client->dns_service_registration, dispatch_get_main_queue());
 
-    //   Set up default.service.arpa NS dnssd-server.local
-    memset(&towire, 0, sizeof(towire));
-    towire.message = &message;
-    towire.lim = &message.data[DNS_DATA_SIZE];
-    towire.p = message.data;
+    RETAIN_HERE(client, dnssd_client); // For the handler
+    mrc_dns_service_registration_set_event_handler(client->dns_service_registration,
+    ^(const mrc_dns_service_registration_event_t event, const OSStatus event_err)
+    {
+        dnssd_client_dns_service_event_handler(event, event_err, client);
+    });
+    INFO("Publishing dnssd client service -- domain: " PRI_DNS_NAME_SRP ", address: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+        mdns_domain_name_get_presentation(domain_name), SEGMENTED_IPv6_ADDR_PARAM_SRP(aaaa_data, ipv6_addr_buf));
+    mrc_dns_service_registration_activate(client->dns_service_registration);
 
-    dns_full_name_to_wire(NULL, &towire, "dnssd-server.local.");
-    err = DNSServiceRegisterRecord(client->shared_connection, &client->ns_record_ref,
-                                   kDNSServiceFlagsKnownUnique | kDNSServiceFlagsForceMulticast,
-                                   client->interface_index,
-                                   "openthread.thread.home.arpa", kDNSServiceType_NS, kDNSServiceClass_IN,
-                                   towire.p - message.data, message.data, 0, dnssd_client_record_callback, client);
-    if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceRegisterRecord failed - record: " "openthread.thread.home.arpa" " NS " "dnssd-server.local");
-        return dnssd_client_service_unpublish(client);
-    }
-
-#if PUBLISH_LEGACY_BROWSING_DOMAIN_FOR_THREAD_DEVICE
-
-    memset(&towire, 0, sizeof(towire));
-    towire.message = &message;
-    towire.lim = &message.data[DNS_DATA_SIZE];
-    towire.p = message.data;
-
-    dns_full_name_to_wire(NULL, &towire, "thread.service.arpa.");
-    err = DNSServiceRegisterRecord(client->service_ref, &client->ptr_record_ref,
-                                   kDNSServiceFlagsKnownUnique, server_state->advertise_interface, AUTOMATIC_BROWSING_DOMAIN,
-                                   kDNSServiceType_PTR, kDNSServiceClass_IN, towire.p - message.data, message.data, 0,
-                                   dnssd_client_record_callback, client);
-    if (err != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceRegisterRecord failed - record: " AUTOMATIC_BROWSING_DOMAIN " PTR " "openthread.thread.home.arpa");
-        return dnssd_client_service_unpublish(client);
-    }
-#endif
-
-    return dnssd_client_state_invalid;
+    ret = dnssd_client_state_invalid;
+out:
+    mdns_forget(&do53_definition);
+    mdns_forget(&push_definition);
+    mdns_forget(&domain_name);
+    mdns_forget(&server_address);
+    return ret;
 }
 
 static state_machine_state_t dnssd_client_action_startup(state_machine_header_t *state_header,
                                                          state_machine_event_t *event);
 static state_machine_state_t dnssd_client_action_not_client(state_machine_header_t *state_header,
                                                             state_machine_event_t *event);
+static state_machine_state_t dnssd_client_action_probing(state_machine_header_t *state_header,
+                                                         state_machine_event_t *event);
 static state_machine_state_t dnssd_client_action_client(state_machine_header_t *state_header,
                                                         state_machine_event_t *event);
 
@@ -367,6 +394,7 @@ static state_machine_decl_t dnssd_client_states[] = {
     { SERVICE_PUB_NAME_DECL(invalid),                            NULL },
     { SERVICE_PUB_NAME_DECL(startup),                            dnssd_client_action_startup },
     { SERVICE_PUB_NAME_DECL(not_client),                         dnssd_client_action_not_client },
+    { SERVICE_PUB_NAME_DECL(probing),                            dnssd_client_action_probing },
     { SERVICE_PUB_NAME_DECL(client),                             dnssd_client_action_client },
 };
 #define DNSSD_CLIENT_NUM_STATES ((sizeof(dnssd_client_states)) / (sizeof(state_machine_decl_t)))
@@ -374,7 +402,7 @@ static state_machine_decl_t dnssd_client_states[] = {
 #define STATE_MACHINE_HEADER_TO_CLIENT(state_header)                                       \
     if (state_header->state_machine_type != state_machine_type_dnssd_client) {             \
         ERROR("state header type isn't omr_client: %d", state_header->state_machine_type); \
-        return dnssd_client_state_invalid;												   \
+        return dnssd_client_state_invalid;                                                 \
     }                                                                                      \
     dnssd_client_t *client = state_header->state_object
 
@@ -403,8 +431,7 @@ dnssd_client_should_be_client(dnssd_client_t *client)
     return should_be_client;
 }
 
-// We get into this state when there is no SRP service published on the Thread network other than our own.
-// If we stop publishing (because a BR-based service showed up), then we go to the probe state.
+// We start in this state and remain here until we get a mesh-local prefix.
 static state_machine_state_t
 dnssd_client_action_startup(state_machine_header_t *state_header, state_machine_event_t *event)
 {
@@ -429,43 +456,101 @@ dnssd_client_action_not_client(state_machine_header_t *state_header, state_machi
         if (client->published_service != NULL) {
             dnssd_client_service_unpublish(client);
         }
+        return dnssd_client_state_invalid;
     }
 
     // We do the same thing here for any event we get, because we're just waiting for conditions to be right.
     if (dnssd_client_should_be_client(client)) {
-        thread_service_t *service;
-
-        // See if we now have a service that's been successfully probed; if so, publish it.
-        service = service_tracker_verified_service_get(client->server_state->service_tracker);
-        if (service != NULL) {
-            if (client->published_service != NULL) {
-                thread_service_release(client->published_service);
-            }
-            client->published_service = service;
-            thread_service_retain(client->published_service);
-            return dnssd_client_state_client;
-        }
-
-        // Check to see if we can start a new probe
-        service = service_tracker_unverified_service_get(client->server_state->service_tracker);
-        if (service != NULL) {
-            if (service->service_type == anycast_service) {
-                memcpy(&service->u.anycast.address, &client->mesh_local_prefix, 8);
-                memcpy(&service->u.anycast.address.s6_addr[8], thread_rloc_preamble, 6);
-                service->u.anycast.address.s6_addr[14] = service->rloc16 >> 8;
-                service->u.anycast.address.s6_addr[15] = service->rloc16 & 255;
-            }
-            probe_srp_service(service, client, dnssd_client_probe_callback);
-            RETAIN_HERE(client, dnssd_client); // For the callback
-            return dnssd_client_state_invalid;
-        }
-
-        // This should only ever happen if we get the service list update before the service publisher gets it.
-        INFO("no service to publish");
-        return dnssd_client_state_invalid;
+        return dnssd_client_state_probing;
     }
     return dnssd_client_state_invalid;
 }
+
+// We get into this state when we've determined we should be a client
+static state_machine_state_t
+dnssd_client_action_probing(state_machine_header_t *state_header, state_machine_event_t *event)
+{
+    STATE_MACHINE_HEADER_TO_CLIENT(state_header);
+    BR_STATE_ANNOUNCE(client, event);
+
+    thread_service_t *service;
+    srp_server_t *server_state = client->server_state;
+
+    // On arrival in this state, we start a timer. If we get to the publishing state, we cancel the timer. If the
+    // timer goes off when we're still probing, we tell the service publisher to publish any relevant cached
+    // services.  The point of this is that it's fairly common at least in testing that we want to be able to
+    // control an accessory after joining the Thread network /because/ the BR went down, and in this case the BR's
+    // published service may take 120 seconds to time out from the thread network data. Publishing the cached
+    // services can potentially help with this.
+    if (event == NULL) {
+        ioloop_add_wake_event(client->wakeup_timer, client, dnssd_client_wait_expired,
+                              dnssd_client_context_release, 5 * MSEC_PER_SEC); // Wait five seconds for probe to succeed.
+        RETAIN_HERE(client, dnssd_client); // for the wake event
+    }
+
+    // If we have been waiting for a second since we started probing and haven't succeeded, tell the service publisher
+    // to publish services.
+    else if (event->type == state_machine_event_type_timeout) {
+        if (server_state->service_publisher != NULL) {
+            INFO("server probe startup timeout expired--publishing cached data.");
+            service_publisher_re_advertise_matching(server_state->service_publisher);
+        }
+        return dnssd_client_state_invalid;
+    }
+
+    // If we no longer need to be a client, stop trying.
+    else {
+        if (!dnssd_client_should_be_client(client)) {
+            ioloop_cancel_wake_event(client->wakeup_timer);
+            return dnssd_client_state_not_client;
+        }
+    }
+
+    // See if we now have a service that's been successfully probed; if so, publish it.
+    service = service_tracker_verified_service_get(client->server_state->service_tracker);
+    if (service != NULL) {
+        if (client->published_service != NULL) {
+            thread_service_release(client->published_service);
+        }
+        client->published_service = service;
+        thread_service_retain(client->published_service);
+
+        // Tell the service publisher that we successfully probed a service.
+        INFO("server probe succeeded--unpublishing cached data.");
+        service_publisher_unadvertise_all(server_state->service_publisher);
+
+        // We no longer want a wakeup.  Note that this is the only way out of the probing state, so it's not
+        // possible to exit the state without canceling the timer here.
+        ioloop_cancel_wake_event(client->wakeup_timer);
+
+        // Publish DNS Push service pointing to probed service.
+        return dnssd_client_state_client;
+    }
+
+    // Check to see if we can start a new probe
+    service = service_tracker_unverified_service_get(client->server_state->service_tracker, unicast_service);
+    if (service != NULL) {
+        if (service->checking) {
+            service_tracker_thread_service_note(client->server_state->service_tracker, service,
+                                                " is still being probed");
+            return dnssd_client_state_invalid;
+        }
+        if (service->service_type == anycast_service) {
+            memcpy(&service->u.anycast.address, &client->mesh_local_prefix, 8);
+            memcpy(&service->u.anycast.address.s6_addr[8], thread_rloc_preamble, 6);
+            service->u.anycast.address.s6_addr[14] = service->rloc16 >> 8;
+            service->u.anycast.address.s6_addr[15] = service->rloc16 & 255;
+        }
+        RETAIN_HERE(client, dnssd_client); // For the probe
+        probe_srp_service(service, client, dnssd_client_probe_callback, dnssd_client_context_release);
+        return dnssd_client_state_invalid;
+    }
+
+    // This should only ever happen if we get the service list update before the service publisher gets it.
+    INFO("no service to publish");
+    return dnssd_client_state_invalid;
+}
+
 
 // We get into this state when we've published a service.
 static state_machine_state_t
@@ -478,6 +563,18 @@ dnssd_client_action_client(state_machine_header_t *state_header, state_machine_e
         // Publish the service.
         dnssd_client_service_publish(client);
         return dnssd_client_state_invalid;
+    }
+
+    if (event->type == state_machine_event_type_dns_registration_bad_service) {
+        if (client->published_service == NULL) {
+            INFO("bad service event received with no published service.");
+        } else {
+            client->published_service->ignore = true;  // Don't consider this service when deciding what to advertise
+            client->published_service->responding = false;
+            thread_service_release(client->published_service);
+            client->published_service = NULL;
+            return dnssd_client_state_probing; // Go back to probing.
+        }
     }
 
     // This can happen if the daemon disconnects.
@@ -502,10 +599,21 @@ dnssd_client_action_client(state_machine_header_t *state_header, state_machine_e
 void
 dnssd_client_cancel(dnssd_client_t *client)
 {
-    service_tracker_callback_cancel(client->server_state->service_tracker, client);
-    thread_tracker_callback_cancel(client->server_state->thread_tracker, client);
-    cti_events_discontinue(client->ml_prefix_connection);
-    client->ml_prefix_connection = NULL;
+    if (client->server_state->service_tracker != NULL) {
+        service_tracker_cancel_probes(client->server_state->service_tracker);
+        service_tracker_callback_cancel(client->server_state->service_tracker, client);
+    }
+    if (client->server_state->thread_tracker != NULL) {
+        thread_tracker_callback_cancel(client->server_state->thread_tracker, client);
+    }
+    ioloop_cancel_wake_event(client->wakeup_timer);
+    if (client->active_data_set_connection != NULL) {
+        cti_events_discontinue(client->active_data_set_connection);
+        RELEASE_HERE(client, dnssd_client); // callback held reference
+        client->active_data_set_connection = NULL;
+    }
+    dnssd_client_remove_published_service(client);
+    state_machine_cancel(&client->state_header);
 }
 
 dnssd_client_t *
@@ -516,15 +624,22 @@ dnssd_client_create(srp_server_t *server_state)
         return client;
     }
     RETAIN_HERE(client, dnssd_client);
+    client->wakeup_timer = ioloop_wakeup_create();
+    if (client->wakeup_timer == NULL) {
+        ERROR("wakeup timer alloc failed");
+        goto out;
+    }
 
     char client_id_buf[100];
-    snprintf(client_id_buf, sizeof(client_id_buf), "[SP%lld]", ++dnssd_client_serial_number);
+    snprintf(client_id_buf, sizeof(client_id_buf), "[DC%lld]", ++dnssd_client_serial_number);
     client->id = strdup(client_id_buf);
     if (client->id == NULL) {
         ERROR("no memory for client ID");
         goto out;
     }
     client->interface_index = -1;
+    client->dns_service_registration_type = dnssd_client_dns_service_type_push;
+    client->dns_service_registration_port = DNS_OVER_TLS_DEFAULT_PORT;
 
     if (!state_machine_header_setup(&client->state_header,
                                     client, client->id,
@@ -558,18 +673,47 @@ dnssd_client_get_tunnel_name_callback(void *context, const char *name, cti_statu
     dnssd_client_t *client = context;
     if (status != kCTIStatus_NoError) {
         INFO("didn't get tunnel name, error code %d", status);
-        return;
+        goto fail;
     }
     client->interface_index = if_nametoindex(name);
+fail:
+    RELEASE_HERE(client, dnssd_client); // was retained for callback, can only get one callback
+}
+
+static void
+dnssd_client_active_data_set_changed_callback(void *context, cti_status_t status)
+{
+    dnssd_client_t *client = context;
+
+    if (status != kCTIStatus_NoError) {
+        ERROR("error %d", status);
+        RELEASE_HERE(client, dnssd_client); // no more callbacks
+        cti_events_discontinue(client->active_data_set_connection);
+        client->active_data_set_connection = NULL;
+        return;
+    }
+
+    status = cti_get_mesh_local_prefix(client->server_state, client, dnssd_client_get_mesh_local_prefix_callback, NULL);
+    if (status != kCTIStatus_NoError) {
+        ERROR("cti_get_mesh_local_prefix failed with status %d", status);
+    } else {
+        RETAIN_HERE(client, dnssd_client); // for mesh-local callback
+    }
+    status = cti_get_tunnel_name(client->server_state, client, dnssd_client_get_tunnel_name_callback, NULL);
+    if (status != kCTIStatus_NoError) {
+        ERROR("cti_get_tunnel_name failed with status %d", status);
+    } else {
+        RETAIN_HERE(client, dnssd_client); // for tunnel name callback
+    }
 }
 
 void
 dnssd_client_start(dnssd_client_t *client)
 {
-    cti_get_mesh_local_prefix(client->server_state, &client->ml_prefix_connection, client,
-                              dnssd_client_get_mesh_local_prefix_callback, NULL);
-    cti_get_tunnel_name(client->server_state, client, dnssd_client_get_tunnel_name_callback, NULL);
+    cti_track_active_data_set(client->server_state, &client->active_data_set_connection,
+                              client, dnssd_client_active_data_set_changed_callback, NULL);
     RETAIN_HERE(client, dnssd_client); // for callback
+    dnssd_client_active_data_set_changed_callback(client, kCTIStatus_NoError); // Get the initial state.
     state_machine_next_state(&client->state_header, dnssd_client_state_startup);
 }
 

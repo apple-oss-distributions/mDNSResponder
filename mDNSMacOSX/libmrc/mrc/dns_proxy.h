@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -95,8 +95,8 @@ mrc_dns_proxy_event_to_string(const mrc_dns_proxy_event_t event)
 		case mrc_dns_proxy_event_none:			return "none";
 		case mrc_dns_proxy_event_started:		return "started";
 		case mrc_dns_proxy_event_interruption:	return "interruption";
+		MDNS_COVERED_SWITCH_DEFAULT:			return "<INVALID EVENT>";
 	}
-	return "<INVALID EVENT>";
 }
 
 /*!

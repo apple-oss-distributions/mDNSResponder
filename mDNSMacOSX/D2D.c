@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -274,7 +274,7 @@ mDNSlocal void D2DBrowseListRetain(const domainname *const name, mDNSu16 type)
     }
     (*ptr)->refCount += 1;
 
-    LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEFAULT, "D2DBrowseListRetain - "
+    LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEBUG, "D2DBrowseListRetain - "
         "name: " PRI_DM_NAME ", type: " PUB_DNS_TYPE ", ref count: %u", DM_NAME_PARAM(&(*ptr)->name),
         DNS_TYPE_PARAM((*ptr)->type), (*ptr)->refCount);
 }
@@ -286,14 +286,14 @@ mDNSlocal bool D2DBrowseListRelease(const domainname *const name, mDNSu16 type)
 
     if (!*ptr)
     {
-        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEFAULT, "D2DBrowseListRelease item not found in the list - "
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEBUG, "D2DBrowseListRelease item not found in the list - "
             "name: " PRI_DM_NAME ", type: " PUB_DNS_TYPE, DM_NAME_PARAM(name), DNS_TYPE_PARAM(type));
         return false;
     }
 
     (*ptr)->refCount -= 1;
 
-    LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEFAULT, "D2DBrowseListRelease - "
+    LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEBUG, "D2DBrowseListRelease - "
         "name: " PRI_DM_NAME ", type: " PUB_DNS_TYPE ", ref count: %u", DM_NAME_PARAM(&(*ptr)->name),
         DNS_TYPE_PARAM((*ptr)->type), (*ptr)->refCount);
 
@@ -434,7 +434,7 @@ mDNSlocal mStatus xD2DParseCompressedPacket(const mDNSu8 * const lhs, const mDNS
     }
     if (mDNS_LoggingEnabled)
     {
-        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEFAULT, "xD2DParseCompressedPacket: Our Bytes - name: " PRI_DM_NAME
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEBUG, "xD2DParseCompressedPacket: Our Bytes - name: " PRI_DM_NAME
             ", type: " PUB_DNS_TYPE ", TTL: %u, rdata length: %u", DM_NAME_PARAM(&recordName),
             DNS_TYPE_PARAM(recordType), ttl, rhs_len);
     }
@@ -744,10 +744,8 @@ exit:
     return;
 }
 
-mDNSlocal void xD2DServiceCallback(D2DServiceEvent event, D2DStatus result, D2DServiceInstance instanceHandle, D2DTransportType transportType, const Byte *key, size_t keySize, const Byte *value, size_t valueSize, void *userData)
+mDNSlocal void xD2DServiceCallback(D2DServiceEvent event, D2DStatus result, D2DServiceInstance instanceHandle, D2DTransportType transportType, const Byte *key, size_t keySize, const Byte *value, size_t valueSize, void * __unused userData)
 {
-    const char *eventString = "unknown";
-
     KQueueLock();
 
     if (keySize   > 0xFFFF)
@@ -761,33 +759,7 @@ mDNSlocal void xD2DServiceCallback(D2DServiceEvent event, D2DStatus result, D2DS
             "value size: %zu", valueSize);
     }
 
-    switch (event)
-    {
-    case D2DServiceFound:
-        eventString = "D2DServiceFound";
-        break;
-    case D2DServiceLost:
-        eventString = "D2DServiceLost";
-        break;
-    case D2DServiceResolved:
-        eventString = "D2DServiceResolved";
-        break;
-    case D2DServiceRetained:
-        eventString = "D2DServiceRetained";
-        break;
-    case D2DServiceReleased:
-        eventString = "D2DServiceReleased";
-        break;
-    case D2DServicePeerLost:
-        eventString = "D2DServicePeerLost";
-        break;
-    default:
-        break;
-    }
-
-    LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEFAULT, "xD2DServiceCallback - event: " PUB_S
-        ", result: %d, instanceHandle: %p, transportType: %u, LHS: %p (%zu), RHS: %p (%zu), userData: %p",
-        eventString, result, instanceHandle, transportType, key, keySize, value, valueSize, userData);
+    LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEFAULT, "xD2DServiceCallback -- event: " PUB_D2D_SRV_EVENT, event);
     PrintHelper(__func__, key, (mDNSu16)keySize, value, (mDNSu16)valueSize);
 
     switch (event)

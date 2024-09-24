@@ -1,6 +1,6 @@
 /* omr-watcher.c
  *
- * Copyright (c) 2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,13 +70,13 @@
 #include "srp.h"
 #include "dns-msg.h"
 #include "ioloop.h"
-#include "adv-ctl-server.h"
 #include "srp-crypto.h"
 
 #include "cti-services.h"
 #include "srp-gw.h"
 #include "srp-proxy.h"
 #include "srp-mdns-proxy.h"
+#include "adv-ctl-server.h"
 #include "dnssd-proxy.h"
 #include "srp-proxy.h"
 #include "route.h"
@@ -107,6 +107,7 @@ struct omr_watcher {
     bool purge_pending;
     bool first_time;
     bool prefix_recheck_pending;
+    bool awaiting_unpublication;
 };
 
 static void
@@ -220,6 +221,19 @@ omr_prefix_finalize(omr_prefix_t *prefix)
 static void
 omr_watcher_finalize(omr_watcher_t *omw)
 {
+    omr_prefix_t *next;
+
+    if (omw->prefix_recheck_wakeup != NULL) {
+        ioloop_cancel_wake_event(omw->prefix_recheck_wakeup);
+        ioloop_wakeup_release(omw->prefix_recheck_wakeup);
+        omw->prefix_recheck_wakeup = NULL;
+    }
+
+    for (omr_prefix_t *prefix = omw->prefixes; prefix != NULL; prefix = next) {
+        next = prefix->next;
+        RELEASE_HERE(prefix, omr_prefix);
+    }
+
     // The omr_watcher_t can have a route_connection and a prefix_connection, but each of these will retain
     // a reference to the omr_watcher, so we can't get here while these connections are still alive. Hence,
     // we do not need to free them here.
@@ -250,6 +264,7 @@ omr_watcher_purge_canceled_callbacks(void *context)
             pcb = &((*pcb)->next);
         }
     }
+    RELEASE_HERE(omw, omr_watcher);
 }
 
 static void
@@ -272,6 +287,7 @@ omr_watcher_prefix_list_callback(void *context, cti_prefix_vec_t *prefixes, cti_
     size_t i;
     omr_prefix_t **ppref = &omw->prefixes, *prefix = NULL, **new = NULL;
     bool something_changed = false;
+    bool user_prefix_seen = false;
 
     INFO("status: %d  prefixes: %p  count: %d", status, prefixes, prefixes == NULL ? -1 : (int)prefixes->num);
 
@@ -356,6 +372,7 @@ omr_watcher_prefix_list_callback(void *context, cti_prefix_vec_t *prefixes, cti_
             if (cti_prefix->ncp) {
                 prefix->ncp = true;
             } else {
+                user_prefix_seen = true;
                 prefix->user = true;
             }
             if (cti_prefix->stable) {
@@ -381,6 +398,7 @@ omr_watcher_prefix_list_callback(void *context, cti_prefix_vec_t *prefixes, cti_
     }
     INFO("omw->prefixes = %p", omw->prefixes);
     for (prefix = omw->prefixes; prefix != NULL; prefix = prefix->next) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
         INFO("prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d is currently in the list " PUB_S_SRP PUB_S_SRP PUB_S_SRP,
              SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length,
              prefix->user ? " (user)" : "", prefix->ncp ? " (ncp)": "", prefix->stable ? " (stable)" : "");
@@ -388,6 +406,10 @@ omr_watcher_prefix_list_callback(void *context, cti_prefix_vec_t *prefixes, cti_
     if (something_changed || omw->first_time) {
         omr_watcher_send_prefix_event(omw, omr_watcher_event_prefix_update_finished, omw->prefixes, NULL);
         omw->first_time = false;
+    }
+    if (!user_prefix_seen && omw->route_state->srp_server->awaiting_prefix_removal) {
+        omw->route_state->srp_server->awaiting_prefix_removal = false;
+        adv_ctl_thread_shutdown_status_check(omw->route_state->srp_server);
     }
 out:
     // Discontinue events (currently we'll only get one callback: this just dereferences the object so it can be freed.)
@@ -515,7 +537,8 @@ omr_watcher_prefix_list_fetch(omr_watcher_t *watcher)
         watcher->prefix_recheck_pending = true;
     }
 
-    int rv = cti_get_onmesh_prefix_list(watcher->route_state->srp_server, &watcher->prefix_connection, watcher, omr_watcher_prefix_list_callback, NULL);
+    int rv = cti_get_onmesh_prefix_list(watcher->route_state->srp_server, &watcher->prefix_connection,
+                                        watcher, omr_watcher_prefix_list_callback, NULL);
     if (rv != kCTIStatus_NoError) {
         ERROR("can't get onmesh prefix list: %d", rv);
         return;
@@ -619,10 +642,10 @@ omr_watcher_prefix_present(omr_watcher_t *watcher, omr_prefix_priority_t priorit
                            struct in6_addr *ignore_prefix, int ignore_prefix_length)
 {
     static struct in6_addr in6addr_zero;
-    SEGMENTED_IPv6_ADDR_GEN_SRP(ignore_prefix->prefix.s6_addr, prefix_buf);
+    SEGMENTED_IPv6_ADDR_GEN_SRP(ignore_prefix, ignore_buf);
     if (in6addr_compare(ignore_prefix, &in6addr_zero)) {
         INFO("prefix to ignore: " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
-             SEGMENTED_IPv6_ADDR_PARAM_SRP(ignore_prefix->s6_addr, prefix_buf), ignore_prefix_length);
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(ignore_prefix->s6_addr, ignore_buf), ignore_prefix_length);
     }
     for (omr_prefix_t *prefix = watcher->prefixes; prefix != NULL; prefix = prefix->next) {
         if (prefix->prefix_length == ignore_prefix_length && !in6addr_compare(&prefix->prefix, ignore_prefix)) {
@@ -646,9 +669,24 @@ omr_watcher_prefix_present(omr_watcher_t *watcher, omr_prefix_priority_t priorit
 }
 
 bool
+omr_watcher_non_ula_prefix_present(omr_watcher_t *watcher)
+{
+    for (omr_prefix_t *prefix = watcher->prefixes; prefix != NULL; prefix = prefix->next) {
+        if (omr_watcher_prefix_is_non_ula_prefix(prefix)) {
+            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
+            INFO("matched prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length);
+            return true;
+        }
+    }
+    INFO("returning false");
+    return false;
+}
+
+bool
 omr_watcher_prefix_exists(omr_watcher_t *watcher, const struct in6_addr *address, int prefix_length)
 {
-    SEGMENTED_IPv6_ADDR_GEN_SRP(address->prefix.s6_addr, target_buf);
+    SEGMENTED_IPv6_ADDR_GEN_SRP(address, target_buf);
     INFO("address: " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
          SEGMENTED_IPv6_ADDR_PARAM_SRP(address->s6_addr, target_buf), prefix_length);
     for (omr_prefix_t *prefix = watcher->prefixes; prefix != NULL; prefix = prefix->next) {

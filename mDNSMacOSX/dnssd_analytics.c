@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,7 +55,7 @@ typedef struct {
 	qtype_count_t 		v6;
 	qtype_count_t 		https;
 } dns_analytic_t;
-static dns_analytic_t s_dns_analytics[e_index_count] = {};
+static dns_analytic_t s_dns_analytics[e_index_count] = {0};
 
 // MARK:  - Private Functions
 
@@ -69,8 +69,9 @@ _index_to_transport_string(uint8_t index)
 		case e_index_encrypted_noncell:
 		case e_index_encrypted_cell:
 			return "encrypted";
+		default:
+			return NULL;
 	}
-	return NULL;
 }
 
 static inline const char *
@@ -83,8 +84,9 @@ _index_to_network_string(uint8_t index)
 		case e_index_standard_cell:
 		case e_index_encrypted_cell:
 			return "cellular";
+		default:
+			return NULL;
 	}
-	return NULL;
 }
 
 static void
@@ -141,6 +143,9 @@ _qtype_count_for_analytic(dns_analytic_t * const _Nonnull analytic, uint16_t qty
 			
 		case kDNSType_HTTPS:
 			qtype_ptr = &analytic->https;
+			break;
+
+		default:
 			break;
 	}
 	return qtype_ptr;
@@ -232,6 +237,7 @@ dns_transport_t
 dnssd_analytics_dns_transport_for_resolver_type(mdns_resolver_type_t type)
 {
 	dns_transport_t transport;
+	mdns_clang_ignore_warning_begin(-Wswitch-default);
 	switch (type) {
 		case mdns_resolver_type_https:
 			transport = dns_transport_DoH;
@@ -250,6 +256,7 @@ dnssd_analytics_dns_transport_for_resolver_type(mdns_resolver_type_t type)
 			transport = dns_transport_Undefined;
 			break;
 	}
+	mdns_clang_ignore_warning_end();
 	return transport;
 }
 

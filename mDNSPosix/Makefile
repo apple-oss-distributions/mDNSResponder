@@ -158,7 +158,7 @@ else
 ifeq ($(os),x)
 # We have to define __MAC_OS_X_VERSION_MIN_REQUIRED=__MAC_OS_X_VERSION_10_4 or on Leopard
 # we get build failures: ‘daemon’ is deprecated (declared at /usr/include/stdlib.h:283)
-CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror -Wno-declaration-after-statement \
+CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror -Wno-declaration-after-statement -Wno-unused-but-set-variable \
 	-D__MAC_OS_X_VERSION_MIN_REQUIRED=__MAC_OS_X_VERSION_10_4 \
 	-DHAVE_STRLCPY=1 -DTARGET_OS_MAC \
 	-D__APPLE_USE_RFC_2292 #-Wunreachable-code

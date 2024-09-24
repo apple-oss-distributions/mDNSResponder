@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2011-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -378,6 +378,7 @@ mDNSlocal mDNSu8 *AddResourceRecord(DNSProxyClient *pc, mDNSu8 **prevptr, mStatu
             //   will also be returned. If the client is explicitly looking up
             //   a DNSSEC record (e.g., DNSKEY, DS) we should return the response.
             //   DNSSECOK bit only influences whether we add the RRSIG or not.
+            mDNSBool addedCNAMERecord = mDNSfalse;
             if (cr->resrec.RecordType != kDNSRecordTypePacketNegative)
             {
                 const ResourceRecord *rr;
@@ -422,6 +423,10 @@ mDNSlocal mDNSu8 *AddResourceRecord(DNSProxyClient *pc, mDNSu8 **prevptr, mStatu
                 }
                 len += (ptr - pc->omsg_ptr);
                 pc->omsg_ptr = ptr;
+                if (cr->resrec.rrtype == kDNSType_CNAME)
+                {
+                    addedCNAMERecord = mDNStrue;
+                }
             }
             if (cr->soa)
             {
@@ -435,6 +440,16 @@ mDNSlocal mDNSu8 *AddResourceRecord(DNSProxyClient *pc, mDNSu8 **prevptr, mStatu
             if ((pc->q.qtype != cr->resrec.rrtype) && cr->resrec.rrtype == kDNSType_CNAME)
             {
                 LogInfo("AddResourceRecord: cname set for %s", CRDisplayString(m ,cr));
+            }
+            // If a CNAME record was just added to the response for the current QNAME, break out of the for-loop.
+            // As described in <https://datatracker.ietf.org/doc/html/rfc2181#section-10.1>, there cannot be more
+            // than one CNAME record for a given domain name. This is a defensive measure because because it's
+            // currently possible for two CNAME records with the same name to end up in mDNSResponder's cache.
+            // To avoid "garbage in, garbage out", which can confuse clients, the DNS proxy shouldn't create
+            // responses with multiple CNAME records with the same name. See rdar://117823387 for more details.
+            if (addedCNAMERecord)
+            {
+                break;
             }
         }
     }
@@ -959,60 +974,6 @@ exit:
     return err;
 }
 
-static mrcs_dns_proxy_t gLegacyProxy = mDNSNULL;
-
-#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
-mDNSexport void DNSProxyInit(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf, const mDNSu8 IPv6Prefix[16], int IPv6PrefixBitLen,
-                             mDNSBool forceAAAASynthesis)
-#else
-mDNSexport void DNSProxyInit(mDNSu32 IpIfArr[MaxIp], mDNSu32 OpIf)
-#endif
-{
-    if (gLegacyProxy)
-    {
-        return;
-    }
-    gLegacyProxy = mrcs_dns_proxy_create(NULL);
-    if (!gLegacyProxy)
-    {
-        return;
-    }
-    for (int i = 0; i < MaxIp; ++i)
-    {
-        mrcs_dns_proxy_add_input_interface(gLegacyProxy, IpIfArr[i]);
-    }
-    mrcs_dns_proxy_set_output_interface(gLegacyProxy, OpIf);
-
-#if MDNSRESPONDER_SUPPORTS(APPLE, DNS_PROXY_DNS64)
-    if (IPv6Prefix)
-    {
-        const OSStatus err = mrcs_dns_proxy_set_nat64_prefix(gLegacyProxy, IPv6Prefix, IPv6PrefixBitLen);
-        if (!err)
-        {
-            mrcs_dns_proxy_enable_force_aaaa_synthesis(gLegacyProxy, forceAAAASynthesis ? true : false);
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-                "DNSProxy using DNS64 IPv6 prefix: " PRI_IPv6_ADDR "/%d" PUB_S,
-                IPv6Prefix, IPv6PrefixBitLen, forceAAAASynthesis ? "" : " (force AAAA synthesis)");
-        }
-        else
-        {
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
-                "DNSProxy not using invalid DNS64 IPv6 prefix: " PRI_IPv6_ADDR "/%d", IPv6Prefix, IPv6PrefixBitLen);
-        }
-    }
-#endif
-    DNSProxyStart(gLegacyProxy);
-}
-
-mDNSexport void DNSProxyTerminate(void)
-{
-    if (gLegacyProxy)
-    {
-        DNSProxyStop(gLegacyProxy);
-        mrcs_forget(&gLegacyProxy);
-    }
-}
-
 mDNSlocal OSStatus DNSProxyStartHandler(const mrcs_dns_proxy_t proxy)
 {
     KQueueLock();
@@ -1051,11 +1012,11 @@ mDNSlocal char *DNSProxyGetStateHandler(void)
     return state;
 }
 
-const struct mrcs_server_handlers_s kMRCSServerHandlers =
+const struct mrcs_server_dns_proxy_handlers_s kMRCSServerDNSProxyHandlers =
 {
-    .dns_proxy_start = DNSProxyStartHandler,
-    .dns_proxy_stop = DNSProxyStopHandler,
-    .dns_proxy_get_state = DNSProxyGetStateHandler
+    .start = DNSProxyStartHandler,
+    .stop = DNSProxyStopHandler,
+    .get_state = DNSProxyGetStateHandler
 };
 
 #else // UNICAST_DISABLED

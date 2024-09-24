@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil -*-
  *
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,9 +41,10 @@
 
 #include "uds_daemon.h"             // Interface to the server side implementation of dns_sd.h
 #include "xpc_services.h"
-#include "xpc_service_dns_proxy.h"
 #include "xpc_service_log_utility.h"
 #include "helper.h"
+#include "dnsproxy.h"
+#include "discovery_proxy.h"
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, ANALYTICS)
 #include "dnssd_analytics.h"
@@ -60,6 +61,10 @@
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
 #include "resolved_cache.h"
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
+#include "unicast_assist_cache.h"
 #endif
 
 #include <mdns/power.h>
@@ -206,14 +211,27 @@ mDNSlocal void mDNSPreferencesSetNames(int key, domainlabel *old, domainlabel *n
             else
                 prevnew->c[0] = 0;
 #endif
+
+        #define LogRedactWithNameChangeKey(CATEGORY, LEVEL, KEY, FORMAT, ...)                           \
+            do {                                                                                        \
+                if ((key) == kmDNSComputerName)                                                         \
+                {                                                                                       \
+                    LogRedact(CATEGORY, LEVEL,                                                          \
+                        "mDNSPreferencesSetNames: changing computer name -- " FORMAT, ##__VA_ARGS__);   \
+                }                                                                                       \
+                else                                                                                    \
+                {                                                                                       \
+                    LogRedact(CATEGORY, LEVEL,                                                          \
+                        "mDNSPreferencesSetNames: changing local host name -- " FORMAT, ##__VA_ARGS__); \
+                }                                                                                       \
+            } while (0)
+
+            LogRedactWithNameChangeKey(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT, key,
+                "last change: " PRI_DM_LABEL " -> " PRI_DM_LABEL
+                ", current change: " PRI_DM_LABEL " -> " PRI_DM_LABEL, DM_LABEL_PARAM_SAFE(prevold),
+                DM_LABEL_PARAM_SAFE(prevnew), DM_LABEL_PARAM_SAFE(old), DM_LABEL_PARAM_SAFE(new));
             mDNSPreferencesSetName(key, old, new);
-        }
-        else
-        {
-            LogInfo("mDNSPreferencesSetNames not invoking helper %s %#s, %s %#s, old %#s, new %#s",
-                    (key == kmDNSComputerName ? "prevoldnicelabel" : "prevoldhostlabel"), prevold->c,
-                    (key == kmDNSComputerName ? "prevnewnicelabel" : "prevnewhostlabel"), prevnew->c,
-                    old->c, new->c);
+        #undef LogRedactWithNameChangeKey
         }
         break;
     default:
@@ -329,9 +347,9 @@ static const char *if_functional_type_to_string(const uint32_t type)
             return "Inter-(co)proc";
         case IFRTYPE_FUNCTIONAL_COMPANIONLINK:
             return "CompanionLink";
+        default:
+            return "Unrecognized";
     }
-
-    return "Unrecognized";
 }
 
 mDNSexport void dump_state_to_fd(int fd)
@@ -389,8 +407,10 @@ mDNSexport void dump_state_to_fd(int fd)
                           &i->ifinfo.ip, utc - i->LastSeen);
             else
             {
-                const CacheRecord *sps[3];
+                const CacheRecord *sps[3] = {mDNSNULL, mDNSNULL, mDNSNULL};
+            #if MDNSRESPONDER_SUPPORTS(COMMON, SPS_CLIENT)
                 FindSPSInCache(&mDNSStorage, &i->ifinfo.NetWakeBrowse, sps);
+            #endif
                 LogToFD(fd, "%p %2ld, %p,  %s %-8.8s %.6a %.6a %s %s %s %s %s %s %-16.16s %#a",
                           i, i->ifinfo.InterfaceID, i->Registered,
                           i->sa_family == AF_INET ? "v4" : i->sa_family == AF_INET6 ? "v6" : "??", i->ifinfo.ifname, &i->ifinfo.MAC, &i->BSSID,
@@ -510,9 +530,13 @@ mDNSexport void dump_state_to_fd(int fd)
         LogToFD(fd, "%##s", mDNSStorage.FQDN.c);
     }
 
-    #if MDNSRESPONDER_SUPPORTS(APPLE, ANALYTICS)
-        dnssd_analytics_log(fd);
-    #endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, ANALYTICS)
+    dnssd_analytics_log(fd);
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
+    unicast_assist_cache_log(fd);
+#endif
 
     LogToFD(fd, "Date: %s", timestamp);
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "---- END STATE LOG ---- (" PUB_S ")", timestamp);
@@ -636,6 +660,12 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "All mDNSResponder Debug Logging/Tracing Disabled (USR1/USR2/PROF)");
         UpdateDebugState();
         break;
+#if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
+    case SIGWINCH:
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "SIGWINCH: Purge unicast assist cache");
+        unicast_assist_cache_purge();
+        break;
+#endif
 
     default: LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "SignalCallback: Unknown signal %d", msg_header->msgh_id); break;
     }
@@ -1011,6 +1041,7 @@ mDNSlocal mDNSBool AllowSleepNow(mDNSs32 now)
             if (m->p->IOPMConnection)   // If lightweight-wake capability is available, use that
             {
                 CFStringRef reasonStr;
+                mdns_clang_ignore_warning_begin(-Wswitch-default);
                 switch (reason)
                 {
                 case mDNSNextWakeReason_NATPortMappingRenewal:
@@ -1037,6 +1068,7 @@ mDNSlocal mDNSBool AllowSleepNow(mDNSs32 now)
                     reasonStr = CFSTR("unspecified");
                     break;
                 }
+                mdns_clang_ignore_warning_end();
                 CFDateRef WakeDate = CFDateCreate(NULL, CFAbsoluteTimeGetCurrent() + interval);
                 if (!WakeDate) LogMsg("ScheduleNextWake: CFDateCreate failed");
                 else
@@ -1098,9 +1130,11 @@ mDNSlocal mDNSBool AllowSleepNow(mDNSs32 now)
         }
 
         m->SleepState = SleepState_Sleeping;
+    #if !MDNSRESPONDER_SUPPORTS(APPLE, KEEP_INTERFACES_DURING_SLEEP)
 		// Clear our interface list to empty state, ready to go to sleep
 		// As a side effect of doing this, we'll also cancel any outstanding SPS Resolve calls that didn't complete
         mDNSMacOSXNetworkChanged();
+    #endif
     }
 
 #if TARGET_OS_OSX && defined(kIOPMAcknowledgmentOptionSystemCapabilityRequirements)
@@ -1226,6 +1260,17 @@ mDNSlocal void SetLowWater(const KQSocketSet *const k, const int r)
         LogMsg("SO_RCVLOWAT IPv6 %d error %d errno %d (%s)", k->sktv6, r, errno, strerror(errno));
 }
 
+mDNSlocal void MRCSServerInit(void)
+{
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+    mrcs_server_set_dns_service_registration_handlers(&kMRCSServerDNSServiceRegistrationHandlers);
+#endif
+    mrcs_server_set_dns_proxy_handlers(&kMRCSServerDNSProxyHandlers);
+    mrcs_server_set_discovery_proxy_handlers(&kMRCSServerDiscoveryProxyHandlers);
+    mrcs_server_set_record_cache_handlers(&kMRCServerRecordCacheHandlers);
+    mrcs_server_activate();
+}
+
 mDNSlocal void * KQueueLoop(void *m_param)
 {
     mDNS            *m = m_param;
@@ -1242,7 +1287,10 @@ mDNSlocal void * KQueueLoop(void *m_param)
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSD_XPC_SERVICE)
     dnssd_server_init();
 #endif
-    mrcs_server_init(&kMRCSServerHandlers);
+#if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
+    unicast_assist_init();
+#endif
+    MRCSServerInit();
     pthread_mutex_lock(&PlatformStorage.BigMutex);
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Starting time value 0x%08X (%d)", (mDNSu32)mDNSStorage.timenow_last, mDNSStorage.timenow_last);
 
@@ -1265,6 +1313,9 @@ mDNSlocal void * KQueueLoop(void *m_param)
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
         resolved_cache_idle();
+#endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
+        unicast_assist_idle();
 #endif
 #if MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
         mDNS_Lock(m);
@@ -1424,37 +1475,52 @@ mDNSlocal size_t LaunchdCheckin(void)
 }
 
 
-extern int sandbox_init(const char *profile, uint64_t flags, char **errorbuf) __attribute__((weak_import));
-
-
 mDNSlocal void SandboxProcess(void)
 {
+#if MDNS_OS(macOS)
     // Invoke sandbox profile /usr/share/sandbox/mDNSResponder.sb
-#if defined(MDNS_NO_SANDBOX) && MDNS_NO_SANDBOX
-    LogMsg("Note: Compiled without Apple Sandbox support");
-#else // MDNS_NO_SANDBOX
-    if (!sandbox_init)
-        LogMsg("Note: Running without Apple Sandbox support (not available on this OS)");
-    else
+    char *sandbox_msg;
+    uint64_t sandbox_flags = SANDBOX_NAMED;
+
+    (void)confstr(_CS_DARWIN_USER_CACHE_DIR, NULL, 0);
+
+    int sandbox_err = sandbox_init("mDNSResponder", sandbox_flags, &sandbox_msg);
+    if (sandbox_err)
     {
-        char *sandbox_msg;
-        uint64_t sandbox_flags = SANDBOX_NAMED;
-
-        (void)confstr(_CS_DARWIN_USER_CACHE_DIR, NULL, 0);
-
-        int sandbox_err = sandbox_init("mDNSResponder", sandbox_flags, &sandbox_msg);
-        if (sandbox_err)
-        {
-            LogMsg("WARNING: sandbox_init error %s", sandbox_msg);
-            // If we have errors in the sandbox during development, to prevent
-            // exiting, uncomment the following line.
-            //sandbox_free_error(sandbox_msg);
-            
-            errx(EX_OSERR, "sandbox_init() failed: %s", sandbox_msg);
-        }
-        else LogInfo("Now running under Apple Sandbox restrictions");
+        LogMsg("WARNING: sandbox_init error %s", sandbox_msg);
+        // If we have errors in the sandbox during development, to prevent
+        // exiting, uncomment the following line.
+        //sandbox_free_error(sandbox_msg);
+        
+        errx(EX_OSERR, "sandbox_init() failed: %s", sandbox_msg);
     }
-#endif // MDNS_NO_SANDBOX
+    else LogInfo("Now running under Apple Sandbox restrictions");
+#else
+    // For non-macOS OSes, mDNSResponder relies on the com.apple.private.sandbox.profile:embedded entry in its
+    // entitlements plist to cause mDNSResponder to be sandboxed as soon as it starts.
+    const int result = sandbox_check(getpid(), NULL, SANDBOX_FILTER_NONE);
+    switch (result)
+    {
+        case 1:
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                "mDNSResponder is sandboxed via com.apple.private.sandbox.profile:embedded entitlement");
+            break;
+
+        case 0:
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
+                "mDNSResponder is not sandboxed (check for com.apple.private.sandbox.profile:embedded entitlement)");
+            break;
+
+        case -1:
+        default:
+        {
+            const long error = (result == -1) ? errno : result;
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT,
+                "Couldn't determine if mDNSResponder is sandboxed because of sandbox_check() error: " PUB_OS_ERR, error);
+            break;
+        }
+    }
+#endif
 }
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
@@ -1476,6 +1542,7 @@ mDNSlocal void SandboxProcess(void)
     os_log_t mDNSLogCategory_ ## NAME ## _redacted  = NULL
 
 MDNS_OS_LOG_CATEGORY_DECLARE(Default);
+MDNS_OS_LOG_CATEGORY_DECLARE(State);
 MDNS_OS_LOG_CATEGORY_DECLARE(mDNS);
 MDNS_OS_LOG_CATEGORY_DECLARE(uDNS);
 MDNS_OS_LOG_CATEGORY_DECLARE(SPS);
@@ -1488,6 +1555,7 @@ MDNS_OS_LOG_CATEGORY_DECLARE(DNSSEC);
 mDNSlocal void init_logging(void)
 {
     MDNS_OS_LOG_CATEGORY_INIT(Default);
+    MDNS_OS_LOG_CATEGORY_INIT(State);
     MDNS_OS_LOG_CATEGORY_INIT(mDNS);
     MDNS_OS_LOG_CATEGORY_INIT(uDNS);
     MDNS_OS_LOG_CATEGORY_INIT(SPS);
@@ -1514,7 +1582,6 @@ mDNSexport int main(int argc, char **argv)
 
 #if DEBUG
     bool useDebugSocket = mDNSfalse;
-    bool useSandbox = mDNStrue;
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
@@ -1560,7 +1627,6 @@ mDNSexport int main(int argc, char **argv)
         if (!strcasecmp(argv[i], "-DisableAllowExpired"      )) EnableAllowExpired        = mDNSfalse;
 #if DEBUG
         if (!strcasecmp(argv[i], "-UseDebugSocket"))            useDebugSocket = mDNStrue;
-        if (!strcasecmp(argv[i], "-NoSandbox"))                 useSandbox = mDNSfalse;
 #endif    
     }
 
@@ -1587,15 +1653,18 @@ mDNSexport int main(int argc, char **argv)
 
 #ifndef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 
-    signal(SIGHUP,  HandleSIG);     // (Debugging) Purge the cache to check for cache handling bugs
-    signal(SIGINT,  HandleSIG);     // Ctrl-C: Detach from Mach BootstrapService and exit cleanly
-    signal(SIGPIPE,   SIG_IGN);     // Don't want SIGPIPE signals -- we'll handle EPIPE errors directly
-    signal(SIGTERM, HandleSIG);     // Machine shutting down: Detach from and exit cleanly like Ctrl-C
-    signal(SIGINFO, HandleSIG);     // (Debugging) Write state snapshot to syslog
-    signal(SIGUSR1, HandleSIG);     // (Debugging) Enable Logging
-    signal(SIGUSR2, HandleSIG);     // (Debugging) Enable Packet Logging
-    signal(SIGPROF, HandleSIG);     // (Debugging) Toggle Multicast Logging
-    signal(SIGTSTP, HandleSIG);     // (Debugging) Disable all Debug Logging (USR1/USR2/PROF)
+    signal(SIGHUP,   HandleSIG);     // (Debugging) Purge the cache to check for cache handling bugs
+    signal(SIGINT,   HandleSIG);     // Ctrl-C: Detach from Mach BootstrapService and exit cleanly
+    signal(SIGPIPE,    SIG_IGN);     // Don't want SIGPIPE signals -- we'll handle EPIPE errors directly
+    signal(SIGTERM,  HandleSIG);     // Machine shutting down: Detach from and exit cleanly like Ctrl-C
+    signal(SIGINFO,  HandleSIG);     // (Debugging) Write state snapshot to syslog
+    signal(SIGUSR1,  HandleSIG);     // (Debugging) Enable Logging
+    signal(SIGUSR2,  HandleSIG);     // (Debugging) Enable Packet Logging
+    signal(SIGPROF,  HandleSIG);     // (Debugging) Toggle Multicast Logging
+    signal(SIGTSTP,  HandleSIG);     // (Debugging) Disable all Debug Logging (USR1/USR2/PROF)
+#if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
+    signal(SIGWINCH, HandleSIG);     // (Debugging) Purge the unicast assist cache for performance testing
+#endif
 
 #endif // MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 
@@ -1639,9 +1708,6 @@ mDNSexport int main(int argc, char **argv)
 
 #endif // MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
 
-#if DEBUG
-    if (useSandbox)
-#endif
     SandboxProcess();
 
     status = mDNSDaemonInitialize();

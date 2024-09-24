@@ -1,6 +1,6 @@
 /* omr-publisher.c
  *
- * Copyright (c) 2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@
 #include "route.h"
 #include "dnssd-proxy.h"
 
+
 #define STATE_MACHINE_IMPLEMENTATION 1
 typedef enum {
     omr_publisher_state_invalid,
@@ -61,6 +62,7 @@ typedef enum {
 #include "thread-service.h"
 #include "omr-watcher.h"
 #include "omr-publisher.h"
+#include "route-tracker.h"
 
 typedef struct omr_publisher {
     int ref_count;
@@ -85,6 +87,7 @@ typedef struct omr_publisher {
     omr_prefix_priority_t omr_priority, force_priority;
     bool ula_prefix_published, dhcp_prefix_published;
     bool dhcp_wanted;
+    bool dhcp_blocked;
     bool first_time;
     bool force_publication;
 } omr_publisher_t;
@@ -123,7 +126,6 @@ static void omr_publisher_discontinue_dhcp(omr_publisher_t *publisher);
 static void omr_publisher_queue_prefix_update(omr_publisher_t *publisher, struct in6_addr *prefix_address,
                                               omr_prefix_priority_t priority, bool preferred,
                                               thread_service_publication_state_t initial_state);
-static void omr_publisher_unpublish_prefix(omr_publisher_t *publisher);
 
 static void
 omr_publisher_finalize(omr_publisher_t *publisher)
@@ -235,6 +237,7 @@ omr_publisher_cancel(omr_publisher_t *publisher)
         interface_release(publisher->dhcp_interface);
         publisher->dhcp_interface = NULL;
     }
+    state_machine_cancel(&publisher->state_header);
 }
 
 omr_publisher_t *
@@ -354,7 +357,9 @@ omr_publisher_send_dhcp_event(omr_publisher_t *publisher, struct in6_addr *prefi
 static void
 omr_publisher_initiate_dhcp(omr_publisher_t *publisher)
 {
-    publisher->dhcp_wanted = true;
+    if (!publisher->dhcp_blocked) {
+        publisher->dhcp_wanted = true;
+    }
     publisher->dhcp_client = (void *)-1;
 }
 
@@ -366,11 +371,10 @@ omr_publisher_interface_configuration_changed(omr_publisher_t *publisher)
         if (publisher->dhcp_interface->inactive || publisher->dhcp_interface->ineligible) {
             // If we have a DHCPv6 client running, we need to discontinue it.
             if (publisher->dhcp_client != NULL) {
-                DHCPv6PDServiceRef NULLABLE dhcp_client = publisher->dhcp_client;
-                publisher->dhcp_client = NULL;
-                CFRelease(dhcp_client); // Release the publisher reference
-                omr_publisher_send_dhcp_event(publisher, NULL, 0, 0);
+                omr_publisher_dhcp_client_deactivate(publisher, (intptr_t)publisher->dhcp_client);
             }
+            interface_release(publisher->dhcp_interface);
+            publisher->dhcp_interface = NULL;
         }
     }
     if (publisher->dhcp_wanted && publisher->dhcp_client == NULL) {
@@ -383,11 +387,7 @@ static void
 omr_publisher_discontinue_dhcp(omr_publisher_t *publisher)
 {
     INFO("discontinuing DHCP PD client");
-    if (publisher->dhcp_client != NULL) {
-        DHCPv6PDServiceRef NULLABLE dhcp_client = publisher->dhcp_client;
-        publisher->dhcp_client = NULL;
-        CFRelease(dhcp_client); // Release the publisher reference
-    }
+    omr_publisher_dhcp_client_deactivate(publisher, (intptr_t)publisher->dhcp_client);
     publisher->dhcp_wanted = false;
 }
 
@@ -459,6 +459,7 @@ omr_publisher_high_prefix_present(omr_publisher_t *publisher)
 {
     bool ret = omr_publisher_prefix_present(publisher, omr_prefix_priority_high);
     if (ret) {
+        INFO("setting publisher->omr_priority to high");
         publisher->omr_priority = omr_prefix_priority_high;
     }
     return ret;
@@ -469,6 +470,7 @@ omr_publisher_medium_prefix_present(omr_publisher_t *publisher)
 {
     bool ret = omr_publisher_prefix_present(publisher, omr_prefix_priority_medium);
     if (ret) {
+        INFO("setting publisher->omr_priority to medium");
         publisher->omr_priority = omr_prefix_priority_medium;
     }
     return ret;
@@ -509,6 +511,33 @@ static bool
 omr_publisher_low_prefix_wins(omr_publisher_t *publisher)
 {
     return omr_publisher_prefix_wins(publisher, omr_prefix_priority_low);
+}
+
+bool
+omr_publisher_publishing_dhcp(omr_publisher_t *publisher)
+{
+    if (publisher->state_header.state == omr_publisher_state_publishing_dhcp)
+    {
+        return true;
+    }
+    return false;
+}
+
+bool
+omr_publisher_publishing_ula(omr_publisher_t *publisher)
+{
+    if (publisher->state_header.state == omr_publisher_state_publishing_ula)
+    {
+        return true;
+    }
+    return false;
+}
+
+bool
+omr_publisher_publishing_prefix(omr_publisher_t *publisher)
+{
+    return omr_publisher_publishing_dhcp(publisher) ||
+           omr_publisher_publishing_ula(publisher);
 }
 
 static void omr_publisher_queue_run(omr_publisher_t *publisher);
@@ -570,6 +599,7 @@ omr_publisher_queue_run(omr_publisher_t *publisher)
         cti_status_t status = cti_remove_prefix(publisher->route_state->srp_server, publisher,
                                                 omr_publisher_prefix_update_callback, NULL, &prefix->prefix,
                                                 prefix->prefix_length);
+        SEGMENTED_IPv6_ADDR_GEN_SRP(prefix, prefix_buf);
         INFO("removing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
              SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length);
         if (status != kCTIStatus_NoError) {
@@ -580,6 +610,7 @@ omr_publisher_queue_run(omr_publisher_t *publisher)
             RETAIN_HERE(publisher, omr_publisher); // for the callback
         }
     } else if (prefix->publication_state == want_add) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(prefix, prefix_buf);
         INFO("adding prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
              SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length);
         cti_status_t status = cti_add_prefix(publisher->route_state->srp_server, publisher,
@@ -595,6 +626,7 @@ omr_publisher_queue_run(omr_publisher_t *publisher)
             RETAIN_HERE(publisher, omr_publisher); // for the callback
         }
     } else {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(prefix, prefix_buf);
         INFO("prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d is in unexpected state " PUB_S_SRP " on the publication queue",
              SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length,
              thread_service_publication_state_name_get(prefix->publication_state));
@@ -632,7 +664,8 @@ omr_publisher_queue_prefix_update(omr_publisher_t *publisher, struct in6_addr *p
     *ppref = prefix;
     // The prefix on the queue is retained by relying on the create/copy rule. When adding a prefix we also retain the
     // prefix as publisher->published_prefix, so that retain is always explicit and this retain is always implicit.
-    omr_prefix_retain(*ppref);
+    // omr_prefix_retain(*ppref);
+
     // If there is anything in the queue, the queue holds a reference to the publisher, so that it will continue to
     // run until it's complete.
     if (old_queue == NULL && publisher->publication_queue != NULL) {
@@ -645,11 +678,16 @@ static void
 omr_publisher_publish_prefix(omr_publisher_t *publisher,
                              struct in6_addr *prefix_address, omr_prefix_priority_t priority, bool preferred)
 {
+    SEGMENTED_IPv6_ADDR_GEN_SRP(prefix_address, prefix_buf);
+    INFO("publishing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/64",
+         SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix_address, prefix_buf));
     omr_publisher_queue_prefix_update(publisher, prefix_address, priority, preferred, want_add);
+    INFO("setting publisher->omr_priority to %d, " PUB_S_SRP "preferred", omr_prefix_priority_to_int(priority),
+         preferred ? "" : "not ");
     publisher->omr_priority = priority;
 }
 
-static void
+void
 omr_publisher_unpublish_prefix(omr_publisher_t *publisher)
 {
     omr_prefix_t *prefix;
@@ -660,6 +698,7 @@ omr_publisher_unpublish_prefix(omr_publisher_t *publisher)
         ERROR("request to unpublished prefix that's not present");
         return;
     }
+    SEGMENTED_IPv6_ADDR_GEN_SRP(prefix, prefix_buf);
     INFO("unpublishing prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
          SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length);
     omr_publisher_queue_prefix_update(publisher, &prefix->prefix, prefix->priority, false, want_delete);
@@ -713,7 +752,9 @@ omr_publisher_unpublish_ula_prefix(omr_publisher_t *publisher)
 bool
 omr_publisher_have_routable_prefix(omr_publisher_t *publisher)
 {
-    if (publisher->omr_priority == omr_prefix_priority_medium || publisher->omr_priority == omr_prefix_priority_high) {
+    if ((publisher->published_prefix != NULL && omr_watcher_prefix_is_non_ula_prefix(publisher->published_prefix)) ||
+        (publisher->omr_watcher != NULL && omr_watcher_non_ula_prefix_present(publisher->omr_watcher)))
+    {
         INFO("we have a routable prefix");
         return true;
     }
@@ -969,6 +1010,36 @@ omr_publisher_action_publishing_ula(state_machine_header_t *state_header, state_
         return omr_publisher_state_invalid;
     } else {
         BR_UNEXPECTED_EVENT(publisher, event);
+    }
+}
+
+void
+omr_publisher_check_prefix(omr_publisher_t *publisher, struct in6_addr *prefix, int UNUSED len)
+{
+    if (publisher == NULL) {
+        return;
+    }
+    if (publisher->published_prefix == NULL) {
+        return;
+    }
+    // Make sure that this prefix, which we are seeing advetised on infrastructure, is not published as the OMR prefix.
+    if (!in6prefix_compare(&publisher->published_prefix->prefix, prefix, 8)) {
+        if (!in6prefix_compare(&publisher->ula_prefix, prefix, 8)) {
+            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->s6_addr, prefix_buf);
+            FAULT("ULA prefix is being advertised on infrastructure: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                  SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->s6_addr, prefix_buf));
+        } else {
+            // If we get here it means that our DHCP prefix is bogus and we can't use it. So we're going to block DHCP, and treat this as
+            // a DHCP prefix loss.
+            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->s6_addr, prefix_buf);
+            ERROR("DHCP prefix is being advertised on infrastructure: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                  SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->s6_addr, prefix_buf));
+
+            publisher->dhcp_wanted = false;
+            publisher->dhcp_blocked = true;
+            omr_publisher_dhcp_client_deactivate(publisher, (intptr_t)publisher->dhcp_client);
+            omr_publisher_send_dhcp_event(publisher, NULL, 0, 0);
+        }
     }
 }
 

@@ -1,0 +1,4 @@
+alt_rosetta:1
+has_sec_transition:1
+add_env:SanitizersAllocationTraces=tagged
+binary_name:mDNSResponder

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ typedef struct
     void *                      resultContext;          // Context to pass to result handler.
     mDNSu32                     reqID;                  // Client request ID.
     int                         searchListIndex;        // Index that indicates the next search domain to try.
+    int                         searchListIndexLast;    // Value of searchListIndex prior to calling NextSearchDomain().
 #if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_DOTLOCAL)
     DNSQuestion *               q2;                     // DNSQuestion for unicast version of a record with a dot-local name.
     mDNSu16                     q2Type;                 // q2's original qtype value.
@@ -54,6 +55,7 @@ typedef struct
     mDNSBool                    useFailover;            // Use DNS service failover if applicable.
     mDNSBool                    failoverMode;           // Use DNS service failover immediately.
     mDNSBool                    prohibitEncryptedDNS;   // Prohibit use of encrypted DNS protocols.
+    mDNSBool                    overrideDNSService;     // True if resolver UUID overrides DNS service selection.
     mDNSu8                      resolverUUID[UUID_SIZE];// Resolver UUID to use with original QNAME.
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
@@ -78,7 +80,7 @@ typedef struct
     QueryRecordOp       op; // Query record operation object.
 
 }   QueryRecordClientRequest;
-mdns_compile_time_max_size_check(QueryRecordClientRequest, 792);
+mdns_compile_time_max_size_check(QueryRecordClientRequest, 816);
 
 typedef struct
 {
@@ -128,6 +130,7 @@ typedef struct
     mDNSBool                useFailover;
     mDNSBool                failoverMode;
     mDNSBool                prohibitEncryptedDNS;
+    mDNSBool                overrideDNSService;
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, AUDIT_TOKEN)
     mdns_audit_token_t      peerToken;
@@ -159,6 +162,9 @@ mDNSexport void QueryRecordClientRequestStop(QueryRecordClientRequest *inRequest
 mDNSexport const domainname * QueryRecordClientRequestGetQName(const QueryRecordClientRequest *inRequest);
 mDNSexport mDNSu16 QueryRecordClientRequestGetType(const QueryRecordClientRequest *inRequest);
 mDNSexport mDNSBool QueryRecordClientRequestIsMulticast(QueryRecordClientRequest *inRequest);
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+mDNSexport mDNSBool ClientRequestUsesAWDL(uint32_t ifindex, DNSServiceFlags flags);
+#endif
 
 #ifdef __cplusplus
 }

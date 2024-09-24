@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,13 @@
 #define __DNSCOMMON_H_
 
 #include "mDNSEmbeddedAPI.h"
+
+// For gettimeofday
+#if !defined(_WIN32)
+#include <sys/time.h>
+#else
+#include "PosixCompat.h"
+#endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
 #include "dnssec_mdns_core.h"
@@ -169,6 +176,28 @@ extern mDNSu32 mDNS_NonCryptoHashUpdateBytes(mDNSNonCryptoHash algorithm, mDNSu3
  */
 extern mDNSu32 mDNS_NonCryptoHash(mDNSNonCryptoHash algorithm, const mDNSu8 *bytes, mDNSu32 len);
 
+/*!
+ *    @brief
+ *      Computes the 32-bit FNV-1a (non-cryptographic) hash value for an domain name.
+ *
+ *    @param name
+ *      The domain name.
+ *
+ *    @result
+ *      The hash value.
+ *
+ *    @discussion
+ *      Since domain name is case-insensitive, to make sure that hash values still match when the case changes,
+ *      the hash value is calculated with the normalized domain name by treating uppercase ASCII letters to their
+ *      lowercase counterparts.
+ *
+ *      For more information about FNV Non-Cryptographic Hash ,
+ *      see <https://datatracker.ietf.org/doc/html/draft-eastlake-fnv-21>.
+ */
+extern mDNSu32 mDNS_DomainNameFNV1aHash(const domainname *name);
+
+extern mDNSs32 mDNSGetTimeOfDay(struct timeval *tv, struct timezone *tz);
+
 // ***************************************************************************
 // MARK: - Domain Name Utility Functions
 
@@ -179,6 +208,29 @@ extern mDNSu32 mDNS_NonCryptoHash(mDNSNonCryptoHash algorithm, const mDNSu8 *byt
 #define mDNSIsLowerCase(X)  ((X) >= 'a' && (X) <= 'z')
 #define mDNSIsLetter(X)     (mDNSIsUpperCase(X) || mDNSIsLowerCase(X))
 #define mDNSIsPrintASCII(X) (((X) >= 32) && ((X) <= 126))
+
+/*!
+ *  @brief
+ *      Convert ASCII uppercase character to its lowercase counterparts.
+ *
+ *  @param c
+ *      The ASCII character.
+ *
+ *  @result
+ *      The lowercase value of the character, if the original one is uppercase, otherwise, the original value.
+ */
+static inline int
+mDNSASCIITolower(const int c)
+{
+    if (mDNSIsUpperCase(c))
+    {
+        return (c + ('a' - 'A'));
+    }
+    else
+    {
+        return c;
+    }
+}
 
 /*!
  *  @brief
@@ -314,6 +366,35 @@ extern mDNSu16 GetRDLength(const ResourceRecord *const rr, mDNSBool estimate);
 extern mDNSBool ValidateRData(const mDNSu16 rrtype, const mDNSu16 rdlength, const RData *const rd);
 extern mStatus DNSNameToLowerCase(domainname *d, domainname *result);
 
+/*!
+ *  @brief
+ *      Gets a pointer to a resource record's record data in wire format.
+ *
+ *  @param rr
+ *      The resource record object.
+ *
+ *  @param bytesBuffer
+ *      The buffer to be used as a temporary space to hold a resource record's record data in wire format if no
+ *      existing wire-format rdata is available.
+ *
+ *  @param bufferSize
+ *      The size of the buffer.
+ *
+ *  @param outRDataLen
+ *      If non-NULL, the address of a variable to set to the length of the resource record's record data in
+ *      wire format.
+ *
+ *  @param outError
+ *      If non-NULL, the address of a variable to set to either a non-zero error code if this function fails, or
+ *      `mStatus_NoError` if this function succeeds.
+ *
+ *  @result
+ *      The pointer to the resource record's record data in wire format if no error occurs. Otherwise mDNSNULL
+ *      and `outError` is set to a non-zero error code.
+ */
+extern const mDNSu8 * ResourceRecordGetRDataBytesPointer(const ResourceRecord *rr, mDNSu8 *bytesBuffer,
+    mDNSu16 bufferSize, mDNSu16 *outRDataLen, mStatus *outError);
+
 #define GetRRDomainNameTarget(RR) (                                                                          \
         ((RR)->rrtype == kDNSType_NS || (RR)->rrtype == kDNSType_CNAME || (RR)->rrtype == kDNSType_PTR || (RR)->rrtype == kDNSType_DNAME) ? &(RR)->rdata->u.name        : \
         ((RR)->rrtype == kDNSType_MX || (RR)->rrtype == kDNSType_AFSDB || (RR)->rrtype == kDNSType_RT  || (RR)->rrtype == kDNSType_KX   ) ? &(RR)->rdata->u.mx.exchange : \
@@ -345,10 +426,24 @@ extern mDNSu8 *PutResourceRecordTTLWithLimit(DNSMessage *const msg, mDNSu8 *ptr,
 
 #define PutResourceRecord(MSG, P, C, RR) PutResourceRecordTTL((MSG), (P), (C), (RR), (RR)->rroriginalttl)
 
+// Calculate TSR only OPT space
+// Assume local variable 'tsrOptsCount'
+#define TSR_OPT_SPACE           (tsrOptsCount * DNSOpt_TSRData_Space)
+#define TSR_OPT_HEADER_SPACE    (tsrOptsCount ? DNSOpt_Header_Space : 0)
+#define TSR_OPT_TOTAL_SPACE     (TSR_OPT_SPACE + TSR_OPT_HEADER_SPACE)
+
+#define PutResourceRecordTSR(msg, ptr, count, rr) \
+    PutResourceRecordTTLWithLimit((msg), (ptr), (count), (rr), (rr)->rroriginalttl, (msg)->data + AllowedRRSpace(msg) - TSR_OPT_TOTAL_SPACE)
+
+// Calculate OPT space
+// Assume local variables 'OwnerRecordSpace', 'TraceRecordSpace' & 'tsrOptsCount'
+#define RR_OPT_SPACE    \
+    (OwnerRecordSpace + TraceRecordSpace + TSR_OPT_SPACE +     \
+    ((OwnerRecordSpace || TraceRecordSpace) ? 0 : TSR_OPT_HEADER_SPACE))
+
 // The PutRR_OS variants assume a local variable 'm', put build the packet at m->omsg,
-// and assume local variables 'OwnerRecordSpace' & 'TraceRecordSpace' indicating how many bytes (if any) to reserve to add an OWNER/TRACER option at the end
 #define PutRR_OS_TTL(ptr, count, rr, ttl) \
-    PutResourceRecordTTLWithLimit(&m->omsg, (ptr), (count), (rr), (ttl), m->omsg.data + AllowedRRSpace(&m->omsg) - OwnerRecordSpace - TraceRecordSpace)
+    PutResourceRecordTTLWithLimit(&m->omsg, (ptr), (count), (rr), (ttl), m->omsg.data + AllowedRRSpace(&m->omsg) - RR_OPT_SPACE)
 
 #define PutRR_OS(P, C, RR) PutRR_OS_TTL((P), (C), (RR), (RR)->rroriginalttl)
 
@@ -415,6 +510,12 @@ extern mDNSBool DNSQuestionNeedsSensitiveLogging(const DNSQuestion *q);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, RUNTIME_MDNS_METRICS)
 extern mDNSBool DNSQuestionCollectsMDNSMetric(const DNSQuestion *q);
+#endif
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+extern mDNSBool DNSQuestionIsEligibleForMDNSAlternativeService(const DNSQuestion *q);
+extern mDNSBool DNSQuestionRequestsMDNSAlternativeService(const DNSQuestion *q);
+extern mDNSBool DNSQuestionUsesMDNSAlternativeService(const DNSQuestion *q);
 #endif
 
 // ***************************************************************************

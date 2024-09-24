@@ -1,6 +1,6 @@
 /* macos-ioloop.c
  *
- * Copyright (c) 2018-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@
 #include <ifaddrs.h>
 #include <dns_sd.h>
 
+#include <CoreUtils/SystemUtils.h>  // For `IsAppleTV()`.
 #include <dispatch/dispatch.h>
 
 #include "srp.h"
@@ -44,14 +45,19 @@
 #include "ioloop.h"
 #include "tls-macos.h"
 #include "tls-keychain.h"
+#include "srp-dnssd.h"
+#include "ifpermit.h"
 
 dispatch_queue_t ioloop_main_queue;
+static int cur_connection_serial;
 
 // Forward references
 static void ioloop_tcp_input_start(comm_t *NONNULL connection);
 static void listener_finalize(comm_t *listener);
 static bool connection_write_now(comm_t *NONNULL connection);
-static void ioloop_read_cancel(void *context);
+static bool ioloop_listener_connection_ready(comm_t *connection);
+
+#define DSCP_CS5 0x28
 
 int
 getipaddr(addr_t *addr, const char *p)
@@ -227,15 +233,18 @@ ioloop(void)
     return 0;
 }
 
-#define connection_cancel(conn) connection_cancel_(conn, __FILE__, __LINE__)
+#define connection_cancel(comm, conn) connection_cancel_(comm, conn, __FILE__, __LINE__)
 static void
-connection_cancel_(nw_connection_t connection, const char *file, int line)
+connection_cancel_(comm_t *comm, nw_connection_t connection, const char *file, int line)
 {
     if (connection == NULL) {
         INFO("null connection at " PUB_S_SRP ":%d", file, line);
     } else {
-        INFO("%p: " PUB_S_SRP ":%d", connection, file, line);
-        nw_connection_cancel(connection);
+        INFO("%p: " PUB_S_SRP " " PUB_S_SRP ":%d" , connection, comm->canceled ? " (already canceled)" : "", file, line);
+        if (!comm->canceled) {
+            nw_connection_cancel(connection);
+            comm->canceled = true;
+        }
     }
 }
 
@@ -314,7 +323,7 @@ ioloop_comm_cancel(comm_t *connection)
 {
     if (connection->connection != NULL) {
         INFO("%p %p", connection, connection->connection);
-        connection_cancel(connection->connection);
+        connection_cancel(connection, connection->connection);
 #if UDP_LISTENER_USES_CONNECTION_GROUPS
     } else if (connection->connection_group != NULL) {
         INFO("%p %p", connection, connection->connection_group);
@@ -325,13 +334,11 @@ ioloop_comm_cancel(comm_t *connection)
         int fd = connection->io.fd;
         if (fd != -1) {
             ioloop_close(&connection->io);
-            close(fd);
-            ioloop_read_cancel(&connection->io);
             if (connection->cancel != NULL) {
                 RETAIN_HERE(connection, listener);
                 dispatch_async(ioloop_main_queue, ^{
                         if (connection->cancel != NULL) {
-                            connection->cancel(connection->context);
+                            connection->cancel(connection, connection->context);
                         }
                         RELEASE_HERE(connection, listener);
                     });
@@ -393,6 +400,12 @@ ioloop_send_message_inner(comm_t *connection, message_t *responding_to,
     dispatch_data_t data = NULL, new_data, combined;
     int i;
     uint16_t len = 0;
+
+#ifdef SRP_TEST_SERVER
+    if (connection->test_send_intercept != NULL) {
+        return connection->test_send_intercept(connection, responding_to, iov, iov_len, final, send_length);
+    }
+#endif
 
     // Not needed on OSX because UDP conversations are treated as "connections."
 #if UDP_LISTENER_USES_CONNECTION_GROUPS
@@ -548,7 +561,7 @@ connection_write_now(comm_t *connection)
                                if (error != NULL) {
                                    ERROR("ioloop_send_message: write failed: " PUB_S_SRP,
                                          strerror(nw_error_get_error_code(error)));
-                                   connection_cancel(connection->connection);
+                                   connection_cancel(connection, connection->connection);
                                }
                                if (connection->writes_pending > 0) {
                                    connection->writes_pending--;
@@ -571,18 +584,18 @@ datagram_read(comm_t *connection, size_t length, dispatch_data_t content, nw_err
     bool ret = true, *retp = &ret;
 
     if (error != NULL) {
-        ERROR("datagram_read: " PUB_S_SRP, strerror(nw_error_get_error_code(error)));
+        ERROR(PUB_S_SRP, strerror(nw_error_get_error_code(error)));
         ret = false;
         goto out;
     }
     if (length > UINT16_MAX) {
-        ERROR("datagram_read: oversized datagram length %zd", length);
+        ERROR("oversized datagram length %zd", length);
         ret = false;
         goto out;
     }
     message = ioloop_message_create(length);
     if (message == NULL) {
-        ERROR("datagram_read: unable to allocate message.");
+        ERROR("unable to allocate message.");
         ret = false;
         goto out;
     }
@@ -590,7 +603,7 @@ datagram_read(comm_t *connection, size_t length, dispatch_data_t content, nw_err
     dispatch_data_apply(content,
                         ^bool (dispatch_data_t __unused region, size_t offset, const void *buffer, size_t size) {
             if (message->length < offset + size) {
-                ERROR("datagram_read: data region %zd:%zd is out of range for message length %d",
+                ERROR("data region %zd:%zd is out of range for message length %d",
                       offset, size, message->length);
                 *retp = false;
                 return false;
@@ -599,6 +612,37 @@ datagram_read(comm_t *connection, size_t length, dispatch_data_t content, nw_err
             return true;
         });
     if (ret == true) {
+        // Set the local address
+        message->local = connection->local;
+
+#ifdef HEXDUMP_INCOMING_DATAGRAMS
+        uint16_t length = message->length > 8192 ? 8192 : message->length; // Don't dump really big messages
+        for (uint16_t i = 0; i < length; i += 32) {
+            char obuf[256];
+            char *obp = obuf;
+            int left = sizeof(obp) - 1;
+            uint16_t max = message->length - i;
+            if (max > 32) {
+                max = 32;
+            }
+            for (uint16_t j = 0; j < max && left > 0; j += 8) {
+                uint16_t submax = max - j;
+                if (submax > 8) {
+                    submax = 8;
+                }
+                for (uint16_t k = 0; k < submax; k++) {
+                    snprintf(obp, left, "%02x", ((uint8_t *)&message->wire)[i + j + k]);
+                    obp += 2;
+                    *obp++ = ' ';
+                    left -= 3;
+                }
+                *obp++ = ' ';
+                left--;
+            }
+            *obp = 0;
+            INFO("%03d " PUB_S_SRP, i, obuf);
+        }
+#endif
         // Process the message.
         if (connection->listener_state != NULL) {
             connection->listener_state->datagram_callback(connection, message, connection->listener_state->context);
@@ -612,7 +656,7 @@ datagram_read(comm_t *connection, size_t length, dispatch_data_t content, nw_err
         ioloop_message_release(message);
     }
     if (!ret && connection->connection != NULL) {
-        connection_cancel(connection->connection);
+        connection_cancel(connection, connection->connection);
     }
     return ret;
 }
@@ -660,7 +704,7 @@ check_fail(comm_t *connection, size_t length, dispatch_data_t content, nw_error_
     }
     if (fail) {
         if (connection->connection != NULL) {
-            connection_cancel(connection->connection);
+            connection_cancel(connection, connection->connection);
         }
     }
     return fail;
@@ -693,7 +737,7 @@ tcp_read_length(comm_t *connection, dispatch_data_t content, nw_error_t error)
     map = dispatch_data_create_map(content, (const void **)&lenbuf, &length);
     if (map == NULL) {
         ERROR("tcp_read_length: map create failed");
-        connection_cancel(connection->connection);
+        connection_cancel(connection, connection->connection);
         return;
     }
     dispatch_release(map);
@@ -727,13 +771,13 @@ ioloop_connection_input_badness_check(comm_t *connection, dispatch_data_t conten
     // For TCP connections, is_complete means the other end closed the connection.
     if (connection->tcp_stream && is_complete) {
         INFO("remote end closed connection.");
-        connection_cancel(connection->connection);
+        connection_cancel(connection, connection->connection);
         return true;
     }
 
     if (content == NULL) {
         INFO("remote end closed connection.");
-        connection_cancel(connection->connection);
+        connection_cancel(connection, connection->connection);
         return true;
     }
     return false;
@@ -774,14 +818,20 @@ ioloop_udp_input_start(comm_t *connection)
 }
 
 static void
-connection_state_changed(comm_t *connection, nw_connection_state_t state, nw_error_t error)
+ioloop_connection_state_changed(comm_t *connection, nw_connection_state_t state, nw_error_t error)
 {
     char errbuf[512];
     connection_error_to_string(error, errbuf, sizeof(errbuf));
 
     if (state == nw_connection_state_ready) {
-        INFO(PRI_S_SRP " state is ready; error = " PUB_S_SRP,
-             connection->name != NULL ? connection->name : "<no name>", errbuf);
+        if (connection->server) {
+            if (!ioloop_listener_connection_ready(connection)) {
+                ioloop_comm_cancel(connection);
+                return;
+            }
+        }
+        INFO(PRI_S_SRP " (%p %p) state is ready; error = " PUB_S_SRP,
+             connection->name != NULL ? connection->name : "<no name>", connection, connection->connection, errbuf);
         // Set up a reader.
         if (connection->tcp_stream) {
             ioloop_tcp_input_start(connection);
@@ -799,13 +849,13 @@ connection_state_changed(comm_t *connection, nw_connection_state_t state, nw_err
     } else if (state == nw_connection_state_failed || state == nw_connection_state_waiting) {
         // Waiting is equivalent to failed because we are not giving libnetcore enough information to
         // actually succeed when there is a problem connecting (e.g. "EHOSTUNREACH").
-        INFO(PRI_S_SRP " state is " PUB_S_SRP "; error = " PUB_S_SRP,
-             state == nw_connection_state_failed ? "failed" : "waiting",
-             connection->name != NULL ? connection->name : "<no name>", errbuf);
-        connection_cancel(connection->connection);
+        INFO(PRI_S_SRP " (%p %p) state is " PUB_S_SRP "; error = " PUB_S_SRP,
+             connection->name != NULL ? connection->name : "<no name>", connection, connection->connection,
+             state == nw_connection_state_failed ? "failed" : "waiting", errbuf);
+        connection_cancel(connection, connection->connection);
     } else if (state == nw_connection_state_cancelled) {
-        INFO(PRI_S_SRP " state is canceled; error = " PUB_S_SRP,
-             connection->name != NULL ? connection->name : "<no name>", errbuf);
+        INFO(PRI_S_SRP " (%p %p) state is canceled; error = " PUB_S_SRP,
+             connection->name != NULL ? connection->name : "<no name>", connection, connection->connection, errbuf);
         if (connection->disconnected != NULL) {
             connection->disconnected(connection, connection->context, 0);
         }
@@ -814,15 +864,39 @@ connection_state_changed(comm_t *connection, nw_connection_state_t state, nw_err
     } else {
         if (error != NULL) {
             // We can get here if e.g. the TLS handshake fails.
-            nw_connection_cancel(connection->connection);
+            connection_cancel(connection, connection->connection);
         }
-        INFO(PRI_S_SRP " state is %d; error = " PUB_S_SRP,
-             connection->name != NULL ? connection->name : "<no name>", state, errbuf);
+        INFO(PRI_S_SRP " (%p %p) state is %d; error = " PUB_S_SRP,
+             connection->name != NULL ? connection->name : "<no name>", connection, connection->connection, state, errbuf);
     }
 }
 
 static void
-ioloop_connection_set_name_from_endpoint(comm_t *listener, comm_t *connection, nw_endpoint_t endpoint)
+ioloop_connection_get_address_from_endpoint(addr_t *addr, nw_endpoint_t endpoint)
+{
+    nw_endpoint_type_t endpoint_type = nw_endpoint_get_type(endpoint);
+    if (endpoint_type == nw_endpoint_type_address) {
+        char *address_string = nw_endpoint_copy_address_string(endpoint);
+        if (address_string == NULL) {
+            ERROR("unable to get description of new connection.");
+        } else {
+            getipaddr(addr, address_string);
+            if (addr->sa.sa_family == AF_INET6) {
+                SEGMENTED_IPv6_ADDR_GEN_SRP(&addr->sin6.sin6_addr, rdata_buf);
+                INFO("parsed connection local IPv6 address is: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                     SEGMENTED_IPv6_ADDR_PARAM_SRP(&addr->sin6.sin6_addr, rdata_buf));
+            } else {
+                IPv4_ADDR_GEN_SRP(&addr->sin.sin_addr, rdata_buf);
+                INFO("parsed connection local IPv4 address is: " PRI_IPv4_ADDR_SRP,
+                     IPv4_ADDR_PARAM_SRP(&addr->sin.sin_addr, rdata_buf));
+            }
+        }
+        free(address_string);
+    }
+}
+
+static void
+ioloop_connection_set_name_from_endpoint(comm_t *connection, nw_endpoint_t endpoint)
 {
     nw_endpoint_type_t endpoint_type = nw_endpoint_get_type(endpoint);
     if (endpoint_type == nw_endpoint_type_address) {
@@ -831,23 +905,33 @@ ioloop_connection_set_name_from_endpoint(comm_t *listener, comm_t *connection, n
         if (port_string == NULL || address_string == NULL) {
             ERROR("Unable to get description of new connection.");
         } else {
-            asprintf(&connection->name, "%s connection from %s/%s", listener->name, address_string, port_string);
+            const char *listener_name = connection->name == NULL ? "bogus" : connection->name;
+            char *free_name = connection->name;
+            connection->name = NULL;
+            asprintf(&connection->name, "%s connection from %s/%s", listener_name, address_string, port_string);
+            if (free_name != NULL) {
+                free(free_name);
+                free_name = NULL;
+                listener_name = NULL;
+            }
             getipaddr(&connection->address, address_string);
             if (connection->address.sa.sa_family == AF_INET6) {
                 SEGMENTED_IPv6_ADDR_GEN_SRP(&connection->address.sin6.sin6_addr, rdata_buf);
-                INFO("parsed connection IPv6 address is: " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                INFO("parsed connection remote IPv6 address is: " PRI_SEGMENTED_IPv6_ADDR_SRP,
                      SEGMENTED_IPv6_ADDR_PARAM_SRP(&connection->address.sin6.sin6_addr, rdata_buf));
             } else {
                 IPv4_ADDR_GEN_SRP(&connection->address.sin.sin_addr, rdata_buf);
-                INFO("parsed connection IPv4 address is: " PRI_IPv4_ADDR_SRP,
+                INFO("parsed connection remote IPv4 address is: " PRI_IPv4_ADDR_SRP,
                      IPv4_ADDR_PARAM_SRP(&connection->address.sin.sin_addr, rdata_buf));
             }
         }
         free(port_string);
         free(address_string);
     } else {
-        ERROR("incoming connection of unexpected type %d", endpoint_type);
-        connection->name = nw_connection_copy_description(connection->connection);
+        if (connection->name == NULL) {
+            connection->name = nw_connection_copy_description(connection->connection);
+        }
+        ERROR("incoming connection " PRI_S_SRP " is of unexpected type %d", connection->name, endpoint_type);
     }
 }
 
@@ -863,6 +947,7 @@ ioloop_udp_receive(comm_t *listener, dispatch_data_t content, nw_content_context
             ERROR("%p: " PRI_S_SRP ": no memory for response state.", listener, listener->name);
             return;
         }
+        response_state->serial = ++cur_connection_serial;
         RETAIN_HERE(response_state, comm);
         response_state->listener_state = listener;
         RETAIN_HERE(response_state->listener_state, listener);
@@ -879,23 +964,14 @@ ioloop_udp_receive(comm_t *listener, dispatch_data_t content, nw_content_context
 #else
 #endif
 
-static void
-connection_callback(comm_t *listener, nw_connection_t new_connection)
-{
-    comm_t *connection = calloc(1, sizeof *connection);
-    if (connection == NULL) {
-        ERROR("Unable to receive connection: no memory.");
-        nw_connection_cancel(new_connection);
-        return;
-    }
 
-    connection->connection = new_connection;
-    nw_retain(connection->connection);
-    nw_connection_created++;
+static bool
+ioloop_listener_connection_ready(comm_t *connection)
+{
 
     nw_endpoint_t endpoint = nw_connection_copy_endpoint(connection->connection);
     if (endpoint != NULL) {
-        ioloop_connection_set_name_from_endpoint(listener, connection, endpoint);
+        ioloop_connection_set_name_from_endpoint(connection, endpoint);
         nw_release(endpoint);
     }
     if (connection->name != NULL) {
@@ -905,19 +981,48 @@ connection_callback(comm_t *listener, nw_connection_t new_connection)
         connection->name = strdup("unidentified");
     }
 
+    // Best effort
+    nw_endpoint_t local_endpoint = nw_connection_copy_connected_local_endpoint(connection->connection);
+    if (local_endpoint != NULL) {
+        ioloop_connection_get_address_from_endpoint(&connection->local, endpoint);
+        nw_release(local_endpoint);
+    }
+
+    if (connection->connected != NULL) {
+        connection->connected(connection, connection->context);
+    }
+    return true;
+}
+
+static void
+ioloop_listener_connection_callback(comm_t *listener, nw_connection_t new_connection)
+{
+    nw_connection_set_queue(new_connection, ioloop_main_queue);
+    nw_connection_start(new_connection);
+
+    comm_t *connection = calloc(1, sizeof *connection);
+    if (connection == NULL) {
+        ERROR("Unable to receive connection: no memory.");
+        nw_connection_cancel(new_connection);
+        return;
+    }
+    connection->serial = ++cur_connection_serial;
+
+    connection->connection = new_connection;
+    nw_retain(connection->connection);
+    nw_connection_created++;
+
+    connection->name = strdup(listener->name);
     connection->datagram_callback = listener->datagram_callback;
     connection->tcp_stream = listener->tcp_stream;
     connection->server = true;
     connection->context = listener->context;
+    connection->connected = listener->connected;
     RETAIN_HERE(connection, comm); // The connection state changed handler has a reference to the connection.
     nw_connection_set_state_changed_handler(connection->connection,
                                             ^(nw_connection_state_t state, nw_error_t error)
-                                            { connection_state_changed(connection, state, error); });
-    nw_connection_set_queue(connection->connection, ioloop_main_queue);
-    nw_connection_start(connection->connection);
-    if (listener->connected != NULL) {
-        listener->connected(connection, listener->context);
-    }
+                                            { ioloop_connection_state_changed(connection, state, error); });
+    INFO("started " PRI_S_SRP, connection->name);
 }
 
 static void
@@ -970,15 +1075,36 @@ static void ioloop_listener_context_release(void *context)
 void
 ioloop_listener_cancel(comm_t *connection)
 {
+    // Only need to do it once.
+    if (connection->canceled) {
+        FAULT("cancel on canceled connection " PRI_S_SRP, connection->name);
+        return;
+    }
+    connection->canceled = true;
     if (connection->listener != NULL) {
         nw_listener_cancel(connection->listener);
         // connection->listener will be released in ioloop_listener_state_changed_handler: nw_listener_state_cancelled.
     }
 #if UDP_LISTENER_USES_CONNECTION_GROUPS
-    if (!connection->stream && connection->io.fd != -1) {
-        ioloop_close(&connection->io);
-        io->refcnt = 100; // Prevent read_cancel from finalizing the io object
-        ioloop_read_cancel(&connection->io);
+    if (connection->connection_group != NULL) {
+        INFO("%p %p", connection, connection->connection_group);
+        nw_connection_group_cancel(connection->connection_group);
+    }
+#else
+    if (!connection->tcp_stream && connection->connection == NULL) {
+        int fd = connection->io.fd;
+        if (fd != -1) {
+            ioloop_close(&connection->io);
+            if (connection->cancel != NULL) {
+                RETAIN_HERE(connection, listener);
+                dispatch_async(ioloop_main_queue, ^{
+                        if (connection->cancel != NULL) {
+                            connection->cancel(connection, connection->context);
+                        }
+                        RELEASE_HERE(connection, listener);
+                    });
+            }
+        }
     }
 #endif
 }
@@ -1023,6 +1149,12 @@ ioloop_udp_listener_state_changed_handler(comm_t *listener, nw_connection_group_
             INFO("failed");
             nw_connection_group_cancel(listener->connection_group);
         } else if (state == nw_connection_group_state_ready) {
+            // It's possible that we might schedule the ready event but then before we return to the run loop
+            // the listener gets canceled, in which case we don't want to deliver the ready event.
+            if (listener->canceled) {
+                INFO("ready but canceled");
+                return;
+            }
             INFO("ready");
             if (listener->avoiding) {
                 listener->listen_port = nw_connection_group_get_port(listener->connection_group);
@@ -1060,7 +1192,7 @@ ioloop_udp_listener_state_changed_handler(comm_t *listener, nw_connection_group_
                 ;
             cancel:
                 if (listener->cancel) {
-                    listener->cancel(listener->context);
+                    listener->cancel(listener, listener->context);
                 }
                 RELEASE_HERE(listener, listener);
             }
@@ -1084,6 +1216,8 @@ ioloop_listener_state_changed_handler(comm_t *listener, nw_listener_state_t stat
     }
 #endif // DEBUG_VERBOSE
 
+    INFO("%p %p " PUB_S_SRP " %d", listener, listener->listener, listener->name, state);
+
     // Should never happen.
     if (listener->listener == NULL && state != nw_listener_state_cancelled) {
         return;
@@ -1105,11 +1239,20 @@ ioloop_listener_state_changed_handler(comm_t *listener, nw_listener_state_t stat
             nw_listener_cancel(listener->listener);
         } else if (state == nw_listener_state_ready) {
             INFO("ready");
+            if (listener->ready != NULL) {
+                listener->ready(listener->context, listener->listen_port);
+            }
         } else if (state == nw_listener_state_cancelled) {
             INFO("cancelled");
             nw_release(listener->listener);
             nw_listener_finalized++;
             listener->listener = NULL;
+            if (listener->cancel != NULL) {
+                listener->cancel(listener, listener->context);
+            }
+            RELEASE_HERE(listener, listener); // Release the nw_listener handler function's reference to the ioloop listener object.
+        } else {
+            INFO("something else");
         }
     }
 }
@@ -1140,34 +1283,14 @@ ioloop_udp_listener_setup(comm_t *listener)
 }
 #else
 static comm_t *
-ioloop_udp_listener_setup(comm_t *listener, const addr_t *ip_address, uint16_t port)
+ioloop_udp_listener_setup(comm_t *listener, const addr_t *ip_address, uint16_t port, const char *launchd_name, int ifindex)
 {
     sa_family_t family = (ip_address != NULL) ? ip_address->sa.sa_family : AF_UNSPEC;
     sa_family_t real_family = family == AF_UNSPEC ? AF_INET6 : family;
     int true_flag = 1;
     addr_t sockname;
-
-    listener->io.fd = socket(real_family, SOCK_DGRAM, IPPROTO_UDP);
-    if (listener->io.fd < 0) {
-        ERROR("Can't get socket: %s", strerror(errno));
-        goto out;
-    }
-    int rv = setsockopt(listener->io.fd, SOL_SOCKET, SO_REUSEADDR, &true_flag, sizeof true_flag);
-    if (rv < 0) {
-        ERROR("SO_REUSEADDR failed: %s", strerror(errno));
-        goto out;
-    }
-
-    rv = setsockopt(listener->io.fd, SOL_SOCKET, SO_REUSEPORT, &true_flag, sizeof true_flag);
-    if (rv < 0) {
-        ERROR("SO_REUSEPORT failed: %s", strerror(errno));
-        goto out;
-    }
-
-    if (fcntl(listener->io.fd, F_SETFL, O_NONBLOCK) < 0) {
-        ERROR("%s: Can't set O_NONBLOCK: %s", listener->name, strerror(errno));
-        goto out;
-    }
+    socklen_t sl;
+    int rv;
 
     listener->address.sa.sa_family = real_family;
     listener->address.sa.sa_len = (real_family == AF_INET
@@ -1179,53 +1302,128 @@ ioloop_udp_listener_setup(comm_t *listener, const addr_t *ip_address, uint16_t p
         listener->address.sin.sin_port = htons(port);
     }
 
-    // skipping multicast support for now
-
-    if (family == AF_INET6) {
-        // Don't use a dual-stack socket.
-        rv = setsockopt(listener->io.fd, IPPROTO_IPV6, IPV6_V6ONLY, &true_flag, sizeof true_flag);
-        if (rv < 0) {
-            SEGMENTED_IPv6_ADDR_GEN_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
-            ERROR("Unable to set IPv6-only flag on UDP socket for " PRI_SEGMENTED_IPv6_ADDR_SRP,
-                  SEGMENTED_IPv6_ADDR_PARAM_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf));
-            goto out;
-        }
-        SEGMENTED_IPv6_ADDR_GEN_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
-        ERROR("Successfully set IPv6-only flag on UDP socket for " PRI_SEGMENTED_IPv6_ADDR_SRP,
-              SEGMENTED_IPv6_ADDR_PARAM_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf));
-    }
-
-    socklen_t sl = listener->address.sa.sa_len;
-    if (bind(listener->io.fd, &listener->address.sa, sl) < 0) {
-        if (family == AF_INET) {
-            IPv4_ADDR_GEN_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf);
-            ERROR("Can't bind to " PRI_IPv4_ADDR_SRP "#%d: %s",
-                  IPv4_ADDR_PARAM_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf), ntohs(port),
-                  strerror(errno));
+    listener->io.fd = -1;
+#ifndef SRP_TEST_SERVER
+    if (launchd_name != NULL) {
+        int *fds;
+        size_t cnt;
+        int ret = launch_activate_socket(launchd_name, &fds, &cnt);
+        if (ret != 0) {
+            FAULT("launchd_activate_socket failed for " PUB_S_SRP ": " PUB_S_SRP, launchd_name, strerror(ret));
+            listener->io.fd = -1;
+        } else if (cnt == 0) {
+            FAULT("too few sockets returned from launchd_active_socket for " PUB_S_SRP" : %zd", launchd_name, cnt);
+            listener->io.fd = -1;
+        } else if (cnt != 1) {
+            FAULT("too many sockets returned from launchd_active_socket for " PUB_S_SRP" : %zd", launchd_name, cnt);
+            for (size_t i = 0; i < cnt; i++) {
+                close(fds[i]);
+            }
+            free(fds);
         } else {
-            SEGMENTED_IPv6_ADDR_GEN_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
-            ERROR("Can't bind to " PRI_SEGMENTED_IPv6_ADDR_SRP "#%d: %s",
-                  SEGMENTED_IPv6_ADDR_PARAM_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf), ntohs(port),
-                  strerror(errno));
+            listener->io.fd = fds[0];
+            free(fds);
         }
-    out:
-        close(listener->io.fd);
-        listener->io.fd = -1;
-        RELEASE_HERE(listener, listener);
-        return NULL;
     }
-
-    // We may have bound to an unspecified port, so fetch the port we got.
-    if (port == 0 && family != AF_LOCAL) {
-        if (getsockname(listener->io.fd, (struct sockaddr *)&sockname, &sl) < 0) {
-            ERROR("ioloop_listener_create: getsockname: %s", strerror(errno));
+#endif
+    if (listener->io.fd == -1) {
+        listener->io.fd = socket(real_family, SOCK_DGRAM, IPPROTO_UDP);
+        if (listener->io.fd < 0) {
+            ERROR("Can't get socket: %s", strerror(errno));
             goto out;
         }
-        port = ntohs(real_family == AF_INET6 ? sockname.sin6.sin6_port : sockname.sin.sin_port);
-        INFO("port is %d", port);
-    }
-    listener->listen_port = port;
+        rv = setsockopt(listener->io.fd, SOL_SOCKET, SO_REUSEADDR, &true_flag, sizeof true_flag);
+        if (rv < 0) {
+            ERROR("SO_REUSEADDR failed: %s", strerror(errno));
+            goto out;
+        }
 
+        rv = setsockopt(listener->io.fd, SOL_SOCKET, SO_REUSEPORT, &true_flag, sizeof true_flag);
+        if (rv < 0) {
+            ERROR("SO_REUSEPORT failed: %s", strerror(errno));
+            goto out;
+        }
+
+        // shift the DSCP value to the left by 2 bits to make the 8-bit field
+        int dscp = DSCP_CS5 << 2;
+        if (real_family == AF_INET6) {
+            // IPV6_TCLASS.
+            rv = setsockopt(listener->io.fd, IPPROTO_IPV6, IPV6_TCLASS, &dscp, sizeof(dscp));
+            if (rv < 0) {
+                ERROR("IPV6_TCLASS failed: %s", strerror(errno));
+                goto out;
+            }
+        } else {
+            // IP_TOS
+            rv = setsockopt(listener->io.fd, IPPROTO_IP, IP_TOS, &dscp, sizeof(dscp));
+            if (rv < 0) {
+                ERROR("IP_TOS failed: %s", strerror(errno));
+                goto out;
+            }
+        }
+        // skipping multicast support for now
+
+        if (family == AF_INET6) {
+            // Don't use a dual-stack socket.
+            rv = setsockopt(listener->io.fd, IPPROTO_IPV6, IPV6_V6ONLY, &true_flag, sizeof true_flag);
+            if (rv < 0) {
+                SEGMENTED_IPv6_ADDR_GEN_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
+                ERROR("Unable to set IPv6-only flag on UDP socket for " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                      SEGMENTED_IPv6_ADDR_PARAM_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf));
+                goto out;
+            }
+            SEGMENTED_IPv6_ADDR_GEN_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
+            ERROR("Successfully set IPv6-only flag on UDP socket for " PRI_SEGMENTED_IPv6_ADDR_SRP,
+                  SEGMENTED_IPv6_ADDR_PARAM_SRP(listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf));
+        }
+
+        sl = listener->address.sa.sa_len;
+        if (bind(listener->io.fd, &listener->address.sa, sl) < 0) {
+            if (family == AF_INET) {
+                IPv4_ADDR_GEN_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf);
+                ERROR("Can't bind to " PRI_IPv4_ADDR_SRP "#%d: %s",
+                      IPv4_ADDR_PARAM_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf), ntohs(port),
+                      strerror(errno));
+            } else {
+                SEGMENTED_IPv6_ADDR_GEN_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
+                ERROR("Can't bind to " PRI_SEGMENTED_IPv6_ADDR_SRP "#%d: %s",
+                      SEGMENTED_IPv6_ADDR_PARAM_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf), ntohs(port),
+                      strerror(errno));
+            }
+        out:
+            close(listener->io.fd);
+            listener->io.fd = -1;
+            RELEASE_HERE(listener, listener);
+            return NULL;
+        }
+    }
+
+    if (fcntl(listener->io.fd, F_SETFL, O_NONBLOCK) < 0) {
+        ERROR("%s: Can't set O_NONBLOCK: %s", listener->name, strerror(errno));
+        goto out;
+    }
+
+    // We may have bound to an unspecified port, so fetch the port we got. Or we may have got the port from
+    // launchd, in which case let's make sure we got the right port.
+    if (launchd_name != NULL || port == 0) {
+        sl = sizeof(sockname);
+        if (getsockname(listener->io.fd, (struct sockaddr *)&sockname, &sl) < 0) {
+            ERROR("getsockname: %s", strerror(errno));
+            goto out;
+        }
+        listener->listen_port = ntohs(real_family == AF_INET6 ? sockname.sin6.sin6_port : sockname.sin.sin_port);
+        if (launchd_name != NULL && listener->listen_port != port) {
+            ERROR("launchd port mismatch: %u %u", port, listener->listen_port);
+        }
+    } else {
+        listener->listen_port = port;
+    }
+    INFO("port is %d", listener->listen_port);
+
+    if (ifindex != 0) {
+        setsockopt(listener->io.fd, IPPROTO_IP, IP_BOUND_IF, &ifindex, sizeof(ifindex));
+        setsockopt(listener->io.fd, IPPROTO_IPV6, IPV6_BOUND_IF, &ifindex, sizeof(ifindex));
+    }
     rv = setsockopt(listener->io.fd, family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6,
                     family == AF_INET ? IP_PKTINFO : IPV6_RECVPKTINFO, &true_flag, sizeof true_flag);
     if (rv < 0) {
@@ -1243,8 +1441,14 @@ ioloop_udp_listener_setup(comm_t *listener, const addr_t *ip_address, uint16_t p
     if (listener->ready != NULL) {
         RETAIN_HERE(listener, listener); // For the ready callback
         dispatch_async(ioloop_main_queue, ^{
-                if (listener->ready != NULL) {
-                    listener->ready(listener->context, port);
+                // It's possible that we might schedule the ready event but then before we return to the run loop
+                // the listener gets canceled, in which case we don't want to deliver the ready event.
+                if (listener->canceled) {
+                    INFO("ready but canceled");
+                } else {
+                    if (listener->ready != NULL) {
+                        listener->ready(listener->context, listener->listen_port);
+                    }
                 }
                 RELEASE_HERE(listener, listener);
             });
@@ -1254,11 +1458,11 @@ ioloop_udp_listener_setup(comm_t *listener, const addr_t *ip_address, uint16_t p
 #endif // UDP_LISTENER_USES_CONNECTION_GROUPS
 
 comm_t *
-ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avoid_ports,
+ioloop_listener_create(bool stream, bool tls, bool launchd, uint16_t *avoid_ports, int num_avoid_ports,
                        const addr_t *ip_address, const char *multicast, const char *name,
                        datagram_callback_t datagram_callback, connect_callback_t connected, cancel_callback_t cancel,
                        ready_callback_t ready, finalize_callback_t finalize, tls_config_callback_t tls_config,
-                       void *context)
+                       unsigned ifindex, void *context)
 {
     comm_t *listener;
     int family = (ip_address != NULL) ? ip_address->sa.sa_family : AF_UNSPEC;
@@ -1300,6 +1504,7 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
         }
         return NULL;
     }
+    listener->serial = ++cur_connection_serial;
     if (avoid_ports != NULL) {
         listener->avoid_ports = malloc(num_avoid_ports * sizeof(uint16_t));
         if (listener->avoid_ports == NULL) {
@@ -1333,10 +1538,11 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
     listener->ready = ready;
     listener->context = context;
     listener->tcp_stream = stream;
+    listener->is_listener = true;
 
 #if !UDP_LISTENER_USES_CONNECTION_GROUPS
     if (stream == FALSE) {
-        comm_t *ret = ioloop_udp_listener_setup(listener, ip_address, port);
+        comm_t *ret = ioloop_udp_listener_setup(listener, ip_address, port, launchd ? name : NULL, ifindex);
         if (ret == NULL) {
             return ret;
         }
@@ -1369,7 +1575,11 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
                 snprintf(ip_address_str, sizeof(ip_address_str), "::");
             }
         } else {
-            inet_ntop(family, ip_address->sa.sa_data, ip_address_str, sizeof(ip_address_str));
+            if (family == AF_INET) {
+                inet_ntop(family, &ip_address->sin.sin_addr, ip_address_str, sizeof(ip_address_str));
+            } else {
+                inet_ntop(family, &ip_address->sin6.sin6_addr, ip_address_str, sizeof(ip_address_str));
+            }
         }
         endpoint = nw_endpoint_create_host(ip_address_str, portbuf);
         if (endpoint == NULL) {
@@ -1378,7 +1588,6 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
             return NULL;
         }
     }
-
     if (stream) {
         nw_parameters_configure_protocol_block_t configure_tls_block = NW_PARAMETERS_DISABLE_PROTOCOL;
         if (tls && tls_config != NULL) {
@@ -1416,9 +1625,21 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
     // Set SO_REUSEADDR.
     nw_parameters_set_reuse_local_address(listener->parameters, true);
 
+
     if (stream) {
         // Create the nw_listener_t.
-        listener->listener = nw_listener_create(listener->parameters);
+        listener->listener = NULL;
+#ifndef SRP_TEST_SERVER
+        if (launchd && name != NULL) {
+            listener->listener = nw_listener_create_with_launchd_key(listener->parameters, name);
+            if (listener->listener == NULL) {
+                ERROR("launchd listener create failed, trying to create it without relying on launchd.");
+            }
+        }
+#endif
+        if (listener->listener == NULL) {
+            listener->listener = nw_listener_create(listener->parameters);
+        }
         if (listener->listener == NULL) {
             ERROR("no memory for nw_listener object");
             RELEASE_HERE(listener, listener);
@@ -1426,17 +1647,22 @@ ioloop_listener_create(bool stream, bool tls, uint16_t *avoid_ports, int num_avo
         }
         nw_listener_created++;
         nw_listener_set_new_connection_handler(listener->listener,
-                                               ^(nw_connection_t connection) { connection_callback(listener, connection); }
-                                               );
+                                               ^(nw_connection_t connection) {
+                                                   ioloop_listener_connection_callback(listener, connection);
+                                               });
 
-        RETAIN_HERE(listener, listener); // for the nw_listener_t
         nw_listener_set_state_changed_handler(listener->listener, ^(nw_listener_state_t state, nw_error_t error) {
             ioloop_listener_state_changed_handler(listener, state, error);
         });
+        RETAIN_HERE(listener, listener); // for the nw_listener_t state change handler callback
         nw_listener_set_queue(listener->listener, ioloop_main_queue);
         nw_listener_start(listener->listener);
 #if UDP_LISTENER_USES_CONNECTION_GROUPS
     } else {
+        if (launchd) {
+            FAULT("launchd not yet supported for connection groups");
+            return NULL;
+        }
         if (!ioloop_udp_listener_setup(listener)) {
             RELEASE_HERE(listener, listener);
             return NULL;
@@ -1470,6 +1696,8 @@ ioloop_connection_create(addr_t *NONNULL remote_address, bool tls, bool stream, 
         ERROR("No memory for connection");
         return NULL;
     }
+    connection->serial = ++cur_connection_serial;
+
     // If we don't release this because of an error, this is the caller's reference to the comm_t.
     RETAIN_HERE(connection, comm);
     endpoint = nw_endpoint_create_host(addrbuf, portbuf);
@@ -1559,7 +1787,7 @@ ioloop_connection_create(addr_t *NONNULL remote_address, bool tls, bool stream, 
     RETAIN_HERE(connection, comm); // The connection state changed handler has a reference to the connection.
     nw_connection_set_state_changed_handler(connection->connection,
                                             ^(nw_connection_state_t state, nw_error_t error)
-                                            { connection_state_changed(connection, state, error); });
+                                            { ioloop_connection_state_changed(connection, state, error); });
     nw_connection_set_queue(connection->connection, ioloop_main_queue);
     nw_connection_start(connection->connection);
     return connection;
@@ -1728,6 +1956,24 @@ ioloop_subproc(const char *exepath, char *NULLABLE *argv, int argc,
     return subproc;
 }
 
+#ifdef SRP_TEST_SERVER
+void
+ioloop_dnssd_txn_cancel_srp(void *srp_server, dnssd_txn_t *txn)
+{
+    if (txn->sdref != NULL) {
+        INFO("txn %p serviceref %p", txn, txn->sdref);
+        if (srp_server != NULL) {
+            dns_service_ref_deallocate(srp_server, txn->sdref);
+        } else {
+            DNSServiceRefDeallocate(txn->sdref);
+        }
+        txn->sdref = NULL;
+    } else {
+        INFO("dead transaction.");
+    }
+}
+#endif
+
 void
 ioloop_dnssd_txn_cancel(dnssd_txn_t *txn)
 {
@@ -1858,20 +2104,37 @@ ioloop_file_descriptor_create_(int fd, void *context, finalize_callback_t finali
 }
 
 static void
-ioloop_read_cancel(void *context)
+ioloop_read_source_finalize(void *context)
 {
     io_t *io = context;
 
+    INFO("io %p fd %d, read source %p, write_source %p", io, io->fd, io->read_source, io->write_source);
+
+    // Release the reference count that dispatch was holding.
+    if (io->is_static) {
+        if (io->context_release != NULL) {
+            io->context_release(io->context);
+        }
+        FINALIZED(file_descriptor_finalized);
+    } else {
+        RELEASE_HERE(io, file_descriptor);
+    }
+}
+
+static void
+ioloop_read_source_cancel_callback(void *context)
+{
+    io_t *io = context;
+
+    INFO("io %p fd %d, read source %p, write_source %p", io, io->fd, io->read_source, io->write_source);
     if (io->read_source != NULL) {
         dispatch_release(io->read_source);
         io->read_source = NULL;
-        // Release the reference count that dispatch was holding.
-        if (io->is_static) {
-            if (io->context_release != NULL) {
-                io->context_release(io->context);
-            }
+        if (io->fd != -1) {
+            close(io->fd);
+            io->fd = -1;
         } else {
-            RELEASE_HERE(io, file_descriptor);
+            FAULT("io->fd has been set to -1 too early");
         }
     }
 }
@@ -1889,13 +2152,13 @@ ioloop_read_event(void *context)
 void
 ioloop_close(io_t *io)
 {
+    INFO("io %p fd %d, read source %p, write_source %p", io, io->fd, io->read_source, io->write_source);
     if (io->read_source != NULL) {
         dispatch_cancel(io->read_source);
     }
     if (io->write_source != NULL) {
         dispatch_cancel(io->write_source);
     }
-    io->fd = -1;
 }
 
 void
@@ -1910,10 +2173,12 @@ ioloop_add_reader(io_t *NONNULL io, io_callback_t NONNULL callback)
         return;
     }
     dispatch_source_set_event_handler_f(io->read_source, ioloop_read_event);
-    dispatch_source_set_cancel_handler_f(io->read_source, ioloop_read_cancel);
+    dispatch_source_set_cancel_handler_f(io->read_source, ioloop_read_source_cancel_callback);
+    dispatch_set_finalizer_f(io->read_source, ioloop_read_source_finalize);
     dispatch_set_context(io->read_source, io);
-    RETAIN_HERE(io, io); // Dispatch will hold a reference.
+    RETAIN_HERE(io, file_descriptor); // Dispatch will hold a reference.
     dispatch_resume(io->read_source);
+    INFO("io %p fd %d, read source %p, write_source %p", io, io->fd, io->read_source, io->write_source);
 }
 
 void
@@ -1925,30 +2190,19 @@ ioloop_run_async(async_callback_t callback, void *context)
 }
 
 const struct sockaddr *
-connection_get_local_address(comm_t *connection)
+connection_get_local_address(message_t *message)
 {
-#if UDP_LISTENER_USES_CONNECTION_GROUPS
-    nw_endpoint_t local_endpoint = NULL;
-    nw_connection_group_t connection_group = connection->listener_state != NULL?
-                                             connection->listener_state->connection_group:
-                                             NULL;
-    const struct sockaddr *local_addr = NULL;
-
-    require_action_quiet(connection_group, exit, ERROR("connection group is NULL."));
-    require_action_quiet(connection->content_context, exit, ERROR("content_context is NULL."));
-    local_endpoint = nw_connection_group_copy_local_endpoint_for_message(connection_group, connection->content_context);
-    require_action(local_endpoint, exit, ERROR("no resources for local endpoint"));
-    local_addr = nw_endpoint_get_address(local_endpoint);
-    require_action(local_addr, exit, ERROR("fail to get local address"));
-
-exit:
-    if (local_endpoint != NULL) {
-        nw_release(local_endpoint);
+    if (message == NULL) {
+        ERROR("message is NULL.");
+        return NULL;
     }
-    return local_addr;
-#else
-    return &connection->address.sa;
-#endif // UDP_LISTENER_USES_CONNECTION_GROUPS
+    return &message->local.sa;
+}
+
+bool
+ioloop_is_device_apple_tv(void)
+{
+    return IsAppleTV();
 }
 
 // Local Variables:

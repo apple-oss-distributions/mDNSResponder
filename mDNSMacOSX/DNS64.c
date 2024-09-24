@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -183,9 +183,7 @@ mDNSexport mDNSBool DNS64StateMachine(mDNS *m, DNSQuestion *inQ, const ResourceR
     case kDNS64State_ReverseIPv6:
         break;
 
-    CUClangWarningIgnoreBegin(-Wcovered-switch-default);
-    default:
-    CUClangWarningIgnoreEnd();
+    MDNS_COVERED_SWITCH_DEFAULT:
         LogMsg("DNS64StateMachine: unrecognized DNS64 state %d", inQ->dns64.state);
         break;
     }
@@ -330,9 +328,7 @@ mDNSexport void DNS64ResetState(DNSQuestion *inQ)
     case kDNS64State_ReverseIPv6:
         break;
 
-    CUClangWarningIgnoreBegin(-Wcovered-switch-default);
-    default:
-    CUClangWarningIgnoreEnd();
+    MDNS_COVERED_SWITCH_DEFAULT:
         LogMsg("DNS64ResetState: unrecognized DNS64 state %d", inQ->dns64.state);
         break;
     }
@@ -549,9 +545,7 @@ mDNSlocal void _DNS64RestartQuestion(mDNS *const m, DNSQuestion *inQ, DNS64State
         inQ->qtype = kDNSType_AAAA;
         break;
 
-    CUClangWarningIgnoreBegin(-Wcovered-switch-default);
-    default:
-    CUClangWarningIgnoreEnd();
+    MDNS_COVERED_SWITCH_DEFAULT:
         LogMsg("DNS64RestartQuestion: unrecognized DNS64 state %d", inQ->dns64.state);
         break;
     }

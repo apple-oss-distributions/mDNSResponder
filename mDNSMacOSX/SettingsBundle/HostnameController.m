@@ -18,7 +18,7 @@
 #import "HostnameController.h"
 #import "BonjourSCStore.h"
 #import <AssertMacros.h>
-#import <Preferences/Preferences.h>
+#import <Preferences/PSEditableTableCell.h>
 
 #define LocalizedStringFromMyBundle(key, comment)     \
     NSLocalizedStringFromTableInBundle(key, @"Localizable", [NSBundle bundleForClass: [self class]], comment)

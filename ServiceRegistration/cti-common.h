@@ -124,9 +124,11 @@ typedef enum {
     kCTI_NetworkNodeType_Router,
     kCTI_NetworkNodeType_EndDevice,
     kCTI_NetworkNodeType_SleepyEndDevice,
+    kCTI_NetworkNodeType_SynchronizedSleepyEndDevice,
     kCTI_NetworkNodeType_NestLurker,
     kCTI_NetworkNodeType_Commissioner,
     kCTI_NetworkNodeType_Leader,
+    kCTI_NetworkNodeType_SleepyRouter,
 } cti_network_node_type_t;
 
 #define kCTIRoleDisabled 0

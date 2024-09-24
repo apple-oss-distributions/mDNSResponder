@@ -65,6 +65,7 @@ struct probe_state {
     thread_service_t *service;
     void *context;
     void (*callback)(thread_service_t *service, void *context, bool succeeded);
+    void (*context_release)(void *context);
     route_state_t *route_state;
     dns_wire_t question;
     int num_retransmissions, retransmission_delay;
@@ -77,7 +78,43 @@ probe_state_finalize(probe_state_t *probe_state)
     if (probe_state->wakeup != NULL) {
         ioloop_wakeup_release(probe_state->wakeup);
     }
+    if (probe_state->service != NULL) {
+        thread_service_release(probe_state->service);
+        probe_state->service = NULL;
+    }
+    if (probe_state->connection != NULL) {
+        ioloop_comm_release(probe_state->connection);
+        probe_state->connection = NULL;
+    }
+    if (probe_state->context_release) {
+        probe_state->context_release(probe_state->context);
+    }
     free(probe_state);
+}
+
+void
+probe_srp_service_probe_cancel(thread_service_t *service)
+{
+    probe_state_t *probe_state = service->probe_state;
+    probe_state->service = NULL;
+    service->probe_state = NULL;
+
+    if (probe_state->context_release != NULL) {
+        probe_state->context_release(probe_state->context);
+    }
+    probe_state->context = NULL;
+
+    thread_service_release(service); // The probe state's reference to the service
+    if (probe_state->wakeup != NULL) {
+        ioloop_cancel_wake_event(probe_state->wakeup);
+    }
+
+    if (probe_state->connection != NULL) {
+        ioloop_comm_cancel(probe_state->connection); // Cancel the connection (should result in the state being released)
+        ioloop_comm_release(probe_state->connection);
+        probe_state->connection = NULL;
+    }
+    RELEASE_HERE(probe_state, probe_state); // The thread_service_t's reference to the probe state
 }
 
 static void
@@ -96,7 +133,13 @@ probe_srp_done(void *context, bool succeeded)
         port = 53;
     } else {
         address = &service->u.unicast.address;
-        port = (service->u.unicast.port[0] << 8) | service->u.unicast.port[1];
+        // If the anycast service is present, we can use port 53, which we need to prefer because pre-2024 Apple BRs
+        // will not answer DNS queries on the SRP service port.
+        if (service->u.unicast.anycast_also_present) {
+            port = 53;
+        } else {
+            port = (service->u.unicast.port[0] << 8) | service->u.unicast.port[1];
+        }
     }
     SEGMENTED_IPv6_ADDR_GEN_SRP(address->s6_addr, addr_buf);
     if (!succeeded) {
@@ -104,14 +147,12 @@ probe_srp_done(void *context, bool succeeded)
              SEGMENTED_IPv6_ADDR_PARAM_SRP(address->s6_addr, addr_buf), port);
         service->checking = false;
         service->ignore = true;  // Don't consider this service when deciding what to advertise
-        service->remove = false; // Keep the service around so we don't keep probing it.
         service->responding = false;
     } else {
         INFO("service " PRI_SEGMENTED_IPv6_ADDR_SRP " responded on port %d",
              SEGMENTED_IPv6_ADDR_PARAM_SRP(address->s6_addr, addr_buf), port);
         service->checking = false;
         service->ignore = false;
-        service->remove = false;
         service->checked = true;
     }
     service->responding = true;
@@ -120,9 +161,12 @@ probe_srp_done(void *context, bool succeeded)
         probe_state->callback(probe_state->service, probe_state->context, succeeded);
         probe_state->callback = NULL;
     }
+    if (probe_state->context_release != NULL) {
+        probe_state->context_release(probe_state->context);
+    }
     probe_state->context = NULL;
-    ioloop_comm_cancel(probe_state->connection); // Cancel the connection (should result in the state being released)
-    thread_service_release(service);
+
+    thread_service_release(service); // The probe state's reference to the service
     if (probe_state->wakeup != NULL) {
         ioloop_cancel_wake_event(probe_state->wakeup);
     }
@@ -130,18 +174,24 @@ probe_srp_done(void *context, bool succeeded)
 }
 
 static void
-probe_srp_datagram(comm_t *UNUSED connection, message_t *message, void *context)
+probe_srp_datagram(comm_t *connection, message_t *message, void *context)
 {
 #ifdef PROBE_SRP_TCP
     (void)message;
     // We should never get a datagram
     ERROR("got a datagram on %p", context);
 #else
+    int rcode = dns_rcode_get(&message->wire);
     probe_state_t *probe_state = context;
-    SEGMENTED_IPv6_ADDR_GEN_SRP(&address->sin6.sin6_addr, addr_buf);
-    INFO("datagram from " PRI_SEGMENTED_IPv6_ADDR_SRP " on port %d xid %x (question xid %x)",
-         SEGMENTED_IPv6_ADDR_PARAM_SRP(&probe_state->connection->address.sin6.sin6_addr, addr_buf),
-         ntohs(probe_state->connection->address.sin6.sin6_port), message->wire.id, probe_state->question.id);
+    if (connection->connection != NULL) {
+        INFO("datagram from " PRI_S_SRP " on port %d xid %x (question xid %x) rcode %d", connection->name,
+             ntohs(probe_state->connection->address.sin6.sin6_port), message->wire.id, probe_state->question.id, rcode);
+    } else {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(&probe_state->connection->address.sin6.sin6_addr, addr_buf);
+        INFO("datagram from " PRI_SEGMENTED_IPv6_ADDR_SRP " on port %d xid %x (question xid %x) rcode %d",
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(&probe_state->connection->address.sin6.sin6_addr, addr_buf),
+             ntohs(probe_state->connection->address.sin6.sin6_port), message->wire.id, probe_state->question.id, rcode);
+    }
     if (message->wire.id != probe_state->question.id) {
         return; // not a response to the question we asked
     }
@@ -151,15 +201,23 @@ probe_srp_datagram(comm_t *UNUSED connection, message_t *message, void *context)
         return;
     }
     dns_message_free(dns_message);
-    probe_srp_done(context, true);
+    // If we get a servfail, treat it like a dropped packet, since that might just mean that the remote end is
+    // temporarily busy.
+    if (rcode == dns_rcode_servfail) {
+        return;
+    }
+    probe_srp_done(context, rcode == dns_rcode_noerror);
+    ioloop_comm_cancel(probe_state->connection); // Cancel the connection (should result in the state being released)
+    if (probe_state->wakeup != NULL) {
+        ioloop_cancel_wake_event(probe_state->wakeup);
+    }
 #endif
 }
 
 static void
-probe_srp_connection_finalize(void *context)
+probe_srp_probe_state_context_release(void *context)
 {
     probe_state_t *probe_state = context;
-    probe_state->connection = NULL;
     RELEASE_HERE(probe_state, probe_state);
 }
 
@@ -177,6 +235,7 @@ probe_srp_disconnected(comm_t *UNUSED connection, void *context, int UNUSED erro
     // object.
     if (probe_state->connection != NULL) {
         ioloop_comm_release(probe_state->connection);
+        probe_state->connection = NULL;
     }
 }
 
@@ -255,11 +314,11 @@ probe_srp_connected(comm_t *connection, void *context)
     dns_opcode_set(&probe_state->question, dns_opcode_query);
     probe_state->question.qdcount = htons(1); // Just ask one question
 
-    // Query localhost.
-    dns_full_name_to_wire(NULL, &towire, "localhost");
-    dns_u16_to_wire(&towire, dns_rrtype_a);
+    // Query SOA for default.service.arpa--if this fails, we can't use this server.
+    dns_full_name_to_wire(NULL, &towire, "default.service.arpa");
+    dns_u16_to_wire(&towire, dns_rrtype_soa);
     dns_u16_to_wire(&towire, dns_qclass_in);
-    probe_state->question_length = towire.p - (uint8_t *)&probe_state->question;
+    probe_state->question_length = (uint16_t)(towire.p - (uint8_t *)&probe_state->question);
 
     // We're not in a hurry; the goal is to probe.
     probe_state->retransmission_delay = 1000; // milliseconds
@@ -271,8 +330,9 @@ probe_srp_connected(comm_t *connection, void *context)
 }
 
 static probe_state_t *
-probe_state_create(addr_t *address, thread_service_t *service, void *context,
-                   void (*callback)(thread_service_t *service, void *context, bool succeeded))
+probe_srp_create(addr_t *address, thread_service_t *service, void *context,
+                   void (*callback)(thread_service_t *service, void *context, bool succeeded),
+                   void (*context_release)(void *context))
 {
     probe_state_t *ret = NULL, *probe_state = calloc(1, sizeof(*probe_state));
     if (probe_state == NULL) {
@@ -283,7 +343,7 @@ probe_state_create(addr_t *address, thread_service_t *service, void *context,
     // tls   stream stable  opportunistic
     probe_state->connection = ioloop_connection_create(address, false, false, false, false,
                                                        probe_srp_datagram, probe_srp_connected, probe_srp_disconnected,
-                                                       probe_srp_connection_finalize, probe_state);
+                                                       probe_srp_probe_state_context_release, probe_state);
     if (probe_state->connection == NULL) {
         INFO("failed to create connection");
         goto out;
@@ -312,6 +372,9 @@ out:
     if (ret == NULL && callback != NULL) {
         dispatch_async(dispatch_get_main_queue(), ^{
             callback(service, context, true); // We claim success here because this should never fail; if it does, it's our problem.
+            if (context_release != NULL) {
+                context_release(context);
+            }
         });
     }
     return ret;
@@ -320,20 +383,21 @@ out:
 // If we've been asked to probe a service, go through the list.
 static probe_state_t *
 probe_srp_anycast_service(thread_service_t *service, void *context,
-                          void (*callback)(thread_service_t *service, void *context, bool succeeded))
+                          void (*callback)(thread_service_t *service, void *context, bool succeeded),
+                          void (*context_release)(void *context))
 {
     addr_t address;
     memset(&address, 0, sizeof(address));
     memcpy(&address.sin6.sin6_addr, &service->u.anycast.address, sizeof(service->u.anycast.address));
     address.sin6.sin6_port = htons(53);
     address.sa.sa_family = AF_INET6;
-    return probe_state_create(&address, service, context, callback);
+    return probe_srp_create(&address, service, context, callback, context_release);
 }
 
 static probe_state_t *
 probe_srp_unicast_service(thread_service_t *service, void *context,
-                          void (*callback)(thread_service_t *service, void *context, bool succeeded))
-{
+                          void (*callback)(thread_service_t *service, void *context, bool succeeded),
+                          void (*context_release)(void *context)){
     if (service->checking || service->user) {
         return NULL;
     }
@@ -342,29 +406,33 @@ probe_srp_unicast_service(thread_service_t *service, void *context,
     address.sa.sa_family = AF_INET6;
     memcpy(&address.sin6.sin6_addr, &service->u.unicast.address, sizeof(address.sin6.sin6_addr));
     memcpy(&address.sin6.sin6_port, service->u.unicast.port, sizeof(address.sin6.sin6_port));
-    return probe_state_create(&address, service, context, callback);
+    return probe_srp_create(&address, service, context, callback, context_release);
 }
 
 void
 probe_srp_service(thread_service_t *service, void *context,
-                  void (*callback)(thread_service_t *service, void *context, bool succeeded))
+                  void (*callback)(thread_service_t *service, void *context, bool succeeded),
+                  void (*context_release)(void *context))
 {
     probe_state_t *probe_state;
     if (service->service_type == unicast_service) {
-        probe_state = probe_srp_unicast_service(service, context, callback);
+        probe_state = probe_srp_unicast_service(service, context, callback, context_release);
     } else if (service->service_type == anycast_service){
-        probe_state = probe_srp_anycast_service(service, context, callback);
+        probe_state = probe_srp_anycast_service(service, context, callback, context_release);
     } else {
         FAULT("bogus service type in probe_srp_service: %d", service->service_type);
         if (callback != NULL) {
             dispatch_async(dispatch_get_main_queue(), ^{
                     callback(service, context, false); // False because this isn't a valid service
+                    if (context_release) {
+                        context_release(context);
+                    }
                 });
         }
         return;
     }
 
-    // probe_state_create returns this retained, but we don't store the pointer.
+    // probe_srp_create returns this retained, but we don't store the pointer.
     RELEASE_HERE(probe_state, probe_state);
 }
 

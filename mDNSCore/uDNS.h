@@ -36,7 +36,8 @@ extern "C" {
                                                              // which typically heal quickly, so we start agressively and exponentially back off
 #define MAX_UCAST_POLL_INTERVAL (60 * 60 * mDNSPlatformOneSecond)
 //#define MAX_UCAST_POLL_INTERVAL (1 * 60 * mDNSPlatformOneSecond)
-#define LLQ_POLL_INTERVAL       (15 * 60 * mDNSPlatformOneSecond) // Polling interval for zones w/ an advertised LLQ port (ie not static zones) if LLQ fails due to NAT, etc.
+#define LLQ_POLL_INTERVAL_MIN   15
+#define LLQ_POLL_INTERVAL       (LLQ_POLL_INTERVAL_MIN * 60 * mDNSPlatformOneSecond) // Polling interval for zones w/ an advertised LLQ port (ie not static zones) if LLQ fails due to NAT, etc.
 #define RESPONSE_WINDOW (60 * mDNSPlatformOneSecond)         // require server responses within one minute of request
 #define MAX_UCAST_UNANSWERED_QUERIES 2                       // number of unanswered queries from any one uDNS server before trying another server
 #define DNSSERVER_PENALTY_TIME (60 * mDNSPlatformOneSecond)  // number of seconds for which new questions don't pick this server
@@ -138,10 +139,14 @@ extern void UnsubscribeQuestionFromDNSPushServer(mDNS *m, DNSQuestion *q, mDNSBo
 extern void UnsubscribeAllQuestionsFromDNSPushServer(mDNS *m, DNSPushServer *server);
 extern void DNSPushZoneRemove(mDNS *m, const DNSPushServer *server);
 extern void DNSPushZoneFinalize(DNSPushZone *zone);
+extern mDNSInterfaceID DNSPushServerGetInterfaceID(mDNS *m, const DNSPushServer *server);
 extern void DNSPushServerCancel(DNSPushServer *server, mDNSBool alreadyRemovedFromSystem);
 extern void DNSPushServerFinalize(DNSPushServer *server);
 extern void DNSPushUpdateQuestionDuplicate(DNSQuestion *primary, DNSQuestion *duplicate);
 #endif
+
+extern void GetZoneData_QuestionCallback(mDNS *m, DNSQuestion *question, const ResourceRecord *answer,
+    QC_result AddRecord);
 
 extern void SleepRecordRegistrations(mDNS *m);
 

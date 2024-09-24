@@ -64,7 +64,7 @@ struct node_type_tracker {
     srp_server_t *server_state;
     cti_connection_t NULLABLE thread_context;
 	node_type_tracker_callback_t *callbacks;
-	time_t last_thread_network_node_type_change;
+	uint64_t last_thread_network_node_type_change;
 	thread_node_type_t current_node_type, previous_node_type;
 };
 
@@ -90,6 +90,7 @@ node_type_tracker_thread_node_type_to_string(thread_node_type_t node_type)
 		NODE_TYPE_TO_STRING(nest_lurker);
 		NODE_TYPE_TO_STRING(commissioner);
 		NODE_TYPE_TO_STRING(leader);
+		NODE_TYPE_TO_STRING(sleepy_router);
 	default:
 		return "<invalid>";
 	}
@@ -129,6 +130,9 @@ node_type_tracker_callback(void *context, cti_network_node_type_t cti_node_type,
 	case kCTI_NetworkNodeType_SleepyEndDevice:
 		node_type = node_type_sleepy_end_device;
 		break;
+    case kCTI_NetworkNodeType_SynchronizedSleepyEndDevice:
+        node_type = node_type_synchronized_sleepy_end_device;
+        break;
 	case kCTI_NetworkNodeType_NestLurker:
 		node_type = node_type_nest_lurker;
 		break;
@@ -138,6 +142,9 @@ node_type_tracker_callback(void *context, cti_network_node_type_t cti_node_type,
 	case kCTI_NetworkNodeType_Leader:
 		node_type = node_type_leader;
 		break;
+    case kCTI_NetworkNodeType_SleepyRouter:
+        node_type = node_type_sleepy_router;
+        break;
 	}
 
     tracker->last_thread_network_node_type_change = ioloop_timenow();

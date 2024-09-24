@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2003-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -247,7 +247,9 @@ struct _DNSRecordRef_t
 
 struct DNSServiceAttribute_s {
     DNSServiceAAAAPolicy aaaa_policy;
+    uint32_t hostkeyhash;
     uint32_t timestamp;    //Timestamp in seconds since epoch time to indicate when the service/record is registered.
+    bool hostkeyhash_is_set;
     bool timestamp_is_set;
 };
 
@@ -305,6 +307,17 @@ DNSServiceErrorType DNSSD_API DNSServiceAttributeSetAAAAPolicy
 }
 
 
+DNSServiceErrorType DNSSD_API DNSServiceAttributeSetHostKeyHash
+(
+    const DNSServiceAttributeRef attr,
+    uint32_t host_key
+)
+{
+    attr->hostkeyhash_is_set = true;
+    attr->hostkeyhash = host_key;
+    return kDNSServiceErr_NoError;
+}
+
 DNSServiceErrorType DNSSD_API DNSServiceAttributeSetTimestamp
 (
     const DNSServiceAttributeRef attr,
@@ -326,30 +339,47 @@ void DNSSD_API DNSServiceAttributeDeallocate(DNSServiceAttributeRef attr)
     mdns_free(tmp);
 }
 
-size_t
-get_required_tlv_length_for_service_attr(const DNSServiceAttribute * const attr)
+static bool
+validate_attribute_tlvs(const DNSServiceAttribute * const attr)
 {
-    // Length for IPC_TLV_TYPE_SERVICE_ATTR_AAAA_POLICY and IPC_TLV_TYPE_SERVICE_ATTR_FAILOVER_POLICY.
-    size_t len = 2 * get_required_tlv_uint32_length();
-
-    // IPC_TLV_TYPE_SERVICE_ATTR_TIMESTAMP.
-    if (attr->timestamp_is_set)
+    if (!attr)
     {
-        len += get_required_tlv_uint32_length();
+        return true;
     }
-    return len;
+    // If either is set, require both
+    if ((attr->timestamp_is_set || attr->hostkeyhash_is_set) &&
+        (!attr->timestamp_is_set || !attr->hostkeyhash_is_set))
+    {
+        return false;
+    }
+    return true;
 }
 
-void
-put_tlvs_for_service_attr(const DNSServiceAttribute * const attr, ipc_msg_hdr * const hdr, uint8_t ** const ptr,
-                          const uint8_t * const limit)
+static size_t
+put_attribute_tlvs(const DNSServiceAttribute * const attr, ipc_msg_hdr * const hdr, uint8_t ** const ptr,
+    const uint8_t * const limit)
 {
-    put_tlv_uint32(IPC_TLV_TYPE_SERVICE_ATTR_AAAA_POLICY, attr->aaaa_policy, ptr, limit);
+    size_t required_len = 0;
+    required_len += put_tlv_uint32(IPC_TLV_TYPE_SERVICE_ATTR_AAAA_POLICY, attr->aaaa_policy, ptr, limit);
     if (attr->timestamp_is_set)
     {
-        put_tlv_uint32(IPC_TLV_TYPE_SERVICE_ATTR_TIMESTAMP, attr->timestamp, ptr, limit);
+        required_len += put_tlv_uint32(IPC_TLV_TYPE_SERVICE_ATTR_TIMESTAMP, attr->timestamp, ptr, limit);
     }
-    hdr->ipc_flags |= IPC_FLAGS_TRAILING_TLVS;
+    if (attr->hostkeyhash_is_set)
+    {
+        required_len += put_tlv_uint32(IPC_TLV_TYPE_SERVICE_ATTR_HOST_KEY_HASH, attr->hostkeyhash, ptr, limit);
+    }
+    if (hdr)
+    {
+        hdr->ipc_flags |= IPC_FLAGS_TRAILING_TLVS;
+    }
+    return required_len;
+}
+
+static size_t
+get_required_length_for_attribute_tlvs(const DNSServiceAttribute * const attr)
+{
+    return put_attribute_tlvs(attr, NULL, NULL, NULL);
 }
 
 static bool _should_return_noauth_error(void)
@@ -2011,7 +2041,14 @@ DNSServiceErrorType DNSServiceRegisterInternal
     len += strlen(name) + strlen(regtype) + strlen(domain) + strlen(host) + 4;
     len += 2 * sizeof(uint16_t);  // port, txtLen
     len += txtLen;
-    (void)attr;
+    if (attr)
+    {
+        if (!validate_attribute_tlvs(attr))
+        {
+            return kDNSServiceErr_BadParam;
+        }
+        len += get_required_length_for_attribute_tlvs(attr);
+    }
 
     hdr = create_hdr(reg_service_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
     if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
@@ -2027,6 +2064,10 @@ DNSServiceErrorType DNSServiceRegisterInternal
     *ptr++ = port.b[1];
     put_uint16(txtLen, &ptr);
     put_rdata(txtLen, txtRecord, &ptr);
+    if (attr)
+    {
+        put_attribute_tlvs(attr, hdr, &ptr, limit);
+    }
 
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
     if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
@@ -2326,7 +2367,14 @@ DNSServiceErrorType DNSServiceRegisterRecordInternal
     len += 3 * sizeof(uint16_t);  // rrtype, rrclass, rdlen
     len += strlen(fullname) + 1;
     len += rdlen;
-    (void)attr;
+    if (attr)
+    {
+        if (!validate_attribute_tlvs(attr))
+        {
+            return kDNSServiceErr_BadParam;
+        }
+        len += get_required_length_for_attribute_tlvs(attr);
+    }
 
     // Bump up the uid. Normally for shared operations (kDNSServiceFlagsShareConnection), this
     // is done in ConnectToServer. For DNSServiceRegisterRecord, ConnectToServer has already
@@ -2349,6 +2397,10 @@ DNSServiceErrorType DNSServiceRegisterRecordInternal
     put_uint16(rdlen, &ptr);
     put_rdata(rdlen, rdata, &ptr);
     put_uint32(ttl, &ptr);
+    if (attr)
+    {
+        put_attribute_tlvs(attr, hdr, &ptr, limit);
+    }
     if (flags & kDNSServiceFlagsQueueRequest)
     {
         hdr->ipc_flags |= IPC_FLAGS_NOERRSD;
@@ -2493,7 +2545,11 @@ static DNSServiceErrorType DNSServiceUpdateRecordInternal
     len += sizeof(DNSServiceFlags);
     if (attr)
     {
-        len += get_required_tlv_length_for_service_attr(attr);
+        if (!validate_attribute_tlvs(attr))
+        {
+            return kDNSServiceErr_BadParam;
+        }
+        len += get_required_length_for_attribute_tlvs(attr);
     }
 
     hdr = create_hdr(update_record_request, &len, &ptr, 1, sdRef);
@@ -2520,7 +2576,7 @@ static DNSServiceErrorType DNSServiceUpdateRecordInternal
     put_uint32(ttl, &ptr);
     if (attr)
     {
-        put_tlvs_for_service_attr(attr, hdr, &ptr, limit);
+        put_attribute_tlvs(attr, hdr, &ptr, limit);
     }
     return deliver_request(hdr, sdRef);     // Will free hdr for us
 }

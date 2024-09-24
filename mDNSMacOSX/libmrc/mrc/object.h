@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -136,5 +136,14 @@ MDNS_ASSUME_NONNULL_END
 			*(PTR) = NULL;					\
 		}									\
 	} while(0)
+
+#define mrc_forget_with_invalidation(PTR, NAME)		\
+	do {											\
+		if (*(PTR)) {								\
+			mrc_ ## NAME ## _invalidate(*(PTR));	\
+			mrc_release_arc_safe(*(PTR));			\
+			*(PTR) = NULL;							\
+		}											\
+	} while (0)
 
 #endif	// MRC_OBJECT_H

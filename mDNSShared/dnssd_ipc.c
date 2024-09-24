@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -214,14 +214,15 @@ size_t get_required_tlv_uint32_length(void)
     return (IPC_TLV16_OVERHEAD_LENGTH + 4);
 }
 
-static int _tlv16_set(uint8_t *const dst, const uint8_t *const limit, const uint16_t type, const uint16_t length,
+static size_t _tlv16_set(uint8_t *const dst, const uint8_t *const limit, const uint16_t type, const uint16_t length,
     const uint8_t *const value, uint8_t **const out_end)
 {
-    if ((limit - dst) < (IPC_TLV16_OVERHEAD_LENGTH + length))
-    {
-        return -1;
-    }
     uint8_t *ptr = dst;
+    const size_t required_len = IPC_TLV16_OVERHEAD_LENGTH + length;
+    mdns_require_quiet(ptr, exit);
+    mdns_require_quiet(ptr <= limit, exit);
+    mdns_require_quiet((size_t)(limit - ptr) >= required_len, exit);
+
     ptr = _write_big16(ptr, type);
     ptr = _write_big16(ptr, length);
     if (length > 0)
@@ -229,18 +230,17 @@ static int _tlv16_set(uint8_t *const dst, const uint8_t *const limit, const uint
         memcpy(ptr, value, length);
         ptr += length;
     }
-    _assign_null_safe(out_end, ptr);
-    return 0;
+
+exit:
+    mdns_assign(out_end, ptr);
+    return required_len;
 }
 
-void put_tlv(const uint16_t type, const uint16_t length, const uint8_t *const value, uint8_t **const ptr,
+size_t put_tlv(const uint16_t type, const uint16_t length, const uint8_t *const value, uint8_t **const ptr,
     const uint8_t *const limit)
 {
-    uint8_t *dst = *ptr;
-    if (_tlv16_set(dst, limit, type, length, value, &dst) == 0)
-    {
-        *ptr = dst;
-    }
+    uint8_t *const dst = ptr ? *ptr : NULL;
+    return _tlv16_set(dst, limit, type, length, value, ptr);
 }
 
 void put_tlv_string(const uint16_t type, const char *const str_value, uint8_t **const ptr, const uint8_t *const limit,
@@ -268,11 +268,17 @@ void put_tlv_uint16(const uint16_t type, const uint16_t u16, uint8_t **const ptr
     put_tlv(type, sizeof(value), value, ptr, limit);
 }
 
-void put_tlv_uint32(const uint16_t type, const uint32_t u32, uint8_t **const ptr, const uint8_t *const limit)
+size_t put_tlv_uint32(const uint16_t type, const uint32_t u32, uint8_t **const ptr, const uint8_t *const limit)
 {
     uint8_t value[4];
     _write_big32(value, u32);
-    put_tlv(type, sizeof(value), value, ptr, limit);
+    return put_tlv(type, sizeof(value), value, ptr, limit);
+}
+
+size_t put_tlv_uuid(const uint16_t type, const uint8_t uuid[MDNS_STATIC_ARRAY_PARAM MDNS_UUID_SIZE], uint8_t **const ptr,
+    const uint8_t *const limit)
+{
+    return put_tlv(type, MDNS_UUID_SIZE, uuid, ptr, limit);
 }
 
 static const uint8_t *_tlv16_get_next(const uint8_t *ptr, const uint8_t *const end, uint16_t *const out_type,
@@ -353,10 +359,26 @@ uint32_t get_tlv_uint32(const uint8_t *const start, const uint8_t *const end, co
                 u32 = _read_big32(value, NULL);
                 err = 0;
                 break;
+            default:
+                break;
         }
     }
     _assign_null_safe(out_error, err);
     return u32;
+}
+
+const uint8_t *get_tlv_uuid(const uint8_t *const start, const uint8_t *const end, const uint16_t type)
+{
+    const uint8_t *uuid = NULL;
+    size_t length = 0;
+    const uint8_t *const value = get_tlv(start, end, type, &length);
+    mdns_require_quiet(value, exit);
+    mdns_require_quiet(length == MDNS_UUID_SIZE, exit);
+
+    uuid = value;
+
+exit:
+    return uuid;
 }
 
 void ConvertHeaderBytes(ipc_msg_hdr *hdr)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,106 @@
 
 #ifndef MDNS_GENERAL_H
 #define MDNS_GENERAL_H
+
+/*!
+ *	@brief
+ *		Evaluates to non-zero if compiling for a particular platform.
+ *
+ *	@param PLATFORM_NAME
+ *		The name of the platform, e.g., APPLE.
+ */
+#define MDNS_PLATFORM(PLATFORM_NAME)	MDNS_PLATFORM_PRIVATE_DEFINITION_ ## PLATFORM_NAME ()
+
+/*!
+ *	@brief
+ *		Evaluates to non-zero if compiling for Apple OSes.
+ *
+ *	@discussion
+ *		`__APPLE__` is defined when compiling for Apple, see
+ *		<https://developer.apple.com/library/archive/documentation/Porting/Conceptual/PortingUnix/compiling/compiling.html>.
+ */
+#if defined(__APPLE__) && __APPLE__
+	#define MDNS_PLATFORM_PRIVATE_DEFINITION_APPLE()	1
+#else
+	#define MDNS_PLATFORM_PRIVATE_DEFINITION_APPLE()	0
+#endif
+
+#if MDNS_PLATFORM(APPLE)
+	#include <TargetConditionals.h>
+#endif
+
+/*!
+ *	@brief
+ *		Evaluates to non-zero if compiling for a particular OS.
+ *
+ *	@param OS_NAME
+ *		The name of the OS, e.g., macOS, iOS, etc.
+ */
+#define MDNS_OS(OS_NAME)	MDNS_OS_PRIVATE_DEFINITION_ ## OS_NAME ()
+
+/*!
+ *	@brief
+ *		Evaluates to non-zero if compiling for macOS.
+ *
+ *	@discussion
+ *		Use `MDNS_OS(macOS)` instead of using this macro directly.
+ */
+#if defined(TARGET_OS_OSX) && TARGET_OS_OSX
+	#define MDNS_OS_PRIVATE_DEFINITION_macOS()	1
+#else
+	#define MDNS_OS_PRIVATE_DEFINITION_macOS()	0
+#endif
+
+/*!
+ *	@brief
+ *		Evaluates to non-zero if compiling for iOS.
+ *
+ *	@discussion
+ *		Use `MDNS_OS(iOS)` instead of using this macro directly.
+ */
+#if defined(TARGET_OS_IOS) && TARGET_OS_IOS
+	#define MDNS_OS_PRIVATE_DEFINITION_iOS()	1
+#else
+	#define MDNS_OS_PRIVATE_DEFINITION_iOS()	0
+#endif
+
+/*!
+ *	@brief
+ *		Evaluates to non-zero if compiling for watchOS.
+ *
+ *	@discussion
+ *		Use `MDNS_OS(watchOS)` instead of using this macro directly.
+ */
+#if defined(TARGET_OS_WATCH) && TARGET_OS_WATCH
+	#define MDNS_OS_PRIVATE_DEFINITION_watchOS()	1
+#else
+	#define MDNS_OS_PRIVATE_DEFINITION_watchOS()	0
+#endif
+
+/*!
+ *	@brief
+ *		Evaluates to non-zero if compiling for tvOS.
+ *
+ *	@discussion
+ *		Use `MDNS_OS(tvOS)` instead of using this macro directly.
+ */
+#if defined(TARGET_OS_TV) && TARGET_OS_TV
+	#define MDNS_OS_PRIVATE_DEFINITION_tvOS()	1
+#else
+	#define MDNS_OS_PRIVATE_DEFINITION_tvOS()	0
+#endif
+
+// Time conversion constants
+
+#define MDNS_NANOSECONDS_PER_SECOND		1000000000
+#define MDNS_MILLISECONDS_PER_SECOND	1000
+#define MDNS_MILLISECONDS_PER_MINUTE	(MDNS_MILLISECONDS_PER_SECOND * MDNS_SECONDS_PER_MINUTE)
+#define MDNS_MILLISECONDS_PER_HOUR		(MDNS_MILLISECONDS_PER_SECOND * MDNS_SECONDS_PER_HOUR)
+#define MDNS_SECONDS_PER_MINUTE			60
+#define MDNS_SECONDS_PER_HOUR			(MDNS_SECONDS_PER_MINUTE * MDNS_MINUTES_PER_HOUR)
+#define MDNS_SECONDS_PER_DAY			(MDNS_SECONDS_PER_HOUR * MDNS_HOUR_PER_DAY)
+#define MDNS_MINUTES_PER_HOUR			60
+#define MDNS_HOUR_PER_DAY				24
 
 // Clang's __has_*() builtin macros are defined as zero if not defined.
 
@@ -175,6 +275,38 @@
 	#define MDNS_CLANG_IGNORE_UNALIGNED_ACCESS_WARNING_END()	MDNS_CLANG_IGNORE_WARNING_END()
 #else
 	#define MDNS_CLANG_IGNORE_UNALIGNED_ACCESS_WARNING_END()
+#endif
+
+/*!
+ *	@brief
+ *		For Clang, starts ignoring the -Wincompatible-function-pointer-types-strict warning diagnostic flag.
+ *
+ *	@discussion
+ *		-Wincompatible-function-pointer-types-strict is like -Wincompatible-function-pointer-types, but is more
+ *		strict in that it warns about function pointer types that are not identical but are still compatible.
+ *
+ *		The -Wincompatible-function-pointer-types-strict is new in clang version 16.0.0 (see
+ *		https://releases.llvm.org/16.0.0/tools/clang/docs/ReleaseNotes.html). This macro allow us to
+ *		conditionally ignore -Wincompatible-function-pointer-types-strict with Clang 16.0.0 or later. This
+ *		avoids -Wunknown-warning-option warnings with earlier Clang versions, which don't recognize
+ *		-Wincompatible-function-pointer-types-strict.
+ */
+#if MDNS_CLANG_VERSION_IS_AT_LEAST(16, 0, 0)
+	#define MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_BEGIN() \
+		MDNS_CLANG_IGNORE_WARNING_BEGIN(-Wincompatible-function-pointer-types-strict)
+#else
+	#define MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_BEGIN()
+#endif
+
+/*!
+ *	@brief
+ *		Undoes the effect of a previous
+ *		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_BEGIN().
+ */
+#if MDNS_CLANG_VERSION_IS_AT_LEAST(16, 0, 0)
+	#define MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_END()	MDNS_CLANG_IGNORE_WARNING_END()
+#else
+	#define MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_END()
 #endif
 
 /*!
@@ -342,6 +474,72 @@
 
 /*!
  *	@brief
+ *		Evaluates to non-zero if the compiler conforms to a specific minimum C standard.
+ *
+ *	@param STANDARD
+ *		The C standard.
+ */
+#define MDNS_C_STANDARD_IS_AT_LEAST(STANDARD)	MDNS_C_STANDARD_PRIVATE_DEFINITION_IS_AT_LEAST_ ## STANDARD ()
+
+/*!
+ *	@brief
+ *		Evaluates to non-zero if the compiler confroms to the C99 standard or later.
+ *
+ *	@discussion
+ *		__STDC_VERSION__ is a predefined macro that expands to 199901L for the C99 standard. See
+ *		<https://en.cppreference.com/w/c/preprocessor/replace>.
+ *
+ *		Use `MDNS_C_STANDARD_IS_AT_LEAST(C99)` instead of using this macro directly.
+ */
+#if defined(__STDC_VERSION__)
+	#define MDNS_C_STANDARD_PRIVATE_DEFINITION_IS_AT_LEAST_C99()	(__STDC_VERSION__ >= 199901L)
+#else
+	#define MDNS_C_STANDARD_PRIVATE_DEFINITION_IS_AT_LEAST_C99()	0
+#endif
+
+/*!
+ *	@brief
+ *		Evaluates to non-zero if the compiler confroms to the C11 standard or later.
+ *
+ *	@discussion
+ *		__STDC_VERSION__ is a predefined macro that expands to 201112L for the C11 standard. See
+ *		<https://en.cppreference.com/w/c/preprocessor/replace>.
+ *
+ *		Use `MDNS_C_STANDARD_IS_AT_LEAST(C11)` instead of using this macro directly.
+ */
+#if defined(__STDC_VERSION__)
+	#define MDNS_C_STANDARD_PRIVATE_DEFINITION_IS_AT_LEAST_C11()	(__STDC_VERSION__ >= 201112L)
+#else
+	#define MDNS_C_STANDARD_PRIVATE_DEFINITION_IS_AT_LEAST_C11()	0
+#endif
+
+/*!
+ *	@brief
+ *		Evaluates to non-zero if the compiler conforms to a specific minimum C++ standard.
+ *
+ *	@param STANDARD
+ *		The C standard.
+ */
+#define MDNS_CPP_STANDARD_IS_AT_LEAST(STANDARD)	MDNS_CPP_STANDARD_PRIVATE_DEFINITION_IS_AT_LEAST_ ## STANDARD ()
+
+/*!
+ *	@brief
+ *		Evaluates to non-zero if the compiler confroms to the C++11 standard or later.
+ *
+ *	@discussion
+ *		__cplusplus is a predefined macro that expands to 201103L for the C++11 standard. See
+ *		<https://en.cppreference.com/w/cpp/preprocessor/replace>.
+ *
+ *		Use `MDNS_CPP_STANDARD_IS_AT_LEAST(CPP11)` instead of using this macro directly.
+ */
+#if defined(__cplusplus)
+	#define MDNS_CPP_STANDARD_PRIVATE_DEFINITION_IS_AT_LEAST_CPP11()	(__cplusplus >= 201103L)
+#else
+	#define MDNS_CPP_STANDARD_PRIVATE_DEFINITION_IS_AT_LEAST_CPP11()	0
+#endif
+
+/*!
+ *	@brief
  *		Causes a compile-time error if an expression evaluates to false.
  *
  *	@param EXPRESSION
@@ -350,9 +548,9 @@
  *	@param MESSAGE
  *		If supported, a sting literal to include as a diagnostic message if the expression evaluates to false.
  */
-#if (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L))
+#if MDNS_C_STANDARD_IS_AT_LEAST(C11)
 	#define mdns_compile_time_check(EXPRESSION, MESSAGE)	_Static_assert(EXPRESSION, MESSAGE)
-#elif (defined(__cplusplus) && (__cplusplus >= 201103L))
+#elif MDNS_CPP_STANDARD_IS_AT_LEAST(CPP11)
 	#define mdns_compile_time_check(EXPRESSION, MESSAGE)	static_assert(EXPRESSION, MESSAGE)
 #elif defined(__cplusplus)
 	#define	mdns_compile_time_check(EXPRESSION, MESSAGE) \
@@ -360,6 +558,33 @@
 #else
 	#define	mdns_compile_time_check(EXPRESSION, MESSAGE) \
 		extern int mdns_compile_time_check_failed[(EXPRESSION) ? 1 : -1]
+#endif
+
+/*!
+ *	@brief
+ *		Causes a compile-time error if an expression evaluates to false.
+ *
+ *	@param EXPRESSION
+ *		The expression.
+ *
+ *	@discussion
+ *		This macro is meant to be used in a local scope, i.e., inside of a function or a block. For the global
+ *		scope, use `mdns_compile_time_check()`.
+ *
+ *		The fallback implementation is based on code from
+ *		<https://www.drdobbs.com/compile-time-assertions/184401873>.
+ */
+#if MDNS_C_STANDARD_IS_AT_LEAST(C11)
+	#define mdns_compile_time_check_local(EXPRESSION)	_Static_assert(EXPRESSION, "Compile-time assertion failed.")
+#elif MDNS_CPP_STANDARD_IS_AT_LEAST(CPP11)
+	#define mdns_compile_time_check_local(EXPRESSION)	static_assert(EXPRESSION, "Compile-time assertion failed.")
+#else
+	#define mdns_compile_time_check_local(EXPRESSION)								\
+		do {																		\
+			enum {																	\
+				mdns_compile_time_check_local_failed = 1 / ((EXPRESSION) ? 1 : 0)	\
+			};																		\
+		} while (0)
 #endif
 
 /*!
@@ -500,6 +725,29 @@
 
 /*!
  *	@brief
+ *		If an expression evaluates to false, executes an action, then returns.
+ *
+ *	@param EXPRESSION
+ *		The expression.
+ *
+ *	@param ACTION
+ *		The code to execute.
+ *
+ *	@discussion
+ *		No debugging information is logged.
+ */
+#define mdns_require_return_action(EXPRESSION, ACTION)	\
+	do {												\
+		if (!(EXPRESSION)) {							\
+			{											\
+				ACTION;									\
+			}											\
+			return;										\
+		}												\
+	} while (0)
+
+/*!
+ *	@brief
  *		Returns from the current function with a specified value if an expression evaluates to false.
  *
  *	@param EXPRESSION
@@ -600,5 +848,87 @@
 #define MDNS_GENERAL_STRUCT_PAD_CHECK(STRUCT_TYPE)															\
 	mdns_compile_time_check(mdns_sizeof_member(STRUCT_TYPE, _mdns_unused_padding) < _Alignof(STRUCT_TYPE),	\
 		"Padding exceeds alignment of '" # STRUCT_TYPE "', so the amount of padding is excessive.")
+
+/*!
+ *	@brief
+ *		Retains a Core Foundation object if the specified object reference is non-NULL.
+ *
+ *	@param OBJ
+ *		A reference to the object to retain.
+ *
+ *	@discussion
+ *		The object reference is explicitly compared against NULL to avoid a warning from the Clang analyzer's
+ *		osx.NumberObjectConversion checker. See
+ *		<https://clang.llvm.org/docs/analyzer/checkers.html#osx-numberobjectconversion-c-c-objc>.
+ */
+#define mdns_cf_retain_null_safe(OBJ)	\
+	do {								\
+		if ((OBJ) != NULL) {			\
+			CFRetain((OBJ));			\
+		}								\
+	} while (0)
+
+/*!
+ *	@brief
+ *		Releases the Core Foundation object referenced by a pointer.
+ *
+ *	@param OBJ_PTR
+ *		The address of the pointer that either references a Core Foundation object or references NULL.
+ *
+ *	@discussion
+ *		If the pointer contains a non-NULL reference, then the pointer will be set to NULL after releasing the
+ *		object.
+ *
+ *		The object reference is explicitly compared against NULL to avoid a warning from the Clang analyzer's
+ *		osx.NumberObjectConversion checker. See
+ *		<https://clang.llvm.org/docs/analyzer/checkers.html#osx-numberobjectconversion-c-c-objc>.
+ */
+#define mdns_cf_forget(OBJ_PTR)		\
+	do {							\
+		if (*(OBJ_PTR) != NULL) {	\
+			CFRelease(*(OBJ_PTR));	\
+			*(OBJ_PTR) = NULL;		\
+		}							\
+	} while (0)
+
+/*!
+ *	@brief
+ *		Alternative to the `default` label in a switch statement that covers all enumeration values.
+ *
+ *	@discussion
+ *		Use `MDNS_COVERED_SWITCH_DEFAULT` instead of `default` to avoid the `-Wcovered-switch-default` warning
+ *		in a switch statement that covers all enumeration values. This macro is useful when strict enforcement
+ *		of the `-Wswitch-default` warning compels us to include a default label in such switch statements.
+ */
+#if MDNS_COMPILER_IS_CLANG()
+	#define MDNS_COVERED_SWITCH_DEFAULT								\
+		MDNS_CLANG_IGNORE_WARNING_BEGIN(-Wcovered-switch-default)	\
+		default														\
+		MDNS_CLANG_IGNORE_WARNING_END()
+#else
+	#define MDNS_COVERED_SWITCH_DEFAULT	default
+#endif
+
+/*!
+ *	@brief
+ *		The static keyword for array parameters for C99 or later.
+ *
+ *	@discussion
+ *		See <https://en.cppreference.com/w/c/language/operator_other#Function_call>.
+ */
+#if MDNS_C_STANDARD_IS_AT_LEAST(C99)
+	#define MDNS_STATIC_ARRAY_PARAM	static
+#else
+	#define MDNS_STATIC_ARRAY_PARAM
+#endif
+
+/*!
+ *	@brief
+ *		The size of a Universally Unique Identifier (UUID) in bytes.
+ *
+ *	@discussion
+ *		See <https://datatracker.ietf.org/doc/html/rfc4122#section-4.1>.
+ */
+#define MDNS_UUID_SIZE	16
 
 #endif	// MDNS_GENERAL_H

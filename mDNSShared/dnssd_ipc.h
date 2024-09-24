@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2003-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,6 +30,7 @@
 #define DNSSD_IPC_H
 
 #include "dns_sd.h"
+#include "general.h"
 
 //
 // Common cross platform services
@@ -117,6 +118,13 @@ extern char *win32_strerror(int inErrorCode);
 #define IPC_TLV_TYPE_GET_TRACKER_STR                8 // A uint8. If non-zero, include tracker domain if applicable.
 #define IPC_TLV_TYPE_SERVICE_ATTR_TRACKER_STR       9 // A null-terminated string. The domain (original hostname or resolved CNAME)
                                                       // that was identified as a tracker
+#define IPC_TLV_TYPE_RESOLVER_OVERRIDE             10 // UUID of resolver configuration to use as an override. [1]
+#define IPC_TLV_TYPE_SERVICE_ATTR_HOST_KEY_HASH    11 // A uint32 value for a host key hash.
+
+// Notes:
+// 1. If this TLV is specified, then the UUID identifies the libnetwork resolver configuration to use for the DNS-SD
+//    API operation (currently limited to DNSServiceQueryRecordWithAttribute()). This overrides the normal DNS service
+//    select process.
 
 // Structure packing macro. If we're not using GNUC, it's not fatal. Most compilers naturally pack the on-the-wire
 // structures correctly anyway, so a plain "struct" is usually fine. In the event that structures are not packed
@@ -228,15 +236,18 @@ size_t get_required_tlv_length(uint16_t value_length);
 size_t get_required_tlv_string_length(const char *str_value);
 size_t get_required_tlv_uint8_length(void);
 size_t get_required_tlv_uint32_length(void);
-void put_tlv(uint16_t type, uint16_t length, const uint8_t *value, uint8_t **ptr, const uint8_t *limit);
+size_t put_tlv(uint16_t type, uint16_t length, const uint8_t *value, uint8_t **ptr, const uint8_t *limit);
 void put_tlv_string(const uint16_t type, const char *const str_value, uint8_t **const ptr, const uint8_t *const limit,
     int *const out_error);
 void put_tlv_uint8(uint16_t type, uint8_t u8, uint8_t **ptr, const uint8_t *limit);
 void put_tlv_uint16(uint16_t type, uint16_t u16, uint8_t **ptr, const uint8_t *limit);
-void put_tlv_uint32(uint16_t type, uint32_t u32, uint8_t **ptr, const uint8_t *limit);
+size_t put_tlv_uint32(uint16_t type, uint32_t u32, uint8_t **ptr, const uint8_t *limit);
+size_t put_tlv_uuid(uint16_t type, const uint8_t uuid[MDNS_STATIC_ARRAY_PARAM MDNS_UUID_SIZE], uint8_t **ptr,
+    const uint8_t *limit);
 const uint8_t *get_tlv(const uint8_t *src, const uint8_t *end, uint16_t type, size_t *out_length);
 const char *get_tlv_string(const uint8_t *const start, const uint8_t *const end, const uint16_t type);
 uint32_t get_tlv_uint32(const uint8_t *src, const uint8_t *end, uint16_t type, int *out_error);
+const uint8_t *get_tlv_uuid(const uint8_t *src, const uint8_t *end, uint16_t type);
 
 void ConvertHeaderBytes(ipc_msg_hdr *hdr);
 

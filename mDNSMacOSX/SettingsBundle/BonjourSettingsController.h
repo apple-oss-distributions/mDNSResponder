@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-#import <Preferences/Preferences.h>
+#import <Preferences/PSListItemsController.h>
 
 @interface BonjourSettingsController: PSListItemsController {
     

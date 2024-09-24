@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -198,8 +198,8 @@ dns_record_type_value_to_string(const uint16_t type)
 		case kDNSRecordType_TA:			return("TA");
 		case kDNSRecordType_DLV:		return("DLV");
 		case kDNSRecordType_Reserved:	return("Reserved");
+		default:						return NULL;
 	}
-	return NULL;
 }
 
 //======================================================================================================================

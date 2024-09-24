@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ mDNSAddr
 mDNSAddr_from_in_addr(const struct in_addr * const NONNULL v4)
 {
 	mDNSAddr mdns_addr; // NOLINT(misc-uninitialized-record-variable): No need to initialize mdns_addr here.
-	check_compile_time_code(sizeof(mdns_addr.ip.v4) == sizeof(v4->s_addr));
+	mdns_compile_time_check_local(sizeof(mdns_addr.ip.v4) == sizeof(v4->s_addr));
 
 	mdns_addr.type = mDNSAddrType_IPv4;
 	mDNSPlatformMemCopy(&mdns_addr.ip.v4, &v4->s_addr, sizeof(v4->s_addr));
@@ -44,7 +44,7 @@ mDNSAddr
 mDNSAddr_from_in6_addr(const struct in6_addr * const NONNULL v6)
 {
 	mDNSAddr mdns_addr; // NOLINT(misc-uninitialized-record-variable): No need to initialize mdns_addr here.
-	check_compile_time_code(sizeof(mdns_addr.ip.v6) == sizeof(v6->s6_addr));
+	mdns_compile_time_check_local(sizeof(mdns_addr.ip.v6) == sizeof(v6->s6_addr));
 
 	mdns_addr.type = mDNSAddrType_IPv6;
 	mDNSPlatformMemCopy(&mdns_addr.ip.v6, v6->s6_addr, sizeof(v6->s6_addr));

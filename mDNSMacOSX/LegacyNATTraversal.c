@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004-2019, 2022-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2004-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -456,18 +456,11 @@ mDNSlocal void tcpConnectionCallback(TCPSocket *sock, void *context, mDNSBool Co
         case LNTExternalAddrOp:  handleLNTGetExternalAddressResponse(tcpInfo); break;
         case LNTPortMapOp:       handleLNTPortMappingResponse       (tcpInfo); break;
         case LNTPortMapDeleteOp: status = mStatus_ConfigChanged;               break;
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wcovered-switch-default"
-#endif
-        default:
+        MDNS_COVERED_SWITCH_DEFAULT:
             LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "tcpConnectionCallback: bad tcp operation! %d",
                 tcpInfo->op);
             status = mStatus_Invalid;
             break;
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
         }
     }
 exit:
@@ -513,6 +506,7 @@ exit:
             }
             break;
         case LNTPortMapDeleteOp: break;
+        MDNS_COVERED_SWITCH_DEFAULT: break;
         }
 
         mDNSPlatformTCPCloseConnection(sock);

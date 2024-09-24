@@ -130,6 +130,13 @@ struct dso_connect_state {
     mDNSBool canceled; // Indicates if the dso_connect_state_t has been canceled and should be ignored for processing.
 
     mDNSBool connecting;
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+    // A boolean value to indicate whether the dso session should use the preconfigured TLS server certificates to
+    // perform the trust evaluation.
+    mDNSBool trusts_alternative_server_certificates;
+#endif
+
     mDNSIPPort config_port, connect_port;
     dso_transport_t *transport;
 #ifdef DSO_USES_NETWORK_FRAMEWORK
@@ -142,6 +149,7 @@ struct dso_connect_state {
     int max_outstanding_queries;
     mDNSs32 last_event;
     mDNSs32 reconnect_time;
+    mDNSu32 if_idx; // The index of the interface where the DSO session is established through.
 };
 
 typedef struct {

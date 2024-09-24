@@ -100,8 +100,8 @@ srp_sec_error_print(const char *reason, OSStatus status)
 static srp_key_t *
 srp_get_key_internal(const char *key_name, bool delete)
 {
-    long two56 = 256;
     srp_key_t *key = NULL;
+    long two56 = 256;
     OSStatus status;
 
     CFMutableDictionaryRef key_parameters = CFDictionaryCreateMutable(NULL, 8,
@@ -121,6 +121,7 @@ srp_get_key_internal(const char *key_name, bool delete)
         CFDictionaryAddValue(key_parameters, kSecReturnRef, kCFBooleanTrue);
         CFDictionaryAddValue(key_parameters, kSecMatchLimit, kSecMatchLimitOne);
         CFDictionaryAddValue(key_parameters, kSecClass, kSecClassKey);
+        CFDictionaryAddValue(key_parameters, kSecUseDataProtectionKeychain, kCFBooleanTrue);
         pubkey_parameters = CFDictionaryCreateMutableCopy(NULL, 8, key_parameters);
         if (pubkey_parameters != NULL) {
             CFDictionaryAddValue(key_parameters, kSecAttrKeyClass, kSecAttrKeyClassPrivate);
@@ -169,6 +170,8 @@ srp_get_key_internal(const char *key_name, bool delete)
             CFRelease(pubkey_parameters);
         }
     }
+    (void)key_name;
+    (void)delete;
     return key;
 }
 
@@ -212,8 +215,8 @@ srp_signature_length(srp_key_t *key)
 size_t
 srp_pubkey_copy(uint8_t *buf, size_t max, srp_key_t *key)
 {
-    CFErrorRef error = NULL;
     size_t ret = 0;
+    CFErrorRef error = NULL;
     CFDataRef pubkey = SecKeyCopyExternalRepresentation(key->public, &error);
     if (pubkey == NULL) {
         if (error != NULL) {
@@ -246,12 +249,12 @@ int
 srp_sign(uint8_t *output, size_t max, uint8_t *message, size_t msglen,
          uint8_t *rr, size_t rdlen, srp_key_t *key)
 {
+    int ret = 0;
     CFMutableDataRef payload = NULL;
     CFDataRef signature = NULL;
     CFErrorRef error = NULL;
     const uint8_t *bytes;
     unsigned long len;
-    int ret = 0;
 
     if (max < ECDSA_SHA256_SIG_SIZE) {
         ERROR("srp_sign: not enough space in output buffer (%lu) for signature (%d).",

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1809,7 +1809,7 @@ mDNSlocal const domainname *DNS_PUSH_NOTIFICATION_SERVICE_TYPE = (const domainna
 mDNSlocal mStatus GetZoneData_StartQuery(mDNS *const m, ZoneData *zd, mDNSu16 qtype);
 
 // GetZoneData_QuestionCallback is called from normal client callback context (core API calls allowed)
-mDNSlocal void GetZoneData_QuestionCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
+mDNSexport void GetZoneData_QuestionCallback(mDNS *const m, DNSQuestion *question, const ResourceRecord *const answer, QC_result AddRecord)
 {
     ZoneData *zd = (ZoneData*)question->QuestionContext;
 
@@ -1817,6 +1817,9 @@ mDNSlocal void GetZoneData_QuestionCallback(mDNS *const m, DNSQuestion *question
 
     if (!AddRecord) return;                                             // Don't care about REMOVE events
     if (AddRecord == QC_addnocache && answer->rdlength == 0) return;    // Don't care about transient failure indications
+    if (AddRecord == QC_suppressed && answer->rdlength == 0) return;    // Ignore the suppression result caused by no
+                                                                        // DNS service, in which case we should not move
+                                                                        // to the next name labels.
     if (answer->rrtype != question->qtype) return;                      // Don't care about CNAMEs
 
     if (answer->rrtype == kDNSType_SOA)
@@ -2387,6 +2390,7 @@ mDNSlocal void UpdateOneSRVRecord(mDNS *m, AuthRecord *rr)
         return;
     case regState_Unregistered:
     case regState_Zero:
+    MDNS_COVERED_SWITCH_DEFAULT:
         break;
     }
     LogMsg("UpdateOneSRVRecord: Unknown state %d for %##s", rr->state, rr->resrec.name->c);
@@ -4339,6 +4343,7 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
     case regState_UpdatePending:
     case regState_Registered: break;
     case regState_DeregPending: break;
+    MDNS_COVERED_SWITCH_DEFAULT: break;
 
     case regState_NATError:
     case regState_NATMap:
@@ -4504,6 +4509,9 @@ mDNSexport mStatus uDNS_UpdateRecord(mDNS *m, AuthRecord *rr)
     case regState_NATError:
         LogMsg("ERROR: uDNS_UpdateRecord called for record %##s with bad state regState_NATError", rr->resrec.name->c);
         return mStatus_UnknownErr;      // states for service records only
+
+    MDNS_COVERED_SWITCH_DEFAULT:
+        break;
     }
     LogMsg("uDNS_UpdateRecord: Unknown state %d for %##s", rr->state, rr->resrec.name->c);
 
@@ -4515,6 +4523,8 @@ unreg_error:
 
 // ***************************************************************************
 // MARK: - Periodic Execution Routines
+
+#if !MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
 
 mDNSlocal const char *LLQStateToString(LLQ_State state);
 
@@ -4665,6 +4675,7 @@ mDNSlocal void uDNS_HandleLLQState(mDNS *const NONNULL m, DNSQuestion *const NON
         DNSTypeName(q->qtype));
 #endif
 }
+#endif // !MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
 
 // The question to be checked is not passed in as an explicit parameter;
 // instead it is implicit that the question to be checked is m->CurrentQuestion.
@@ -4673,6 +4684,7 @@ mDNSlocal void uDNS_CheckCurrentQuestion(mDNS *const m)
     DNSQuestion *q = m->CurrentQuestion;
     if (m->timenow - NextQSendTime(q) < 0) return;
 
+#if !MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
     if (q->LongLived)
     {
         uDNS_HandleLLQState(m,q);
@@ -4693,6 +4705,7 @@ mDNSlocal void uDNS_CheckCurrentQuestion(mDNS *const m)
         }
 #endif // MDNSRESPONDER_SUPPORTS(COMMON, DNS_PUSH)
     }
+#endif // !MDNSRESPONDER_SUPPORTS(APPLE, DNS_PUSH)
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     Querier_HandleUnicastQuestion(q);
@@ -5250,7 +5263,9 @@ mDNSexport void mDNS_AddSearchDomain(const domainname *const domain, mDNSInterfa
         {
             // If domain is already in list, and marked for deletion, unmark the delete
             // Be careful not to touch the other flags that may be present
-            LogInfo("mDNS_AddSearchDomain already in list %##s", domain->c);
+            LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                "mDNS_AddSearchDomain: domain already in list -- search domain: " PRI_DM_NAME,
+                DM_NAME_PARAM_NONNULL(domain));
             if ((*p)->flag & SLE_DELETE) (*p)->flag &= ~SLE_DELETE;
             tmp = *p;
             *p = tmp->next;
@@ -5267,11 +5282,17 @@ mDNSexport void mDNS_AddSearchDomain(const domainname *const domain, mDNSInterfa
     {
         // if domain not in list, add to list, mark as add (1)
         *p = (SearchListElem *) mDNSPlatformMemAllocateClear(sizeof(**p));
-        if (!*p) { LogMsg("ERROR: mDNS_AddSearchDomain - malloc"); return; }
+        if (!*p)
+        {
+            LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_ERROR, "ERROR: mDNS_AddSearchDomain - malloc");
+            return;
+        }
         AssignDomainName(&(*p)->domain, domain);
         (*p)->next = mDNSNULL;
         (*p)->InterfaceID = InterfaceID;
-        LogInfo("mDNS_AddSearchDomain created new %##s, InterfaceID %p", domain->c, InterfaceID);
+        LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+            "mDNS_AddSearchDomain: new search domain added -- search domain: " PRI_DM_NAME ", InterfaceID %p",
+            DM_NAME_PARAM_NONNULL(domain), InterfaceID);
     }
 }
 
@@ -5424,7 +5445,7 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
         // before.
         for (ptr = SearchList; ptr; ptr = ptr->next)
             ptr->flag &= ~SLE_DELETE;
-        LogInfo("uDNS_SetupWABQueries: No config change");
+        LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT, "uDNS_SetupWABQueries: No config change");
     }
     mDNS_Unlock(m);
 
@@ -5440,7 +5461,10 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
     while (*p)
     {
         ptr = *p;
-        LogInfo("uDNS_SetupWABQueries:action 0x%x: Flags 0x%x,  AuthRecs %p, InterfaceID %p %##s", action, ptr->flag, ptr->AuthRecs, ptr->InterfaceID, ptr->domain.c);
+        const mDNSu32 nameHash = mDNS_DomainNameFNV1aHash(&ptr->domain);
+        LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+            "uDNS_SetupWABQueries -- action: 0x%x, flags: 0x%x, ifid: %p, domain: " PUB_DM_NAME " (%x)",
+            action, ptr->flag, ptr->InterfaceID, DM_NAME_PARAM(&ptr->domain), nameHash);
         // If SLE_DELETE is set, stop all the queries, deregister all the records and free the memory.
         // Otherwise, check to see what the "action" requires. If a particular action bit is not set and
         // we have started the corresponding queries as indicated by the "flags", stop those queries and
@@ -5462,20 +5486,23 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
                 if ((ptr->flag & SLE_WAB_BROWSE_QUERY_STARTED) &&
                     !SameDomainName(&ptr->domain, &localdomain) && (ptr->InterfaceID == mDNSInterface_Any))
                 {
-                    LogInfo("uDNS_SetupWABQueries: DELETE  Browse for domain  %##s", ptr->domain.c);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                        "uDNS_SetupWABQueries: DELETE Browse for domain -- name hash: %x", nameHash);
                     mDNS_StopGetDomains(m, &ptr->BrowseQ);
                     mDNS_StopGetDomains(m, &ptr->DefBrowseQ);
                 }
                 if ((ptr->flag & SLE_WAB_LBROWSE_QUERY_STARTED) &&
                     !SameDomainName(&ptr->domain, &localdomain) && (ptr->InterfaceID == mDNSInterface_Any))
                 {
-                    LogInfo("uDNS_SetupWABQueries: DELETE  Legacy Browse for domain  %##s", ptr->domain.c);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                        "uDNS_SetupWABQueries: DELETE Legacy Browse for domain -- name hash: %x", nameHash);
                     mDNS_StopGetDomains(m, &ptr->AutomaticBrowseQ);
                 }
                 if ((ptr->flag & SLE_WAB_REG_QUERY_STARTED) &&
                     !SameDomainName(&ptr->domain, &localdomain) && (ptr->InterfaceID == mDNSInterface_Any))
                 {
-                    LogInfo("uDNS_SetupWABQueries: DELETE  Registration for domain  %##s", ptr->domain.c);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                        "uDNS_SetupWABQueries: DELETE Registration for domain -- name hash: %x", nameHash);
                     mDNS_StopGetDomains(m, &ptr->RegisterQ);
                     mDNS_StopGetDomains(m, &ptr->DefRegisterQ);
                 }
@@ -5487,9 +5514,16 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
                 {
                     ARListElem *dereg = arList;
                     arList = arList->next;
-                    LogInfo("uDNS_SetupWABQueries: DELETE Deregistering PTR %##s -> %##s", dereg->ar.resrec.name->c, dereg->ar.resrec.rdata->u.name.c);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                        "uDNS_SetupWABQueries: DELETE Deregistering PTR -- "
+                        "record: " PRI_DM_NAME " PTR " PRI_DM_NAME, DM_NAME_PARAM(dereg->ar.resrec.name),
+                        DM_NAME_PARAM(&dereg->ar.resrec.rdata->u.name));
                     err = mDNS_Deregister(m, &dereg->ar);
-                    if (err) LogMsg("uDNS_SetupWABQueries:: ERROR!! mDNS_Deregister returned %d", err);
+                    if (err)
+                    {
+                        LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_ERROR,
+                            "uDNS_SetupWABQueries: mDNS_Deregister returned error -- error: %d", err);
+                    }
                     // Memory will be freed in the FreeARElemCallback
                 }
                 continue;
@@ -5501,7 +5535,8 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
             if (!(action & UDNS_WAB_BROWSE_QUERY) && (ptr->flag & SLE_WAB_BROWSE_QUERY_STARTED) &&
                 !SameDomainName(&ptr->domain, &localdomain) && (ptr->InterfaceID == mDNSInterface_Any))
             {
-                LogInfo("uDNS_SetupWABQueries: Deleting Browse for domain  %##s", ptr->domain.c);
+                LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                    "uDNS_SetupWABQueries: Deleting Browse for domain -- name hash: %x", nameHash);
                 ptr->flag &= ~SLE_WAB_BROWSE_QUERY_STARTED;
                 uDNS_DeleteWABQueries(m, ptr, UDNS_WAB_BROWSE_QUERY);
             }
@@ -5509,7 +5544,8 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
             if (!(action & UDNS_WAB_LBROWSE_QUERY) && (ptr->flag & SLE_WAB_LBROWSE_QUERY_STARTED) &&
                 !SameDomainName(&ptr->domain, &localdomain) && (ptr->InterfaceID == mDNSInterface_Any))
             {
-                LogInfo("uDNS_SetupWABQueries: Deleting Legacy Browse for domain  %##s", ptr->domain.c);
+                LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                    "uDNS_SetupWABQueries: Deleting Legacy Browse for domain -- name hash: %x", nameHash);
                 ptr->flag &= ~SLE_WAB_LBROWSE_QUERY_STARTED;
                 uDNS_DeleteWABQueries(m, ptr, UDNS_WAB_LBROWSE_QUERY);
             }
@@ -5517,7 +5553,8 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
             if (!(action & UDNS_WAB_REG_QUERY) && (ptr->flag & SLE_WAB_REG_QUERY_STARTED) &&
                 !SameDomainName(&ptr->domain, &localdomain) && (ptr->InterfaceID == mDNSInterface_Any))
             {
-                LogInfo("uDNS_SetupWABQueries: Deleting Registration for domain  %##s", ptr->domain.c);
+                LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                    "uDNS_SetupWABQueries: Deleting Registration for domain -- name hash: %x", nameHash);
                 ptr->flag &= ~SLE_WAB_REG_QUERY_STARTED;
                 uDNS_DeleteWABQueries(m, ptr, UDNS_WAB_REG_QUERY);
             }
@@ -5535,22 +5572,26 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
                 err1 = mDNS_GetDomains(m, &ptr->BrowseQ,          mDNS_DomainTypeBrowse,              &ptr->domain, ptr->InterfaceID, FoundDomain, ptr);
                 if (err1)
                 {
-                    LogMsg("uDNS_SetupWABQueries: GetDomains for domain %##s returned error(s):\n"
-                           "%d (mDNS_DomainTypeBrowse)\n", ptr->domain.c, err1);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_ERROR,
+                        "uDNS_SetupWABQueries: GetDomains(mDNS_DomainTypeBrowse) returned error -- "
+                        "name hash: %x, error: %d", nameHash, err1);
                 }
                 else
                 {
-                    LogInfo("uDNS_SetupWABQueries: Starting Browse for domain %##s", ptr->domain.c);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                        "uDNS_SetupWABQueries: Starting Browse for domain -- name hash: %x", nameHash);
                 }
                 err2 = mDNS_GetDomains(m, &ptr->DefBrowseQ,       mDNS_DomainTypeBrowseDefault,       &ptr->domain, ptr->InterfaceID, FoundDomain, ptr);
                 if (err2)
                 {
-                    LogMsg("uDNS_SetupWABQueries: GetDomains for domain %##s returned error(s):\n"
-                           "%d (mDNS_DomainTypeBrowseDefault)\n", ptr->domain.c, err2);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_ERROR,
+                        "uDNS_SetupWABQueries: GetDomains(mDNS_DomainTypeBrowseDefault) returned error -- "
+                        "name hash: %x, error: %d", nameHash, err2);
                 }
                 else
                 {
-                    LogInfo("uDNS_SetupWABQueries: Starting Default Browse for domain %##s", ptr->domain.c);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                        "uDNS_SetupWABQueries: Starting Default Browse for domain -- name hash: %x", nameHash);
                 }
                 // For simplicity, we mark a single bit for denoting that both the browse queries have started.
                 // It is not clear as to why one would fail to start and the other would succeed in starting up.
@@ -5572,14 +5613,15 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
                 err1 = mDNS_GetDomains(m, &ptr->AutomaticBrowseQ, mDNS_DomainTypeBrowseAutomatic,     &ptr->domain, ptr->InterfaceID, FoundDomain, ptr);
                 if (err1)
                 {
-                    LogMsg("uDNS_SetupWABQueries: GetDomains for domain %##s returned error(s):\n"
-                           "%d (mDNS_DomainTypeBrowseAutomatic)\n",
-                           ptr->domain.c, err1);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_ERROR,
+                        "uDNS_SetupWABQueries: GetDomains(mDNS_DomainTypeBrowseAutomatic) returned error -- "
+                        "name hash: %x, error: %d", nameHash, err1);
                 }
                 else
                 {
                     ptr->flag |= SLE_WAB_LBROWSE_QUERY_STARTED;
-                    LogInfo("uDNS_SetupWABQueries: Starting Legacy Browse for domain %##s", ptr->domain.c);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                        "uDNS_SetupWABQueries: Starting Legacy Browse for domain -- name hash: %x", nameHash);
                 }
             }
         }
@@ -5593,22 +5635,26 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
                 err1 = mDNS_GetDomains(m, &ptr->RegisterQ,        mDNS_DomainTypeRegistration,        &ptr->domain, ptr->InterfaceID, FoundDomain, ptr);
                 if (err1)
                 {
-                    LogMsg("uDNS_SetupWABQueries: GetDomains for domain %##s returned error(s):\n"
-                           "%d (mDNS_DomainTypeRegistration)\n", ptr->domain.c, err1);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_ERROR,
+                        "uDNS_SetupWABQueries: GetDomains(mDNS_DomainTypeRegistration) returned error -- "
+                        "name hash: %x, error: %d", nameHash, err1);
                 }
                 else
                 {
-                    LogInfo("uDNS_SetupWABQueries: Starting Registration for domain %##s", ptr->domain.c);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                        "uDNS_SetupWABQueries: Starting Registration for domain -- name hash: %x", nameHash);
                 }
                 err2 = mDNS_GetDomains(m, &ptr->DefRegisterQ,     mDNS_DomainTypeRegistrationDefault, &ptr->domain, ptr->InterfaceID, FoundDomain, ptr);
                 if (err2)
                 {
-                    LogMsg("uDNS_SetupWABQueries: GetDomains for domain %##s returned error(s):\n"
-                           "%d (mDNS_DomainTypeRegistrationDefault)", ptr->domain.c, err2);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_ERROR,
+                        "uDNS_SetupWABQueries: GetDomains(mDNS_DomainTypeRegistrationDefault) returned error -- "
+                        "name hash: %x, error: %d", nameHash, err2);
                 }
                 else
                 {
-                    LogInfo("uDNS_SetupWABQueries: Starting Default Registration for domain %##s", ptr->domain.c);
+                    LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
+                        "uDNS_SetupWABQueries: Starting Default Registration for domain -- name hash: %x", nameHash);
                 }
                 if (!err1 || !err2)
                 {
@@ -5685,10 +5731,22 @@ mDNSexport domainname  *uDNS_GetNextSearchDomain(mDNSInterfaceID InterfaceID, in
     while (p)
     {
         int labels = CountLabels(&p->domain);
-        if (labels > 0)
+        if (labels > 1)
+        {
+            const domainname *d = SkipLeadingLabels(&p->domain, labels - 2);
+            if (SameDomainName(d, (const domainname *)"\x7" "in-addr" "\x4" "arpa") ||
+                SameDomainName(d, (const domainname *)"\x3" "ip6"     "\x4" "arpa"))
+            {
+                LogInfo("uDNS_GetNextSearchDomain: skipping search domain %##s, InterfaceID %p", p->domain.c, p->InterfaceID);
+                (*searchIndex)++;
+                p = p->next;
+                continue;
+            }
+        }
+        if (ignoreDotLocal && labels > 0)
         {
             const domainname *d = SkipLeadingLabels(&p->domain, labels - 1);
-            if (ignoreDotLocal && SameDomainLabel(d->c, (const mDNSu8 *)"\x5" "local"))
+            if (SameDomainLabel(d->c, (const mDNSu8 *)"\x5" "local"))
             {
                 LogInfo("uDNS_GetNextSearchDomain: skipping local domain %##s, InterfaceID %p", p->domain.c, p->InterfaceID);
                 (*searchIndex)++;
@@ -5814,6 +5872,7 @@ mDNSlocal void DNSPushProcessResponse(mDNS *const m, const DNSMessage *const msg
     CacheRecord *CacheFlushRecords = (CacheRecord*)1;
     CacheRecord **cfp = &CacheFlushRecords;
     enum { removeName, removeClass, removeRRset, removeRR, addRR } action;
+    const mDNSInterfaceID if_id = DNSPushServerGetInterfaceID(m, server);
 
     // Ignore records we don't want to cache.
 
@@ -5933,7 +5992,7 @@ mDNSlocal void DNSPushProcessResponse(mDNS *const m, const DNSMessage *const msg
             CacheRecord *rr = mDNSNULL;
 
             // 2a. Check if this packet resource record is already in our cache.
-            rr = mDNSCoreReceiveCacheCheck(m, msg, uDNS_LLQ_Events, slot, cg, &cfp, mDNSNULL);
+            rr = mDNSCoreReceiveCacheCheck(m, msg, uDNS_LLQ_Events, slot, cg, &cfp, if_id);
 
             // If packet resource record not in our cache, add it now
             // (unless it is just a deletion of a record we never had, in which case we don't care)
@@ -5961,12 +6020,13 @@ mDNSlocal void DNSPushProcessResponses(mDNS *const m, const DNSMessage *const ms
     mDNSIPPort port;
     port.NotAnInteger = 0;
     ResourceRecord *const mrr = &m->rec.r.resrec;
+    const mDNSInterfaceID if_id = DNSPushServerGetInterfaceID(m, server);
 
     // Validate the contents of the message
     // XXX Right now this code will happily parse all the valid data and then hit invalid data
     // and give up.  I don't think there's a risk here, but we should discuss it.
     // XXX what about source validation?   Like, if we have a VPN, are we safe?   I think yes, but let's think about it.
-    while ((ptr = GetLargeResourceRecord(m, msg, ptr, end, mDNSNULL, kDNSRecordTypePacketAns, &m->rec)))
+    while ((ptr = GetLargeResourceRecord(m, msg, ptr, end, if_id, kDNSRecordTypePacketAns, &m->rec)))
     {
     #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
         mdns_forget(&mrr->metadata);
@@ -6825,6 +6885,15 @@ static DNSPushServer *DNSPushServerCreate(const domainname *const name, const mD
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
     mdns_replace(&server->dnsservice, dnsService);
+#if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+    if (server->connectInfo)
+    {
+        // If the underlying DNS service is an mDNS alternative service, then it might have configured alternative TLS
+        // trust anchors for us to use when setting up the TLS connection.
+        server->connectInfo->trusts_alternative_server_certificates =
+            mdns_dns_service_is_mdns_alternative(dnsService);
+    }
+#endif
 #else
     server->qDNSServer = qDNSServer;
 #endif
@@ -6844,6 +6913,33 @@ static DNSPushServer *DNSPushServerCreate(const domainname *const name, const mD
 exit:
     mDNSPlatformMemFree(server);
     return serverToReturn;
+}
+
+mDNSexport mDNSInterfaceID DNSPushServerGetInterfaceID(mDNS *const m, const DNSPushServer *const server)
+{
+    mDNSInterfaceID ifID = mDNSInterface_Any;
+    if (server)
+    {
+        bool hasLocalPurview = false;
+    #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
+        if (server->dnsservice)
+        {
+            // Check if the underlying DNS service of this DNS push server has local purview
+            hasLocalPurview = mdns_dns_service_has_local_purview(server->dnsservice);
+        }
+    #endif
+        if (hasLocalPurview && server->connectInfo)
+        {
+            // If the underlying DNS service has local purview, then this server is specifically related to the
+            // interface where the DSO connection is established.
+            const dso_connect_state_t *const dcs = server->connectInfo;
+            if (dcs->if_idx != 0)
+            {
+                ifID = mDNSPlatformInterfaceIDfromInterfaceIndex(m, dcs->if_idx);
+            }
+        }
+    }
+    return ifID;
 }
 
 mDNSexport void DNSPushServerFinalize(DNSPushServer *const server)
@@ -7030,13 +7126,13 @@ mDNSexport void UnsubscribeQuestionFromDNSPushServer(mDNS *const NONNULL m, DNSQ
             continue;
         }
 
-        // When a subscription is canceled, this original TTL needs to be restored and the record aging resumes.
-        // See https://tools.ietf.org/html/rfc8765#section-6.3.1: "The TTL of an added record is stored by the client."
+        // When a subscription is canceled, the added record will be removed immediately from the cache.
         cache_record->DNSPushSubscribed = mDNSfalse;
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-            "[Q%u->PushS%u->DSO%u] the cached record aging resumes due to the unsubscribed activity - "
+            "[Q%u->PushS%u->DSO%u] Removing record from the cache due to the unsubscribed activity - "
             "qname: " PRI_DM_NAME ", qtype: " PUB_S ", TTL: %us.", qid, server_serial, dso_serial,
             DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), cache_record->resrec.rroriginalttl);
+        mDNS_PurgeCacheResourceRecord(m, cache_record);
     }
 
 exit:
@@ -7080,12 +7176,16 @@ DNSPushUpdateQuestionDuplicate(DNSQuestion *const NONNULL primary, DNSQuestion *
     }
     if (primary->dnsPushServer != mDNSNULL)
     {
-        if (primary->dnsPushServer->connection != mDNSNULL)
+        dso_state_t *const dso_state = primary->dnsPushServer->connection;
+        if (dso_state)
         {
+            // Update the outstanding query context from the old primary being stopped to the new primary.
+            dso_update_outstanding_query_context(dso_state, primary, duplicate);
+
             // Also update the context of the dso_activity_t since we are replacing the original primary question with
             // the new one(which is previously a duplicate of the primary question).
-            dso_activity_t *const activity = dso_find_activity(primary->dnsPushServer->connection, mDNSNULL,
-                                                               kDNSPushActivity_Subscription, primary);
+            dso_activity_t *const activity = dso_find_activity(dso_state, mDNSNULL, kDNSPushActivity_Subscription,
+                primary);
             if (activity != mDNSNULL)
             {
                 activity->context = duplicate;
@@ -7133,6 +7233,8 @@ mDNSlocal const char *LLQStateToString(const LLQ_State state)
         CASE_TO_STR(LLQ_SecondaryRequest);
         CASE_TO_STR(LLQ_Established);
         CASE_TO_STR(LLQ_Poll);
+        MDNS_COVERED_SWITCH_DEFAULT:
+            break;
     }
 #undef CASE_TO_STR
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_FAULT, "Invalid LLQ_State - state: %u", state);

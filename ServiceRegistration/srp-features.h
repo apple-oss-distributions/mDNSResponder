@@ -1,6 +1,6 @@
 /* srp-features.h
  *
- * Copyright (c) 2020-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,14 @@
 
 // SRP_FEATURE_COMBINED_SRP_DNSSD_PROXY: controls whether to initialize dnssd-proxy in srp-mdns-proxy.
 #if defined(BUILD_SRP_MDNS_PROXY) && (BUILD_SRP_MDNS_PROXY == 1)
+
+// SRP_TEST_SERVER always builds a full (simulated) Thread border router
+#  if defined(SRP_TEST_SERVER)
+#    define SRP_TEST_SERVER_OVERRIDE 1
+#  else
+#    define SRP_TEST_SERVER_OVERRIDE 0
+#  endif
+
 // We can only have combined srp-dnssd-proxy if we are building srp-mdns-proxy
 #  define SRP_FEATURE_PUBLISH_SPECIFIC_ROUTES 0
 #  define SRP_FEATURE_DNSSD_PROXY_SHARED_CONNECTION 0
@@ -56,6 +64,7 @@
 #endif
 
     #define SRP_ANALYTICS 0
+
 
 // At present we never want this, but we're keeping the code around.
 #define SRP_ALLOWS_MDNS_CONFLICTS 0

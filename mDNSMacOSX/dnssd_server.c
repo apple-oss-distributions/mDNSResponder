@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,6 +58,12 @@
 #include <mdns/signed_result.h>
 #endif
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+#include "uds_daemon.h"
+#include <mdns/dispatch.h>
+#include <mdns/powerlog.h>
+#endif
+
 #include "mdns_strict.h"
 
 //======================================================================================================================
@@ -77,11 +83,13 @@
 	check_compile_time(sizeof_field(DX_STRUCT(NAME), base) == sizeof(DX_STRUCT(SUPER)));	\
 	extern int _dx_base_type_check[sizeof(&(((dx_ ## NAME ## _t)0)->base) == ((dx_ ## SUPER ## _t)0))]
 
-#define DX_SUBKIND_DEFINE_ABSTRACT(NAME, SUPER, ...)		\
-	static const struct dx_kind_s _dx_ ## NAME ## _kind = {	\
-		.superkind = &_dx_ ## SUPER ##_kind,				\
-		__VA_ARGS__											\
-	};														\
+#define DX_SUBKIND_DEFINE_ABSTRACT(NAME, SUPER, ...)									\
+	static const struct dx_kind_s _dx_ ## NAME ## _kind = {								\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_BEGIN()	\
+		.superkind = &_dx_ ## SUPER ##_kind,											\
+		__VA_ARGS__																		\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_END()		\
+	};																					\
 	DX_BASE_CHECK(NAME, SUPER)
 
 #define DX_SUBKIND_DEFINE(NAME, SUPER, ...)												\
@@ -255,6 +263,9 @@ MDNS_CLANG_TREAT_WARNING_AS_ERROR_BEGIN(-Wpadded)
 struct dx_gai_request_s {
 	struct dx_request_s				base;					// Request object base.
 	mdns_dns_service_id_t			custom_service_id;		// ID for this request's custom DNS service.
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+	uint64_t						powerlog_start_time;	// If non-zero, time when mDNS client request started.
+#endif
 	GetAddrInfoClientRequest *		gai;					// Underlying GAI request.
 	QueryRecordClientRequest *		query;					// Underlying SVCB/HTTPS query request.
 	dx_gai_result_t					results;				// List of pending results.
@@ -292,7 +303,7 @@ struct dx_gai_request_s {
 	MDNS_STRUCT_PAD_64_32(1, 1);
 };
 MDNS_CLANG_TREAT_WARNING_AS_ERROR_END()
-mdns_compile_time_max_size_check(struct dx_gai_request_s, 248);
+mdns_compile_time_max_size_check(struct dx_gai_request_s, 256);
 
 // Notes:
 // 1. If a client request specifies that DNS services that allow failover be avoided if they're unable to provide
@@ -340,6 +351,9 @@ mdns_compile_time_max_size_check(struct dx_gai_request_s, 248);
 typedef xpc_object_t
 (*dx_request_take_results_f)(dx_any_request_t request);
 
+typedef void
+(*dx_request_report_powerlog_progress_f)(dx_any_request_t request);
+
 typedef const struct dx_request_kind_s * dx_request_kind_t;
 struct dx_request_kind_s {
 	struct dx_kind_s			base;
@@ -354,12 +368,14 @@ struct dx_request_kind_s {
 	_dx_ ## NAME ## _request_finalize(dx_ ## NAME ## _request_t request);							\
 																									\
 	static const struct dx_request_kind_s _dx_ ## NAME ## _request_kind = {							\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_BEGIN()				\
 		.base = {																					\
 			.superkind	= &_dx_request_kind,														\
 			.invalidate	= _dx_ ## NAME ## _request_invalidate,										\
 			.finalize	= _dx_ ## NAME ## _request_finalize											\
 		},																							\
 		__VA_ARGS__																					\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_END()					\
 	};																								\
 																									\
 	static dx_ ## NAME ## _request_t																\
@@ -377,7 +393,7 @@ static xpc_object_t
 _dx_gai_request_take_results(dx_gai_request_t request);
 
 DX_REQUEST_SUBKIND_DEFINE(gai,
-	.take_results	= _dx_gai_request_take_results
+	.take_results = _dx_gai_request_take_results,
 );
 
 //======================================================================================================================
@@ -609,9 +625,11 @@ static dx_session_t	g_session_list = NULL;
 mDNSexport void
 dnssd_server_init(void)
 {
-	static dispatch_once_t	s_once = 0;
-	static xpc_connection_t	s_listener = NULL;
-
+	static dispatch_once_t s_once = 0;
+	static xpc_connection_t s_listener = NULL;
+#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+	static dispatch_source_t s_powerlog_progress_timer = NULL;
+#endif
 	dispatch_once(&s_once,
 	^{
 		s_listener = xpc_connection_create_mach_service(DNSSD_MACH_SERVICE_NAME, _dx_server_queue(),
@@ -624,6 +642,23 @@ dnssd_server_init(void)
 			}
 		});
 		xpc_connection_activate(s_listener);
+	#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+		const uint32_t interval_ms = 30 * MDNS_MILLISECONDS_PER_MINUTE;
+		s_powerlog_progress_timer = mdns_dispatch_create_periodic_monotonic_timer(interval_ms, 5, _dx_server_queue());
+		if (s_powerlog_progress_timer) {
+			dispatch_source_set_event_handler(s_powerlog_progress_timer,
+			^{
+				os_log_debug(_mdns_server_log(), "periodic powerlog report timer fired");
+				_dx_kqueue_locked("dnssd_server: submitting client summary to powerlog", true,
+				^{
+					mdns_powerlog_submit_client_summary();
+				});
+			});
+			dispatch_activate(s_powerlog_progress_timer);
+		} else {
+			os_log_fault(_mdns_server_log(), "Failed to create periodic powerlog report timer");
+		}
+	#endif
 	});
 }
 
@@ -1442,9 +1477,7 @@ _dx_gai_request_trust_check(const dx_gai_request_t me, bool * const out_defer_st
 			err = kDNSServiceErr_NoAuth;
 			break;
 
-		CUClangWarningIgnoreBegin(-Wcovered-switch-default);
-		default:
-		CUClangWarningIgnoreEnd();
+		MDNS_COVERED_SWITCH_DEFAULT:
 			err = kDNSServiceErr_Unknown;
 			break;
 	}
@@ -1471,7 +1504,7 @@ _dx_gai_request_invalidate(const dx_gai_request_t me)
 	}
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRUST_ENFORCEMENT)
-	mdns_trust_forget(&me->trust);
+	mdns_trust_forget_with_invalidation(&me->trust);
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, SIGNED_RESULTS)
 	mdns_forget(&me->signed_resolve);
@@ -1750,6 +1783,16 @@ _dx_gai_request_start_client_requests_internal(const dx_gai_request_t me,
 		if (gai_params && !me->gai) {
 			me->gai = _dx_get_addr_info_client_request_start(gai_params, _dx_gai_request_gai_result_handler, me, &err);
 			require_noerr_return(err);
+		#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+			if (me->gai) {
+				const domainname *const qname = GetAddrInfoClientRequestGetQName(me->gai);
+				if ((me->ifindex != kDNSServiceInterfaceIndexLocalOnly) && IsLocalDomain(qname)) {
+					const char * const client_name = me->base.session->client_name;
+					const mDNSBool uses_awdl = ClientRequestUsesAWDL(me->ifindex, me->flags);
+					me->powerlog_start_time = mdns_powerlog_getaddrinfo_start(client_name, uses_awdl);
+				}
+			}
+		#endif
 		}
 	});
 	if (err) {
@@ -1766,6 +1809,14 @@ _dx_gai_request_stop_client_requests(const dx_gai_request_t me, const bool need_
 	_dx_kqueue_locked("dx_gai_request: stopping client requests", need_lock,
 	^{
 		_dx_get_addr_info_client_request_forget(&me->gai);
+	#if MDNSRESPONDER_SUPPORTS(APPLE, POWERLOG_MDNS_REQUESTS)
+		if (me->powerlog_start_time != 0) {
+			const char * const client_name = me->base.session->client_name;
+			const mDNSBool uses_awdl = ClientRequestUsesAWDL(me->ifindex, me->flags);
+			mdns_powerlog_getaddrinfo_stop(client_name, me->powerlog_start_time, uses_awdl);
+			me->powerlog_start_time = 0;
+		}
+	#endif
 		_dx_query_record_client_request_forget(&me->query);
 	});
 }
@@ -2176,6 +2227,9 @@ _dx_gai_request_enqueue_result(const dx_gai_request_t me, const QC_result qc_res
 				}
 				SetOrClearBits(&me->state, dx_gai_state_avoid_suppressed_a_result, false);
 				break;
+
+			default:
+				break;
 		}
 	}
 	_dx_gai_request_append_result(me, result);
@@ -2330,8 +2384,10 @@ _dx_gai_request_involves_parallel_a_and_aaaa_questions(const dx_gai_request_t me
 
 		case (kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6):
 			return true;
+
+		default:
+			return false;
 	}
-	return false;
 }
 
 //======================================================================================================================
@@ -2420,6 +2476,9 @@ _dx_gai_request_check_for_failover_restart(const dx_gai_request_t me, const Reso
 					case kDNSType_HTTPS:
 						me->state &= ~DX_GAI_STATE_WAITING_FOR_RESULTS;
 						break;
+
+					default:
+						break;
 				}
 			} else {
 				switch (answer->rrtype) {
@@ -2429,6 +2488,9 @@ _dx_gai_request_check_for_failover_restart(const dx_gai_request_t me, const Reso
 
 					case kDNSServiceType_AAAA:
 						me->state &= ~dx_gai_state_waiting_for_aaaa;
+						break;
+
+					default:
 						break;
 				}
 				const dx_gai_state_t state = me->state;
@@ -2632,7 +2694,6 @@ _dx_replace_domain_name(mdns_domain_name_t * const ptr, const domainname * const
 static bool
 _dx_qc_result_is_add(const QC_result qc_result)
 {
-	// No default case to allow the compiler to catch missing enum values.
 	switch (qc_result) {
 		case QC_rmv:
 			return false;
@@ -2641,9 +2702,9 @@ _dx_qc_result_is_add(const QC_result qc_result)
 		case QC_addnocache:
 		case QC_forceresponse:
 		case QC_suppressed:
-			break;
+		MDNS_COVERED_SWITCH_DEFAULT:
+			return true;
 	}
-	return true;
 }
 
 //======================================================================================================================
@@ -2651,7 +2712,6 @@ _dx_qc_result_is_add(const QC_result qc_result)
 static bool
 _dx_qc_result_is_suppressed(const QC_result qc_result)
 {
-	// No default case to allow the compiler to catch missing enum values.
 	switch (qc_result) {
 		case QC_suppressed:
 			return true;
@@ -2660,9 +2720,9 @@ _dx_qc_result_is_suppressed(const QC_result qc_result)
 		case QC_add:
 		case QC_addnocache:
 		case QC_forceresponse:
-			break;
+		MDNS_COVERED_SWITCH_DEFAULT:
+			return false;
 	}
-	return false;
 }
 
 //======================================================================================================================

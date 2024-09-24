@@ -25,6 +25,7 @@
 #include <stdint.h>
 #include <stddef.h>	// For offsetof().
 
+#include "general.h"
 #include "nullability.h"
 #include "dns_assert_macros.h"
 
@@ -126,13 +127,15 @@ typedef enum {
 //======================================================================================================================
 
 // Define the kind instance of the reference count object.
-#define REF_COUNT_OBJECT_DEFINE_KIND_INSTANCE_BASIC(FAMILY_NAME, NAME, ...)		\
-	const struct ref_count_kind_s _ ## FAMILY_NAME ## _ ## NAME ## _kind = { 	\
-		.superkind	= &ref_count_kind,											\
-		.name		= # FAMILY_NAME "_" # NAME,									\
-		.finalize	= _ ## FAMILY_NAME ## _ ## NAME ## _finalize,				\
-		__VA_ARGS__																\
-	};																			\
+#define REF_COUNT_OBJECT_DEFINE_KIND_INSTANCE_BASIC(FAMILY_NAME, NAME, ...)				\
+	const struct ref_count_kind_s _ ## FAMILY_NAME ## _ ## NAME ## _kind = { 			\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_BEGIN()	\
+		.superkind	= &ref_count_kind,													\
+		.name		= # FAMILY_NAME "_" # NAME,											\
+		.finalize	= _ ## FAMILY_NAME ## _ ## NAME ## _finalize,						\
+		__VA_ARGS__																		\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_END()		\
+	};																					\
 	OBJECT_BASE_CHECK(FAMILY_NAME ## _ ## NAME, ref_count_obj)
 
 #define REF_COUNT_OBJECT_DEFINE_KIND_INSTANCE(FAMILY_NAME, NAME)				\
@@ -198,12 +201,14 @@ typedef enum {
 
 #define REF_COUNT_OBJECT_SUBKIND_DEFINE_KIND_INSTANCE_ABSTRUCT(FAMILY_NAME, SUPER, NAME, ...)					\
 	const struct FAMILY_NAME ## _ ## SUPER ## _kind_s _ ## FAMILY_NAME ## _ ## SUPER ## _ ## NAME ## _kind = {	\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_BEGIN()							\
 		.base = {																								\
 			.superkind	= &_ ## FAMILY_NAME ## _ ## SUPER ## _kind,												\
 			.name 		= # FAMILY_NAME "_" # SUPER "_" # NAME,													\
 		},																										\
 		.FAMILY_NAME ## _ ## SUPER ## _init_fields = FAMILY_NAME ## _ ## SUPER ## _init_fields,					\
 		__VA_ARGS__																								\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_END()								\
 	};																											\
 	OBJECT_BASE_CHECK(FAMILY_NAME ## _ ## SUPER ## _ ## NAME, FAMILY_NAME ## _ ## SUPER)
 
@@ -221,6 +226,7 @@ typedef enum {
 
 #define REF_COUNT_OBJECT_SUBKIND_DEFINE_KIND_INSTANCE_WITHOUT_COMPARATOR(FAMILY_NAME, SUPER, NAME, ...)			\
 	const struct FAMILY_NAME ## _ ## SUPER ## _kind_s _ ## FAMILY_NAME ## _ ## SUPER ## _ ## NAME ## _kind = {	\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_BEGIN()							\
 		.base = {																								\
 			.superkind	= &_ ## FAMILY_NAME ## _ ## SUPER ## _kind,												\
 			.name 		= # FAMILY_NAME "_" # SUPER "_" # NAME,													\
@@ -228,16 +234,19 @@ typedef enum {
 		},																										\
 		.FAMILY_NAME ## _ ## SUPER ## _init_fields = FAMILY_NAME ## _ ## SUPER ## _init_fields,					\
 		__VA_ARGS__																								\
+		MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_END()								\
 	};																											\
 	OBJECT_BASE_CHECK(FAMILY_NAME ## _ ## SUPER ## _ ## NAME, FAMILY_NAME ## _ ## SUPER)
 
 #define REF_COUNT_OBJECT_SUBKIND_DEFINE_KIND_INSTANCE_FULL(FAMILY_NAME, SUPER, NAME, ...)						\
 	const struct FAMILY_NAME ## _ ## SUPER ## _kind_s _ ## FAMILY_NAME ## _ ## SUPER ## _ ## NAME ## _kind = {	\
 		.base = {																								\
+			MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_BEGIN()						\
 			.superkind	= &_ ## FAMILY_NAME ## _ ## SUPER ## _kind,												\
 			.name 		= # FAMILY_NAME "_" # SUPER "_" # NAME,													\
 			.compare	= _ ## FAMILY_NAME ## _ ## SUPER ## _ ## NAME ## _compare,								\
 			.finalize	= _ ## FAMILY_NAME ## _ ## SUPER ## _ ## NAME ## _finalize								\
+			MDNS_CLANG_IGNORE_INCOMPATIBLE_FUNCTION_POINTER_TYPES_STRICT_WARNING_END()							\
 		},																										\
 		.FAMILY_NAME ## _ ## SUPER ## _init_fields = FAMILY_NAME ## _ ## SUPER ## _init_fields,					\
 		__VA_ARGS__																								\

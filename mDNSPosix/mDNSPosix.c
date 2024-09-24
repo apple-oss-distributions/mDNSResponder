@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -385,8 +385,34 @@ mDNSlocal void tcpConnectCallback(int fd, void *context)
     }
 }
 
+// Searches the interface list looking for the named interface.
+// Returns a pointer to if it found, or NULL otherwise.
+mDNSlocal PosixNetworkInterface *SearchForInterfaceByName(mDNS *const m, const char *const intfName)
+{
+    PosixNetworkInterface *intf;
+
+    assert(m != NULL);
+    assert(intfName != NULL);
+
+    intf = (PosixNetworkInterface*)(m->HostInterfaces);
+    while ((intf != NULL) && (strcmp(intf->intfName, intfName) != 0))
+        intf = (PosixNetworkInterface *)(intf->coreIntf.next);
+
+    return intf;
+}
+
+mDNSlocal PosixNetworkInterface *SearchForInterfaceByIndex(mDNS *const m, const mDNSu32 index)
+{
+    PosixNetworkInterface *intf = (PosixNetworkInterface*)(m->HostInterfaces);
+    while (intf && (((mDNSu32)intf->index) != index))
+    {
+        intf = (PosixNetworkInterface *)(intf->coreIntf.next);
+    }
+    return intf;
+}
+
 // This routine is called when the main loop detects that data is available on a socket.
-mDNSlocal void SocketDataReady(mDNS *const m, PosixNetworkInterface *intf, int skt, UDPSocket *sock)
+mDNSlocal void SocketDataReady(mDNS *const m, const PosixNetworkInterface *intf, const int skt, UDPSocket *const sock)
 {
     mDNSAddr senderAddr, destAddr;
     mDNSIPPort senderPort, destPort;
@@ -398,7 +424,6 @@ mDNSlocal void SocketDataReady(mDNS *const m, PosixNetworkInterface *intf, int s
     int flags;
     mDNSu8 ttl;
     mDNSBool reject;
-    const mDNSInterfaceID InterfaceID = intf ? intf->coreIntf.InterfaceID : NULL;
 
     assert(m    != NULL);
     assert(skt  >= 0);
@@ -455,6 +480,29 @@ mDNSlocal void SocketDataReady(mDNS *const m, PosixNetworkInterface *intf, int s
             if      (packetInfo.ipi_ifname[0] != 0) reject = (strcmp(packetInfo.ipi_ifname, intf->intfName) != 0);
             else if (packetInfo.ipi_ifindex != -1) reject = (packetInfo.ipi_ifindex != intf->index);
 
+            // In case a unicast packet was received on an unexpected socket, i.e., a socket associated with an
+            // interface that doesn't match the interface on which the unicast packet was actually received, then
+            // instead of immediately rejecting it, pass the message to mDNSCoreReceive() with the actual interface ID
+            // instead of the ID of the interface with which the socket is associated.
+            if (reject && !mDNSAddrIsDNSMulticast(&destAddr))
+            {
+                const PosixNetworkInterface *realIntf = mDNSNULL;
+                if (packetInfo.ipi_ifname[0] != '\0')
+                {
+                    realIntf = SearchForInterfaceByName(m, packetInfo.ipi_ifname);
+                }
+                else if (packetInfo.ipi_ifindex != -1)
+                {
+                    realIntf = SearchForInterfaceByIndex(m, (mDNSu32)packetInfo.ipi_ifindex);
+                }
+                if (realIntf)
+                {
+                    debugf("SocketDataReady correcting receive interface from %s/%u to %s/%u",
+                        intf->intfName, intf->index, realIntf->intfName, realIntf->index);
+                    intf = realIntf;
+                    reject = mDNSfalse;
+                }
+            }
             if (reject)
             {
                 verbosedebugf("SocketDataReady ignored a packet from %#a to %#a on interface %s/%d expecting %#a/%s/%d/%d",
@@ -481,8 +529,11 @@ mDNSlocal void SocketDataReady(mDNS *const m, PosixNetworkInterface *intf, int s
     }
 
     if (packetLen >= 0)
+    {
+        const mDNSInterfaceID InterfaceID = intf ? intf->coreIntf.InterfaceID : NULL;
         mDNSCoreReceive(m, &packet, (mDNSu8 *)&packet + packetLen,
                         &senderAddr, senderPort, &destAddr, sock == mDNSNULL ? MulticastDNSPort : sock->port, InterfaceID);
+    }
 }
 
 mDNSlocal void UDPReadCallback(int fd, void *context)
@@ -959,22 +1010,6 @@ mDNSexport int ParseDNSServers(mDNS *m, const char *filePath)
     return (numOfServers > 0) ? 0 : -1;
 }
 
-// Searches the interface list looking for the named interface.
-// Returns a pointer to if it found, or NULL otherwise.
-mDNSlocal PosixNetworkInterface *SearchForInterfaceByName(mDNS *const m, const char *intfName)
-{
-    PosixNetworkInterface *intf;
-
-    assert(m != NULL);
-    assert(intfName != NULL);
-
-    intf = (PosixNetworkInterface*)(m->HostInterfaces);
-    while ((intf != NULL) && (strcmp(intf->intfName, intfName) != 0))
-        intf = (PosixNetworkInterface *)(intf->coreIntf.next);
-
-    return intf;
-}
-
 mDNSexport mDNSInterfaceID mDNSPlatformInterfaceIDfromInterfaceIndex(mDNS *const m, mDNSu32 index)
 {
     PosixNetworkInterface *intf;
@@ -985,10 +1020,7 @@ mDNSexport mDNSInterfaceID mDNSPlatformInterfaceIDfromInterfaceIndex(mDNS *const
     if (index == kDNSServiceInterfaceIndexP2P      ) return(mDNSInterface_P2P);
     if (index == kDNSServiceInterfaceIndexAny      ) return(mDNSInterface_Any);
 
-    intf = (PosixNetworkInterface*)(m->HostInterfaces);
-    while ((intf != NULL) && (mDNSu32) intf->index != index)
-        intf = (PosixNetworkInterface *)(intf->coreIntf.next);
-
+    intf = (PosixNetworkInterface*)SearchForInterfaceByIndex(m, index);
     return (mDNSInterfaceID) intf;
 }
 
@@ -2087,7 +2119,7 @@ mDNSexport mDNSBool mDNSPlatformValidRecordForInterface(const AuthRecord *rr, mD
     return 1;
 }
 
-mDNSexport mDNSBool mDNSPlatformValidQuestionForInterface(DNSQuestion *q, const NetworkInterfaceInfo *intf)
+mDNSexport mDNSBool mDNSPlatformValidQuestionForInterface(const DNSQuestion *const q, const NetworkInterfaceInfo *const intf)
 {
     (void) q;
     (void) intf;

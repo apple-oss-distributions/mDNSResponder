@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -240,7 +240,7 @@ dns_obj_rr_nsec3_has_reasonable_iterations(const dns_obj_rr_nsec3_t me)
 {
 	// Validating resolvers SHOULD return an insecure response when processing NSEC3 records with iterations larger
 	// than 100.
-	// See https://datatracker.ietf.org/doc/draft-ietf-dnsop-nsec3-guidance/
+	// See https://datatracker.ietf.org/doc/html/rfc9276
 	const uint16_t max_reasonable_iterations = 100;
 	return dns_obj_rr_nsec3_get_iterations(me) <= max_reasonable_iterations;
 }
