@@ -245,6 +245,11 @@ service_publisher_re_advertise_instance(srp_server_t *server_state, adv_host_t *
     char time_buf[TSR_TIMESTAMP_STRING_LEN];
     DNSServiceAttributeRef tsr_attribute = srp_message_tsr_attribute_generate(NULL, host->key_id,
                                                                               time_buf, sizeof(time_buf));
+    if (tsr_attribute == NULL) {
+        INFO("Unable to allocate tsr attribute for " PUB_S_SRP "." PUB_S_SRP " host " PRI_S_SRP " (instance %p)",
+             instance->instance_name, instance->service_type, host->registered_name, instance);
+        return;
+    }
 
     int err = dns_service_register_wa(server_state, &service_ref,
                                       (kDNSServiceFlagsShareConnection | kDNSServiceFlagsNoAutoRename |
@@ -272,6 +277,7 @@ service_publisher_re_advertise_instance(srp_server_t *server_state, adv_host_t *
         instance->shared_txn = (intptr_t)server_state->shared_registration_txn;
         adv_instance_retain(instance); // for the callback
     }
+    DNSServiceAttributeDeallocate(tsr_attribute);
 }
 
 static void
@@ -313,6 +319,11 @@ service_publisher_re_advertise_record(srp_server_t *server_state, adv_host_t *ho
     char time_buf[TSR_TIMESTAMP_STRING_LEN];
     DNSServiceAttributeRef tsr_attribute = srp_message_tsr_attribute_generate(NULL, host->key_id,
                                                                               time_buf, sizeof(time_buf));
+    if (tsr_attribute == NULL) {
+        INFO("Unable to allocate tsr attribute for host " PRI_S_SRP, host->registered_name);
+        return;
+    }
+
 
     int err = dns_service_register_record_wa(server_state, service_ref, &record->rref, kDNSServiceFlagsKnownUnique,
                                              server_state->advertise_interface, host->registered_name,
@@ -326,6 +337,7 @@ service_publisher_re_advertise_record(srp_server_t *server_state, adv_host_t *ho
         record->shared_txn = (intptr_t)host->server_state->shared_registration_txn;
         adv_record_retain(record); // for the callback
     }
+    DNSServiceAttributeDeallocate(tsr_attribute);
 }
 
 // Re-advertise records that match the address of the WED device we're bonded to if we're bonded to a WED device, or
@@ -451,6 +463,7 @@ service_publisher_finalize(service_publisher_t *publisher)
     free(publisher->neighbor_ml_eid_string);
     free(publisher->id);
     ioloop_wakeup_release(publisher->wakeup_timer);
+    free(publisher->thread_interface_name);
     free(publisher);
 }
 
@@ -794,6 +807,20 @@ service_publisher_have_anycast_service(service_publisher_t *publisher)
     return anycast_service_present;
 }
 
+bool
+service_publisher_competing_service_present(service_publisher_t *publisher)
+{
+    if (publisher == NULL) {
+        return false;
+    }
+    if (service_publisher_have_anycast_service(publisher) ||
+        service_publisher_have_competing_unicast_service(publisher, false))
+    {
+        return true;
+    }
+    return false;
+}
+
 void
 service_publisher_wanted_service_added(service_publisher_t *publisher)
 {
@@ -990,6 +1017,7 @@ service_publisher_can_publish(service_publisher_t *publisher)
     bool have_node_type = false;
     bool have_wed_ml_eid = true;
     bool have_neighbor_ml_eid = true;
+    bool end_device = false;
 
     // Check the conditions that prevent publication.
     if (service_publisher_have_competing_unicast_service(publisher, false)) {
@@ -1023,6 +1051,10 @@ service_publisher_can_publish(service_publisher_t *publisher)
         have_node_type = false;
         can_publish = false;
         break;
+    case node_type_end_device:
+        have_node_type = true;
+        end_device = true;
+        break;
     case node_type_sleepy_end_device:
     case node_type_synchronized_sleepy_end_device:
         sleepy_end_device = true;
@@ -1055,7 +1087,7 @@ service_publisher_can_publish(service_publisher_t *publisher)
     }
     if (publisher->neighbor_ml_eid_string == NULL) {
         have_neighbor_ml_eid = false;
-        if (sleepy_end_device) {
+        if (sleepy_end_device || end_device || router) {
             if (publisher->sed_timeout == NULL) {
                 publisher->sed_timeout = ioloop_wakeup_create();
                 if (publisher->sed_timeout != NULL) {
@@ -1068,21 +1100,23 @@ service_publisher_can_publish(service_publisher_t *publisher)
         }
     }
 
-    INFO(PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
+    INFO(PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP
+         PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
          can_publish ?                         "can publish" :  "can't publish",
-         publisher->seen_service_list ?                   "" : " have not seen service list",
-         no_competing_service ?                           "" : " competing service present",
-         no_anycast_service ?                             "" : " anycast service present",
-         associated ?                                     "" : " not associated ",
-         router ?                                         "" : " not a router ",
-         sleepy_router ?                                  "" : " not a sleepy router",
-         sleepy_end_device ?                              "" : " not a sleepy end device",
-         have_node_type ?                                 "" : " don't have node type",
-         have_ml_eid ?                                    "" : " no ml-eid ",
-         have_wed_ml_eid ?                                "" : " no wed ml-eid ",
-         have_neighbor_ml_eid ?                           "" : " no neighbor ml-eid ",
-         have_thread_interface_name ?                     "" : " no thread interface name ",
-         publisher->stopped ?                     " stopped" : "");
+         publisher->seen_service_list ?                   "" : " / no service list",
+         no_competing_service ?                           "" : " / competing present",
+         no_anycast_service ?                             "" : " / anycast present",
+         associated ?                                     "" : " / not associated ",
+         router ?                                 " / router " : "",
+         sleepy_router ?                    " / sleepy router" : "",
+         sleepy_end_device ?            " / sleepy end device" : "",
+         end_device ?                          " / end device" : "",
+         have_node_type ?                                 "" : " / no node type",
+         have_ml_eid ?                                    "" : " / no ml-eid ",
+         have_wed_ml_eid ?                                "" : " / no wed ",
+         have_neighbor_ml_eid ?                           "" : " / no neighbor ",
+         have_thread_interface_name ?                     "" : " / no interface ",
+         publisher->stopped ?                     " / stopped" : "");
     return can_publish;
 }
 
@@ -1229,8 +1263,9 @@ service_publisher_listener_start(service_publisher_t *publisher)
                                                NULL, publisher->server_state);
     if (publisher->srp_listener == NULL) {
         ERROR("failed to setup SRP listener");
+    } else {
+        service_publisher_re_advertise_matching(publisher);
     }
-    service_publisher_re_advertise_matching(publisher);
 }
 
 // We go to this state when we have decided to publish, but perhaps do not currently have an SRP listener
@@ -1514,7 +1549,7 @@ service_publisher_create(srp_server_t *server_state)
     {
         goto out;
     }
-    RETAIN_HERE(publisher, service_publisher); // for thread network state tracker
+    RETAIN_HERE(publisher, service_publisher); // for node type state tracker
 
     // Set the first_time flag so that we'll know to remove any locally-published on-mesh prefixes.
     publisher->first_time = true;
@@ -1554,7 +1589,7 @@ service_publisher_get_mesh_local_address_callback(void *context, const char *add
 
     if (publisher->have_ml_eid && !in6addr_compare(&new_mesh_local_address, &publisher->thread_mesh_local_address)) {
         INFO("address didn't change");
-        return;
+        goto out;
     }
     publisher->thread_mesh_local_address = new_mesh_local_address;
     publisher->have_ml_eid = true;
@@ -1583,15 +1618,15 @@ service_publisher_get_mesh_local_address_callback(void *context, const char *add
     state_machine_event_t *event = state_machine_event_create(state_machine_event_type_ml_eid_changed, NULL);
     if (event == NULL) {
         ERROR("unable to allocate event to deliver");
-        return;
+        goto out;
     }
     state_machine_event_deliver(&publisher->state_header, event);
     RELEASE_HERE(event, state_machine_event);
-    RELEASE_HERE(publisher, service_publisher); // callback held a reference.
-    return;
+    goto out;
 fail:
-    RELEASE_HERE(publisher, service_publisher); // callback held a reference.
     publisher->have_ml_eid = false;
+out:
+    RELEASE_HERE(publisher, service_publisher); // callback held a reference.
     return;
 }
 

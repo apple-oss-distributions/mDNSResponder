@@ -1209,17 +1209,17 @@ mDNSexport void Querier_ProcessDNSServiceChanges(const mDNSBool updatePushQuesti
         DNSQuestion *const q = m->RestartQuestion;
         mDNSBool skipQuestion = mDNSfalse;
 #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
-        mDNSBool MDNSAlternativeModeOn = mDNSfalse;
+        const mDNSOpaque16 originalQID = q->TargetQID;
 #endif
         if (mDNSOpaque16IsZero(q->TargetQID))
         {
         #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
-            // Handles the case where mDNS query has a new discovery proxy service to use.
+            // If a discovery proxy is available for an mDNS question, convert it from mDNS to unicast by assigning
+            // a non-zero question ID, so that _Querier_GetDNSService below can handle it accordingly.
             if (DNSQuestionIsEligibleForMDNSAlternativeService(q) &&
                 Querier_IsMDNSAlternativeServiceAvailableForQuestion(q))
             {
                 q->TargetQID = mDNS_NewMessageID(m);
-                MDNSAlternativeModeOn = mDNStrue;
             }
             else
         #endif
@@ -1296,31 +1296,18 @@ mDNSexport void Querier_ProcessDNSServiceChanges(const mDNSBool updatePushQuesti
             mDNSBool newSuppressed = ShouldSuppressUnicastQuery(q, newService);
             if (!q->Suppressed != !newSuppressed) restart = mDNStrue;
         }
+    #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+        // After we have determined whether to restart the question, restore the original QID of the question so that
+        // the mDNS_StopQuery_internal below can clear any existing state that is associated with the old question,
+        // including the bonjour on demand state.
+        q->TargetQID = originalQID;
+    #endif
         if (restart)
         {
             if (!q->Suppressed)
             {
-            #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
-                // If we have decided to change the mDNS question to a non-mDNS question that uses mDNS alternative
-                // exclusive service for resolution, we need to deliver remove event for the records that get added
-                // as mDNS response, because we are switching to a different service.
-                // To ensure that the mDNS record matches the question, we need to change the question back to an mDNS
-                // question by making its QID zero.
-                const mDNSOpaque16 newQID = q->TargetQID;
-                if (MDNSAlternativeModeOn)
-                {
-                    q->TargetQID = zeroID;
-                }
-            #endif
                 CacheRecordRmvEventsForQuestion(m, q);
                 if (m->RestartQuestion == q) LocalRecordRmvEventsForQuestion(m, q);
-            #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
-                // After the function call, restore the original QID.
-                if (MDNSAlternativeModeOn)
-                {
-                    q->TargetQID = newQID;
-                }
-            #endif
             }
             if (m->RestartQuestion == q)
             {

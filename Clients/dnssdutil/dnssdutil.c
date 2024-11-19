@@ -10474,15 +10474,18 @@ static OSStatus
 		uint16_t		inQClass );
 static OSStatus
 	_DNSServerAnswerQueryDynamically(
-		DNSServerRef	inServer,
-		const uint8_t *	inQName,
-		int				inQType,
-		int				inQClass,
-		size_t          inIndex,
-		size_t			inTruncateLen,
-		Boolean			inDNSSEC,
-		Boolean			inUseBadAddrs,
-		DataBuffer *	inDB );
+		DNSServerRef		inServer,
+		const uint8_t *		inQName,
+		int					inQType,
+		int					inQClass,
+		size_t         		 inIndex,
+		size_t				inTruncateLen,
+		Boolean				inDNSSEC,
+		Boolean				inUseBadAddrs,
+		DataBuffer *		inDB,
+		int32_t *			outEDECode,
+		const uint8_t **	outEDETextPtr,
+		size_t *			outEDETextLen );
 
 static OSStatus
 	_DNSServerAnswerQuery(
@@ -10508,6 +10511,9 @@ static OSStatus
 	
 	DataBuffer_Init( &db, dbBuf, sizeof( dbBuf ), kDNSMaxTCPMessageSize );
 	
+	int32_t edeCode = -1;
+	const uint8_t *edeTextPtr = NULL;
+	size_t edeTextLen = 0;
 	require_action_quiet( inMsgLen >= kDNSHeaderLength, exit, err = kUnderrunErr );
 	
 	hdr		= (const DNSHeader *) inMsgPtr;
@@ -10615,7 +10621,8 @@ static OSStatus
 		truncateLen = inForTCP ? 0 : kDNSMaxUDPMessageSize;
 	}
 	useBadAddrs = me->badUDPMode && !inForTCP;
-	err = _DNSServerAnswerQueryDynamically( me, qname, qtype, qclass, inIndex, truncateLen, dnssecOK, useBadAddrs, &db );
+	err = _DNSServerAnswerQueryDynamically( me, qname, qtype, qclass, inIndex, truncateLen, dnssecOK, useBadAddrs, &db,
+		&edeCode, &edeTextPtr, &edeTextLen );
 	if( err == kSkipErr ) goto exit;
 	require_noerr_action( err, done, rcode = kDNSRCode_ServFail );
 	
@@ -10650,7 +10657,6 @@ done:
 		DNSHeader *					rhdr;
 		uint16_t					additionalCount;
 		dns_fixed_fields_opt		optFields;
-		size_t						rOptOffset;
 		
 		memset( &optFields, 0, sizeof( optFields ) );
 		dns_fixed_fields_opt_set_type( &optFields, kDNSRecordType_OPT );
@@ -10658,30 +10664,58 @@ done:
 		dns_fixed_fields_opt_set_extended_rcode( &optFields, ( rcode >> 4 ) & 0xFFU );
 		if( dnssecOK ) dns_fixed_fields_opt_set_extended_flags( &optFields, kDNSExtendedFlag_DNSSECOK );
 		
-		rOptOffset = DataBuffer_GetLen( &db );
+		const size_t optOffset = DataBuffer_GetLen( &db );
 		err = DataBuffer_Append( &db, &optFields, sizeof( optFields ) );
 		require_noerr( err, exit );
 		
+		const size_t optRDataOffset = DataBuffer_GetLen( &db );
+		if( inForTCP && ( edeCode >= 0 ) )
+		{
+			// According to <https://datatracker.ietf.org/doc/html/rfc8914#section-2>, the EDE option's INFO-CODE is an
+			// unsigned 16-bit value.
+
+			require_fatal( edeCode <= UINT16_MAX, "EDE INFO-CODE (%d) cannot be encoded as two octets", edeCode );
+
+			// As stated in <https://datatracker.ietf.org/doc/html/rfc8914#section-2>, the EDE option's OPTION-LENGTH,
+			// which is 2 octets / 16 bits, "contains the length of the payload (everything after OPTION-LENGTH) in
+			// octets and should be 2 plus the length of the EXTRA-TEXT field (which may be a zero-length string)."
+			// Therefore, the maximum supported EDE EXTRA-TEXT length is UINT16_MAX - 2.
+
+			const size_t edeTextLenMax = UINT16_MAX - 2;
+			require_fatal( edeTextLen <= edeTextLenMax,
+				"EDE EXTRA-TEXT length (%zu) exceeds max size of %zu", edeTextLen, edeTextLenMax );
+
+			dns_fixed_fields_extended_dns_error_option edeOption;
+			memset( &edeOption, 0, sizeof( edeOption ) );
+			dns_fixed_fields_extended_dns_error_option_set_code( &edeOption, kDNSEDNS0OptionCode_ExtendedDNSError );
+			dns_fixed_fields_extended_dns_error_option_set_length( &edeOption, (uint16_t)( 2 + edeTextLen ) );
+			dns_fixed_fields_extended_dns_error_option_set_info_code( &edeOption, (uint16_t) edeCode );
+			err = DataBuffer_Append( &db, &edeOption, sizeof( edeOption ) );
+			require_noerr( err, exit );
+
+			err = DataBuffer_Append( &db, edeTextPtr, edeTextLen );
+			require_noerr( err, exit );
+		}
+
 		// Pad responses using the block-length padding strategy using a 468-octet block length as recommended by
 		// <https://datatracker.ietf.org/doc/html/rfc8467#section-4.1>.
 		
 		if( usePadding )
 		{
-			dns_fixed_fields_opt *		rOptPtr;
 			dns_fixed_fields_option		padOption;
-			size_t						curLen, newLen, rdLen;
+			size_t						curLen, newLen;
 			uint16_t					padLen;
 			
 			curLen = DataBuffer_GetLen( &db );
 			newLen = RoundUp( curLen + sizeof( padOption ), 468 );
 			require_action( newLen > curLen, exit, err = kSizeErr );
 			
-			rdLen = newLen - curLen;
-			require_action( rdLen <= UINT16_MAX, exit, err = kSizeErr );
+			const size_t diffLen = newLen - curLen;
+			require_action( diffLen <= UINT16_MAX, exit, err = kSizeErr );
 			
 			memset( &padOption, 0, sizeof( padOption ) );
 			dns_fixed_fields_option_set_code( &padOption, kDNSEDNS0OptionCode_Padding );
-			padLen = (uint16_t)( rdLen - sizeof( padOption ) );
+			padLen = (uint16_t)( diffLen - sizeof( padOption ) );
 			dns_fixed_fields_option_set_length( &padOption, padLen );
 			err = DataBuffer_Append( &db, &padOption, sizeof( padOption ) );
 			require_noerr( err, exit );
@@ -10692,9 +10726,18 @@ done:
 				require_noerr( err, exit );
 			}
 			check( DataBuffer_GetLen( &db ) == newLen );
-			rOptPtr = (dns_fixed_fields_opt *)( DataBuffer_GetPtr( &db ) + rOptOffset );
-			dns_fixed_fields_opt_set_rdlen( rOptPtr, (uint16_t) rdLen );
 		}
+
+		// Set OPT record's RDLEN value.
+
+		const size_t optRDLen = DataBuffer_GetLen( &db ) - optRDataOffset;
+		require_action( optRDLen <= UINT16_MAX, exit, err = kSizeErr );
+
+		dns_fixed_fields_opt * const rOptPtr = (dns_fixed_fields_opt *)( DataBuffer_GetPtr( &db ) + optOffset );
+		dns_fixed_fields_opt_set_rdlen( rOptPtr, (uint16_t) optRDLen );
+
+		// Increment the Additional count for the OPT record.
+
 		check( DataBuffer_GetLen( &db ) >= sizeof( *rhdr ) );
 		rhdr = (DNSHeader *) DataBuffer_GetPtr( &db );
 		additionalCount = DNSHeaderGetAdditionalCount( rhdr ) + 1;
@@ -10748,6 +10791,7 @@ exit:
 #define kLabelPrefix_Alias			"alias"
 #define kLabelPrefix_AliasTTL		"alias-ttl"
 #define kLabelPrefix_Count			"count-"
+#define kLabelPrefix_EDE			"ede-"
 #define kLabelPrefix_Index			"index-"
 #define kLabelPrefix_RCode			"rcode-"
 #define kLabelPrefix_SRV			"srv-"
@@ -10809,6 +10853,9 @@ static Boolean
 		uint32_t *			outOffset,
 		uint32_t *			outProcDelayMs,
 		DNSNameFlags *		outFlags,
+		int32_t *			outEDECode,
+		const uint8_t **	outEDETextPtr,
+		size_t *			outEDETextLen,
 		const uint8_t **	outZone,
 		const uint8_t **	outZoneParent,
 		DNSKeyInfoRef *		outZSK,
@@ -10857,7 +10904,10 @@ static OSStatus
 		const size_t			inTruncateLen,
 		const Boolean			inDNSSEC,
 		const Boolean			inUseBadAddrs,
-		DataBuffer * const		inDB )
+		DataBuffer * const		inDB,
+		int32_t * const			outEDECode,
+		const uint8_t ** const	outEDETextPtr,
+		size_t * const			outEDETextLen )
 {
 	OSStatus			err;
 	uint32_t			aliasCount		= 0;
@@ -10901,13 +10951,16 @@ static OSStatus
 	uint64_t			startTicks;
 	Boolean				wasSuspended;
 	
+	int32_t edeCode = -1;
+	const uint8_t *edeTextPtr = NULL;
+	size_t edeTextLen = 0;
 	startTicks = UpTicks();
 	require_action_quiet( inQClass == kDNSServiceClass_IN, done, status = kQueryStatus_NotImplemented );
 	
 	wasSuspended = me->suspended;
 	nameExists = _DNSServerParseHostName( me, inQName, &aliasCount, aliasTTLs, &aliasTTLCount, &addrCount, &randCount,
-		&index, &rcodeOverride, &ttl, &offset, &procDelayMs, &nameFlags, &zone, &zoneParent, &zsk, &ksk, &zskParent,
-		&action );
+		&index, &rcodeOverride, &ttl, &offset, &procDelayMs, &nameFlags, &edeCode, &edeTextPtr, &edeTextLen, &zone,
+		&zoneParent, &zsk, &ksk, &zskParent, &action );
 	if( nameExists )
 	{
 		check( !( ( aliasCount > 0 ) && ( aliasTTLCount > 0 ) ) );
@@ -12106,6 +12159,9 @@ done:
 		
 		if( delayTicks > elapsedTicks ) SleepForUpTicks( delayTicks - elapsedTicks );
 	}
+	if( outEDECode )	*outEDECode		= edeCode;
+	if( outEDETextPtr )	*outEDETextPtr	= edeTextPtr;
+	if( outEDETextLen )	*outEDETextLen	= edeTextLen;
 	err = kNoErr;
 	
 exit:
@@ -12124,25 +12180,28 @@ static Boolean
 
 static Boolean
 	_DNSServerParseHostName(
-		DNSServerRef		me,
-		const uint8_t *		inQName,
-		uint32_t *			outAliasCount,
-		uint32_t			outAliasTTLs[ kAliasTTLCountMax ],
-		uint32_t *			outAliasTTLCount,
-		uint32_t *			outCount,
-		uint32_t *			outRandCount,
-		uint32_t *			outIndex,
-		int *				outRCode,
-		uint32_t *			outTTL,
-		uint32_t *			outOffset,
-		uint32_t *			outProcDelayMs,
-		DNSNameFlags *		outFlags,
-		const uint8_t **	outZone,
-		const uint8_t **	outZoneParent,
-		DNSKeyInfoRef *		outZSK,
-		DNSKeyInfoRef *		outKSK,
-		DNSKeyInfoRef *		outParentZSK,
-		DNSServerAction *	outAction )
+		DNSServerRef			me,
+		const uint8_t *			inQName,
+		uint32_t *				outAliasCount,
+		uint32_t				outAliasTTLs[ kAliasTTLCountMax ],
+		uint32_t *				outAliasTTLCount,
+		uint32_t *				outCount,
+		uint32_t *				outRandCount,
+		uint32_t *				outIndex,
+		int *					outRCode,
+		uint32_t *				outTTL,
+		uint32_t *				outOffset,
+		uint32_t *				outProcDelayMs,
+		DNSNameFlags *			outFlags,
+		int32_t * const			outEDECode,
+		const uint8_t ** const	outEDETextPtr,
+		size_t * const			outEDETextLen,
+		const uint8_t **		outZone,
+		const uint8_t **		outZoneParent,
+		DNSKeyInfoRef *			outZSK,
+		DNSKeyInfoRef *			outKSK,
+		DNSKeyInfoRef *			outParentZSK,
+		DNSServerAction *		outAction )
 {
 	OSStatus			err;
 	const uint8_t *		label;
@@ -12152,6 +12211,9 @@ static Boolean
 	uint32_t			aliasCount		= 0;	// Arg from Alias label. Valid values are in [2, 2^31 - 1].
 	int32_t				count			= -1;	// First arg from Count label. Valid values are in [0, 255].
 	uint32_t			randCount		= 0;	// Second arg from Count label. Valid values are in [count, 255].
+	int32_t				edeCode			= -1;	// Arg from EDE label. Valid values are in [0, 65535].
+	const uint8_t *		edeTextPtr		= NULL;	// Optional second arg from EDE label. No restrictions on supplied text.
+	size_t				edeTextLen		= 0;	// Length of optional second arg from EDE label.
 	uint32_t			index			= 0;	// Arg from Index label. Valid values are in [1, 2^32 - 1].
 	int					rcode			= -1;	// Arg from RCode label. Valid values are in [0, 15].
 	int32_t				ttl				= -1;	// Arg from TTL label. Valid values are in [0, 2^31 - 1].
@@ -12247,6 +12309,27 @@ static Boolean
 			continue;
 		}
 		
+		// Check if this label is a valid Extended DNS Error (EDE) label.
+
+		if( strnicmp_prefix( labelData, labelLen, kLabelPrefix_EDE ) == 0  )
+		{
+			const char *			ptr = (const char *) &labelData[ sizeof_string( kLabelPrefix_EDE ) ];
+			const char * const		end = (const char *) labelNext;
+
+			if( edeCode >= 0 ) break; // Count cannot be specified more than once.
+
+			err = DecimalTextToUInt32( ptr, end, &arg, &ptr );
+			if( err || ( arg > UINT16_MAX ) ) break;
+			edeCode = (int32_t) arg;
+
+			if( ptr < end )
+			{
+				if( *ptr++ != '-' ) break;
+				edeTextPtr = (const uint8_t *) ptr;
+				edeTextLen = (size_t)( end - ptr );
+			}
+			continue;
+		}
 		// Check if this label is a valid Index label.
 		
 		if( strnicmp_prefix( labelData, labelLen, kLabelPrefix_Index ) == 0  )
@@ -12446,6 +12529,9 @@ static Boolean
 	if( outAliasTTLCount )	*outAliasTTLCount	= aliasTTLCount;
 	if( outCount )			*outCount			= ( count       >= 0 ) ? ( (uint32_t) count )       : 1;
 	if( outRandCount )		*outRandCount		= randCount;
+	if( outEDECode )		*outEDECode			= edeCode;
+	if( outEDETextPtr )		*outEDETextPtr		= edeTextPtr;
+	if( outEDETextLen )		*outEDETextLen		= edeTextLen;
 	if( outIndex )			*outIndex			= index;
 	if( outRCode )			*outRCode			= rcode;
 	if( outTTL )			*outTTL				= ( ttl         >= 0 ) ? ( (uint32_t) ttl )         : me->defaultTTL;

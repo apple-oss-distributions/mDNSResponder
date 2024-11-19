@@ -455,6 +455,10 @@ service_tracker_callback_cancel(service_tracker_t *tracker, void *context)
 		if (callback->context == context) {
             *tpp = callback->next;
             service_tracker_callback_free(callback);
+            // If this was the last callback on the list, release the list's reference to the tracker.
+            if (tracker->callbacks == NULL) {
+                RELEASE_HERE(tracker, service_tracker);
+            }
             return;
 		}
 	}

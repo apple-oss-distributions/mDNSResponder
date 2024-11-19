@@ -414,7 +414,10 @@ dnssd_client_should_be_client(dnssd_client_t *client)
     bool should_be_client = false;
     srp_server_t *server_state = client->server_state;
 
-    if (!service_publisher_could_publish(server_state->service_publisher)) {
+    if (server_state->service_publisher != NULL &&
+        !service_publisher_could_publish(server_state->service_publisher) &&
+        service_publisher_competing_service_present(server_state->service_publisher))
+    {
         should_be_client = true;
         might_publish = true;
     }

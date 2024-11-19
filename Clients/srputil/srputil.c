@@ -1135,7 +1135,7 @@ main(int argc, char **argv)
 
     ioloop_init();
     // Start the queue, //then// do the work
-    ioloop_run_async(start_activities, NULL);
+    ioloop_run_async(start_activities, NULL, NULL);
     ioloop();
 }
 

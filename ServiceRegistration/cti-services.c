@@ -2302,7 +2302,7 @@ cti_internal_wed_reply_callback(cti_connection_t NONNULL conn_ref, object_t repl
 
     const char *extended_mac = NULL;
     const char *ml_eid = NULL;
-    bool added = false;
+    bool present = true;
 
     if (status == kCTIStatus_NoError) {
         object_t result_dictionary = NULL;
@@ -2332,10 +2332,10 @@ cti_internal_wed_reply_callback(cti_connection_t NONNULL conn_ref, object_t repl
                     } else if (!strcmp(key, "mleid")) {
                         ml_eid = value;
                     } else if (!strcmp(key, "status")) {
-                        if (!strcmp(value, "wed_added")) {
-                            added = true;
+                        if (!strcmp(value, "wed_present")) {
+                            present = true;
                         } else if (!strcmp(value, "wed_removed")) {
-                            added = false;
+                            present = false;
                         } else {
                             ERROR("unknown wed status " PUB_S_SRP, value);
                             goto out;
@@ -2353,11 +2353,11 @@ cti_internal_wed_reply_callback(cti_connection_t NONNULL conn_ref, object_t repl
     }
 out:
     if (callback != NULL) {
-        if (added && (ml_eid == NULL || extended_mac == NULL)) {
-            added = false;
+        if (present && (ml_eid == NULL || extended_mac == NULL)) {
+            present = false;
         }
         INFO("[CX%d] calling callback for %p", conn_ref->serial, conn_ref);
-        callback(conn_ref->context, extended_mac, ml_eid, added, status);
+        callback(conn_ref->context, extended_mac, ml_eid, present, status);
     }
     if (vec != NULL) {
         RELEASE_HERE(vec, cti_service_vec);
@@ -2376,11 +2376,9 @@ cti_track_wed_status_(srp_server_t *UNUSED server, cti_connection_t *ref, void *
 
     xpc_dictionary_set_string(dict, "interface", "org.wpantund.v1");
     xpc_dictionary_set_string(dict, "path", "/org/wpantund/utun2");
-    xpc_dictionary_set_string(dict, "method", "PropGet");
-    xpc_dictionary_set_string(dict, "property_name", "WakeOnDeviceConnectionStatus");
 
     errx = setup_for_command(ref, client_queue, "get_wed_status", "WakeOnDeviceConnectionStatus", NULL, dict, "WpanctlCmd",
-                             context, app_callback, cti_internal_wed_reply_callback, false, file, line);
+                             context, app_callback, cti_internal_wed_reply_callback, true, file, line);
     xpc_release(dict);
 
     return errx;
@@ -2398,11 +2396,9 @@ cti_track_neighbor_ml_eid_(srp_server_t *UNUSED server, cti_connection_t *ref, v
 
     xpc_dictionary_set_string(dict, "interface", "org.wpantund.v1");
     xpc_dictionary_set_string(dict, "path", "/org/wpantund/utun2");
-    xpc_dictionary_set_string(dict, "method", "PropGet");
-    xpc_dictionary_set_string(dict, "property_name", "ThreadNeighborMeshLocalAddress");
 
-    errx = setup_for_command(ref, client_queue, "get_neighbor_ml_eid", "ThreadNeighborMeshLocalAddress", "ThreadNeighborMeshLocalAddress", dict, "WpanctlCmd",
-                             context, app_callback, cti_internal_string_event_reply, false, file, line);
+    errx = setup_for_command(ref, client_queue, "get_neighbor_ml_eid", "ThreadNeighborMeshLocalAddress", NULL, dict,
+                             "WpanctlCmd", context, app_callback, cti_internal_string_event_reply, true, file, line);
     xpc_release(dict);
 
     return errx;

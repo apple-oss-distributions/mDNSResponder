@@ -4497,7 +4497,7 @@ mDNSlocal mDNSBool DumpMDNSPacket_GetNameHashTypeClass(const DNSMessage *const m
     domainname name;
 
     ptr = getDomainName(msg, ptr, end, &name);
-    const mDNSu32 nameHash = mDNS_NonCryptoHash(mDNSNonCryptoHash_FNV1a, name.c, DomainNameLength(&name));
+    const mDNSu32 nameHash = mDNS_DomainNameFNV1aHash(&name);
     mdns_require_action_quiet(ptr, exit, found = mDNSfalse);
 
     mdns_require_action_quiet(ptr + 4 <= end, exit, found = mDNSfalse);

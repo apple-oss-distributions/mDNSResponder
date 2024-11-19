@@ -304,6 +304,11 @@ thread_tracker_callback_cancel(thread_tracker_t *tracker, void *context)
 		if (callback->context == context) {
             *tpp = callback->next;
             thread_tracker_callback_free(callback);
+            // If we don't have any callbacks left on the list, the list no longer holds a reference to
+            // the tracker.
+            if (tracker->callbacks == NULL) {
+                RELEASE_HERE(tracker, thread_tracker);
+            }
             return;
 		}
 	}

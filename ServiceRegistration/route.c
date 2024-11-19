@@ -2272,9 +2272,9 @@ adv_ctl_add_prefix(route_state_t *route_state, const uint8_t *const data)
             }
         }
         if (prefix == NULL) {
-            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
+            SEGMENTED_IPv6_ADDR_GEN_SRP((struct in6_addr *)data, prefix_buf);
             INFO("adding prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf));
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP((struct in6_addr *)data, prefix_buf));
             if (!omr_watcher_prefix_add(route_state->omr_watcher, (struct in6_addr *)data, BR_PREFIX_SLASH_64_BYTES, omr_prefix_priority_low)) {
                 INFO("failed");
             }
@@ -2611,7 +2611,7 @@ partition_state_reset(route_state_t *route_state)
     }
 
     if (route_state->partition_anycast_service_add_pending_wakeup != NULL) {
-        ioloop_cancel_wake_event(route_state->partition_service_add_pending_wakeup);
+        ioloop_cancel_wake_event(route_state->partition_anycast_service_add_pending_wakeup);
     }
 
     if (route_state->service_set_changed_wakeup != NULL) {

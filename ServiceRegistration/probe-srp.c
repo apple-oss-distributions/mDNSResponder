@@ -299,6 +299,10 @@ probe_srp_connected(comm_t *connection, void *context)
 #else
     (void)connection;
     probe_state_t *probe_state = context;
+    if (probe_state->connection == NULL) {
+        INFO("canceled before connection was ready");
+        return;
+    }
     // Initialize a DNS message to send to the target
     memset(&probe_state->question, 0, DNS_HEADER_SIZE);
     dns_towire_state_t towire;

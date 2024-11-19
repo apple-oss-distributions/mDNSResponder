@@ -60,7 +60,10 @@ struct mrc_session_s {
 	mrc_client_t		client;			// Delegate object to use when invoking callbacks.
 	const char *		entity_name;	// For logging purposes, the name of the entity that is to be enabled.
 	mrc_session_state_t	state;			// Current state of the session.
+	MDNS_STRUCT_PAD_64_32(7, 3);
 };
+MRC_STRUCT_PAD_CHECK(session);
+MRC_STRUCT_MAX_SIZE_CHECK(session, 64);
 
 MRC_OBJECT_SUBKIND_DEFINE(session);
 
@@ -79,7 +82,10 @@ struct mrc_client_s {
 	dispatch_queue_t	user_queue;	// User's dispatch queue.
 	mrc_client_state_t	state;		// Current state.
 	bool				immutable;	// True if the DNS proxy is no longer externally mutable.
+	MDNS_STRUCT_PAD_64_32(6, 2);
 };
+MRC_STRUCT_PAD_CHECK(client);
+MRC_STRUCT_MAX_SIZE_CHECK(client, 48);
 
 MRC_OBJECT_SUBKIND_DEFINE_ABSTRACT_MINIMAL_WITHOUT_ALLOC(client);
 
@@ -121,7 +127,9 @@ struct mrc_client_kind_s {
 	mrc_client_handle_notification_f	handle_notification;
 	const char *						operation_name;
 	bool								oneshot;
+	MDNS_STRUCT_PAD_64_32(7, 3);
 };
+MRC_STRUCT_PAD_CHECK(client_kind);
 
 #define MRC_CLIENT_SUBKIND_DEFINE_CORE(NAME, OPERATION_NAME, ...)								\
 	static char *																				\
@@ -220,13 +228,16 @@ OS_CLOSED_ENUM(mrc_dns_proxy_state_inquiry_state, int8_t,
 
 struct mrc_dns_proxy_state_inquiry_s {
 	struct mdns_obj_s								base;		// Object base.
+	uint64_t										cmd_id;		// Command ID.
 	mrc_dns_proxy_state_inquiry_t					next;		// Next inquiry in list.
 	dispatch_queue_t								queue;		// User's dispatch queue.
 	mrc_dns_proxy_state_inquiry_response_handler_t	handler;	// Response handler.
-	uint64_t										cmd_id;		// Command ID.
 	mrc_dns_proxy_state_inquiry_state_t				state;		// Current inquiry state.
 	bool											immutable;	// True if this object is no longer externally mutable.
+	MDNS_STRUCT_PAD_64_32(6, 2);
 };
+MRC_STRUCT_PAD_CHECK(dns_proxy_state_inquiry);
+MRC_STRUCT_MAX_SIZE_CHECK(dns_proxy_state_inquiry, 64);
 
 MRC_OBJECT_SUBKIND_DEFINE(dns_proxy_state_inquiry);
 
@@ -239,7 +250,10 @@ struct mrc_dns_service_registration_s {
 	mrc_dns_service_registration_event_handler_t	event_handler;				// Event handler.
 	mrc_dns_service_definition_type_t				definition_type;			// The type of the DNS service.
 	bool											reports_connection_errors;	// Whether to report connection error.
+	MDNS_STRUCT_PAD_64_32(6, 2);
 };
+MRC_STRUCT_PAD_CHECK(dns_service_registration);
+MRC_STRUCT_MAX_SIZE_CHECK(dns_service_registration, 72);
 
 MRC_CLIENT_SUBKIND_DEFINE_WITH_NOTIFICATION_HANDLING(dns_service_registration, "DNS Service Registration");
 
@@ -262,7 +276,10 @@ struct mrc_discovery_proxy_parameters_s {
 	CFMutableSetRef		domains;			// Domains to match in order to use the proxy.
 	xpc_object_t		certs;				// Certificates that can be used as trust anchors for TLS evaluation.
 	uint32_t			ifindex;			// Index of the interface where the proxy can be configured.
+	MDNS_STRUCT_PAD_64_32(4, 0);
 };
+MRC_STRUCT_PAD_CHECK(discovery_proxy_parameters);
+MRC_STRUCT_MAX_SIZE_CHECK(discovery_proxy_parameters, 56);
 
 MRC_OBJECT_SUBKIND_DEFINE(discovery_proxy_parameters);
 
@@ -291,7 +308,10 @@ struct mrc_record_cache_flush_s {
 	mrc_record_cache_flush_result_handler_t	handler;		// User handler.
 	uint16_t								key_tag;		// Key tag.
 	bool									have_key_tag;	// True if the key tag value was set.
+	MDNS_STRUCT_PAD_64_32(5, 1);
 };
+MRC_STRUCT_PAD_CHECK(record_cache_flush);
+MRC_STRUCT_MAX_SIZE_CHECK(record_cache_flush, 72);
 
 MRC_CLIENT_SUBKIND_DEFINE_ONE_SHOT(record_cache_flush, "Record Cache Flush");
 

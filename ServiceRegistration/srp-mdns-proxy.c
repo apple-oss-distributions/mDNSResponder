@@ -1840,14 +1840,14 @@ srp_mdns_update_finished(adv_update_t *update)
         when = INT32_MAX;
     }
 
+    RETAIN_HERE(host, adv_host); // For the async callback or timeout
     if (next_lease_expiry == now) {
         INFO("scheduling immediate call to lease_callback in the run loop for " PRI_S_SRP, host->name);
-        ioloop_run_async(lease_callback, host);
+        ioloop_run_async(lease_callback, host, srp_adv_host_context_release);
     } else {
         INFO("scheduling wakeup to lease_callback in %" PRIu64 " for host " PRI_S_SRP,
              when / 1000, host->name);
         ioloop_add_wake_event(host->lease_wakeup, host, lease_callback, srp_adv_host_context_release, (uint32_t)when);
-        RETAIN_HERE(host, adv_host);
     }
 
     // Instance vectors can hold circular references to the update object, which won't get freed until we call
@@ -4285,7 +4285,7 @@ main(int argc, char **argv)
         srp_proxy_init("local");
 #ifdef SRP_TEST_SERVER
     } else  {
-        ioloop_run_async(srp_test_server_run_test, test_to_run);
+        ioloop_run_async(srp_test_server_run_test, test_to_run, NULL);
 #endif
     }
 

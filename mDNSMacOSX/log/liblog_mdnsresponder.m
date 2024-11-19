@@ -44,6 +44,7 @@
 //  MAC address                     %{mdnsresponder:mac_addr}.6P        pointer (mDNSEthAddr *)
 //  Name hash and type in packet    %{mdnsresponder:mdns_name_hash_type_bytes}  length (int), pointer (void *)
 //  Network change event flags      %{mdnsresponder:net_change_flags}d  flags (mDNSNetworkChangeEventFlags_t)
+//  Register record result          %{mdnsresponder:reg_result}d        int (mStatus)
 
 //======================================================================================================================
 // MARK: - Data Structures
@@ -449,6 +450,46 @@ exit:
 }
 
 //======================================================================================================================
+
+// mDNSResponder reuses mStatus error code to pass record registration result.
+enum
+{
+    mStatus_NoError         = 0,
+    mStatus_NameConflict    = -65548,
+    mStatus_MemFree         = -65792,
+};
+
+static NS_RETURNS_RETAINED NSAttributedString *
+MDNSOLCopyFormattedStringRegisterRecordResult(const id value)
+{
+    NSString *nsstr = @"";
+    const NSNumber *number;
+    mdns_require_quiet([(NSObject *)value isKindOfClass:[NSNumber class]], exit);
+
+    number = (const NSNumber *)value;
+    const unsigned long long event = [number unsignedLongLongValue];
+
+    const int32_t reg_result = (int32_t)event;
+    switch (reg_result) {
+        case mStatus_NoError:
+            nsstr = @"REGISTERED";
+            break;
+        case mStatus_NameConflict:
+            nsstr = @"DEREGISTERED";
+            break;
+        case mStatus_MemFree:
+            nsstr = @"NAME CONFLICT";
+            break;
+        default:
+            nsstr = [[NSString alloc] initWithFormat:@"<Unknown register record result: %d>", reg_result];
+            break;
+    }
+
+exit:
+    return MDNSAS(nsstr);
+}
+
+//======================================================================================================================
 // MARK: - External Functions
 
 NS_RETURNS_RETAINED
@@ -467,6 +508,7 @@ OSLogCopyFormattedString(const char *type, id value, __unused os_log_type_info_t
         { .type = "mac_addr",                   .function = MDNSOLCopyFormattedStringmDNSMACAddr },
         { .type = "mdns_name_hash_type_bytes",  .function = MDNSOLCopyFormattedStringMDNSNameHashTypeBytes },
         { .type = "net_change_flags",           .function = MDNSOLCopyFormattedStringNetworkChangeEventFlag },
+        { .type = "reg_result",                 .function = MDNSOLCopyFormattedStringRegisterRecordResult },
     };
 
     for (int i = 0; i < (int)(sizeof(formatters) / sizeof(formatters[0])); i++) {

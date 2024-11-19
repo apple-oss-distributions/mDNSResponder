@@ -100,7 +100,7 @@ srp_test_server_run_test(void *context)
             exit(1);
         }
 #else
-        INFO("skipping test %s on limited device.");
+        INFO("skipping test %s on limited device.", test_to_run);
         exit(0);
 #endif
     } else {

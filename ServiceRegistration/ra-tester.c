@@ -68,6 +68,10 @@ main(int argc, char **argv)
         return 1;
     }
     server_state->name = strdup("ra-tester");
+    if (server_state->name == NULL) {
+        ERROR("no memmory for server_state->name");
+        return 1;
+    }
     server_state->route_state = route_state_create(server_state, "ra-tester");
     if (server_state->route_state == NULL) {
         return 1;

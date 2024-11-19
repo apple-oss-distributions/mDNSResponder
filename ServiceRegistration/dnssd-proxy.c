@@ -755,6 +755,7 @@ dp_question_cancel(question_t *question)
         }
         if (served_domain == NULL) {
             served_domain_free(question->served_domain);
+            question->served_domain = NULL;
         }
     }
     RELEASE_HERE(question, question); // Release from the list.
@@ -3968,7 +3969,7 @@ dp_tracker_dso_state_change(const dso_life_cycle_t cycle, void *const context, d
                 }
             }
         }
-        ioloop_run_async(dp_tracker_dso_cleanup, NULL);
+        ioloop_run_async(dp_tracker_dso_cleanup, NULL, NULL);
         return true;
     }
     return false;
@@ -4074,7 +4075,7 @@ dnssd_proxy_dns_evaluate(comm_t *comm, message_t *message, dp_tracker_t *tracker
     goto out;
 fail:
     // For connected connections, if we exit unexpectedly, we need to cancel the connection.
-    if (comm->tcp_stream) {
+    if (comm->tcp_stream && tracker != NULL) {
         ioloop_comm_cancel(tracker->connection);
     }
 out:

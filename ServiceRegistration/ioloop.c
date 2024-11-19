@@ -57,6 +57,7 @@ typedef struct async_event {
     struct async_event *next;
     async_callback_t callback;
     void *context;
+    void (*context_release)(void *context);
 } async_event_t;
 
 io_t *ios;
@@ -398,6 +399,9 @@ start_over:
         async_event_t *event = async_events;
         async_events = event->next;
         event->callback(event->context);
+        if (event->context_release != NULL) {
+            event->context_release(event->context);
+        }
         free(event);
     }
 
@@ -1125,6 +1129,12 @@ listen_callback(io_t *io, void *context)
              ntohs((addr.sa.sa_family == AF_INET ? addr.sin.sin_port : addr.sin6.sin6_port)));
     comm = calloc(1, sizeof *comm);
     comm->name = strdup(addrbuf);
+    if (comm->name == NULL) {
+        ERROR("no memory for name.");
+        close(rv);
+        free(comm);
+        return;
+    }
     comm->io.fd = rv;
     comm->address = addr;
     comm->datagram_callback = listener->datagram_callback;
@@ -1877,7 +1887,7 @@ ioloop_file_descriptor_create_(int fd, void *context, finalize_callback_t finali
 }
 
 void
-ioloop_run_async(async_callback_t callback, void *context)
+ioloop_run_async(async_callback_t callback, void *context, void (*context_release)(void *context))
 {
     async_event_t **epp, *event = calloc(1, sizeof(*event));
     if (event == NULL) {
@@ -1886,6 +1896,7 @@ ioloop_run_async(async_callback_t callback, void *context)
 
     event->callback = callback;
     event->context = context;
+    event->context_release = context_release;
 
     epp = &async_events;
     while (*epp) {

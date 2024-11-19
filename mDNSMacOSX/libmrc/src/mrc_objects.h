@@ -19,6 +19,9 @@
 
 #include "mdns_objects.h"
 
+//======================================================================================================================
+// MARK: - Kind Support
+
 #define MRC_OBJECT_SUBKIND_DEFINE_ABSTRACT(NAME)			MDNS_OBJ_SUBKIND_DEFINE_ABSTRACT(mrc_ ## NAME)
 #define MRC_OBJECT_SUBKIND_DEFINE(NAME)						MDNS_OBJ_SUBKIND_DEFINE(mrc_ ## NAME)
 #define MRC_OBJECT_SUBKIND_DEFINE_FULL(NAME)				MDNS_OBJ_SUBKIND_DEFINE_FULL(mrc_ ## NAME)
@@ -31,5 +34,18 @@
 
 #define MRC_CLASS(NAME)			MDNS_OBJ_CLASS(mrc_ ## NAME)
 #define MRC_CLASS_DECL(NAME)	MDNS_OBJ_CLASS_DECL(mrc_ ## NAME)
+
+//======================================================================================================================
+// MARK: - Struct Padding
+
+#define MRC_STRUCT_PAD_CHECK(NAME)	MDNS_GENERAL_STRUCT_PAD_CHECK(struct mrc_ ## NAME ## _s)
+
+//======================================================================================================================
+// MARK: - Struct Size Checks
+
+#define MRC_STRUCT_MAX_SIZE_CHECK(NAME, MAX_SIZE)									\
+	mdns_compile_time_check(sizeof(struct mrc_ ## NAME ## _s) <= (MAX_SIZE),		\
+		"sizeof(struct mrc_" # NAME "_s) exceeds max size of '" # MAX_SIZE "'. "	\
+		"Consider using up any unused struct padding before increasing the max size.")
 
 #endif	// MRC_OBJECTS_H

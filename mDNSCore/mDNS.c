@@ -3899,10 +3899,8 @@ mDNSlocal void ReconfirmAntecedents(mDNS *const m, const domainname *const name,
         crtarget = GetRRDomainNameTarget(&cr->resrec);
         if (crtarget && SameDomainName(crtarget, name))
         {
-            const mDNSu32 nameHash = mDNS_NonCryptoHash(mDNSNonCryptoHash_FNV1a, cr->resrec.name->c,
-                DomainNameLength(cr->resrec.name));
-            const mDNSu32 targetNameHash = mDNS_NonCryptoHash(mDNSNonCryptoHash_FNV1a, crtarget->c,
-                DomainNameLength(crtarget));
+            const mDNSu32 nameHash = mDNS_DomainNameFNV1aHash(cr->resrec.name);
+            const mDNSu32 targetNameHash = mDNS_DomainNameFNV1aHash(crtarget);
             // In the case of a PTR record, name_hash is the name of the service, target_name_hash is the hash
             // of the SRV record name, so target_name_hash is also useful information.
             LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT, "ReconfirmAntecedents: Reconfirming "
@@ -7635,13 +7633,23 @@ mDNSlocal void SendSPSRegistrationForOwner(mDNS *const m, NetworkInterfaceInfo *
             else
             {
                 mStatus err;
+                if (!m->SPClientSocket)
+                {
+                    m->SPClientSocket = mDNSPlatformUDPSocket(zeroIPPort);
+                    if (!m->SPClientSocket)
+                    {
+                        LogRedact(MDNS_LOG_CATEGORY_SPS, MDNS_LOG_ERROR,
+                            "SendSPSRegistration: Failed to allocate SPClientSocket");
+                        goto exit;
+                    }
+                }
                 // Once we've attempted to register, we need to include our OWNER option in our packets when we re-awaken
                 m->SentSleepProxyRegistration = mDNStrue;
 
                 LogSPS("SendSPSRegistration: Sending Update %s %d (%d) id %5d with %d records %d bytes to %#a:%d", intf->ifname, intf->NextSPSAttempt, sps,
                        mDNSVal16(m->omsg.h.id), m->omsg.h.mDNS_numUpdates, p - m->omsg.data, &intf->SPSAddr[sps], mDNSVal16(intf->SPSPort[sps]));
                 // if (intf->NextSPSAttempt < 5) m->omsg.h.flags = zeroID;  // For simulating packet loss
-                err = mDNSSendDNSMessage(m, &m->omsg, p, intf->InterfaceID, mDNSNULL, mDNSNULL, &intf->SPSAddr[sps], intf->SPSPort[sps], mDNSNULL, mDNSfalse);
+                err = mDNSSendDNSMessage(m, &m->omsg, p, intf->InterfaceID, mDNSNULL, m->SPClientSocket, &intf->SPSAddr[sps], intf->SPSPort[sps], mDNSNULL, mDNSfalse);
                 if (err) LogSPS("SendSPSRegistration: mDNSSendDNSMessage err %d", err);
                 if (err && intf->SPSAddr[sps].type == mDNSAddrType_IPv4 && intf->NetWakeResolve[sps].ThisQInterval == -1)
                 {
@@ -8338,6 +8346,18 @@ mDNSexport void mDNSCoreMachineSleep(mDNS *const m, mDNSBool sleep)
     }
 }
 
+#if MDNSRESPONDER_SUPPORTS(COMMON, SPS_CLIENT)
+mDNSlocal void CloseSPSRegistrationSocket(void)
+{
+    mDNS *const m = &mDNSStorage;
+    if (m->SPClientSocket)
+    {
+        mDNSPlatformUDPClose(m->SPClientSocket);
+        m->SPClientSocket = mDNSNULL;
+    }
+}
+#endif
+
 mDNSexport mDNSBool mDNSCoreReadyForSleep(mDNS *m, mDNSs32 now)
 {
     DNSQuestion *q;
@@ -8388,6 +8408,8 @@ mDNSexport mDNSBool mDNSCoreReadyForSleep(mDNS *m, mDNSs32 now)
         if (!AuthRecord_uDNS(rr) && rr->resrec.RecordType > kDNSRecordTypeDeregistering)
             if (!mDNSOpaque64IsZero(&rr->updateIntID))
             { LogSPS("mDNSCoreReadyForSleep: waiting for SPS updateIntID 0x%x 0x%x (updateid %d) %s", rr->updateIntID.l[1], rr->updateIntID.l[0], mDNSVal16(rr->updateid), ARDisplayString(m,rr)); goto spsnotready; }
+
+    CloseSPSRegistrationSocket();
 #endif
 
     // Scan list of private LLQs, and make sure they've all completed their handshake with the server
@@ -8418,6 +8440,7 @@ spsnotready:
     {
         LogMsg("Failed to register with SPS, now sending goodbyes");
 
+        CloseSPSRegistrationSocket();
         for (intf = GetFirstActiveInterface(m->HostInterfaces); intf; intf = GetFirstActiveInterface(intf->next))
             if (intf->NetWakeBrowse.ThisQInterval >= 0)
             {

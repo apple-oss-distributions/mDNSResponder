@@ -1,6 +1,6 @@
 /* srp-replication.c
  *
- * Copyright (c) 2020-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1046,6 +1046,7 @@ srpl_shutdown(srp_server_t *server_state)
             RELEASE_HERE(domain, srpl_domain);
             free(server_state->current_thread_domain_name);
             server_state->current_thread_domain_name = NULL;
+            break;
         } else {
             dp = &(*dp)->next;
         }
@@ -2633,10 +2634,11 @@ srpl_connection_dso_life_cycle_callback(dso_life_cycle_t cycle, void *const cont
             srpl_connection->connection_null_reason = "dso_life_cycle_callback";
             srpl_connection->connection = NULL;
         }
+        srpl_connection_next_state(srpl_connection, srpl_state_disconnect_wait);
         srpl_connection_reset(srpl_connection);
         srpl_connection->dso = NULL;
         RELEASE_HERE(srpl_connection, srpl_connection);
-        ioloop_run_async(srpl_connection_dso_cleanup, NULL);
+        ioloop_run_async(srpl_connection_dso_cleanup, NULL, NULL);
         return true;
     }
     return false;
@@ -2764,7 +2766,7 @@ srpl_match_unidentified_with_instance(srpl_connection_t *connection,
     RETAIN_HERE(connection, srpl_connection); // for the function
     RELEASE_HERE(cur->connection, srpl_connection);
     cur->connection = NULL;
-    RELEASE_HERE(connection->instance, srpl_instance); // Get rid of the instance's reference to the connection
+    RELEASE_HERE(connection->instance, srpl_instance); // release connection's reference to the unmatched instance
     connection->instance = NULL;
 
     // Remove the currently associated instance from the unmatched_instances
@@ -2894,6 +2896,14 @@ srpl_connection_connect(srpl_connection_t *srpl_connection)
         ERROR(PRI_S_SRP ": no instance to connect to", srpl_connection->name);
         return false;
     }
+
+    // this should not happen. If it happens, something goes wrong and we log a fault.
+    if (srpl_connection->connection != NULL) {
+        FAULT(PRI_S_SRP " (instance " PRI_S_SRP ", state " PRI_S_SRP ") has connection object, skip connecting.",
+              srpl_connection->name, srpl_connection->instance->instance_name, srpl_connection->state_name);
+        return false;
+    }
+
     srpl_connection->connection = ioloop_connection_create(&srpl_connection->connected_address,
                                                            // tls, stream, stable, opportunistic
                                                              true,   true,   true, true,
@@ -3312,8 +3322,7 @@ srpl_instance_add(const char *hostname, const char *service_name,
         INFO("making outgoing connection on instance " PRI_S_SRP " (partner_id: %" PRIx64 ") since " PUB_S_SRP,
              instance->instance_name, instance->partner_id, msg_buf);
         if (instance->connection != NULL && instance->connection->connection != NULL) {
-            srpl_trigger_disconnect(instance->connection);
-            srpl_connection_next_state(instance->connection, srpl_state_idle);
+            srpl_connection_discontinue(instance->connection);
         } else {
             srpl_instance_reconnect(instance);
         }
@@ -3328,8 +3337,7 @@ srpl_instance_add(const char *hostname, const char *service_name,
             instance->connection->connection != NULL)
         {
             INFO("some id updated, disconnect the current connection.");
-            srpl_trigger_disconnect(instance->connection);
-            srpl_connection_next_state(instance->connection, srpl_state_idle);
+            srpl_connection_discontinue(instance->connection);
         }
     }
 }
@@ -4141,7 +4149,7 @@ srpl_disconnect(srpl_connection_t *srpl_connection)
 {
     const int delay = 300; // five minutes
     srpl_instance_t *instance = srpl_connection->instance;
-    if (instance != NULL && srpl_connection->connection != NULL) {
+    if (instance != NULL && !instance->unmatched && srpl_connection->connection != NULL) {
         srpl_state_t state = srpl_connection_drop_state_delay(instance, srpl_connection, delay);
         if (state == srpl_state_retry_delay_send) {
             srpl_retry_delay_send(srpl_connection, delay);
@@ -4499,15 +4507,17 @@ srpl_sync_wait_check(void *context)
 
     if (srpl_connection->instance == NULL) {
         FAULT("srpl_connection->instance shouldn't ever be NULL here, but it is.");
-        return;
+        goto out;
     }
     if (srpl_connection->instance->domain == NULL) {
         FAULT("srpl_connection->instance->domain shouldn't ever be NULL here, but it is.");
-        return;
+        goto out;
     }
     if (!srpl_connection->instance->domain->partner_discovery_pending) {
         srpl_maybe_sync_or_transition(srpl_connection->instance->domain);
     }
+out:
+    RELEASE_HERE(srpl_connection, srpl_connection);
 }
 
 static srpl_state_t
@@ -4516,7 +4526,8 @@ srpl_sync_wait_action(srpl_connection_t *srpl_connection, srpl_event_t *event)
     STATE_ANNOUNCE(srpl_connection, event);
     if (event == NULL) {
         // This will trigger a do_sync event if we should synchronize at this point.
-        ioloop_run_async(srpl_sync_wait_check, srpl_connection);
+        RETAIN_HERE(srpl_connection, srpl_connection);
+        ioloop_run_async(srpl_sync_wait_check, srpl_connection, NULL);
         return srpl_state_invalid;
     } else if (event->event_type == srpl_event_do_sync) {
         // When starting to sync, we reset the keepalive_interval so that we can detect
@@ -5223,7 +5234,7 @@ srpl_advertise_finished_event_send(char *hostname, int rcode, srp_server_t *serv
         free(event);
         return;
     }
-    ioloop_run_async(srpl_deferred_advertise_finished_event_deliver, event);
+    ioloop_run_async(srpl_deferred_advertise_finished_event_deliver, event, NULL);
 }
 
 
@@ -5775,7 +5786,7 @@ void
 srpl_srp_client_update_finished_event_send(adv_host_t *host, int rcode)
 {
     srpl_event_t *event;
-    event = malloc(sizeof(*event));
+    event = calloc(1, sizeof(*event));
     if (event == NULL) {
         FAULT(PRI_S_SRP ": unable to allocate memory to defer event", host->name);
         return;
@@ -5785,7 +5796,7 @@ srpl_srp_client_update_finished_event_send(adv_host_t *host, int rcode)
     event->content.client_result.host = host;
     srp_adv_host_retain(event->content.client_result.host);
     event->content.client_result.rcode = rcode;
-    ioloop_run_async(srpl_deferred_srp_client_update_finished_event_deliver, event);
+    ioloop_run_async(srpl_deferred_srp_client_update_finished_event_deliver, event, NULL);
 }
 
 typedef struct {

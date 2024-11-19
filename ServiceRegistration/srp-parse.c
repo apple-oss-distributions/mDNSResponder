@@ -680,10 +680,6 @@ srp_evaluate(const char *remote_name, dns_message_t **in_parsed_message, message
             goto out;
         }
     }
-    if (keys != NULL) {
-        free(keys);
-        keys = NULL;
-    }
 
     // And make sure it has a key record
     if (host_description->key == NULL) {
@@ -842,6 +838,11 @@ badsig:
     ret->drop = true;
 
 out:
+    if (keys != NULL) {
+        free(keys);
+        keys = NULL;
+    }
+
     // No matter how we get out of this, we free the delete structures that weren't dangling removes,
     // because they are not used to do the update.
     for (dp = deletes; dp; ) {
@@ -1010,7 +1011,9 @@ srp_parse_host_messages_evaluate(srp_server_t *UNUSED server_state, srpl_connect
     client_updates = prev;
 
     // Now that we've eliminated shadowed updates, we can actually call srp_update_start.
-    ret = srp_update_start(client_updates);
+    if (client_updates != NULL) {
+        ret = srp_update_start(client_updates);
+    }
     goto good;
 out:
     srp_parse_client_updates_free(client_updates);

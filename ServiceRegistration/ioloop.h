@@ -390,7 +390,8 @@ void ioloop_file_descriptor_retain_(io_t *NONNULL file_descriptor, const char *N
 void ioloop_file_descriptor_release_(io_t *NONNULL file_descriptor, const char *NONNULL file, int line);
 
 bool ioloop_interface_monitor_start(void);
-void ioloop_run_async(async_callback_t NULLABLE callback, void *NULLABLE context);
+void ioloop_run_async(async_callback_t NULLABLE callback, void *NULLABLE context,
+                      void (*NULLABLE context_release)(void *NULLABLE context));
 
 
 bool srp_load_file_data(void *NULLABLE host_context, const char *NONNULL filename, uint8_t *NONNULL buffer,

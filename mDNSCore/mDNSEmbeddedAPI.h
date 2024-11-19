@@ -2551,6 +2551,7 @@ struct mDNS_struct
 #endif
 #if MDNSRESPONDER_SUPPORTS(COMMON, SPS_CLIENT)
     mDNSQuestionCallback *SPSBrowseCallback;    // So the platform layer can do something useful with SPS browse results
+    UDPSocket            *SPClientSocket;       // Socket for sleep proxy client registration requests.
 #endif
     int ProxyRecords;                           // Total number of records we're holding as proxy
     #define           MAX_PROXY_RECORDS 10000   /* DOS protection: 400 machines at 25 records each */

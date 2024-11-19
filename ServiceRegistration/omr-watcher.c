@@ -459,7 +459,7 @@ omr_watcher_callback_cancel(omr_watcher_t *omw, omr_watcher_callback_t *callback
             if (!omw->purge_pending) {
                 omw->purge_pending = true;
                 RETAIN_HERE(omw, omr_watcher);
-                ioloop_run_async(omr_watcher_purge_canceled_callbacks, omw);
+                ioloop_run_async(omr_watcher_purge_canceled_callbacks, omw, NULL);
             }
         }
     }
