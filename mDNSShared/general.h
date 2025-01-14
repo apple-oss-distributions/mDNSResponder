@@ -931,4 +931,74 @@
  */
 #define MDNS_UUID_SIZE	16
 
+/*!
+ *	@brief
+ *		Evaluates to non-zero if the code is being analyzed by Clang's static analyzer.
+ *
+ *	@discussion
+ *		As described in <https://clang-analyzer.llvm.org/faq.html#exclude_code>, "when the static analyzer is
+ *		using clang to parse source files, it implicitly defines the preprocessor macro __clang_analyzer__."
+ */
+#if defined(__clang_analyzer__)
+	#define MDNS_CLANG_ANALYZER()	1
+#else
+	#define MDNS_CLANG_ANALYZER()	0
+#endif
+
+/*!
+ *	@brief
+ *		When performing static analysis, acknowledges that a pointer is non-NULL.
+ *
+ *	@param PTR
+ *		The pointer.
+ *
+ *	@discussion
+ *		This macro is meant as a last resort to address the false positive described in
+ *		https://clang-analyzer.llvm.org/faq.html#null_pointer where the analyzer thinks that a pointer can be
+ *		NULL because some preceding code NULL checks the pointer.
+ *
+ *		This macro should be used when it isn't trivial to remove the preceding NULL check.
+ */
+#if MDNS_CLANG_ANALYZER()
+	#define mdns_clang_static_analyzer_acknowledge_nonnull(PTR)	(void)(*(PTR))
+#else
+	#define mdns_clang_static_analyzer_acknowledge_nonnull(PTR)
+#endif
+
+/*!
+ *	@brief
+ *		When performing static analysis, fills a memory area with zero bytes.
+ *
+ *	@param PTR
+ *		The address of the start of the memory area.
+ *
+ *	@param LEN
+ *		The length of the memory area.
+ *
+ *	@discussion
+ *		This macro is meant as a last resort to address false positives where the analyzer thinks that a code
+ *		path exists where uninitialized memory can be accessed.
+ */
+#if MDNS_CLANG_ANALYZER()
+	#define mdns_clang_static_analyzer_zero_mem(PTR, LEN)	memset((PTR), 0, (LEN))
+#else
+	#define mdns_clang_static_analyzer_zero_mem(PTR, LEN)
+#endif
+
+/*!
+ *	@brief
+ *		Returns the greater of two values.
+ *
+ *	@param X
+ *		The first value.
+ *
+ *	@param Y
+ *		The second value.
+ *
+ *	@discussion
+ *		Avoid passing expressions with side effects as arguments. See
+ *		<https://wiki.sei.cmu.edu/confluence/display/c/PRE31-C.+Avoid+side+effects+in+arguments+to+unsafe+macros>.
+ */
+#define mdns_max(X, Y)	(((X) > (Y)) ? (X) : (Y))
+
 #endif	// MDNS_GENERAL_H

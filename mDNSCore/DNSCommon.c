@@ -4496,9 +4496,11 @@ mDNSlocal mDNSBool DumpMDNSPacket_GetNameHashTypeClass(const DNSMessage *const m
     mDNSBool found;
     domainname name;
 
+    mdns_clang_static_analyzer_zero_mem(name.c, 1);
     ptr = getDomainName(msg, ptr, end, &name);
-    const mDNSu32 nameHash = mDNS_DomainNameFNV1aHash(&name);
     mdns_require_action_quiet(ptr, exit, found = mDNSfalse);
+
+    const mDNSu32 nameHash = mDNS_DomainNameFNV1aHash(&name);
 
     mdns_require_action_quiet(ptr + 4 <= end, exit, found = mDNSfalse);
     const mDNSu16 type = ReadField16(&ptr[0]);

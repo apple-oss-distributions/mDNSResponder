@@ -995,7 +995,7 @@ mDNSlocal void AnswerAllLocalQuestionsWithLocalAuthRecord(mDNS *const m, AuthRec
 
 mDNSlocal mDNSBool ResourceRecordIsValidAnswer(const AuthRecord *const rr)
 {
-    if ((rr->resrec.RecordType & kDNSRecordTypeActiveMask) &&
+    if ((rr->resrec.RecordType & kDNSRecordTypeActiveMask) && rr->resrec.rrtype != kDNSType_OPT &&
         ((rr->Additional1 == mDNSNULL) || (rr->Additional1->resrec.RecordType & kDNSRecordTypeActiveMask)) &&
         ((rr->Additional2 == mDNSNULL) || (rr->Additional2->resrec.RecordType & kDNSRecordTypeActiveMask)) &&
         ((rr->DependentOn == mDNSNULL) || (rr->DependentOn->resrec.RecordType & kDNSRecordTypeActiveMask)))
@@ -2163,10 +2163,11 @@ mDNSlocal void SetupTSROpt(const TSROptData *tsrData, rdataOPT *const tsrOPT)
 mDNSlocal mDNSu8 *AddTSRROptsToMessage(const TSRDataPtrRecHead * const tsrHead, const DNSMessage *const msg,
     mDNSu8 * const rdlengthptr, mDNSu8 *ptr, const mDNSu8 *end)
 {
-    RData rdatastorage = {sizeof(RDataBody), 0, {0}};
+    RData rdatastorage = {0};
     ResourceRecord next_opt;
     mDNSu8 *startptr = ptr;
     mDNSu16 actualLength = (mDNSu16)(rdlengthptr[0] << 8) + (mDNSu16)rdlengthptr[1];
+    rdatastorage.MaxRDLength = sizeof(RDataBody);
     next_opt.rrtype     = kDNSType_OPT;
     next_opt.rdata      = &rdatastorage;
     next_opt.rdlength   = sizeof(rdataOPT);
@@ -4221,6 +4222,10 @@ mDNSlocal mDNSBool AddRecordInProbe(mDNS *const m, const AuthRecord *const ar, c
     {
         return mDNSfalse;
     }
+    if (rr->resrec.rrtype == kDNSType_OPT)
+    {
+        return mDNSfalse;
+    }
     mDNSBool hasTSR = (mDNSGetTSRForAuthRecord(m, ar) != mDNSNULL);
 
     // Only include TXT record in probe query's authority section if TSR record exist for the name
@@ -5016,7 +5021,7 @@ mDNSlocal void SendQueries(mDNS *const m)
     for (ar = m->ResourceRecords; ar; ar=ar->next)
         if (ar->SendRNow)
         {
-            if (ar->ARType != AuthRecordLocalOnly && ar->ARType != AuthRecordP2P)
+            if (ar->ARType != AuthRecordLocalOnly && ar->ARType != AuthRecordP2P && ar->resrec.rrtype != kDNSType_OPT)
                 LogInfo("SendQueries: No active interface %d to send probe: %d %s",
                         IIDPrintable(ar->SendRNow), IIDPrintable(ar->resrec.InterfaceID), ARDisplayString(m, ar));
             ar->SendRNow = mDNSNULL;
@@ -16227,8 +16232,9 @@ mDNSexport mStatus mDNS_Update(mDNS *const m, AuthRecord *const rr, mDNSu32 newt
     }
 #endif
 
-    if (RRLocalOnly(rr) || (rr->resrec.rroriginalttl == newttl && rr->resrec.rdlength == newrdlength &&
-                            mDNSPlatformMemSame(rr->resrec.rdata->u.data, newrdata->u.data, newrdlength)))
+    if (RRLocalOnly(rr) || (rr->resrec.rrtype == kDNSType_OPT) ||
+        (rr->resrec.rroriginalttl == newttl && rr->resrec.rdlength == newrdlength &&
+         mDNSPlatformMemSame(rr->resrec.rdata->u.data, newrdata->u.data, newrdlength)))
         CompleteRDataUpdate(m, rr);
     else
     {

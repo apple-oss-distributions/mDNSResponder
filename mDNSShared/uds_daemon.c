@@ -34,6 +34,7 @@
 #include "uDNS.h"
 #include "uds_daemon.h"
 #include "dns_sd_internal.h"
+#include "general.h"
 
 // Apple-specific functionality, not required for other platforms
 
@@ -1491,14 +1492,14 @@ mDNSlocal void regrecord_callback(mDNS *const m, AuthRecord *rr, mStatus result)
                 MDNS_CORE_LOG_RDATA(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT, record,
                     "[R%u->Rec%u] DNSServiceRegisterRecord Result -- "
                     "event: " PUB_REG_RESULT ", ifindex: %d, name: " PRI_DM_NAME "(%x), ", request->request_id, re->key,
-                    REG_RESULT_PARAM(result), ifIndex, DM_NAME_PARAM(record->name), nameHash);
+                    REG_RESULT_PARAM(result), (mDNSs32)ifIndex, DM_NAME_PARAM(record->name), nameHash);
             }
             else
             {
                 MDNS_CORE_LOG_RDATA(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT, record,
                     "[R%u->Rec%u] DNSServiceRegisterRecord Result -- "
                     "event: " PUB_REG_RESULT ", ifindex: %d, name hash: %x, ",
-                    request->request_id, re->key, REG_RESULT_PARAM(result), ifIndex, nameHash);
+                    request->request_id, re->key, REG_RESULT_PARAM(result), (mDNSs32)ifIndex, nameHash);
             }
         }
         if (result != mStatus_MemFree)
@@ -1699,6 +1700,7 @@ mDNSlocal void connection_termination(request_state *request)
         {
             const AuthRecord *const ar = ptr->rr;
             const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+            mdns_clang_static_analyzer_acknowledge_nonnull(ar->resrec.name);
             mdns_powerlog_register_record_stop(request->pid_name, ar->resrec.name->c, ptr->powerlog_start_time, usesAWDL);
         }
 #endif
@@ -1771,7 +1773,7 @@ mDNSlocal mStatus _handle_regrecord_request_start(request_state *request, AuthRe
             mDNSfalse, "[R%u->Rec%u] DNSServiceRegisterRecord START -- "
             "name: " PRI_DM_NAME ", type: " PUB_DNS_TYPE ", flags: 0x%X, interface index: %d, "
             "client pid: %d (" PUB_S "), ", request->request_id, re->key, DM_NAME_PARAM_NONNULL(record->name),
-            DNS_TYPE_PARAM(record->rrtype), request->flags, request->interfaceIndex, request->process_id,
+            DNS_TYPE_PARAM(record->rrtype), request->flags, (mDNSs32)request->interfaceIndex, request->process_id,
             request->pid_name);
     }
     else
@@ -1780,7 +1782,7 @@ mDNSlocal mStatus _handle_regrecord_request_start(request_state *request, AuthRe
             mDNSfalse, "[R%u->Rec%u] DNSServiceRegisterRecord START -- "
             "name: " PRI_DM_NAME ", type: " PUB_DNS_TYPE ", flags: 0x%X, interface index: %d, ",
             request->request_id, re->key, DM_NAME_PARAM_NONNULL(record->name), DNS_TYPE_PARAM(record->rrtype),
-            request->flags, request->interfaceIndex);
+            request->flags, (mDNSs32)request->interfaceIndex);
     }
     regRequestShouldLogFullRequestInfo(re);
 
@@ -1788,9 +1790,9 @@ mDNSlocal mStatus _handle_regrecord_request_start(request_state *request, AuthRe
     if (err)
     {
         const mDNSu32 nameHash = mDNS_DomainNameFNV1aHash(record->name);
-        UDS_LOG_ANSWER_EVENT_WITH_FORMAT(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_ERROR, request->request_id, 0, record,
+        UDS_LOG_ANSWER_EVENT_WITH_FORMAT(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_ERROR, request->request_id, 0u, record,
             "DNSServiceRegisterRecord Result -- record %u, event: ERROR, ifindex: %d, name: " PRI_DM_NAME "(%x)",
-            re->key, (int)request->interfaceIndex, DM_NAME_PARAM(record->name), nameHash);
+            re->key, (mDNSs32)request->interfaceIndex, DM_NAME_PARAM(record->name), nameHash);
         freeL("registered_record_entry", re);
         freeL("registered_record_entry/AuthRecord", rr);
     }
@@ -2565,7 +2567,7 @@ mDNSlocal mStatus remove_record(request_state *request)
         MDNS_CORE_LOG_RDATA(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEFAULT, record,
             "[R%u->Rec%u] DNSServiceRemoveRecord -- ifindex: %d, client pid: %d (" PUB_S "), "
             "duration: " PUB_TIME_DUR ", name: " PRI_DM_NAME "(%x), ",
-            request->request_id, e->key, ifIndex, request->process_id, request->pid_name, duration,
+            request->request_id, e->key, (mDNSs32)ifIndex, request->process_id, request->pid_name, duration,
             DM_NAME_PARAM(record->name), nameHash);
     }
     else
@@ -4457,12 +4459,12 @@ mDNSlocal void resolve_result_save_answer(request_resolve *const resolve, const 
             const mDNSu8 *const txt_rdata = answer->rdata->u.data;
             const mDNSu16 txt_rdlength = answer->rdlength;
 
-            // MAX(1, txt_rdlength) ensures that resolve->txt_rdata is non-null, when the TXT record rdata length is 0,
-            // thus allowing the 0-length TXT to be identified as a positive record.
+            // mdns_max(1, txt_rdlength) ensures that resolve->txt_rdata is non-null, when the TXT record rdata length 
+            // is 0, thus allowing the 0-length TXT to be identified as a positive record.
             // In theory, TXT record should contain "One or more <character-string>s." according to:
             // [TXT RDATA format](https://datatracker.ietf.org/doc/html/rfc1035#section-3.3.14)
             // Here we allow mDNSResponder to return TXT record with a 0 data length.
-            resolve->txt_rdata = mDNSPlatformMemAllocateClear(MAX(1, txt_rdlength));
+            resolve->txt_rdata = mDNSPlatformMemAllocateClear(mdns_max(1, txt_rdlength));
             mdns_require_return(resolve->txt_rdata);
 
             mDNSPlatformMemCopy(resolve->txt_rdata, txt_rdata, txt_rdlength);
@@ -5144,6 +5146,7 @@ mDNSlocal void queryrecord_termination_callback(request_state *request)
     if (request->powerlog_start_time != 0)
     {
         const mDNSBool usesAWDL = ClientRequestUsesAWDL(request->interfaceIndex, request->flags);
+        mdns_clang_static_analyzer_acknowledge_nonnull(qname);
         mdns_powerlog_query_record_stop(request->pid_name, qname->c, request->powerlog_start_time, usesAWDL);
         request->powerlog_start_time = 0;
     }

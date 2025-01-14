@@ -2041,14 +2041,6 @@ DNSServiceErrorType DNSServiceRegisterInternal
     len += strlen(name) + strlen(regtype) + strlen(domain) + strlen(host) + 4;
     len += 2 * sizeof(uint16_t);  // port, txtLen
     len += txtLen;
-    if (attr)
-    {
-        if (!validate_attribute_tlvs(attr))
-        {
-            return kDNSServiceErr_BadParam;
-        }
-        len += get_required_length_for_attribute_tlvs(attr);
-    }
 
     hdr = create_hdr(reg_service_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
     if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
@@ -2064,10 +2056,6 @@ DNSServiceErrorType DNSServiceRegisterInternal
     *ptr++ = port.b[1];
     put_uint16(txtLen, &ptr);
     put_rdata(txtLen, txtRecord, &ptr);
-    if (attr)
-    {
-        put_attribute_tlvs(attr, hdr, &ptr, limit);
-    }
 
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
     if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
@@ -2367,14 +2355,6 @@ DNSServiceErrorType DNSServiceRegisterRecordInternal
     len += 3 * sizeof(uint16_t);  // rrtype, rrclass, rdlen
     len += strlen(fullname) + 1;
     len += rdlen;
-    if (attr)
-    {
-        if (!validate_attribute_tlvs(attr))
-        {
-            return kDNSServiceErr_BadParam;
-        }
-        len += get_required_length_for_attribute_tlvs(attr);
-    }
 
     // Bump up the uid. Normally for shared operations (kDNSServiceFlagsShareConnection), this
     // is done in ConnectToServer. For DNSServiceRegisterRecord, ConnectToServer has already
@@ -2397,10 +2377,6 @@ DNSServiceErrorType DNSServiceRegisterRecordInternal
     put_uint16(rdlen, &ptr);
     put_rdata(rdlen, rdata, &ptr);
     put_uint32(ttl, &ptr);
-    if (attr)
-    {
-        put_attribute_tlvs(attr, hdr, &ptr, limit);
-    }
     if (flags & kDNSServiceFlagsQueueRequest)
     {
         hdr->ipc_flags |= IPC_FLAGS_NOERRSD;

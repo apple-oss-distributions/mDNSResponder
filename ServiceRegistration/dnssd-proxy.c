@@ -2662,9 +2662,27 @@ dp_push_response(dnssd_query_t *query, dns_rr_t *original_question)
         iov.iov_len = (query->towire.p - (uint8_t *)query->response);
         iov.iov_base = query->response;
         INFO("[Q%d][QU%d] " PRI_S_SRP " (len %zd)", SERIAL(query), SERIAL(question), name, iov.iov_len);
-
         query->towire.p = query->p_dso_length;
         dns_u16_to_wire(&query->towire, dso_length);
+
+#ifdef DNS_PUSH_DUMP_DEBUGGING
+        for (size_t i = 0; i < iov.iov_len; i += 32) {
+            char line[32 * 2 + 8 + 1];
+            char *dp = line;
+            for (int j = 0; j < 32; j++) {
+                if (i + j < iov.iov_len) {
+                    snprintf(dp, sizeof(line) - (dp - line), "%02x", ((uint8_t *)iov.iov_base)[i + j]);
+                    dp += 2;
+                    if (!((j + 1) & 3)) {
+                        *dp++ = ' ';
+                        *dp = 0;
+                    }
+                }
+            }
+            INFO("%s", line);
+        }
+#endif // DNS_PUSH_DUMP_DEBUGGING
+
         ioloop_send_message(query->tracker->connection, query->message, &iov, 1);
         dp_query_towire_reset(query);
     }

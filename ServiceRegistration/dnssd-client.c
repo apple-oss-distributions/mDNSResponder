@@ -254,6 +254,7 @@ dnssd_client_dns_service_event_handler(const mrc_dns_service_registration_event_
 {
     state_machine_event_t *event = NULL;
     bool want_event = false;
+    bool last_event = false;
     switch(mrc_event)
     {
     case mrc_dns_service_registration_event_started:
@@ -265,6 +266,7 @@ dnssd_client_dns_service_event_handler(const mrc_dns_service_registration_event_
 
     case mrc_dns_service_registration_event_invalidation:
         want_event = true;
+        last_event = true;
         if (event_err) {
             ERROR("DNS service registration invalidated with error: %d", (int)event_err);
         } else {
@@ -286,7 +288,9 @@ dnssd_client_dns_service_event_handler(const mrc_dns_service_registration_event_
             state_machine_event_deliver(&client->state_header, event);
             RELEASE_HERE(event, state_machine_event);
         }
-        // Either event should be the last event we get.
+    }
+    if (last_event) {
+        // Release dnssd client if this is the last event we get.
         RELEASE_HERE(client, dnssd_client);
     }
 }

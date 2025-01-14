@@ -1627,8 +1627,12 @@ ioloop_listener_create(bool stream, bool tls, bool launchd, uint16_t *avoid_port
                 tls_config((void *)&tls_context);
             };
         }
+        nw_parameters_configure_protocol_block_t configure_tcp_block = ^(nw_protocol_options_t tcp_options) {
+            INFO("setting tcp mss to 450");
+            nw_tcp_options_set_maximum_segment_size(tcp_options, 450);
+        };
 
-        listener->parameters = nw_parameters_create_secure_tcp(configure_tls_block, NW_PARAMETERS_DEFAULT_CONFIGURATION);
+        listener->parameters = nw_parameters_create_secure_tcp(configure_tls_block, configure_tcp_block);
     } else {
         if (tls) {
             ERROR("DTLS support not implemented.");
