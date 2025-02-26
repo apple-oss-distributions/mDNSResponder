@@ -601,8 +601,8 @@ service_publisher_queue_update(service_publisher_t *publisher, thread_service_t 
     thread_service_t **p_published;
     if (service->service_type == unicast_service) {
         p_published = &publisher->published_unicast_service;
-    } else if (service->service_type == unicast_service) {
-        p_published = &publisher->published_unicast_service;
+    } else if (service->service_type == anycast_service) {
+        p_published = &publisher->published_anycast_service;
     } else {
         ERROR("unsupported service type %d", service->service_type);
         return;
@@ -641,13 +641,13 @@ service_publisher_create_service_for_queue(thread_service_t *service)
     }
 }
 
-static void UNUSED
+static void
 service_publisher_service_publish(service_publisher_t *publisher, thread_service_t *service)
 {
     service_publisher_queue_update(publisher, service, want_add);
 }
 
-static void UNUSED
+static void
 service_publisher_service_unpublish(service_publisher_t *publisher, thread_service_type_t service_type, bool enqueue)
 {
     thread_service_t *service;
@@ -671,8 +671,8 @@ service_publisher_service_unpublish(service_publisher_t *publisher, thread_servi
         thread_service_t *to_delete = service_publisher_create_service_for_queue(service);
         service_publisher_queue_update(publisher, to_delete, want_delete);
         thread_service_release(to_delete); // service_publisher_queue_update explicitly retains the references it makes.
-        thread_service_release(service); // No longer published.
     }
+    thread_service_release(service); // No longer published.
 }
 
 static void
@@ -1378,8 +1378,13 @@ service_publisher_action_publishing(state_machine_header_t *state_header, state_
     STATE_MACHINE_HEADER_TO_PUBLISHER(state_header);
     BR_STATE_ANNOUNCE(publisher, event);
 
-    if (event == NULL || event->type == state_machine_event_type_timeout ||
-        event->type == state_machine_event_type_srp_needed)
+    // If we just entered this state, we shouldn't have a published service, so publish one unconditionally.
+    // If we got a timeout or srp_needed event, and only if we haven't successfully published the service, then
+    // publish it.
+    if (event == NULL ||
+        (!publisher->have_unicast_in_net_data &&
+         (event->type == state_machine_event_type_timeout ||
+          event->type == state_machine_event_type_srp_needed)))
     {
         if (publisher->published_unicast_service != NULL) {
             // We shouldn't see a published service on state entry.

@@ -15252,23 +15252,9 @@ mDNSexport mStatus mDNS_StartQuery_internal(mDNS *const m, DNSQuestion *const qu
     // 2. Be put before any log is printed, or domain name information may leak.
     if (DNSQuestionNeedsSensitiveLogging(question))
     {
-        gNumOfSensitiveLoggingEnabledQuestions++;
-        if (!gSensitiveLoggingEnabled)
-        {
-            gSensitiveLoggingEnabled = mDNStrue;
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-                "[Q%u] Question enables sensitive logging, all the sensitive level logs and the state dump of the question will now be redacted.",
-                mDNSVal16(question->TargetQID));
-        }
-        else
-        {
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG,
-                "[Q%u] Question enables sensitive logging, redaction already in effect. - "
-                "number of enabled questions: %d.", mDNSVal16(question->TargetQID),
-                gNumOfSensitiveLoggingEnabledQuestions);
-        }
+        mDNSEnableSensitiveLoggingForQuestion(mDNSVal16(question->TargetQID));
     }
-#endif // MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+#endif
 
     const mDNSBool localOnlyOrP2P = LocalOnlyOrP2PInterface(question->InterfaceID);
 #if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
@@ -15632,21 +15618,9 @@ mDNSexport mStatus mDNS_StopQuery_internal(mDNS *const m, DNSQuestion *const que
 #if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
     if (DNSQuestionNeedsSensitiveLogging(question))
     {
-         gNumOfSensitiveLoggingEnabledQuestions--;
-
-        if (gNumOfSensitiveLoggingEnabledQuestions == 0)
-        {
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-                "[Q%u] Last question that enables sensitive logging is stopped.", mDNSVal16(question->TargetQID));
-            gSensitiveLoggingEnabled = mDNSfalse;
-        }
-        else
-        {
-            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG, "[Q%u] number of sensitive logging enabled questions: "
-                "%u.", mDNSVal16(question->TargetQID), gNumOfSensitiveLoggingEnabledQuestions);
-        }
+        mDNSDisableSensitiveLoggingForQuestion(mDNSVal16(question->TargetQID));
     }
-#endif // MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+#endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
     // Must drop the lock before releasing DNSSEC context because its finalizer may stop other questions, which would
@@ -19219,6 +19193,38 @@ mDNSexport void mDNS_FinalExit(mDNS *const m)
 
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "mDNS_FinalExit: done");
 }
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+mDNSexport void mDNSEnableSensitiveLoggingForQuestion(const mDNSu16 questionID)
+{
+    const unsigned int enableCount = mDNSEnableSensitiveLogging();
+    if (enableCount == 1)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+            "[Q%u] sensitive logging enabled", questionID);
+    }
+    else
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG,
+            "[Q%u] sensitive logging enable count increased: %u", questionID, enableCount);
+    }
+}
+
+mDNSexport void mDNSDisableSensitiveLoggingForQuestion(const mDNSu16 questionID)
+{
+    const unsigned int enableCount = mDNSDisableSensitiveLogging();
+    if (enableCount == 0)
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+            "[Q%u] sensitive logging disabled", questionID);
+    }
+    else
+    {
+        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG,
+            "[Q%u] sensitive logging enable count decreased: %u", questionID, enableCount);
+    }
+}
+#endif
 
 #ifdef UNIT_TEST
 #include "../unittests/mdns_ut.c"

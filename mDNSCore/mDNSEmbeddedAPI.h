@@ -2927,6 +2927,10 @@ extern mDNSu32 SetValidDNSServers(mDNS *m, DNSQuestion *question);
 extern mDNSBool ShouldSuppressUnicastQuery(const DNSQuestion *q, mdns_dns_service_t dnsservice);
 extern mDNSBool LocalRecordRmvEventsForQuestion(mDNS *m, DNSQuestion *q);
 #endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+mDNSexport void mDNSEnableSensitiveLoggingForQuestion(mDNSu16 questionID);
+mDNSexport void mDNSDisableSensitiveLoggingForQuestion(mDNSu16 questionID);
+#endif
 
 // ***************************************************************************
 #if 0

@@ -222,9 +222,9 @@ extern int mDNS_McastTracingEnabled;
 extern int mDNS_DebugMode;          // If non-zero, LogMsg() writes to stderr instead of syslog
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
-extern int gNumOfSensitiveLoggingEnabledQuestions;
-extern int gSensitiveLoggingEnabled; // If true, LogRedact() will redact all private level logs. The content of state
-                                        // dump that is related to user's privacy will also be redacted.
+extern unsigned int mDNSEnableSensitiveLogging(void);
+extern unsigned int mDNSDisableSensitiveLogging(void);
+extern int mDNSSensitiveLoggingIsEnabled(void);
 #endif
 
 extern const char ProgramName[];
@@ -305,17 +305,17 @@ extern void freeL(const char *msg, void *x);
     #define JOIN(X, Y) JOIN_AGAIN(X, Y)
     #define JOIN_AGAIN(X, Y) X ## Y
 
-    #define LogRedact(CATEGORY, LEVEL, FORMAT, ...)                                         \
-        do                                                                                  \
-        {                                                                                   \
-            if (!gSensitiveLoggingEnabled || ((CATEGORY) == (MDNS_LOG_CATEGORY_STATE)))     \
-            {                                                                               \
-                os_log_with_type(CATEGORY, LEVEL, FORMAT, ## __VA_ARGS__);                  \
-            }                                                                               \
-            else                                                                            \
-            {                                                                               \
-                os_log_with_type(JOIN(CATEGORY, _redacted), LEVEL, FORMAT, ## __VA_ARGS__); \
-            }                                                                               \
+    #define LogRedact(CATEGORY, LEVEL, FORMAT, ...)                                            \
+        do                                                                                     \
+        {                                                                                      \
+            if (!mDNSSensitiveLoggingIsEnabled() || ((CATEGORY) == (MDNS_LOG_CATEGORY_STATE))) \
+            {                                                                                  \
+                os_log_with_type(CATEGORY, LEVEL, FORMAT, ## __VA_ARGS__);                     \
+            }                                                                                  \
+            else                                                                               \
+            {                                                                                  \
+                os_log_with_type(JOIN(CATEGORY, _redacted), LEVEL, FORMAT, ## __VA_ARGS__);    \
+            }                                                                                  \
         } while(0)
 #else
     #if (MDNS_HAS_VA_ARG_MACROS)
