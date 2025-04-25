@@ -103,7 +103,8 @@ typedef enum
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define MDNS_LOG_CATEGORY_DISABLED OS_LOG_DISABLED
 #else
-    #define MDNS_LOG_CATEGORY_DISABLED "Log Disabled"
+    extern const char mDNS_LogDisabled[];
+    #define MDNS_LOG_CATEGORY_DISABLED ((const char *)mDNS_LogDisabled)
 #endif
 
 // Set this symbol to 1 to answer remote queries for our Address, and reverse mapping PTR
@@ -222,9 +223,9 @@ extern int mDNS_McastTracingEnabled;
 extern int mDNS_DebugMode;          // If non-zero, LogMsg() writes to stderr instead of syslog
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
-extern int gNumOfSensitiveLoggingEnabledQuestions;
-extern int gSensitiveLoggingEnabled; // If true, LogRedact() will redact all private level logs. The content of state
-                                        // dump that is related to user's privacy will also be redacted.
+extern unsigned int mDNSEnableSensitiveLogging(void);
+extern unsigned int mDNSDisableSensitiveLogging(void);
+extern int mDNSSensitiveLoggingIsEnabled(void);
 #endif
 
 extern const char ProgramName[];
@@ -305,17 +306,17 @@ extern void freeL(const char *msg, void *x);
     #define JOIN(X, Y) JOIN_AGAIN(X, Y)
     #define JOIN_AGAIN(X, Y) X ## Y
 
-    #define LogRedact(CATEGORY, LEVEL, FORMAT, ...)                                         \
-        do                                                                                  \
-        {                                                                                   \
-            if (!gSensitiveLoggingEnabled || ((CATEGORY) == (MDNS_LOG_CATEGORY_STATE)))     \
-            {                                                                               \
-                os_log_with_type(CATEGORY, LEVEL, FORMAT, ## __VA_ARGS__);                  \
-            }                                                                               \
-            else                                                                            \
-            {                                                                               \
-                os_log_with_type(JOIN(CATEGORY, _redacted), LEVEL, FORMAT, ## __VA_ARGS__); \
-            }                                                                               \
+    #define LogRedact(CATEGORY, LEVEL, FORMAT, ...)                                            \
+        do                                                                                     \
+        {                                                                                      \
+            if (!mDNSSensitiveLoggingIsEnabled() || ((CATEGORY) == (MDNS_LOG_CATEGORY_STATE))) \
+            {                                                                                  \
+                os_log_with_type(CATEGORY, LEVEL, FORMAT, ## __VA_ARGS__);                     \
+            }                                                                                  \
+            else                                                                               \
+            {                                                                                  \
+                os_log_with_type(JOIN(CATEGORY, _redacted), LEVEL, FORMAT, ## __VA_ARGS__);    \
+            }                                                                                  \
         } while(0)
 #else
     #if (MDNS_HAS_VA_ARG_MACROS)
@@ -496,7 +497,7 @@ extern void freeL(const char *msg, void *x);
 // DNSServiceBrowse(_test._tcp.local., PTR) RESULT REMOVE interface 1:   23 _test._tcp.local. PTR demo._test._tcp.local.
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_ADD_RMV                     "%{mdns:addrmv}d"
-    #define ADD_RMV_PARAM(add_rmv_value)    (add_rmv_value)
+    #define ADD_RMV_PARAM(add_rmv_value)    ((add_rmv_value) ? 1 : 0)
 #else
     #define PUB_ADD_RMV                     PUB_S
     #define ADD_RMV_PARAM(add_rmv_value)    ((add_rmv_value) ? "add" : "rmv")
@@ -506,7 +507,7 @@ extern void freeL(const char *msg, void *x);
 // uppercase.
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
     #define PUB_ADD_RMV_U                   "%{mdns:addrmv_upper}d"
-    #define ADD_RMV_U_PARAM(add_rmv_value)  (add_rmv_value)
+    #define ADD_RMV_U_PARAM(add_rmv_value)  ((add_rmv_value) ? 1 : 0)
 #else
     #define PUB_ADD_RMV_U                   PUB_S
     #define ADD_RMV_U_PARAM(add_rmv_value)  ((add_rmv_value) ? "ADD" : "RMV")
@@ -653,7 +654,7 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
     #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
-        #define PUB_DNSSEC_RESULT                           "%{public, mdns:dnssec_result}d"
+        #define PUB_DNSSEC_RESULT                           "%{public, mdns:dnssec_result}u"
         #define DNSSEC_RESULT_PARAM(dnssec_result_value)    (dnssec_result_value)
     #else
         #define PUB_DNSSEC_RESULT                           "%s"
@@ -666,7 +667,7 @@ extern void freeL(const char *msg, void *x);
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
     #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
-        #define PUB_DNSSEC_INVAL_STATE                  "%{public, mdns:dnssec_inval_state}d"
+        #define PUB_DNSSEC_INVAL_STATE                  "%{public, mdns:dnssec_inval_state}u"
         #define DNSSEC_INVAL_STATE_PARAM(state_value)   (state_value)
     #else
         #define PUB_DNSSEC_INVAL_STATE                  "%s"
@@ -710,11 +711,11 @@ extern void freeL(const char *msg, void *x);
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
-    #define PUB_D2D_SRV_EVENT   "%{public, mdnsresponder:d2d_service_event}d"
+    #define PUB_D2D_SRV_EVENT   "%{public, mdnsresponder:d2d_service_event}u"
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
-    #define PUB_DNS_SCOPE_TYPE          "%{public, mdnsresponder:dns_scope_type}d"
+    #define PUB_DNS_SCOPE_TYPE          "%{public, mdnsresponder:dns_scope_type}u"
     #define DNS_SCOPE_TYPE_PARAM(type)  (type)
 #else
     #define PUB_DNS_SCOPE_TYPE          "%s"

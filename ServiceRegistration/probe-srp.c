@@ -70,6 +70,7 @@ struct probe_state {
     dns_wire_t question;
     int num_retransmissions, retransmission_delay;
     uint16_t question_length;
+    bool canceled;
 };
 
 static void
@@ -111,9 +112,8 @@ probe_srp_service_probe_cancel(thread_service_t *service)
 
     if (probe_state->connection != NULL) {
         ioloop_comm_cancel(probe_state->connection); // Cancel the connection (should result in the state being released)
-        ioloop_comm_release(probe_state->connection);
-        probe_state->connection = NULL;
     }
+    probe_state->canceled = true;
     RELEASE_HERE(probe_state, probe_state); // The thread_service_t's reference to the probe state
 }
 
@@ -183,6 +183,10 @@ probe_srp_datagram(comm_t *connection, message_t *message, void *context)
 #else
     int rcode = dns_rcode_get(&message->wire);
     probe_state_t *probe_state = context;
+    if (probe_state->canceled) {
+        INFO("datagram received after cancel--ignoring");
+        return;
+    }
     if (connection->connection != NULL) {
         INFO("datagram from " PRI_S_SRP " on port %d xid %x (question xid %x) rcode %d", connection->name,
              ntohs(probe_state->connection->address.sin6.sin6_port), message->wire.id, probe_state->question.id, rcode);
@@ -231,6 +235,11 @@ probe_srp_disconnected(comm_t *UNUSED connection, void *context, int UNUSED erro
     if (probe_state->service != NULL) {
         probe_srp_done(context, false);
     }
+
+    if (probe_state->wakeup != NULL) {
+        ioloop_cancel_wake_event(probe_state->wakeup);
+    }
+
     // Once we've gotten the connection disconnect event, we should not get any more callbacks from the connection
     // object.
     if (probe_state->connection != NULL) {
@@ -299,6 +308,10 @@ probe_srp_connected(comm_t *connection, void *context)
 #else
     (void)connection;
     probe_state_t *probe_state = context;
+    if (probe_state->canceled) {
+        INFO("canceled before connection was ready");
+        return;
+    }
     // Initialize a DNS message to send to the target
     memset(&probe_state->question, 0, DNS_HEADER_SIZE);
     dns_towire_state_t towire;
@@ -340,7 +353,7 @@ probe_srp_create(addr_t *address, thread_service_t *service, void *context,
         goto out;
     }
     RETAIN_HERE(probe_state, probe_state); // Retain for the caller
-    // tls   stream stable  opportunistic
+                                                             // tls   stream stable  opportunistic
     probe_state->connection = ioloop_connection_create(address, false, false, false, false,
                                                        probe_srp_datagram, probe_srp_connected, probe_srp_disconnected,
                                                        probe_srp_probe_state_context_release, probe_state);
@@ -354,6 +367,7 @@ probe_srp_create(addr_t *address, thread_service_t *service, void *context,
          SEGMENTED_IPv6_ADDR_PARAM_SRP(&address->sin6.sin6_addr, addr_buf), ntohs(address->sin6.sin6_port));
     probe_state->context = context;
     probe_state->callback = callback;
+    probe_state->context_release = context_release;
     service->last_probe_time = srp_time();
 
     service->probe_state = probe_state;

@@ -31,6 +31,7 @@ RELEASE_RETAIN_DECLS(service_publisher);
 
 bool service_publisher_is_address_mesh_local(service_publisher_t *NONNULL publisher, addr_t *NONNULL address);
 bool service_publisher_could_publish(service_publisher_t *NULLABLE publisher);
+bool service_publisher_competing_service_present(service_publisher_t *NULLABLE publisher);
 void service_publisher_cancel(service_publisher_t *NONNULL publisher);
 service_publisher_t *NULLABLE service_publisher_create(srp_server_t *NONNULL server_state);
 void service_publisher_start(service_publisher_t *NONNULL publisher);

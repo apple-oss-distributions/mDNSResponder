@@ -278,9 +278,6 @@ dns_rdata_dump_to_buf(dns_rr_t *rr, char *outbuf, size_t bufsize)
     size_t output_len, avail = bufsize;
     char *obp;
 
-    obp = outbuf;
-    avail = bufsize;
-
 #define ADVANCE(result, start, remaining) \
     output_len = strlen(start);           \
     result = start + output_len;          \
@@ -377,7 +374,7 @@ dns_rdata_dump_to_buf(dns_rr_t *rr, char *outbuf, size_t bufsize)
         break;
 
     case dns_rrtype_txt:
-        strcpy(outbuf, "TXT ");
+        memcpy(outbuf, "TXT ", 5);
         ADVANCE(obp, outbuf, bufsize);
         for (unsigned i = 0; i < rr->data.txt.len; i++) {
             if (isascii(rr->data.txt.data[i]) && isprint(rr->data.txt.data[i])) {
@@ -647,9 +644,7 @@ dns_rrdata_free(dns_rr_t *rr)
     case dns_rrtype_ns:
     case dns_rrtype_cname:
         dns_name_free(rr->data.ptr.name);
-#ifndef __clang_analyzer__
         rr->data.ptr.name = NULL;
-#endif
             break;
 
     case dns_rrtype_soa:
@@ -663,9 +658,7 @@ dns_rrdata_free(dns_rr_t *rr)
 
     case dns_rrtype_txt:
         free(rr->data.txt.data);
-#ifndef __clang_analyzer__
         rr->data.txt.data = NULL;
-#endif
         break;
 
     default:

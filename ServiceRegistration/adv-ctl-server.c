@@ -240,6 +240,10 @@ adv_ctl_thread_shutdown_continue(void *context)
     }
 
     xpc_object_t response;
+    if (server_state->shutdown_request == NULL) {
+        FAULT("shutdown request unexpectedly NULL here.");
+        return;
+    }
     response = xpc_dictionary_create_reply(server_state->shutdown_request);
     if (response == NULL) {
         ERROR("adv_xpc_message: Unable to create reply dictionary.");

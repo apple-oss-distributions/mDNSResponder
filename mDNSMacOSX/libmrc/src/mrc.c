@@ -60,7 +60,10 @@ struct mrc_session_s {
 	mrc_client_t		client;			// Delegate object to use when invoking callbacks.
 	const char *		entity_name;	// For logging purposes, the name of the entity that is to be enabled.
 	mrc_session_state_t	state;			// Current state of the session.
+	MDNS_STRUCT_PAD_64_32(7, 3);
 };
+MRC_STRUCT_PAD_CHECK(session);
+MRC_STRUCT_MAX_SIZE_CHECK(session, 64);
 
 MRC_OBJECT_SUBKIND_DEFINE(session);
 
@@ -79,7 +82,10 @@ struct mrc_client_s {
 	dispatch_queue_t	user_queue;	// User's dispatch queue.
 	mrc_client_state_t	state;		// Current state.
 	bool				immutable;	// True if the DNS proxy is no longer externally mutable.
+	MDNS_STRUCT_PAD_64_32(6, 2);
 };
+MRC_STRUCT_PAD_CHECK(client);
+MRC_STRUCT_MAX_SIZE_CHECK(client, 48);
 
 MRC_OBJECT_SUBKIND_DEFINE_ABSTRACT_MINIMAL_WITHOUT_ALLOC(client);
 
@@ -88,6 +94,7 @@ typedef union {
 	MRC_UNION_MEMBER(cached_local_records_inquiry);
 	MRC_UNION_MEMBER(discovery_proxy);
 	MRC_UNION_MEMBER(dns_proxy);
+	MRC_UNION_MEMBER(dns_proxy_state_inquiry);
 	MRC_UNION_MEMBER(dns_service_registration);
 	MRC_UNION_MEMBER(record_cache_flush);
 } mrc_any_client_t __attribute__((__transparent_union__));
@@ -121,7 +128,9 @@ struct mrc_client_kind_s {
 	mrc_client_handle_notification_f	handle_notification;
 	const char *						operation_name;
 	bool								oneshot;
+	MDNS_STRUCT_PAD_64_32(7, 3);
 };
+MRC_STRUCT_PAD_CHECK(client_kind);
 
 #define MRC_CLIENT_SUBKIND_DEFINE_CORE(NAME, OPERATION_NAME, ...)								\
 	static char *																				\
@@ -211,24 +220,15 @@ MRC_OBJECT_SUBKIND_DEFINE(dns_proxy_parameters);
 //======================================================================================================================
 // MARK: - DNS Proxy State Inquiry Kind Definition
 
-OS_CLOSED_ENUM(mrc_dns_proxy_state_inquiry_state, int8_t,
-	mrc_dns_proxy_state_inquiry_state_nascent		= 0,
-	mrc_dns_proxy_state_inquiry_state_registered	= 1,
-	mrc_dns_proxy_state_inquiry_state_in_progress	= 2,
-	mrc_dns_proxy_state_inquiry_state_done			= 3
-);
-
 struct mrc_dns_proxy_state_inquiry_s {
-	struct mdns_obj_s								base;		// Object base.
-	mrc_dns_proxy_state_inquiry_t					next;		// Next inquiry in list.
-	dispatch_queue_t								queue;		// User's dispatch queue.
+	struct mrc_client_s								base;		// Object base.
 	mrc_dns_proxy_state_inquiry_response_handler_t	handler;	// Response handler.
-	uint64_t										cmd_id;		// Command ID.
-	mrc_dns_proxy_state_inquiry_state_t				state;		// Current inquiry state.
-	bool											immutable;	// True if this object is no longer externally mutable.
+	MDNS_STRUCT_PAD_64_32(0, 0);
 };
+MRC_STRUCT_PAD_CHECK(dns_proxy_state_inquiry);
+MRC_STRUCT_MAX_SIZE_CHECK(dns_proxy_state_inquiry, 56);
 
-MRC_OBJECT_SUBKIND_DEFINE(dns_proxy_state_inquiry);
+MRC_CLIENT_SUBKIND_DEFINE_ONE_SHOT(dns_proxy_state_inquiry, "DNS Proxy State Inquiry");
 
 //======================================================================================================================
 // MARK: - DNS Service Registration Kind Definition
@@ -239,7 +239,10 @@ struct mrc_dns_service_registration_s {
 	mrc_dns_service_registration_event_handler_t	event_handler;				// Event handler.
 	mrc_dns_service_definition_type_t				definition_type;			// The type of the DNS service.
 	bool											reports_connection_errors;	// Whether to report connection error.
+	MDNS_STRUCT_PAD_64_32(6, 2);
 };
+MRC_STRUCT_PAD_CHECK(dns_service_registration);
+MRC_STRUCT_MAX_SIZE_CHECK(dns_service_registration, 72);
 
 MRC_CLIENT_SUBKIND_DEFINE_WITH_NOTIFICATION_HANDLING(dns_service_registration, "DNS Service Registration");
 
@@ -262,7 +265,10 @@ struct mrc_discovery_proxy_parameters_s {
 	CFMutableSetRef		domains;			// Domains to match in order to use the proxy.
 	xpc_object_t		certs;				// Certificates that can be used as trust anchors for TLS evaluation.
 	uint32_t			ifindex;			// Index of the interface where the proxy can be configured.
+	MDNS_STRUCT_PAD_64_32(4, 0);
 };
+MRC_STRUCT_PAD_CHECK(discovery_proxy_parameters);
+MRC_STRUCT_MAX_SIZE_CHECK(discovery_proxy_parameters, 56);
 
 MRC_OBJECT_SUBKIND_DEFINE(discovery_proxy_parameters);
 
@@ -291,7 +297,10 @@ struct mrc_record_cache_flush_s {
 	mrc_record_cache_flush_result_handler_t	handler;		// User handler.
 	uint16_t								key_tag;		// Key tag.
 	bool									have_key_tag;	// True if the key tag value was set.
+	MDNS_STRUCT_PAD_64_32(5, 1);
 };
+MRC_STRUCT_PAD_CHECK(record_cache_flush);
+MRC_STRUCT_MAX_SIZE_CHECK(record_cache_flush, 72);
 
 MRC_CLIENT_SUBKIND_DEFINE_ONE_SHOT(record_cache_flush, "Record Cache Flush");
 
@@ -306,22 +315,6 @@ _mrc_session_activate_async(mrc_session_t session);
 
 static void
 _mrc_session_invalidate_async(mrc_session_t session, OSStatus error);
-
-static void
-_mrc_dns_proxy_state_inquiry_register(mrc_dns_proxy_state_inquiry_t inquiry);
-
-static void
-_mrc_dns_proxy_state_inquiry_deregister(mrc_dns_proxy_state_inquiry_t inquiry);
-
-static void
-_mrc_dns_proxy_state_inquiry_send_command(mrc_dns_proxy_state_inquiry_t inquiry);
-
-static void
-_mrc_dns_proxy_state_inquiry_terminate_with_error(mrc_dns_proxy_state_inquiry_t inquiry, OSStatus error);
-
-static void
-_mrc_dns_proxy_state_inquiry_terminate_with_state_description(mrc_dns_proxy_state_inquiry_t inquiry,
-	mdns_xpc_string_t description);
 
 static mrc_discovery_proxy_parameters_t
 _mrc_discovery_proxy_parameters_create_or_copy(mrc_discovery_proxy_parameters_t original);
@@ -349,7 +342,6 @@ _mrc_xpc_dns_proxy_params_print_description(xpc_object_t params, bool debug, boo
 // MARK: - Globals
 
 static mrc_session_t g_session_list = NULL;
-static mrc_dns_proxy_state_inquiry_t g_dns_proxy_state_inquiry_list = NULL;
 
 //======================================================================================================================
 // MARK: - Client Private Methods
@@ -1228,12 +1220,7 @@ mrc_dns_proxy_state_inquiry_create(void)
 void
 mrc_dns_proxy_state_inquiry_set_queue(const mrc_dns_proxy_state_inquiry_t me, const dispatch_queue_t queue)
 {
-	require_return(!me->immutable);
-	if (queue) {
-		dispatch_retain(queue);
-	}
-	dispatch_forget(&me->queue);
-	me->queue = queue;
+	_mrc_client_set_queue(me, queue);
 }
 
 //======================================================================================================================
@@ -1242,7 +1229,7 @@ void
 mrc_dns_proxy_state_inquiry_set_handler(const mrc_dns_proxy_state_inquiry_t me,
 	const mrc_dns_proxy_state_inquiry_response_handler_t handler)
 {
-	require_return(!me->immutable);
+	mdns_require_return(!_mrc_client_is_immutable(me));
 	const mrc_dns_proxy_state_inquiry_response_handler_t new_handler = handler ? Block_copy(handler) : NULL;
 	BlockForget(&me->handler);
 	me->handler = new_handler;
@@ -1253,14 +1240,7 @@ mrc_dns_proxy_state_inquiry_set_handler(const mrc_dns_proxy_state_inquiry_t me,
 void
 mrc_dns_proxy_state_inquiry_activate(const mrc_dns_proxy_state_inquiry_t me)
 {
-	me->immutable = true;
-	mrc_retain(me);
-	dispatch_async(_mrc_client_queue(),
-	^{
-		_mrc_dns_proxy_state_inquiry_register(me);
-		_mrc_dns_proxy_state_inquiry_send_command(me);
-		mrc_release(me);
-	});
+	_mrc_client_activate_async(me);
 }
 
 //======================================================================================================================
@@ -1268,156 +1248,67 @@ mrc_dns_proxy_state_inquiry_activate(const mrc_dns_proxy_state_inquiry_t me)
 void
 mrc_dns_proxy_state_inquiry_invalidate(const mrc_dns_proxy_state_inquiry_t me)
 {
-	me->immutable = true;
-	mrc_retain(me);
-	dispatch_async(_mrc_client_queue(),
-	^{
-		_mrc_dns_proxy_state_inquiry_terminate_with_state_description(me, NULL);
-		mrc_release(me);
-	});
+	_mrc_client_invalidate_async(me, kNoErr);
 }
 
 //======================================================================================================================
 // MARK: - DNS Proxy State Inquiry Private Methods
 
 static char *
-_mrc_dns_proxy_state_inquiry_copy_description(const mrc_dns_proxy_state_inquiry_t me, __unused const bool debug,
+_mrc_dns_proxy_state_inquiry_copy_description(const mrc_dns_proxy_state_inquiry_t me, const bool debug,
 	__unused const bool privacy)
 {
 	char *description = NULL;
-	asprintf(&description, "<%s: %p>: ", me->base.kind->name, (void *)me);
+	mdns_string_builder_t sb = mdns_string_builder_create(0, NULL);
+	mdns_require_quiet(sb, exit);
+
+	OSStatus err;
+	if (debug) {
+		const mdns_kind_t kind = mrc_get_kind(me);
+		err = mdns_string_builder_append_formatted(sb, "<%s: %p>: ", kind->name, (void *)me);
+		mdns_require_noerr_quiet(err, exit);
+	}
+	description = mdns_string_builder_copy_string(sb);
+	mdns_require_quiet(description, exit);
+
+exit:
+	mdns_forget(&sb);
 	return description;
 }
 
 //======================================================================================================================
 
 static void
-_mrc_dns_proxy_state_inquiry_finalize(const mrc_dns_proxy_state_inquiry_t me)
+_mrc_dns_proxy_state_inquiry_finalize(__unused const mrc_dns_proxy_state_inquiry_t me)
 {
-	dispatch_forget(&me->queue);
+	// Nothing to do for now.
+}
+
+//======================================================================================================================
+
+static xpc_object_t
+_mrc_dns_proxy_state_inquiry_create_start_message(__unused const mrc_dns_proxy_state_inquiry_t me,
+	const uint64_t cmd_id)
+{
+	return mrc_xpc_create_dns_proxy_get_state_command_message(cmd_id);
 }
 
 //======================================================================================================================
 
 static void
-_mrc_dns_proxy_state_inquiry_register(const mrc_dns_proxy_state_inquiry_t me)
-{
-	require_return(me->state == mrc_dns_proxy_state_inquiry_state_nascent);
-
-	me->state = mrc_dns_proxy_state_inquiry_state_registered;
-	mrc_dns_proxy_state_inquiry_t *ptr = &g_dns_proxy_state_inquiry_list;
-	while (*ptr) {
-		ptr = &(*ptr)->next;
-	}
-	*ptr = me;
-	mrc_retain(*ptr);
-}
-
-//======================================================================================================================
-
-static void
-_mrc_dns_proxy_state_inquiry_deregister(const mrc_dns_proxy_state_inquiry_t me)
-{
-	mrc_dns_proxy_state_inquiry_t *ptr = &g_dns_proxy_state_inquiry_list;
-	while (*ptr && (*ptr != me)) {
-		ptr = &(*ptr)->next;
-	}
-	if (*ptr) {
-		mrc_release(*ptr);
-		*ptr = me->next;
-		me->next = NULL;
-	}
-}
-
-//======================================================================================================================
-
-static void
-_mrc_dns_proxy_state_inquiry_handle_reply(const mrc_dns_proxy_state_inquiry_t me, const uint64_t cmd_id,
-	const xpc_object_t reply)
-{
-	require_return(me->cmd_id == cmd_id);
-	require_return(me->state == mrc_dns_proxy_state_inquiry_state_in_progress);
-
-	if (xpc_get_type(reply) == XPC_TYPE_DICTIONARY) {
-		bool valid;
-		OSStatus err = mrc_xpc_message_get_error(reply, &valid);
-		if (!valid) {
-			err = kResponseErr;
-		}
-		mdns_xpc_string_t state = NULL;
-		if (!err) {
-			mdns_xpc_dictionary_t result = mrc_xpc_message_get_result(reply);
-			if (result) {
-				state = mrc_xpc_dns_proxy_state_result_get_description(result);
-			}
-			if (!state) {
-				err = kResponseErr;
-			}
-		}
-		os_log_with_type(_mrc_client_log(), err ? OS_LOG_TYPE_ERROR : OS_LOG_TYPE_INFO,
-			"[DP%llu] DNS proxy state reply -- error: %{mdns:err}ld", (unsigned long long)me->cmd_id, (long)err);
-		if (err) {
-			_mrc_dns_proxy_state_inquiry_terminate_with_error(me, err);
-		} else {
-			_mrc_dns_proxy_state_inquiry_terminate_with_state_description(me, state);
-		}
-	} else {
-		char *description = xpc_copy_description(reply);
-		os_log_error(_mrc_client_log(),
-			"[DP%llu] Abnormal DNS proxy state reply: %{public}s", (unsigned long long)me->cmd_id, description);
-		ForgetMem(&description);
-		if (reply != XPC_ERROR_CONNECTION_INTERRUPTED) {
-			const OSStatus err = (reply == XPC_ERROR_CONNECTION_INVALID) ? kConnectionErr : kResponseErr;
-			_mrc_dns_proxy_state_inquiry_terminate_with_error(me, err);
-		}
-	}
-}
-
-//======================================================================================================================
-
-static void
-_mrc_dns_proxy_state_inquiry_send_command(const mrc_dns_proxy_state_inquiry_t me)
-{
-	require_return(
-		(me->state == mrc_dns_proxy_state_inquiry_state_registered) ||
-		(me->state == mrc_dns_proxy_state_inquiry_state_in_progress)
-	);
-	me->state = mrc_dns_proxy_state_inquiry_state_in_progress;
-	me->cmd_id = _mrc_client_get_new_command_id();
-	const uint64_t cmd_id = me->cmd_id;
-	xpc_object_t msg = mrc_xpc_create_dns_proxy_get_state_command_message(cmd_id);
-	mrc_retain(me);
-	xpc_connection_send_message_with_reply(_mrc_client_connection(), msg, _mrc_client_queue(),
-	^(const xpc_object_t reply)
-	{
-		_mrc_dns_proxy_state_inquiry_handle_reply(me, cmd_id, reply);
-		mrc_release(me);
-	});
-	xpc_forget(&msg);
-}
-
-//======================================================================================================================
-
-static void
-_mrc_dns_proxy_state_inquiry_terminate_imp(const mrc_dns_proxy_state_inquiry_t me,
+_mrc_dns_proxy_state_inquiry_invoke_user_handler(const mrc_dns_proxy_state_inquiry_t me,
 	const mdns_xpc_string_t state_description, const OSStatus error)
 {
-	require_return(me->state != mrc_dns_proxy_state_inquiry_state_done);
-
-	_mrc_dns_proxy_state_inquiry_deregister(me);
-	me->state = mrc_dns_proxy_state_inquiry_state_done;
-	if (me->queue && me->handler) {
+	const dispatch_queue_t user_queue = _mrc_client_get_user_queue(me);
+	if (user_queue && me->handler) {
 		const mrc_dns_proxy_state_inquiry_response_handler_t handler = me->handler;
-		me->handler = NULL;
 		if (state_description) {
 			mdns_xpc_string_retain(state_description);
 		}
-		dispatch_async(me->queue,
+		dispatch_async(user_queue,
 		^{
 			const char * const cstr = state_description ? mdns_xpc_string_get_string_ptr(state_description) : NULL;
 			handler(cstr, error);
-			mrc_dns_proxy_state_inquiry_response_handler_t tmp_handler = handler;
-			BlockForget(&tmp_handler);
 			mdns_xpc_string_t tmp = state_description;
 			mdns_xpc_string_forget(&tmp);
 		});
@@ -1428,18 +1319,43 @@ _mrc_dns_proxy_state_inquiry_terminate_imp(const mrc_dns_proxy_state_inquiry_t m
 //======================================================================================================================
 
 static void
-_mrc_dns_proxy_state_inquiry_terminate_with_error(const mrc_dns_proxy_state_inquiry_t me, const OSStatus error)
+_mrc_dns_proxy_state_inquiry_invoke_user_handler_with_state_description(const mrc_dns_proxy_state_inquiry_t me,
+	const mdns_xpc_string_t description)
 {
-	_mrc_dns_proxy_state_inquiry_terminate_imp(me, NULL, error);
+	_mrc_dns_proxy_state_inquiry_invoke_user_handler(me, description, kNoErr);
 }
 
 //======================================================================================================================
 
 static void
-_mrc_dns_proxy_state_inquiry_terminate_with_state_description(const mrc_dns_proxy_state_inquiry_t me,
-	const mdns_xpc_string_t description)
+_mrc_dns_proxy_state_inquiry_invoke_user_handler_with_error(const mrc_dns_proxy_state_inquiry_t me,
+	const OSStatus error)
 {
-	_mrc_dns_proxy_state_inquiry_terminate_imp(me, description, kNoErr);
+	_mrc_dns_proxy_state_inquiry_invoke_user_handler(me, NULL, error);
+}
+
+//======================================================================================================================
+
+static void
+_mrc_dns_proxy_state_inquiry_handle_start(const mrc_dns_proxy_state_inquiry_t me, const xpc_object_t result)
+{
+	mdns_xpc_string_t state = NULL;
+	if (result) {
+		state = mrc_xpc_dns_proxy_state_result_get_description(result);
+	}
+	if (state) {
+		_mrc_dns_proxy_state_inquiry_invoke_user_handler_with_state_description(me, state);
+	} else {
+		_mrc_dns_proxy_state_inquiry_invoke_user_handler_with_error(me, kResponseErr);
+	}
+}
+
+//======================================================================================================================
+
+static void
+_mrc_dns_proxy_state_inquiry_handle_invalidation(const mrc_dns_proxy_state_inquiry_t me, const OSStatus error)
+{
+	_mrc_dns_proxy_state_inquiry_invoke_user_handler_with_error(me, error);
 }
 
 //======================================================================================================================
@@ -2563,19 +2479,6 @@ _mrc_client_handle_connection_interruption(void)
 {
 	for (mrc_session_t session = g_session_list; session; session = session->next) {
 		_mrc_session_handle_connection_interruption(session);
-	}
-	for (mrc_dns_proxy_state_inquiry_t inquiry = g_dns_proxy_state_inquiry_list; inquiry; inquiry = inquiry->next) {
-		switch (inquiry->state) {
-			case mrc_dns_proxy_state_inquiry_state_in_progress:
-				_mrc_dns_proxy_state_inquiry_send_command(inquiry);
-				break;
-
-			case mrc_dns_proxy_state_inquiry_state_nascent:
-			case mrc_dns_proxy_state_inquiry_state_registered:
-			case mrc_dns_proxy_state_inquiry_state_done:
-			MDNS_COVERED_SWITCH_DEFAULT:
-				break;
-		}
 	}
 }
 

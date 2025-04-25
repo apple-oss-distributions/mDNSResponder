@@ -70,7 +70,7 @@ static bool do_srp = true;
 
 const uint64_t thread_enterprise_number = 52627;
 
-cti_connection_t thread_service_context;
+cti_connection_t *thread_service_context;
 
 static const char *interface_name = NULL;
 static wakeup_t *wait_for_remote_disconnect = NULL;
@@ -582,7 +582,7 @@ send_push_unsubscribe(void)
     dso_message_t message;
     if (!push_send_bogus_keepalive) {
         INFO("unsubscribe");
-        dso_make_message(&message, buffer, sizeof(dns_message), dso_connection->dso, true, false, 0, 0, NULL);
+        dso_make_message(&message, buffer, sizeof(dns_message), dso_connection->dso, true, false, 0, 0, NULL, NULL);
         memset(&towire, 0, sizeof(towire));
         towire.p = &buffer[DNS_HEADER_SIZE];
         towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);
@@ -600,7 +600,7 @@ send_push_unsubscribe(void)
     }
 
     // Send a keepalive message so that we can get the response, since the unsubscribe is not a response-requiring request.
-    dso_make_message(&message, buffer, sizeof(dns_message), dso_connection->dso, false, false, 0, 0, NULL);
+    dso_make_message(&message, buffer, sizeof(dns_message), dso_connection->dso, false, false, 0, 0, NULL, NULL);
     memset(&towire, 0, sizeof(towire));
     towire.p = &buffer[DNS_HEADER_SIZE];
     towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);
@@ -834,7 +834,7 @@ send_push_subscribe(void)
     uint8_t *buffer = (uint8_t *)&dns_message;
     dns_towire_state_t towire;
     dso_message_t message;
-    dso_make_message(&message, buffer, sizeof(dns_message), dso_connection->dso, false, false, 0, 0, NULL);
+    dso_make_message(&message, buffer, sizeof(dns_message), dso_connection->dso, false, false, 0, 0, NULL, NULL);
     dns_push_subscribe_xid = ntohs(dns_message.id);
     memset(&towire, 0, sizeof(towire));
     towire.p = &buffer[DNS_HEADER_SIZE];
@@ -874,7 +874,7 @@ dso_connected(comm_t *connection, void *UNUSED context)
     uint8_t *buffer = (uint8_t *)&dns_message;
     dns_towire_state_t towire;
     dso_message_t message;
-    dso_make_message(&message, buffer, sizeof(dns_message), connection->dso, false, false, 0, 0, NULL);
+    dso_make_message(&message, buffer, sizeof(dns_message), connection->dso, false, false, 0, 0, NULL, NULL);
     memset(&towire, 0, sizeof(towire));
     towire.p = &buffer[DNS_HEADER_SIZE];
     towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);

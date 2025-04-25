@@ -87,8 +87,13 @@ extern "C" {
 
 #ifdef DEBUG_VERBOSE
 #ifdef __clang_analyzer__
-#define RELEASE_BASE(x, object_type, file, line) \
-    object_type ## _finalize(x)
+#define OBJECT_TYPE(x) typedef struct x x##_t; void srp_##x##_release(x##_t *obj); void srp_##x##_retain(x##_t *obj);
+#define NW_OBJECT_TYPE(x)
+#include "object-types.h"
+#undef OBJECT_TYPE
+#undef NW_OBJECT_TYPE
+#define RELEASE_BASE(x, object_type, file, line) srp_##object_type##_release(x)
+#define RETAIN_BASE(x, object_type, file, line) srp_##object_type##_retain(x)
 #else
 #define RELEASE_BASE(x, object_type, file, line) do {                             \
         if ((x) != NULL) {                                                        \
@@ -114,7 +119,6 @@ extern "C" {
         }                                                                         \
     } while (0)
 
-#endif // __clang_analyzer__
 #define RETAIN_BASE(x, object_type, file, line) do {                              \
         if ((x) != NULL) {                                                        \
             INFO("ALLOC:  retain at %2.2d: %p (%10s): %s:%d",                     \
@@ -130,6 +134,7 @@ extern "C" {
             }                                                                     \
         }                                                                         \
     } while (0)
+#endif // __clang_analyzer__
 #define RELEASE(x, object_type) RELEASE_BASE(x, object_type, file, line)
 #define RETAIN(x, object_type) RETAIN_BASE(x, object_type, file, line)
 #define RELEASE_HERE(x, object_type) RELEASE_BASE(x, object_type, __FILE__, __LINE__)
@@ -457,6 +462,7 @@ is_thread_mesh_synthetic_or_link_local(const struct in6_addr *addr)
 #ifndef THREAD_DEVKIT_ADK
 // Object type external definitions
 #define OBJECT_TYPE(x) extern int x##_created, x##_finalized, old_##x##_created, old_##x##_finalized;
+#define NW_OBJECT_TYPE(x) OBJECT_TYPE(x)
 #include "object-types.h"
 #endif // !THREAD_DEVKIT_ADK
 

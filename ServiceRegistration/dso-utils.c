@@ -19,6 +19,7 @@
 #include "dns-msg.h"
 #include "ioloop.h"
 #include "dso-utils.h"
+#define dso_transport comm
 #include "dso.h"
 
 void

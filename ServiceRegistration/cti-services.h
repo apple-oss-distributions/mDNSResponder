@@ -46,7 +46,7 @@ typedef enum _offmesh_route_preference {
     offmesh_route_preference_high,
 } offmesh_route_preference_t;
 
-typedef struct _cti_service {
+typedef struct cti_service {
     uint64_t enterprise_number;
     uint16_t service_type;
     uint16_t service_version;
@@ -60,13 +60,13 @@ typedef struct _cti_service {
     int flags;      // E.g., kCTIFlag_NCP
 } cti_service_t;
 
-typedef struct _cti_service_vec {
+typedef struct cti_service_vec {
     size_t num;
     int ref_count;
     cti_service_t *NULLABLE *NONNULL services;
 } cti_service_vec_t;
 
-typedef struct _cti_prefix {
+typedef struct cti_prefix {
     struct in6_addr prefix;
     int prefix_length;
     int metric;
@@ -134,13 +134,13 @@ typedef struct _cti_prefix {
                                                             (((flags) & ~(1 << kCTIDPShift)) | \
                                                              (((value) & 1) << kCTIDPShift)))
 
-typedef struct _cti_prefix_vec {
+typedef struct cti_prefix_vec {
     size_t num;
     int ref_count;
     cti_prefix_t *NULLABLE *NONNULL prefixes;
 } cti_prefix_vec_t;
 
-typedef struct _cti_route {
+typedef struct cti_route {
     struct in6_addr prefix;
     int prefix_length;
     offmesh_route_origin_t origin;
@@ -152,13 +152,13 @@ typedef struct _cti_route {
     int ref_count;
 } cti_route_t;
 
-typedef struct _cti_route_vec {
+typedef struct cti_route_vec {
     size_t num;
     int ref_count;
     cti_route_t *NULLABLE *NONNULL routes;
 } cti_route_vec_t;
 
-typedef struct srp_server_state srp_server_t;
+typedef struct srp_server srp_server_t;
 
 /* cti_reply:
  *
@@ -241,7 +241,7 @@ cti_get_tunnel_name_(srp_server_t *NULLABLE server, void *NULLABLE context, cti_
 #define cti_track_neighbor_ml_eid(server, ref, context, callback, client_queue) \
     cti_track_neighbor_ml_eid_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_track_neighbor_ml_eid_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref,
+cti_track_neighbor_ml_eid_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref,
                            void *NULLABLE context, cti_string_property_reply_t NONNULL callback,
                            run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
@@ -368,7 +368,7 @@ cti_service_create_(uint64_t enterprise_number, uint16_t rloc16, uint16_t servic
 
 void
 cti_service_release_(cti_service_t *NONNULL service, const char *NONNULL file, int line);
-#define cti_service_release(services) cti_service_release(service, __FILE__, __LINE__)
+#define cti_service_release(service) cti_service_release_(service, __FILE__, __LINE__)
 
 /* cti_service_reply: Callback from cti_get_service_list()
  *
@@ -431,7 +431,7 @@ typedef void
 #define cti_get_service_list(server, ref, context, callback, client_queue) \
     cti_get_service_list_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_service_list_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+cti_get_service_list_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref, void *NULLABLE context,
                       cti_service_reply_t NONNULL callback, run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
 /*
@@ -562,7 +562,7 @@ typedef void
 #define cti_get_prefix_list(server, ref, context, callback, client_queue) \
     cti_get_prefix_list_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_prefix_list_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+cti_get_prefix_list_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref, void *NULLABLE context,
                      cti_prefix_reply_t NONNULL callback, run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
 /* cti_state_reply: Callback from cti_get_state()
@@ -617,7 +617,7 @@ typedef void
 #define cti_get_state(server, ref, context, callback, client_queue) \
     cti_get_state_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_state_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+cti_get_state_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref, void *NULLABLE context,
                cti_state_reply_t NONNULL callback, run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
 /* cti_uint64_property_reply: Callback from cti_get_partition_id() or cti_get_xpanid()
@@ -671,7 +671,7 @@ typedef void
 #define cti_get_partition_id(server, ref, context, callback, client_queue) \
     cti_get_partition_id_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_partition_id_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+cti_get_partition_id_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref, void *NULLABLE context,
                       cti_uint64_property_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
                       const char *NONNULL file, int line);
 
@@ -702,7 +702,7 @@ cti_get_partition_id_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *
 #define cti_get_extended_pan_id(server, ref, context, callback, client_queue) \
     cti_get_extended_pan_id_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_extended_pan_id_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+cti_get_extended_pan_id_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref, void *NULLABLE context,
                          cti_uint64_property_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
                          const char *NONNULL file, int line);
 
@@ -757,7 +757,7 @@ typedef void
 #define cti_get_network_node_type(server, ref, context, callback, client_queue) \
     cti_get_network_node_type_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_network_node_type_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+cti_get_network_node_type_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref, void *NULLABLE context,
                            cti_network_node_type_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
                            const char *NONNULL file, int line);
 
@@ -1104,7 +1104,7 @@ typedef void
 #define cti_get_offmesh_route_list(server, ref, context, callback, client_queue) \
     cti_get_offmesh_route_list_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_offmesh_route_list_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref,
+cti_get_offmesh_route_list_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref,
                             void *NULLABLE context, cti_offmesh_route_reply_t NONNULL callback,
                             run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
@@ -1159,7 +1159,7 @@ typedef void
 #define cti_get_onmesh_prefix_list(server, ref, context, callback, client_queue) \
     cti_get_onmesh_prefix_list_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_onmesh_prefix_list_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref,
+cti_get_onmesh_prefix_list_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref,
                             void *NULLABLE context, cti_onmesh_prefix_reply_t NONNULL callback,
                             run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
@@ -1210,7 +1210,7 @@ typedef void
     cti_get_rloc16_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_rloc16_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref,
+cti_get_rloc16_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref,
                 void *NULLABLE context, cti_rloc16_reply_t NONNULL callback,
                 run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
@@ -1258,7 +1258,7 @@ typedef void
     cti_track_active_data_set_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 
 DNS_SERVICES_EXPORT cti_status_t
-cti_track_active_data_set_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref,
+cti_track_active_data_set_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref,
                 void *NULLABLE context, cti_reply_t NONNULL callback,
                 run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
@@ -1330,7 +1330,7 @@ typedef void
     cti_track_wed_status_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
 
 DNS_SERVICES_EXPORT cti_status_t
-cti_track_wed_status_(srp_server_t *NULLABLE server, cti_connection_t NULLABLE *NULLABLE ref,
+cti_track_wed_status_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref,
                       void *NULLABLE context, cti_wed_reply_t NONNULL callback,
                       run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
@@ -1372,7 +1372,7 @@ cti_add_ml_eid_mapping_(srp_server_t *NULLABLE server, void *NULLABLE context,
  * been returned by a CTI library call that subscribes to events.
  */
 DNS_SERVICES_EXPORT cti_status_t
-cti_events_discontinue(cti_connection_t NONNULL ref);
+cti_events_discontinue(cti_connection_t *NONNULL ref);
 
 typedef union cti_callback {
     cti_reply_t NULLABLE reply;

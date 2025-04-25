@@ -26,7 +26,7 @@
 #include <sys/socket.h>         // Needed for socket() etc.
 #include <netinet/in.h>         // Needed for sockaddr_in
 #include <syslog.h>
-#include <sys/fcntl.h>
+#include <fcntl.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <time.h>
@@ -778,7 +778,7 @@ mDNSlocal void getLocalTimestampFromTimeval(const struct timeval *const tv,
     strftime(timeZoneStr, sizeof(timeZoneStr), "%z", &localTime);
 
     // Construct the final timestamp with the milliseconds.
-    snprintf(outBuffer, bufferLen, "%s.%03u%s", dateTimeStr, (mDNSs32)tv->tv_usec / (mDNSs32)USEC_PER_MSEC,
+    snprintf(outBuffer, bufferLen, "%s.%03d%s", dateTimeStr, (mDNSs32)tv->tv_usec / (mDNSs32)USEC_PER_MSEC,
              timeZoneStr);
 }
 

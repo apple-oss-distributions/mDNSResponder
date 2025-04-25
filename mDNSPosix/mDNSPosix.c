@@ -1638,87 +1638,160 @@ mDNSlocal mStatus OpenIfNotifySocket(int *pFD)
 }
 
 #if MDNS_DEBUGMSGS
-mDNSlocal void      PrintNetLinkMsg(const struct nlmsghdr *pNLMsg)
+#define CASE_ENUM_NAME(name) case name: return #name;
+mDNSlocal char const * NLMsgTypeName(uint16_t type)
 {
-    const char *kNLMsgTypes[] = { "", "NLMSG_NOOP", "NLMSG_ERROR", "NLMSG_DONE", "NLMSG_OVERRUN" };
-    const char *kNLRtMsgTypes[] = { "RTM_NEWLINK", "RTM_DELLINK", "RTM_GETLINK", "RTM_NEWADDR", "RTM_DELADDR", "RTM_GETADDR" };
-
-    printf("nlmsghdr len=%d, type=%s, flags=0x%x\n", pNLMsg->nlmsg_len,
-           pNLMsg->nlmsg_type < RTM_BASE ? kNLMsgTypes[pNLMsg->nlmsg_type] : kNLRtMsgTypes[pNLMsg->nlmsg_type - RTM_BASE],
-           pNLMsg->nlmsg_flags);
-
-    if (RTM_NEWLINK <= pNLMsg->nlmsg_type && pNLMsg->nlmsg_type <= RTM_GETLINK)
+    switch (type)
     {
-        struct ifinfomsg    *pIfInfo = (struct ifinfomsg*) NLMSG_DATA(pNLMsg);
-        printf("ifinfomsg family=%d, type=%d, index=%d, flags=0x%x, change=0x%x\n", pIfInfo->ifi_family,
-               pIfInfo->ifi_type, pIfInfo->ifi_index, pIfInfo->ifi_flags, pIfInfo->ifi_change);
-
+        CASE_ENUM_NAME(NLMSG_NOOP);
+        CASE_ENUM_NAME(NLMSG_ERROR);
+        CASE_ENUM_NAME(NLMSG_DONE);
+        CASE_ENUM_NAME(NLMSG_OVERRUN);
+        CASE_ENUM_NAME(RTM_NEWLINK);
+        CASE_ENUM_NAME(RTM_DELLINK);
+        CASE_ENUM_NAME(RTM_NEWADDR);
+        CASE_ENUM_NAME(RTM_DELADDR);
     }
-    else if (RTM_NEWADDR <= pNLMsg->nlmsg_type && pNLMsg->nlmsg_type <= RTM_GETADDR)
-    {
-        struct ifaddrmsg    *pIfAddr = (struct ifaddrmsg*) NLMSG_DATA(pNLMsg);
-        printf("ifaddrmsg family=%d, index=%d, flags=0x%x\n", pIfAddr->ifa_family,
-               pIfAddr->ifa_index, pIfAddr->ifa_flags);
-    }
-    printf("\n");
+    return "???";
 }
+mDNSlocal char const * IFATypeName(unsigned short type)
+{
+    switch (type)
+    {
+        CASE_ENUM_NAME(IFA_ADDRESS);
+        CASE_ENUM_NAME(IFA_LOCAL);
+        CASE_ENUM_NAME(IFA_LABEL);
+        CASE_ENUM_NAME(IFA_BROADCAST);
+        CASE_ENUM_NAME(IFA_ANYCAST);
+        CASE_ENUM_NAME(IFA_CACHEINFO);
+        CASE_ENUM_NAME(IFA_MULTICAST);
+        CASE_ENUM_NAME(IFA_FLAGS);
+    }
+    return "???";
+}
+#undef CASE_ENUM_NAME
 #endif
 
-mDNSlocal mDNSu32       ProcessRoutingNotification(int sd)
+mDNSlocal void MarkInterfaceMask(mDNSu32 *mask, int ifindex)
+{
+    // Valid interface indices are > 0, but might be >= 32.
+    // Use bit 0 to represent any out-of-range interface.
+    *mask |= (0 < ifindex && ifindex < 32) ? (mDNSu32)1 << ifindex : 1;
+}
+
+mDNSlocal mDNSu32 ProcessRoutingNotification(int sd, mDNS *m)
 // Read through the messages on sd and if any indicate that any interface records should
 // be torn down and rebuilt, return affected indices as a bitmask. Otherwise return 0.
 {
     ssize_t readCount;
     char buff[4096];
-    struct nlmsghdr         *pNLMsg = (struct nlmsghdr*) buff;
+    struct nlmsghdr *pNLMsg;
+    int len;
     mDNSu32 result = 0;
 
-    // The structure here is more complex than it really ought to be because,
-    // unfortunately, there's no good way to size a buffer in advance large
-    // enough to hold all pending data and so avoid message fragmentation.
-    // (Note that FIONREAD is not supported on AF_NETLINK.)
-
-    readCount = read(sd, buff, sizeof buff);
-    while (1)
+    readCount = recv(sd, buff, sizeof(buff), MSG_TRUNC);
+    if (readCount < 0)
     {
-        // Make sure we've got an entire nlmsghdr in the buffer, and payload, too.
-        // If not, discard already-processed messages in buffer and read more data.
-        if (((char*) &pNLMsg[1] > (buff + readCount)) ||    // i.e. *pNLMsg extends off end of buffer
-            ((char*) pNLMsg + pNLMsg->nlmsg_len > (buff + readCount)))
-        {
-            if (buff < (char*) pNLMsg)      // we have space to shuffle
-            {
-                // discard processed data
-                readCount -= ((char*) pNLMsg - buff);
-                memmove(buff, pNLMsg, readCount);
-                pNLMsg = (struct nlmsghdr*) buff;
+        LogMsg("netlink recv failed: %s", strerror(errno));
+        return 0;
+    }
+    if (readCount > (ssize_t)sizeof(buff))
+    {
+        LogMsg("netlink recv truncated: %ld", (long int)readCount);
+        return UINT32_MAX; // assume we have missed a relevant event
+    }
 
-                // read more data
-                readCount += read(sd, buff + readCount, sizeof buff - readCount);
-                continue;                   // spin around and revalidate with new readCount
-            }
-            else
-                break;  // Otherwise message does not fit in buffer
-        }
+    pNLMsg = (struct nlmsghdr *)buff;
+    len = (int)readCount;
+    while (NLMSG_OK(pNLMsg, len))
+    {
+        debugf("nlmsghdr ofs=%d len=%d, type=%s(%d), flags=0x%x",
+            (char const *)pNLMsg - buff, pNLMsg->nlmsg_len,
+            NLMsgTypeName(pNLMsg->nlmsg_type), pNLMsg->nlmsg_type, pNLMsg->nlmsg_flags);
+
+        if (pNLMsg->nlmsg_type == RTM_NEWLINK || pNLMsg->nlmsg_type == RTM_DELLINK)
+        {
+            struct ifinfomsg *pIfInfo = NLMSG_DATA(pNLMsg);
 
 #if MDNS_DEBUGMSGS
-        PrintNetLinkMsg(pNLMsg);
+            struct rtattr *pRta = IFLA_RTA(pIfInfo);
+            int rlen = pNLMsg->nlmsg_len;
+            debugf("ifinfomsg family=%d, type=%d, index=%d, flags=0x%x, change=0x%x",
+                pIfInfo->ifi_family, pIfInfo->ifi_type, pIfInfo->ifi_index,
+                pIfInfo->ifi_flags, pIfInfo->ifi_change);
+            while (RTA_OK(pRta, rlen))
+            {
+                debugf("rtattr type=???" "(%d) [%d bytes]", pRta->rta_type, RTA_PAYLOAD(pRta));
+                pRta = RTA_NEXT(pRta, rlen);
+            }
 #endif
 
-        // Process the NetLink message
-        if (pNLMsg->nlmsg_type == RTM_GETLINK || pNLMsg->nlmsg_type == RTM_NEWLINK)
-            result |= 1 << ((struct ifinfomsg*) NLMSG_DATA(pNLMsg))->ifi_index;
-        else if (pNLMsg->nlmsg_type == RTM_DELADDR || pNLMsg->nlmsg_type == RTM_NEWADDR)
-            result |= 1 << ((struct ifaddrmsg*) NLMSG_DATA(pNLMsg))->ifa_index;
-
-        // Advance pNLMsg to the next message in the buffer
-        if ((pNLMsg->nlmsg_flags & NLM_F_MULTI) != 0 && pNLMsg->nlmsg_type != NLMSG_DONE)
-        {
-            ssize_t len = readCount - ((char*)pNLMsg - buff);
-            pNLMsg = NLMSG_NEXT(pNLMsg, len);
+            MarkInterfaceMask(&result, pIfInfo->ifi_index);
         }
-        else
-            break;  // all done!
+        else if (pNLMsg->nlmsg_type == RTM_NEWADDR || pNLMsg->nlmsg_type == RTM_DELADDR)
+        {
+            struct ifaddrmsg *pIfAddr = NLMSG_DATA(pNLMsg);
+            struct rtattr *pRta = IFA_RTA(pIfAddr);
+            int rlen = pNLMsg->nlmsg_len;
+            mDNSAddr addr = { mDNSAddrType_None };
+            mDNSBool ignore = mDNSfalse;
+
+            debugf("ifaddrmsg family=%d, prefixlen=%d, flags=0x%x, scope=%d, index=%d",
+                pIfAddr->ifa_family, pIfAddr->ifa_prefixlen, pIfAddr->ifa_flags, pIfAddr->ifa_scope, pIfAddr->ifa_index);
+            while (RTA_OK(pRta, rlen))
+            {
+                if (pRta->rta_type == IFA_ADDRESS)
+                {
+                    if (pIfAddr->ifa_family == AF_INET)
+                    {
+                        addr.type = mDNSAddrType_IPv4;
+                        addr.ip.v4 = *(mDNSv4Addr *)RTA_DATA(pRta);
+                    }
+#if HAVE_IPV6
+                    else if (pIfAddr->ifa_family == AF_INET6)
+                    {
+                        addr.type = mDNSAddrType_IPv6;
+                        addr.ip.v6 = *(mDNSv6Addr *)RTA_DATA(pRta);
+                    }
+#endif
+#if MDNS_DEBUGMSGS
+                    debugf("rtattr type=IFA_ADDRESS(%d) %#a", pRta->rta_type, &addr);
+#endif
+                }
+                else if (pRta->rta_type == IFA_FLAGS)
+                {
+                    debugf("rtattr type=IFA_FLAGS(%d) 0x%" PRIx32, pRta->rta_type, *(uint32_t *)RTA_DATA(pRta));
+                }
+                else
+                {
+                    debugf("rtattr type=%s(%d) [%d bytes]", IFATypeName(pRta->rta_type), pRta->rta_type, RTA_PAYLOAD(pRta));
+                }
+                pRta = RTA_NEXT(pRta, rlen);
+            }
+
+            // The kernel appears to periodically send RTM_NEWADDR events for IPv6 addresses that
+            // we already know about; in practice this has been observed as frequently as multiple
+            // times per minute and may be releated to receiving a RA. We don't want to completely
+            // rebuild and re-advertise all our host records in this case.
+            if (pNLMsg->nlmsg_type == RTM_NEWADDR && addr.type != mDNSAddrType_None)
+            {
+                PosixNetworkInterface *intf = (PosixNetworkInterface *)m->HostInterfaces;
+                while (intf != NULL)
+                {
+                    if ((mDNSu32)intf->index == pIfAddr->ifa_index && mDNSSameAddress(&intf->coreIntf.ip, &addr))
+                    {
+                        debugf("RTM_NEWADDR matches existing %s address, ignoring", intf->intfName);
+                        ignore = mDNStrue;
+                        break;
+                    }
+                    intf = (PosixNetworkInterface *)intf->coreIntf.next;
+                }
+            }
+
+            if (!ignore) MarkInterfaceMask(&result, pIfAddr->ifa_index);
+        }
+
+        pNLMsg = NLMSG_NEXT(pNLMsg, len);
     }
 
     return result;
@@ -1753,7 +1826,7 @@ mDNSlocal void      PrintRoutingSocketMsg(const struct ifa_msghdr *pRSMsg)
 }
 #endif
 
-mDNSlocal mDNSu32       ProcessRoutingNotification(int sd)
+mDNSlocal mDNSu32 ProcessRoutingNotification(int sd, mDNS *m)
 // Read through the messages on sd and if any indicate that any interface records should
 // be torn down and rebuilt, return affected indices as a bitmask. Otherwise return 0.
 {
@@ -1761,6 +1834,8 @@ mDNSlocal mDNSu32       ProcessRoutingNotification(int sd)
     char buff[4096];
     struct ifa_msghdr       *pRSMsg = (struct ifa_msghdr*) buff;
     mDNSu32 result = 0;
+
+    (void)m; // Unused
 
     readCount = read(sd, buff, sizeof buff);
     if (readCount < (ssize_t) sizeof(struct ifa_msghdr))
@@ -1800,7 +1875,7 @@ mDNSlocal void InterfaceChangeCallback(int fd, void *context)
 
     do
     {
-        changedInterfaces |= ProcessRoutingNotification(pChgRec->NotifySD);
+        changedInterfaces |= ProcessRoutingNotification(pChgRec->NotifySD, pChgRec->mDNS);
     }
     while (0 < select(pChgRec->NotifySD + 1, &readFDs, (fd_set*) NULL, (fd_set*) NULL, &zeroTimeout));
 
@@ -1884,10 +1959,12 @@ mDNSexport mStatus mDNSPlatformInit(mDNS *const m)
     // Tell mDNS core about the network interfaces on this machine.
     if (err == mStatus_NoError) err = SetupInterfaceList(m);
 
+#ifndef UNICAST_DISABLED
     // Tell mDNS core about DNS Servers
     mDNS_Lock(m);
     if (err == mStatus_NoError) ParseDNSServers(m, uDNS_SERVERS_FILE);
     mDNS_Unlock(m);
+#endif
 
     if (err == mStatus_NoError)
     {

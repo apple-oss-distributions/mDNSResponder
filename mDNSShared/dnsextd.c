@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,6 +53,7 @@ extern int daemon(int, int);
 #include "../mDNSShared/dnssd_ipc.h"
 #include "../mDNSCore/uDNS.h"
 #include "../mDNSShared/DebugServices.h"
+#include "SCCSVersioning.h"
 
 // Compatibility workaround
 #ifndef AF_LOCAL
@@ -3132,7 +3133,7 @@ mDNS mDNSStorage;
 
 // For convenience when using the "strings" command, this is the last thing in the file
 // The "@(#) " pattern is a special prefix the "what" command looks for
-const char mDNSResponderVersionString_SCCS[] = "@(#) dnsextd " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
+const char mDNSResponderVersionString_SCCS[] = MDNSRESPONDER_SCCS_VERSION_STRING(dnsextd);
 
 #if _BUILDING_XCODE_PROJECT_
 // If the process crashes, then this string will be magically included in the automatically-generated crash log

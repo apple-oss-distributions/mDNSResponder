@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
  *
  * Disclaimer: IMPORTANT:  This Apple software is supplied to you by Apple Inc.
  * ("Apple") in consideration of your agreement to the following terms, and your
@@ -214,6 +214,7 @@ static const char kFilePathSep = '/';
 #endif
 #include "dns_sd.h"
 #include "ClientCommon.h"
+#include "SCCSVersioning.h"
 
 
 #if TEST_NEW_CLIENTSTUB
@@ -2457,17 +2458,11 @@ Fail:
 }
 
 
-// Note: The C preprocessor stringify operator ('#') makes a string from its argument, without macro expansion
-// e.g. If "version" is #define'd to be "4", then STRINGIFY_AWE(version) will return the string "version", not "4"
-// To expand "version" to its value before making the string, use STRINGIFY(version) instead
-#define STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s) # s
-#define STRINGIFY(s) STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s)
-
 // NOT static -- otherwise the compiler may optimize it out
 // The "@(#) " pattern is a special prefix the "what" command looks for
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdate-time"
-    const char VersionString_SCCS[] = "@(#) dns-sd " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
+const char VersionString_SCCS[] = MDNSRESPONDER_SCCS_VERSION_STRING(dns-sd);
 #pragma GCC diagnostic pop
 
 #if _BUILDING_XCODE_PROJECT_

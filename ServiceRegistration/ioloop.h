@@ -49,6 +49,18 @@
 #define UDP_LISTENER_USES_CONNECTION_GROUPS 0
 #endif
 
+// General purpose macro for creating a wakeup object if we don't already have one. Use it like so:
+// GENERATE_WAKEUP(&my_wakeup) { ... }
+// The code inside the braces isn't executed unless the wakeup object was successfully created.
+
+#define GENERATE_WAKEUP(ptr)                  \
+    if ((*ptr) == NULL) {                     \
+        (*ptr) = ioloop_wakeup_create();      \
+    }                                         \
+    if ((*ptr) == NULL) {                     \
+        ERROR("unable to make wakeup " #ptr); \
+    } else
+
 #ifndef __DSO_H
 typedef struct dso_state dso_state_t;
 #endif
@@ -86,8 +98,8 @@ struct message {
     dns_wire_t wire;
 };
 
-
-typedef struct dso_transport comm_t;
+#define dso_transport comm
+typedef struct comm comm_t;
 typedef struct io io_t;
 typedef struct subproc subproc_t;
 typedef struct wakeup wakeup_t;
@@ -107,7 +119,7 @@ typedef void (*datagram_callback_t)(comm_t *NONNULL comm, message_t *NONNULL mes
 typedef void (*connect_callback_t)(comm_t *NONNULL connection, void *NULLABLE context);
 typedef void (*disconnect_callback_t)(comm_t *NONNULL comm, void *NULLABLE context, int error);
 enum interface_address_change { interface_address_added, interface_address_deleted, interface_address_unchanged };
-typedef struct srp_server_state srp_server_t;
+typedef struct srp_server srp_server_t;
 typedef void (*interface_callback_t)(srp_server_t *NULLABLE server_state, void *NULLABLE context,
                                      const char *NONNULL name, const addr_t *NONNULL address,
                                      const addr_t *NONNULL netmask, uint32_t flags,
@@ -160,7 +172,7 @@ struct wakeup {
 #endif
 };
 
-struct dso_transport {
+struct comm {
 #ifdef IOLOOP_MACOS
     nw_connection_t NULLABLE connection;
     nw_listener_t NULLABLE listener;
@@ -193,7 +205,7 @@ struct dso_transport {
     int num_avoid_ports;
     int serial;
     bool avoiding;
-    char *NONNULL name;
+    char *NULLABLE name;
     void *NULLABLE context;
 #ifdef SRP_TEST_SERVER
     void *NULLABLE test_context;
@@ -390,7 +402,8 @@ void ioloop_file_descriptor_retain_(io_t *NONNULL file_descriptor, const char *N
 void ioloop_file_descriptor_release_(io_t *NONNULL file_descriptor, const char *NONNULL file, int line);
 
 bool ioloop_interface_monitor_start(void);
-void ioloop_run_async(async_callback_t NULLABLE callback, void *NULLABLE context);
+void ioloop_run_async(async_callback_t NULLABLE callback, void *NULLABLE context,
+                      void (*NULLABLE context_release)(void *NULLABLE context));
 
 
 bool srp_load_file_data(void *NULLABLE host_context, const char *NONNULL filename, uint8_t *NONNULL buffer,

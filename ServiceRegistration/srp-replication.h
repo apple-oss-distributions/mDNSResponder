@@ -369,6 +369,7 @@ struct srpl_domain {
     bool have_dataset_id;
     bool dataset_id_committed;
     bool partner_discovery_pending;
+    bool primary_has_waited;
     int ref_count;
     srpl_opstate_t srpl_opstate;
     srpl_domain_t *NULLABLE next;
@@ -380,6 +381,7 @@ struct srpl_domain {
     dnssd_txn_t *NULLABLE srpl_advertise_txn;
     wakeup_t *NULLABLE srpl_register_wakeup;
     wakeup_t *NULLABLE partner_discovery_timeout;
+    wakeup_t *NULLABLE primary_transition_timeout;
 };
 
 #define SRP_THREAD_DOMAIN "thread.home.arpa."
@@ -458,6 +460,7 @@ void srpl_connection_retain_(srpl_connection_t *NONNULL srpl_connection, const c
 srpl_domain_t *NULLABLE srpl_domain_create_or_copy(srp_server_t *NONNULL server_state, const char *NONNULL domain_name);
 void srpl_dump_connection_states(srp_server_t *NONNULL server_state);
 void srpl_change_server_priority(srp_server_t *NONNULL server_state, uint32_t new);
+void srpl_thread_service_set_changed(srp_server_t *NONNULL server_state);
 #endif // __SRP_REPLICATION_H__
 
 // Local Variables:

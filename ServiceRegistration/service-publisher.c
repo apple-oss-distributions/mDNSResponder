@@ -1,6 +1,6 @@
 /* service-publisher.c
  *
- * Copyright (c) 2023-2024 Apple Inc. All rights reserved.
+ * Copyright (c) 2023-2025 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -123,10 +123,11 @@ struct service_publisher {
     void (*reconnect_callback)(void *context);
     thread_service_t *published_unicast_service;
     thread_service_t *published_anycast_service;
+    thread_service_t *stale_service;
     thread_service_t *publication_queue;
-    cti_connection_t active_data_set_connection;
-    cti_connection_t wed_tracker_connection;
-    cti_connection_t neighbor_tracker_connection;
+    cti_connection_t *active_data_set_connection;
+    cti_connection_t *wed_tracker_connection;
+    cti_connection_t *neighbor_tracker_connection;
     struct in6_addr thread_mesh_local_address;
     struct in6_addr wed_ml_eid;
     struct in6_addr neighbor_ml_eid;
@@ -145,7 +146,7 @@ struct service_publisher {
     bool stopped;
     bool have_thread_interface_name;
     bool have_unicast_in_net_data, have_anycast_in_net_data;
-    bool cached_services_published, started_stale_service_timeout;
+    bool cached_services_published;
 };
 
 static uint64_t service_publisher_serial_number;
@@ -173,7 +174,8 @@ service_publisher_unadvertise_all(service_publisher_t *publisher)
                              host->name, SEGMENTED_IPv6_ADDR_PARAM_SRP(record->rdata, rdata_buf),
                             record, record->rref);
                     }
-                    srp_mdns_shared_record_remove(server_state, record);
+                    srp_mdns_shared_record_remove(server_state, record, true);
+                    srp_mdns_shared_record_remove(server_state, record, false);
                     // DNSServiceRemoveRecord should clear the cache, but it doesn't.
                     DNSServiceReconfirmRecord(0, server_state->advertise_interface, host->name, record->rrtype,
                                               dns_qclass_in, record->rdlen, record->rdata);
@@ -181,7 +183,8 @@ service_publisher_unadvertise_all(service_publisher_t *publisher)
             }
         }
         if (host->key_record != NULL) {
-            srp_mdns_shared_record_remove(server_state, host->key_record);
+            srp_mdns_shared_record_remove(server_state, host->key_record, true);
+            srp_mdns_shared_record_remove(server_state, host->key_record, false);
         }
         if (host->instances != NULL) {
             for (int i = 0; i < host->instances->num; i++) {
@@ -189,7 +192,7 @@ service_publisher_unadvertise_all(service_publisher_t *publisher)
                 if (instance != NULL && instance->txn != NULL) {
                     INFO("unadvertising " PRI_S_SRP "." PRI_S_SRP " instance %p sdref %p",
                          instance->instance_name, instance->service_type, instance, instance->txn->sdref);
-                    ioloop_dnssd_txn_cancel(instance->txn);
+                    ioloop_dnssd_txn_cancel_srp(host->server_state, instance->txn);
                     ioloop_dnssd_txn_release(instance->txn);
                     instance->txn = NULL;
                 }
@@ -203,10 +206,16 @@ service_publisher_instance_callback(DNSServiceRef UNUSED sdref, DNSServiceFlags 
                                     const char *name, const char *regtype, const char *domain, void *context)
 {
     adv_instance_t *instance = context;
+    adv_host_t *host = instance->host;
+
+    if (srp_mdns_cancel_previous_instance(host, instance, sdref, domain, error_code, "cache")) {
+        return;
+    }
+
     if (error_code != kDNSServiceErr_NoError) {
         INFO("DNSServiceRegister failed: " PUB_S_SRP "." PUB_S_SRP " host " PRI_S_SRP ": %d (instance %p sdref %p)",
              name, regtype, domain, error_code, instance, instance->txn == NULL ? 0 : instance->txn->sdref);
-        ioloop_dnssd_txn_cancel(instance->txn);
+        ioloop_dnssd_txn_cancel_srp(host->server_state, instance->txn);
         ioloop_dnssd_txn_release(instance->txn);
         instance->txn = NULL;
     } else {
@@ -245,6 +254,11 @@ service_publisher_re_advertise_instance(srp_server_t *server_state, adv_host_t *
     char time_buf[TSR_TIMESTAMP_STRING_LEN];
     DNSServiceAttributeRef tsr_attribute = srp_message_tsr_attribute_generate(NULL, host->key_id,
                                                                               time_buf, sizeof(time_buf));
+    if (tsr_attribute == NULL) {
+        INFO("Unable to allocate tsr attribute for " PUB_S_SRP "." PUB_S_SRP " host " PRI_S_SRP " (instance %p)",
+             instance->instance_name, instance->service_type, host->registered_name, instance);
+        return;
+    }
 
     int err = dns_service_register_wa(server_state, &service_ref,
                                       (kDNSServiceFlagsShareConnection | kDNSServiceFlagsNoAutoRename |
@@ -272,6 +286,7 @@ service_publisher_re_advertise_instance(srp_server_t *server_state, adv_host_t *
         instance->shared_txn = (intptr_t)server_state->shared_registration_txn;
         adv_instance_retain(instance); // for the callback
     }
+    DNSServiceAttributeDeallocate(tsr_attribute);
 }
 
 static void
@@ -280,6 +295,10 @@ service_publisher_record_callback(DNSServiceRef UNUSED sdref, DNSRecordRef rref,
 {
     adv_record_t *record = context;
     const char *host_name = record->host != NULL ? record->host->name : "<null>";
+    if (srp_mdns_cancel_previous_record(record->host, record, rref, error_code, "cache")) {
+        return;
+    }
+
     if (error_code != kDNSServiceErr_NoError) {
         ERROR("re-registration for " PRI_S_SRP " (record %p rref %p) failed with code %d",
               host_name, record, rref, error_code);
@@ -306,13 +325,19 @@ service_publisher_re_advertise_record(srp_server_t *server_state, adv_host_t *ho
         }
         INFO("host registration is stale: " PUB_S_SRP " (record %p rref %p)",
              host->registered_name, record, record->rref);
-        srp_mdns_shared_record_remove(host->server_state, record);
+        srp_mdns_shared_record_remove(host->server_state, record, true);
+        srp_mdns_shared_record_remove(host->server_state, record, false);
     }
 
     // Get the TSR attribute for the host object.
     char time_buf[TSR_TIMESTAMP_STRING_LEN];
     DNSServiceAttributeRef tsr_attribute = srp_message_tsr_attribute_generate(NULL, host->key_id,
                                                                               time_buf, sizeof(time_buf));
+    if (tsr_attribute == NULL) {
+        INFO("Unable to allocate tsr attribute for host " PRI_S_SRP, host->registered_name);
+        return;
+    }
+
 
     int err = dns_service_register_record_wa(server_state, service_ref, &record->rref, kDNSServiceFlagsKnownUnique,
                                              server_state->advertise_interface, host->registered_name,
@@ -326,6 +351,7 @@ service_publisher_re_advertise_record(srp_server_t *server_state, adv_host_t *ho
         record->shared_txn = (intptr_t)host->server_state->shared_registration_txn;
         adv_record_retain(record); // for the callback
     }
+    DNSServiceAttributeDeallocate(tsr_attribute);
 }
 
 // Re-advertise records that match the address of the WED device we're bonded to if we're bonded to a WED device, or
@@ -443,6 +469,7 @@ service_publisher_finalize(service_publisher_t *publisher)
 {
     thread_service_release(publisher->published_unicast_service);
     thread_service_release(publisher->published_anycast_service);
+    thread_service_release(publisher->stale_service);
     thread_service_list_release(&publisher->publication_queue);
 
     free(publisher->state_header.name);
@@ -451,6 +478,7 @@ service_publisher_finalize(service_publisher_t *publisher)
     free(publisher->neighbor_ml_eid_string);
     free(publisher->id);
     ioloop_wakeup_release(publisher->wakeup_timer);
+    free(publisher->thread_interface_name);
     free(publisher);
 }
 
@@ -588,8 +616,8 @@ service_publisher_queue_update(service_publisher_t *publisher, thread_service_t 
     thread_service_t **p_published;
     if (service->service_type == unicast_service) {
         p_published = &publisher->published_unicast_service;
-    } else if (service->service_type == unicast_service) {
-        p_published = &publisher->published_unicast_service;
+    } else if (service->service_type == anycast_service) {
+        p_published = &publisher->published_anycast_service;
     } else {
         ERROR("unsupported service type %d", service->service_type);
         return;
@@ -599,6 +627,10 @@ service_publisher_queue_update(service_publisher_t *publisher, thread_service_t 
     }
     service->publication_state = initial_state;
     if (initial_state == want_add) {
+        // When we retry, *p_published will point to the previous attempt, so we need to release it here
+        if (*p_published != NULL) {
+            thread_service_release(*p_published);
+        }
         *p_published = service;
         thread_service_retain(*p_published);
     }
@@ -628,13 +660,13 @@ service_publisher_create_service_for_queue(thread_service_t *service)
     }
 }
 
-static void UNUSED
+static void
 service_publisher_service_publish(service_publisher_t *publisher, thread_service_t *service)
 {
     service_publisher_queue_update(publisher, service, want_add);
 }
 
-static void UNUSED
+static void
 service_publisher_service_unpublish(service_publisher_t *publisher, thread_service_type_t service_type, bool enqueue)
 {
     thread_service_t *service;
@@ -658,25 +690,27 @@ service_publisher_service_unpublish(service_publisher_t *publisher, thread_servi
         thread_service_t *to_delete = service_publisher_create_service_for_queue(service);
         service_publisher_queue_update(publisher, to_delete, want_delete);
         thread_service_release(to_delete); // service_publisher_queue_update explicitly retains the references it makes.
-        thread_service_release(service); // No longer published.
     }
+    thread_service_release(service); // No longer published.
 }
 
 static void
 service_publisher_unpublish_stale_service(service_publisher_t *publisher, thread_service_t *service)
 {
-    // If there's a stale service, don't try to publish the real service until we see the stale service go away.
-    INFO("setting seen_service_list to false");
-    publisher->seen_service_list = false;
+    if (publisher->stale_service != NULL) {
+        thread_service_release(publisher->stale_service);
+        publisher->stale_service = NULL;
+    }
+    if (service == NULL) {
+        ERROR("no stale service to unpublish");
+        return;
+    }
+    publisher->stale_service = service_publisher_create_service_for_queue(service);
 
-    thread_service_t *to_delete = service_publisher_create_service_for_queue(service);
-
-    if (to_delete == NULL) {
-        thread_service_note(publisher->id, service, "no memory for service to delete");
+    if (publisher->stale_service == NULL) {
+        thread_service_note(publisher->id, service, "no memory for stale service to unpublish");
     } else {
-        service_publisher_queue_update(publisher, to_delete, want_delete);
-        thread_service_release(to_delete); // service_publisher_queue_update explicitly retains all the references it makes
-        service->ignore = true;
+        service_publisher_queue_update(publisher, publisher->stale_service, want_delete);
     }
 }
 
@@ -702,10 +736,15 @@ service_publisher_start_wait(service_publisher_t *publisher, int32_t millisecond
 }
 
 static bool
-service_publisher_have_competing_unicast_service(service_publisher_t *publisher, bool want_stale_service_timeout)
+service_publisher_have_competing_unicast_service(service_publisher_t *publisher)
 {
     thread_service_t *NULLABLE published_service = publisher->published_unicast_service;
     bool competing_service_present = false;
+
+    if (publisher->stale_service != NULL) {
+        thread_service_release(publisher->stale_service);
+        publisher->stale_service = NULL;
+    }
 
     for (thread_service_t *service = service_tracker_services_get(publisher->server_state->service_tracker);
          service != NULL; service = service->next)
@@ -714,7 +753,9 @@ service_publisher_have_competing_unicast_service(service_publisher_t *publisher,
             continue;
         }
         if (service->service_type == unicast_service) {
+            // If we haven't published a service, and we see a service, either it's a stale service or a competing service.
             if (published_service == NULL) {
+                // If it's stale, remove it.
                 if (service->rloc16 == publisher->server_state->rloc16 ||
                     (publisher->have_ml_eid &&
                      !in6addr_compare(&service->u.unicast.address, &publisher->thread_mesh_local_address)))
@@ -722,18 +763,11 @@ service_publisher_have_competing_unicast_service(service_publisher_t *publisher,
                     thread_service_note(publisher->id, service,
                                         "is on our ml-eid or rloc16 but we aren't publishing it, so it's stale.");
                     service_publisher_unpublish_stale_service(publisher, service);
-
-                    if (want_stale_service_timeout &&
-                        !publisher->cached_services_published && !publisher->started_stale_service_timeout)
-                    {
-                        INFO("starting wakeup timer to publish cached services after stale service timeout.");
-                        publisher->started_stale_service_timeout = true;
-                        service_publisher_start_wait(publisher, 2000);
-                    }
-                    continue;
+                } else {
+                    // otherwise mark it as competing.
+                    thread_service_note(publisher->id, service, "is not ours and we aren't publishing.");
+                    competing_service_present = true;
                 }
-                thread_service_note(publisher->id, service, "is not ours and we aren't publishing.");
-                competing_service_present = true;
             // First check to see if the other service is on the mesh-local prefix. If it's not, it wins.
             } else if (in6prefix_compare(&service->u.unicast.address, &published_service->u.unicast.address, 8)) {
                 competing_service_present = true;
@@ -751,7 +785,7 @@ service_publisher_have_competing_unicast_service(service_publisher_t *publisher,
                         thread_service_note(publisher->id, service,
                                             "is on our ml-eid but is not the one we are publishing, so it's stale.");
                         service_publisher_unpublish_stale_service(publisher, service);
-                        continue;
+
                     } else {
                         thread_service_note(publisher->id, service, "is the one we are publishing.");
                     }
@@ -761,7 +795,6 @@ service_publisher_have_competing_unicast_service(service_publisher_t *publisher,
                         thread_service_note(publisher->id, service,
                                             "is a stale service published on our rloc16 with a different ml-eid.");
                         service_publisher_unpublish_stale_service(publisher, service);
-                        continue;
                     } else if (cmp < 0) {
                         competing_service_present = true;
                         thread_service_note(publisher->id, service, "is not ours and wins against ours.");
@@ -792,6 +825,20 @@ service_publisher_have_anycast_service(service_publisher_t *publisher)
         }
     }
     return anycast_service_present;
+}
+
+bool
+service_publisher_competing_service_present(service_publisher_t *publisher)
+{
+    if (publisher == NULL) {
+        return false;
+    }
+    if (service_publisher_have_anycast_service(publisher) ||
+        service_publisher_have_competing_unicast_service(publisher))
+    {
+        return true;
+    }
+    return false;
 }
 
 void
@@ -990,9 +1037,10 @@ service_publisher_can_publish(service_publisher_t *publisher)
     bool have_node_type = false;
     bool have_wed_ml_eid = true;
     bool have_neighbor_ml_eid = true;
+    bool end_device = false;
 
     // Check the conditions that prevent publication.
-    if (service_publisher_have_competing_unicast_service(publisher, false)) {
+    if (service_publisher_have_competing_unicast_service(publisher)) {
         no_competing_service = false;
         can_publish = false;
     }
@@ -1022,6 +1070,10 @@ service_publisher_can_publish(service_publisher_t *publisher)
     case node_type_unknown:
         have_node_type = false;
         can_publish = false;
+        break;
+    case node_type_end_device:
+        have_node_type = true;
+        end_device = true;
         break;
     case node_type_sleepy_end_device:
     case node_type_synchronized_sleepy_end_device:
@@ -1055,7 +1107,7 @@ service_publisher_can_publish(service_publisher_t *publisher)
     }
     if (publisher->neighbor_ml_eid_string == NULL) {
         have_neighbor_ml_eid = false;
-        if (sleepy_end_device) {
+        if (sleepy_end_device || end_device || router) {
             if (publisher->sed_timeout == NULL) {
                 publisher->sed_timeout = ioloop_wakeup_create();
                 if (publisher->sed_timeout != NULL) {
@@ -1068,21 +1120,23 @@ service_publisher_can_publish(service_publisher_t *publisher)
         }
     }
 
-    INFO(PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
+    INFO(PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP
+         PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP PUB_S_SRP,
          can_publish ?                         "can publish" :  "can't publish",
-         publisher->seen_service_list ?                   "" : " have not seen service list",
-         no_competing_service ?                           "" : " competing service present",
-         no_anycast_service ?                             "" : " anycast service present",
-         associated ?                                     "" : " not associated ",
-         router ?                                         "" : " not a router ",
-         sleepy_router ?                                  "" : " not a sleepy router",
-         sleepy_end_device ?                              "" : " not a sleepy end device",
-         have_node_type ?                                 "" : " don't have node type",
-         have_ml_eid ?                                    "" : " no ml-eid ",
-         have_wed_ml_eid ?                                "" : " no wed ml-eid ",
-         have_neighbor_ml_eid ?                           "" : " no neighbor ml-eid ",
-         have_thread_interface_name ?                     "" : " no thread interface name ",
-         publisher->stopped ?                     " stopped" : "");
+         publisher->seen_service_list ?                   "" : " / no service list",
+         no_competing_service ?                           "" : " / competing present",
+         no_anycast_service ?                             "" : " / anycast present",
+         associated ?                                     "" : " / not associated ",
+         router ?                                 " / router " : "",
+         sleepy_router ?                    " / sleepy router" : "",
+         sleepy_end_device ?            " / sleepy end device" : "",
+         end_device ?                          " / end device" : "",
+         have_node_type ?                                 "" : " / no node type",
+         have_ml_eid ?                                    "" : " / no ml-eid ",
+         have_wed_ml_eid ?                                "" : " / no wed ",
+         have_neighbor_ml_eid ?                           "" : " / no neighbor ",
+         have_thread_interface_name ?                     "" : " / no interface ",
+         publisher->stopped ?                     " / stopped" : "");
     return can_publish;
 }
 
@@ -1133,17 +1187,11 @@ service_publisher_action_waiting_to_publish(state_machine_header_t *state_header
     // We do the same thing here whether we've gotten an event or just on entry, so no need to check.
     if (service_publisher_can_publish(publisher)) {
         ioloop_cancel_wake_event(publisher->wakeup_timer);
-        publisher->started_stale_service_timeout = false;
         return service_publisher_state_start_listeners;
     }
-    if (service_publisher_have_competing_unicast_service(publisher, true)) {
+    if (service_publisher_have_competing_unicast_service(publisher)) {
         ioloop_cancel_wake_event(publisher->wakeup_timer);
-        publisher->started_stale_service_timeout = false;
         return service_publisher_state_not_publishing;
-    }
-    // If we saw a stale service, we'll get a timeout event here.
-    if (event != NULL && event->type == state_machine_event_type_timeout && !publisher->cached_services_published) {
-        service_publisher_re_advertise_matching(publisher);
     }
     return service_publisher_state_invalid;
 }
@@ -1229,8 +1277,9 @@ service_publisher_listener_start(service_publisher_t *publisher)
                                                NULL, publisher->server_state);
     if (publisher->srp_listener == NULL) {
         ERROR("failed to setup SRP listener");
+    } else {
+        service_publisher_re_advertise_matching(publisher);
     }
-    service_publisher_re_advertise_matching(publisher);
 }
 
 // We go to this state when we have decided to publish, but perhaps do not currently have an SRP listener
@@ -1343,20 +1392,45 @@ service_publisher_action_publishing(state_machine_header_t *state_header, state_
     STATE_MACHINE_HEADER_TO_PUBLISHER(state_header);
     BR_STATE_ANNOUNCE(publisher, event);
 
-    if (event == NULL || event->type == state_machine_event_type_timeout ||
-        event->type == state_machine_event_type_srp_needed)
-    {
-        if (publisher->published_unicast_service != NULL) {
-            // We shouldn't see a published service on state entry.
-            if (event == NULL) {
-                ERROR("unicast service still published!");
-            }
-            // Only actually enqueue a delete if we aren't retrying.
-            service_publisher_service_unpublish(publisher, unicast_service, event == NULL);
+    bool in_abeyance = (event != NULL && !publisher->have_unicast_in_net_data &&
+                        (event->type == state_machine_event_type_timeout ||
+                         event->type == state_machine_event_type_srp_needed ||
+                         publisher->published_unicast_service == NULL));
+
+    // If we just entered this state, we shouldn't have a published service, so publish one unconditionally.
+    // If we got a timeout or srp_needed event, and only if we haven't successfully published the service, then
+    // publish it.
+    if (event == NULL || in_abeyance) {
+        // If we are no longer able to publish, cancel the listener, etc and go to not_publshing. We check in_abeyance
+        // here because if we just got into the publishing state, we've already just called service_publisher_can_publish
+        // and there's no point polluting the log by calling it a second time in a row.
+        if (in_abeyance && !service_publisher_can_publish(publisher)) {
+            service_publisher_listener_cancel(publisher);
+            service_publisher_service_unpublish(publisher, unicast_service, true);
+            return service_publisher_state_not_publishing;
         }
 
-        // On non-BR devices, don't actually publish the service until we get a signal that it's needed.
-        if (!publisher->server_state->srp_on_demand || service_publisher_wanted_service_missing(publisher)) {
+        bool want_retry_timer = false;
+
+        // The call to service_publisher_can_publish will attempt to remove the stale service, so we don't need to
+        // do it here, but if we get here and publisher->stale_service is not NULL, we want to schedule a retry.
+        if (publisher->stale_service != NULL) {
+            want_retry_timer = true;
+        }
+
+        // When we first enter the state, if the unicast service is already published, something went wrong.
+        // Un-publish it and start again.
+        if (event == NULL && publisher->published_unicast_service != NULL) {
+            ERROR("unicast service still published!");
+            return service_publisher_state_not_publishing;
+        }
+
+        // On non-BR devices, don't actually publish the SRP service until we get a signal that it's needed.
+        // Also don't try to publish a new service until the stale service has actually gone out of the network
+        // data.
+        if (!want_retry_timer &&
+            (!publisher->server_state->srp_on_demand || service_publisher_wanted_service_missing(publisher)))
+        {
             uint8_t port[] = { publisher->srp_listener_port >> 8, publisher->srp_listener_port & 255 };
             thread_service_t *service = thread_service_unicast_create(publisher->server_state->rloc16,
                                                                       (uint8_t *)&publisher->thread_mesh_local_address,
@@ -1364,17 +1438,22 @@ service_publisher_action_publishing(state_machine_header_t *state_header, state_
             service_publisher_service_publish(publisher, service);
             thread_service_release(service); // service_publisher_publish retains the references it keeps.
 
-            // Set up a retransmit timer in case the service publication fails.
-            if (event == NULL) {
-                publisher->retry_interval = 5; // First retry after five seconds
-            } else {
-                // Maybe the service tracker is wedged, so restart it
-                service_tracker_start(publisher->server_state->service_tracker);
+            want_retry_timer = true;
+        }
 
+        if (want_retry_timer) {
+            // Set up a retransmit timer in case the service publication fails.
+            if (event != NULL) {
+                if (event->type == state_machine_event_type_timeout) {
+                    // Maybe the service tracker is wedged, so restart it
+                    service_tracker_start(publisher->server_state->service_tracker);
+                }
                 // Exponential backoff.
                 if (publisher->retry_interval < 3600) {
                     publisher->retry_interval *= 2;
                 }
+            } else {
+                publisher->retry_interval = 5; // First retry after five seconds
             }
             service_publisher_start_wait(publisher, (publisher->retry_interval * MSEC_PER_SEC +
                                                      srp_random32() % (publisher->retry_interval * MSEC_PER_SEC) / 2));
@@ -1514,7 +1593,7 @@ service_publisher_create(srp_server_t *server_state)
     {
         goto out;
     }
-    RETAIN_HERE(publisher, service_publisher); // for thread network state tracker
+    RETAIN_HERE(publisher, service_publisher); // for node type state tracker
 
     // Set the first_time flag so that we'll know to remove any locally-published on-mesh prefixes.
     publisher->first_time = true;
@@ -1554,7 +1633,7 @@ service_publisher_get_mesh_local_address_callback(void *context, const char *add
 
     if (publisher->have_ml_eid && !in6addr_compare(&new_mesh_local_address, &publisher->thread_mesh_local_address)) {
         INFO("address didn't change");
-        return;
+        goto out;
     }
     publisher->thread_mesh_local_address = new_mesh_local_address;
     publisher->have_ml_eid = true;
@@ -1583,15 +1662,15 @@ service_publisher_get_mesh_local_address_callback(void *context, const char *add
     state_machine_event_t *event = state_machine_event_create(state_machine_event_type_ml_eid_changed, NULL);
     if (event == NULL) {
         ERROR("unable to allocate event to deliver");
-        return;
+        goto out;
     }
     state_machine_event_deliver(&publisher->state_header, event);
     RELEASE_HERE(event, state_machine_event);
-    RELEASE_HERE(publisher, service_publisher); // callback held a reference.
-    return;
+    goto out;
 fail:
-    RELEASE_HERE(publisher, service_publisher); // callback held a reference.
     publisher->have_ml_eid = false;
+out:
+    RELEASE_HERE(publisher, service_publisher); // callback held a reference.
     return;
 }
 

@@ -41,9 +41,8 @@ mDNSexport int mDNS_DebugMode = mDNStrue;
 mDNSexport int mDNS_DebugMode = mDNSfalse;
 #endif
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
-mDNSexport int gNumOfSensitiveLoggingEnabledQuestions = 0;
-mDNSexport int gSensitiveLoggingEnabled = 0;
+#if !MDNSRESPONDER_SUPPORTS(APPLE, OS_LOG)
+mDNSexport const char mDNS_LogDisabled[] = "disabled";
 #endif
 
 // Note, this uses mDNS_vsnprintf instead of standard "vsnprintf", because mDNS_vsnprintf knows
@@ -72,7 +71,7 @@ mDNSlocal void LogMsgWithLevelv(os_log_t category, os_log_type_t level, const ch
 mDNSlocal void LogMsgWithLevelv(const char *category, mDNSLogLevel_t level, const char *format, va_list args)
 {
     // Do not print the logs if the log category is MDNS_LOG_CATEGORY_DISABLED.
-    if (strcmp(category, MDNS_LOG_CATEGORY_DISABLED) == 0)
+    if (category == mDNS_LogDisabled)
     {
         return;
     }
@@ -119,3 +118,22 @@ mDNSexport void LogToFD(int fd, const char *format, ...)
     LogMsgWithLevelv(NULL, MDNS_LOG_DEFAULT, format, args);
     va_end(args);
 }
+
+#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+static unsigned int mDNS_SensitiveLoggingEnableCount = 0;
+
+mDNSexport unsigned int mDNSEnableSensitiveLogging(void)
+{
+    return ++mDNS_SensitiveLoggingEnableCount;
+}
+
+mDNSexport unsigned int mDNSDisableSensitiveLogging(void)
+{
+	return --mDNS_SensitiveLoggingEnableCount;
+}
+
+mDNSexport int mDNSSensitiveLoggingIsEnabled(void)
+{
+    return (mDNS_SensitiveLoggingEnableCount != 0);
+}
+#endif

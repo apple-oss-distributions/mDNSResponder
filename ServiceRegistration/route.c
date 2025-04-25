@@ -1096,8 +1096,9 @@ schedule_next_router_probe(interface_t *interface)
 }
 
 void
-router_solicit(icmp_message_t *message)
+router_solicit(icmp_message_t *in_message)
 {
+    icmp_message_t *message = in_message;
     interface_t *iface, *interface;
     bool is_retransmission = false;
 
@@ -1247,11 +1248,15 @@ router_advertisement(icmp_message_t *message)
     for (int i = 0; i < message->num_options; i++) {
         icmp_option_t *option = &message->options[i];
         if (option->type == icmp_option_ra_flags_extension) {
-            if (option->option.ra_flags_extension[0] & RA_FLAGS1_STUB_ROUTER) {
+            if (option->option.ra_flags_extension[0] & RA_FLAGS1_STUB_ROUTER_EXPERIMENTAL) {
                 message->stub_router = true;
             }
         }
     }
+    if (message->flags & ND_RA_FLAG_SNAC_ROUTER) {
+        message->stub_router = true;
+    }
+
     // Something may have changed, so do a policy recalculation for this interface
     routing_policy_evaluate(message->interface, false);
 }
@@ -2272,9 +2277,9 @@ adv_ctl_add_prefix(route_state_t *route_state, const uint8_t *const data)
             }
         }
         if (prefix == NULL) {
-            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
+            SEGMENTED_IPv6_ADDR_GEN_SRP((struct in6_addr *)data, prefix_buf);
             INFO("adding prefix " PRI_SEGMENTED_IPv6_ADDR_SRP,
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf));
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP((struct in6_addr *)data, prefix_buf));
             if (!omr_watcher_prefix_add(route_state->omr_watcher, (struct in6_addr *)data, BR_PREFIX_SLASH_64_BYTES, omr_prefix_priority_low)) {
                 INFO("failed");
             }
@@ -2611,7 +2616,7 @@ partition_state_reset(route_state_t *route_state)
     }
 
     if (route_state->partition_anycast_service_add_pending_wakeup != NULL) {
-        ioloop_cancel_wake_event(route_state->partition_service_add_pending_wakeup);
+        ioloop_cancel_wake_event(route_state->partition_anycast_service_add_pending_wakeup);
     }
 
     if (route_state->service_set_changed_wakeup != NULL) {
@@ -3098,6 +3103,7 @@ partition_maybe_advertise_service(route_state_t *route_state)
     int i;
     int64_t last_add_time;
     bool advertising_service = false;
+    bool seen_legacy_service = false;
 
     // If we aren't ready to advertise a service, there's nothing to do.
     if (!route_state->partition_can_advertise_service) {
@@ -3135,7 +3141,9 @@ partition_maybe_advertise_service(route_state_t *route_state)
     for (service = service_tracker_services_get(route_state->srp_server->service_tracker);
          service; service = service->next)
     {
+        thread_service_note("checking ", service, "");
         if (service->ignore || service->service_type != unicast_service) {
+            thread_service_note("", service, service->ignore ? " is marked 'ignore'" : " is not unicast");
             continue;
         }
 
@@ -3143,7 +3151,7 @@ partition_maybe_advertise_service(route_state_t *route_state)
             (in6addr_compare(&service->u.unicast.address, &route_state->srp_listener_ip_address) ||
              ((service->u.unicast.port[0] << 8) | service->u.unicast.port[1]) != route_state->srp_service_listen_port))
         {
-            thread_service_note("Rtr0", service, "is ours, but stale");
+            thread_service_note("", service, "is ours, but stale");
             partition_stop_advertising_service(route_state);
             goto schedule_wakeup;
         }
@@ -3155,16 +3163,18 @@ partition_maybe_advertise_service(route_state_t *route_state)
              aservice != NULL; aservice = aservice->next)
         {
             if (aservice->ignore || aservice->service_type != anycast_service) {
+                thread_service_note("", aservice, aservice->ignore ? "is marked 'ignore'" : " is not an anycast service");
                 continue;
             }
             if (service->rloc16 == aservice->rloc16) {
+                thread_service_note("", service, " matches the RLOC16 we are looking for");
                 anycast_present = true;
                 break;
             }
         }
         if (!anycast_present) {
             num_legacy_services++;
-            route_state->seen_legacy_service = true;
+            seen_legacy_service = true;
             continue;
         }
 
@@ -3187,7 +3197,7 @@ partition_maybe_advertise_service(route_state_t *route_state)
     // ours. Also, if we notice that a service is being advertised by our rloc16 with a different IP address than the
     // listener address, it's a stale address, so remove it. If we have seen a legacy service, and there is only one
     // other non-legacy service, continue to advertise a second service, since cooperating services are preferable.
-    if ((num_lower_services > 0  && !route_state->seen_legacy_service) || num_lower_services > 1) {
+    if ((num_lower_services > 0  && !seen_legacy_service) || num_lower_services > 1) {
         if (advertising_service) {
             SEGMENTED_IPv6_ADDR_GEN_SRP(&route_state->srp_listener_ip_address, addr_buf);
             INFO(PRI_SEGMENTED_IPv6_ADDR_SRP ": stopping advertising unicast service.",
@@ -3201,7 +3211,7 @@ partition_maybe_advertise_service(route_state_t *route_state)
     // If there is not some other service published, and we are not publishing, publish.  If there is a legacy (no
     // anycast) service published, publish a second service so as to encourage the legacy service to withdraw, because
     // cooperating services are preferable to competing services.
-    else if (num_other_services < 1 || (num_other_services < 2 && route_state->seen_legacy_service)) {
+    else if (num_other_services < 1 || (num_other_services < 2 && seen_legacy_service)) {
         if (num_legacy_services > 1 && num_other_services > 1) {
             ERROR("%d legacy services present!", num_legacy_services);
         } else if (!advertising_service) {
@@ -3386,8 +3396,9 @@ partition_service_set_changed_callback(void *context)
         }
     }
 
-    partition_maybe_advertise_service(route_state);
+    srpl_thread_service_set_changed(route_state->srp_server);
     partition_maybe_advertise_anycast_service(route_state);
+    partition_maybe_advertise_service(route_state);
 }
 
 static void

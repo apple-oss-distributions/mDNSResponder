@@ -173,6 +173,22 @@ dns_service_find_ref_deallocate_event(srp_server_t *state)
     return NULL;
 }
 
+// Find a ref deallocate event for a particular sdref
+dns_service_event_t *
+dns_service_find_ref_deallocate_event_for_register(srp_server_t *state, dns_service_event_t *register_event)
+{
+    for (dns_service_event_t *event = state->dns_service_events; event; event = event->next) {
+        dns_service_dump_event(state->test_state, event, state->dns_service_events);
+        if (event->event_type == dns_service_event_type_ref_deallocate &&
+            register_event->event_type == dns_service_event_type_register &&
+            register_event->sdref == event->sdref && !event->consumed)
+        {
+            return event;
+        }
+    }
+    return NULL;
+}
+
 // Find a DNSServiceUpdateRecord that corresponds to a DNSServiceRegister or DNSServiceRegisterRecord event.
 // For a DNSServiceRegister update, event->rref will be NULL.
 dns_service_event_t *
@@ -518,12 +534,11 @@ void
 dns_service_ref_deallocate(srp_server_t *state, DNSServiceRef sdRef)
 {
 #undef DNSServiceRefDeallocate
-    dns_service_event_append(state, dns_service_event_type_ref_deallocate, sdRef, NULL, NULL,
+    dns_service_event_append(state, dns_service_event_type_ref_deallocate, sdRef->sdref, NULL, NULL,
                              0, 0, NULL, NULL, NULL, NULL, 0, 0, NULL, 0, 0, 0, NULL, NULL, NULL, 0);
     DNSServiceRefDeallocate(sdRef->sdref);
     free(sdRef);
 }
-
 
 // Local Variables:
 // mode: C

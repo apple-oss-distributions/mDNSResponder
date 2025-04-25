@@ -107,7 +107,7 @@ struct dnssd_client {
     char *id;
     srp_server_t *server_state;
     wakeup_t *wakeup_timer;
-    cti_connection_t active_data_set_connection;
+    cti_connection_t *active_data_set_connection;
     struct in6_addr mesh_local_prefix;
     bool have_mesh_local_prefix;
     bool first_time;
@@ -254,6 +254,7 @@ dnssd_client_dns_service_event_handler(const mrc_dns_service_registration_event_
 {
     state_machine_event_t *event = NULL;
     bool want_event = false;
+    bool last_event = false;
     switch(mrc_event)
     {
     case mrc_dns_service_registration_event_started:
@@ -265,6 +266,7 @@ dnssd_client_dns_service_event_handler(const mrc_dns_service_registration_event_
 
     case mrc_dns_service_registration_event_invalidation:
         want_event = true;
+        last_event = true;
         if (event_err) {
             ERROR("DNS service registration invalidated with error: %d", (int)event_err);
         } else {
@@ -286,7 +288,9 @@ dnssd_client_dns_service_event_handler(const mrc_dns_service_registration_event_
             state_machine_event_deliver(&client->state_header, event);
             RELEASE_HERE(event, state_machine_event);
         }
-        // Either event should be the last event we get.
+    }
+    if (last_event) {
+        // Release dnssd client if this is the last event we get.
         RELEASE_HERE(client, dnssd_client);
     }
 }
@@ -414,7 +418,10 @@ dnssd_client_should_be_client(dnssd_client_t *client)
     bool should_be_client = false;
     srp_server_t *server_state = client->server_state;
 
-    if (!service_publisher_could_publish(server_state->service_publisher)) {
+    if (server_state->service_publisher != NULL &&
+        !service_publisher_could_publish(server_state->service_publisher) &&
+        service_publisher_competing_service_present(server_state->service_publisher))
+    {
         should_be_client = true;
         might_publish = true;
     }

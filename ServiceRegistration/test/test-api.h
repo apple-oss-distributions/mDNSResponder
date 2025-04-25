@@ -25,6 +25,7 @@ typedef struct test_state test_state_t;
 typedef struct io_context io_context_t;
 typedef struct dns_service_event dns_service_event_t;
 typedef struct test_packet_state test_packet_state_t;
+typedef struct threadsim_network_state threadsim_network_state_t;
 
 extern ready_callback_t NULLABLE srp_test_dnssd_tls_listener_ready;
 extern void *NULLABLE srp_test_tls_listener_context;
@@ -46,6 +47,7 @@ struct test_state {
     dns_service_event_t *NULLABLE dns_service_events;
     void *NULLABLE context;
     int counter;
+    threadsim_network_state_t *NULLABLE threadsim_network_state;
     const char *NONNULL title;
     const char *NULLABLE variant_title;
     const char *NONNULL explanation;
@@ -82,17 +84,17 @@ struct test_state {
         }                                                       \
     } while (0)
 
-#define TEST_FAIL_STATUS(test_state, message, status)               \
-    do {                                                            \
-           srp_test_state_explain(test_state);                      \
-           fprintf(stderr, "test failed: " message "\n\n", status); \
-           exit(1);                                                 \
+#define TEST_FAIL_STATUS(test_state, message, ...)                         \
+    do {                                                                   \
+           srp_test_state_explain(test_state);                             \
+           fprintf(stderr, "test failed: " message "\n\n", ##__VA_ARGS__); \
+           exit(1);                                                        \
     } while (0)
 
-#define TEST_FAIL_CHECK_STATUS(test_state, success_condition, message, status) \
+#define TEST_FAIL_CHECK_STATUS(test_state, success_condition, message, ...)    \
     do {                                                                       \
        if (!(success_condition)) {                                             \
-           TEST_FAIL_STATUS(test_state, message, status);                      \
+           TEST_FAIL_STATUS(test_state, message, ##__VA_ARGS__);               \
        }                                                                       \
     } while (0)
 

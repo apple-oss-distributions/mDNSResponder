@@ -82,6 +82,8 @@ dns_service_event_t *NULLABLE dns_service_find_first_register_record_event_by_na
 dns_service_event_t *NULLABLE dns_service_find_callback_for_registration(srp_server_t *NONNULL state,
                                                                          dns_service_event_t *NONNULL register_event);
 dns_service_event_t *NULLABLE dns_service_find_ref_deallocate_event(srp_server_t *NONNULL state);
+dns_service_event_t *NULLABLE dns_service_find_ref_deallocate_event_for_register(srp_server_t *NONNULL state,
+                                                                                 dns_service_event_t *NONNULL register_event);
 dns_service_event_t *NULLABLE dns_service_find_update_for_register_event(srp_server_t *NONNULL state,
                                                                          dns_service_event_t *NONNULL register_event,
                                                                          dns_service_event_t *NULLABLE after_event);

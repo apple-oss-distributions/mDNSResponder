@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019, 2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -576,7 +576,7 @@ static void resolveReply( DNSServiceRef sdRef,
     {
         NSURLComponents * urlComponents = [[NSURLComponents alloc] init];
         urlComponents.scheme = @"http";
-        urlComponents.host = [NSString stringWithUTF8String: hosttarget];
+        urlComponents.host = [[NSString stringWithUTF8String: hosttarget] stringByTrimmingCharactersInSet:[NSCharacterSet punctuationCharacterSet]];
         if( TXTRecordContainsKey( txtLen, txtRecord, "path" ) )
         {
             uint8_t         valueLen;

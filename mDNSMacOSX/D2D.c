@@ -218,8 +218,9 @@ mDNSexport void external_connection_release(const domainname *instance)
         if ((ptr->ar.resrec.rrtype == kDNSServiceType_PTR) &&
              SameDomainName(&ptr->ar.rdatastorage.u.name, instance))
         {
-            LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEFAULT, "external_connection_release: Calling D2DRelease - "
-                "instanceHandle: %p, transportType: %d", ptr->instanceHandle, ptr->transportType);
+            LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_DEFAULT,
+                "external_connection_release: Calling D2DRelease - instanceHandle: %p, transportType: %u",
+                ptr->instanceHandle, ptr->transportType);
             if (D2DRelease) D2DRelease(ptr->instanceHandle, ptr->transportType);
         }
     }
@@ -551,7 +552,7 @@ mDNSexport void xD2DAddToCache(D2DStatus result, D2DServiceInstance instanceHand
     }
     else
     {
-        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "xD2DAddToCache: Unexpected result - result: %d", result);
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "xD2DAddToCache: Unexpected result - result: %u", result);
     }
 }
 
@@ -625,7 +626,7 @@ mDNSexport void xD2DRemoveFromCache(D2DStatus result, D2DServiceInstance instanc
     }
     else
     {
-        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "xD2DRemoveFromCache: Unexpected result - result: %d", result);
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "xD2DRemoveFromCache: Unexpected result - result: %u", result);
     }
 }
 
@@ -645,7 +646,7 @@ mDNSlocal void xD2DServiceResolved(D2DStatus result, D2DServiceInstance instance
     }
     else
     {
-        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "xD2DServiceResolved: Unexpected result - result: %d", result);
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "xD2DServiceResolved: Unexpected result - result: %u", result);
     }
 }
 
@@ -665,7 +666,7 @@ mDNSlocal void xD2DRetainHappened(D2DStatus result, D2DServiceInstance instanceH
     }
     else
     {
-        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "xD2DRetainHappened: Unexpected result - result: %d", result);
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "xD2DRetainHappened: Unexpected result - result: %u", result);
     }
 }
 
@@ -685,7 +686,7 @@ mDNSlocal void xD2DReleaseHappened(D2DStatus result, D2DServiceInstance instance
     }
     else
     {
-        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "xD2DReleaseHappened: Unexpected result - result: %d", result);
+        LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "xD2DReleaseHappened: Unexpected result - result: %u", result);
     }
 }
 
@@ -1200,7 +1201,7 @@ void initializeD2DPlugins(mDNS *const m)
             D2DStatus ds = D2DInitialize(CFRunLoopGetMain(), xD2DServiceCallback, m);
             if (ds != kD2DSuccess)
             {
-                LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "D2DInitialiize failed: %d", ds);
+                LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "D2DInitialiize failed: %u", ds);
             }
             else
             {
@@ -1216,7 +1217,7 @@ void terminateD2DPlugins(void)
         D2DStatus ds = D2DTerminate();
         if (ds != kD2DSuccess)
         {
-            LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "D2DTerminate failed: %d", ds);
+            LogRedact(MDNS_LOG_CATEGORY_D2D, MDNS_LOG_ERROR, "D2DTerminate failed: %u", ds);
         }
         else
         {

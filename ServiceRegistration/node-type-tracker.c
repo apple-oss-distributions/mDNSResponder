@@ -62,7 +62,7 @@ struct node_type_tracker {
     void (*reconnect_callback)(route_state_t *route_state);
     route_state_t *route_state;
     srp_server_t *server_state;
-    cti_connection_t NULLABLE thread_context;
+    cti_connection_t *NULLABLE thread_context;
 	node_type_tracker_callback_t *callbacks;
 	uint64_t last_thread_network_node_type_change;
 	thread_node_type_t current_node_type, previous_node_type;
@@ -272,14 +272,18 @@ node_type_tracker_callback_cancel(node_type_tracker_t *tracker, void *context)
     if (tracker == NULL) {
         return;
     }
-	for (node_type_tracker_callback_t **tpp = &tracker->callbacks; *tpp != NULL; tpp = &((*tpp)->next)) {
-		node_type_tracker_callback_t *callback = *tpp;
-		if (callback->context == context) {
+    for (node_type_tracker_callback_t **tpp = &tracker->callbacks; *tpp != NULL; tpp = &((*tpp)->next)) {
+        node_type_tracker_callback_t *callback = *tpp;
+        if (callback->context == context) {
             *tpp = callback->next;
             node_type_tracker_callback_free(callback);
+            // Release the reference held by the callback list if callback list becomes empty.
+            if (tracker->callbacks == NULL) {
+                RELEASE_HERE(tracker, node_type_tracker);
+            }
             return;
-		}
-	}
+        }
+    }
 }
 
 thread_node_type_t

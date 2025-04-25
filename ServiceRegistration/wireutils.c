@@ -192,8 +192,15 @@ dns_name_print_to_limit(dns_name_t *NONNULL name, dns_name_t *NULLABLE limit, ch
         }
         for (i = 0; i < lp->len; i++) {
             if (isascii(lp->data[i]) && (lp->data[i] == ' ' || isprint(lp->data[i]))) {
-                if (ix + 2 >= bufmax) {
-                    break;
+                if (lp->data[i] == '.' || (lp->data[i] == '\\')) {  // Escape dot and backslash literals
+                    if (ix + 3 >= bufmax) {
+                        break;
+                    }
+                    buf[ix++] = '\\';
+                } else {
+                    if (ix + 2 >= bufmax) {
+                        break;
+                    }
                 }
                 buf[ix++] = lp->data[i];
             } else {
@@ -241,8 +248,11 @@ dns_labels_equal(const char *label1, const char *label2, size_t len)
 }
 
 bool
-dns_names_equal(dns_label_t *NONNULL name1, dns_label_t *NONNULL name2)
+dns_names_equal(dns_label_t *name1, dns_label_t *name2)
 {
+    if (name1 == NULL || name2 == NULL) {
+        return false;
+    }
     if (name1->len != name2->len) {
         return false;
     }
@@ -437,6 +447,9 @@ fail:
 dns_name_t *
 dns_name_subdomain_of(dns_name_t *name, dns_name_t *domain)
 {
+    if (name == NULL || domain == NULL) {
+        return false;
+    }
     int dnum = 0, nnum = 0;
     dns_name_t *np, *dp;
 

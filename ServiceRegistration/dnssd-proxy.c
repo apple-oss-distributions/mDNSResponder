@@ -435,7 +435,7 @@ dp_start_question(question_t *question, bool dns64)
         len = strlen(question->name);
         if (question->served_domain->interface != NULL) {
             if (len + sizeof local_suffix > sizeof name) {
-                ERROR("[QU%d] question name %s is too long for .local.", SERIAL(question), name);
+                ERROR("[QU%d] question name " PRI_S_SRP " is too long for .local.", SERIAL(question), name);
                 return kDNSServiceErr_BadParam;
             }
             memcpy(name, question->name, len);
@@ -443,7 +443,7 @@ dp_start_question(question_t *question, bool dns64)
         } else {
             size_t dlen = strlen(question->served_domain->domain_ld) + 1;
             if (len + dlen > sizeof name) {
-                ERROR("[QU%d] question name %s is too long for %s.", SERIAL(question), name, question->served_domain->domain);
+                ERROR("[QU%d] question name " PRI_S_SRP " is too long for " PRI_S_SRP ".", SERIAL(question), name, question->served_domain->domain);
                 return kDNSServiceErr_BadParam;
             }
             memcpy(name, question->name, len);
@@ -503,7 +503,7 @@ dp_start_question(question_t *question, bool dns64)
                                    question->type, question->qclass, dns_question_callback, question);
 #endif
     if (err != kDNSServiceErr_NoError) {
-        ERROR("[QU%d] DNSServiceQueryRecord failed for '%s': %d", SERIAL(question), np, err);
+        ERROR("[QU%d] DNSServiceQueryRecord failed for '"PRI_S_SRP "': %d", SERIAL(question), np, err);
     } else {
         INFO("[QU%d] txn %p new sdref %p", SERIAL(question), question->txn, sdref);
 #if SRP_FEATURE_DNSSD_PROXY_SHARED_CONNECTION
@@ -755,6 +755,7 @@ dp_question_cancel(question_t *question)
         }
         if (served_domain == NULL) {
             served_domain_free(question->served_domain);
+            question->served_domain = NULL;
         }
     }
     RELEASE_HERE(question, question); // Release from the list.
@@ -1062,7 +1063,7 @@ static void
 dns_push_cancel(dso_activity_t *activity)
 {
     dnssd_query_t *query = (dnssd_query_t *)activity->context;
-    INFO("[Q%d][QU%d] " PUB_S_SRP, SERIAL(query), SERIAL(query->question), activity->name);
+    INFO("[Q%d][QU%d] " PUB_S_SRP, query->serial, SERIAL(query->question), activity->name);
     // We can either get here because the dso object is being finalized, or because the activity is being dropped.
     // In the former case, we need to cancel the query. In the latter case, we've been called as a result of
     // dnssd_query_cancel calling dso_drop_activity. dnssd_query_cancel sets query->activity to NULL before dropping
@@ -2245,7 +2246,6 @@ dp_dns_queries_finished(dnssd_query_t *answered_query)
 {
     dns_message_t *first_message = NULL;
     unsigned qdcount = 0, ancount = 0, nscount = 0, arcount = 0;
-    unsigned first_qdcount, first_ancount, first_nscount, first_arcount;
     dnssd_query_t *first_query = NULL;
     dp_tracker_t *tracker = answered_query->tracker;
 
@@ -2304,10 +2304,6 @@ dp_dns_queries_finished(dnssd_query_t *answered_query)
             if (first_query == NULL) {
                 first_query = source;
                 first_message = first_query->response_msg;
-                first_qdcount = first_message->qdcount;
-                first_ancount = first_message->ancount;
-                first_nscount = first_message->nscount;
-                first_arcount = first_message->arcount;
             }
             qdcount += source->response_msg->qdcount;
             ancount += source->response_msg->ancount;
@@ -2661,12 +2657,101 @@ dp_push_response(dnssd_query_t *query, dns_rr_t *original_question)
         iov.iov_len = (query->towire.p - (uint8_t *)query->response);
         iov.iov_base = query->response;
         INFO("[Q%d][QU%d] " PRI_S_SRP " (len %zd)", SERIAL(query), SERIAL(question), name, iov.iov_len);
-
         query->towire.p = query->p_dso_length;
         dns_u16_to_wire(&query->towire, dso_length);
+
+#ifdef DNS_PUSH_DUMP_DEBUGGING
+        for (size_t i = 0; i < iov.iov_len; i += 32) {
+            char line[32 * 2 + 8 + 1];
+            char *dp = line;
+            for (int j = 0; j < 32; j++) {
+                if (i + j < iov.iov_len) {
+                    snprintf(dp, sizeof(line) - (dp - line), "%02x", ((uint8_t *)iov.iov_base)[i + j]);
+                    dp += 2;
+                    if (!((j + 1) & 3)) {
+                        *dp++ = ' ';
+                        *dp = 0;
+                    }
+                }
+            }
+            INFO("%s", line);
+        }
+#endif // DNS_PUSH_DUMP_DEBUGGING
+
         ioloop_send_message(query->tracker->connection, query->message, &iov, 1);
         dp_query_towire_reset(query);
     }
+}
+
+static interface_addr_t *
+dnssd_proxy_find_usable_interface_address(srp_server_t *UNUSED server_state, addr_t *local, uint16_t rrtype)
+{
+    // Get the current state of all interfaces at the time of the query
+    ioloop_map_interface_addresses(srp_servers, NULL, &served_domains, dnssd_proxy_ifaddr_callback);
+
+    for (served_domain_t *sd = served_domains; sd != NULL; sd = sd->next) {
+        if (sd->interface != NULL) {
+            interface_addr_t *ifmatch = NULL;
+            // See if there is a match for this address in this per-interface served domain
+            for (ifmatch = sd->interface->addresses; ifmatch != NULL; ifmatch = ifmatch->next) {
+                if (ifmatch->addr.sa.sa_family == local->sa.sa_family &&
+                    ((ifmatch->addr.sa.sa_family == AF_INET &&
+                      !memcmp(&ifmatch->addr.sin.sin_addr, &local->sin.sin_addr, sizeof (struct in_addr))) ||
+                     (ifmatch->addr.sa.sa_family == AF_INET6 &&
+                      !memcmp(&ifmatch->addr.sin6.sin6_addr, &local->sin6.sin6_addr, sizeof (struct in6_addr)))))
+                {
+                    INFO("matched " PUB_S_SRP, sd->domain);
+                    for (interface_addr_t *address = sd->interface->addresses; address != NULL; address = address->next) {
+                        if (rrtype == dns_rrtype_aaaa) {
+                            if (address->addr.sa.sa_family == AF_INET6 &&
+#ifndef SRP_TEST_SERVER
+                                !IN6_IS_ADDR_LINKLOCAL(&address->addr.sin6.sin6_addr) &&
+#endif
+                                !is_thread_mesh_synthetic_address(&address->addr.sin6.sin6_addr))
+                            {
+                                return address;
+                            }
+                        } else {
+                            if (rrtype == dns_rrtype_a) {
+                                if (address->addr.sa.sa_family == AF_INET &&
+#ifndef SRP_TEST_SERVER
+                                    !is_in_addr_link_local(&address->addr.sin.sin_addr) &&
+#endif
+                                    true)
+                                {
+                                    return address;
+                                }
+                            }
+                        }
+                    }
+                    // There is no usable address of the correct family on this interface.
+                    return NULL;
+                } else {
+#ifdef USABLE_INTERFACE_VERBOSE_DEBUGGING
+                    if (ifmatch->addr.sa.sa_family == AF_INET6) {
+                        SEGMENTED_IPv6_ADDR_GEN_SRP(&ifmatch->addr.sin6.sin6_addr, local_buf);
+                        ERROR("local address " PRI_SEGMENTED_IPv6_ADDR_SRP " on " PUB_S_SRP ".",
+                              SEGMENTED_IPv6_ADDR_PARAM_SRP(&ifmatch->addr.sin6.sin6_addr, local_buf), sd->domain);
+                    } else {
+                        IPv4_ADDR_GEN_SRP(&ifmatch->addr.sin.sin_addr, local_buf);
+                        ERROR("local address " PRI_IPv4_ADDR_SRP " on " PUB_S_SRP ".",
+                              IPv4_ADDR_PARAM_SRP(&ifmatch->addr.sin.sin_addr, local_buf), sd->domain);
+                    }
+#endif
+                }
+            }
+        }
+    }
+    if (local->sa.sa_family == AF_INET6) {
+        SEGMENTED_IPv6_ADDR_GEN_SRP(&local->sin6.sin6_addr, local_buf);
+        ERROR("local address "PRI_SEGMENTED_IPv6_ADDR_SRP " is not seen as present on any known interface.",
+             SEGMENTED_IPv6_ADDR_PARAM_SRP(&local->sin6.sin6_addr, local_buf));
+    } else {
+        IPv4_ADDR_GEN_SRP(&local->sin.sin_addr, local_buf);
+        ERROR("local address " PRI_IPv4_ADDR_SRP " is not seen as present on any known interface.",
+              IPv4_ADDR_PARAM_SRP(&local->sin.sin_addr, local_buf));
+    }
+    return NULL;
 }
 
 static bool
@@ -2702,69 +2787,46 @@ dnssd_hardwired_response(dnssd_query_t *query, DNSServiceQueryRecordReply UNUSED
                                           &query->response->ancount);
             response_type = "local host v4-mapped address";
         }
-        // If it's an IPv6 address and NOT a v4-mapped address, we can respond with an AAAA record.
+        // If it's an IPv6 address and NOT a v4-mapped address, and it's not a synthesized anycast or rloc
+        // address, we can just use it.
         else if (local->sa.sa_family == AF_INET6 && question->type == dns_rrtype_aaaa &&
-                 memcmp(&local->sin6.sin6_addr, v4mapped, sizeof(v4mapped)))
+                 memcmp(&local->sin6.sin6_addr, v4mapped, sizeof(v4mapped)) &&
+                 !is_thread_mesh_synthetic_address(&local->sin6.sin6_addr))
         {
             struct in6_addr response = local->sin6.sin6_addr;
-            bool address_is_usable = false;
-            // If it's not a synthesized anycast or rloc address, we can just use it.
-            if (!is_thread_mesh_synthetic_address(&response)) {
-                address_is_usable = true;
-                response_type = "local host IPv6 address";
-            } else {
-                // Otherwise, we need to find the mesh-local address and respond with that.
-                srp_server_t *server_state = srp_servers;
-#if SRP_TEST_SERVER
-                for (; !address_is_usable && server_state != NULL; server_state = server_state->next)
-#endif
-                {
-                    if (0) {
-#if STUB_ROUTER
-                    } else if (server_state->stub_router_enabled) {
-                        route_state_t *route_state = server_state->route_state;
-                        if (route_state->thread_interface_name != NULL) {
-                            for (interface_address_state_t *address = route_state->interface_addresses;
-                                 !address_is_usable && address != NULL; address = address->next)
-                            {
-                                // Wrong interface or wrong type of address
-                                if (strcmp(address->name, route_state->thread_interface_name) ||
-                                    address->addr.sa.sa_family != AF_INET6)
-                                {
-                                    continue;
-                                }
-                                if (!is_thread_mesh_synthetic_or_link_local(&address->addr.sin6.sin6_addr))
-                                {
-                                    memcpy(&response, &address->addr.sin6.sin6_addr, sizeof(response));
-                                    response_type = "thread interface address";
-                                    address_is_usable = true;
-                                }
-                            }
-                            if (address_is_usable == false) {
-                                response_type = "no usable address on thread interface";
-                            }
-                        } else {
-                            address_is_usable = false;
-                            response_type = "thread interface name unknown";
-                        }
-#endif
-                    } else {
-                        // For thread device, the only thing that can work is the ML-EID.
-                        if (service_publisher_get_ml_eid(server_state->service_publisher, &response)) {
-                            address_is_usable = true;
-                            response_type = "thread device ML-EID";
-                        } else {
-                            response_type = "thread ML-EID not known";
-                        }
-                    }
+            dp_query_add_data_to_response(query, question->name, question->type, dns_qclass_in, 16,
+                                          &response, 300, true, true, &query->response->ancount);
+            response_type = "local host IPv6 address";
+            SEGMENTED_IPv6_ADDR_GEN_SRP(&response, response_buf);
+            INFO(PUB_S_SRP " IN AAAA " PRI_SEGMENTED_IPv6_ADDR_SRP " " PUB_S_SRP, question->name,
+                 SEGMENTED_IPv6_ADDR_PARAM_SRP(&response, response_buf), response_type);
+        } else {
+            // Otherwise we need to see if there is an IP address of the correct type on the interface on which we received the query.
+            interface_addr_t *interface_address = dnssd_proxy_find_usable_interface_address(srp_servers, local, question->type);
+            if (question->type == dns_rrtype_aaaa) {
+                if (interface_address != NULL) {
+                    struct in6_addr response = interface_address->addr.sin6.sin6_addr;
+                    dp_query_add_data_to_response(query, question->name, question->type, dns_qclass_in, 16,
+                                                  &response, 300, true, true, &query->response->ancount);
+                    response_type = "local host IPv6 address matching interface";
+                    SEGMENTED_IPv6_ADDR_GEN_SRP(&response, response_buf);
+                    INFO(PUB_S_SRP " IN AAAA " PRI_SEGMENTED_IPv6_ADDR_SRP " " PUB_S_SRP, question->name,
+                         SEGMENTED_IPv6_ADDR_PARAM_SRP(&response, response_buf), response_type);
+                } else {
+                    response_type = "no local IPv6 address on matching interface";
                 }
-            }
-            if (address_is_usable) {
-                SEGMENTED_IPv6_ADDR_GEN_SRP(&response, response_buf);
-                INFO(PUB_S_SRP " IN AAAA " PRI_SEGMENTED_IPv6_ADDR_SRP " " PUB_S_SRP, question->name,
-                     SEGMENTED_IPv6_ADDR_PARAM_SRP(&response, response_buf), response_type);
-                dp_query_add_data_to_response(query, question->name, question->type, dns_qclass_in, 16,
-                                              &response, 300, true, true, &query->response->ancount);
+            } else {
+                if (interface_address != NULL) {
+                    struct in_addr response = interface_address->addr.sin.sin_addr;
+                    dp_query_add_data_to_response(query, question->name, question->type, dns_qclass_in, 16,
+                                                  &response, 300, true, true, &query->response->ancount);
+                    response_type = "local host IPv4 address matching interface";
+                    IPv4_ADDR_GEN_SRP(&response, response_buf);
+                    INFO(PUB_S_SRP " IN A " PRI_IPv4_ADDR_SRP " " PUB_S_SRP, question->name,
+                         IPv4_ADDR_PARAM_SRP(&response, response_buf), response_type);
+                } else {
+                    response_type = "no local IPv4 address on matching interface";
+                }
             }
         }
     } else {
@@ -3578,7 +3640,7 @@ dns_push_unsubscribe(dso_activity_t *activity)
 }
 
 static void
-dns_push_subscription_change(const char *opcode_name, dp_tracker_t *tracker, const dns_wire_t *header, dso_state_t *dso)
+dns_push_subscription_change(const char *opcode_name, dp_tracker_t *tracker, const dns_wire_t *header, dso_state_t *dso, uint16_t xid)
 {
     // type-in-hex/class-in-hex/name-to-subscribe
     char activity_name[5];
@@ -3592,11 +3654,16 @@ dns_push_subscription_change(const char *opcode_name, dp_tracker_t *tracker, con
     uint16_t subscribe_xid = ntohs(header->id);
     char nbuf[DNS_MAX_NAME_SIZE + 1];
 
+    if (xid == 0) {
+        ERROR("[DSO%d][TRK%d] push subscribe with zero xid received from " PRI_S_SRP "(opcode " PUB_S_SRP ")",
+              SERIAL(dso), SERIAL(tracker), dso->remote_name, opcode_name);
+    }
+
     memset(&question, 0, sizeof(question));
     if (dso->primary.opcode == kDSOType_DNSPushSubscribe) {
         if (!dns_rr_parse(&question, header->data, offp + dso->primary.length, &offp, false, false)) {
             dso_simple_response(tracker->connection, NULL, header, dns_rcode_formerr);
-            ERROR("[DSO%d][TRK%d] RR parse for %s from %s failed", SERIAL(dso), SERIAL(tracker), dso->remote_name, opcode_name);
+            ERROR("[DSO%d][TRK%d] RR parse for " PRI_S_SRP " from " PUB_S_SRP " failed", SERIAL(dso), SERIAL(tracker), opcode_name, dso->remote_name);
             goto out;
         }
         dns_name_print(question.name, nbuf, sizeof(nbuf));
@@ -3613,7 +3680,7 @@ dns_push_subscription_change(const char *opcode_name, dp_tracker_t *tracker, con
         if (dso->primary.opcode == kDSOType_DNSPushSubscribe) {
             dso_simple_response(tracker->connection, NULL, header, dns_rcode_formerr);
         }
-        ERROR("DNS push " PUB_S_SRP " parse from %s failed: length mismatch (%d != %d)",
+        ERROR("DNS push " PUB_S_SRP " parse from " PRI_S_SRP " failed: length mismatch (%d != %d)",
               dso->primary.opcode == kDSOType_DNSPushSubscribe ? "subscribe" : "unsubscribe",
               dso->remote_name, offp, len);
         goto out;
@@ -3679,7 +3746,8 @@ dso_limit(dp_tracker_t *tracker, message_t *message, dp_tracker_session_type_t s
     return false;
 }
 
-static void dso_message(dp_tracker_t *tracker, message_t *message, dso_state_t *dso)
+static void
+dso_message(dp_tracker_t *tracker, message_t *message, dso_state_t *dso, uint16_t xid)
 {
     // For the first DSO message we get on a connection, see if we already have too many connections of
     // the same type. We track SRP replication and DNS Push separately, because we don't want a surfeit of
@@ -3695,10 +3763,10 @@ static void dso_message(dp_tracker_t *tracker, message_t *message, dso_state_t *
 
     switch(dso->primary.opcode) {
     case kDSOType_DNSPushSubscribe:
-        dns_push_subscription_change("DNS Push Subscribe", tracker, &message->wire, dso);
+        dns_push_subscription_change("DNS Push Subscribe", tracker, &message->wire, dso, xid);
         break;
     case kDSOType_DNSPushUnsubscribe:
-        dns_push_subscription_change("DNS Push Unsubscribe", tracker, &message->wire, dso);
+        dns_push_subscription_change("DNS Push Unsubscribe", tracker, &message->wire, dso, xid);
         break;
 
     case kDSOType_DNSPushReconfirm:
@@ -3762,7 +3830,7 @@ dp_keepalive_response_send(dso_keepalive_context_t *keepalive_event, dso_state_t
     p_dso_length = NULL;
 
     dso_make_message(&state, dsobuf, sizeof(dsobuf), dso, false /* unidirectional */, true /* response */,
-                     keepalive_event->xid, dns_rcode_noerror, dso->transport);
+                     keepalive_event->xid, dns_rcode_noerror, dso->transport, NULL);
     dns_u16_to_wire(&towire, kDSOType_Keepalive);
     dns_rdlength_begin(&towire);
     dns_u32_to_wire(&towire, keepalive_event->inactivity_timeout); // Idle timeout (we are never idle)
@@ -3804,10 +3872,10 @@ dns_push_callback(void *context, void *event_context, dso_state_t *dso, dso_even
              dso->remote_name);
         break;
     case kDSOEventType_DSOMessage:
-        INFO("[DSO%d] DSO Message (Primary TLV=%d) received from " PRI_S_SRP,
-             SERIAL(dso), dso->primary.opcode, dso->remote_name);
         message = event_context;
-        dso_message((dp_tracker_t *)context, message, dso);
+        INFO("[DSO%d] DSO Message (Primary TLV=%d) (xid=%x) received from " PRI_S_SRP,
+             SERIAL(dso), dso->primary.opcode, message->wire.id, dso->remote_name);
+        dso_message((dp_tracker_t *)context, message, dso, message->wire.id);
         break;
     case kDSOEventType_DSOResponse:
         INFO("[DSO%d] DSO Response (Primary TLV=%d) received from " PRI_S_SRP,
@@ -3968,7 +4036,7 @@ dp_tracker_dso_state_change(const dso_life_cycle_t cycle, void *const context, d
                 }
             }
         }
-        ioloop_run_async(dp_tracker_dso_cleanup, NULL);
+        ioloop_run_async(dp_tracker_dso_cleanup, NULL, NULL);
         return true;
     }
     return false;
@@ -4074,7 +4142,7 @@ dnssd_proxy_dns_evaluate(comm_t *comm, message_t *message, dp_tracker_t *tracker
     goto out;
 fail:
     // For connected connections, if we exit unexpectedly, we need to cancel the connection.
-    if (comm->tcp_stream) {
+    if (comm->tcp_stream && tracker != NULL) {
         ioloop_comm_cancel(tracker->connection);
     }
 out:

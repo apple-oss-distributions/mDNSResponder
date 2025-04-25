@@ -142,6 +142,9 @@ struct TCPListener_struct
 // Value assiged to 'Exists' to indicate the multicast state of the interface has changed.
 #define MulticastStateChanged   2
 
+#if MDNSRESPONDER_SUPPORTS(APPLE, PADDING_CHECKS)
+MDNS_CLANG_TREAT_WARNING_AS_ERROR_BEGIN(-Wpadded)
+#endif
 struct NetworkInterfaceInfoOSX_struct
 {
     NetworkInterfaceInfo ifinfo;                // MUST be the first element in this structure
@@ -170,8 +173,6 @@ struct NetworkInterfaceInfoOSX_struct
     uint32_t ift_subfamily;                     // The interface's subfamily type from the SIOCGIFTYPE ioctl().
     uint32_t if_functional_type;                // The interface's functional type from the SIOCGIFFUNCTIONALTYPE
                                                 // ioctl().
-    mDNSBool isAWDL;                            // True if this interface has the IFEF_AWDL flag set.
-    mDNSBool isPrivacyRisk;                     // True if this interface is a privacy risk.
 #ifdef MDNSRESPONDER_USES_LIB_DISPATCH_AS_PRIMARY_EVENT_LOOP_MECHANISM
     dispatch_source_t BPF_source;
 #else
@@ -179,7 +180,17 @@ struct NetworkInterfaceInfoOSX_struct
     CFRunLoopSourceRef BPF_rls;
 #endif
     NetworkInterfaceInfoOSX *Registered;        // non-NULL means registered with mDNS Core
+    mDNSBool isAWDL;                            // True if this interface has the IFEF_AWDL flag set.
+    mDNSBool isPrivacyRisk;                     // True if this interface is a privacy risk.
+    mDNSBool mDNSAllowedOnPTP;                  // True if mDNS allowed despite this being a point-to-point interface.
+#if MDNSRESPONDER_SUPPORTS(APPLE, PADDING_CHECKS)
+    MDNS_STRUCT_PAD_64_32(5, 1);
+#endif
 };
+#if MDNSRESPONDER_SUPPORTS(APPLE, PADDING_CHECKS)
+MDNS_CLANG_TREAT_WARNING_AS_ERROR_END()
+MDNS_GENERAL_STRUCT_PAD_CHECK(NetworkInterfaceInfoOSX);
+#endif
 
 struct mDNS_PlatformSupport_struct
 {
@@ -295,7 +306,7 @@ struct CompileTimeAssertionChecks_mDNSMacOSX
     // Check our structures are reasonable sizes. Including overly-large buffers, or embedding
     // other overly-large structures instead of having a pointer to them, can inadvertently
     // cause structure sizes (and therefore memory usage) to balloon unreasonably.
-    char sizecheck_NetworkInterfaceInfoOSX[(sizeof(NetworkInterfaceInfoOSX) <=  8704) ? 1 : -1];
+    char sizecheck_NetworkInterfaceInfoOSX[(sizeof(NetworkInterfaceInfoOSX) <=  6488) ? 1 : -1];
     char sizecheck_mDNS_PlatformSupport   [(sizeof(mDNS_PlatformSupport)    <=  1378) ? 1 : -1];
 };
 

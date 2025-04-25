@@ -279,10 +279,10 @@ $(BUILDDIR)/libdns_sd.$(LDSUFFIX): $(CLIENTLIBOBJS)
 	$(LD) $(SOOPTS) $(LINKOPTS) -o $@ $+
 	$(STRIP) $@
 
-Clients: setup libdns_sd ../Clients/build/dns-sd
+Clients: setup ../Clients/build/dns-sd
 	@echo "Clients done"
 
-../Clients/build/dns-sd: ../Clients/dns-sd.c
+../Clients/build/dns-sd: ../Clients/dns-sd.c libdns_sd
 	$(MAKE) -C ../Clients DEBUG=$(DEBUG) SUPMAKE_CFLAGS="$(MDNSCFLAGS)"
 
 # nss_mdns target builds the Name Service Switch module

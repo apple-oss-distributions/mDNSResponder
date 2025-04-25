@@ -398,8 +398,9 @@ mDNSlocal void tcpConnectionCallback(TCPSocket *sock, void *context, mDNSBool Co
     {
         LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "tcpConnectionCallback: WARNING- tcpInfo->sock(%p) != sock(%p) !!! Printing tcpInfo struct",
             tcpInfo->sock, sock);
-        LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "tcpConnectionCallback: tcpInfo->Address:Port [" PRI_IP_ADDR ":%d] "
-            "tcpInfo->op[%d] tcpInfo->retries[%d] tcpInfo->Request[" PRI_S "] tcpInfo->Reply[" PRI_S "]",
+        LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT,
+            "tcpConnectionCallback: tcpInfo->Address:Port [" PRI_IP_ADDR ":%d] "
+            "tcpInfo->op[%u] tcpInfo->retries[%d] tcpInfo->Request[" PRI_S "] tcpInfo->Reply[" PRI_S "]",
             &tcpInfo->Address, mDNSVal16(tcpInfo->Port), tcpInfo->op, tcpInfo->retries, tcpInfo->Request,
             tcpInfo->Reply);
     }
@@ -457,8 +458,8 @@ mDNSlocal void tcpConnectionCallback(TCPSocket *sock, void *context, mDNSBool Co
         case LNTPortMapOp:       handleLNTPortMappingResponse       (tcpInfo); break;
         case LNTPortMapDeleteOp: status = mStatus_ConfigChanged;               break;
         MDNS_COVERED_SWITCH_DEFAULT:
-            LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "tcpConnectionCallback: bad tcp operation! %d",
-                tcpInfo->op);
+            LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT,
+                "tcpConnectionCallback: bad tcp operation! %u", tcpInfo->op);
             status = mStatus_Invalid;
             break;
         }

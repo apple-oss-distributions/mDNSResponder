@@ -602,6 +602,27 @@ start_needing_instance(void)
     }
 }
 
+advertising_proxy_conn_ref primary_sub;
+bool is_primary = false;
+
+static void
+primary_resident_callback(advertising_proxy_conn_ref UNUSED sub, void *UNUSED context, advertising_proxy_error_type error)
+{
+    fprintf(stderr, "primary resident callback: %d\n", error);
+    exit(0);
+}
+
+static void
+start_primary_resident_update(void)
+{
+    advertising_proxy_error_type ret = advertising_proxy_update_primary_resident(&primary_sub, dispatch_get_main_queue(),
+                                                                                 primary_resident_callback, NULL, is_primary);
+    if (ret != kDNSSDAdvertisingProxyStatus_NoError) {
+        fprintf(stderr, "advertising_proxy_update_primary_resident failed: %d\n", ret);
+        exit(1);
+    }
+}
+
 const char *browse_service, *resolve_name, *resolve_service;
 
 advertising_proxy_subscription_t *browse_sub;
@@ -719,6 +740,7 @@ usage(void)
     fprintf(stderr, "  need-service <service> <flag>         -- signal to srp-mdns-proxy that we need to discover a service\n");
     fprintf(stderr, "  need-instance <name> <service> <flag> -- signal to srp-mdns-proxy that we need to discover a service\n");
     fprintf(stderr, "  start-srp                             -- on thread device, enable srp registration\n");
+    fprintf(stderr, "  primary-resident <true|false>         -- set/unset the current device the primary resident\n");
 #ifdef NOTYET
     fprintf(stderr, "  flush                                 -- flush all entries from the SRP proxy (for testing only)\n");
 #endif
@@ -754,6 +776,7 @@ bool start_thread_shutdown = false;
 bool advertise_winning_unicast_service = false;
 bool remove_unicast_service = false;
 bool start_srp = false;
+bool primary_update = false;
 uint8_t prefix_buf[16];
 #ifdef NOTYET
 bool watch = false;
@@ -863,6 +886,9 @@ start_activities(void *context)
     }
     if (err == kDNSSDAdvertisingProxyStatus_NoError && need_service != NULL && need_name != NULL) {
         start_needing_instance();
+    }
+    if (err == kDNSSDAdvertisingProxyStatus_NoError && primary_update) {
+        start_primary_resident_update();
     }
     if (err == kDNSSDAdvertisingProxyStatus_NoError && start_srp) {
         start_registrar();
@@ -1053,6 +1079,18 @@ main(int argc, char **argv)
             }
             i += 3;
             something = true;
+        } else if (!strcmp(argv[i], "primary-resident")) {
+            if (i + 1 >= argc) {
+                usage();
+            }
+            primary_update = true;
+            if (!strcmp(argv[i+1], "true")) {
+                is_primary = true;
+            } else {
+                is_primary = false;
+            }
+            i++;
+            something = true;
         } else if (!strcmp(argv[i], "start-srp")) {
             start_srp = true;
             something = true;
@@ -1135,7 +1173,7 @@ main(int argc, char **argv)
 
     ioloop_init();
     // Start the queue, //then// do the work
-    ioloop_run_async(start_activities, NULL);
+    ioloop_run_async(start_activities, NULL, NULL);
     ioloop();
 }
 

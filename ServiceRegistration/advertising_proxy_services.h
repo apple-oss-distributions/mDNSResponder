@@ -34,7 +34,7 @@
 
 __BEGIN_DECLS
 typedef void *run_context_t;
-typedef struct _cti_connection_t *advertising_proxy_conn_ref;
+typedef struct cti_connection *advertising_proxy_conn_ref;
 #define ADV_CTL_SERVER_SOCKET_NAME "/var/run/adv-ctl-server-socket"
 #define RCHAR char
 #define RUCHAR uint8_t

@@ -26,7 +26,7 @@
 #define NO_IOLOOP 1
 #endif
 
-typedef struct _cti_connection_t *cti_connection_t;
+typedef struct cti_connection cti_connection_t;
 
 #ifndef GCCATTR
 #ifdef __clang__

@@ -1,6 +1,6 @@
 /* cti-server.h
  *
- * Copyright (c) 2020 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2020-2024 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ int cti_init(void);
 void cti_fd_init(int *NONNULL p_nfds, fd_set *NONNULL r) GCCATTR((nonnull (1,2)));
 void cti_fd_process(fd_set *NONNULL r) GCCATTR((nonnull (1)));
 
-typedef int (*send_event_t)(cti_connection_t NONNULL connection, int event) GCCATTR((nonnull (1)));
+typedef int (*send_event_t)(cti_connection_t *NONNULL connection, int event) GCCATTR((nonnull (1)));
 void cti_notify_event(unsigned int evt, send_event_t NONNULL evt_handler) GCCATTR((nonnull (2)));
 
 int ctiAddService(uint32_t enterprise_number, const uint8_t *NONNULL service_data,
@@ -51,15 +51,15 @@ int ctiAddService(uint32_t enterprise_number, const uint8_t *NONNULL service_dat
     GCCATTR((nonnull (2, 4)));
 int ctiRemoveService(uint32_t enterprise_number,
 					 const uint8_t *service_data, size_t service_data_length) GCCATTR((nonnull (2)));
-int ctiRetrieveServiceList(cti_connection_t NONNULL connection, int event) GCCATTR((nonnull (1)));
+int ctiRetrieveServiceList(cti_connection_t *NONNULL connection, int event) GCCATTR((nonnull (1)));
 int ctiAddMeshPrefix(struct in6_addr *NONNULL prefix,
 					 size_t prefix_length, bool on_mesh, bool preferred, bool slaac, bool stable) GCCATTR((nonnull (1)));
 int ctiRemoveMeshPrefix(struct in6_addr *NONNULL prefix, size_t prefix_length) GCCATTR((nonnull (1)));
-int ctiRetrievePrefixList(cti_connection_t NONNULL connection, int event) GCCATTR((nonnull (1)));
-int ctiRetrievePartitionId(cti_connection_t NONNULL connection, int event) GCCATTR((nonnull (1)));
-int ctiRetrieveXPANID(cti_connection_t NONNULL connection, int event) GCCATTR((nonnull (1)));
-int ctiRetrieveTunnel(cti_connection_t NONNULL connection) GCCATTR((nonnull (1)));
-int ctiRetrieveNodeType(cti_connection_t NONNULL connection, int event) GCCATTR((nonnull (1)));
+int ctiRetrievePrefixList(cti_connection_t *NONNULL connection, int event) GCCATTR((nonnull (1)));
+int ctiRetrievePartitionId(cti_connection_t *NONNULL connection, int event) GCCATTR((nonnull (1)));
+int ctiRetrieveXPANID(cti_connection_t *NONNULL connection, int event) GCCATTR((nonnull (1)));
+int ctiRetrieveTunnel(cti_connection_t *NONNULL connection) GCCATTR((nonnull (1)));
+int ctiRetrieveNodeType(cti_connection_t *NONNULL connection, int event) GCCATTR((nonnull (1)));
 
 #endif // __CTI_SERVER_H__
 

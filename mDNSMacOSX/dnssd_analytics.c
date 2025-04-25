@@ -17,6 +17,7 @@
 #include "dnssd_analytics.h"
 #include "mDNSMacOSX.h"
 #include "uds_daemon.h"
+#include "mdns/general.h"
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, ANALYTICS)
 
@@ -201,7 +202,7 @@ dnssd_analytics_update_dns_query_info(bool is_cellular, dns_transport_t transpor
 		qtype_count->reply_neg++;
 	}
 
-	LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_DEBUG, "dnssd_analytics_update_dns_query_info cell %d qtype %d queries %u latency %d pos %d",
+	LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_DEBUG, "dnssd_analytics_update_dns_query_info cell %d qtype %d queries %u latency %u pos %d",
 			  is_cellular, qtype, num_queries, latency_ms, is_positive_answer);
 exit:
 	return;
@@ -361,7 +362,7 @@ dnssd_analytics_update_cache_request(CacheRequestType inType, CacheState inState
         } else if (inState == CacheState_miss) {
             sCacheRequest_UnicastMissCount++;
         } else {
-			LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_WARNING, "dnssd_analytics_update_cache_request:  unknown CacheState %d for unicast", inState);
+			LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_WARNING, "dnssd_analytics_update_cache_request:  unknown CacheState %u for unicast", inState);
         }
     } else if (inType == CacheRequestType_multicast) {
         if (inState == CacheState_hit) {
@@ -369,10 +370,10 @@ dnssd_analytics_update_cache_request(CacheRequestType inType, CacheState inState
         } else if (inState == CacheState_miss) {
             sCacheRequest_MulticastMissCount++;
         } else {
-            LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_WARNING, "dnssd_analytics_update_cache_request:  unknown CacheState %d for multicast", inState);
+			LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_WARNING, "dnssd_analytics_update_cache_request:  unknown CacheState %u for multicast", inState);
         }
     } else {
-        LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_WARNING, "dnssd_analytics_update_cache_request:  unknown CacheRequestType %d", inType);
+		LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_WARNING, "dnssd_analytics_update_cache_request:  unknown CacheRequestType %u", inType);
     }
 }
 
@@ -432,13 +433,134 @@ dnssd_analytics_update_unicast_assist(bool assist, bool unicast)
 			sNonUnicastAssist_MulticastCount++;
 		}
 	}
-	LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_DEBUG,
-			  "dnssd_analytics_update_unicast_assist Assist(unicast %s%lld, multicast %s%lld) "
-			  "NonAssist(unicast %s%lld, multicast %s%lld)",
-			  assist ? unicast ? "*" : "" : "", sUnicastAssist_UnicastCount,
-			  assist ? unicast ? "" : "*" : "", sUnicastAssist_MulticastCount,
-			  !assist ? unicast ? "*" : "" : "", sNonUnicastAssist_UnicastCount,
-			  !assist ? unicast ? "" : "*" : "", sNonUnicastAssist_MulticastCount);
+}
+
+static uint64_t sUAPresence_Count_enabled = 0;
+static uint64_t sUAPresence_Count_assert = 0;
+static uint64_t sUAPresence_Count_assert_addrs = 0;
+static uint64_t sUAPresence_Count_assert_hashes = 0;
+
+static uint64_t sUAPresence_Count_update = 0;
+static uint64_t sUAPresence_Count_update_devices = 0;
+static uint64_t sUAPresence_Count_update_devices_old = 0;
+static uint64_t sUAPresence_Count_update_devices_invalid = 0;
+static uint64_t sUAPresence_Count_update_devices_missing = 0;
+
+static uint64_t sUAPresence_Count_addrs = 0;
+static uint64_t sUAPresence_Count_addrs_invalid = 0;
+
+static uint64_t sUAPresence_Count_qhashes = 0;
+static uint64_t sUAPresence_Count_qhashes_found_multicast = 0;
+static uint64_t sUAPresence_Count_qhashes_found_unicast = 0;
+static uint64_t sUAPresence_Count_qhashes_not_found = 0;
+
+static void
+_post_unicast_assist_presence(void)
+{
+	bool posted;
+	posted = analytics_send_event_lazy("com.apple.mDNSResponder.unicastassist_presence", ^{
+		xpc_object_t dict;
+		dict = xpc_dictionary_create(NULL, NULL, 0);
+		xpc_dictionary_set_uint64(dict, "enabled",					sUAPresence_Count_enabled);
+		xpc_dictionary_set_uint64(dict, "assert",					sUAPresence_Count_assert);
+		xpc_dictionary_set_uint64(dict, "assert_addrs",				sUAPresence_Count_assert_addrs);
+		xpc_dictionary_set_uint64(dict, "assert_hashes",			sUAPresence_Count_assert_hashes);
+
+		xpc_dictionary_set_uint64(dict, "update",					sUAPresence_Count_update);
+		xpc_dictionary_set_uint64(dict, "update_devices",			sUAPresence_Count_update_devices);
+		xpc_dictionary_set_uint64(dict, "update_devices_old",		sUAPresence_Count_update_devices_old);
+		xpc_dictionary_set_uint64(dict, "update_devices",			sUAPresence_Count_update_devices_invalid);
+		xpc_dictionary_set_uint64(dict, "update_devices",			sUAPresence_Count_update_devices_missing);
+
+		xpc_dictionary_set_uint64(dict, "addrs",					sUAPresence_Count_addrs);
+		xpc_dictionary_set_uint64(dict, "addrs_invalid",			sUAPresence_Count_addrs_invalid);
+
+		xpc_dictionary_set_uint64(dict, "qhashes",					sUAPresence_Count_qhashes_found_multicast);
+		xpc_dictionary_set_uint64(dict, "qhashes_found_multicast",	sUAPresence_Count_qhashes_found_multicast);
+		xpc_dictionary_set_uint64(dict, "qhashes_found_unicast",	sUAPresence_Count_qhashes_found_unicast);
+		xpc_dictionary_set_uint64(dict, "qhashes_not_found",		sUAPresence_Count_qhashes_not_found);
+		return (dict);
+	});
+	if (!posted) {
+		LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_WARNING,
+			"com.apple.mDNSResponder.unicastassist_presence: Analytic not posted");
+	}
+	sUAPresence_Count_enabled = 0;
+	sUAPresence_Count_assert = 0;
+	sUAPresence_Count_assert_addrs = 0;
+	sUAPresence_Count_assert_hashes = 0;
+
+	sUAPresence_Count_update = 0;
+	sUAPresence_Count_update_devices = 0;
+	sUAPresence_Count_update_devices_old = 0;
+	sUAPresence_Count_update_devices_invalid = 0;
+	sUAPresence_Count_update_devices_missing = 0;
+
+	sUAPresence_Count_addrs = 0;
+	sUAPresence_Count_addrs_invalid = 0;
+
+	sUAPresence_Count_qhashes = 0;
+	sUAPresence_Count_qhashes_found_multicast = 0;
+	sUAPresence_Count_qhashes_found_unicast = 0;
+	sUAPresence_Count_qhashes_not_found = 0;
+}
+
+void
+dnssd_analytics_increment_unicast_assist_presence_count(UAPCount_t sel, uint64_t count)
+{
+	switch (sel) {
+		case UAPCount_presence_enabled:
+			sUAPresence_Count_enabled += count;
+			break;
+		case UAPCount_presence_assert:
+			sUAPresence_Count_assert += count;
+			break;
+		case UAPCount_presence_assert_addrs:
+			sUAPresence_Count_assert_addrs += count;
+			break;
+		case UAPCount_presence_assert_hashes:
+			sUAPresence_Count_assert_hashes += count;
+			break;
+
+		case UAPCount_presence_update:
+			sUAPresence_Count_update += count;
+			break;
+		case UAPCount_presence_update_devices:
+			sUAPresence_Count_update_devices += count;
+			break;
+		case UAPCount_presence_update_devices_old:
+			sUAPresence_Count_update_devices_old += count;
+			break;
+		case UAPCount_presence_update_devices_invalid:
+			sUAPresence_Count_update_devices_invalid += count;
+			break;
+		case UAPCount_presence_update_devices_missing:
+			sUAPresence_Count_update_devices_missing += count;
+			break;
+
+		case UAPCount_addrs:
+			sUAPresence_Count_addrs += count;
+			break;
+		case UAPCount_addrs_invalid:
+			sUAPresence_Count_addrs_invalid += count;
+			break;
+
+		case UAPCount_qhashes:
+			sUAPresence_Count_qhashes += count;
+			break;
+		case UAPCount_qhashes_found_multicast:
+			sUAPresence_Count_qhashes_found_multicast += count;
+			break;
+		case UAPCount_qhashes_found_unicast:
+			sUAPresence_Count_qhashes_found_unicast += count;
+			break;
+		case UAPCount_qhashes_not_found:
+			sUAPresence_Count_qhashes_not_found += count;
+			break;
+
+		MDNS_COVERED_SWITCH_DEFAULT:
+			break;
+	}
 }
 
 #endif // UNICAST_ASSIST_ANALYTICS
@@ -613,6 +735,7 @@ dnssd_analytics_init(void)
 #endif	//	DNS_ANALYTICS
 #if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST_ANALYTICS)
 					_post_unicast_assist();
+					_post_unicast_assist_presence();
 #endif	//	UNICAST_ASSIST_ANALYTICS
 					LogRedact(MDNS_LOG_CATEGORY_ANALYTICS, MDNS_LOG_DEFAULT, "com.apple.mDNSResponder.analytics.daily Complete");
 					mDNS_Unlock(&mDNSStorage);
@@ -675,6 +798,26 @@ dnssd_analytics_log(int fd)
 	LogToFD(fd, "Assist Multicast: %llu", sUnicastAssist_MulticastCount);
 	LogToFD(fd, "Non-assist Unicast: %llu", sNonUnicastAssist_UnicastCount);
 	LogToFD(fd, "Non-assist Multicast: %llu", sNonUnicastAssist_MulticastCount);
+
+	LogToFD(fd, "----    Unicast Assist Presence");
+	LogToFD(fd, "Enabled: %llu", sUAPresence_Count_enabled);
+	LogToFD(fd, "Asserts: %llu", sUAPresence_Count_assert);
+	LogToFD(fd, "Assert addrs: %llu", sUAPresence_Count_assert_addrs);
+	LogToFD(fd, "Assert hashes: %llu", sUAPresence_Count_assert_hashes);
+
+	LogToFD(fd, "Updates received: %llu", sUAPresence_Count_update);
+	LogToFD(fd, "Update devices: %llu", sUAPresence_Count_update_devices);
+	LogToFD(fd, "Update devices old: %llu", sUAPresence_Count_update_devices_old);
+	LogToFD(fd, "Update devices invalid: %llu", sUAPresence_Count_update_devices_invalid);
+	LogToFD(fd, "Update devices missing: %llu", sUAPresence_Count_update_devices_missing);
+
+	LogToFD(fd, "Addrs: %llu", sUAPresence_Count_addrs);
+	LogToFD(fd, "Invalid addrs: %llu", sUAPresence_Count_addrs_invalid);
+
+	LogToFD(fd, "Qhashes: %llu", sUAPresence_Count_qhashes);
+	LogToFD(fd, "Qhashes found via multicast: %llu", sUAPresence_Count_qhashes_found_multicast);
+	LogToFD(fd, "Qhashes found via unicast: %llu", sUAPresence_Count_qhashes_found_unicast);
+	LogToFD(fd, "Qhashes not found: %llu", sUAPresence_Count_qhashes_not_found);
 #endif // UNICAST_ASSIST_ANALYTICS
 }
 

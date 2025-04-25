@@ -1,6 +1,6 @@
 /* icmp.c
  *
- * Copyright (c) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -595,7 +595,10 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
     dns_u8_to_wire(&towire, 0);                 // icmp6_code
     dns_u16_to_wire(&towire, 0);                // The kernel computes the checksum (we don't technically have it).
     dns_u8_to_wire(&towire, 0);                 // Hop limit, we don't set.
-    dns_u8_to_wire(&towire, 0);                 // Flags.  We don't offer DHCP, so We set neither the M nor the O bit.
+    // RA flags. Possibly we should be reflecting the M and O bits we see from an infrastructure router, if any. The only flag
+    // we need to send is the SNAC router flag.
+    dns_u8_to_wire(&towire, ND_RA_FLAG_SNAC_ROUTER);
+
     // We are not a home agent, so no H bit.  Lifetime is 0, so Prf is 0.
 #ifdef ROUTER_LIFETIME_HACK
     dns_u16_to_wire(&towire, BR_PREFIX_LIFETIME); // Router lifetime, hacked.  This shouldn't ever be enabled.
@@ -701,13 +704,6 @@ router_advertisement_send(interface_t *interface, const struct in6_addr *destina
     dns_rdata_raw_data_to_wire(&towire, &route_state->srp_server->ula_prefix, 16); // /48 requires 16 bytes
 #endif // SKIP_SLASH_48
 #endif // SEND_INTERFACE_SPECIFIC_RIOS
-
-    // Send the stub router flag
-    dns_u8_to_wire(&towire, ND_OPT_RA_FLAGS_EXTENSION);
-    dns_u8_to_wire(&towire, 1); // length / 8
-    dns_u8_to_wire(&towire, RA_FLAGS1_STUB_ROUTER);
-    dns_u8_to_wire(&towire, 0); // Five bytes of zero flag bits
-    dns_u32_to_wire(&towire, 0);
 
     // Send Source link-layer address option
     if (interface->have_link_layer_address) {

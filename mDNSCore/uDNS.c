@@ -935,7 +935,7 @@ mDNSexport mStatus mDNS_StopNATOperation_internal(mDNS *m, NATTraversalInfo *tra
         return(mStatus_BadReferenceErr);
     }
 
-    LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "mDNS_StopNATOperation_internal %p %d %d %d %d", traversal,
+    LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "mDNS_StopNATOperation_internal %p %d %d %d %u", traversal,
         traversal->Protocol, mDNSVal16(traversal->IntPort), mDNSVal16(traversal->RequestedPort), traversal->NATLease);
 
     if (m->CurrentNATTraversal == traversal)
@@ -949,8 +949,8 @@ mDNSexport mStatus mDNS_StopNATOperation_internal(mDNS *m, NATTraversalInfo *tra
              (!p->Protocol && traversal->Protocol == NATOp_MapTCP && mDNSSameIPPort(traversal->IntPort, DiscardPort))) :
             (!p->Protocol || (p->Protocol == NATOp_MapTCP && mDNSSameIPPort(p->IntPort, DiscardPort))))
         {
-            LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "Warning: Removed port mapping request %p Prot %d Int %d TTL %d "
-                "duplicates existing port mapping request %p Prot %d Int %d TTL %d",
+            LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_DEFAULT, "Warning: Removed port mapping request %p Prot %d Int %d TTL %u "
+                "duplicates existing port mapping request %p Prot %d Int %d TTL %u",
                 traversal, traversal->Protocol, mDNSVal16(traversal->IntPort), traversal->NATLease,
                 p, p->Protocol, mDNSVal16(p->IntPort), p->NATLease);
             unmap = mDNSfalse;
@@ -4334,7 +4334,8 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
 {
     DomainAuthInfo *info;
 
-    LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: Resource Record " PRI_S ", state %d", ARDisplayString(m, rr), rr->state);
+    LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT,
+        "uDNS_DeregisterRecord: Resource Record " PRI_S ", state %u", ARDisplayString(m, rr), rr->state);
 
     switch (rr->state)
     {
@@ -4354,7 +4355,8 @@ mDNSexport mStatus uDNS_DeregisterRecord(mDNS *const m, AuthRecord *const rr)
     case regState_NoTarget:
     case regState_Unregistered:
     case regState_Zero:
-        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT, "uDNS_DeregisterRecord: State %d for " PRI_DM_NAME " type " PUB_S,
+        LogRedact(MDNS_LOG_CATEGORY_UDNS, MDNS_LOG_DEFAULT,
+            "uDNS_DeregisterRecord: State %u for " PRI_DM_NAME " type " PUB_S,
             rr->state, DM_NAME_PARAM(rr->resrec.name), DNSTypeName(rr->resrec.rrtype));
         // This function may be called during sleep when there are no sleep proxy servers
         if (rr->resrec.RecordType == kDNSRecordTypeDeregistering) CompleteDeregistration(m, rr);
@@ -5429,7 +5431,7 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
 {
     SearchListElem **p = &SearchList, *ptr;
     mStatus err;
-    int action = 0;
+    unsigned int action = 0;
 
     // step 1: mark each element for removal
     for (ptr = SearchList; ptr; ptr = ptr->next)
@@ -5464,7 +5466,7 @@ mDNSexport void uDNS_SetupWABQueries(mDNS *const m)
         const mDNSu32 nameHash = mDNS_DomainNameFNV1aHash(&ptr->domain);
         LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
             "uDNS_SetupWABQueries -- action: 0x%x, flags: 0x%x, ifid: %p, domain: " PUB_DM_NAME " (%x)",
-            action, ptr->flag, ptr->InterfaceID, DM_NAME_PARAM(&ptr->domain), nameHash);
+            action, (unsigned int)ptr->flag, ptr->InterfaceID, DM_NAME_PARAM(&ptr->domain), nameHash);
         // If SLE_DELETE is set, stop all the queries, deregister all the records and free the memory.
         // Otherwise, check to see what the "action" requires. If a particular action bit is not set and
         // we have started the corresponding queries as indicated by the "flags", stop those queries and
@@ -7363,7 +7365,7 @@ mDNSexport mStatus mDNS_SetSecretForDomain(mDNS *m, DomainAuthInfo *info, const 
     return mStatus_UnsupportedErr;
 }
 
-mDNSexport domainname  *uDNS_GetNextSearchDomain(mDNSInterfaceID InterfaceID, mDNSs8 *searchIndex, mDNSBool ignoreDotLocal)
+mDNSexport domainname  *uDNS_GetNextSearchDomain(mDNSInterfaceID InterfaceID, int *searchIndex, mDNSBool ignoreDotLocal)
 {
     (void) InterfaceID;
     (void) searchIndex;

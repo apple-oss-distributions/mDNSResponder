@@ -91,6 +91,30 @@ dnssd_analytics_update_cache_usage_counts(uint32_t inHitMulticastCount, uint32_t
 void
 dnssd_analytics_update_unicast_assist(bool assist, bool unicast);
 
+typedef enum {	// These are accumulated between reports
+	UAPCount_presence_enabled,					// Presence enabled
+	UAPCount_presence_assert,					// Presence asserted
+	UAPCount_presence_assert_addrs,				// Presence asserted addrs
+	UAPCount_presence_assert_hashes,			// Presence asserted hashes
+
+	UAPCount_presence_update,					// Presence updated
+	UAPCount_presence_update_devices,			// Presence update devices
+	UAPCount_presence_update_devices_old,		// Presence update devices old data
+	UAPCount_presence_update_devices_invalid,	// Presence update devices with invalid addr
+	UAPCount_presence_update_devices_missing,	// Presence update devices that were previously seen
+
+	UAPCount_addrs,								// Count of good addrs from device
+	UAPCount_addrs_invalid,						// Count of invalid addrs from device
+
+	UAPCount_qhashes,							// Count of qhashes in addr
+	UAPCount_qhashes_found_multicast,			// Count of qhashes found via multicast
+	UAPCount_qhashes_found_unicast,				// Count of qhashes found via unicast
+	UAPCount_qhashes_not_found					// Count of qhashes not found
+} UAPCount_t;
+
+void
+dnssd_analytics_increment_unicast_assist_presence_count(UAPCount_t sel, uint64_t count);
+
 #endif // UNICAST_ASSIST_ANALYTICS
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, WAB_ANALYTICS)

@@ -39,6 +39,8 @@
 #define DEBUG_64BIT_SCM_RIGHTS 0
 #endif
 
+#include "mdns_strict.h"
+
 #if defined(_WIN32)
 
     #define _SSIZE_T
@@ -89,8 +91,6 @@ static void syslog( int priority, const char * message, ...)
     #include <sys/uio.h>
 
 #endif
-
-#include "mdns_strict.h"
 
 #if !defined(SETIOV)
     #if defined(_WIN32)
@@ -288,7 +288,7 @@ DNSServiceAttributeRef DNSSD_API DNSServiceAttributeCreate
     void
 )
 {
-#ifdef MEMORY_OBJECT_TRACKING
+#if defined(MEMORY_OBJECT_TRACKING) && !defined(__clang_analyzer__)
     extern int saref_created;
     saref_created++;
 #endif
@@ -331,7 +331,7 @@ DNSServiceErrorType DNSSD_API DNSServiceAttributeSetTimestamp
 
 void DNSSD_API DNSServiceAttributeDeallocate(DNSServiceAttributeRef attr)
 {
-#ifdef MEMORY_OBJECT_TRACKING
+#if defined(MEMORY_OBJECT_TRACKING) && !defined(__clang_analyzer__)
     extern int saref_finalized;
     saref_finalized++;
 #endif
@@ -456,10 +456,10 @@ static int read_all(const dnssd_sock_t sd, uint8_t *buf, size_t len)
         ssize_t num_read = recv(sd, buf, len, 0);
         // It is valid to get an interrupted system call error e.g., somebody attaching
         // in a debugger, retry without failing
-        if ((num_read < 0) && (errno == EINTR)) 
-        { 
-            syslog(LOG_INFO, "dnssd_clientstub read_all: EINTR continue"); 
-            continue; 
+        if ((num_read < 0) && (errno == EINTR))
+        {
+            syslog(LOG_INFO, "dnssd_clientstub read_all: EINTR continue");
+            continue;
         }
         if ((num_read == 0) || (num_read < 0) || (((size_t)num_read) > len))
         {
@@ -528,15 +528,15 @@ static int more_bytes(dnssd_sock_t sd)
         int nfdbits = sizeof (int) * 8;
         int nints = (sd/nfdbits) + 1;
         fs = (fd_set *)mdns_calloc(nints, (size_t)sizeof(int));
-        if (fs == NULL) 
-        { 
-            syslog(LOG_WARNING, "dnssd_clientstub more_bytes: malloc failed"); 
-            return 0; 
+        if (fs == NULL)
+        {
+            syslog(LOG_WARNING, "dnssd_clientstub more_bytes: malloc failed");
+            return 0;
         }
     }
     FD_SET(sd, fs);
     ret = select((int)sd+1, fs, (fd_set*)NULL, (fd_set*)NULL, &tv);
-    if (fs != &readfds) 
+    if (fs != &readfds)
         mdns_free(fs);
 #endif
     return (ret > 0);
@@ -545,8 +545,8 @@ static int more_bytes(dnssd_sock_t sd)
 // set_waitlimit() implements a timeout using select. It is called from deliver_request() before recv() OR accept()
 // to ensure the UDS clients are not blocked in these system calls indefinitely.
 // Note: Ideally one should never be blocked here, because it indicates either mDNSResponder daemon is not yet up/hung/
-// superbusy/crashed or some other OS bug. For eg: On Windows which suffers from 3rd party software 
-// (primarily 3rd party firewall software) interfering with proper functioning of the TCP protocol stack it is possible 
+// superbusy/crashed or some other OS bug. For eg: On Windows which suffers from 3rd party software
+// (primarily 3rd party firewall software) interfering with proper functioning of the TCP protocol stack it is possible
 // the next operation on this socket(recv/accept) is blocked since we depend on TCP to communicate with the system service.
 static int set_waitlimit(dnssd_sock_t sock, int timeout)
 {
@@ -643,7 +643,7 @@ static void FreeDNSRecords(DNSServiceOp *sdRef)
     while (rec)
     {
         DNSRecord *next = rec->recnext;
-#ifdef MEMORY_OBJECT_TRACKING
+#if defined(MEMORY_OBJECT_TRACKING) && !defined(__clang_analyzer__)
         extern int rref_finalized;
         rref_finalized++;
 #endif
@@ -655,7 +655,7 @@ static void FreeDNSRecords(DNSServiceOp *sdRef)
 
 static void FreeDNSServiceOp(DNSServiceOp *x)
 {
-#ifdef MEMORY_OBJECT_TRACKING
+#if defined(MEMORY_OBJECT_TRACKING) && !defined(__clang_analyzer__)
     extern void *dns_service_op_not_to_be_freed;
     if (x != NULL && x == dns_service_op_not_to_be_freed) {
         syslog(LOG_ERR, "dnssd_clientstub attempt to dispose protected DNSServiceRef %p", x);
@@ -694,7 +694,7 @@ static void FreeDNSServiceOp(DNSServiceOp *x)
             x->kacontext = NULL;
         }
         mdns_free(x);
-#ifdef MEMORY_OBJECT_TRACKING
+#if defined(MEMORY_OBJECT_TRACKING) && !defined(__clang_analyzer__)
         extern int sdref_finalized;
         sdref_finalized++;
 #endif
@@ -711,10 +711,10 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
     dnssd_sockaddr_t saddr;
     DNSServiceOp *sdr;
 
-    if (!ref) 
-    { 
-        syslog(LOG_WARNING, "dnssd_clientstub DNSService operation with NULL DNSServiceRef"); 
-        return kDNSServiceErr_BadParam; 
+    if (!ref)
+    {
+        syslog(LOG_WARNING, "dnssd_clientstub DNSService operation with NULL DNSServiceRef");
+        return kDNSServiceErr_BadParam;
     }
 
     if (flags & kDNSServiceFlagsShareConnection)
@@ -726,8 +726,8 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
         }
         if (!DNSServiceRefValid(*ref) || ((*ref)->op != connection_request && (*ref)->op != connection_delegate_request) || (*ref)->primary)
         {
-            syslog(LOG_WARNING, "dnssd_clientstub kDNSServiceFlagsShareConnection used with invalid DNSServiceRef %p %08X %08X op %d",
-                   (*ref), (*ref)->sockfd, (*ref)->validator, (*ref)->op);
+            syslog(LOG_WARNING, "dnssd_clientstub kDNSServiceFlagsShareConnection used with invalid DNSServiceRef %p %08X %08X op %u",
+                (*ref), (unsigned int)(*ref)->sockfd, (unsigned int)(*ref)->validator, (*ref)->op);
             *ref = NULL;
             return kDNSServiceErr_BadReference;
         }
@@ -749,11 +749,11 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
 #endif
 
     sdr = mdns_malloc(sizeof(DNSServiceOp));
-    if (!sdr) 
-    { 
-        syslog(LOG_WARNING, "dnssd_clientstub ConnectToServer: malloc failed"); 
-        *ref = NULL; 
-        return kDNSServiceErr_NoMemory; 
+    if (!sdr)
+    {
+        syslog(LOG_WARNING, "dnssd_clientstub ConnectToServer: malloc failed");
+        *ref = NULL;
+        return kDNSServiceErr_NoMemory;
     }
     sdr->next          = NULL;
     sdr->primary       = NULL;
@@ -774,19 +774,19 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
     sdr->disp_queue    = NULL;
 #endif
     sdr->kacontext     = NULL;
-#ifdef MEMORY_OBJECT_TRACKING
+#if defined(MEMORY_OBJECT_TRACKING) && !defined(__clang_analyzer__)
     extern int sdref_created;
     sdref_created++;
 #endif
-    
+
     if (flags & kDNSServiceFlagsShareConnection)
     {
         DNSServiceOp **p = &(*ref)->next;       // Append ourselves to end of primary's list
-        while (*p) 
+        while (*p)
             p = &(*p)->next;
         *p = sdr;
         // Preincrement counter before we use it -- it helps with debugging if we know the all-zeroes ID should never appear
-        if (++(*ref)->uid.u32[0] == 0) 
+        if (++(*ref)->uid.u32[0] == 0)
             ++(*ref)->uid.u32[1];               // In parent DNSServiceOp increment UID counter
         sdr->primary    = *ref;                 // Set our primary pointer
         sdr->sockfd     = (*ref)->sockfd;       // Inherit primary's socket
@@ -929,7 +929,7 @@ static DNSServiceErrorType deliver_request(ipc_msg_hdr *hdr, DNSServiceOp *sdr)
         syslog(LOG_WARNING, "dnssd_clientstub deliver_request: !hdr");
         return kDNSServiceErr_Unknown;
     }
-    
+
     datalen = hdr->datalen;    // We take a copy here because we're going to convert hdr->datalen to network byte order
     #if defined(USE_TCP_LOOPBACK) || defined(USE_NAMED_ERROR_RETURN_SOCKET)
     data = (char *)hdr + sizeof(ipc_msg_hdr);
@@ -946,7 +946,8 @@ static DNSServiceErrorType deliver_request(ipc_msg_hdr *hdr, DNSServiceOp *sdr)
     {
         if (hdr)
             mdns_free(hdr);
-        syslog(LOG_WARNING, "dnssd_clientstub deliver_request: invalid DNSServiceRef %p %08X %08X", sdr, sdr->sockfd, sdr->validator);
+        syslog(LOG_WARNING, "dnssd_clientstub deliver_request: invalid DNSServiceRef %p %08X %08X",
+            sdr, (unsigned int)sdr->sockfd, (unsigned int)sdr->validator);
         return kDNSServiceErr_BadReference;
     }
 
@@ -1056,7 +1057,7 @@ static DNSServiceErrorType deliver_request(ipc_msg_hdr *hdr, DNSServiceOp *sdr)
     }
 #endif
 
-    if (!MakeSeparateReturnSocket) 
+    if (!MakeSeparateReturnSocket)
         errsd = sdr->sockfd;
     if (MakeSeparateReturnSocket)
     {
@@ -1066,10 +1067,10 @@ static DNSServiceErrorType deliver_request(ipc_msg_hdr *hdr, DNSServiceOp *sdr)
         // set_waitlimit() ensures we do not block indefinitely just in case something is wrong
         dnssd_sockaddr_t daddr;
         dnssd_socklen_t len = sizeof(daddr);
-        if ((err = set_waitlimit(listenfd, DNSSD_CLIENT_TIMEOUT)) != kDNSServiceErr_NoError) 
+        if ((err = set_waitlimit(listenfd, DNSSD_CLIENT_TIMEOUT)) != kDNSServiceErr_NoError)
             goto cleanup;
         errsd = accept(listenfd, (struct sockaddr *)&daddr, &len);
-        if (!dnssd_SocketValid(errsd)) 
+        if (!dnssd_SocketValid(errsd))
             deliver_request_bailout("accept");
 #else
 
@@ -1161,7 +1162,7 @@ dnssd_sock_t DNSSD_API DNSServiceRefSockFD(DNSServiceRef sdRef)
     if (!DNSServiceRefValid(sdRef))
     {
         syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRefSockFD called with invalid DNSServiceRef %p %08X %08X",
-               sdRef, sdRef->sockfd, sdRef->validator);
+            sdRef, (unsigned int)sdRef->sockfd, (unsigned int)sdRef->validator);
         return dnssd_InvalidSocket;
     }
 
@@ -1227,7 +1228,7 @@ static void CallbackWithError(DNSServiceRef sdRef, DNSServiceErrorType error)
             if (sdr->AppCallback) ((DNSServiceNATPortMappingReply)sdr->AppCallback)(sdr, 0, 0, error, 0, 0, 0, 0, 0, sdr->AppContext);
             break;
         default:
-            syslog(LOG_WARNING, "dnssd_clientstub CallbackWithError called with bad op %d", sdr->op);
+            syslog(LOG_WARNING, "dnssd_clientstub CallbackWithError called with bad op %u", sdr->op);
         }
         // If DNSServiceRefDeallocate was called in the callback, morebytes will be zero. As the sdRef
         // (and its subordinates) have been freed, we should not proceed further. Note that when we
@@ -1256,7 +1257,8 @@ DNSServiceErrorType DNSSD_API DNSServiceProcessResult(DNSServiceRef sdRef)
 
     if (!DNSServiceRefValid(sdRef))
     {
-        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceProcessResult called with invalid DNSServiceRef %p %08X %08X", sdRef, sdRef->sockfd, sdRef->validator);
+        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceProcessResult called with invalid DNSServiceRef %p %08X %08X",
+            sdRef, (unsigned int)sdRef->sockfd, (unsigned int)sdRef->validator);
         return kDNSServiceErr_BadReference;
     }
 
@@ -1287,7 +1289,7 @@ DNSServiceErrorType DNSSD_API DNSServiceProcessResult(DNSServiceRef sdRef)
         if (ioresult == read_all_fail || ioresult == read_all_defunct)
         {
             error = (ioresult == read_all_defunct) ? kDNSServiceErr_DefunctConnection : kDNSServiceErr_ServiceNotRunning;
-            
+
             // Set the ProcessReply to NULL before callback as the sdRef can get deallocated
             // in the callback.
             sdRef->ProcessReply = NULL;
@@ -1320,7 +1322,8 @@ DNSServiceErrorType DNSSD_API DNSServiceProcessResult(DNSServiceRef sdRef)
         ConvertHeaderBytes(&cbh.ipc_hdr);
         if (cbh.ipc_hdr.version != VERSION)
         {
-            syslog(LOG_WARNING, "dnssd_clientstub DNSServiceProcessResult daemon version %d does not match client version %d", cbh.ipc_hdr.version, VERSION);
+            syslog(LOG_WARNING, "dnssd_clientstub DNSServiceProcessResult daemon version %u does not match client version %d",
+                cbh.ipc_hdr.version, VERSION);
             sdRef->ProcessReply = NULL;
             return kDNSServiceErr_Incompatible;
         }
@@ -1331,7 +1334,7 @@ DNSServiceErrorType DNSSD_API DNSServiceProcessResult(DNSServiceRef sdRef)
         if (ioresult < read_all_success) // On error, read_all will write a message to syslog for us
         {
             error = (ioresult == read_all_defunct) ? kDNSServiceErr_DefunctConnection : kDNSServiceErr_ServiceNotRunning;
-            
+
             // Set the ProcessReply to NULL before callback as the sdRef can get deallocated
             // in the callback.
             sdRef->ProcessReply = NULL;
@@ -1389,7 +1392,8 @@ void DNSSD_API DNSServiceRefDeallocate(DNSServiceRef sdRef)
 
     if (!DNSServiceRefValid(sdRef))     // Also verifies dnssd_SocketValid(sdRef->sockfd) for us too
     {
-        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRefDeallocate called with invalid DNSServiceRef %p %08X %08X", sdRef, sdRef->sockfd, sdRef->validator);
+        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRefDeallocate called with invalid DNSServiceRef %p %08X %08X",
+            sdRef, (unsigned int)sdRef->sockfd, (unsigned int)sdRef->validator);
         return;
     }
 
@@ -2041,14 +2045,6 @@ DNSServiceErrorType DNSServiceRegisterInternal
     len += strlen(name) + strlen(regtype) + strlen(domain) + strlen(host) + 4;
     len += 2 * sizeof(uint16_t);  // port, txtLen
     len += txtLen;
-    if (attr)
-    {
-        if (!validate_attribute_tlvs(attr))
-        {
-            return kDNSServiceErr_BadParam;
-        }
-        len += get_required_length_for_attribute_tlvs(attr);
-    }
 
     hdr = create_hdr(reg_service_request, &len, &ptr, (*sdRef)->primary ? 1 : 0, *sdRef);
     if (!hdr) { DNSServiceRefDeallocate(*sdRef); *sdRef = NULL; return kDNSServiceErr_NoMemory; }
@@ -2064,10 +2060,6 @@ DNSServiceErrorType DNSServiceRegisterInternal
     *ptr++ = port.b[1];
     put_uint16(txtLen, &ptr);
     put_rdata(txtLen, txtRecord, &ptr);
-    if (attr)
-    {
-        put_attribute_tlvs(attr, hdr, &ptr, limit);
-    }
 
     err = deliver_request(hdr, *sdRef);     // Will free hdr for us
     if (err == kDNSServiceErr_NoAuth && !_should_return_noauth_error())
@@ -2255,14 +2247,14 @@ DNSServiceErrorType DNSServiceSendQueuedRequestsInternal(DNSServiceRef sdr)
     bytesWritten = writev(sdr->sockfd, iov, numMsg);
     if (bytesWritten != totalLength)
     {
-        syslog(LOG_WARNING,"DNSServiceSendQueuedRequestsInternal ERROR: writev(fd:%d, written:%zu, total:%zu bytes) failed, errno[%d]:%s",
-               sdr->sockfd, bytesWritten, totalLength, errno, strerror(errno));
+        syslog(LOG_WARNING,"DNSServiceSendQueuedRequestsInternal ERROR: writev(fd:%d, written:%zd, total:%zd bytes) failed, errno[%d]:%s",
+            sdr->sockfd, bytesWritten, totalLength, errno, strerror(errno));
         err = kDNSServiceErr_Unknown;
     }
     else
     {
-        syslog(LOG_INFO, "DNSServiceSendQueuedRequestsInternal: writev(fd:%d, numMsg:%d, %zu bytes) succeed",
-               sdr->sockfd, numMsg, totalLength);
+        syslog(LOG_INFO, "DNSServiceSendQueuedRequestsInternal: writev(fd:%d, numMsg:%u, %zd bytes) succeed",
+            sdr->sockfd, numMsg, totalLength);
     }
     for (rref = sdr->rec; rref != NULL; rref = rref->recnext)
     {
@@ -2350,13 +2342,15 @@ DNSServiceErrorType DNSServiceRegisterRecordInternal
 
     if (!DNSServiceRefValid(sdRef))
     {
-        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRegisterRecord called with invalid DNSServiceRef %p %08X %08X", sdRef, sdRef->sockfd, sdRef->validator);
+        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRegisterRecord called with invalid DNSServiceRef %p %08X %08X",
+            sdRef, (unsigned int)sdRef->sockfd, (unsigned int)sdRef->validator);
         return kDNSServiceErr_BadReference;
     }
 
     if (sdRef->op != connection_request && sdRef->op != connection_delegate_request)
     {
-        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRegisterRecord called with non-DNSServiceCreateConnection DNSServiceRef %p %d", sdRef, sdRef->op);
+        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRegisterRecord called with non-DNSServiceCreateConnection DNSServiceRef %p %u",
+            sdRef, sdRef->op);
         return kDNSServiceErr_BadReference;
     }
 
@@ -2367,14 +2361,6 @@ DNSServiceErrorType DNSServiceRegisterRecordInternal
     len += 3 * sizeof(uint16_t);  // rrtype, rrclass, rdlen
     len += strlen(fullname) + 1;
     len += rdlen;
-    if (attr)
-    {
-        if (!validate_attribute_tlvs(attr))
-        {
-            return kDNSServiceErr_BadParam;
-        }
-        len += get_required_length_for_attribute_tlvs(attr);
-    }
 
     // Bump up the uid. Normally for shared operations (kDNSServiceFlagsShareConnection), this
     // is done in ConnectToServer. For DNSServiceRegisterRecord, ConnectToServer has already
@@ -2397,17 +2383,13 @@ DNSServiceErrorType DNSServiceRegisterRecordInternal
     put_uint16(rdlen, &ptr);
     put_rdata(rdlen, rdata, &ptr);
     put_uint32(ttl, &ptr);
-    if (attr)
-    {
-        put_attribute_tlvs(attr, hdr, &ptr, limit);
-    }
     if (flags & kDNSServiceFlagsQueueRequest)
     {
         hdr->ipc_flags |= IPC_FLAGS_NOERRSD;
     }
     rref = mdns_calloc(1, sizeof(*rref));
     if (!rref) { mdns_free(hdr); return kDNSServiceErr_NoMemory; }
-#ifdef MEMORY_OBJECT_TRACKING
+#if defined(MEMORY_OBJECT_TRACKING) && !defined(__clang_analyzer__)
     extern int rref_created;
     rref_created++;
 #endif
@@ -2466,13 +2448,15 @@ DNSServiceErrorType DNSSD_API DNSServiceAddRecord
     }
     if (sdRef->op != reg_service_request)
     {
-        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceAddRecord called with non-DNSServiceRegister DNSServiceRef %p %d", sdRef, sdRef->op);
+        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceAddRecord called with non-DNSServiceRegister DNSServiceRef %p %u",
+            sdRef, sdRef->op);
         return kDNSServiceErr_BadReference;
     }
 
     if (!DNSServiceRefValid(sdRef))
     {
-        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceAddRecord called with invalid DNSServiceRef %p %08X %08X", sdRef, sdRef->sockfd, sdRef->validator);
+        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceAddRecord called with invalid DNSServiceRef %p %08X %08X",
+            sdRef, (unsigned int)sdRef->sockfd, (unsigned int)sdRef->validator);
         return kDNSServiceErr_BadReference;
     }
 
@@ -2493,7 +2477,7 @@ DNSServiceErrorType DNSSD_API DNSServiceAddRecord
 
     rref = mdns_calloc(1, sizeof(*rref));
     if (!rref) { mdns_free(hdr); return kDNSServiceErr_NoMemory; }
-#ifdef MEMORY_OBJECT_TRACKING
+#if defined(MEMORY_OBJECT_TRACKING) && !defined(__clang_analyzer__)
     extern int rref_created;
     rref_created++;
 #endif
@@ -2533,7 +2517,8 @@ static DNSServiceErrorType DNSServiceUpdateRecordInternal
 
     if (!DNSServiceRefValid(sdRef))
     {
-        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceUpdateRecord called with invalid DNSServiceRef %p %08X %08X", sdRef, sdRef->sockfd, sdRef->validator);
+        syslog(LOG_WARNING, "dnssd_clientstub DNSServiceUpdateRecord called with invalid DNSServiceRef %p %08X %08X",
+            sdRef, (unsigned int)sdRef->sockfd, (unsigned int)sdRef->validator);
         return kDNSServiceErr_BadReference;
     }
 
@@ -2628,7 +2613,7 @@ DNSServiceErrorType DNSSD_API DNSServiceRemoveRecord
     if (!DNSServiceRefValid(sdRef))
     {
         syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRemoveRecord called with invalid DNSServiceRef %p %08X %08X",
-               sdRef, sdRef->sockfd, sdRef->validator);
+            sdRef, (unsigned int)sdRef->sockfd, (unsigned int)sdRef->validator);
         return kDNSServiceErr_BadReference;
     }
 
@@ -2638,7 +2623,7 @@ DNSServiceErrorType DNSSD_API DNSServiceRemoveRecord
     if (*p == NULL)
     {
         syslog(LOG_WARNING, "dnssd_clientstub DNSServiceRemoveRecord called with invalid DNSRecordRef %p %08X %08X",
-               RecordRef, sdRef->sockfd, sdRef->validator);
+            RecordRef, (unsigned int)sdRef->sockfd, (unsigned int)sdRef->validator);
         return kDNSServiceErr_BadReference;
     }
 
@@ -2667,7 +2652,7 @@ DNSServiceErrorType DNSSD_API DNSServiceRemoveRecord
         // This RecordRef could only have been allocated in DNSServiceRegisterRecord or DNSServiceAddRecord.
         // Delink from the list before freeing
         *p = RecordRef->recnext;
-#ifdef MEMORY_OBJECT_TRACKING
+#if defined(MEMORY_OBJECT_TRACKING) && !defined(__clang_analyzer__)
         extern int rref_finalized;
         rref_finalized++;
 #endif

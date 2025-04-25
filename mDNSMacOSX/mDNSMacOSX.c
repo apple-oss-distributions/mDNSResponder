@@ -46,6 +46,7 @@
 
 #include <mdns/power.h>
 #include <mdns/sockaddr.h>
+#include <mdns/system.h>
 #include <mdns/tcpinfo.h>
 #include <stdio.h>
 #include <stdarg.h>                 // For va_list support
@@ -195,14 +196,6 @@ static CFArrayRef privateDnsArray = NULL;
 // other end, and that device (e.g. a modem bank) is probably not answering Multicast DNS queries anyway.
 
 
-#if MDNSRESPONDER_SUPPORTS(APPLE, BONJOUR_ON_DEMAND)
-#define MulticastInterface(i) ((i)->m->BonjourEnabled               && \
-                              ((i)->ifa_flags & IFF_MULTICAST)      && \
-                              !((i)->ifa_flags & IFF_POINTOPOINT))
-#else
-#define MulticastInterface(i) (((i)->ifa_flags & IFF_MULTICAST)     && \
-                              !((i)->ifa_flags & IFF_POINTOPOINT))
-#endif
 #define SPSInterface(i)       ((i)->ifinfo.McastTxRx && !((i)->ifa_flags & IFF_LOOPBACK) && !(i)->D2DInterface)
 
 mDNSlocal void SetNetworkChanged(mDNSs32 delay);
@@ -853,7 +846,8 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
                 }
                 else
                 {
-                    LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_ERROR, "[Q%u] setsockopt - IPV6_MUTLICAST_IF scopeid %d, not a valid interface",
+                    LogRedact(MDNS_LOG_CATEGORY_NAT, MDNS_LOG_ERROR,
+                        "[Q%u] setsockopt - IPV6_MUTLICAST_IF scopeid %u, not a valid interface",
                         mDNSVal16(dns_msg->h.id), info->scope_id);
                 }
             }
@@ -2476,10 +2470,13 @@ mDNSlocal CFArrayRef CopyCertChain(SecIdentityRef identity)
                     if (err || !trust) LogMsg("CopyCertChain: SecTrustCreateWithCertificates() returned %d", (int) err);
                     else
                     {
+                        // SecTrustEvaluate() requires a non-NULL second argument, but this code has never depended on a
+                        // trust result. The point of providing the address of a trust result variable here is to
+                        // prevent a -Wnonnull warning from clang and a nullability.NullPassedToNonnull warning from the
+                        // static analyzer.
+                        SecTrustResultType trustResult = kSecTrustResultInvalid;
                         mdns_clang_ignore_warning_begin(-Wdeprecated-declarations);
-                        mdns_clang_ignore_warning_begin(-Wnonnull);
-                        err = SecTrustEvaluate(trust, NULL);
-                        mdns_clang_ignore_warning_end();
+                        err = SecTrustEvaluate(trust, &trustResult);
                         mdns_clang_ignore_warning_end();
                         if (err) LogMsg("CopyCertChain: SecTrustEvaluate() returned %d", (int) err);
                         else
@@ -2760,6 +2757,16 @@ mDNSlocal  mDNSBool InterfaceSupportsKeepAlive(NetworkInterfaceInfo *const intf)
     return CheckInterfaceSupport(intf, mDNS_IOREG_KA_KEY);
 }
 #endif
+
+mDNSlocal mDNSBool MulticastInterface(const NetworkInterfaceInfoOSX *const i)
+{
+#if MDNSRESPONDER_SUPPORTS(APPLE, BONJOUR_ON_DEMAND)
+    mdns_require_return_value(i->m->BonjourEnabled, mDNSfalse);
+#endif
+    mdns_require_return_value(i->ifa_flags & IFF_MULTICAST, mDNSfalse);
+    mdns_require_return_value(!(i->ifa_flags & IFF_POINTOPOINT) || i->mDNSAllowedOnPTP, mDNSfalse);
+    return mDNStrue;
+}
 
 mDNSlocal mDNSBool NetWakeInterface(NetworkInterfaceInfoOSX *i)
 {
@@ -3058,7 +3065,18 @@ mDNSlocal NetworkInterfaceInfoOSX *AddInterfaceToList(const struct ifaddrs *ifa,
     i->Registered      = mDNSNULL;
     i->ift_family      = GetIFTFamily(i->ifinfo.ifname, &i->ift_subfamily);
     i->if_functional_type = GetIFRFunctionalType(i->ifinfo.ifname);
-
+    if (i->ifa_flags & IFF_POINTOPOINT)
+    {
+        OSStatus err;
+        const char *const ifname = i->ifinfo.ifname;
+        i->mDNSAllowedOnPTP = mdns_system_point_to_point_interface_allows_mdns(ifname, &err);
+        if (err)
+        {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
+                "AddInterfaceToList: Failed to determine if point-to-point interface allows mDNS -- "
+                "ifname: " PUB_S ", error: " PUB_OS_ERR, ifname, (long)err);
+        }
+    }
     // MulticastInterface() depends on the "m" and "ifa_flags" values being initialized above.
     i->ifinfo.McastTxRx   = MulticastInterface(i);
     // Do this AFTER i->BSSID has been set up
@@ -5170,7 +5188,7 @@ mDNSlocal void NetworkChanged(SCDynamicStoreRef store, CFArrayRef changedKeys, v
 
         LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
             "*** Network Configuration Change *** -- "
-            "change count: %ld, delay: %d, flags: %{public, mdnsresponder:net_change_flags}d",
+            "change count: %ld, delay: %d, flags: %{public, mdnsresponder:net_change_flags}u",
             (long)c, delay, netChangeFlags);
     }
 
@@ -5284,7 +5302,7 @@ mDNSlocal void SysEventCallBack(int s1, short __unused filter, void *context, __
     else
     {
         LogRedact(MDNS_LOG_CATEGORY_STATE, MDNS_LOG_DEFAULT,
-            "SysEventCallBack -- event: %{public, mdnsresponder:kev_dl_event}d", msg.k.event_code);
+            "SysEventCallBack -- event: %{public, mdnsresponder:kev_dl_event}u", msg.k.event_code);
 
         // We receive network change notifications both through configd and through SYSPROTO_EVENT socket.
         // Configd may not generate network change events for manually configured interfaces (i.e., non-DHCP)
@@ -7078,9 +7096,10 @@ mDNSexport mDNSBool mDNSPlatformValidRecordForInterface(const AuthRecord *rr, mD
         const NetworkInterfaceInfoOSX *const intf = IfindexToInterfaceInfoOSX(InterfaceID);
         if (intf && intf->isPrivacyRisk)
         {
-            LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEBUG, "mDNSPlatformValidRecordForInterface: Filtering privacy risk -- "
+            LogRedact(MDNS_LOG_CATEGORY_MDNS, MDNS_LOG_DEBUG,
+                "mDNSPlatformValidRecordForInterface: Filtering privacy risk -- "
                 "name: " PRI_DM_NAME ", ifname: " PUB_S ", ifid: %d", DM_NAME_PARAM(rr->resrec.name),
-                intf->ifinfo.ifname, IIDPrintable(intf->ifinfo.InterfaceID));
+                intf->ifinfo.ifname, (int)IIDPrintable(intf->ifinfo.InterfaceID));
             return mDNSfalse;
         }
     }

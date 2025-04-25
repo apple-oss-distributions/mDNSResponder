@@ -49,10 +49,13 @@ extern int daemon(int, int);
 #include "mDNSUNP.h"        // For daemon()
 #include "uds_daemon.h"
 #include "PlatformCommon.h"
+#include "SCCSVersioning.h"
 
+#ifndef UNICAST_DISABLED
 #define CONFIG_FILE "/etc/mdnsd.conf"
 static domainname DynDNSZone;                // Default wide-area zone for service registration
 static domainname DynDNSHostname;
+#endif
 
 #define RR_CACHE_SIZE 500
 static CacheEntity gRRCache[RR_CACHE_SIZE];
@@ -87,6 +90,7 @@ mDNSlocal void mDNS_StatusCallback(mDNS *const m, mStatus result)
 
 static void Reconfigure(mDNS *m)
 {
+#ifndef UNICAST_DISABLED
     mDNSAddr DynDNSIP;
     const mDNSAddr dummy = { mDNSAddrType_IPv4, { { { 1, 1, 1, 1 } } } };;
     mDNS_SetPrimaryInterfaceInfo(m, NULL, NULL, NULL);
@@ -96,18 +100,21 @@ static void Reconfigure(mDNS *m)
     mDNSPlatformSourceAddrForDest(&DynDNSIP, &dummy);
     if (DynDNSHostname.c[0]) mDNS_AddDynDNSHostName(m, &DynDNSHostname, NULL, NULL);
     if (DynDNSIP.type) mDNS_SetPrimaryInterfaceInfo(m, &DynDNSIP, NULL, NULL);
+#endif
     mDNS_ConfigChanged(m);
 }
 
 // Do appropriate things at startup with command line arguments. Calls exit() if unhappy.
 mDNSlocal void ParseCmdLineArgs(int argc, char **argv)
 {
+    mDNSBool foreground = mDNSfalse;
     if (argc > 1)
     {
         if (0 == strcmp(argv[1], "-debug")) mDNS_DebugMode = mDNStrue;
-        else printf("Usage: %s [-debug]\n", argv[0]);
+        else if (0 == strcmp(argv[1], "-foreground")) foreground = mDNStrue;
+        else printf("Usage: %s [-debug|-foreground]\n", argv[0]);
     }
-    if (!mDNS_DebugMode)
+    if (!mDNS_DebugMode && !foreground)
     {
         int result = daemon(0, 0);
         if (result != 0) { LogMsg("Could not run as daemon - exiting"); exit(result); }
@@ -279,10 +286,4 @@ asm (".desc ___crashreporter_info__, 0x10");
 #endif
 
 // For convenience when using the "strings" command, this is the last thing in the file
-#if mDNSResponderVersion > 1
-mDNSexport const char mDNSResponderVersionString_SCCS[] = "@(#) mDNSResponder-" STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
-#elif MDNS_VERSIONSTR_NODTS
-mDNSexport const char mDNSResponderVersionString_SCCS[] = "@(#) mDNSResponder (Engineering Build)";
-#else
-mDNSexport const char mDNSResponderVersionString_SCCS[] = "@(#) mDNSResponder (Engineering Build) (" __DATE__ " " __TIME__ ")";
-#endif
+mDNSexport const char mDNSResponderVersionString_SCCS[] = MDNSRESPONDER_SCCS_VERSION_STRING_HYPHENATED(mDNSResponder);

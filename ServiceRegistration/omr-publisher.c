@@ -160,15 +160,28 @@ omr_publisher_watcher_callback(route_state_t *UNUSED NONNULL route_state, void *
     // On startup, notice any prefixes with the user flag set: we didn't publish these, so they must be left over from
     // a crash or restart.
     if (publisher->first_time && event_type == omr_watcher_event_prefix_added && prefix != NULL && prefix->user) {
-        // We might actually publish our own prefix before we go through this loop for the first time. If that's the case,
-        // don't unpublish it!
-        if (publisher->published_prefix == NULL ||
-            in6addr_compare(&prefix->prefix, &publisher->published_prefix->prefix))
-        {
-            SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
-            INFO("removing stale prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
-                 SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length);
-            omr_publisher_queue_prefix_update(publisher, &prefix->prefix, omr_prefix_priority_low, false, want_delete);
+        // If we are publishing a prefix and we see some other prefix published with our RLOC, remove it.
+        // This shouldn't be possible though if publisher->first_time is true.
+        if (publisher->published_prefix != NULL) {
+            INFO("published prefix is %p", publisher->published_prefix);
+            if (in6addr_compare(&prefix->prefix, &publisher->published_prefix->prefix)){
+                SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
+                FAULT("removing stale prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
+                      SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length);
+                omr_publisher_queue_prefix_update(publisher, &prefix->prefix, omr_prefix_priority_low, false, want_delete);
+            } else {
+                SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
+                FAULT("prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d already published with first_time set",
+                     SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length);
+            }
+        } else {
+            // We see a prefix published, but we didn't publish it and it's not our ULA prefix.
+            if (in6prefix_compare(&publisher->route_state->my_thread_ula_prefix, &prefix->prefix, 8)) {
+                SEGMENTED_IPv6_ADDR_GEN_SRP(prefix->prefix.s6_addr, prefix_buf);
+                INFO("removing stale prefix " PRI_SEGMENTED_IPv6_ADDR_SRP "/%d",
+                     SEGMENTED_IPv6_ADDR_PARAM_SRP(prefix->prefix.s6_addr, prefix_buf), prefix->prefix_length);
+                omr_publisher_queue_prefix_update(publisher, &prefix->prefix, omr_prefix_priority_low, false, want_delete);
+            }
         }
     }
 
@@ -436,7 +449,8 @@ omr_publisher_prefix_init_from_published(omr_publisher_t *publisher, struct in6_
         in6addr_copy(prefix, &publisher->published_prefix->prefix);
         *prefix_length = publisher->published_prefix->prefix_length;
     } else {
-        in6addr_zero(prefix);
+        // Our own ULA prefix is never in conflict.
+        in6addr_copy(prefix, &publisher->route_state->my_thread_ula_prefix);
         *prefix_length = 64;
     }
 }
@@ -486,6 +500,12 @@ static bool
 omr_publisher_low_prefix_present(omr_publisher_t *publisher)
 {
     return omr_publisher_prefix_present(publisher, omr_prefix_priority_low);
+}
+
+static bool
+omr_publisher_my_prefix_present(omr_publisher_t *publisher)
+{
+    return omr_watcher_prefix_exists(publisher->omr_watcher, &publisher->route_state->my_thread_ula_prefix, 64);
 }
 
 static bool
@@ -655,6 +675,7 @@ omr_publisher_queue_prefix_update(omr_publisher_t *publisher, struct in6_addr *p
     }
     prefix->publication_state = initial_state;
     if (initial_state == want_add) {
+        INFO("setting published prefix to %p", publisher->published_prefix);
         publisher->published_prefix = prefix;
         omr_prefix_retain(publisher->published_prefix);
     }
@@ -694,6 +715,7 @@ omr_publisher_unpublish_prefix(omr_publisher_t *publisher)
 
     prefix = publisher->published_prefix;
     publisher->published_prefix = NULL;
+    INFO("setting published prefix to %p", publisher->published_prefix);
     if (prefix == NULL) {
         ERROR("request to unpublished prefix that's not present");
         return;
@@ -780,6 +802,30 @@ omr_publisher_dhcp_event(omr_publisher_t *publisher, state_machine_event_t *UNUS
     return omr_publisher_state_invalid;
 }
 
+static state_machine_state_t
+omr_publisher_check_for_ula_prefix(omr_publisher_t *publisher, state_machine_state_t desired_state)
+{
+    if (omr_publisher_medium_or_high_prefix_present(publisher)) {
+        INFO("competing medium- or high priority prefix present");
+        // We are trying to get a DHCPv6 prefix, so we need to stop.
+        if (publisher->dhcp_client != NULL) {
+            omr_publisher_discontinue_dhcp(publisher);
+        }
+        return omr_publisher_state_not_publishing;
+    } else if (omr_publisher_low_prefix_present(publisher)) {
+        INFO("competing low priority prefix present");
+        publisher->omr_priority = omr_prefix_priority_low;
+        return omr_publisher_state_not_publishing;
+    }
+    // In case we see our own prefix, that means that we had published it previously. So we can re-publish
+    // it immediately to prevent an unnecessary OMR prefix change..
+    else if (omr_publisher_my_prefix_present(publisher)) {
+        return desired_state;
+    }  else {
+        return omr_publisher_state_invalid;
+    }
+}
+
 // In the startup state, we wait to learn about prefixes, or for a timeout to occur. If a prefix shows up that's of medium or
 // high priority, we don't need to do DHCP, so go to not_publishing. If it's a low priority prefix, we start DHCP, but won't publish
 // anything other than a DHCP prefix.
@@ -803,13 +849,17 @@ omr_publisher_action_startup(state_machine_header_t *state_header, state_machine
                               publisher->min_start + srp_random16() % OMR_PUBLISHER_START_WAIT);
         publisher->min_start = 0; // Only need mandatory 3-second startup delay when first joining Thread network.
         RETAIN_HERE(publisher, omr_publisher); // For wakeup
-        return omr_publisher_state_invalid;
+        // If ULA is already published, start DHCP immediately and then publish ULA.
+        return omr_publisher_check_for_ula_prefix(publisher, omr_publisher_state_check_for_dhcp);
     }
-    // The only way out of the startup state is for the timer to expire--we don't care about prefixes showing up or
-    // going away.
+    // Aside from the case where we notice that our own ULA prefix is the OMR prefix but we don't remember publishing
+    // it, the only way out of the startup state is for the timer to expire--we don't care prefixes other than our own
+    // ULA prefix in the startup state.
     if (event->type == state_machine_event_type_timeout) {
         INFO("startup timeout");
         return omr_publisher_state_check_for_dhcp;
+    } else if (event->type == state_machine_event_type_prefix) {
+        return omr_publisher_check_for_ula_prefix(publisher, omr_publisher_state_check_for_dhcp);
     } else {
         BR_UNEXPECTED_EVENT(publisher, event);
     }
@@ -841,7 +891,8 @@ omr_publisher_action_check_for_dhcp(state_machine_header_t *state_header, state_
         if (publisher->dhcp_client == NULL) {
             omr_publisher_initiate_dhcp(publisher);
         }
-        return omr_publisher_state_invalid;
+        // If ULA is already published, don't wait for DHCP timeout before publishing ULA.
+        return omr_publisher_check_for_ula_prefix(publisher, omr_publisher_state_publishing_ula);
     }
     if (event->type == state_machine_event_type_timeout) {
         // We didn't get a DHCPv6 prefix quickly (might still get one later)
@@ -857,20 +908,7 @@ omr_publisher_action_check_for_dhcp(state_machine_header_t *state_header, state_
         }
         return omr_publisher_state_publishing_ula;
     } else if (event->type == state_machine_event_type_prefix) {
-        if (omr_publisher_medium_or_high_prefix_present(publisher)) {
-            INFO("competing medium- or high priority prefix showed up");
-            // We are trying to get a DHCPv6 prefix, so we need to stop.
-            if (publisher->dhcp_client != NULL) {
-                omr_publisher_discontinue_dhcp(publisher);
-            }
-            return omr_publisher_state_not_publishing;
-        } else if (omr_publisher_low_prefix_present(publisher)) {
-            INFO("competing low priority prefix showed up");
-            publisher->omr_priority = omr_prefix_priority_low;
-            return omr_publisher_state_not_publishing;
-        } else {
-            return omr_publisher_state_invalid;
-        }
+        return omr_publisher_check_for_ula_prefix(publisher, omr_publisher_state_publishing_ula);
     } else if (event->type == state_machine_event_type_dhcp) {
         return omr_publisher_dhcp_event(publisher, event);
     } else {

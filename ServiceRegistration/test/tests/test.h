@@ -55,6 +55,10 @@ void test_srpl_update_after_remove(test_state_t *NULLABLE next_state);
 void test_dns_push(test_state_t *NULLABLE next_state, int variant);
 void test_listen_longevity_start(test_state_t *NULLABLE next_state);
 void test_ifaddrs_start(test_state_t *NULLABLE next_state);
+void test_thread_startup(test_state_t *NULLABLE next_test);
+
+// common functions
+void test_lease_renew_evaluate(test_state_t *NONNULL state);
 
 // Local Variables:
 // mode: C

@@ -783,8 +783,8 @@ _mrcs_session_handle_dns_service_registration_start(const mrcs_session_t me, con
 							_mrcs_session_handle_dns_service_registration_connection_error(me, command_id, error);
 							break;
 
-						case mdns_event_update:
-							// Not handled for now.
+						case mdns_event_update: // Not handled for now.
+						MDNS_COVERED_SWITCH_DEFAULT:
 							break;
 					}
 				};

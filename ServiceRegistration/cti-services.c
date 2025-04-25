@@ -35,7 +35,7 @@
 #include "xpc_clients.h"
 #include "cti-services.h"
 typedef xpc_object_t object_t;
-typedef void (*cti_internal_callback_t)(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status);
+typedef void (*cti_internal_callback_t)(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status);
 
 
 //*************************************************************************************************************
@@ -43,9 +43,10 @@ typedef void (*cti_internal_callback_t)(cti_connection_t NONNULL conn_ref, objec
 
 #include "cti-common.h"
 
+#ifndef SRP_TEST_SERVER
 static int client_serial_number;
 
-struct _cti_connection_t
+struct cti_connection
 {
     int ref_count;
 
@@ -89,7 +90,7 @@ struct _cti_connection_t
 // Utility Functions
 
 static void
-cti_connection_finalize(cti_connection_t ref)
+cti_connection_finalize(cti_connection_t *ref)
 {
     if (ref->first_command != NULL) {
         xpc_release(ref->first_command);
@@ -100,7 +101,7 @@ cti_connection_finalize(cti_connection_t ref)
 
 #define cti_connection_release(ref) cti_connection_release_(ref, __FILE__, __LINE__)
 static void
-cti_connection_release_(cti_connection_t ref, const char *file, int line)
+cti_connection_release_(cti_connection_t *ref, const char *file, int line)
 {
     ref->callback.reply = NULL;
     RELEASE(ref, cti_connection);
@@ -109,7 +110,7 @@ cti_connection_release_(cti_connection_t ref, const char *file, int line)
 static void
 cti_xpc_connection_finalize(void *context)
 {
-    cti_connection_t ref = context;
+    cti_connection_t *ref = context;
     INFO("[CX%d] " PUB_S_SRP, ref->serial, ref->command_name);
     cti_connection_release(context);
 }
@@ -271,6 +272,7 @@ cti_log_object(const char *context, int serial, const char *command, const char 
                 if (keys == NULL) {
                     free(values);
                     INFO("[CX%d] no memory", serial);
+                    return;
                 }
                 xpc_dictionary_apply(object, ^bool (const char *key, object_t value) {
                         values[*p_index] = cti_xpc_copy_description(value);
@@ -296,12 +298,8 @@ cti_log_object(const char *context, int serial, const char *command, const char 
                 } else {
                     len = strlen(str) + 2;
                 }
-                if (type == XPC_TYPE_DICTIONARY) {
-#ifdef __clang_analyzer__
-                    len = 2;
-#else
+                if (type == XPC_TYPE_DICTIONARY && keys != NULL) { // analyzer wrongly thinks keys can be NULL here
                     len += strlen(keys[i]) + 2; // "key: "
-#endif
                 }
                 if (len + 1 > space_avail) {
                     if (i + 1 == count) {
@@ -322,9 +320,8 @@ cti_log_object(const char *context, int serial, const char *command, const char 
                         p_space = linebuf;
                     }
                     if (len + 1 > space_avail) {
-                        if (type == XPC_TYPE_DICTIONARY) {
-#ifndef __clang_analyzer__
-                            if (first) {
+                        if (type == XPC_TYPE_DICTIONARY && keys != NULL) {
+                           if (first) {
                                 INFO("[CX%d] " PUB_S_SRP "(" PUB_S_SRP "): " PUB_S_SRP PUB_S_SRP PUB_S_SRP " " PUB_S_SRP
                                      PUB_S_SRP ": " PUB_S_SRP PUB_S_SRP, serial, context, command,
                                      indent, preamble, divide, compound_begin, keys[i], str, eol);
@@ -334,7 +331,6 @@ cti_log_object(const char *context, int serial, const char *command, const char 
                                      ": " PUB_S_SRP PUB_S_SRP, serial, context, command,
                                      indent, preamble, divide, keys[i], str, eol);
                             }
-#endif
                         } else {
                             if (first) {
                                 INFO("[CX%d] " PUB_S_SRP "(" PUB_S_SRP "): " PUB_S_SRP PUB_S_SRP PUB_S_SRP " " PUB_S_SRP
@@ -350,10 +346,8 @@ cti_log_object(const char *context, int serial, const char *command, const char 
                     }
                 }
                 if (!emitted) {
-                    if (type == XPC_TYPE_DICTIONARY) {
-#ifndef __clang_analyzer__
+                    if (type == XPC_TYPE_DICTIONARY && keys != NULL) {
                         snprintf(p_space, space_avail, "%s%s: %s%s", i == 0 ? "" : " ", keys[i], str, i + 1 == count ? "" : ",");
-#endif
                     } else {
                         snprintf(p_space, space_avail, "%s%s%s", i == 0 ? "" : " ", str, i + 1 == count ? "" : ",");
                     }
@@ -415,7 +409,7 @@ cti_log_object(const char *context, int serial, const char *command, const char 
 }
 
 static void
-cti_event_handler(object_t event, cti_connection_t conn_ref)
+cti_event_handler(object_t event, cti_connection_t *conn_ref)
 {
     if (event == XPC_ERROR_CONNECTION_INVALID) {
         INFO("[CX%d] (" PUB_S_SRP "): cleanup", conn_ref->serial, conn_ref->command_name);
@@ -525,7 +519,7 @@ cti_event_handler(object_t event, cti_connection_t conn_ref)
 
 // Creates a new cti_ Connection Reference(cti_connection_t)
 static cti_status_t
-init_connection(cti_connection_t *ref, const char *servname, object_t *dict, const char *command_name,
+init_connection(cti_connection_t **ref, const char *servname, object_t *dict, const char *command_name,
                 const char *property_name, const char *return_property_name, void *context, cti_callback_t app_callback,
                 cti_internal_callback_t internal_callback, run_context_t client_queue,
                 const char *file, int line)
@@ -533,9 +527,9 @@ init_connection(cti_connection_t *ref, const char *servname, object_t *dict, con
     // Use an cti_connection_t on the stack to be captured in the blocks below, rather than
     // capturing the cti_connection_t* owned by the client
 #ifdef MALLOC_DEBUG_LOGGING
-    cti_connection_t conn_ref = debug_calloc(1, sizeof(struct _cti_connection_t), file, line);
+    cti_connection_t *conn_ref = debug_calloc(1, sizeof(struct cti_connection), file, line);
 #else
-    cti_connection_t conn_ref = calloc(1, sizeof(struct _cti_connection_t));
+    cti_connection_t *conn_ref = calloc(1, sizeof(struct cti_connection));
 #endif
     if (conn_ref == NULL) {
         ERROR("no memory to allocate!");
@@ -609,7 +603,7 @@ init_connection(cti_connection_t *ref, const char *servname, object_t *dict, con
 }
 
 static cti_status_t
-setup_for_command(cti_connection_t *ref, run_context_t client_queue, const char *command_name,
+setup_for_command(cti_connection_t **ref, run_context_t client_queue, const char *command_name,
                   const char *property_name, const char *return_property_name, object_t dict, const char *command,
                   void *context, cti_callback_t app_callback, cti_internal_callback_t internal_callback,
                   bool events_only, const char *file, int line)
@@ -651,7 +645,7 @@ setup_for_command(cti_connection_t *ref, run_context_t client_queue, const char 
 }
 
 static void
-cti_internal_event_reply_callback(cti_connection_t NONNULL conn_ref, object_t __unused reply, cti_status_t status)
+cti_internal_event_reply_callback(cti_connection_t *NONNULL conn_ref, object_t __unused reply, cti_status_t status)
 {
     cti_reply_t callback;
     INFO("[CX%d] conn_ref = %p", conn_ref != NULL ? conn_ref->serial : 0, conn_ref);
@@ -662,7 +656,7 @@ cti_internal_event_reply_callback(cti_connection_t NONNULL conn_ref, object_t __
 }
 
 static void
-cti_internal_reply_callback(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status)
+cti_internal_reply_callback(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status)
 {
     cti_internal_event_reply_callback(conn_ref, reply, status);
     conn_ref->callback.reply = NULL;
@@ -844,7 +838,7 @@ cti_remove_route_(srp_server_t *UNUSED server, void *NULLABLE context, cti_reply
 }
 
 static void
-cti_internal_string_event_reply(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status_in)
+cti_internal_string_event_reply(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status_in)
 {
     cti_string_property_reply_t callback = conn_ref->callback.string_property_reply;
     xpc_retain(reply);
@@ -914,7 +908,7 @@ cti_internal_string_event_reply(cti_connection_t NONNULL conn_ref, object_t repl
 }
 
 static void
-cti_internal_string_property_reply(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status_in)
+cti_internal_string_property_reply(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status_in)
 {
     cti_internal_string_event_reply(conn_ref, reply, status_in);
     conn_ref->callback.reply = NULL;
@@ -947,7 +941,7 @@ cti_get_tunnel_name_(srp_server_t *UNUSED server, void *NULLABLE context, cti_st
 }
 
 cti_status_t
-cti_track_active_data_set_(srp_server_t *UNUSED server, cti_connection_t *ref, void *NULLABLE context,
+cti_track_active_data_set_(srp_server_t *UNUSED server, cti_connection_t **ref, void *NULLABLE context,
                            cti_reply_t NONNULL callback,
                            run_context_t NULLABLE client_queue, const char *file, int line)
 {
@@ -1034,7 +1028,7 @@ cti_event_or_response_extract(object_t *reply, object_t *result_dictionary)
 }
 
 static void
-cti_internal_state_reply_callback(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status_in)
+cti_internal_state_reply_callback(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status_in)
 {
     cti_state_reply_t callback = conn_ref->callback.state_reply;
     cti_network_state_t state = kCTI_NCPState_Unknown;
@@ -1080,7 +1074,7 @@ cti_internal_state_reply_callback(cti_connection_t NONNULL conn_ref, object_t re
 }
 
 cti_status_t
-cti_get_state_(srp_server_t *UNUSED server, cti_connection_t *ref, void *NULLABLE context,
+cti_get_state_(srp_server_t *UNUSED server, cti_connection_t **ref, void *NULLABLE context,
                cti_state_reply_t NONNULL callback, run_context_t NULLABLE client_queue, const char *file, int line)
 {
     cti_callback_t app_callback;
@@ -1103,7 +1097,7 @@ cti_get_state_(srp_server_t *UNUSED server, cti_connection_t *ref, void *NULLABL
 typedef const char *cti_property_name_t;
 
 static void
-cti_internal_uint64_property_callback(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status_in)
+cti_internal_uint64_property_callback(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status_in)
 {
     cti_uint64_property_reply_t callback = conn_ref->callback.uint64_property_reply;
     uint64_t uint64_val = 0;
@@ -1152,7 +1146,7 @@ cti_internal_uint64_property_callback(cti_connection_t NONNULL conn_ref, object_
 }
 
 static cti_status_t
-cti_get_uint64_property(cti_connection_t *ref, void *NULLABLE context, cti_uint64_property_reply_t NONNULL callback,
+cti_get_uint64_property(cti_connection_t **ref, void *NULLABLE context, cti_uint64_property_reply_t NONNULL callback,
                         run_context_t NULLABLE client_queue, cti_property_name_t property_name, const char *file, int line)
 {
     cti_callback_t app_callback;
@@ -1173,7 +1167,7 @@ cti_get_uint64_property(cti_connection_t *ref, void *NULLABLE context, cti_uint6
 }
 
 cti_status_t
-cti_get_partition_id_(srp_server_t *UNUSED server, cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+cti_get_partition_id_(srp_server_t *UNUSED server, cti_connection_t *NULLABLE *NULLABLE ref, void *NULLABLE context,
                       cti_uint64_property_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
                       const char *NONNULL file, int line)
 {
@@ -1181,7 +1175,7 @@ cti_get_partition_id_(srp_server_t *UNUSED server, cti_connection_t NULLABLE *NU
 }
 
 cti_status_t
-cti_get_extended_pan_id_(srp_server_t *UNUSED server, cti_connection_t NULLABLE *NULLABLE ref, void *NULLABLE context,
+cti_get_extended_pan_id_(srp_server_t *UNUSED server, cti_connection_t *NULLABLE *NULLABLE ref, void *NULLABLE context,
                          cti_uint64_property_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
                          const char *NONNULL file, int line)
 {
@@ -1189,7 +1183,7 @@ cti_get_extended_pan_id_(srp_server_t *UNUSED server, cti_connection_t NULLABLE 
 }
 
 static void
-cti_internal_network_node_type_callback(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status_in)
+cti_internal_network_node_type_callback(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status_in)
 {
     cti_network_node_type_reply_t callback = conn_ref->callback.network_node_type_reply;
     cti_network_node_type_t network_node_type = kCTI_NetworkNodeType_Unknown;
@@ -1236,7 +1230,7 @@ cti_internal_network_node_type_callback(cti_connection_t NONNULL conn_ref, objec
 }
 
 cti_status_t
-cti_get_network_node_type_(srp_server_t *UNUSED server, cti_connection_t *ref, void *NULLABLE context,
+cti_get_network_node_type_(srp_server_t *UNUSED server, cti_connection_t **ref, void *NULLABLE context,
                            cti_network_node_type_reply_t NONNULL callback,
                            run_context_t NULLABLE client_queue, const char *file, int line)
 {
@@ -1256,6 +1250,7 @@ cti_get_network_node_type_(srp_server_t *UNUSED server, cti_connection_t *ref, v
 
     return errx;
 }
+#endif // !SRP_TEST_SERVER
 
 static void
 cti_service_finalize(cti_service_t *service)
@@ -1337,6 +1332,7 @@ cti_service_release_(cti_service_t *service, const char *file, int line)
     RELEASE(service, cti_service);
 }
 
+#ifndef SRP_TEST_SERVER
 static uint8_t *
 cti_array_to_bytes(object_t array, size_t *length_ret, const char *log_name)
 {
@@ -1543,7 +1539,7 @@ cti_parse_services_array(cti_service_vec_t **services, object_t services_array)
 }
 
 static void
-cti_internal_service_reply_callback(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status_in)
+cti_internal_service_reply_callback(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status_in)
 {
     cti_service_reply_t callback = conn_ref->callback.service_reply;
     cti_service_vec_t *vec = NULL;
@@ -1570,7 +1566,7 @@ cti_internal_service_reply_callback(cti_connection_t NONNULL conn_ref, object_t 
 }
 
 cti_status_t
-cti_get_service_list_(srp_server_t *UNUSED server, cti_connection_t *ref, void *NULLABLE context,
+cti_get_service_list_(srp_server_t *UNUSED server, cti_connection_t **ref, void *NULLABLE context,
                       cti_service_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
                       const char *file, int line)
 {
@@ -1590,6 +1586,7 @@ cti_get_service_list_(srp_server_t *UNUSED server, cti_connection_t *ref, void *
 
     return errx;
 }
+#endif // SRP_TEST_SERVER
 
 static void
 cti_prefix_finalize(cti_prefix_t *prefix)
@@ -1661,6 +1658,7 @@ cti_prefix_release_(cti_prefix_t *prefix, const char *file, int line)
     RELEASE(prefix, cti_prefix);
 }
 
+#ifndef SRP_TEST_SERVER
 static cti_status_t
 cti_parse_prefixes_array(cti_prefix_vec_t **vec_ret, object_t prefixes_array)
 {
@@ -1739,9 +1737,7 @@ cti_parse_prefixes_array(cti_prefix_vec_t **vec_ret, object_t prefixes_array)
                           j, destination);
                     goto done_with_prefix_array;
                 }
-#ifndef __clang_analyzer__ // destination is never null at this point
                 memcpy(prefix_buffer, destination, prefix_pres_len);
-#endif
                 prefix_buffer[prefix_pres_len] = 0;
                 inet_pton(AF_INET6, prefix_buffer, &prefix_addr);
 
@@ -1774,7 +1770,7 @@ cti_parse_prefixes_array(cti_prefix_vec_t **vec_ret, object_t prefixes_array)
 }
 
 static void
-cti_internal_prefix_reply_callback(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status_in)
+cti_internal_prefix_reply_callback(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status_in)
 {
     cti_prefix_reply_t callback = conn_ref->callback.prefix_reply;
     cti_status_t status = status_in;
@@ -1803,7 +1799,7 @@ cti_internal_prefix_reply_callback(cti_connection_t NONNULL conn_ref, object_t r
 }
 
 cti_status_t
-cti_get_prefix_list_(srp_server_t *UNUSED server, cti_connection_t *ref, void *NULLABLE context,
+cti_get_prefix_list_(srp_server_t *UNUSED server, cti_connection_t **ref, void *NULLABLE context,
                      cti_prefix_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
                      const char *file, int line)
 {
@@ -1823,6 +1819,7 @@ cti_get_prefix_list_(srp_server_t *UNUSED server, cti_connection_t *ref, void *N
 
     return errx;
 }
+#endif // SRP_TEST_SERVER
 
 static void
 cti_route_finalize(cti_route_t *route)
@@ -1890,6 +1887,7 @@ cti_route_create_(struct in6_addr *prefix, int prefix_length, offmesh_route_orig
     return route_ret;
 }
 
+#ifndef SRP_TEST_SERVER
 static cti_status_t
 cti_parse_offmesh_routes_array(cti_route_vec_t **vec_ret, object_t routes_array)
 {
@@ -1976,9 +1974,7 @@ cti_parse_offmesh_routes_array(cti_route_vec_t **vec_ret, object_t routes_array)
                                  i, addr_str);
                                 goto done_with_route_array;
                         }
-#ifndef __clang_analyzer__ // destination is never null at this point
                         memcpy(prefix_buffer, addr_str, prefix_pres_len);
-#endif
                         prefix_buffer[prefix_pres_len] = 0;
                         if (inet_pton(AF_INET6, prefix_buffer, &prefix_addr) != 1) {
                             ERROR("invalid ipv6 address " PRI_S_SRP, prefix_buffer);
@@ -2029,7 +2025,7 @@ cti_parse_offmesh_routes_array(cti_route_vec_t **vec_ret, object_t routes_array)
 }
 
 static void
-cti_internal_offmesh_route_reply_callback(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status_in)
+cti_internal_offmesh_route_reply_callback(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status_in)
 {
     cti_offmesh_route_reply_t callback = conn_ref->callback.offmesh_route_reply;
     cti_status_t status = status_in;
@@ -2058,7 +2054,7 @@ cti_internal_offmesh_route_reply_callback(cti_connection_t NONNULL conn_ref, obj
 }
 
 cti_status_t
-cti_get_offmesh_route_list_(srp_server_t *UNUSED server, cti_connection_t *ref,
+cti_get_offmesh_route_list_(srp_server_t *UNUSED server, cti_connection_t **ref,
                             void *NULLABLE context, cti_offmesh_route_reply_t NONNULL callback,
                             run_context_t NULLABLE client_queue, const char *file, int line)
 {
@@ -2191,7 +2187,7 @@ cti_parse_onmesh_prefix_array(cti_prefix_vec_t **vec_ret, object_t prefix_array)
 }
 
 static void
-cti_internal_onmesh_prefix_reply_callback(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status_in)
+cti_internal_onmesh_prefix_reply_callback(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status_in)
 {
     cti_onmesh_prefix_reply_t callback = conn_ref->callback.onmesh_prefix_reply;
     cti_status_t status = status_in;
@@ -2220,7 +2216,7 @@ cti_internal_onmesh_prefix_reply_callback(cti_connection_t NONNULL conn_ref, obj
 }
 
 cti_status_t
-cti_get_onmesh_prefix_list_(srp_server_t *UNUSED server, cti_connection_t NULLABLE *NULLABLE ref,
+cti_get_onmesh_prefix_list_(srp_server_t *UNUSED server, cti_connection_t *NULLABLE *NULLABLE ref,
                             void *NULLABLE context, cti_onmesh_prefix_reply_t NONNULL callback,
                             run_context_t NULLABLE client_queue, const char *file, int line)
 {
@@ -2244,7 +2240,7 @@ cti_get_onmesh_prefix_list_(srp_server_t *UNUSED server, cti_connection_t NULLAB
 }
 
 static void
-cti_internal_rloc16_reply_callback(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status_in)
+cti_internal_rloc16_reply_callback(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status_in)
 {
     cti_rloc16_reply_t callback = conn_ref->callback.rloc16_reply;
     cti_status_t status = status_in;
@@ -2271,7 +2267,7 @@ cti_internal_rloc16_reply_callback(cti_connection_t NONNULL conn_ref, object_t r
 }
 
 cti_status_t
-cti_get_rloc16_(srp_server_t *UNUSED server, cti_connection_t *ref,
+cti_get_rloc16_(srp_server_t *UNUSED server, cti_connection_t **ref,
                 void *NULLABLE context, cti_rloc16_reply_t NONNULL callback,
                 run_context_t NULLABLE client_queue, const char *file, int line)
 {
@@ -2294,7 +2290,7 @@ cti_get_rloc16_(srp_server_t *UNUSED server, cti_connection_t *ref,
 }
 
 static void
-cti_internal_wed_reply_callback(cti_connection_t NONNULL conn_ref, object_t reply, cti_status_t status_in)
+cti_internal_wed_reply_callback(cti_connection_t *NONNULL conn_ref, object_t reply, cti_status_t status_in)
 {
     cti_wed_reply_t callback = conn_ref->callback.wed_reply;
     cti_service_vec_t *vec = NULL;
@@ -2302,7 +2298,7 @@ cti_internal_wed_reply_callback(cti_connection_t NONNULL conn_ref, object_t repl
 
     const char *extended_mac = NULL;
     const char *ml_eid = NULL;
-    bool added = false;
+    bool present = true;
 
     if (status == kCTIStatus_NoError) {
         object_t result_dictionary = NULL;
@@ -2332,10 +2328,10 @@ cti_internal_wed_reply_callback(cti_connection_t NONNULL conn_ref, object_t repl
                     } else if (!strcmp(key, "mleid")) {
                         ml_eid = value;
                     } else if (!strcmp(key, "status")) {
-                        if (!strcmp(value, "wed_added")) {
-                            added = true;
+                        if (!strcmp(value, "wed_present")) {
+                            present = true;
                         } else if (!strcmp(value, "wed_removed")) {
-                            added = false;
+                            present = false;
                         } else {
                             ERROR("unknown wed status " PUB_S_SRP, value);
                             goto out;
@@ -2353,11 +2349,11 @@ cti_internal_wed_reply_callback(cti_connection_t NONNULL conn_ref, object_t repl
     }
 out:
     if (callback != NULL) {
-        if (added && (ml_eid == NULL || extended_mac == NULL)) {
-            added = false;
+        if (present && (ml_eid == NULL || extended_mac == NULL)) {
+            present = false;
         }
         INFO("[CX%d] calling callback for %p", conn_ref->serial, conn_ref);
-        callback(conn_ref->context, extended_mac, ml_eid, added, status);
+        callback(conn_ref->context, extended_mac, ml_eid, present, status);
     }
     if (vec != NULL) {
         RELEASE_HERE(vec, cti_service_vec);
@@ -2365,7 +2361,7 @@ out:
 }
 
 cti_status_t
-cti_track_wed_status_(srp_server_t *UNUSED server, cti_connection_t *ref, void *NULLABLE context,
+cti_track_wed_status_(srp_server_t *UNUSED server, cti_connection_t **ref, void *NULLABLE context,
                       cti_wed_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
                       const char *file, int line)
 {
@@ -2376,18 +2372,16 @@ cti_track_wed_status_(srp_server_t *UNUSED server, cti_connection_t *ref, void *
 
     xpc_dictionary_set_string(dict, "interface", "org.wpantund.v1");
     xpc_dictionary_set_string(dict, "path", "/org/wpantund/utun2");
-    xpc_dictionary_set_string(dict, "method", "PropGet");
-    xpc_dictionary_set_string(dict, "property_name", "WakeOnDeviceConnectionStatus");
 
     errx = setup_for_command(ref, client_queue, "get_wed_status", "WakeOnDeviceConnectionStatus", NULL, dict, "WpanctlCmd",
-                             context, app_callback, cti_internal_wed_reply_callback, false, file, line);
+                             context, app_callback, cti_internal_wed_reply_callback, true, file, line);
     xpc_release(dict);
 
     return errx;
 }
 
 cti_status_t
-cti_track_neighbor_ml_eid_(srp_server_t *UNUSED server, cti_connection_t *ref, void *NULLABLE context,
+cti_track_neighbor_ml_eid_(srp_server_t *UNUSED server, cti_connection_t **ref, void *NULLABLE context,
                            cti_string_property_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
                            const char *file, int line)
 {
@@ -2398,11 +2392,9 @@ cti_track_neighbor_ml_eid_(srp_server_t *UNUSED server, cti_connection_t *ref, v
 
     xpc_dictionary_set_string(dict, "interface", "org.wpantund.v1");
     xpc_dictionary_set_string(dict, "path", "/org/wpantund/utun2");
-    xpc_dictionary_set_string(dict, "method", "PropGet");
-    xpc_dictionary_set_string(dict, "property_name", "ThreadNeighborMeshLocalAddress");
 
-    errx = setup_for_command(ref, client_queue, "get_neighbor_ml_eid", "ThreadNeighborMeshLocalAddress", "ThreadNeighborMeshLocalAddress", dict, "WpanctlCmd",
-                             context, app_callback, cti_internal_string_event_reply, false, file, line);
+    errx = setup_for_command(ref, client_queue, "get_neighbor_ml_eid", "ThreadNeighborMeshLocalAddress", NULL, dict,
+                             "WpanctlCmd", context, app_callback, cti_internal_string_event_reply, true, file, line);
     xpc_release(dict);
 
     return errx;
@@ -2438,7 +2430,7 @@ cti_add_ml_eid_mapping_(srp_server_t *UNUSED server, void *NULLABLE context,
 
 
 cti_status_t
-cti_events_discontinue(cti_connection_t ref)
+cti_events_discontinue(cti_connection_t *ref)
 {
     if (ref->connection != NULL) {
         INFO("[CX%d] canceling connection %p", ref->serial, ref->connection);
@@ -2448,6 +2440,7 @@ cti_events_discontinue(cti_connection_t ref)
     cti_connection_release(ref);
     return kCTIStatus_NoError;
 }
+#endif // SRP_TEST_SERVER
 
 // Local Variables:
 // mode: C

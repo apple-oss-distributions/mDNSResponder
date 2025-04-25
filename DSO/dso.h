@@ -1,6 +1,6 @@
 /* dso.h
  *
- * Copyright (c) 2018-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -236,7 +236,7 @@ void dso_add_tlv_u32(dso_message_t *state, uint32_t u32);
 void dso_finish_tlv(dso_message_t *state);
 dso_activity_t *dso_find_activity(dso_state_t *dso, const char *name, const char *activity_type, void *context);
 dso_activity_t *dso_add_activity(dso_state_t *dso, const char *name, const char *activity_type,
-                                            void *context, void (*finalize)(dso_activity_t *));
+                                 void *context, void (*finalize)(dso_activity_t *));
 void dso_drop_activity(dso_state_t *dso, dso_activity_t *activity);
 uint32_t dso_ignore_further_responses(dso_state_t *dso, const void *context);
 
@@ -260,7 +260,8 @@ void dso_update_outstanding_query_context(dso_state_t *dso, const void *old_cont
 
 uint32_t dso_connections_reset_outstanding_query_context(const void *context);
 bool dso_make_message(dso_message_t *state, uint8_t *outbuf, size_t outbuf_size, dso_state_t *dso,
-                      bool unidirectional, bool response, uint16_t xid, int rcode, void *callback_state);
+                      bool unidirectional, bool response, uint16_t xid, int rcode, void *callback_state,
+                      bool (*xid_check_func)(dso_state_t *dso, uint16_t xid, void *callback_state));
 size_t dso_message_length(dso_message_t *state);
 void dso_retry_delay(dso_state_t *dso, const DNSMessageHeader *header);
 void dso_keepalive(dso_state_t *dso, const DNSMessageHeader *header, bool response);

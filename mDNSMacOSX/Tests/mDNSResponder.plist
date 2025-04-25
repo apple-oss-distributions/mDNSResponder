@@ -15,25 +15,6 @@
 	<array>
 		<dict>
 			<key>TestName</key>
-			<string>Check Hardendened Heap Status</string>
-			<key>Description</key>
-			<string>Check the status of Hardened Heap (positive result will show Rosetta entries)</string>
-			<key>AsRoot</key>
-			<true/>
-			<key>RequiresWiFi</key>
-			<false/>
-			<key>Timeout</key>
-			<integer>60</integer>
-			<key>IgnoreOutput</key>
-			<true/>
-			<key>Command</key>
-			<array>
-				<string>/usr/bin/footprint</string>
-				<string>mDNSResponder</string>
-			</array>
-		</dict>
-		<dict>
-			<key>TestName</key>
 			<string>mDNSResponder Leaks</string>
 			<key>Description</key>
 			<string>Checks mDNSResponder for memory leaks.</string>
@@ -4334,6 +4315,55 @@
 				<string>/usr/local/bin/srp-test-server</string>
 				<string>--test</string>
 				<string>dns-mdns</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNS push hardwired query</string>
+			<key>Description</key>
+			<string>
+				The goal of this test is to create DNS push connection to the test server and attempt to
+				look up the hostname of the server, which goes through the hardwired query path. If we get
+				an answer, the test succeeded.
+			</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>dns-push-hardwired</string>
+			</array>
+		</dict>
+		<dict>
+			<key>TestName</key>
+			<string>DNS hardwired query</string>
+			<key>Description</key>
+			<string>
+				The goal of this test is to create DNS connection to the test server and attempt to
+				look up the hostname of the server, which goes through the hardwired query path. If we get
+				an answer, the test succeeded.
+				succeeded.
+			</string>
+			<key>AsRoot</key>
+			<false/>
+			<key>RequiresWiFi</key>
+			<false/>
+			<key>Timeout</key>
+			<integer>20</integer>
+			<key>IgnoreOutput</key>
+			<false/>
+			<key>Command</key>
+			<array>
+				<string>/usr/local/bin/srp-test-server</string>
+				<string>--test</string>
+				<string>dns-hardwired</string>
 			</array>
 		</dict>
 		<dict>

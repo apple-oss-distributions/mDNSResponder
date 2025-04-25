@@ -55,12 +55,14 @@ typedef struct registered_record_entry
     uint64_t powerlog_start_time;
 #endif
     struct registered_record_entry *next;
-    mDNSu32 key;
-    client_context_t regrec_client_context;
     request_state *request;
-    mDNSBool external_advertise;
-    mDNSInterfaceID origInterfaceID;
     AuthRecord *rr;             // Pointer to variable-sized AuthRecord (Why a pointer? Why not just embed it here?)
+    mDNSInterfaceID origInterfaceID;
+    client_context_t regrec_client_context;
+    mDNSs32 reg_request_start_time_secs;    // When the current record registration starts in continuous time.
+    mDNSs32 last_full_log_time_secs;        // When the last time mDNSResponder prints the full registration details.
+    mDNSu32 key;
+    mDNSBool external_advertise;
 } registered_record_entry;
 
 // A single registered service: ServiceRecordSet + bookkeeping

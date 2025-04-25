@@ -192,6 +192,7 @@ adv_service_state_create(const char *regtype)
     adv_service_state_t *state = calloc(1, sizeof(*state));
     if (state == NULL) {
         ERROR("no memory for service state %{public}s", regtype);
+        goto out;
     }
     RETAIN_HERE(state, adv_service_state);
     state->service_type = strdup(regtype);
@@ -200,6 +201,7 @@ adv_service_state_create(const char *regtype)
         state = NULL;
         ERROR("no memory for service_type %{public}s", regtype);
     }
+out:
     return state;
 }
 
@@ -346,7 +348,7 @@ advertising_proxy_registrar_create(advertising_proxy_subscription_t **subscripti
     }
     advertising_proxy_subscription_t *tmp = subscription;
     RETAIN_HERE(subscription, advertising_proxy_subscription); // For callback
-    dispatch_async(clientq, ^{
+    dispatch_async(queue, ^{
         callback(tmp, kDNSSDAdvertisingProxyStatus_NoError, context);
         RELEASE_HERE(subscription, advertising_proxy_subscription); // For callback
     });
@@ -519,7 +521,7 @@ advertising_proxy_resolve_callback(DNSServiceRef UNUSED sdRef, DNSServiceFlags f
         advertising_proxy_subscription_t *subscription = instance->subscribers[i];
         if (subscription != NULL) {
             subscription->instance_callback(subscription, error, interface_index,
-                                            (flags & kDNSServiceFlagsAdd) ? true : true, fullname, hosttarget, port,
+                                            (flags & kDNSServiceFlagsAdd) ? true : false, fullname, hosttarget, port,
                                             txt_length, txt_record, context);
         }
     }

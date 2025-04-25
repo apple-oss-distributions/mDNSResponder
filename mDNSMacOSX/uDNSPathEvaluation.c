@@ -63,7 +63,7 @@ mDNSexport void mDNSPlatformGetDNSRoutePolicy(DNSQuestion *q)
     if (host == NULL)
     {
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
-            "[Q%u] mDNSPlatformGetDNSRoutePolicy: Query for " PRI_DM_NAME " (" PUB_S "), PID[%d], EUID[%d], ServiceID[%d]"
+            "[Q%u] mDNSPlatformGetDNSRoutePolicy: Query for " PRI_DM_NAME " (" PUB_S "), PID[%d], EUID[%u], ServiceID[%d]"
             " host is NULL",
             mDNSVal16(q->TargetQID), DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), q->pid, q->euid, q->ServiceID);
         goto exit;
@@ -72,7 +72,7 @@ mDNSexport void mDNSPlatformGetDNSRoutePolicy(DNSQuestion *q)
     if (parameters == NULL)
     {
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
-            "[Q%u] mDNSPlatformGetDNSRoutePolicy: Query for " PRI_DM_NAME " (" PUB_S "), PID[%d], EUID[%d], ServiceID[%d]"
+            "[Q%u] mDNSPlatformGetDNSRoutePolicy: Query for " PRI_DM_NAME " (" PUB_S "), PID[%d], EUID[%u], ServiceID[%d]"
             " parameters is NULL",
             mDNSVal16(q->TargetQID), DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), q->pid, q->euid, q->ServiceID);
         goto exit;
@@ -158,7 +158,7 @@ mDNSexport void mDNSPlatformGetDNSRoutePolicy(DNSQuestion *q)
     if (evaluator == NULL)
     {
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
-            "[Q%u] mDNSPlatformGetDNSRoutePolicy: Query for " PRI_DM_NAME " (" PUB_S "), PID[%d], EUID[%d], ServiceID[%d]"
+            "[Q%u] mDNSPlatformGetDNSRoutePolicy: Query for " PRI_DM_NAME " (" PUB_S "), PID[%d], EUID[%u], ServiceID[%d]"
             " evaluator is NULL",
             mDNSVal16(q->TargetQID), DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), q->pid, q->euid, q->ServiceID);
         goto exit;
@@ -170,7 +170,7 @@ mDNSexport void mDNSPlatformGetDNSRoutePolicy(DNSQuestion *q)
     if (path == NULL)
     {
         LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_ERROR,
-            "[Q%u] mDNSPlatformGetDNSRoutePolicy: Query for " PRI_DM_NAME " (" PUB_S "), PID[%d], EUID[%d], ServiceID[%d]"
+            "[Q%u] mDNSPlatformGetDNSRoutePolicy: Query for " PRI_DM_NAME " (" PUB_S "), PID[%d], EUID[%u], ServiceID[%d]"
             " path is NULL",
             mDNSVal16(q->TargetQID), DM_NAME_PARAM(&q->qname), DNSTypeName(q->qtype), q->pid, q->euid, q->ServiceID);
         goto exit;
@@ -200,7 +200,7 @@ mDNSexport void mDNSPlatformGetDNSRoutePolicy(DNSQuestion *q)
                 if (dnspol_ifindex != client_ifindex)
                 {
                     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-                        "[Q%u] mDNSPlatformGetDNSRoutePolicy: DNS Route Policy has changed the scoped ifindex from [%d] to [%d]",
+                        "[Q%u] mDNSPlatformGetDNSRoutePolicy: DNS Route Policy has changed the scoped ifindex from [%u] to [%u]",
                         mDNSVal16(q->TargetQID), client_ifindex, dnspol_ifindex);
                 }
             }

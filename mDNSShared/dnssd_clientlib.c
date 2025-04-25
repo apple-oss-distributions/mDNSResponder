@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4 -*-
  *
- * Copyright (c) 2004-2018 Apple Inc. All rights reserved.
+ * Copyright (c) 2004-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,6 +30,7 @@
 #include <string.h>
 
 #include "dns_sd.h"
+#include "SCCSVersioning.h"
 #include "mdns_strict.h"
 
 #if defined(_WIN32)
@@ -352,12 +353,6 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
 
 // For convenience when using the "strings" command, this is the last thing in the file
 
-// Note: The C preprocessor stringify operator ('#') makes a string from its argument, without macro expansion
-// e.g. If "version" is #define'd to be "4", then STRINGIFY_AWE(version) will return the string "version", not "4"
-// To expand "version" to its value before making the string, use STRINGIFY(version) instead
-#define STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s) # s
-#define STRINGIFY(s) STRINGIFY_ARGUMENT_WITHOUT_EXPANSION(s)
-
 // The "used" variable attribute prevents a non-exported variable from being stripped, even if its visibility is hidden,
 // e.g., when compiling with -fvisibility=hidden.
 #if defined(__GNUC__)
@@ -372,7 +367,7 @@ DNSServiceErrorType DNSSD_API TXTRecordGetItemAtIndex
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdate-time"
 #endif
-const char VersionString_SCCS_libdnssd[] DNSSD_USED = "@(#) libdns_sd " STRINGIFY(mDNSResponderVersion) " (" __DATE__ " " __TIME__ ")";
+const char VersionString_SCCS_libdnssd[] DNSSD_USED = MDNSRESPONDER_SCCS_VERSION_STRING(libdns_sd);
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif

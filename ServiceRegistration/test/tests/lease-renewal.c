@@ -32,7 +32,7 @@
 
 #define LEASE_TIME 15
 
-static void
+void
 test_lease_renew_evaluate(test_state_t *state)
 {
     adv_instance_t *instance = srp_test_server_find_instance(state, TEST_INSTANCE_NAME, TEST_SERVICE_TYPE);
@@ -42,14 +42,32 @@ test_lease_renew_evaluate(test_state_t *state)
                                                                                                  TEST_INSTANCE_NAME,
                                                                                                  TEST_SERVICE_TYPE);
     TEST_FAIL_CHECK(state, register_event != NULL, "failed to initially register service");
+#ifdef USE_DNSSERVICE_UPDATE_RECORD
     dns_service_event_t *update_event = dns_service_find_update_for_register_event(state->primary,
                                                                                    register_event, NULL);
     // TSR update due to lease renewal is all that we are looking for.
     while (update_event != NULL && update_event->rdata != NULL) {
         update_event = dns_service_find_update_for_register_event(state->primary, register_event, update_event);
     }
-    TEST_FAIL_CHECK(state, update_event != NULL, "initial registration is successful but lease renewal is not received.");
-    TEST_PASSED(state);
+    TEST_FAIL_CHECK(state, update_event != NULL,
+                    "initial registration is successful but lease renewal is not received.");
+#else
+    dns_service_event_t *dealloc_event = dns_service_find_ref_deallocate_event_for_register(state->primary, register_event);
+    TEST_FAIL_CHECK(state, dealloc_event != NULL,
+                    "registration deallocate event for initial registration not found.");
+    dealloc_event->consumed = true;
+
+    register_event->consumed = true;
+    // Check for the second register event
+    register_event = dns_service_find_first_register_event_by_name_and_type(state->primary,
+                                                                            TEST_INSTANCE_NAME, TEST_SERVICE_TYPE);
+    TEST_FAIL_CHECK(state, register_event != NULL, "failed to re-register service");
+    register_event->consumed = true;
+
+
+    // Look for a second register event
+    // Look for a ref deallocate referring to the first register event
+#endif
 }
 
 static void
@@ -71,6 +89,7 @@ test_lease_renewal_callback(DNSServiceRef sdref, DNSServiceFlags UNUSED flags, D
         srp_client_ref_deallocate(sdref);
         srp_network_state_stable(NULL); // Discontinue SRP client
         test_lease_renew_evaluate(state);
+        TEST_PASSED(state);
     });
 }
 

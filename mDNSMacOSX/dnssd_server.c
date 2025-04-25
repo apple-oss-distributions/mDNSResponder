@@ -1253,7 +1253,7 @@ static void
 _dx_session_log_pending_send_count_increase(const dx_session_t me)
 {
 	os_log_debug(_mdns_server_log(),
-		"XPC session to client with pid %lld (%{public}s) pending send count increased to %d",
+		"XPC session to client with pid %lld (%{public}s) pending send count increased to %u",
 		(long long)me->client_pid, me->client_name, me->pending_send_count);
 }
 
@@ -1263,7 +1263,7 @@ static void
 _dx_session_log_pending_send_count_decrease(const dx_session_t me)
 {
 	os_log_debug(_mdns_server_log(),
-		"XPC session to client with pid %lld (%{public}s) pending send count decreased to %d",
+		"XPC session to client with pid %lld (%{public}s) pending send count decreased to %u",
 		(long long)me->client_pid, me->client_name, me->pending_send_count);
 }
 
@@ -2653,12 +2653,12 @@ _dx_gai_result_log(const dx_gai_result_t me, const uint32_t request_id)
 		_dx_log_name_and_record_with_formatted_bookends(name, me->record, sensitive_logging,
 			"[R%u->Q%u] getaddrinfo result -- event: %{mdns:addrmv}d, ifindex: %d, name: ", /* name */
 			", type: %{mdns:rrtype}d, rdata: ", /* rdata */ ", expired: %{mdns:yesno}d",
-			request_id, me->question_id, is_add, me->ifindex, type, expired);
+			request_id, me->question_id, is_add, (int)me->ifindex, type, expired);
 	} else {
 		_dx_log_name_with_formatted_bookends(name, sensitive_logging,
 			"[R%u->Q%u] getaddrinfo result -- event: %{mdns:addrmv}d, ifindex: %d, name: ", /* name */
 			", type: %{mdns:rrtype}d, rdata: <none>, reason: %{mdns:nreason}d",
-			request_id, me->question_id, is_add, me->ifindex, type, me->negative_reason);
+			request_id, me->question_id, is_add, (int)me->ifindex, type, me->negative_reason);
 	}
 }
 

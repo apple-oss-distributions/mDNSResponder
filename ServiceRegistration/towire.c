@@ -42,6 +42,8 @@
 #include <sys/time.h>
 #endif
 
+#define is_digit(X)     ((X) >= '0' && (X) <= '9')
+
 static int
 dns_parse_label(const char *cur, const char *NONNULL *NONNULL nextp, uint8_t *NONNULL lenp, uint8_t *NONNULL buf,
                 ssize_t max)
@@ -51,8 +53,26 @@ dns_parse_label(const char *cur, const char *NONNULL *NONNULL nextp, uint8_t *NO
     const char *s;
     uint8_t *t;
 
-    end = strchr(cur, '.');
-    if (end == NULL) {
+    end = cur;
+    while (*end != 0) {
+        if (end[0] == '.') {
+            // unescaped '.': end of the label
+            break;
+        } else if (end[0] == '\\') {
+            if (end[1] != '\0') {
+                // escape backslash
+                end += 2;
+            } else {
+                // single trailing backslash is invalid
+                return EINVAL;
+            }
+        } else {
+            // other character
+            end++;
+        }
+    }
+
+    if (*end == 0) {
         end = cur + strlen(cur);
         if (end == cur) {
             *lenp = 0;
@@ -71,9 +91,12 @@ dns_parse_label(const char *cur, const char *NONNULL *NONNULL nextp, uint8_t *NO
     tlen = 0;
     for (s = cur; s < end; s++) {
         if (*s == '\\') {
-            if (s + 4 <= end) {
+            if (s + 4 <= end && is_digit(s[1]) && is_digit(s[2]) && is_digit(s[3])) {
                 tlen++;
                 s += 3;
+            } else if (s + 2 <= end) {
+                tlen++;
+                s++;
             } else {
                 tlen++;
             }
@@ -100,7 +123,7 @@ dns_parse_label(const char *cur, const char *NONNULL *NONNULL nextp, uint8_t *NO
     t = buf;
     for (s = cur; s < end; s++) {
         if (*s == '\\') {
-            if (s + 4 <= end) {
+            if (s + 4 <= end && is_digit(s[1]) && is_digit(s[2]) && is_digit(s[3])) {
                 int v0 = s[1] - '0';
                 int v1 = s[2] - '0';
                 int v2 = s[3] - '0';
@@ -111,6 +134,9 @@ dns_parse_label(const char *cur, const char *NONNULL *NONNULL nextp, uint8_t *NO
                 } else {
                     return EINVAL;
                 }
+            } else if (s + 2 <= end) {
+                *t++ = (uint8_t)s[1];
+                s++;
             } else {
                 return EINVAL;
             }

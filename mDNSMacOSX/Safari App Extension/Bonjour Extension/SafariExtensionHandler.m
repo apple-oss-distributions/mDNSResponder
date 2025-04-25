@@ -1,6 +1,6 @@
 /*
  *
- * Copyright (c) 2017 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 #import "SafariExtensionHandler.h"
 #import "SafariExtensionViewController.h"
 
-//#define SHOW_BROWSE_COUNT 1
+#define SHOW_BROWSE_COUNT 0
 
 #if SHOW_BROWSE_COUNT
 #include <dns_sd.h>
@@ -45,15 +45,10 @@ static void browseReply( DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t in
 #if SHOW_BROWSE_COUNT
         self.instanceD = [NSMutableDictionary dictionary];
         [self startInstanceBrowse];
+        [self countChanged:0];
 #endif
     }
     return( self );
-}
-
-- (void)validateToolbarItemInWindow:(SFSafariWindow *)window validationHandler:(void (^)(BOOL enabled, NSString *badgeText))validationHandler {
-    // This method will be called whenever some state changes in the passed in window. You should use this as a chance to enable or disable your toolbar item and set badge text.
-    (void)window;    // Unused
-    validationHandler(YES, _instanceD.count ? [NSNumber numberWithInteger: _instanceD.count].stringValue : @"");
 }
 
 - (SFSafariExtensionViewController *)popoverViewController {
@@ -85,6 +80,16 @@ static void browseReply( DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t in
     }
 }
 
+- (void)countChanged:(NSInteger)count
+{
+    [SFSafariApplication getActiveWindowWithCompletionHandler:^(SFSafariWindow * _Nullable activeWindow) {
+        [activeWindow getToolbarItemWithCompletionHandler:^(SFSafariToolbarItem * _Nullable toolbarItem) {
+            [toolbarItem setEnabled:(count != 0) ? YES : NO];
+            [toolbarItem setBadgeText:count ? [NSNumber numberWithInteger: count].stringValue : @"" ];
+        }];
+    }];
+}
+
 #pragma mark - Dispatch
 
 static void finalizer( void * context )
@@ -102,6 +107,7 @@ static void browseReply( DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t in
     (void)interfaceIndex;   //    Unused
     (void)errorCode;        //    Unused
     SafariExtensionHandler *self = (__bridge SafariExtensionHandler *)context;
+    NSUInteger count = self.instanceD.count;
     char fullNameBuffer[kDNSServiceMaxDomainName];
     if( DNSServiceConstructFullName( fullNameBuffer, serviceName, regtype, replyDomain ) == kDNSServiceErr_NoError )
     {
@@ -115,6 +121,11 @@ static void browseReply( DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t in
         else
         {
             [self.instanceD removeObjectForKey: fullName];
+        }
+
+        if( count != self.instanceD.count)
+        {
+            [self countChanged:self.instanceD.count];
         }
     }
 }

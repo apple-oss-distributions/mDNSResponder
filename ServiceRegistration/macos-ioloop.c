@@ -243,7 +243,6 @@ connection_cancel_(comm_t *comm, nw_connection_t connection, const char *file, i
         INFO("%p: " PUB_S_SRP " " PUB_S_SRP ":%d" , connection, comm->canceled ? " (already canceled)" : "", file, line);
         if (!comm->canceled) {
             nw_connection_cancel(connection);
-            comm->canceled = true;
         }
     }
 }
@@ -286,11 +285,9 @@ comm_finalize(comm_t *comm)
     // later on.  So we can't actually free the data structure yet, but the good news is that comm_finalize() will
     // be called again later when the last outstanding asynchronous cancel is done, and then all of the stuff
     // that follows this will happen.
-#ifndef __clang_analyzer__
     if (comm->ref_count > 0) {
         return;
     }
-#endif
     if (comm->idle_timer != NULL) {
         ioloop_cancel_wake_event(comm->idle_timer);
         RELEASE_HERE(comm->idle_timer, wakeup);
@@ -321,6 +318,10 @@ ioloop_comm_release_(comm_t *comm, const char *file, int line)
 void
 ioloop_comm_cancel(comm_t *connection)
 {
+    if (connection->canceled) {
+        ERROR("already canceled");
+        return;
+    }
     if (connection->connection != NULL) {
         INFO("%p %p", connection, connection->connection);
         connection_cancel(connection, connection->connection);
@@ -349,6 +350,7 @@ ioloop_comm_cancel(comm_t *connection)
     if (connection->idle_timer != NULL) {
         ioloop_cancel_wake_event(connection->idle_timer);
     }
+    connection->canceled = true;
 }
 
 void
@@ -545,7 +547,7 @@ connection_write_now(comm_t *connection)
                                   NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT, connection->pending_write);
         if (connection->disconnected != NULL) {
             RETAIN_HERE(connection, comm);
-            ioloop_run_async(ioloop_disconnect_content_context, connection);
+            ioloop_run_async(ioloop_disconnect_content_context, connection, NULL);
         }
 #endif
     } else {
@@ -824,6 +826,12 @@ ioloop_connection_state_changed(comm_t *connection, nw_connection_state_t state,
     connection_error_to_string(error, errbuf, sizeof(errbuf));
 
     if (state == nw_connection_state_ready) {
+        // It's possible that we might schedule the ready event but then before we return to the run loop
+        // the listener gets canceled, in which case we don't want to deliver the ready event.
+        if (connection->canceled) {
+            INFO("ready but canceled");
+            return;
+        }
         if (connection->server) {
             if (!ioloop_listener_connection_ready(connection)) {
                 ioloop_comm_cancel(connection);
@@ -957,6 +965,11 @@ ioloop_udp_receive(comm_t *listener, dispatch_data_t content, nw_content_context
         response_state->connection_ready = true;
         const char *identifier = nw_content_context_get_identifier(context);
         response_state->name = strdup(identifier);
+        if (response_state->name == NULL) {
+            ERROR("%p: " PRI_S_SRP ": no memory for response state name.", listener, listener->name);
+            RELEASE_HERE(response_state, comm);
+            return;
+        }
         proceed = datagram_read(response_state, dispatch_data_get_size(content), content, NULL);
         RELEASE_HERE(response_state, comm);
     }
@@ -979,6 +992,10 @@ ioloop_listener_connection_ready(comm_t *connection)
     } else {
         ERROR("Unable to get description of new connection.");
         connection->name = strdup("unidentified");
+        if (connection->name == NULL) {
+            ERROR("No memory for connection name.");
+            return false;
+        }
     }
 
     // Best effort
@@ -1013,6 +1030,13 @@ ioloop_listener_connection_callback(comm_t *listener, nw_connection_t new_connec
     nw_connection_created++;
 
     connection->name = strdup(listener->name);
+    if (connection->name == NULL) {
+        ERROR("%p: " PRI_S_SRP ": no memory for connection name.", listener, listener->name);
+        nw_connection_cancel(connection->connection);
+        nw_release(connection->connection);
+        free(connection);
+        return;
+    }
     connection->datagram_callback = listener->datagram_callback;
     connection->tcp_stream = listener->tcp_stream;
     connection->server = true;
@@ -1238,6 +1262,12 @@ ioloop_listener_state_changed_handler(comm_t *listener, nw_listener_state_t stat
             INFO("failed");
             nw_listener_cancel(listener->listener);
         } else if (state == nw_listener_state_ready) {
+            // It's possible that we might schedule the ready event but then before we return to the run loop
+            // the listener gets canceled, in which case we don't want to deliver the ready event.
+            if (listener->canceled) {
+                INFO("ready but canceled");
+                return;
+            }
             INFO("ready");
             if (listener->ready != NULL) {
                 listener->ready(listener->context, listener->listen_port);
@@ -1382,12 +1412,12 @@ ioloop_udp_listener_setup(comm_t *listener, const addr_t *ip_address, uint16_t p
             if (family == AF_INET) {
                 IPv4_ADDR_GEN_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf);
                 ERROR("Can't bind to " PRI_IPv4_ADDR_SRP "#%d: %s",
-                      IPv4_ADDR_PARAM_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf), ntohs(port),
+                      IPv4_ADDR_PARAM_SRP(&listener->address.sin.sin_addr.s_addr, ipv4_addr_buf), port,
                       strerror(errno));
             } else {
                 SEGMENTED_IPv6_ADDR_GEN_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf);
                 ERROR("Can't bind to " PRI_SEGMENTED_IPv6_ADDR_SRP "#%d: %s",
-                      SEGMENTED_IPv6_ADDR_PARAM_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf), ntohs(port),
+                      SEGMENTED_IPv6_ADDR_PARAM_SRP(&listener->address.sin6.sin6_addr.s6_addr, ipv6_addr_buf), port,
                       strerror(errno));
             }
         out:
@@ -1596,8 +1626,12 @@ ioloop_listener_create(bool stream, bool tls, bool launchd, uint16_t *avoid_port
                 tls_config((void *)&tls_context);
             };
         }
+        nw_parameters_configure_protocol_block_t configure_tcp_block = ^(nw_protocol_options_t tcp_options) {
+            INFO("setting tcp mss to 450");
+            nw_tcp_options_set_maximum_segment_size(tcp_options, 450);
+        };
 
-        listener->parameters = nw_parameters_create_secure_tcp(configure_tls_block, NW_PARAMETERS_DEFAULT_CONFIGURATION);
+        listener->parameters = nw_parameters_create_secure_tcp(configure_tls_block, configure_tcp_block);
     } else {
         if (tls) {
             ERROR("DTLS support not implemented.");
@@ -1765,6 +1799,13 @@ ioloop_connection_create(addr_t *NONNULL remote_address, bool tls, bool stream, 
     nw_release(protocol_stack);
 
     connection->name = strdup(addrbuf);
+    if (connection->name == NULL) {
+        ERROR("No memory for connection name.");
+        nw_release(endpoint);
+        nw_release(parameters);
+        RELEASE_HERE(connection, comm);
+        return NULL;
+    }
 
     // Create the nw_connection_t.
     connection->connection = nw_connection_create(endpoint, parameters);
@@ -2043,7 +2084,6 @@ ioloop_dnssd_txn_add_(DNSServiceRef ref, void *context, dnssd_txn_finalize_callb
     return txn;
 }
 
-
 void
 ioloop_dnssd_txn_set_aux_pointer(dnssd_txn_t *NONNULL txn, void *aux_pointer)
 {
@@ -2182,10 +2222,13 @@ ioloop_add_reader(io_t *NONNULL io, io_callback_t NONNULL callback)
 }
 
 void
-ioloop_run_async(async_callback_t callback, void *context)
+ioloop_run_async(async_callback_t callback, void *context, void (*context_release)(void *))
 {
     dispatch_async(ioloop_main_queue, ^{
             callback(context);
+            if (context_release != NULL) {
+                context_release(context);
+            }
         });
 }
 

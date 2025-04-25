@@ -22,7 +22,7 @@
 #define __IFPERMIT_H__ 1
 
 typedef struct ifpermit_list ifpermit_list_t;
-typedef struct srp_server_state srp_server_t;
+typedef struct srp_server srp_server_t;
 #define ifpermit_list_create() ifpermit_list_create_(__FILE__, __LINE__)
 ifpermit_list_t *NULLABLE ifpermit_list_create_(const char *NONNULL file, int line);
 void ifpermit_list_add(ifpermit_list_t *NONNULL list, const char *NONNULL name);

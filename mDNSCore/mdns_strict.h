@@ -118,10 +118,11 @@
 static
 #if defined(_WIN32)
 __forceinline
+void _mdns_strict_strlcpy(char * const dst, const char * const src, const size_t dst_len)
 #else
 inline __attribute__((always_inline))
-#endif
 void _mdns_strict_strlcpy(char * const restrict dst, const char * const restrict src, const size_t dst_len)
+#endif
 {
 	if (dst_len == 0) {
 		return;

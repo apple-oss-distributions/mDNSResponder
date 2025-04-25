@@ -24,14 +24,14 @@
 #include "ioloop-common.h" // for service_connection_t
 
 typedef struct adv_instance adv_instance_t;
-typedef struct adv_record_registration adv_record_t;
+typedef struct adv_record adv_record_t;
 typedef struct adv_host adv_host_t;
 typedef struct adv_update adv_update_t;
 typedef struct client_update client_update_t;
 typedef struct adv_instance_vec adv_instance_vec_t;
 typedef struct adv_record_vec adv_record_vec_t;
 typedef struct srpl_connection srpl_connection_t;
-typedef struct srp_server_state srp_server_t;
+typedef struct srp_server srp_server_t;
 typedef struct route_state route_state_t;
 typedef struct srp_wanted_state srp_wanted_state_t; // private
 typedef struct srp_xpc_client srp_xpc_client_t;     // private
@@ -44,7 +44,7 @@ typedef struct dns_host_description dns_host_description_t;
 typedef struct service_instance service_instance_t;
 typedef struct service service_t;
 typedef struct delete delete_t;
-typedef struct _cti_connection_t *cti_connection_t;
+typedef struct cti_connection cti_connection_t;
 typedef struct dnssd_proxy_advertisements dnssd_proxy_advertisements_t;
 #if SRP_FEATURE_DISCOVERY_PROXY_SERVER
 typedef struct dnssd_dp_proxy_advertisements dnssd_dp_proxy_advertisements_t;
@@ -57,8 +57,8 @@ typedef struct wanted_service wanted_service_t;
 #ifdef SRP_TEST_SERVER
 typedef struct dns_service_event dns_service_event_t;
 typedef struct test_state test_state_t;
-typedef struct srp_server_state srp_server_t;
 typedef struct srpl_connection srpl_connection_t;
+typedef struct threadsim_node_state threadsim_node_state_t;
 #endif
 
 #define TSR_TIMESTAMP_STRING_LEN 28
@@ -74,7 +74,7 @@ enum {
 };
 
 // Server internal state
-struct srp_server_state {
+struct srp_server {
 #if SRP_TEST_SERVER
     srp_server_t *NULLABLE next;
 #endif
@@ -89,6 +89,7 @@ struct srp_server_state {
     comm_t *NULLABLE srpl_listener;
     srpl_connection_t *NULLABLE connections; // list of connections that other srp servers create to connect to us
     int server_id;
+    threadsim_node_state_t *NULLABLE threadsim_node;
 #endif
 #if STUB_ROUTER
     route_state_t *NULLABLE route_state;
@@ -137,6 +138,8 @@ struct adv_instance {
     int ref_count;
     dnssd_txn_t *NULLABLE txn;           // The dnssd_txn_t that was created from the shared connection.
     intptr_t shared_txn;                 // The shared txn on which the txn for this instance's registration was created
+    dnssd_txn_t *NULLABLE previous_txn;  // The previous dnssd_txn_t after registering an update.
+    intptr_t previous_shared_txn;        // The previous shared txn on which the previous txn was registered
     adv_host_t *NULLABLE host;           // Host to which this service instance belongs
     adv_update_t *NULLABLE update;       // Ongoing update that currently owns this instance, if any.
     wakeup_t *NULLABLE retry_wakeup;     // In case we get a spurious name conflict.
@@ -156,24 +159,27 @@ struct adv_instance {
 };
 
 // A record registration
-struct adv_record_registration {
+struct adv_record {
     int ref_count;
     DNSRecordRef NULLABLE rref;            // The RecordRef we get back from DNSServiceRegisterRecord().
     adv_host_t *NULLABLE host;             // The host object to which this record refers.
     intptr_t shared_txn;                   // The shared transaction on which this record was registered.
+    DNSRecordRef NULLABLE previous_rref;   // We update a record by adding a new transaction that should cause the old
+    intptr_t previous_shared_txn;          // transaction to be canceled as stale. So we need to keep the old transaction.
     adv_update_t *NULLABLE update;         // The ongoing update, if any
+    wakeup_t *NONNULL re_register_wakeup;  // Wakeup for retry when we run into a name conflict
     uint8_t *NULLABLE rdata;
     uint16_t rrtype;                       // For hosts, always A or AAAA, for instances always TXT, PTR or SRV.
     uint16_t rdlen;                        // Length of the RR
     bool update_pending;                   // True if we are updating this record and haven't gotten a response yet.
+    bool re_register_pending;
 };
 
 struct adv_host {
     int ref_count;
     srp_server_t *NULLABLE server_state;   // Server state to which this host belongs.
-    wakeup_t *NONNULL re_register_wakeup;  // Wakeup for retry when we run into a name conflict
     wakeup_t *NONNULL retry_wakeup;        // Wakeup for retry when we run into a temporary failure
-    wakeup_t *NONNULL lease_wakeup;        // Wakeup at least expiry time
+    wakeup_t *NULLABLE lease_wakeup;       // Wakeup at least expiry time
     adv_host_t *NULLABLE next;             // Hosts are maintained in a linked list.
     adv_update_t *NULLABLE update;         // Update to this host, if one is being done
     char *NONNULL name;                    // Name of host (without domain)
@@ -206,7 +212,6 @@ struct adv_host {
     // host registration has expired, and there happens to be another update in progress, then we want
     // to defer the host registration.
     bool update_pending;
-    bool re_register_pending;
 
 };
 
@@ -230,16 +235,16 @@ struct adv_update {
     // The set of instances from the update that already exist but have changed.
     // This array mirrors the array of instances configured on the host; entries to be updated
     // are non-NULL, entries that don't need updated are NULL.
-    adv_instance_vec_t *NONNULL update_instances;
+    adv_instance_vec_t *NULLABLE update_instances;
 
     // The set of instances that exist and need to be removed.
-    adv_instance_vec_t *NONNULL remove_instances;
+    adv_instance_vec_t *NULLABLE remove_instances;
 
     // The set of instances that exist and were renewed
-    adv_instance_vec_t *NONNULL renew_instances;
+    adv_instance_vec_t *NULLABLE renew_instances;
 
     // The set of instances that need to be added.
-    adv_instance_vec_t *NONNULL add_instances;
+    adv_instance_vec_t *NULLABLE add_instances;
 
     // Outstanding instance updates
     int num_instances_started;
@@ -308,7 +313,7 @@ struct wanted_service {
 
 // Exported functions.
 bool srp_mdns_shared_registration_txn_setup(srp_server_t *NONNULL server_state);
-void srp_mdns_shared_record_remove(srp_server_t *NONNULL server_state, adv_record_t *NONNULL record);
+void srp_mdns_shared_record_remove(srp_server_t *NONNULL server_state, adv_record_t *NONNULL record, bool previous_rref);
 void srp_mdns_update_finished(adv_update_t *NONNULL update);
 #define adv_instance_retain(instance) adv_instance_retain_(instance, __FILE__, __LINE__)
 void adv_instance_retain_(adv_instance_t *NONNULL instance, const char *NONNULL file, int line);
@@ -338,6 +343,11 @@ DNSServiceAttributeRef NULLABLE srp_adv_host_tsr_attribute_generate(adv_host_t *
                                                                     char *NONNULL time_buf, size_t time_buf_size);
 DNSServiceAttributeRef NULLABLE srp_message_tsr_attribute_generate(message_t *NULLABLE message, uint32_t key_id,
                                                                    char *NONNULL time_buf, size_t time_buf_size);
+bool srp_mdns_cancel_previous_instance(adv_host_t *NONNULL host, adv_instance_t *NONNULL instance,
+                                       DNSServiceRef NULLABLE sdref, const char *NULLABLE domain, int error_code,
+                                       const char *NONNULL context);
+bool srp_mdns_cancel_previous_record(adv_host_t *NONNULL host, adv_record_t *NONNULL record, DNSRecordRef NULLABLE rref,
+                                     int error_code, const char *NONNULL context);
 #endif // __SRP_MDNS_PROXY_H__
 
 // Local Variables:

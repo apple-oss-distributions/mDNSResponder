@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Bonjour Safari Extension</string>
+	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -17,7 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>XPC!</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1</string>
+	<string>1.2</string>
+	<key>LSApplicationCategoryType</key>
+	<string></string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
@@ -35,17 +37,17 @@
 			<key>Identifier</key>
 			<string>Button</string>
 			<key>Image</key>
-			<string>ToolbarItemIcon.png</string>
+			<string>ToolbarItemIcon.pdf</string>
 			<key>Label</key>
-			<string>Browse</string>
+			<string>Bonjour</string>
 		</dict>
 		<key>SFSafariWebsiteAccess</key>
 		<dict>
 			<key>Level</key>
-			<string>All</string>
+			<string>None</string>
 		</dict>
 	</dict>
 	<key>NSHumanReadableDescription</key>
-	<string>Bonjour service browsing done correctly!</string>
+	<string>Bonjour browsing is back.</string>
 </dict>
 </plist>

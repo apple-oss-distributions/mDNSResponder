@@ -33,6 +33,7 @@
 static void
 test_change_text_record_test_evaluate(test_state_t *state)
 {
+#if USE_DNSSERVICE_UPDATE_RECORD
     dns_service_event_t *register_event = dns_service_find_first_register_event_by_name_and_type(state->primary,
                                                                                                  TEST_INSTANCE_NAME,
                                                                                                  TEST_SERVICE_TYPE);
@@ -46,6 +47,10 @@ test_change_text_record_test_evaluate(test_state_t *state)
         update_event = dns_service_find_update_for_register_event(state->primary, register_event, update_event);
     }
     TEST_FAIL_CHECK(state, update_event != NULL, "failed to correctly update service");
+#else
+    // Otherwise just check the same way as with lease renewal
+    test_lease_renew_evaluate(state);
+#endif
     TEST_PASSED(state);
 }
 

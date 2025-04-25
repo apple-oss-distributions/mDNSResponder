@@ -1,6 +1,6 @@
-/* srp-test-runner.h
+/* srp-test-runner.c
  *
- * Copyright (c) 2023 Apple Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,79 +34,126 @@ ready_callback_t srp_test_dnssd_tls_listener_ready;
 void *srp_test_tls_listener_context;
 void (*srp_test_dso_message_finished)(void *context, message_t *message, dso_state_t *dso);
 
-void
-srp_test_server_run_test(void *context)
-{
-    char *test_to_run = context;
+typedef struct test_startup_state test_startup_state_t;
+struct test_startup_state {
+    int variant;
+    void (*test_func)(test_state_t *next_test);
+    void (*test_variant_func)(test_state_t *next_test, int variant);
+    const char *test_name;
+};
 
-    if (test_to_run != NULL) {
+static void
+srp_test_server_start_test(void *context)
+{
+    test_startup_state_t *startup_state = context;
 #if TARGET_OS_IOS || TARGET_OS_OSX || TARGET_OS_TV
+    if (startup_state->test_func != NULL) {
+        startup_state->test_func(NULL);
+    } else if (startup_state->test_variant_func != NULL) {
+        startup_state->test_variant_func(NULL, startup_state->variant);
+    } else {
+        INFO("no test function");
+        exit(1);
+    }
+#else
+    INFO("skipping test %s on limited device.", startup_state->test_name);
+    exit(0);
+#endif
+}
+
+bool
+srp_test_server_run_test(const char *test_to_run)
+{
+    bool normal_startup = false;
+    test_startup_state_t *startup_state = calloc(1, sizeof(*startup_state));
+    if (startup_state == NULL) {
+        ERROR("unable to allocate test startup state structure.");
+        exit(1);
+    }
+    if (test_to_run != NULL) {
+        startup_state->test_name = test_to_run;
+
         if (!strcmp(test_to_run, "change-text-record")) {
-            test_change_text_record_start(NULL);
+            startup_state->test_func = test_change_text_record_start;
         } else if (!strcmp(test_to_run, "multi-host-record")) {
-            test_multi_host_record_start(NULL);
+            startup_state->test_func = test_multi_host_record_start;
         } else if (!strcmp(test_to_run, "lease-expiry")) {
-            test_lease_expiry_start(NULL);
+            startup_state->test_func = test_lease_expiry_start;
         } else if (!strcmp(test_to_run, "lease-renewal")) {
-            test_lease_renewal_start(NULL);
+            startup_state->test_func = test_lease_renewal_start;
         } else if (!strcmp(test_to_run, "single-srpl-update")) {
-            test_single_srpl_update(NULL);
+            startup_state->test_func = test_single_srpl_update;
         } else if (!strcmp(test_to_run, "srpl-two-instances-dup")) {
-            test_srpl_host_2i(NULL, DUP_TEST_VARIANT_BOTH);
+            startup_state->test_variant_func = test_srpl_host_2i;
+            startup_state->variant = DUP_TEST_VARIANT_BOTH;
         } else if (!strcmp(test_to_run, "srpl-two-instances-dup-first")) {
-            test_srpl_host_2i(NULL, DUP_TEST_VARIANT_FIRST);
+            startup_state->test_variant_func = test_srpl_host_2i;
+            startup_state->variant = DUP_TEST_VARIANT_FIRST;
         } else if (!strcmp(test_to_run, "srpl-two-instances-dup-last")) {
-            test_srpl_host_2i(NULL, DUP_TEST_VARIANT_LAST);
+            startup_state->test_variant_func = test_srpl_host_2i;
+            startup_state->variant = DUP_TEST_VARIANT_LAST;
         } else if (!strcmp(test_to_run, "srpl-two-instances-dup-add-first")) {
-            test_srpl_host_2i(NULL, DUP_TEST_VARIANT_FIRST);
+            startup_state->test_variant_func = test_srpl_host_2i;
+            startup_state->variant = DUP_TEST_VARIANT_FIRST;
         } else if (!strcmp(test_to_run, "srpl-two-instances-dup-add-last")) {
-            test_srpl_host_2i(NULL, DUP_TEST_VARIANT_LAST);
+            startup_state->test_variant_func = test_srpl_host_2i;
+            startup_state->variant = DUP_TEST_VARIANT_LAST;
         } else if (!strcmp(test_to_run, "srpl-two-instances-dup-2keys")) {
-            test_srpl_host_2i(NULL, DUP_TEST_VARIANT_TWO_KEYS);
+            startup_state->test_variant_func = test_srpl_host_2i;
+            startup_state->variant = DUP_TEST_VARIANT_TWO_KEYS;
         } else if (!strcmp(test_to_run, "srpl-two-instances")) {
-            test_srpl_host_2i(NULL, DUP_TEST_VARIANT_NO_DUP);
+            startup_state->test_variant_func = test_srpl_host_2i;
+            startup_state->variant = DUP_TEST_VARIANT_NO_DUP;
         } else if (!strcmp(test_to_run, "srpl-two-instances-one-remove")) {
-            test_srpl_host_2ir(NULL);
+            startup_state->test_func = test_srpl_host_2ir;
         } else if (!strcmp(test_to_run, "srpl-zero-instances-two-servers")) {
-            test_srpl_host_0i2s(NULL);
+            startup_state->test_func = test_srpl_host_0i2s;
         } else if (!strcmp(test_to_run, "srpl-lease-time")) {
-            test_srpl_lease_time(NULL);
+            startup_state->test_func = test_srpl_lease_time;
         } else if (!strcmp(test_to_run, "dns-dangling-query")) {
-            test_dns_dangling_query(NULL);
+            startup_state->test_func = test_dns_dangling_query;
         } else if (!strcmp(test_to_run, "srpl-cycle-through-peers")) {
-            test_srpl_cycle_through_peers(NULL);
+            startup_state->test_func = test_srpl_cycle_through_peers;
         } else if (!strcmp(test_to_run, "srpl-update-after-remove")) {
-            test_srpl_update_after_remove(NULL);
+            startup_state->test_func = test_srpl_update_after_remove;
         } else if (!strcmp(test_to_run, "dns-push-hardwired")) {
-            test_dns_push(NULL, PUSH_TEST_VARIANT_HARDWIRED);
+            startup_state->test_variant_func = test_dns_push;
+            startup_state->variant = PUSH_TEST_VARIANT_HARDWIRED;
         } else if (!strcmp(test_to_run, "dns-push-mdns")) {
-            test_dns_push(NULL, PUSH_TEST_VARIANT_MDNS);
+            startup_state->test_variant_func = test_dns_push;
+            startup_state->variant = PUSH_TEST_VARIANT_MDNS;
         } else if (!strcmp(test_to_run, "dns-hardwired")) {
-            test_dns_push(NULL, PUSH_TEST_VARIANT_DNS_HARDWIRED);
+            startup_state->test_variant_func = test_dns_push;
+            startup_state->variant = PUSH_TEST_VARIANT_DNS_HARDWIRED;
         } else if (!strcmp(test_to_run, "dns-mdns")) {
-            test_dns_push(NULL, PUSH_TEST_VARIANT_DNS_MDNS);
+            startup_state->test_variant_func = test_dns_push;
+            startup_state->variant = PUSH_TEST_VARIANT_DNS_MDNS;
         } else if (!strcmp(test_to_run, "dns-push-crash")) {
-            test_dns_push(NULL, PUSH_TEST_VARIANT_DAEMON_CRASH);
+            startup_state->test_variant_func = test_dns_push;
+            startup_state->variant = PUSH_TEST_VARIANT_DAEMON_CRASH;
         } else if (!strcmp(test_to_run, "dns-crash")) {
-            test_dns_push(NULL, PUSH_TEST_VARIANT_DNS_CRASH);
+            startup_state->test_variant_func = test_dns_push;
+            startup_state->variant = PUSH_TEST_VARIANT_DNS_CRASH;
         } else if (!strcmp(test_to_run, "dns-two")) {
-            test_dns_push(NULL, PUSH_TEST_VARIANT_TWO_QUESTIONS);
+            startup_state->test_variant_func = test_dns_push;
+            startup_state->variant = PUSH_TEST_VARIANT_TWO_QUESTIONS;
         } else if (!strcmp(test_to_run, "listener-longevity")) {
-            test_listen_longevity_start(NULL);
+            startup_state->test_func = test_listen_longevity_start;
         } else if (!strcmp(test_to_run, "ifaddrs")) {
-            test_ifaddrs_start(NULL);
+            startup_state->test_func = test_ifaddrs_start;
+        } else if (!strcmp(test_to_run, "thread-startup")) {
+            startup_state->test_func = test_thread_startup;
+            normal_startup = true;
         } else {
             INFO("test to run: %s", test_to_run);
             exit(1);
         }
-#else
-        INFO("skipping test %s on limited device.");
-        exit(0);
-#endif
+        ioloop_run_async(srp_test_server_start_test, startup_state, NULL);
     } else {
         INFO("no test to run");
         exit(1);
     }
+    return normal_startup;
 }
 
 void *

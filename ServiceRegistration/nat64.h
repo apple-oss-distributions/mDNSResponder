@@ -90,12 +90,12 @@ typedef struct nat64_ipv4_default_route_monitor_event {
     nat64_ipv4_default_route_monitor_event_type_t event_type;
 } nat64_ipv4_default_route_monitor_event_t;
 
-typedef struct {
+typedef struct nat64_ipv4_default_route_monitor {
     uint32_t ref_count;
     nat64_ipv4_default_route_monitor_state_type_t state;
     bool has_ipv4_default_route;
     char *NONNULL state_name;
-    nat64_t *NONNULL nat64;
+    nat64_t *NULLABLE nat64;
 } nat64_ipv4_default_route_monitor_t;
 
 // Infrastructure prefix monitor
@@ -121,13 +121,13 @@ typedef enum {
     nat64_infra_prefix_monitor_state_change_occurred,
 } nat64_infra_prefix_monitor_state_type_t;
 
-typedef struct {
+typedef struct nat64_infra_prefix_monitor {
     uint32_t ref_count;
     nat64_infra_prefix_monitor_state_type_t state;
     char *NONNULL state_name;
     DNSServiceRef NULLABLE sdRef;    // LLQ sdRef
     nat64_prefix_t *NULLABLE infra_nat64_prefixes;
-    nat64_t *NONNULL nat64;
+    nat64_t *NULLABLE nat64;
     bool canceled;
 } nat64_infra_prefix_monitor_t;
 
@@ -156,13 +156,13 @@ typedef enum {
     nat64_thread_prefix_monitor_state_change_occurred,
 } nat64_thread_prefix_monitor_state_type_t;
 
-typedef struct {
+typedef struct nat64_thread_prefix_monitor {
     uint32_t ref_count;
     nat64_thread_prefix_monitor_state_type_t state;
     char *NONNULL state_name;
     nat64_prefix_t *NULLABLE thread_nat64_prefixes;
     wakeup_t *NULLABLE timer;
-    nat64_t *NONNULL nat64;
+    nat64_t *NULLABLE nat64;
 } nat64_thread_prefix_monitor_t;
 
 // Infra nat64 prefix publisher
@@ -191,13 +191,13 @@ typedef enum {
     nat64_infra_prefix_publisher_state_publishing,  // Publishing infra prefix
 } nat64_infra_prefix_publisher_state_type_t;
 
-typedef struct {
+typedef struct nat64_infra_prefix_publisher {
     uint32_t ref_count;
     nat64_infra_prefix_publisher_state_type_t state;
     char *NONNULL state_name;
     bool routable_omr_prefix_present;
     nat64_prefix_t *NULLABLE proposed_prefix;
-    nat64_t *NONNULL nat64;
+    nat64_t *NULLABLE nat64;
 } nat64_infra_prefix_publisher_t;
 
 // BR nat64 prefix publisher
@@ -226,14 +226,14 @@ typedef enum {
     nat64_br_prefix_publisher_state_publishing,
 } nat64_br_prefix_publisher_state_type_t;
 
-typedef struct {
+typedef struct nat64_br_prefix_publisher {
     uint32_t ref_count;
     nat64_br_prefix_publisher_state_type_t state;
     char *NONNULL state_name;
     nat64_prefix_t *NULLABLE br_prefix;
     wakeup_t *NULLABLE timer;
     bool wait_finished;
-    nat64_t *NONNULL nat64;
+    nat64_t *NULLABLE nat64;
 } nat64_br_prefix_publisher_t;
 
 struct nat64 {

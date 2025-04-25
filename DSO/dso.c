@@ -245,8 +245,8 @@ dso_state_t *dso_state_create(bool is_server, int max_outstanding_queries, const
     const size_t outsize = (sizeof (dso_outstanding_query_state_t)) + (size_t)max_outstanding_queries * sizeof (dso_outstanding_query_t);
 
     if ((sizeof (*dso) + outsize + namespace) > UINT_MAX) {
-        FAULT("Fatal: sizeof (*dso)[%zd], outsize[%zd], "
-                  "namespace[%zd]", sizeof (*dso), outsize, namespace);
+        FAULT("Fatal: sizeof (*dso)[%zu], outsize[%zu], "
+                  "namespace[%zu]", sizeof (*dso), outsize, namespace);
         dso = NULL;
         goto out;
     }
@@ -599,7 +599,8 @@ exit:
 }
 
 bool dso_make_message(dso_message_t *state, uint8_t *outbuf, size_t outbuf_size, dso_state_t *dso,
-                      bool unidirectional, bool response, uint16_t xid, int rcode, void *callback_state)
+                      bool unidirectional, bool response, uint16_t xid, int rcode, void *callback_state,
+                      bool (*xid_check_func)(dso_state_t *dso, uint16_t xid, void *callback_state))
 {
     DNSMessageHeader *msg_header;
     dso_outstanding_query_state_t *midState = dso->outstanding_queries;
@@ -650,7 +651,16 @@ bool dso_make_message(dso_message_t *state, uint8_t *outbuf, size_t outbuf_size,
             if (looping++ > 1000) {
                 return false;
             }
-            message_id = (uint16_t)mDNSRandom(UINT16_MAX);
+            if (0) {
+#ifdef SRP_TEST_SERVER
+            } else if (looping == 1 && xid != 0) {
+                // srp_test_server will pass in an xid that is known to already have been used so that we can test
+                // to make sure that we reject the repeated xid
+                message_id = xid;
+#endif
+            } else {
+                message_id = (uint16_t)mDNSRandom(UINT16_MAX);
+            }
             msg_id_ok = true;
             if (message_id == 0) {
                 msg_id_ok = false;
@@ -661,6 +671,9 @@ bool dso_make_message(dso_message_t *state, uint8_t *outbuf, size_t outbuf_size,
                     } else if (midState->queries[i].id == message_id) {
                         msg_id_ok = false;
                     }
+                }
+                if (xid_check_func != NULL && xid_check_func(dso, message_id, callback_state)) {
+                    msg_id_ok = false;
                 }
             }
         } while (!msg_id_ok);

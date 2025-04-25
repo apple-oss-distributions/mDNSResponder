@@ -62,7 +62,7 @@ struct thread_tracker {
     void (*reconnect_callback)(route_state_t *route_state);
     route_state_t *route_state;
     srp_server_t *server_state;
-    cti_connection_t NULLABLE thread_context;
+    cti_connection_t *NULLABLE thread_context;
 	thread_tracker_callback_t *callbacks;
 	uint64_t last_thread_network_state_change;
 	thread_network_state_t current_state, previous_state;
@@ -304,6 +304,11 @@ thread_tracker_callback_cancel(thread_tracker_t *tracker, void *context)
 		if (callback->context == context) {
             *tpp = callback->next;
             thread_tracker_callback_free(callback);
+            // If we don't have any callbacks left on the list, the list no longer holds a reference to
+            // the tracker.
+            if (tracker->callbacks == NULL) {
+                RELEASE_HERE(tracker, thread_tracker);
+            }
             return;
 		}
 	}

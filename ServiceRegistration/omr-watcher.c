@@ -98,8 +98,8 @@ struct omr_watcher {
     int ref_count;
     route_state_t *route_state;
     omr_watcher_callback_t *callbacks;
-    cti_connection_t route_connection;
-    cti_connection_t prefix_connection;
+    cti_connection_t *route_connection;
+    cti_connection_t *prefix_connection;
     wakeup_t *prefix_recheck_wakeup;
     omr_prefix_t *prefixes;
     void (*disconnect_callback)(void *context);
@@ -459,7 +459,7 @@ omr_watcher_callback_cancel(omr_watcher_t *omw, omr_watcher_callback_t *callback
             if (!omw->purge_pending) {
                 omw->purge_pending = true;
                 RETAIN_HERE(omw, omr_watcher);
-                ioloop_run_async(omr_watcher_purge_canceled_callbacks, omw);
+                ioloop_run_async(omr_watcher_purge_canceled_callbacks, omw, NULL);
             }
         }
     }

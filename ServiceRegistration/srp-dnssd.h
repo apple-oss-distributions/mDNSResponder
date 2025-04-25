@@ -18,7 +18,7 @@
  */
 
 #ifdef SRP_TEST_SERVER
-typedef struct srp_server_state srp_server_t;
+typedef struct srp_server srp_server_t;
 DNSServiceErrorType dns_service_register(srp_server_t *NULLABLE srp_server, DNSServiceRef NONNULL *NULLABLE sdRef,
                                          DNSServiceFlags flags, uint32_t interfaceIndex, const char *NULLABLE name,
                                          const char *NONNULL regtype, const char *NULLABLE domain,

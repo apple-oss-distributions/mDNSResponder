@@ -46,6 +46,7 @@ struct push_test_state {
     DNSServiceRef register_ref, ptr_sdref;
     DNSServiceRef txns[TXN_LIMIT];
     int num_txns;
+    uint16_t first_xid;
     uint16_t subscribe_xids[SUBSCRIBE_LIMIT];
     int num_subscribe_xids, soa_index, ds_index[2];
     char *hostname;
@@ -88,7 +89,7 @@ test_dns_push_send_push_unsubscribe(push_test_state_t *push_state, int index)
         dso_message_t message;
 
         INFO("unsubscribe %x %d", push_state->subscribe_xids[index], index);
-        dso_make_message(&message, buffer, sizeof(dns_message), push_state->dso_connection->dso, true, false, 0, 0, NULL);
+        dso_make_message(&message, buffer, sizeof(dns_message), push_state->dso_connection->dso, true, false, 0, 0, NULL, NULL);
         memset(&towire, 0, sizeof(towire));
         towire.p = &buffer[DNS_HEADER_SIZE];
         towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);
@@ -122,7 +123,7 @@ test_dns_push_unsubscribe_all(push_test_state_t *push_state)
     }
 
     // Send a keepalive message so that we can get the response, since the unsubscribe is not a response-requiring request.
-    dso_make_message(&message, buffer, sizeof(dns_message), push_state->dso_connection->dso, false, false, 0, 0, NULL);
+    dso_make_message(&message, buffer, sizeof(dns_message), push_state->dso_connection->dso, false, false, 0, 0, NULL, NULL);
     memset(&towire, 0, sizeof(towire));
     towire.p = &buffer[DNS_HEADER_SIZE];
     towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);
@@ -436,9 +437,9 @@ test_dns_push_dso_message(push_test_state_t *push_state, message_t *message, dso
         if (response) {
             // This is a protocol error--the response isn't supposed to contain a primary TLV.
             TEST_FAIL_STATUS(push_state->test_state,
-                             "DNS Push response from server, rcode = %d", dns_rcode_get(&message->wire));
+                             "DNS Push response from server, xid = %x, rcode = %d", ntohs(message->wire.id), dns_rcode_get(&message->wire));
         } else {
-            INFO("Unexpected DNS Push request from server, rcode = %d", dns_rcode_get(&message->wire));
+            INFO("Unexpected DNS Push request from server, xid = %x, rcode = %d", ntohs(message->wire.id), dns_rcode_get(&message->wire));
         }
         break;
 
@@ -469,7 +470,7 @@ test_dns_push_dso_message(push_test_state_t *push_state, message_t *message, dso
             for (int i = 0; i < push_state->num_subscribe_xids; i++) {
                 if (message->wire.id == htons(push_state->subscribe_xids[i])) {
                     int rcode = dns_rcode_get(&message->wire);
-                    INFO("DNS Push Subscribe response from server, rcode = %d", rcode);
+                    INFO("DNS Push Subscribe response from server, xid = %x, rcode = %d", ntohs(message->wire.id), rcode);
                     if (rcode != dns_rcode_noerror) {
                         TEST_FAIL_STATUS(push_state->test_state, "subscribe for %x failed",
                                          push_state->subscribe_xids[i]);
@@ -580,6 +581,19 @@ test_dns_push_dso_event_callback(void *context, void *event_context, dso_state_t
     }
 }
 
+static bool
+test_dns_push_check_xid(dso_state_t *UNUSED dso, uint16_t xid, void *context)
+{
+    push_test_state_t *push_state = context;
+    for (int i = 0; i < push_state->num_subscribe_xids; i++) {
+        INFO("subscribe check: xid = %x   xids[%d] = %x", xid, i, push_state->subscribe_xids[i]);
+        if (push_state->subscribe_xids[i] == htons(xid)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void
 test_dns_push_send_push_subscribe(push_test_state_t *push_state, const char *name, int rrtype)
 {
@@ -593,14 +607,17 @@ test_dns_push_send_push_subscribe(push_test_state_t *push_state, const char *nam
     if (i >= SUBSCRIBE_LIMIT) {
         TEST_FAIL_STATUS(push_state->test_state, "subscribe xid limit reached: %d", i);
     }
-    push_state->num_subscribe_xids++;
 
     if (push_state->test_dns_push) {
         // DNS Push subscription
-        dso_make_message(&message, buffer, sizeof(dns_message), push_state->dso_connection->dso, false, false, 0, 0, NULL);
+        dso_make_message(&message, buffer, sizeof(dns_message), push_state->dso_connection->dso,
+                         false, false, push_state->first_xid, 0, push_state, test_dns_push_check_xid);
 
+        if (!strcmp(name, "_dns-push-tls._tcp.default.service.arpa.")) {
+            push_state->first_xid = dns_message.id;
+        }
         push_state->subscribe_xids[i] = ntohs(dns_message.id);
-        INFO("push subscribe for %s, rrtype %d, xid %x, num %d", name, rrtype, push_state->subscribe_xids[i], i);
+        INFO("push subscribe for %s, rrtype %d, xid %x %x, num %d", name, rrtype, push_state->first_xid, push_state->subscribe_xids[i], i);
         memset(&towire, 0, sizeof(towire));
         towire.p = &buffer[DNS_HEADER_SIZE];
         towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);
@@ -640,6 +657,7 @@ test_dns_push_send_push_subscribe(push_test_state_t *push_state, const char *nam
         push_state->subscribe_xids[i] = ntohs(dns_message.id);
         INFO("DNS query for %s, rrtype %d, xid %x, num %d", name, rrtype, push_state->subscribe_xids[i], i);
     }
+    push_state->num_subscribe_xids++;
 
     memset(&iov, 0, sizeof(iov));
     iov.iov_len = towire.p - buffer;
@@ -663,7 +681,7 @@ test_dns_push_connected(comm_t *connection, void *context)
     uint8_t *buffer = (uint8_t *)&dns_message;
     dns_towire_state_t towire;
     dso_message_t message;
-    dso_make_message(&message, buffer, sizeof(dns_message), connection->dso, false, false, 0, 0, NULL);
+    dso_make_message(&message, buffer, sizeof(dns_message), connection->dso, false, false, 0, 0, NULL, NULL);
     memset(&towire, 0, sizeof(towire));
     towire.p = &buffer[DNS_HEADER_SIZE];
     towire.lim = towire.p + (sizeof(dns_message) - DNS_HEADER_SIZE);

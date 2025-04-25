@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil -*-
  *
- * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2025 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,10 +57,6 @@
 #if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER)
 #include <mdns/managed_defaults.h>
 #include "QuerierSupport.h"
-#endif
-
-#if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
-#include "resolved_cache.h"
 #endif
 
 #if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
@@ -629,7 +625,12 @@ mDNSlocal void SignalCallback(CFMachPortRef port, void *msg, CFIndex size, void 
             mDNS_PurgeCacheResourceRecord(m, rr);
         }
         // Restart unicast and multicast queries
-        mDNSCoreRestartQueries(m);
+        mDNSCoreRestartQueries(m
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER) && MDNS_OS(watchOS)
+            // In the case of SIGHUP, subscriber should also be restarted for a clean state.
+            , mDNSfalse
+#endif
+        );
         mDNS_Unlock(m);
     } break;
     case SIGINT:
@@ -1287,9 +1288,6 @@ mDNSlocal void * KQueueLoop(void *m_param)
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSD_XPC_SERVICE)
     dnssd_server_init();
 #endif
-#if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
-    unicast_assist_init();
-#endif
     MRCSServerInit();
     pthread_mutex_lock(&PlatformStorage.BigMutex);
     LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT, "Starting time value 0x%08X (%d)", (mDNSu32)mDNSStorage.timenow_last, mDNSStorage.timenow_last);
@@ -1310,9 +1308,6 @@ mDNSlocal void * KQueueLoop(void *m_param)
         mDNSs32 nextTimerEvent = udsserver_idle(mDNSDaemonIdle(m));
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSD_XPC_SERVICE)
         dnssd_server_idle();
-#endif
-#if MDNSRESPONDER_SUPPORTS(APPLE, TRACKER_STATE)
-        resolved_cache_idle();
 #endif
 #if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
         unicast_assist_idle();

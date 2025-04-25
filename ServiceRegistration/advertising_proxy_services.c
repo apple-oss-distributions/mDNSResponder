@@ -106,7 +106,7 @@ advertising_proxy_ref_dealloc(advertising_proxy_conn_ref conn_ref)
 }
 
 static void
-adv_message_parse(cti_connection_t connection)
+adv_message_parse(cti_connection_t *connection)
 {
     int err = kDNSSDAdvertisingProxyStatus_NoError;
     int32_t status;
@@ -151,13 +151,13 @@ out:
 static void
 adv_read_callback(io_t *UNUSED io, void *context)
 {
-    cti_connection_t connection = context;
+    cti_connection_t *connection = context;
 
     cti_read(connection, adv_message_parse);
 }
 
 static void
-adv_service_list_callback(cti_connection_t connection, void *UNUSED object, cti_status_t UNUSED status)
+adv_service_list_callback(cti_connection_t *connection, void *UNUSED object, cti_status_t UNUSED status)
 {
     int i;
     advertising_proxy_host_t *host = NULL;
@@ -256,7 +256,7 @@ adv_service_list_callback(cti_connection_t connection, void *UNUSED object, cti_
 }
 
 static void
-adv_ula_callback(cti_connection_t connection, void *UNUSED object, cti_status_t UNUSED status)
+adv_ula_callback(cti_connection_t *connection, void *UNUSED object, cti_status_t UNUSED status)
 {
     uint64_t ula_prefix;
 
@@ -287,7 +287,7 @@ adv_send_command_(advertising_proxy_conn_ref *ref, run_context_t client_queue, c
                   const char *file, int line)
 {
     int fd;
-    cti_connection_t connection;
+    cti_connection_t *connection;
 
     fd = cti_make_unix_socket(ADV_CTL_SERVER_SOCKET_NAME, sizeof(ADV_CTL_SERVER_SOCKET_NAME), false);
     if (fd < 0) {

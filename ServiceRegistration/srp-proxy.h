@@ -21,7 +21,7 @@
 #define __SRP_PROXY_H
 
 typedef struct srp_proxy_listener_state srp_proxy_listener_state_t;
-typedef struct srp_server_state srp_server_t;
+typedef struct srp_server srp_server_t;
 typedef struct srpl_connection srpl_connection_t;
 typedef struct client_update client_update_t;
 

@@ -8,7 +8,7 @@
 
   <PropertyGroup>
     <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
-    <Platform Condition="'$(Platform)' == ''">Win32;x64</Platform>
+    <Platform Condition="'$(Platform)' == ''">Win32;x64;ARM64</Platform>
   </PropertyGroup>
 
   <Target Name="install" DependsOnTargets="mDNSResponder;PostBuild" />

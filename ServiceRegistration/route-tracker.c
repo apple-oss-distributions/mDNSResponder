@@ -656,7 +656,16 @@ route_tracker_shutdown(route_state_t *route_state)
 static void
 route_tracker_remove_callback(void *context)
 {
+    route_tracker_t *tracker = context;
     route_tracker_update_callback(context, 0);
+    RELEASE_HERE(tracker, route_tracker);
+}
+
+static void
+route_tracker_context_release(void *context)
+{
+    route_tracker_t *tracker = context;
+    RELEASE_HERE(tracker, route_tracker);
 }
 
 static void
@@ -677,7 +686,8 @@ route_tracker_test_route_update(void *context, struct in6_addr *prefix, cti_repl
                         INFO("bit %d added", bit);
                     }
                     tracker->callback = callback;
-                    ioloop_run_async(route_tracker_remove_callback, tracker);
+                    RETAIN_HERE(tracker, route_tracker);
+                    ioloop_run_async(route_tracker_remove_callback, tracker, route_tracker_context_release);
                     return;
                 }
             }

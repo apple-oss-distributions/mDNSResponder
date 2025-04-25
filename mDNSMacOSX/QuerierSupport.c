@@ -358,16 +358,6 @@ mDNSlocal mdns_dns_service_t _Querier_GetNonNativeDNSService(const mdns_dns_serv
             }
         }
     }
-    // Check if the final service is a fail-fast service.
-    if (service && mdns_dns_service_fail_fast_mode_enabled(service))
-    {
-        // If it's having connection problems and the DNSQuestion has already been used to probe if the service is back
-        // up and running. This way the client requests can fail quicker.
-        if (mdns_dns_service_has_connection_problems(service) && q->UsedAsFailFastProbe)
-        {
-            service = NULL;
-        }
-    }
     return service;
 }
 
@@ -437,6 +427,16 @@ mDNSlocal mdns_dns_service_t _Querier_GetDNSService(const DNSQuestion *q, const 
     }
 
 exit:
+    // Check if the final service is a fail-fast service.
+    if (service && mdns_dns_service_fail_fast_mode_enabled(service))
+    {
+        // If it's having connection problems and the DNSQuestion has already been used to probe if the service is back
+        // up and running. This way the client requests can fail quicker.
+        if (mdns_dns_service_has_connection_problems(service) && q->UsedAsFailFastProbe)
+        {
+            service = NULL;
+        }
+    }
     return service;
 }
 
@@ -802,7 +802,7 @@ mDNSlocal void _Querier_UpdateDNSMessageSizeAnalytics(const mdns_querier_t queri
 }
 #endif
 
-#define kOrphanedQuerierMaxCount 10
+#define kOrphanedClientMaxCount 10
 
 static const CFSetCallBacks gMDNSObjectSetCallbacks =
 {
@@ -820,6 +820,61 @@ mDNSlocal CFMutableSetRef _Querier_GetOrphanedQuerierSet(void)
         sOrphanedQuerierSet = CFSetCreateMutable(kCFAllocatorDefault, 0, &gMDNSObjectSetCallbacks);
     }
     return sOrphanedQuerierSet;
+}
+
+mDNSlocal CFMutableSetRef _Querier_GetOrphanedSubscriberSet(void)
+{
+    static CFMutableSetRef sOrphanedSubscriberSet = NULL;
+    if (!sOrphanedSubscriberSet)
+    {
+        sOrphanedSubscriberSet = CFSetCreateMutable(kCFAllocatorDefault, 0, &gMDNSObjectSetCallbacks);
+    }
+    return sOrphanedSubscriberSet;
+}
+
+mDNSlocal CFMutableSetRef _Querier_GetOrphanedClientSet(const bool querier)
+{
+    if (querier)
+    {
+        return _Querier_GetOrphanedQuerierSet();
+    }
+    else
+    {
+        return _Querier_GetOrphanedSubscriberSet();
+    }
+}
+
+typedef bool
+(^_Querier_OrphanMatch_t)(mdns_client_t _Nonnull candidate);
+
+mDNSlocal mdns_client_t _Querier_PopMatchedOrphanedClient(const DNSQuestion *const q,
+    const _Querier_OrphanMatch_t match_block)
+{
+    mdns_require_return_value(q->dnsservice, mDNSNULL);
+
+    const bool usesQuerier = !mdns_dns_service_uses_subscriber(q->dnsservice);
+    const CFMutableSetRef clientSet = _Querier_GetOrphanedClientSet(usesQuerier);
+    __block mdns_client_t client = mDNSNULL;
+
+    mdns_cfset_enumerate(clientSet,
+    ^ bool (const mdns_client_t candidate)
+    {
+        const mdns_dns_service_t dnsservice = (mdns_dns_service_t)mdns_client_get_context(candidate);
+        if ((dnsservice == q->dnsservice) &&
+            (mdns_client_match(candidate, q->qname.c, q->qtype, q->qclass)) &&
+            (!match_block || match_block(candidate)))
+        {
+            client = candidate;
+        }
+        const bool proceed = !client;
+        return proceed;
+    });
+    if (client)
+    {
+        mdns_retain(client);
+        CFSetRemoveValue(clientSet, client);
+    }
+    return client;
 }
 
 #define _Querier_LogConcludedQuerierWitFormattedPrefix(QUERIER, SENSITIVE, PREFIX_FMT, ...)             \
@@ -842,7 +897,6 @@ mDNSlocal CFMutableSetRef _Querier_GetOrphanedQuerierSet(void)
 
 mDNSlocal void _Querier_HandleQuerierResponse(const mdns_querier_t querier)
 {
-    KQueueLock();
     _Querier_LogConcludedQuerierWitFormattedPrefix(querier, mdns_querier_needs_sensitive_logging(querier),
         "[Q%u] Handling concluded querier: ", mdns_querier_get_user_id(querier));
 
@@ -972,12 +1026,12 @@ mDNSlocal void _Querier_HandleQuerierResponse(const mdns_querier_t querier)
             }
         }
     }
-    KQueueUnlock("_Querier_HandleQuerierResponse");
 }
 
 mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
 {
     mDNS *const m = &mDNSStorage;
+    mdns_client_t orphan = NULL;
     mdns_querier_t querier = NULL;
     mdns_subscriber_t subscriber = NULL;
     mdns_domain_name_t qname = NULL;
@@ -994,34 +1048,36 @@ mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
 #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
     const bool needDNSSEC = dns_question_is_primary_dnssec_requestor(q);
 #endif
-    const CFMutableSetRef set = _Querier_GetOrphanedQuerierSet();
-    if (set)
-    {
-        __block mdns_querier_t orphan = NULL;
-        mdns_cfset_enumerate(set,
-        ^ bool (const mdns_querier_t _Nonnull candidate)
+    const bool usesQuerier = !mdns_dns_service_uses_subscriber(q->dnsservice);
+    const CFMutableSetRef clientSet = _Querier_GetOrphanedClientSet(usesQuerier);
+    const _Querier_OrphanMatch_t orphanMatch = !usesQuerier ? NULL :
+        ^ bool (const mdns_client_t _Nonnull candidate)
         {
-            const mdns_dns_service_t dnsservice = (mdns_dns_service_t)mdns_querier_get_context(candidate);
-            if ((dnsservice == q->dnsservice) && mdns_querier_match(candidate, q->qname.c, q->qtype, q->qclass))
+            bool match = false;
+            mdns_querier_t querierCandidate = mdns_querier_downcast(candidate);
+            if (querierCandidate)
             {
-            #if MDNSRESPONDER_SUPPORTS(APPLE, DNSSECv2)
-                if ((mdns_querier_get_dnssec_ok(candidate) == needDNSSEC) &&
-                    (mdns_querier_get_checking_disabled(candidate) == needDNSSEC))
-            #endif
-                {
-                    orphan = candidate;
-                }
+                match = ((mdns_querier_get_dnssec_ok(querierCandidate) == needDNSSEC) &&
+                         (mdns_querier_get_checking_disabled(querierCandidate) == needDNSSEC));
             }
-            const bool proceed = (orphan == NULL);
-            return proceed;
-        });
-        if (orphan)
+            return match;
+        };
+    orphan = _Querier_PopMatchedOrphanedClient(q, orphanMatch);
+    if (orphan)
+    {
+        mdns_client_replace(&q->client, orphan);
+        mdns_client_set_time_limit_ms(orphan, 0);
+        if (usesQuerier)
         {
-            mdns_client_replace(&q->client, orphan);
-            CFSetRemoveValue(set, orphan);
-            mdns_querier_set_time_limit_ms(orphan, 0);
             LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-                "[Q%u->Q%u] Adopted orphaned querier", mDNSVal16(q->TargetQID), mdns_querier_get_user_id(orphan));
+                "[Q%u->Q%u] Adopted orphaned querier", mDNSVal16(q->TargetQID),
+                mdns_querier_get_user_id((mdns_querier_t)orphan));
+        }
+        else
+        {
+            LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                "[Q%u->Sub%llu] Adopted orphaned subscriber", mDNSVal16(q->TargetQID),
+                mdns_subscriber_get_id((mdns_subscriber_t)orphan));
         }
     }
     if (!q->client)
@@ -1088,12 +1144,6 @@ mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
             {
                 mdns_querier_set_delegator_uuid(querier, q->uuid);
             }
-        #if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
-            if (DNSQuestionNeedsSensitiveLogging(q))
-            {
-                mdns_querier_enable_sensitive_logging(querier, true);
-            }
-        #endif
             client = mdns_client_upcast(querier);
         }
 
@@ -1109,13 +1159,30 @@ mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
         if (querier)
         {
             mdns_retain(querier);
+            const mDNSu16 questionID = mDNSVal16(q->TargetQID);
+        #if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+            const bool sensitiveLogging = DNSQuestionNeedsSensitiveLogging(q);
+            if (sensitiveLogging)
+            {
+                mdns_querier_enable_sensitive_logging(querier, true);
+                mDNSEnableSensitiveLoggingForQuestion(questionID);
+            }
+        #endif
             mdns_querier_set_result_handler(querier,
             ^{
+                KQueueLock();
                 _Querier_HandleQuerierResponse(querier);
+            #if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+                if (sensitiveLogging)
+                {
+                    mDNSDisableSensitiveLoggingForQuestion(questionID);
+                }
+            #endif
+                KQueueUnlock("querier result handler");
                 mdns_release(querier);
             });
-            mdns_querier_set_log_label(querier, "Q%u", mDNSVal16(q->TargetQID));
-            mdns_querier_set_user_id(querier, mDNSVal16(q->TargetQID));
+            mdns_querier_set_log_label(querier, "Q%u", questionID);
+            mdns_querier_set_user_id(querier, questionID);
         }
         if (subscriber)
         {
@@ -1130,8 +1197,26 @@ mDNSexport void Querier_HandleUnicastQuestion(DNSQuestion *q)
                         _Querier_ApplyUpdate(subscriber);
                         break;
 
+                    case mdns_subscriber_event_timeout:
+                        // Right now, mdns_subscriber_event_timeout can only be triggered by making a subscriber an
+                        // orphan.
+                        if (!CFSetContainsValue(clientSet, subscriber))
+                        {
+                            // If we have a timeout but the subscriber isn't in the orphan set, it means that this
+                            // subscriber has been adopted. In which case, we should interrupt the timeout process.
+                            break;
+                        }
+                        CFSetRemoveValue(clientSet, subscriber);
+                        mdns_client_invalidate(subscriber);
+                        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                            "[Sub%llu] Orphaned subscriber removed due to timeout", mdns_subscriber_get_id(subscriber));
+                        break;
+
                     case mdns_subscriber_event_invalidated:
+                        CFSetRemoveValue(clientSet, subscriber);
                         _Querier_HandleSubscriberInvalidation(subscriber);
+                        LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
+                            "[Sub%llu] Subscriber has been invalidated", mdns_subscriber_get_id(subscriber));
                         mdns_release(subscriber);
                         break;
 
@@ -1177,6 +1262,7 @@ exit:
     }
     q->LastQTime = m->timenow;
     SetNextQueryTime(m, q);
+    mdns_forget(&orphan);
     mdns_forget(&querier);
     mdns_forget(&subscriber);
     mdns_forget(&qname);
@@ -1209,17 +1295,17 @@ mDNSexport void Querier_ProcessDNSServiceChanges(const mDNSBool updatePushQuesti
         DNSQuestion *const q = m->RestartQuestion;
         mDNSBool skipQuestion = mDNSfalse;
 #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
-        mDNSBool MDNSAlternativeModeOn = mDNSfalse;
+        const mDNSOpaque16 originalQID = q->TargetQID;
 #endif
         if (mDNSOpaque16IsZero(q->TargetQID))
         {
         #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
-            // Handles the case where mDNS query has a new discovery proxy service to use.
+            // If a discovery proxy is available for an mDNS question, convert it from mDNS to unicast by assigning
+            // a non-zero question ID, so that _Querier_GetDNSService below can handle it accordingly.
             if (DNSQuestionIsEligibleForMDNSAlternativeService(q) &&
                 Querier_IsMDNSAlternativeServiceAvailableForQuestion(q))
             {
                 q->TargetQID = mDNS_NewMessageID(m);
-                MDNSAlternativeModeOn = mDNStrue;
             }
             else
         #endif
@@ -1296,31 +1382,18 @@ mDNSexport void Querier_ProcessDNSServiceChanges(const mDNSBool updatePushQuesti
             mDNSBool newSuppressed = ShouldSuppressUnicastQuery(q, newService);
             if (!q->Suppressed != !newSuppressed) restart = mDNStrue;
         }
+    #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
+        // After we have determined whether to restart the question, restore the original QID of the question so that
+        // the mDNS_StopQuery_internal below can clear any existing state that is associated with the old question,
+        // including the bonjour on demand state.
+        q->TargetQID = originalQID;
+    #endif
         if (restart)
         {
             if (!q->Suppressed)
             {
-            #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
-                // If we have decided to change the mDNS question to a non-mDNS question that uses mDNS alternative
-                // exclusive service for resolution, we need to deliver remove event for the records that get added
-                // as mDNS response, because we are switching to a different service.
-                // To ensure that the mDNS record matches the question, we need to change the question back to an mDNS
-                // question by making its QID zero.
-                const mDNSOpaque16 newQID = q->TargetQID;
-                if (MDNSAlternativeModeOn)
-                {
-                    q->TargetQID = zeroID;
-                }
-            #endif
                 CacheRecordRmvEventsForQuestion(m, q);
                 if (m->RestartQuestion == q) LocalRecordRmvEventsForQuestion(m, q);
-            #if MDNSRESPONDER_SUPPORTS(APPLE, TERMINUS_ASSISTED_UNICAST_DISCOVERY)
-                // After the function call, restore the original QID.
-                if (MDNSAlternativeModeOn)
-                {
-                    q->TargetQID = newQID;
-                }
-            #endif
             }
             if (m->RestartQuestion == q)
             {
@@ -1489,27 +1562,45 @@ exit:
 }
 
 #define kOrphanedQuerierTimeLimitSecs 5
+#define kOrphanedSubscriberTimeLimitSecs 30
 
-mDNSexport void Querier_HandleStoppedDNSQuestion(DNSQuestion *q)
+mDNSexport void Querier_HandleStoppedDNSQuestion(DNSQuestion * const q)
 {
     const mdns_querier_t querier = mdns_querier_downcast(q->client);
-    if (querier && !mdns_querier_has_concluded(querier))
+    const mdns_subscriber_t subscriber = mdns_subscriber_downcast(q->client);
+    mdns_require_quiet(querier || subscriber, exit);
+
+    const mdns_dns_service_t dnsservice = (mdns_dns_service_t)mdns_client_get_context(q->client);
+    const bool usesQuerier = (querier != NULL);
+    // Subscriber is always active and ready to be orphaned as long as we hold a reference to it.
+    const bool isEligibleToBeOrphaned = usesQuerier ? (!mdns_querier_has_concluded(querier)) : true;
+    if (isEligibleToBeOrphaned && !mdns_dns_service_is_defunct(dnsservice))
     {
-        const mdns_dns_service_t dnsservice = (mdns_dns_service_t)mdns_querier_get_context(querier);
-        if (!mdns_dns_service_is_defunct(dnsservice))
+        const CFMutableSetRef clientSet = _Querier_GetOrphanedClientSet(usesQuerier);
+        if (clientSet && (CFSetGetCount(clientSet) < kOrphanedClientMaxCount))
         {
-            const CFMutableSetRef set = _Querier_GetOrphanedQuerierSet();
-            if (set && (CFSetGetCount(set) < kOrphanedQuerierMaxCount))
+            CFSetAddValue(clientSet, q->client);
+            uint32_t timeLimitMs;
+            if (usesQuerier)
             {
-                CFSetAddValue(set, querier);
                 LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
-                    "[Q%u] Keeping orphaned querier for up to " StringifyExpansion(kOrphanedQuerierTimeLimitSecs) " seconds",
-                    mdns_querier_get_user_id(querier));
-                mdns_querier_set_time_limit_ms(querier, kOrphanedQuerierTimeLimitSecs * 1000);
-                mdns_forget(&q->client);
+                    "[Q%u] Keeping orphaned querier for up to " StringifyExpansion(kOrphanedQuerierTimeLimitSecs)
+                    " seconds", mdns_querier_get_user_id(querier));
+                timeLimitMs = kOrphanedQuerierTimeLimitSecs;
             }
+            else
+            {
+                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEFAULT,
+                    "[Sub%llu] Keeping orphaned subscriber for up to " StringifyExpansion(kOrphanedSubscriberTimeLimitSecs)
+                    " seconds", mdns_subscriber_get_id(subscriber));
+                timeLimitMs = kOrphanedSubscriberTimeLimitSecs;
+            }
+            mdns_client_set_time_limit_ms(q->client, timeLimitMs * 1000);
+            mdns_forget(&q->client);
         }
     }
+
+exit:
     mdns_client_forget(&q->client);
     mdns_forget(&q->dnsservice);
 }
@@ -1977,6 +2068,10 @@ mDNSlocal mDNSBool _DPCSubscribe(DNSQuestion *const q, const mDNSInterfaceID int
             {
                 case mdns_subscriber_event_change:
                     _Querier_ApplyUpdate(subscriber);
+                    break;
+
+                case mdns_subscriber_event_timeout:
+                    // Nothing to do for discovery proxy subscriber.
                     break;
 
                 case mdns_subscriber_event_invalidated:

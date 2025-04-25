@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2024 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2025 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -72,6 +72,7 @@
 #endif
 
 #include <inttypes.h>   // for uintptr_t and PRIXPTR
+#include <stddef.h>     // for NULL
 
 
 #include "mDNSFeatures.h"
@@ -2551,6 +2552,7 @@ struct mDNS_struct
 #endif
 #if MDNSRESPONDER_SUPPORTS(COMMON, SPS_CLIENT)
     mDNSQuestionCallback *SPSBrowseCallback;    // So the platform layer can do something useful with SPS browse results
+    UDPSocket            *SPClientSocket;       // Socket for sleep proxy client registration requests.
 #endif
     int ProxyRecords;                           // Total number of records we're holding as proxy
     #define           MAX_PROXY_RECORDS 10000   /* DOS protection: 400 machines at 25 records each */
@@ -2926,6 +2928,10 @@ extern mDNSu32 SetValidDNSServers(mDNS *m, DNSQuestion *question);
 extern mDNSBool ShouldSuppressUnicastQuery(const DNSQuestion *q, mdns_dns_service_t dnsservice);
 extern mDNSBool LocalRecordRmvEventsForQuestion(mDNS *m, DNSQuestion *q);
 #endif
+#if MDNSRESPONDER_SUPPORTS(APPLE, LOG_PRIVACY_LEVEL)
+mDNSexport void mDNSEnableSensitiveLoggingForQuestion(mDNSu16 questionID);
+mDNSexport void mDNSDisableSensitiveLoggingForQuestion(mDNSu16 questionID);
+#endif
 
 // ***************************************************************************
 #if 0
@@ -2971,7 +2977,7 @@ extern const mDNSu8 *LastLabel(const domainname *d);
 // Get total length of domain name, in native DNS format, including terminal root label
 //   (e.g. length of "com." is 5 (length byte, three data bytes, final zero)
 extern mDNSu16  DomainNameLengthLimit(const domainname *const name, const mDNSu8 *limit);
-#define DomainNameLength(name) DomainNameLengthLimit((name), (name)->c + MAX_DOMAIN_NAME)
+#define DomainNameLength(name) DomainNameLengthLimit((name), NULL)
 extern mDNSu16 DomainNameBytesLength(const mDNSu8 *name, const mDNSu8 *limit);
 
 extern mDNSu8 DomainLabelLength(const domainlabel *const label);
@@ -3504,7 +3510,11 @@ extern void     mDNSCoreReceiveForQuerier(mDNS *m, DNSMessage *msg, const mDNSu8
 extern CacheRecord *mDNSCheckCacheFlushRecords(mDNS *m, CacheRecord *CacheFlushRecords, mDNSBool id_is_zero, int numAnswers,
 											   DNSQuestion *unicastQuestion, CacheRecord *NSECCachePtr, CacheRecord *NSECRecords,
 											   mDNSu8 rcode);
-extern void     mDNSCoreRestartQueries(mDNS *const m);
+extern void     mDNSCoreRestartQueries(mDNS *const m
+#if MDNSRESPONDER_SUPPORTS(APPLE, QUERIER) && MDNS_OS(watchOS)
+                                       , mDNSBool restartPushQuery
+#endif
+                                       );
 extern void     mDNSCoreRestartQuestion(mDNS *const m, DNSQuestion *q);
 extern void     mDNSCoreRestartRegistration(mDNS *const m, AuthRecord  *rr, int announceCount);
 typedef void (*FlushCache)(mDNS *const m);
@@ -3555,6 +3565,9 @@ extern void GrantCacheExtensions(mDNS *const m, DNSQuestion *q, mDNSu32 lease);
 extern void MakeNegativeCacheRecordForQuestion(mDNS *m, CacheRecord *cr, const DNSQuestion *q, mDNSu32 ttl,
     mDNSInterfaceID InterfaceID, mDNSOpaque16 responseFlags);
 extern void CompleteDeregistration(mDNS *const m, AuthRecord *rr);
+#if MDNSRESPONDER_SUPPORTS(APPLE, UNICAST_ASSIST)
+extern mDNSBool RestartActiveQuestionIfNoAnswerFromAddress(mDNSu16 rrtype, mDNSu32 qnamehash, const mDNSAddr *addr, mDNSInterfaceID interfaceID);
+#endif
 extern void AnswerCurrentQuestionWithResourceRecord(mDNS *const m, CacheRecord *const rr, const QC_result AddRecord);
 extern void AnswerQuestionByFollowingCNAME(mDNS *const m, DNSQuestion *q, ResourceRecord *rr);
 extern NetworkInterfaceInfo *FirstInterfaceForID(mDNS *const m, const mDNSInterfaceID InterfaceID);
@@ -3565,6 +3578,7 @@ extern void CacheRecordSetResponseFlags(CacheRecord *const cr, const mDNSOpaque1
 extern void mDNSCoreResetRecord(mDNS *const m);
 extern mDNSBool getValidContinousTSRTime(mDNSs32 *timestampContinuous, mDNSu32 tsrTimestamp);
 extern AuthRecord *mDNSGetTSRForAuthRecord(mDNS *m, const AuthRecord *rr);
+extern AuthRecord *mDNSGetTSRForAuthRecordNamed(mDNS *const m, const domainname *const name, const mDNSu32 namehash);
 extern CacheRecord *mDNSGetTSRForCacheGroup(const CacheGroup *const cg);
 typedef enum { eTSRCheckLose = -1, eTSRCheckNoKeyMatch = 0, eTSRCheckKeyMatch, eTSRCheckWin } eTSRCheckResult;
 extern eTSRCheckResult CheckTSRForResourceRecord(const TSROptData *curTSROpt, const ResourceRecord *ourTSRRec);

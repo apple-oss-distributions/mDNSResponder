@@ -23,7 +23,7 @@
 
 typedef struct service_tracker_callback service_tracker_callback_t;
 typedef struct service_tracker service_tracker_t;
-typedef struct srp_server_state srp_server_t;
+typedef struct srp_server srp_server_t;
 
 RELEASE_RETAIN_DECLS(service_tracker);
 #define service_tracker_retain(watcher) service_tracker_retain_(watcher, __FILE__, __LINE__)
@@ -49,6 +49,8 @@ thread_service_t *NULLABLE service_tracker_unverified_service_get(service_tracke
                                                                   thread_service_type_t service_type);
 void service_tracker_verify_next_service(service_tracker_t *NULLABLE tracker);
 void service_tracker_cancel_probes(service_tracker_t *NULLABLE tracker);
+int service_tracker_get_winning_anycast_sequence_number(service_tracker_t *NULLABLE tracker);
+int service_tracker_count_anycast_services(service_tracker_t *NULLABLE tracker, int sequence_number);
 #endif // __SERVICE_TRACKER_H__
 
 // Local Variables:

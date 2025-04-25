@@ -28,7 +28,7 @@
 
 typedef struct icmp_listener icmp_listener_t;
 typedef struct route_state route_state_t;
-typedef struct srp_server_state srp_server_t;
+typedef struct srp_server srp_server_t;
 typedef struct nat64 nat64_t;
 typedef struct omr_watcher omr_watcher_t;
 typedef struct omr_watcher_callback omr_watcher_callback_t;
@@ -253,7 +253,13 @@ typedef enum icmp_type {
 #ifndef ND_OPT_RA_FLAGS_EXTENSION
 #define ND_OPT_RA_FLAGS_EXTENSION icmp_option_ra_flags_extension
 #endif
-#define RA_FLAGS1_STUB_ROUTER 0x80
+
+// Not defined anywhere else
+#define RA_FLAGS1_STUB_ROUTER_EXPERIMENTAL 0x80
+
+#ifndef ND_RA_FLAG_SNAC_ROUTER
+#define ND_RA_FLAG_SNAC_ROUTER 0x02
+#endif // ND_RA_FLAG_SNAC_ROUTER
 
 typedef struct link_layer_address {
     uint16_t length;
@@ -369,7 +375,6 @@ struct route_state {
     char *NULLABLE thread_interface_name;
     char *NULLABLE home_interface_name;
     bool have_non_thread_interface;
-    bool seen_legacy_service;
 #if SRP_FEATURE_NAT64
     nat64_t *NULLABLE nat64;
 #endif
@@ -379,12 +384,12 @@ struct route_state {
 #ifndef RA_TESTER
     wakeup_t *NULLABLE thread_network_shutdown_wakeup;
     cti_network_state_t current_thread_state;
-    cti_connection_t NULLABLE thread_role_context;
-    cti_connection_t NULLABLE thread_state_context;
-    cti_connection_t NULLABLE thread_xpanid_context;
-    cti_connection_t NULLABLE thread_route_context;
-    cti_connection_t NULLABLE thread_rloc16_context;
-    cti_connection_t NULLABLE thread_ml_prefix_connection;
+    cti_connection_t *NULLABLE thread_role_context;
+    cti_connection_t *NULLABLE thread_state_context;
+    cti_connection_t *NULLABLE thread_xpanid_context;
+    cti_connection_t *NULLABLE thread_route_context;
+    cti_connection_t *NULLABLE thread_rloc16_context;
+    cti_connection_t *NULLABLE thread_ml_prefix_connection;
     bool thread_network_running;
     bool thread_network_shutting_down;
 #endif

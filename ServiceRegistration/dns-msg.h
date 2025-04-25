@@ -92,7 +92,7 @@ struct dns_label {
 typedef struct dns_rdata_txt dns_rdata_txt_t;
 struct dns_rdata_txt {
     uint8_t len;
-    uint8_t *NONNULL data;
+    uint8_t *NULLABLE data;
 };
 
 typedef struct dns_rdata_unparsed dns_rdata_unparsed_t;
@@ -105,7 +105,7 @@ typedef struct dns_rdata_single_name dns_rdata_ptr_t;
 typedef struct dns_rdata_single_name dns_rdata_ns_t;
 typedef struct dns_rdata_single_name dns_rdata_cname_t;
 struct dns_rdata_single_name {
-    dns_label_t *NONNULL name;
+    dns_label_t *NULLABLE name;
 };
 
 typedef struct dns_rdata_srv dns_rdata_srv_t;
@@ -153,7 +153,7 @@ struct dns_rdata_soa {
 
 typedef struct dns_rr dns_rr_t;
 struct dns_rr {
-    dns_label_t *NONNULL name;
+    dns_label_t *NULLABLE name;
     uint16_t type;
     uint16_t qclass;
     uint32_t ttl;
@@ -481,7 +481,7 @@ void dns_message_free(dns_message_t *NONNULL message);
     dns_wire_parse_(ret, message, len, dump_to_stderr, __FILE__, __LINE__)
 bool dns_wire_parse_(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *NONNULL message, unsigned len,
                      bool dump_to_stderr, const char *NONNULL FILE, int line);
-bool dns_names_equal(dns_label_t *NONNULL name1, dns_label_t *NONNULL name2);
+bool dns_names_equal(dns_label_t *NULLABLE name1, dns_label_t *NULLABLE name2);
 
 // wireutils.c
 dns_name_t *NULLABLE dns_name_copy(dns_name_t *NONNULL original);
@@ -502,7 +502,7 @@ bool dns_names_equal_text(dns_label_t *NONNULL name1, const char *NONNULL name2)
 size_t dns_name_wire_length(dns_label_t *NONNULL name);
 size_t dns_name_to_wire_canonical(uint8_t *NONNULL buf, size_t max, dns_label_t *NONNULL name);
 dns_name_t *NULLABLE dns_pres_name_parse(const char *NONNULL pname);
-dns_name_t *NULLABLE dns_name_subdomain_of(dns_name_t *NONNULL name, dns_name_t *NONNULL domain);
+dns_name_t *NULLABLE dns_name_subdomain_of(dns_name_t *NULLABLE name, dns_name_t *NULLABLE domain);
 const char *NONNULL dns_rcode_name(int rcode);
 bool dns_keys_rdata_equal(dns_rr_t *NONNULL key1, dns_rr_t *NONNULL key2);
 void dns_txt_data_print(char *NONNULL txt_buf, size_t buf_size, uint16_t txt_length, uint8_t *NONNULL txt_data);
