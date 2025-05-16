@@ -2248,14 +2248,14 @@ cti_internal_rloc16_reply_callback(cti_connection_t *NONNULL conn_ref, object_t 
     uint16_t rloc16 = 0;
     if (status == kCTIStatus_NoError) {
         status = cti_event_or_response_extract(reply, &result_dictionary);
-        // The reply format is
-        // commandData:  {response: "> e000
-        // Done", method: "OtCtlCmd"}
-        // where e000 is the rloc16 that we want to extract
         if (status == kCTIStatus_NoError) {
-            const char *rloc16_str = xpc_dictionary_get_string(result_dictionary, "response");
-            char *endptr = "\n";
-            rloc16 = (uint16_t)strtol(&rloc16_str[2], &endptr, 16);
+            uint64_t rloc64 = xpc_dictionary_get_uint64(result_dictionary, "value");
+            if (rloc64 <= UINT16_MAX) {
+                rloc16 = (uint16_t)rloc64;
+            } else {
+                ERROR("[CX%d] got invalid RLOC16 value: 0x%" PRIX64 " is too large", conn_ref->serial, rloc64);
+                status = kCTIStatus_UnknownError;
+            }
         }
     }
     if (callback != NULL) {
@@ -2264,12 +2264,19 @@ cti_internal_rloc16_reply_callback(cti_connection_t *NONNULL conn_ref, object_t 
     } else {
         INFO("[CX%d] not calling callback for %p", conn_ref->serial, conn_ref);
     }
+    // It is not a connection for which we intend receiving events, so close it.
+    conn_ref->callback.rloc16_reply = NULL;
+    if (conn_ref->connection != NULL) {
+        INFO("[CX%d] canceling connection %p after successful response", conn_ref->serial, conn_ref->connection);
+        xpc_connection_cancel(conn_ref->connection);
+    }
+    cti_connection_release(conn_ref);
 }
 
 cti_status_t
-cti_get_rloc16_(srp_server_t *UNUSED server, cti_connection_t **ref,
-                void *NULLABLE context, cti_rloc16_reply_t NONNULL callback,
-                run_context_t NULLABLE client_queue, const char *file, int line)
+cti_get_rloc16_(srp_server_t *UNUSED server, void *NULLABLE context,
+                cti_rloc16_reply_t NONNULL callback, run_context_t NULLABLE client_queue,
+                const char *file, int line)
 {
     cti_callback_t app_callback;
     app_callback.rloc16_reply = callback;
@@ -2278,10 +2285,10 @@ cti_get_rloc16_(srp_server_t *UNUSED server, cti_connection_t **ref,
 
     xpc_dictionary_set_string(dict, "interface", "org.wpantund.v1");
     xpc_dictionary_set_string(dict, "path", "/org/wpantund/utun2");
-    xpc_dictionary_set_string(dict, "method", "OtCtlCmd");
-    xpc_dictionary_set_string(dict, "otctl_cmd", "rloc16");
+    xpc_dictionary_set_string(dict, "method", "PropGet");
+    xpc_dictionary_set_string(dict, "property_name", "Thread:RLOC16");
 
-    errx = setup_for_command(ref, client_queue, "get_rloc16", NULL, NULL, dict, "WpanctlCmd",
+    errx = setup_for_command(NULL, client_queue, "get_rloc16", NULL, NULL, dict, "WpanctlCmd",
                              context, app_callback, cti_internal_rloc16_reply_callback, false, file, line);
     INFO("get_rloc16 result %d", errx);
     xpc_release(dict);

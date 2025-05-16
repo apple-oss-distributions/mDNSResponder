@@ -800,7 +800,11 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
         const unsigned long optval = 1;
         #endif
         #ifndef USE_TCP_LOOPBACK
-        char* uds_serverpath = getenv(MDNS_UDS_SERVERPATH_ENVVAR);
+        char* uds_serverpath = NULL;
+        if (!issetugid())
+        {
+            uds_serverpath = getenv(MDNS_UDS_SERVERPATH_ENVVAR);
+        }
         if (uds_serverpath == NULL)
             uds_serverpath = MDNS_UDS_SERVERPATH;
         else if (strlen(uds_serverpath) >= MAX_CTLPATH)
@@ -1757,7 +1761,7 @@ static void handle_addrinfo_response(DNSServiceOp *const sdr, const CallbackHead
             #endif
             sa4.sin_family = AF_INET;
             //  sin_port   = 0;
-            if (!cbh->cb_err) memcpy(&sa4.sin_addr, rdata, rdlen);
+            if (!cbh->cb_err && rdlen == 4) memcpy(&sa4.sin_addr, rdata, rdlen);
         }
         else
         {
@@ -1769,7 +1773,7 @@ static void handle_addrinfo_response(DNSServiceOp *const sdr, const CallbackHead
             //  sin6_port     = 0;
             //  sin6_flowinfo = 0;
             //  sin6_scope_id = 0;
-            if (!cbh->cb_err)
+            if (!cbh->cb_err && rdlen == 16)
             {
                 memcpy(&sa6.sin6_addr, rdata, rdlen);
                 if (IN6_IS_ADDR_LINKLOCAL(&sa6.sin6_addr)) sa6.sin6_scope_id = cbh->cb_interface;

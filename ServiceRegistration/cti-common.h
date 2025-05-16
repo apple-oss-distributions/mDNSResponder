@@ -88,6 +88,7 @@ typedef struct cti_connection cti_connection_t;
 #else
 #define kCTIPropertyPartitionID                 "Network:PartitionID"
 #define kCTIPropertyExtendedPANID               "Network:XPANID"
+#define kCTIPropertyThreadRLOC16                "Thread:RLOC16"
 #endif // POSIX_BUILD
 
 typedef enum

@@ -131,8 +131,8 @@ thread_device_startup(srp_server_t *NONNULL server_state)
     INFO("starting up");
 
     // Before we can actually do anything, we need our RLOC16.
-    int status = cti_get_rloc16(server_state, &server_state->thread_rloc16_context, server_state,
-                                thread_device_rloc16_callback, NULL);
+    cti_status_t status = cti_get_rloc16(server_state, server_state,
+                                         thread_device_rloc16_callback, NULL);
     if (status != kCTIStatus_NoError) {
         FAULT("can't get rloc16: %d", status);
     }
@@ -174,10 +174,6 @@ void
 thread_device_shutdown(srp_server_t *NONNULL server_state)
 {
     INFO("shutting down");
-    if (server_state->thread_rloc16_context != NULL) {
-        cti_events_discontinue(server_state->thread_rloc16_context);
-        server_state->thread_rloc16_context = NULL;
-    }
     if (server_state->wed_tracker != NULL) {
         cti_events_discontinue(server_state->wed_tracker);
         server_state->wed_tracker = NULL;

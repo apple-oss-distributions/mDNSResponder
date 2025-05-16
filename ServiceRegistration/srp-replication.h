@@ -1,6 +1,6 @@
 /* srp-replication.h
  *
- * Copyright (c) 2020-2023 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2020-2025 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -370,6 +370,7 @@ struct srpl_domain {
     bool dataset_id_committed;
     bool partner_discovery_pending;
     bool primary_has_waited;
+    bool srpl_shutting_down;
     int ref_count;
     srpl_opstate_t srpl_opstate;
     srpl_domain_t *NULLABLE next;
@@ -432,7 +433,8 @@ struct srpl_domain {
 #define SRPL_VERSION_ANYCAST                    2
 #define SRPL_VERSION_MULTI_HOST_MESSAGE         3
 #define SRPL_VERSION_EDNS0_TSR                  4
-#define SRPL_CURRENT_VERSION                    SRPL_VERSION_EDNS0_TSR
+#define SRPL_VERSION_TSR_TRANSACTION_FIXES      5
+#define SRPL_CURRENT_VERSION                    SRPL_VERSION_TSR_TRANSACTION_FIXES
 
 // Variation bits.
 #define SRPL_VARIATION_MULTI_HOST_MESSAGE   1

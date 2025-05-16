@@ -1,6 +1,6 @@
 /* srp-replication.c
  *
- * Copyright (c) 2020-2024 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2025 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -828,12 +828,21 @@ srpl_instance_discontinue_timeout(void *context)
     srpl_instance_t **sp = NULL, *instance = context;
     srpl_domain_t *domain = instance->domain;
 
+    RETAIN_HERE(instance, srpl_instance); // retain for this function
+
     INFO("discontinuing instance " PRI_S_SRP " with partner id %" PRIx64, instance->instance_name, instance->partner_id);
     for (sp = &domain->instances; *sp; sp = &(*sp)->next) {
         if (*sp == instance) {
             *sp = instance->next;
+            RELEASE_HERE(instance, srpl_instance);
             break;
         }
+    }
+
+    if (instance->reconnect_timeout != NULL) {
+        ioloop_cancel_wake_event(instance->reconnect_timeout);
+        ioloop_wakeup_release(instance->reconnect_timeout);
+        instance->reconnect_timeout = NULL;
     }
 
     srpl_connection_t *srpl_connection = instance->connection;
@@ -845,11 +854,12 @@ srpl_instance_discontinue_timeout(void *context)
         RELEASE_HERE(srpl_connection, srpl_connection);
         instance->connection = NULL;
     }
-    RELEASE_HERE(instance, srpl_instance);
+
+    RELEASE_HERE(instance, srpl_instance); // release the reference this function holds
 
     // Check to see if we are eligible to move into the routine state if we haven't done so.
     // If the partner we failed to sync with goes away, we could enter the routine state if
-    // we have succcessfully sync-ed with all other partners discovered in startup.
+    // we have successfully sync-ed with all other partners discovered in startup.
     srpl_maybe_sync_or_transition(domain);
 }
 
@@ -1049,6 +1059,7 @@ srpl_shutdown(srp_server_t *server_state)
     }
     for (srpl_domain_t **dp = &server_state->srpl_domains; *dp != NULL; ) {
         srpl_domain_t *domain = *dp;
+        domain->srpl_shutting_down = true;
         if (!strcmp(domain->name, server_state->current_thread_domain_name)) {
             for (instance = domain->instances; instance != NULL; instance = next) {
                 next = instance->next;
@@ -1269,13 +1280,7 @@ srpl_disconnected_callback(comm_t *comm, void *context, int UNUSED error)
         goto out;
     }
 
-    // If it's not our job to reconnect, we no longer need this connection. Release the reference
-    // held by the instance (which'd cause the connection to be finalized).
     srpl_connection_next_state(srpl_connection, srpl_state_idle);
-    if (instance->connection == srpl_connection) {
-        RELEASE_HERE(srpl_connection, srpl_connection);
-        instance->connection = NULL;
-    }
 
 out:
     RELEASE_HERE(srpl_connection, srpl_connection);
@@ -4760,7 +4765,18 @@ srpl_can_be_routine_state(srpl_domain_t *domain)
 
     srp_server_t *server_state = domain->server_state;
     int winning_seq = service_tracker_get_winning_anycast_sequence_number(server_state->service_tracker);
-
+    // if the winning sequence number comes from a lower version partner, we should ignore it
+    if (winning_seq != -1) {
+        for (srpl_instance_t *instance = domain->instances; instance != NULL; instance = instance->next) {
+            if (instance->version_mismatch && instance->have_dataset_id &&
+                MSB(instance->dataset_id) == winning_seq)
+            {
+                INFO("the winning seq 0x%02x is from a lower version server; ignore", winning_seq);
+                winning_seq = -1;
+                break;
+            }
+        }
+    }
     if (winning_seq != -1) {
         if (!domain->have_dataset_id) {
             INFO("we do not have a dataset id but see sequence number 0x%02x", (uint8_t)winning_seq);
@@ -6450,12 +6466,17 @@ srpl_sync_with_instance(srpl_instance_t *instance)
 
 // We check how many active srp servers we discovered. If less than 5, we first
 // check if we are ready to enter the routine state. If there are still srp servers
-// that we haven't started wo sync with, we do so.
+// that we haven't started to sync with, we do so.
 static void
 srpl_maybe_sync_or_transition(srpl_domain_t *domain)
 {
     int num_winners = 0;
     int rank = 0;
+
+    if (domain->srpl_shutting_down) {
+        INFO("srp replication is shutting down.");
+        return;
+    }
 
     // if we haven't committed a dataset id, here we check if we
     // should propose a new one. we propose a new dataset id if

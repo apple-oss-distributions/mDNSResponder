@@ -4512,10 +4512,10 @@ mDNSlocal void SendQueries(mDNS *const m)
                             }
                             else
                             {
-                                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_INFO,
-                                    "SKIPPED unicast assist query - " PRI_IP_ADDR " %d " PRI_DM_NAME " " PUB_S " qhash %x",
-                                    addr, (int)IIDPrintable(ifid), DM_NAME_PARAM(&q->qname),
-                                    DNSTypeName(q->qtype), q->qnamehash);
+                                LogRedact(MDNS_LOG_CATEGORY_DEFAULT, MDNS_LOG_DEBUG,
+                                    "SKIPPED unicast assist query - " PRI_IP_ADDR " %d " PRI_DM_NAME " " PUB_DNS_TYPE
+                                    " qhash %x", addr, (int)IIDPrintable(ifid), DM_NAME_PARAM(&q->qname),
+                                    DNS_TYPE_PARAM(q->qtype), q->qnamehash);
                             }
                             return result;
                         });

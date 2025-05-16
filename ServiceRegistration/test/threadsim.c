@@ -458,12 +458,6 @@ threadsim_onmesh_prefix_callback(cti_connection_t *connection)
     (void)connection;
 }
 
-static void
-threadsim_rloc16_callback(cti_connection_t *connection)
-{
-    (void)connection;
-}
-
 static void threadsim_active_data_set_callback(cti_connection_t *connection)
 {
     (void)connection;
@@ -872,10 +866,12 @@ cti_get_onmesh_prefix_list_(srp_server_t *server, cti_connection_t **ref, void *
 
 
 cti_status_t
-cti_get_rloc16_(srp_server_t *server, cti_connection_t **ref, void *context, cti_rloc16_reply_t callback,
+cti_get_rloc16_(srp_server_t *server, void *context, cti_rloc16_reply_t callback,
                 run_context_t UNUSED client_queue, const char *UNUSED file, int UNUSED line)
 {
-    THREADSIM_AFTER_STATEFUL(1000, threadsim_rloc16_callback, rloc16_reply);
+    (void)context;
+    (void)callback;
+    THREADSIM_AFTER(1000, ^{});
 }
 
 

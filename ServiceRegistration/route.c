@@ -2147,6 +2147,9 @@ cti_get_tunnel_name_callback(void *context, const char *name, cti_status_t statu
 }
 
 static void
+route_rloc16_callback(void *context, uint16_t rloc16, cti_status_t status);
+
+static void
 cti_get_role_callback(void *context, cti_network_node_type_t role, cti_status_t status)
 {
     route_state_t *route_state = context;
@@ -2169,8 +2172,11 @@ cti_get_role_callback(void *context, cti_network_node_type_t role, cti_status_t 
     } else {
         ERROR("cti_get_role_callback: nonzero status %d", status);
     }
-
-    // Our thread role doesn't actually matter, but it's useful to report it in the logs.
+    // We want to update the RLOC at each node state change
+    status = cti_get_rloc16(route_state->srp_server, route_state, route_rloc16_callback, NULL);
+    if (status != kCTIStatus_NoError) {
+        ERROR("error when calling cti_get_rloc16: %d", status);
+    }
 }
 
 static void
@@ -2402,7 +2408,7 @@ thread_network_startup(route_state_t *route_state)
                                          route_get_xpanid_callback, NULL);
     }
     if (status == kCTIStatus_NoError) {
-        status = cti_get_rloc16(route_state->srp_server, &route_state->thread_rloc16_context, route_state,
+        status = cti_get_rloc16(route_state->srp_server, route_state,
                                 route_rloc16_callback, NULL);
     }
     if (status == kCTIStatus_NoError) {

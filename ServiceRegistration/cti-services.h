@@ -1193,9 +1193,6 @@ typedef void
  * kCTIStatus_NoError means that the caller can expect the reply callback to be called at least once.  Any
  * other error means that the request could not be sent, and the callback will never be called.
  *
- * ref:            A pointer to a reference to the connection is stored through ref if ref is not NULL.
- *                 When events are no longer needed, call cti_discontinue_events() on the returned pointer.
- *
  * context:        An anonymous pointer that will be passed along to the callback when
  *                 an event occurs.
  * callback:       CallBack function for the client that indicates success or failure.
@@ -1206,12 +1203,11 @@ typedef void
  *                 the error that occurred. Note: A return value of kCTIStatus_NoError does not mean
  *                 that the request succeeded, merely that it was successfully started.
  */
-#define cti_get_rloc16(server, ref, context, callback, client_queue) \
-    cti_get_rloc16_(server, ref, context, callback, client_queue, __FILE__, __LINE__)
+#define cti_get_rloc16(server, context, callback, client_queue) \
+    cti_get_rloc16_(server, context, callback, client_queue, __FILE__, __LINE__)
 
 DNS_SERVICES_EXPORT cti_status_t
-cti_get_rloc16_(srp_server_t *NULLABLE server, cti_connection_t *NULLABLE *NULLABLE ref,
-                void *NULLABLE context, cti_rloc16_reply_t NONNULL callback,
+cti_get_rloc16_(srp_server_t *NULLABLE server, void *NULLABLE context, cti_rloc16_reply_t NONNULL callback,
                 run_context_t NULLABLE client_queue, const char *NONNULL file, int line);
 
 /* cti_active_data_set_change_reply: Callback from cti_get_active_data_set_change()
